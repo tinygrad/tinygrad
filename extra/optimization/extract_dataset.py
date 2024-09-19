@@ -7,7 +7,7 @@ from test.external.process_replay.process_replay import _pmap
 PAGE_SIZE = 100
 RUN_ID = os.getenv("GITHUB_RUN_ID", "HEAD")
 TABLE_NAME = f"process_replay_{RUN_ID}_{getenv('GITHUB_RUN_ATTEMPT')}_{VERSION}"
-LOGOPS = os.getenv("LOGOPS", "/tmp/ops")
+LOGOPS = os.getenv("LOGOPS", "/tmp/sops")
 
 def extract_ast(offset:int) -> bool:
   logops = open(LOGOPS, "a")

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>tinygrad viz</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+HK:wght@100..900&display=swap" rel="stylesheet">
+  <script src="https://d3js.org/d3.v5.min.js" charset="utf-8"></script>
+  <script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
+  <style>
+  * {
+    box-sizing: border-box;
+  }
+  html, body {
+    background-color: #191919;
+    color: #EEEEEE;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    font-family: "Noto Sans", sans-serif;
+    font-optical-sizing: auto;
+    font-weight: 400px;
+    font-style: normal;
+    font-variation-settings: "wdth" 100;
+    font-size: 14px;
+    overflow: hidden;
+  }
+  svg {
+    width: 100%;
+    height: 100%;
+  }
+  svg * {
+    cursor: default;
+    user-select: none;
+  }
+  .node rect {
+    stroke: #313131;
+    stroke-width: 1.5px;
+  }
+  .label text {
+    color: black;
+    font-weight: 350;
+  }
+  .edgePath path {
+    stroke: #606060;
+    stroke-width: 1.5px;
+  }
+  .main-container {
+    display: grid;
+    grid-template-columns: repeat(14, 1fr);
+    gap: 8px;
+    padding: 12px;
+    width: 100%;
+    height: 100%;
+    background-color: #191919;
+  }
+  .graph {
+    grid-column: span 10;
+  }
+  .container {
+    height: 100%;
+    background-color: #111111;
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .metadata {
+    grid-column: span 3;
+    overflow-y: auto;
+  }
+  .uop-list {
+    grid-column: span 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .uop-el {
+    padding: 8px 0;
+    color: #7B7B7B;
+    cursor: pointer;
+  }
+  .active-uop-el {
+    color: #EEEEEE;
+  }
+  .metadata > * + * {
+    margin-top: 8px;
+  }
+  .rewrite-counter {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .rewrite-counter > * + * {
+    margin-left: 4px;
+  }
+  .wrap {
+    word-wrap: break-word;
+    white-space: pre-wrap;
+  }
+  .code-block {
+    max-height: 30%;
+    overflow-y: auto;
+    background-color: #191919;
+    border-radius: 8px;
+    padding: 8px;
+  }
+  </style>
+</head>
+<body>
+  <div class="main-container">
+    <div class="container uop-list"></div>
+    <div class="container graph">
+      <svg>
+        <g id="render"></g>
+      </svg>
+    </div>
+    <div class="container metadata"></div>
+  </div>
+  <script>
+  var currentUOp = 0;
+  var totalUOps = 0;
+  var currentRewrite = 0;
+  var totalRewrites = 0;
+  var cache = {}
+  async function main() {
+    let ret;
+    if (currentUOp in cache) {
+      ret = cache[currentUOp];
+    } else {
+      ret = await (await fetch("/"+currentUOp)).json();
+      cache[currentUOp] = ret;
+    }
+    const [ctx, rest] = ret;
+    totalUOps = rest.length-1;
+    totalRewrites = ctx.graphs.length-1;
+    // graph
+    function renderGraph(graph) {
+      const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+      for ([k,u] of Object.entries(graph)) {
+        g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
+        for (src of u[2]) {
+          g.setEdge(src, k)
+        }
+      }
+      const svg = d3.select("svg");
+      const inner = svg.select("g");
+      var zoom = d3.zoom()
+        .scaleExtent([0.05, 2])
+        .on("zoom", () => {
+          const transform = d3.event.transform;
+          inner.attr("transform", transform);
+        });
+      svg.call(zoom);
+      const render = new dagreD3.render();
+      render(inner, g);
+    }
+    renderGraph(ctx.graphs[currentRewrite][0])
+    // metadata
+    const container = document.querySelector(".container.metadata");
+    container.innerHTML = "";
+    container.appendChild(Object.assign(document.createElement("pre"), { textContent: ctx.loc }));
+    ctx.extra[currentRewrite].forEach((b) => {
+      if (b.length == 0) return;
+      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${b}</code>`, className: "code-block" });
+      container.appendChild(pre);
+    })
+    if (ctx.graphs.length > 1) {
+      const rewriteCounter = Object.assign(document.createElement("div"), { className: "rewrite-counter" });
+      container.appendChild(rewriteCounter)
+      ctx.graphs.forEach((_, i) => {
+        const rewriteDiv = Object.assign(document.createElement("div"), { textContent: i, className: "uop-el" });
+        if (i === currentRewrite) {
+          rewriteDiv.classList.add("active-uop-el");
+          if (i !== 0) {
+            const [pattern, diff] = ctx.diffs[i-1];
+            container.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${pattern}</code>`, className: "wrap" }));
+            const diffHtml = diff.map((line) => {
+              if (line.startsWith("+")) return `<span style="color: #30A46C;">${line}</span>`;
+              if (line.startsWith("-")) return `<span style="color: #E5484D;">${line}</span>`;
+              return `<span>${line}</span>`;
+            }).join("<br>");
+            container.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${diffHtml}</code>`, className: "wrap" }));
+          }
+        }
+        rewriteDiv.addEventListener("click", () => {
+          currentRewrite = i;
+          main();
+        });
+        rewriteCounter.appendChild(rewriteDiv);
+      })
+    } else {
+      container.appendChild(Object.assign(document.createElement("p"), { textContent: "No rewrites" }));
+    }
+    // uop list
+    const uopList = document.querySelector(".container.uop-list");
+    uopList.innerHTML = "";
+    rest.forEach((r, i) => {
+      const div = Object.assign(document.createElement("div"), { textContent: r, className: "uop-el" });
+      if (i === currentUOp) {
+        div.classList.add("active-uop-el");
+      }
+      div.addEventListener("click", () => {
+        currentUOp = i;
+        currentRewrite = 0;
+        main();
+      });
+      uopList.appendChild(div);
+    });
+  }
+  document.addEventListener("keydown", async function(event) {
+    // up and down change the UOp from the list
+    if (event.key == 'ArrowUp') {
+      event.preventDefault()
+      currentRewrite = 0;
+      currentUOp = Math.max(0, currentUOp-1)
+      main()
+    }
+    if (event.key == 'ArrowDown') {
+      event.preventDefault()
+      currentRewrite = 0;
+      currentUOp = Math.min(totalUOps, currentUOp+1)
+      main()
+    }
+    // left and right go through rewrites in a single UOp
+    if (event.key == 'ArrowLeft') {
+      event.preventDefault()
+      currentRewrite = Math.max(0, currentRewrite-1)
+      main()
+    }
+    if (event.key == 'ArrowRight') {
+      event.preventDefault()
+      currentRewrite = Math.min(totalRewrites, currentRewrite+1)
+      main()
+    }
+  })
+  main()
+  </script>
+  </body>
+</html>

@@ -15,18 +15,6 @@ BASEDIR = Path(__file__).parent / "kits19" / "data"
 TRAIN_PREPROCESSED_DIR =  Path(__file__).parent / "kits19" / "preprocessed" / "train"
 VAL_PREPROCESSED_DIR =  Path(__file__).parent / "kits19" / "preprocessed" / "val"
 
-"""
-To download the dataset:
-```sh
-git clone https://github.com/neheller/kits19
-cd kits19
-pip3 install -r requirements.txt
-python3 -m starter_code.get_imaging
-cd ..
-mv kits19 extra/datasets
-```
-"""
-
 @functools.lru_cache(None)
 def get_train_files():
   return sorted([x for x in BASEDIR.iterdir() if x.stem.startswith("case") and int(x.stem.split("_")[-1]) < 210 and x not in get_val_files()])
@@ -123,7 +111,7 @@ def pad_input(volume, roi_shape, strides, padding_mode="constant", padding_val=-
   paddings = [bounds[2]//2, bounds[2]-bounds[2]//2, bounds[1]//2, bounds[1]-bounds[1]//2, bounds[0]//2, bounds[0]-bounds[0]//2, 0, 0, 0, 0]
   return F.pad(torch.from_numpy(volume), paddings, mode=padding_mode, value=padding_val).numpy(), paddings
 
-def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), overlap=0.5):
+def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), overlap=0.5, gpus=None):
   from tinygrad.engine.jit import TinyJit
   mdl_run = TinyJit(lambda x: model(x).realize())
   image_shape, dim = list(inputs.shape[2:]), len(inputs.shape[2:])
@@ -152,7 +140,7 @@ def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), o
   for i in range(0, strides[0] * size[0], strides[0]):
     for j in range(0, strides[1] * size[1], strides[1]):
       for k in range(0, strides[2] * size[2], strides[2]):
-        out = mdl_run(Tensor(inputs[..., i:roi_shape[0]+i,j:roi_shape[1]+j, k:roi_shape[2]+k])).numpy()
+        out = mdl_run(Tensor(inputs[..., i:roi_shape[0]+i,j:roi_shape[1]+j, k:roi_shape[2]+k], device=gpus)).numpy()
         result[..., i:roi_shape[0]+i, j:roi_shape[1]+j, k:roi_shape[2]+k] += out * norm_patch
         norm_map[..., i:roi_shape[0]+i, j:roi_shape[1]+j, k:roi_shape[2]+k] += norm_patch
   result /= norm_map

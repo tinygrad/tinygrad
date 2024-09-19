@@ -121,9 +121,9 @@ def to_uop(*a) -> UOp:
         return UOp(UOps.CONST, dtype, (st_uop,), lop.arg.val)
       buf = UOp(UOps.DEFINE_GLOBAL, membuf_dtype if isinstance(membuf_dtype, ImageDType) else PtrDType(membuf_dtype), (), lop.arg.idx)
       if lop.op is BufferOps.LOAD: return UOp(UOps.LOAD, dtype, (buf, st_uop))
-      return UOp(UOps.STORE, None, (buf, st_uop, create_uop(lop.src[0])))
+      return UOp(UOps.STORE, dtypes.void, (buf, st_uop, create_uop(lop.src[0])))
     src = tuple(create_uop(x) for x in lop.src)
-    if lop.op is MetaOps.KERNEL: return UOp(UOps.SINK, None, src)
+    if lop.op is MetaOps.KERNEL: return UOp(UOps.SINK, dtypes.void, src)
     if lop.op in ReduceOps:
       alu_op = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.MAX:BinaryOps.MAX}[cast(ReduceOps, lop.op)]
       return UOp(UOps.REDUCE_AXIS, src[0].dtype, src, (alu_op, lop.arg))

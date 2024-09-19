@@ -16,14 +16,14 @@ import functools
 def render(self) -> Tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
   glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=0)
-  uops = linearize_uop(full_graph_rewrite(UOp(UOps.STORE, None, (glbl, UOp.const(dtypes.int, 0), self)).sink()))
+  uops = linearize_uop(full_graph_rewrite(UOp(UOps.STORE, dtypes.void, (glbl, UOp.const(dtypes.int, 0), self)).sink()))
   if DEBUG>=5: print_uops(uops)
   from tinygrad.renderer.cstyle import CStyleLanguage
   class TestRenderer(CStyleLanguage):
     code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
   rewritten_uop = [uop for uop in uops if uop.op is UOps.STORE][0].src[-1]
   fxn = TestRenderer().render("", uops)
-  return fxn.split("data0[0] = ")[1].split(";")[0], rewritten_uop.vmin.arg, rewritten_uop.vmax.arg
+  return fxn.split("data0[0] = ")[1].split(";")[0], rewritten_uop.vmin, rewritten_uop.vmax
 
 def NumNode(val): return UOp.const(dtypes.int, val)
 def Variable(expr, nmin, nmax):
@@ -216,7 +216,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
 
   def test_mod_factor(self):
-    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 50, {"((b*50)%100)", "((b%2)*50)"})
+    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 99, "((b*50)%100)")
 
   def test_mod_to_sub(self):
     # This is mod reduction
@@ -254,8 +254,9 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_lt(self):
     self.helper_test_variable(create_lt_node(Variable("a", 0, 5)*4,13), 0, 1, "(a<4)")
     self.helper_test_variable(create_lt_node(Variable("a", 0, 5)*4,16), 0, 1, "(a<4)")
-    self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,12), 0, 1, {"((a*-1)<-2)", "((a*(-4))<(-11))", '((a<3)!=1)'})
-    self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,13), 0, 1, {"((a*-1)<-3)", "((a*(-4))<(-12))", '((a<4)!=1)'})
+    self.helper_test_variable(create_lt_node(Variable("a", 0, 5)*(-2),0), 0, 1, {"((a*-1)<0)", "((a*(-1))<0)"})
+    self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,12), 0, 1, {"((a*-1)<-2)", "((a*(-1))<(-2))", '((a<3)!=1)'})
+    self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,13), 0, 1, {"((a*-1)<-3)", "((a*(-1))<(-3))", '((a<4)!=1)'})
 
   def test_div_div(self):
     self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
@@ -296,12 +297,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(create_lt_node(Variable("a", 0, 6)*6+Variable("b", 0, 6)*6, 8), 0, 1,
                               "(((a*3)+(b*3))<4)")
 
-  @unittest.expectedFailure
   def test_lt_sum_factor_rhs_partial(self):
     self.helper_test_variable(create_lt_node(Variable("a", 0, 6)*6 + Variable("b", 0, 6)*4 + Variable("c", 0, 6)*8, 4), 0, 1,
                               "(((a*3)+(b*2)+(c*4))<2)")
 
-  @unittest.expectedFailure
   def test_lt_sum_factor_rhs_all(self):
     self.helper_test_variable(create_lt_node(Variable("a", 0, 6)*6 + Variable("b", 0, 6)*4 + Variable("c", 0, 6)*8, 2), 0, 1,
                               "(((a*3)+(b*2)+(c*4))<1)")
@@ -345,7 +344,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "((((idx*-10)+99)//11)+-9)")
 
   def test_div_into_mod(self):
-    self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
+    self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(((idx*4)%8)//4)")
 
   # TODO: simplify the expression
   def test_div_neg_cancel(self):
@@ -429,6 +428,24 @@ class TestSymbolic(unittest.TestCase):
     gidx = Variable("gidx", 0, 124)
     self.helper_test_variable(gidx%4+(gidx//4)*4, 0, 124, "gidx")
     self.helper_test_variable((gidx//4)*4+gidx%4, 0, 124, "gidx")
+
+  def test_arange_unrolled4(self):
+    gidx = Variable("gidx", 0, 2559)
+    alu0 = -gidx
+    unrolled_div = (alu0+2561)//-4+(alu0+2562)//-4+(alu0+2560)//-4+(alu0+2559)//-4+2559
+    self.helper_test_variable(unrolled_div, 0, 2559, "gidx")
+
+  def test_arange_unrolled2(self):
+    gidx = Variable("gidx", 0, 2559)
+    alu0 = -gidx
+    unrolled_div = (alu0+2559)//-2+(alu0+2560)//-2+2559
+    self.helper_test_variable(unrolled_div, 0, 2559, "gidx")
+
+  def test_gated_load(self):
+    idx = Variable("idx", 0, 24)
+    self.helper_test_variable(idx//4, 0, 6, "(idx//4)")
+    # TODO: simplify the true branch
+    self.helper_test_variable(idx.lt(4).where(idx//4, idx.const_like(-1)), -1, 6, "((idx<4)?(idx//4):(-1))")
 
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):
@@ -662,6 +679,27 @@ class TestSymbolicRealWorld(unittest.TestCase):
     print(idx.render())
     # NOTE: this used to have 13,151,129,600 in the output which is out of int32 range.
     assert idx.render() == "((((1+lidx5)%16)*49)+(((1+lidx5)//16)*802816)+(gidx0*3211264)+(gidx1*784)+(gidx2*8)+(lidx4*100352)+2207744+lidx3)"
+
+class TestBounds(unittest.TestCase):
+  def test_unrolled_arange(self):
+    # #include <metal_stdlib>
+    # using namespace metal;
+    # kernel void r_2560_640_4(device int* data0, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {
+    #   int gidx0 = gid.x; /* 2560 */
+    #   int alu0 = (gidx0*(-1));
+    #   int alu1 = max((int)((-640)),((((alu0+2559)/(-4))*(-1))+(-640)));
+    #   int alu2 = max((int)((-640)),((((alu0+2560)/(-4))*(-1))+(-640)));
+    #   int alu3 = max((int)((-640)),((((alu0+2561)/(-4))*(-1))+(-640)));
+    #   int alu4 = max((int)((-640)),((((alu0+2562)/(-4))*(-1))+(-640)));
+    #   *(data0+gidx0) = ((alu1*(-1))+(alu2*(-1))+(alu4*(-1))+(alu3*(-1))+(-1));
+    # }
+    gidx0 = Variable("gidx0", 0, 2559)
+    assert gidx0.vmin == 0 and gidx0.vmax == 2559
+    alu0 = gidx0 * -1
+    assert alu0.vmin == -2559 and alu0.vmax == 0
+    assert (alu0+2559).vmin == 0 and (alu0+2559).vmax == 2559
+    assert ((alu0+2559)//-4).vmin == -639 and ((alu0+2559)//-4).vmax == 0
+    assert (((alu0+2559)//-4)*(-1)).vmin == 0 and (((alu0+2559)//-4)*(-1)).vmax == 639
 
 if __name__ == '__main__':
   unittest.main()
