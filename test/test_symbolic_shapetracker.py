@@ -10,18 +10,6 @@ class TestSymbolic(unittest.TestCase):
     assert st.shape == (x, 3)
     assert st.real_strides() == (3, 1)
 
-  def test_expr_idxs(self):
-    x = Variable("x", 1, 100)
-    st = ShapeTracker.from_shape((x, 3))
-    idxs = [Variable("x", 0, 100), Variable("y", 0, 100)]
-    e1, e2 = st.expr_idxs(idxs)
-    assert e1.render() == "((x*3)+y)"
-    assert e2.render() == "1"
-    st = st.permute((1, 0))
-    e1, e2 = st.expr_idxs(idxs)
-    assert e1.render() == "((y*3)+x)"
-    assert e2.render() == "1"
-
   @unittest.expectedFailure
   def test_real_strides_0(self):
     st = ShapeTracker(views=(View(shape=(2, (NumNode(1)+Variable('start_pos', 1, 8)), 1, 1), strides=(8, 1, 0, 0), offset=0, mask=((0, 2), (0, Variable('start_pos', 1, 8)), (0, 1), (0, 1)), contiguous=False), View(shape=(2, (NumNode(1)+Variable('start_pos', 1, 8))), strides=((NumNode(1)+Variable('start_pos', 1, 8)), 1), offset=0, mask=None, contiguous=True)))   # noqa: E501
@@ -230,22 +218,6 @@ class TestSymbolicPad(unittest.TestCase):
     assert t.shape == (9,)
     st = t.lazydata.st
     print(st)
-    # TODO: fix this, required for symbolic arange
-    with self.assertRaises(RuntimeError):
-      st.expr_idxs()
-
-class TestSymbolicShapeExpr(unittest.TestCase):
-  def test_symbolic_expr_idxs(self):
-    # taken from symbolic shape llama
-    i = Variable("i", 1, 120)
-    gidx0 = Variable("gidx0", 0, i)
-    lidx1 = Variable("lidx1", 0, 7)
-    idx = (gidx0, lidx1, NumNode(1))
-    shape = (i+1, 8, 4)
-    strides = (1, (i*4)+4, i+1)
-    st = ShapeTracker((View.create(shape, strides), ))
-    idx, _valid = st.expr_idxs(idx)
-    assert idx.render() == "((lidx1*((i*4)+4))+1+gidx0+i)"
 
 if __name__ == '__main__':
   unittest.main()
