@@ -484,7 +484,7 @@ match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 class TrackedRewriteContext:
   loc: str                                  # location that called graph_rewrite
   sink: UOp                                 # the sink passed into the rewrite
-  rewrites: List[Tuple[UOp, UOp, str]]      # all rewrites of sparents. (before, after, UPat printable)
+  rewrites: List[Tuple[UOp, UOp, UPat]]     # all rewrites of sparents. (before, after, UPat)
 contexts: List[TrackedRewriteContext] = []
 class TrackedPatternMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
@@ -506,7 +506,7 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += (et:=time.perf_counter()-st)
         match_stats[p][3] += et
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2: contexts[-1].rewrites.append((uop, ret, p.printable()))
+        if TRACK_MATCH_STATS >= 2: contexts[-1].rewrites.append((uop, ret, p))
         return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
     return None

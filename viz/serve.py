@@ -30,9 +30,9 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
 @dataclass(frozen=True)
 class UOpRet:
   loc: str
-  graphs: List[Tuple[UOp, UOp, UOp, UOp]] # snapshot of the entire AST after each rewrite
-  diffs: List[Tuple[str, List[str]]]      # the diffs for each rewrite
-  extra: List[List[str]]                  # these become code blocks in the UI
+  graphs: List[Tuple[UOp, UOp, UOp, UOp]]      # snapshot of the entire AST after each rewrite
+  diffs: List[Tuple[str, str, List[str]]]      # the diffs for each rewrite
+  extra: List[List[str]]                       # these become code blocks in the UI
 
 def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[bytes, UOp]) -> UOp:
   if (found:=cache.get(base.key)): return found
@@ -46,14 +46,15 @@ def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[bytes, UOp]) -> UOp:
 def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
   uops: List[UOp] = [ctx.sink]
   graphs: List[Tuple[UOp, UOp, UOp, UOp]] = [(ctx.sink, ctx.sink, ctx.sink, ctx.sink)]
-  diffs: List[Tuple[str, List[str]]] = []
+  diffs: List[Tuple[str, str, List[str]]] = []
   extra: List[List[str]] = [[str(ctx.sink)]]
   for (first, rewritten, pattern) in ctx.rewrites:
     # if the sink was replaced, we have to replace the entire graph, otherwise just replace the parent
     new_sink = rewritten if first.op is UOps.SINK else replace_uop(uops[-1], first, rewritten, {})
     # TODO: sometimes it hits a ctx and can't find any UOp to replace
     #if new_sink is uops[-1]: continue
-    diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
+    loc_str = f"{pattern.location[0].split('/')[-1]}:{pattern.location[1]}"
+    diffs.append((str(pattern), loc_str, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
     assert new_sink.op is uops[-1].op
     graphs.append((new_sink, uops[-1], rewritten, first))
     uops.append(new_sink)
