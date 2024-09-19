@@ -34,13 +34,10 @@ class UOpRet:
   diffs: List[Tuple[str, str, List[str]]]      # the diffs for each rewrite
   extra: List[List[str]]                       # these become code blocks in the UI
 
-def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[bytes, UOp]) -> UOp:
-  if (found:=cache.get(base.key)): return found
-  if base.key == prev.key: ret = new
-  else:
-    new_srcs = tuple(replace_uop(x, prev, new, cache) for x in base.src)
-    ret = UOp(base.op, base.dtype, new_srcs, base.arg) if new_srcs != base.src else base
-  cache[base.key] = ret
+def replace_uop(base:UOp, replaces:Dict[bytes, UOp]) -> UOp:
+  if (found:=replaces.get(base.key)): return found
+  new_srcs = tuple(replace_uop(x, replaces) for x in base.src)
+  replaces[base.key] = ret = UOp(base.op, base.dtype, new_srcs, base.arg) if new_srcs != base.src else base
   return ret
 
 def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
@@ -52,7 +49,8 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
   for i, (first, rewritten, pattern) in enumerate(ctx.rewrites):
     if pattern.location[0].split("/")[-1] == "ops.py": continue
     # first, rewrite this UOp with the current rewrite + all the seen rewrites before this
-    new_sink = replace_uop(uops[-1], first, rewritten, {**seen_replaces})
+    seen_replaces[first.key] = rewritten
+    new_sink = replace_uop(uops[-1], {**seen_replaces})
     # sanity check
     assert new_sink is not uops[-1], f"rewritten sink wasn't rewritten! {i}\n{new_sink}\n{uops[-1]}"
     # update ret data
@@ -62,7 +60,6 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
     graphs.append((new_sink, uops[-1], rewritten, first))
     uops.append(new_sink)
     extra.append([str(new_sink)])
-    seen_replaces[first.key] = rewritten
   return UOpRet(ctx.loc, graphs, diffs, extra)
 
 class Handler(BaseHTTPRequestHandler):
