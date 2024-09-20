@@ -1,20 +1,12 @@
 #!/usr/bin/env python3
-from dataclasses import dataclass
 from typing import Dict, List, Tuple
-import pickle, re, os, sys, time, threading, webbrowser, json, difflib, contextlib
-from tinygrad.helpers import getenv
-from tinygrad.ops import TrackedRewriteContext, UOp, UOps
-from tinygrad.engine.graph import uops_colors, word_wrap
+import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib
+from dataclasses import dataclass
+from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
-
-stop_reloader = threading.Event()
-def reloader():
-  mtime = os.stat(__file__).st_mtime
-  while not stop_reloader.is_set():
-    if mtime != os.stat(__file__).st_mtime:
-      print("reloading server...")
-      os.execv(sys.executable, [sys.executable] + sys.argv)
-    time.sleep(0.1)
+from tinygrad.helpers import getenv
+from tinygrad.ops import TrackedRewriteContext, UOp
+from tinygrad.engine.graph import uops_colors, word_wrap
 
 def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
@@ -30,31 +22,31 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
 @dataclass(frozen=True)
 class UOpRet:
   loc: str
-  graphs: List[Tuple[UOp, UOp, UOp, UOp]] # snapshot of the entire AST after each rewrite
-  diffs: List[Tuple[str, List[str]]]      # the diffs for each rewrite
-  extra: List[List[str]]                  # these become code blocks in the UI
+  graphs: List[Tuple[UOp, UOp, UOp, UOp]]                  # snapshot of the entire AST after each rewrite
+  diffs: List[Tuple[str, Tuple[str, int], List[str]]]      # the diffs for each rewrite
+  extra: List[List[str]]                                   # these become code blocks in the UI
 
-def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[bytes, UOp]) -> UOp:
-  if (found:=cache.get(base.key)): return found
-  if base.key == prev.key: ret = new
-  else:
-    new_srcs = tuple(replace_uop(x, prev, new, cache) for x in base.src)
-    ret = UOp(base.op, base.dtype, new_srcs, base.arg) if new_srcs != base.src else base
-  cache[base.key] = ret
+def replace_uop(base:UOp, replaces:Dict[bytes, UOp]) -> UOp:
+  if (found:=replaces.get(base.key)): return found
+  new_srcs = tuple(replace_uop(x, replaces) for x in base.src)
+  replaces[base.key] = ret = UOp(base.op, base.dtype, new_srcs, base.arg) if new_srcs != base.src else base
   return ret
 
 def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
   uops: List[UOp] = [ctx.sink]
   graphs: List[Tuple[UOp, UOp, UOp, UOp]] = [(ctx.sink, ctx.sink, ctx.sink, ctx.sink)]
-  diffs: List[Tuple[str, List[str]]] = []
+  diffs: List[Tuple[str, Tuple[str, int], List[str]]] = []
   extra: List[List[str]] = [[str(ctx.sink)]]
-  for (first, rewritten, pattern) in ctx.rewrites:
-    # if the sink was replaced, we have to replace the entire graph, otherwise just replace the parent
-    new_sink = rewritten if first.op is UOps.SINK else replace_uop(uops[-1], first, rewritten, {})
-    # TODO: sometimes it hits a ctx and can't find any UOp to replace
-    #if new_sink is uops[-1]: continue
-    diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
-    assert new_sink.op is uops[-1].op
+  seen_replaces: Dict[bytes, UOp] = {}
+  for i, (first, rewritten, pattern) in enumerate(ctx.rewrites):
+    if pattern.location[0].split("/")[-1] == "ops.py": continue
+    # first, rewrite this UOp with the current rewrite + all the seen rewrites before this
+    seen_replaces[first.key] = rewritten
+    new_sink = replace_uop(uops[-1], {**seen_replaces})
+    # sanity check
+    assert new_sink is not uops[-1], f"rewritten sink wasn't rewritten! {i}\n{new_sink}\n{uops[-1]}"
+    # update ret data
+    diffs.append((str(pattern), pattern.location, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
     graphs.append((new_sink, uops[-1], rewritten, first))
     uops.append(new_sink)
     extra.append([str(new_sink)])
@@ -62,25 +54,26 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
-    if self.path == "/favicon.svg":
+    if (url:=urlparse(self.path)).path == "/favicon.svg":
       self.send_response(200)
       self.send_header("Content-type", "image/svg+xml")
       self.end_headers()
       with open(os.path.join(os.path.dirname(__file__), "favicon.svg"), "rb") as f:
         ret = f.read()
-    if self.path == "/":
+    if url.path == "/":
       self.send_response(200)
       self.send_header("Content-type", "text/html")
       self.end_headers()
       with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f:
         ret = f.read()
-    elif re.search(r'/\d+', self.path):
+    elif url.path == "/graph":
+      query = parse_qs(url.query)
       self.send_response(200)
       self.send_header("Content-type", "application/json")
       self.end_headers()
       with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
       rest = [x.loc for x in contexts]
-      g = create_graph(contexts[int(self.path.split("/")[-1])])
+      g = create_graph(contexts[int(query["uop_idx"][0])])
       ret = json.dumps(({"loc": g.loc, "graphs": [[uop_to_json(x) for x in graph] for graph in g.graphs],
                          "diffs": g.diffs, "extra": g.extra}, rest)).encode()
     else:
@@ -89,6 +82,14 @@ class Handler(BaseHTTPRequestHandler):
     return self.wfile.write(ret)
 
 BROWSER = getenv("BROWSER", 1)
+stop_reloader = threading.Event()
+def reloader():
+  mtime = os.stat(__file__).st_mtime
+  while not stop_reloader.is_set():
+    if mtime != os.stat(__file__).st_mtime:
+      print("reloading server...")
+      os.execv(sys.executable, [sys.executable] + sys.argv)
+    time.sleep(0.1)
 def main():
   try:
     st = time.perf_counter()

@@ -6,12 +6,11 @@ from tinygrad import Tensor
 from tinygrad.engine.realize import lower_schedule
 from tinygrad.ops import UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.helpers import all_same, DEBUG, colored, getenv
+from tinygrad.helpers import CI, all_same, DEBUG, colored, getenv
 from tinygrad.codegen.uopgraph import constant_folder, devectorize, float4_folding
 from test.external.process_replay.helpers import print_diff
 from viz.serve import create_graph
 
-@unittest.skip("TODO: some of these graph_rewrites don't display a diff in VIZ=1")
 class TestViz(unittest.TestCase):
   def tearDown(self) -> None:
     from tinygrad.ops import contexts
@@ -24,7 +23,8 @@ class TestViz(unittest.TestCase):
       except Exception as e:
         print(colored(f"failed to create graph for ctx {i}", "red"))
         raise e
-      for j,(x,y) in enumerate(zip(ret.uops, ret.uops[1:])):
+      rewrites = [x[0] for x in ret.graphs]
+      for j,(x,y) in enumerate(zip(rewrites, rewrites[1:])):
         if x.key == y.key:
           raise AssertionError(f"failed to generate the correct diff at rewrite {j} ctx {i}")
 
@@ -50,14 +50,14 @@ class TestViz(unittest.TestCase):
     gep = UOp(UOps.GEP, dtypes.int, (vec,), (0,))
     sink = UOp(UOps.STORE, dtypes.void, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0), UOp.const(dtypes.int, 0), gep)).sink()
     pm = PatternMatcher([
-      (UPat(UOps.VECTORIZE, name="root", src=(UPat(UOps.CONST, name="const"),), allow_any_len=True),
+      (UPat(UOps.VECTORIZE, name="root", src=(UPat(UOps.CONST, name="const"),), allow_any_len=True, location="test"),
        lambda root,const: UOp.const_like(root, const.arg) if all_same(root.src) else None),
-      (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="x"),)), lambda root,x: root.const_like(x.arg))
+      (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="x"),), location="test"), lambda root,x: root.const_like(x.arg))
     ])
     ret = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, ret)
     g = create_graph(contexts[0])
-    assert g.uops[-1].key == ret.key
+    assert g.graphs[-1][0].key == ret.key
     self.assert_valid_ctx(contexts)
 
   def test_devectorize_viz(self):
@@ -88,7 +88,9 @@ class TestViz(unittest.TestCase):
     new_sink = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, new_sink, unified=0)
     self.assert_valid_ctx(contexts)
+    assert all(ctx.loc.split("/")[-1].split(":")[0] == __file__.split("/")[-1] for ctx in contexts)
 
+  @unittest.skipIf(CI, "slow, it's generating diffs for 36202 rules")
   def test_fuzz_resnet(self):
     mdl = ResNet50()
     img = Tensor.empty(64, 3, 224, 224)
