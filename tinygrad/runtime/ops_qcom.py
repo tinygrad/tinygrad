@@ -6,7 +6,7 @@ from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
-from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le, prod
+from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le, prod, DEBUG, fromimport
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 def _qreg_exec(reg, __val=0, **kwargs):
@@ -118,7 +118,7 @@ class QCOMComputeQueue(HWComputeQueue):
 
     self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
              qreg.a6xx_sp_cs_ctrl_reg0(threadsize=adreno.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
-             qreg.a6xx_sp_cs_unknown_a9b1(unk5=True, unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
+             qreg.a6xx_sp_cs_unknown_a9b1(unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.device._stack.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
 
@@ -219,6 +219,7 @@ class QCOMArgsState(HCQArgsState):
 class QCOMProgram(HCQProgram):
   def __init__(self, device: QCOMDevice, name: str, lib: bytes):
     self.device, self.name, self.lib = device, name, lib
+    if DEBUG >= 5: fromimport('extra.disassemblers.adreno', 'disasm')(lib)
     self._parse_lib()
 
     self.lib_gpu = self.device.allocator.alloc(self.image_size, options=BufferOptions(cpu_access=True, nolru=True))
@@ -279,8 +280,15 @@ class QCOMProgram(HCQProgram):
 class QCOMAllocator(HCQAllocator):
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
     if options.image is not None:
-      pitch = round_up(round_up(options.image.shape[1], 16) * (4 * options.image.base.itemsize), 1 << (pitchalign:=6))
-      texture = self.device._gpu_alloc(pitch * round_up(options.image.shape[0], 16), kgsl.KGSL_MEMTYPE_TEXTURE, map_to_cpu=True)
+      imgw, imgh, itemsize_log = options.image.shape[1], options.image.shape[0], int(math.log2(options.image.itemsize))
+      pitchalign = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6
+      align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
+
+      granularity = 128 if options.image.itemsize == 4 else 256
+      pitch_add = (1 << pitchalign) if min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2 else 0
+      pitch = round_up(imgw * 4 * options.image.itemsize, 1 << pitchalign) + pitch_add
+
+      texture = self.device._gpu_alloc(pitch * round_up(imgh, 16), kgsl.KGSL_MEMTYPE_TEXTURE, map_to_cpu=True)
 
       # Extend HCQBuffer with texture-related info.
       texture.samplers, texture.descriptor, texture.ibo = [0] * 4, [0] * 16, [0] * 16
@@ -291,7 +299,7 @@ class QCOMAllocator(HCQAllocator):
 
       tex_fmt = adreno.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else adreno.FMT6_16_16_16_16_FLOAT
       texture.descriptor[0] = qreg.a6xx_tex_const_0(swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt)
-      texture.descriptor[1] = qreg.a6xx_tex_const_1(width=options.image.shape[1], height=options.image.shape[0])
+      texture.descriptor[1] = qreg.a6xx_tex_const_1(width=imgw, height=imgh)
       texture.descriptor[2] = qreg.a6xx_tex_const_2(type=adreno.A6XX_TEX_2D, pitch=pitch, pitchalign=pitchalign-6)
       texture.descriptor[4:7] = [*data64_le(texture.va_addr), qreg.a6xx_tex_const_6(plane_pitch=0x400000)]
       texture.ibo = [texture.descriptor[0] & (~0xffff), *texture.descriptor[1:len(texture.descriptor)]]

@@ -4,11 +4,11 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict
 
-from tinygrad.ops import BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify
+from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType, PtrDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, AMX, round_up, all_int, \
+from tinygrad.helpers import _CURRENT_KERNEL, all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, AMX, round_up, all_int, \
                              get_contraction, to_function_name, diskcache_put, ContextVar
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
@@ -749,7 +749,9 @@ class Kernel:
       print(self.applied_opts)
     verify_ast(modified_ast)
 
+    if TRACK_MATCH_STATS >= 2: _CURRENT_KERNEL.set(self.name)
     self.uops:List[UOp] = linearize_uop(full_graph_rewrite(ast_to_uop(modified_ast, self.opts), self.opts))
+    if TRACK_MATCH_STATS >= 2: _CURRENT_KERNEL.set(None)
     if DEBUG >= 5: print_uops(self.uops)
     if getenv("GRAPHUOPS"):
       from tinygrad.engine.graph import graph_uops
@@ -775,10 +777,8 @@ class Kernel:
 # the living definition of intermediate UOps
 
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
-  if uop in sts: return
+  if not uop.has_st or uop in sts: return
   op, _, src, arg = uop.op, uop.dtype, uop.src, uop.arg
-  # NOTE: UOps.DEFINE_GLOBAL and UOps.DEFINE_LOCAL don't have shape
-  if op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}: return
   # restore globals from the two stage reduce
   if op is UOps.LOAD and src[0].op is UOps.DEFINE_LOCAL:
     _assert_valid_uop(local_reduce:=src[2].src[2], uop.st_arg, sts)
@@ -792,9 +792,9 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
     assert op in {UOps.SHAPETRACKER, UOps.SWIZZLE, UOps.ALU, UOps.CAST, UOps.BITCAST, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
     # movementops are pushed to the edges with SHAPETRACKER
     # elementwise inherits shape
-    st = arg if op is UOps.SHAPETRACKER else sts[src[uop.st_loc if op in BUFFER_UOPS else -1]]
-    for x in (src[1:] if op in BUFFER_UOPS else src):
-      if sts[x].shape != st.shape:
+    st = arg if op is UOps.SHAPETRACKER else sts[src[uop.st_loc if op in BUFFER_UOPS else 0]]
+    for x in src:
+      if x.has_st and sts[x].shape != st.shape:
         if prod(sts[x].shape) == prod(st.shape): raise AssertionError(f"found implicit reshape {x.op} {op} {sts[x].shape} != {st.shape}")
         raise AssertionError(f"found implicit expand {x.op} {sts[x].shape} != {op} {st.shape} {prod(sts[x].shape)} != {prod(st.shape)}")
   sts[uop] = st

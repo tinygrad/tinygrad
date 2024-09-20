@@ -49,7 +49,7 @@ def fold_expanded(ex, buf):
           # generate the folded new_srcs
           if is_load:
             new_load = UOp(UOps.LOAD, load_1.dtype.vec(fold_length), tuple(new_src))
-            for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(UOps.GEP, load_1.dtype, (new_load,), (i,))
+            for i in range(fold_length): new_srcs[offsets[o+i]] = new_load.gep(i)
           else:
             for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(UOps.STORE, dtypes.void, tuple(new_src)) if i == 0 else None
           for i in range(fold_length): used.add((rootsrc,o+i))
@@ -68,7 +68,7 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   if len(new_src) >= 4:
     new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(4), tuple(new_src[2] for _ in range(4)))
   vec_load = UOp(UOps.LOAD, load.dtype.vec(4), tuple(new_src))
-  return functools.reduce(lambda ret, i: id4.ne(i).where(ret, UOp(UOps.GEP, load.dtype, (vec_load,), (i,))), range(4), load.const_like(float('nan')))
+  return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), load.const_like(float('nan')))
 
 float4_folding = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
@@ -146,25 +146,26 @@ def lt_folding(x:UOp, c:int) -> Optional[UOp]:
   if (newx:=div_folding(x,c)) is not None and newx.op is UOps.ALU and newx.arg is BinaryOps.IDIV: return newx.src[0].lt(newx.src[1])
   return cast(UOp, x.divides(g)).lt(c//g) if ((g:=math.gcd(x.const_factor(), c)) > 1) else None
 
-def fold_unrolled_divs(divs:UOp, c:UOp):
+def fold_unrolled_divs(divs:UOp):
   # div pattern in unrolled arange
-  # example: (-x+2561)//-4+(-x+2562)//-4+(-x+2560)//-4+(-x+2559)//-4+2559 -> x
+  # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
   add_chain, seen_const, ans = list(_get_chain(divs, BinaryOps.ADD)), [], None
   for u in add_chain:
-    if not (u.op is UOps.ALU and u.arg is BinaryOps.IDIV and u.src[1].op is UOps.CONST and u.src[1].arg==-len(add_chain)): return None
+    if not (u.op is UOps.ALU and u.arg is BinaryOps.IDIV and u.src[1].op is UOps.CONST and u.src[1].arg==len(add_chain)): return None
     # assumed CONST is the last of an ADD
-    if not ((s0:=u.src[0]).op is UOps.ALU and s0.arg is BinaryOps.ADD and s0.src[1].op is UOps.CONST and s0.src[1].op is UOps.CONST): return None
-    if not ((neg:=s0.src[0]).op is UOps.ALU and neg.arg is BinaryOps.MUL and neg.src[1].op is UOps.CONST and neg.src[1].arg==-1): return None
-    if ans is None: ans = neg.src[0]
-    if ans != neg.src[0]: return None
-    seen_const.append(s0.src[1].arg)
-  return ans if sorted(seen_const)==list(range(c.arg, c.arg+len(add_chain))) and ans is not None and (ans.vmin, ans.vmax)==(0, c.arg) else None
+    if (s0:=u.src[0]).op is UOps.ALU and s0.arg is BinaryOps.ADD and s0.src[1].op is UOps.CONST and s0.src[1].op is UOps.CONST:
+      seen_const.append(s0.src[1].arg)
+      s0 = s0.src[0]
+    else: seen_const.append(0)
+    if ans is None: ans = s0
+    if ans != s0: return None
+  return ans if ans is not None and sorted(seen_const)==list(range(len(add_chain))) else None
 
 # ***** image load valid simplification *****
 
 def is_increasing(f:UOp):
   # is f a monotonically increasing function regards its input
-  if f.op in [UOps.CONST, UOps.DEFINE_VAR, UOps.SPECIAL]: return True
+  if f.op in [UOps.CONST, UOps.DEFINE_VAR, UOps.SPECIAL, UOps.RANGE]: return True
   if f.op is UOps.ALU and f.arg is BinaryOps.ADD: return is_increasing(f.src[0]) and is_increasing(f.src[1])
   if f.op is UOps.ALU and f.arg in (BinaryOps.MUL, BinaryOps.IDIV) and f.src[1].op is UOps.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
   return False  # False if not sure
@@ -181,10 +182,12 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:DefaultDict[UOp, List[Optional[ConstType]]] = defaultdict(lambda: [None, None])
   for stmt in _get_chain(valid, BinaryOps.AND):
-    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST:
-      if (s:=stmt.src[0]).op is UOps.ALU and s.arg is BinaryOps.MUL and s.src[1].op is UOps.CONST and s.src[1].arg == -1:
-        bounds[s.src[0]][0] = -stmt.src[1].arg+1
-      else: bounds[s][1] = stmt.src[1].arg-1
+    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPNE and stmt.src[1].op is UOps.CONST and stmt.src[1].arg == 1:
+      # (X < c).ne(True) -> X >= c
+      if (s0:=stmt.src[0]).op is UOps.ALU and s0.arg is BinaryOps.CMPLT and s0.src[1].op is UOps.CONST:
+        bounds[s0.src[0]][0] = s0.src[1].arg
+    elif stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST:
+      bounds[stmt.src[0]][1] = stmt.src[1].arg-1
 
   for uop,v in bounds.items():
     # some expr has lower bound > upper bound -> valid is an empty set
@@ -197,21 +200,21 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
 
   drop_stmt = []
   for stmt in _get_chain(valid, BinaryOps.AND):
-    if not (stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST): continue
-    if (s0:=stmt.src[0]).op is UOps.ALU and s0.arg is BinaryOps.MUL and (s01:=s0.src[1]).op is UOps.CONST and s01.arg == -1:
-      # -X < c -> X > -c, check if it's negative when X = -c
-      for i in idx.src:
-        if is_increasing(i) and (rw:=graph_rewrite(replace_uop(i, s0.src[0], s0.const_like(-stmt.src[1].arg)), constant_folder)):
-          if rw.op is UOps.CONST and rw.arg < 0:
+    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPNE and stmt.src[1].op is UOps.CONST and stmt.src[1].arg == 1:
+      # (X < c).ne(True) -> X >= c
+      if (s0:=stmt.src[0]).op is UOps.ALU and s0.arg is BinaryOps.CMPLT and s0.src[1].op is UOps.CONST:
+        X, c = s0.src[0], s0.src[1].arg
+        # X >= c, check if it's negative when X = c-1
+        for i in idx.src:
+          if is_increasing(i) and graph_rewrite(replace_uop(i, X, X.const_like(c-1)), constant_folder).vmax < 0:
             drop_stmt.append(stmt)
             break
-    else:
+    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST:
       # X < c, check if it's out of bound when X = c
       for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
-        if is_increasing(i) and (rw:=graph_rewrite(replace_uop(i, s0, s0.const_like(stmt.src[1].arg)), constant_folder)):
-          if rw.op is UOps.CONST and rw.arg >= b:
-            drop_stmt.append(stmt)
-            break
+        if is_increasing(i) and graph_rewrite(replace_uop(i, (X:=stmt.src[0]), X.const_like(stmt.src[1].arg)), constant_folder).vmin >= b:
+          drop_stmt.append(stmt)
+          break
 
   if drop_stmt or idx.key != start_idx.key:
     new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
@@ -349,7 +352,7 @@ constant_folder = PatternMatcher([
     .where(UPat.cvar("multconst"), UPat.const(None, 0)), m2 + UPat.var("extra")),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
   # unrolled arange div folding
-  (UPat.var("divs") + UPat.cvar("c"), fold_unrolled_divs),
+  (UPat(UOps.ALU, name="divs", src=[UPat(), UPat(UOps.ALU, arg=BinaryOps.IDIV)], arg=BinaryOps.ADD), fold_unrolled_divs),
   # indexing, with cast or where
   (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*
     UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.any(UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE, name="rng"), UPat(UOps.RANGE, name="rng"))),
@@ -402,6 +405,9 @@ constant_folder = PatternMatcher([
   # c0*x<c1 for negative int c0 and non-positive c1
   ((UPat.cvar("c0", vec=False)*UPat.var("x")).lt(UPat.cvar("c1", vec=False)),
    lambda x,c0,c1: (-x).lt(-(math.floor(-c1.arg/-c0.arg))) if dtypes.is_int(x.dtype) and c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
+  # x//c0<c1 for positive int c0
+  ((UPat.var("x")//UPat.cvar("c0", vec=False)).lt(UPat.cvar("c1", vec=False)),
+   lambda x,c0,c1: x.lt(c1.arg*c0.arg) if dtypes.is_int(x.dtype) and c0.arg > 0 else None),
   # mul add lt
   (((UPat.cvar("c0", vec=False)*UPat.var("x"))+UPat.var("x2")).lt(UPat.cvar("c1", vec=False)),
    lambda x,x2,c0,c1: x.lt(c1//c0) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax and x2.vmin >= 0 else None),
@@ -454,8 +460,7 @@ constant_folder = PatternMatcher([
       if any(x.op in {UOps.SINK, UOps.EXPAND} for x in root.src) else None),
   # ** move add consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))), UPat.var("y")]),
-    lambda x,c1,y: (x+y)+c1),
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
 ])
 
 # *** uop expander ***
@@ -549,9 +554,7 @@ def do_contract(con:UOp):
 
 def no_vectorized_alu(alu):
   if alu.dtype.count == 1: return None
-  alus = tuple(UOp(alu.op, alu.dtype.scalar(),
-                   tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), (i,)) if alu.op is not UOps.REDUCE or j == 0 else s for j,s in enumerate(alu.src)),
-                   alu.arg) for i in range(alu.dtype.count))
+  alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
 def create_gate(root:UOp) -> Optional[UOp]:
@@ -601,7 +604,7 @@ def no_vectorized_load_store(ls:UOp):
 def no_vectorized_acc(acc:UOp):
   if acc.dtype.count == 1: return None
   alus = tuple(UOp(acc.op, acc.dtype.scalar(),
-    tuple(UOp(UOps.GEP, s.dtype.scalar(), (s,), (i,)) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
+    tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
   return UOp(UOps.VECTORIZE, acc.dtype, alus)
 
 def delete_redundant_gates(root:UOp) -> Optional[UOp]:
