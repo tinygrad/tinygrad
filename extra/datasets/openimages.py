@@ -2,14 +2,13 @@ import sys
 import json
 import numpy as np
 from PIL import Image
-import pathlib
+from pathlib import Path
 import boto3, botocore
-from tinygrad.helpers import fetch
-from tqdm import tqdm
+from tinygrad.helpers import fetch, tqdm, getenv
 import pandas as pd
 import concurrent.futures
 
-BASEDIR = pathlib.Path(__file__).parent / "open-images-v6-mlperf"
+BASEDIR = Path(__file__).parent / "open-images-v6-mlperf"
 BUCKET_NAME = "open-images-dataset"
 TRAIN_BBOX_ANNOTATIONS_URL = "https://storage.googleapis.com/openimages/v6/oidv6-train-annotations-bbox.csv"
 VALIDATION_BBOX_ANNOTATIONS_URL = "https://storage.googleapis.com/openimages/v5/validation-annotations-bbox.csv"
@@ -55,15 +54,15 @@ MLPERF_CLASSES = ['Airplane', 'Antelope', 'Apple', 'Backpack', 'Balloon', 'Banan
 ]
 
 
-def openimages(subset: str):
+def openimages(base_dir:Path, subset:str):
   valid_subsets = ['train', 'validation']
   if subset not in valid_subsets:
     raise ValueError(f"{subset=} must be one of {valid_subsets}")
 
-  ann_file = BASEDIR / f"{subset}/labels/openimages-mlperf.json"
+  ann_file = base_dir / f"{subset}/labels/openimages-mlperf.json"
 
   if not ann_file.is_file():
-    fetch_openimages(ann_file, subset)
+    fetch_openimages(ann_file, base_dir, subset)
 
   return ann_file
 
@@ -112,10 +111,10 @@ def download_image(bucket, subset, image_id, data_dir):
   except botocore.exceptions.ClientError as exception:
     sys.exit(f"ERROR when downloading image `validation/{image_id}`: {str(exception)}")
 
-def fetch_openimages(output_fn, subset: str):
+def fetch_openimages(output_fn:str, base_dir:Path, subset:str):
   bucket = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED)).Bucket(BUCKET_NAME)
 
-  annotations_dir, data_dir = BASEDIR / "annotations", BASEDIR / f"{subset}/data"
+  annotations_dir, data_dir = base_dir / "annotations", base_dir / f"{subset}/data"
   annotations_dir.mkdir(parents=True, exist_ok=True)
   data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -176,6 +175,16 @@ def iterate(coco, bs=8):
       targets.append(prepare_target(annotations, img_id, original_size))
     yield np.array(X), targets
 
+def download_dataset(base_dir:Path, subset:str):
+  try:
+    (base_dir / subset).mkdir(parents=True)
+    print(f"Downloading {subset} dataset...")
+    openimages(base_dir, subset)
+    print("Done")
+  except OSError:
+    print(f"{subset} dataset is already available")
+
+
 if __name__ == "__main__":
-  openimages("validation")
-  openimages("train")
+  download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), "train")
+  download_dataset(base_dir, "validation")
