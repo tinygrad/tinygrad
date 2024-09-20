@@ -47,8 +47,8 @@ class TestViz(unittest.TestCase):
     list(lower_schedule(schedule2))
     ret = get_ctx_groups(contexts)
     assert len(ret.keys()) == 2
-    assert all(len([x for x in ctxs if "schedule" in x.loc]) != 0 for ctxs in ret.values())
-    assert all(len([x for x in ctxs if "uopgraph" in x.loc]) != 0 for ctxs in ret.values())
+    assert all(len([x for x in ctxs if "schedule" in x.loc]) != 0 for ctxs,_ in ret.values())
+    assert all(len([x for x in ctxs if "uopgraph" in x.loc]) != 0 for ctxs,_ in ret.values())
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()
