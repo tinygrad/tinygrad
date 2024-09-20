@@ -226,6 +226,10 @@
       const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${e}</code>`, className: "code-block" });
       metadata.appendChild(pre);
     })
+    if (ret[0].code !== "") {
+      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${ret[0].code}</code>`, className: "code-block" });
+      metadata.appendChild(pre);
+    }
     // ** rewrite list
     if (ret[0].graphs.length > 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
