@@ -9,7 +9,7 @@ from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import CI, all_same, DEBUG, colored, getenv
 from tinygrad.codegen.uopgraph import constant_folder, devectorize, float4_folding
 from test.external.process_replay.helpers import print_diff
-from viz.serve import create_graph
+from viz.serve import create_graph, get_ctx_groups
 
 class TestViz(unittest.TestCase):
   def tearDown(self) -> None:
@@ -38,6 +38,17 @@ class TestViz(unittest.TestCase):
     a = Tensor.ones(4, 1).contiguous().realize()
     out = a + a.reshape(1, 4)
     self.assert_valid_graph(out)
+
+  def test_ctx_groups(self):
+    contexts.clear()
+    schedule1 = Tensor.randn(4, 1).contiguous().schedule()
+    schedule2 = Tensor.randn(4, 4).contiguous().schedule()
+    list(lower_schedule(schedule1))
+    list(lower_schedule(schedule2))
+    ret = get_ctx_groups(contexts)
+    assert len(ret.keys()) == 2
+    assert all(len([x for x in ctxs if "schedule" in x.loc]) != 0 for ctxs in ret.values())
+    assert all(len([x for x in ctxs if "uopgraph" in x.loc]) != 0 for ctxs in ret.values())
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()

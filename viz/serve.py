@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-from typing import Dict, List, Tuple
+from collections import defaultdict
+from typing import DefaultDict, Dict, List, Tuple
 import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from tinygrad.helpers import getenv
+from tinygrad import Device
+from tinygrad.helpers import Context, getenv, to_function_name
 from tinygrad.ops import TrackedRewriteContext, UOp
 from tinygrad.engine.graph import uops_colors, word_wrap
+from tinygrad.engine.realize import get_runner
+from tinygrad.engine.schedule import full_ast_rewrite
 
 def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
@@ -52,6 +56,17 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
     extra.append([str(new_sink)])
   return UOpRet(ctx.loc, graphs, diffs, extra)
 
+def get_ctx_groups(contexts:List[TrackedRewriteContext]) -> DefaultDict[str, List[TrackedRewriteContext]]:
+  ctx_groups: DefaultDict[str, List[TrackedRewriteContext]] = defaultdict(list)
+  kernel_name = ""
+  for ctx in contexts:
+    if ctx.loc.split("/")[-1].split(":")[0] == "schedule.py":
+      with Context(TRACK_MATCH_STATS=0): kernel_name = get_runner(Device.DEFAULT, full_ast_rewrite(ctx.sink)).p.name
+    elif ctx.kernel_name is not None: kernel_name = ctx.kernel_name
+    # TODO: make ansi play nice with css
+    ctx_groups[to_function_name(kernel_name)].append(ctx)
+  return ctx_groups
+
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
     if (url:=urlparse(self.path)).path == "/favicon.svg":
@@ -66,14 +81,23 @@ class Handler(BaseHTTPRequestHandler):
       self.end_headers()
       with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f:
         ret = f.read()
+    elif url.path == "/kernels":
+      self.send_response(200)
+      self.send_header("Content-type", "application/json")
+      self.end_headers()
+      with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
+      ctx_groups = get_ctx_groups(contexts)
+      ret = json.dumps({k:[x.loc for x in v] for k,v in ctx_groups.items()}).encode()
     elif url.path == "/graph":
       query = parse_qs(url.query)
       self.send_response(200)
       self.send_header("Content-type", "application/json")
       self.end_headers()
       with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
-      rest = [x.loc for x in contexts]
-      g = create_graph(contexts[int(query["uop_idx"][0])])
+      ctx_groups = get_ctx_groups(contexts)
+      group = ctx_groups[list(ctx_groups.keys())[int(query["kernel_idx"][0])]]
+      g = create_graph(group[int(query["uop_idx"][0])])
+      rest = [x.loc for x in group]
       ret = json.dumps(({"loc": g.loc, "graphs": [[uop_to_json(x) for x in graph] for graph in g.graphs],
                          "diffs": g.diffs, "extra": g.extra}, rest)).encode()
     else:
