@@ -165,7 +165,7 @@ def fold_unrolled_divs(divs:UOp):
 
 def is_increasing(f:UOp):
   # is f a monotonically increasing function regards its input
-  if f.op in [UOps.CONST, UOps.DEFINE_VAR, UOps.SPECIAL]: return True
+  if f.op in [UOps.CONST, UOps.DEFINE_VAR, UOps.SPECIAL, UOps.RANGE]: return True
   if f.op is UOps.ALU and f.arg is BinaryOps.ADD: return is_increasing(f.src[0]) and is_increasing(f.src[1])
   if f.op is UOps.ALU and f.arg in (BinaryOps.MUL, BinaryOps.IDIV) and f.src[1].op is UOps.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
   return False  # False if not sure
