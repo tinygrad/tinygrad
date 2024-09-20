@@ -209,7 +209,7 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
           if is_increasing(i) and graph_rewrite(replace_uop(i, X, X.const_like(c-1)), constant_folder).vmax < 0:
             drop_stmt.append(stmt)
             break
-    else:
+    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST:
       # X < c, check if it's out of bound when X = c
       for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
         if is_increasing(i) and graph_rewrite(replace_uop(i, (X:=stmt.src[0]), X.const_like(stmt.src[1].arg)), constant_folder).vmin >= b:
