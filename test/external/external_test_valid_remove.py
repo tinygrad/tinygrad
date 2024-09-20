@@ -59,5 +59,63 @@ class TestOpenpilotValidhack(unittest.TestCase):
     p = kernel.to_program()
     print(p.src)
 
+  def test_const_idx(self):
+    Device.DEFAULT = "GPU"
+
+    ast = UOp(UOps.SINK, dtypes.void, arg=None, src=(
+      UOp(UOps.STORE, dtypes.void, arg=None, src=(
+        UOp(UOps.DEFINE_GLOBAL, dtypes.imagef((10, 128, 4)), arg=0, src=()),
+        UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 512, 1), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(UOps.CAST, dtypes.float, arg=None, src=(
+          UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+            UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+              UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                UOp(UOps.DEFINE_GLOBAL, dtypes.imagef((1, 128, 4)), arg=1, src=()),
+                UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 0, 1), offset=0, mask=((0, 1), (0, 1), (0, 512)), contiguous=False),)), src=()),)),
+              UOp(UOps.CAST, dtypes.float, arg=None, src=(
+                UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+                  UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+                    UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+                      UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+                        UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+                          UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+                            UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+                              UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                                x18:=UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=2, src=()),
+                                UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 0, 1), offset=48128, mask=((0, 1), (1, 2), (0, 512)), contiguous=False),)), src=()),)),
+                              UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                                x18,
+                                UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 0, 1), offset=45568, mask=((0, 1), (2, 3), (0, 512)), contiguous=False),)), src=()),)),)),
+                            UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                              x18,
+                              UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 0, 1), offset=43008, mask=((0, 1), (3, 4), (0, 512)), contiguous=False),)), src=()),)),)),
+                          UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                            x18,
+                            UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 0, 1), offset=40448, mask=((0, 1), (4, 5), (0, 512)), contiguous=False),)), src=()),)),)),
+                        UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                          x18,
+                          UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 0, 1), offset=37888, mask=((0, 1), (5, 6), (0, 512)), contiguous=False),)), src=()),)),)),
+                      UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                        x18,
+                        UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 0, 1), offset=35328, mask=((0, 1), (6, 7), (0, 512)), contiguous=False),)), src=()),)),)),
+                    UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                      x18,
+                      UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 0, 1), offset=32768, mask=((0, 1), (7, 8), (0, 512)), contiguous=False),)), src=()),)),)),
+                  UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+                    x18,
+                    UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 0, 1), offset=30208, mask=((0, 1), (8, 9), (0, 512)), contiguous=False),)), src=()),)),)),)),)),
+            UOp(UOps.LOAD, dtypes.float, arg=None, src=(
+              UOp(UOps.DEFINE_GLOBAL, dtypes.imagef((1, 128, 4)), arg=3, src=()),
+              UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 0, 1), offset=0, mask=((0, 1), (9, 10), (0, 512)), contiguous=False),)), src=()),)),)),)),)),))
+
+    opts = [Opt(op=OptOps.UPCAST, axis=1, amt=4), Opt(op=OptOps.NOLOCALS, axis=None, amt=None)]
+    kernel = Kernel(ast)
+
+    for opt in opts: kernel.apply_opt(opt)
+
+    p = kernel.to_program()
+    # ((idx1<1)?read_imagef(data1, smp, (int2)(idx0,0)):(float4)(0.0f,0.0f,0.0f,0.0f))
+    print(p.src)
+
 if __name__ == '__main__':
   unittest.main()
