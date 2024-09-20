@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-from collections import defaultdict
-from typing import DefaultDict, Dict, List, Tuple
+from typing import Dict, List, Tuple
 import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlparse
