@@ -261,9 +261,53 @@ def diskcache(func):
   return wrapper
 
 # *** http support ***
+def download_from_google_drive(
+  url: str,
+  name: Optional[Union[pathlib.Path, str]] = None,
+  subdir: Optional[str] = None,
+) -> pathlib.Path:
+  import gdown
+  """
+  Downloads a file from Google Drive using gdown and saves it to the cache directory or a custom path.
+
+  :param url: The Google Drive file URL
+  :param name: Optional file name or path for saving
+  :param subdir: Optional sub-directory under the cache folder
+  :return: The path to the downloaded file
+  """
+  # Extract file ID from the Google Drive URL
+  if "id=" in url:
+    file_id = url.split("id=")[1].split("&")[0]
+  else:
+    raise ValueError("Invalid Google Drive URL format. Ensure it contains 'id='.")
+
+  # Define the download path
+  _cache_dir = pathlib.Path.home() / ".cache"
+  if name is not None and (isinstance(name, pathlib.Path) or "/" in name):
+    fp = pathlib.Path(name)
+  else:
+    fp = (
+      pathlib.Path(_cache_dir)
+      / "tinygrad"
+      / "downloads"
+      / (subdir or "")
+      / (name or f"{file_id}.pth")
+    )
+
+  # Download the file using gdown if it does not already exist
+  if not fp.is_file():
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    gdown.download(
+      f"https://drive.google.com/uc?id={file_id}", str(fp), quiet=False
+    )
+
+  return fp
+
 
 def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional[str]=None, gunzip:bool=False,
           allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
+  if "drive.google.com" in url:
+    return download_from_google_drive(url, name, subdir)
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
   else:
