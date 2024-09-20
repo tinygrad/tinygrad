@@ -174,6 +174,17 @@ def replace_uop(uop:UOp, old:UOp, new:UOp):
   # replace all `old` in `uop` to `new`
   return new if uop is old else UOp(uop.op, uop.dtype, tuple(replace_uop(s, old, new) for s in uop.src), uop.arg)
 
+def parse_valid(valid:UOp) -> Tuple[UOp, bool, int]:
+  # if it's X <= c, returns X, True, c
+  # if it's X >= c, returns X, False, c
+
+  # (X < c).ne(True) -> X >= c
+  if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPNE and valid.src[1].op is UOps.CONST and valid.src[1].arg == 1 and \
+    (s0:=valid.src[0]).op is UOps.ALU and s0.arg is BinaryOps.CMPLT and s0.src[1].op is UOps.CONST: return s0.src[0], False, s0.src[1].arg
+  # X < c -> X <= c-1
+  if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPLT and valid.src[1].op is UOps.CONST: return valid.src[0], True, valid.src[1].arg-1
+  raise ValueError(f"not able to parse {valid=}")
+
 def simplify_valid_image_load(load:UOp, buf:UOp):
   if not isinstance(buf_dtype:=buf.dtype, ImageDType) or len(load.src) < 4: return None
   buf, idx, invalid_val, valid = load.src
@@ -182,12 +193,8 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:DefaultDict[UOp, List[Optional[ConstType]]] = defaultdict(lambda: [None, None])
   for stmt in _get_chain(valid, BinaryOps.AND):
-    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPNE and stmt.src[1].op is UOps.CONST and stmt.src[1].arg == 1:
-      # (X < c).ne(True) -> X >= c
-      if (s0:=stmt.src[0]).op is UOps.ALU and s0.arg is BinaryOps.CMPLT and s0.src[1].op is UOps.CONST:
-        bounds[s0.src[0]][0] = s0.src[1].arg
-    elif stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST:
-      bounds[stmt.src[0]][1] = stmt.src[1].arg-1
+    expr, is_upper, c = parse_valid(stmt)
+    bounds[expr][int(is_upper)] = c
 
   for uop,v in bounds.items():
     # some expr has lower bound > upper bound -> valid is an empty set
@@ -200,19 +207,17 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
 
   drop_stmt = []
   for stmt in _get_chain(valid, BinaryOps.AND):
-    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPNE and stmt.src[1].op is UOps.CONST and stmt.src[1].arg == 1:
-      # (X < c).ne(True) -> X >= c
-      if (s0:=stmt.src[0]).op is UOps.ALU and s0.arg is BinaryOps.CMPLT and s0.src[1].op is UOps.CONST:
-        X, c = s0.src[0], s0.src[1].arg
-        # X >= c, check if it's negative when X = c-1
-        for i in idx.src:
-          if is_increasing(i) and graph_rewrite(replace_uop(i, X, X.const_like(c-1)), constant_folder).vmax < 0:
-            drop_stmt.append(stmt)
-            break
-    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST:
-      # X < c, check if it's out of bound when X = c
+    X, is_upper, c = parse_valid(stmt)
+    if is_upper:
+      # X <= c, check if it's out of bound when X = c+1
       for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
-        if is_increasing(i) and graph_rewrite(replace_uop(i, (X:=stmt.src[0]), X.const_like(stmt.src[1].arg)), constant_folder).vmin >= b:
+        if is_increasing(i) and graph_rewrite(replace_uop(i, X, X.const_like(c+1)), constant_folder).vmin >= b:
+          drop_stmt.append(stmt)
+          break
+    else:
+      # X >= c, check if it's negative when X = c-1
+      for i in idx.src:
+        if is_increasing(i) and graph_rewrite(replace_uop(i, X, X.const_like(c-1)), constant_folder).vmax < 0:
           drop_stmt.append(stmt)
           break
 
