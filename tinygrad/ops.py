@@ -455,25 +455,25 @@ class UPat(MathTrait):
         set(x.dtype) if x.dtype else None, x.allowed_len == 0, "[%s]" if x.src and len(x.src)>1 else "(%s)")
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
-def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
-  if pat._any:
-    for x in pat.src[0]:
-      if (match:=_match(uop, x, store.copy())): return match
-    return []
-  if (pat.name is not None and store.setdefault(pat.name, uop) is not uop) or \
-     (pat.dtype is not None and uop.dtype not in pat.dtype) or \
-     (pat.arg is not None and pat.arg != uop.arg) or \
-     (pat.op is not None and uop.op not in pat.op) or \
-     (pat.allowed_len != 0 and len(uop.src) != pat.allowed_len): return []
-  if pat.src is None: return [store]
-  res: List[Dict[str, UOp]] = []
-  for vp in pat.src:
-    stores, new_stores = [store.copy()], []
-    for uu, vv in zip(uop.src, vp):
-      for s in stores: new_stores.extend(_match(uu, vv, s))
-      stores, new_stores = new_stores, []
-    res.extend(stores)
-  return res
+  def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
+    if self._any:
+      for x in self.src[0]:
+        if (match:=x.match(uop, store.copy())): return match
+      return []
+    if (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
+      (self.dtype is not None and uop.dtype not in self.dtype) or \
+      (self.arg is not None and self.arg != uop.arg) or \
+      (self.op is not None and uop.op not in self.op) or \
+      (self.allowed_len != 0 and len(uop.src) != self.allowed_len): return []
+    if self.src is None: return [store]
+    res: List[Dict[str, UOp]] = []
+    for vp in self.src:
+      stores, new_stores = [store.copy()], []
+      for uu, vv in zip(uop.src, vp):
+        for s in stores: new_stores.extend(vv.match(uu, s))
+        stores, new_stores = new_stores, []
+      res.extend(stores)
+    return res
 
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
@@ -491,7 +491,7 @@ class PatternMatcher:
     ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
     for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + ([] if uop.arg is None else self.pdict[(uop.op, None)]):
       if not early_reject.issubset(ler): continue
-      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
+      if (matches := p.match(uop, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
 # *** tracking pattern matcher ***
@@ -520,7 +520,7 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
-      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
+      if (matches := p.match(uop, {})) and (ret:=fxn(**matches[0])) is not None:
         match_stats[p][0] += 1
         match_stats[p][2] += (et:=time.perf_counter()-st)
         match_stats[p][3] += et
