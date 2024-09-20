@@ -60,9 +60,9 @@ def get_ctx_groups(contexts:List[TrackedRewriteContext]) -> DefaultDict[str, Lis
   ctx_groups: DefaultDict[str, List[TrackedRewriteContext]] = defaultdict(list)
   kernel_name = ""
   for ctx in contexts:
-    if ctx.kernel_name is not None: kernel_name = ctx.kernel_name
-    elif ctx.loc.split("/")[-1].split(":")[0] == "schedule.py":
+    if ctx.loc.split("/")[-1].split(":")[0] == "schedule.py":
       with Context(TRACK_MATCH_STATS=0): kernel_name = get_runner(Device.DEFAULT, full_ast_rewrite(ctx.sink)).p.name
+    elif ctx.kernel_name is not None: kernel_name = ctx.kernel_name
     # TODO: make ansi play nice with css
     ctx_groups[to_function_name(kernel_name)].append(ctx)
   return ctx_groups
