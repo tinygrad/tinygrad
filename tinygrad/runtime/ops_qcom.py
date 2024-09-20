@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, decimal, math
 from types import SimpleNamespace
-from typing import Tuple, List, Any
+from typing import Tuple, List, Any, cast
 from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState, hcq_command
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
@@ -187,7 +187,7 @@ class QCOMArgsState(HCQArgsState):
       ctypes.memmove(self.ptr + cnst_off, (ctypes.c_int8 * cnst_sz).from_buffer_copy(cnst_val.to_bytes(cnst_sz, byteorder='little')), cnst_sz)
 
     if prg.samp_cnt > 0: to_mv(self.ptr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
-    for i, b in enumerate(bufs):
+    for i, b in enumerate(cast(List[QCOMBuffer], bufs)):
       if prg.buf_info[i].type is BUFTYPE_TEX: to_mv(self.ptr + prg.buf_info[i].offset, len(b.desc) * 4).cast('I')[:] = array.array('I', b.desc)
       elif prg.buf_info[i].type is BUFTYPE_IBO: to_mv(self.ptr + prg.buf_info[i].offset, len(b.ibo) * 4).cast('I')[:] = array.array('I', b.ibo)
       else: self.update_buffer(i, b)
@@ -274,6 +274,9 @@ class QCOMProgram(HCQProgram):
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True, nolru=True))
+
+class QCOMBuffer(HCQBuffer):
+  def __init__(self, va_addr:int, size:int, desc=None, ibo=None): self.va_addr, self.size, self.desc, self.ibo = va_addr, size, desc, ibo
 
 class QCOMAllocator(HCQAllocator):
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
