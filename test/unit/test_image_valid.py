@@ -39,24 +39,27 @@ class TestHelpers(unittest.TestCase):
     self.assertTrue(is_increasing(f2))
     self.assertTrue(is_increasing(f3))
 
+    rng = UOp(UOps.RANGE, dtypes.int, arg=(2, True), src=(UOp(UOps.CONST, dtypes.int, arg=0, src=()), UOp(UOps.CONST, dtypes.int, arg=5, src=()),))
+    self.assertTrue(is_increasing(rng))
+    self.assertTrue(is_increasing(rng+2))
+
 class TestValidSimplification(unittest.TestCase):
-  def test_idx_neg_lt_c(self):
-    # (idx1 * (-1) < c) ? (..., idx1-1+c) : 0 can drop the valid
+  def test_idx_gt_c(self):
+    # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
+    # (idx1 < c+1).ne(True) -> idx > c
     gidx0 = Special("gidx0", 32)
     gidx1 = Special("gidx1", 32)
-    self.assertEqual(render((10, 10, 4), (gidx1*(-1)).lt(0), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1-1))),
+    self.assertEqual(render((10, 10, 4), (gidx1).lt(1).ne(True), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1-1))),
                      "read_imagef(data0, smp, (int2)(gidx0,(gidx1+(-1))))")
-    self.assertEqual(render((10, 10, 4), (gidx1*(-1)).lt(-1), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1-2))),
+    self.assertEqual(render((10, 10, 4), (gidx1).lt(1).ne(True), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1-2))),
                      "read_imagef(data0, smp, (int2)(gidx0,(gidx1+(-2))))")
-    self.assertEqual(render((10, 10, 4), (gidx1*(-1)).lt(1), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1))),
-                     "read_imagef(data0, smp, (int2)(gidx0,gidx1))")
 
     # should match any one of the AND clause and drop the matched statement from valid
-    valid = (gidx1*(-1)).lt(0) and (gidx0*(-1)).lt(0)
-    self.assertEqual(render((10, 10, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1-1))),
-                     "(((gidx0*(-1))<0)?read_imagef(data0, smp, (int2)(gidx0,(gidx1+(-1)))):(float4)(0.0f,0.0f,0.0f,0.0f))")
+    valid = (gidx0).lt(1).ne(True) & (gidx1).lt(1).ne(True)
+    self.assertEqual(render((10, 10, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0+1, gidx1-1))),
+                     "(((gidx0<1)!=1)?read_imagef(data0, smp, (int2)((gidx0+1),(gidx1+(-1)))):(float4)(0.0f,0.0f,0.0f,0.0f))")
 
-    valid = (gidx1*(-1)).lt(0) and (gidx1*(-1)).lt(0)
+    valid = (gidx1).lt(1).ne(True) & (gidx1).lt(1).ne(True)
     self.assertEqual(render((10, 10, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1-1))),
                      "read_imagef(data0, smp, (int2)(gidx0,(gidx1+(-1))))")
 
@@ -65,6 +68,9 @@ class TestValidSimplification(unittest.TestCase):
     gidx0 = Special("gidx0", 32)
     gidx1 = Special("gidx1", 32)
     self.assertEqual(render((10, 10, 4), (gidx1).lt(10), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1))),
+                     "read_imagef(data0, smp, (int2)(gidx0,gidx1))")
+    # same thing, valid has a div
+    self.assertEqual(render((10, 10, 4), (gidx1//2).lt(5), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1))),
                      "read_imagef(data0, smp, (int2)(gidx0,gidx1))")
     # 10x20 image, not out of bound
     self.assertEqual(render((20, 10, 4), (gidx1).lt(10), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1))),
@@ -82,14 +88,14 @@ class TestValidSimplification(unittest.TestCase):
   def test_valid_empty_set(self):
     gidx0 = Special("gidx0", 32)
     gidx1 = Special("gidx1", 32)
-    shape = (1, 2, 4)
+    shape = (32, 32, 4)
     idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0%2, gidx1+2))
     # not empty
     self.assertEqual(render(shape, (gidx0).lt(8), idx),
                      "((gidx0<8)?read_imagef(data0, smp, (int2)((gidx0%2),(gidx1+2))):(float4)(0.0f,0.0f,0.0f,0.0f))")
 
     # empty
-    self.assertRaises(IndexError, lambda: render(shape, (gidx0).lt(8) & (-gidx0).lt(-7), idx))
+    self.assertRaises(IndexError, lambda: render(shape, (gidx0).lt(8) & (gidx0).lt(8).ne(True), idx))
 
   @unittest.expectedFailure  # TODO: FIXME
   def test_openpilot_conv1(self):
@@ -135,7 +141,7 @@ class TestValidSimplification(unittest.TestCase):
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)
     gidx = Special("gidx", 512)
-    valid = gidx.lt(488) & (-gidx).lt(-479)
+    valid = gidx.lt(488) & (gidx).lt(480).ne(True)
     idx = ((gidx*3+18)%26, (gidx*3+18)//26-56)
     # alu0 is ((gidx*3)+18)
     self.assertEqual(render((1, 26, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx)),
@@ -144,7 +150,7 @@ class TestValidSimplification(unittest.TestCase):
   def test_simplify2(self):
     # from GPU=1 DEBUG=4 FORWARD_ONLY=1 IMAGE=2 python3 test/test_ops.py TestOps.test_simple_padding_conv2d
     lidx = Special("lidx", 4)
-    valid = lidx.lt(3) & (-lidx).lt(0)
+    valid = lidx.lt(3) & lidx.lt(1).ne(True)
     idx = ((lidx+1)%2, (lidx+1)//2-1)
     self.assertEqual(render((1, 2, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx)),
                      "read_imagef(data0, smp, (int2)((lidx+(-1)),0))")
@@ -152,7 +158,7 @@ class TestValidSimplification(unittest.TestCase):
   def test_simplify3(self):
     # from openpilot
     idx0 = Special("idx0", 265)
-    valid = (-idx0).lt(-200)
+    valid = idx0.lt(201).ne(True)
     idx = ((idx0+55)%64, (idx0+55)//64-4)
     self.assertEqual(render((1, 64, 4), valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx)),
                      "read_imagef(data0, smp, (int2)((idx0+(-201)),0))")

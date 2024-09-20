@@ -6,7 +6,7 @@ from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
-from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le, prod
+from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le, prod, DEBUG, fromimport
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 def _qreg_exec(reg, __val=0, **kwargs):
@@ -118,7 +118,7 @@ class QCOMComputeQueue(HWComputeQueue):
 
     self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
              qreg.a6xx_sp_cs_ctrl_reg0(threadsize=adreno.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
-             qreg.a6xx_sp_cs_unknown_a9b1(unk5=True, unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
+             qreg.a6xx_sp_cs_unknown_a9b1(unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.device._stack.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
 
@@ -219,6 +219,7 @@ class QCOMArgsState(HCQArgsState):
 class QCOMProgram(HCQProgram):
   def __init__(self, device: QCOMDevice, name: str, lib: bytes):
     self.device, self.name, self.lib = device, name, lib
+    if DEBUG >= 5: fromimport('extra.disassemblers.adreno', 'disasm')(lib)
     self._parse_lib()
 
     self.lib_gpu = self.device.allocator.alloc(self.image_size, options=BufferOptions(cpu_access=True, nolru=True))

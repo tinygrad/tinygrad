@@ -5,7 +5,7 @@ from enum import auto, IntEnum, Enum
 from collections import defaultdict
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
-from tinygrad.helpers import pretty_print, prod, getenv, all_same
+from tinygrad.helpers import _CURRENT_KERNEL, ContextVar, pretty_print, prod, getenv, all_same
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -143,14 +143,16 @@ class UOp(MathTrait):
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
   def replace(self, op: Optional[UOps]=None, dtype:Optional[DType]=None, src: Optional[Tuple[UOp,...]]=None, arg:Any=None):
     return UOp(op or self.op, dtype or self.dtype, self.src if src is None else src, self.arg if arg is None else arg)
+  @property
+  def has_st(self) -> bool: return self.op not in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
-    from tinygrad.shape.shapetracker import ShapeTracker
-    if self.op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}: return None
+    if not self.has_st: return None
     if self.op in BUFFER_UOPS: return self.st_arg
     if self.op in {UOps.SHAPETRACKER, UOps.SWIZZLE}: return self.arg
     src_sts = [x.st for x in self.src if x.st is not None]
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
+    from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(src_sts[0].reduce(self.arg[1])) if self.op is UOps.REDUCE_AXIS else src_sts[0]
   @functools.cached_property
   def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
@@ -494,12 +496,13 @@ class PatternMatcher:
 
 # *** tracking pattern matcher ***
 
-TRACK_MATCH_STATS = getenv("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
+TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedRewriteContext:
   loc: str                                                                # location that called graph_rewrite
   sink: UOp                                                               # the sink passed into the rewrite
+  kernel_name: Optional[str] = None                                       # the name of the kernel being rewritten
   rewrites: List[Tuple[UOp, UOp, UPat]] = field(default_factory=list)     # all rewrites of sparents. (before, after, UPat)
 contexts: List[TrackedRewriteContext] = []
 class TrackedPatternMatcher(PatternMatcher):
@@ -522,7 +525,7 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += (et:=time.perf_counter()-st)
         match_stats[p][3] += et
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2: contexts[-1].rewrites.append((uop, ret, p))
+        if TRACK_MATCH_STATS >= 2 and contexts: contexts[-1].rewrites.append((uop, ret, p))
         return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -562,7 +565,8 @@ class RewriteContext:
       self.nodes[replace_source] = self.replace[n] = found = self.rewrite(new_x) if (new_x := self.pm.rewrite(x)) else x
     return found
 def graph_rewrite(sink:UOp, pm:PatternMatcher) -> UOp:
-  if TRACK_MATCH_STATS >= 2: contexts.append(TrackedRewriteContext(f"{(f:=sys._getframe(1)).f_code.co_filename.split('/')[-1]}:{f.f_lineno}", sink))
+  if TRACK_MATCH_STATS >= 2:
+    contexts.append(TrackedRewriteContext(f"{(f:=sys._getframe(1)).f_code.co_filename.split('/')[-1]}:{f.f_lineno}", sink, _CURRENT_KERNEL.get()))
   return RewriteContext(pm).rewrite(sink)
 
 # ***** uop type spec *****
