@@ -110,5 +110,10 @@ class TestViz(unittest.TestCase):
     list(lower_schedule(sched))
     self.assert_valid_ctx(contexts)
 
+  def test_no_ctx(self):
+    simple_pm = PatternMatcher([(UPat(UOps.CONST), lambda:True)])
+    simple_pm.rewrite(UOp.const(dtypes.int, 2))
+    self.assertEqual(len(contexts), 0)
+
 if __name__ == "__main__":
   unittest.main()
