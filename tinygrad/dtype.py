@@ -31,7 +31,9 @@ class ImageDType(DType):
 
 # @dataclass(frozen=True, init=False, repr=False, eq=False)
 class PtrDType(DType):
-  def __init__(self, dt:DType): super().__init__(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
+  def __init__(self, dt:DType):
+    self.base = dt
+    super().__init__(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
   def __hash__(self): return super().__hash__()
   def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.count==dt.count
   def __ne__(self, dt): return not (self == dt)

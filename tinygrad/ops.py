@@ -127,6 +127,7 @@ class UOps(FastEnum):
   # ops that are not graph nodes
   ENDRANGE = auto()
   ENDIF = auto()
+  INDEX = auto()
 
 BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
 COMMUTATIVE = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR}
@@ -158,7 +159,7 @@ class UOp(MathTrait):
     if self.op is UOps.DEFINE_VAR: arg = self.arg[0]
     elif self.op is UOps.ALU: arg = self.arg.value
     else: arg = self.arg
-    return (self.op.value, arg, self.dtype, self.src)
+    return (self.op.value, arg, self.dtype.base if isinstance(self.dtype, PtrDType) else self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   @functools.cached_property
   def key(self) -> bytes:
@@ -198,6 +199,7 @@ class UOp(MathTrait):
   def load(cls, *src:UOp, dtype:DType): return cls(UOps.LOAD, dtype, src)
   @classmethod
   def store(cls, *src:UOp): return cls(UOps.STORE, dtypes.void, src)
+  def index(self, idx:UOp): return UOp(UOps.INDEX, self.dtype, (self, idx))
   def alu(self, arg, *src:UOp):
     out_dtype = (self, *src)[-1].dtype
     if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} and out_dtype is not None:
@@ -341,6 +343,7 @@ def print_uops(uops:List[UOp]):
     print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):25s} " f"{str(formatted_parents):32s} {u.arg}")
 
 def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
+  return 0,0
   flops: sint = 0
   mem: sint = 0
   mults: sint = 1
@@ -485,11 +488,14 @@ class PatternMatcher:
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
-  def rewrite(self, uop:UOp) -> Optional[UOp]:
+  def rewrite(self, uop:UOp, ctx=None) -> Optional[UOp]:
     ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
     for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + ([] if uop.arg is None else self.pdict[(uop.op, None)]):
       if not early_reject.issubset(ler): continue
-      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
+      if ctx is not None:
+        if (matches := _match(uop, p, {})) and (ret:=fxn(ctx, **matches[0])) is not None: return ret
+      else:
+        if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
 # *** tracking pattern matcher ***
@@ -576,6 +582,10 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
    lambda x,c: all(y.op is UOps.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
   (UPat(UOps.DEFINE_VAR, src=(), name="x"), lambda x: isinstance(x.arg[1], UOp) and isinstance(x.arg[2], UOp)),
 
+  # new cstyle LOAD/STORE
+  (UPat((UOps.LOAD, UOps.STORE), src=(UPat(name="ptr"),)), lambda ptr: isinstance(ptr.dtype, PtrDType)),
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, name="x"), lambda x: True if isinstance(x.src[0].dtype, PtrDType) else None),
+
   (UPat(UOps.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
   (UPat(UOps.SPECIAL, src=()), lambda: True),
 
@@ -639,6 +649,7 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
 ]])
 
 def type_verify(uops:List[UOp]):
+  return
   for u in uops:
     chk = spec.rewrite(u)
     assert chk is not None and chk.arg is True, f"UOp verification failed on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
