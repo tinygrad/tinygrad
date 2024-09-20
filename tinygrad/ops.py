@@ -392,11 +392,11 @@ class UPat(MathTrait):
   __slots__ = ["op", "dtype", "arg", "name", "src", "_any"]
   def __init__(self, op:Optional[Union[UOps, Tuple[UOps, ...]]]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None,
                src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
-               name:Optional[str]=None, allow_any_len:bool=False, location=None, _any=False,
+               name:Optional[str]=None, allow_any_len:bool=False, location=None,
                custom_early_reject:Optional[Set[Tuple[UOps, Any]]]=None):
     self.op: Optional[Tuple[UOps, ...]] = (op,) if isinstance(op, UOps) else op
     self.dtype: Optional[Tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
-    self.arg, self.name, self._any = arg, name, _any
+    self.arg, self.name = arg, name
     self.src: Any = None
 
     # try all permutations if it's a list
@@ -415,7 +415,7 @@ class UPat(MathTrait):
       self.early_reject = set((pp.op[0], pp.arg) for pp in upat_match if pp.op is not None and len(pp.op) == 1)
 
   @staticmethod
-  def any(*src): return UPat(src=src, _any=True)
+  def any(*src): return UPatAny(src=src)
 
   @staticmethod
   @functools.lru_cache(None)
@@ -455,10 +455,6 @@ class UPat(MathTrait):
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
   def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
-    if self._any:
-      for x in self.src[0]:
-        if (match:=x.match(uop, store.copy())): return match
-      return []
     if (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
       (self.dtype is not None and uop.dtype not in self.dtype) or \
       (self.arg is not None and self.arg != uop.arg) or \
@@ -473,6 +469,12 @@ class UPat(MathTrait):
         stores, new_stores = new_stores, []
       res.extend(stores)
     return res
+
+class UPatAny(UPat):
+  def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
+    for x in self.src[0]:
+      if (match:=x.match(uop, store.copy())): return match
+    return []
 
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
