@@ -182,10 +182,12 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:DefaultDict[UOp, List[Optional[ConstType]]] = defaultdict(lambda: [None, None])
   for stmt in _get_chain(valid, BinaryOps.AND):
-    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST:
-      if (s:=stmt.src[0]).op is UOps.ALU and s.arg is BinaryOps.MUL and s.src[1].op is UOps.CONST and s.src[1].arg == -1:
-        bounds[s.src[0]][0] = -stmt.src[1].arg+1
-      else: bounds[s][1] = stmt.src[1].arg-1
+    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPNE and stmt.src[1].op is UOps.CONST and stmt.src[1].arg == 1:
+      # (X < c).ne(True) -> X >= c
+      if (s0:=stmt.src[0]).op is UOps.ALU and s0.arg is BinaryOps.CMPLT and s0.src[1].op is UOps.CONST:
+        bounds[s0.src[0]][0] = s0.src[1].arg
+    elif stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST:
+      bounds[stmt.src[0]][1] = stmt.src[1].arg-1
 
   for uop,v in bounds.items():
     # some expr has lower bound > upper bound -> valid is an empty set
@@ -198,21 +200,21 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
 
   drop_stmt = []
   for stmt in _get_chain(valid, BinaryOps.AND):
-    if not (stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST): continue
-    if (s0:=stmt.src[0]).op is UOps.ALU and s0.arg is BinaryOps.MUL and (s01:=s0.src[1]).op is UOps.CONST and s01.arg == -1:
-      # -X < c -> X > -c, check if it's negative when X = -c
-      for i in idx.src:
-        if is_increasing(i) and (rw:=graph_rewrite(replace_uop(i, s0.src[0], s0.const_like(-stmt.src[1].arg)), constant_folder)):
-          if rw.op is UOps.CONST and rw.arg < 0:
+    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPNE and stmt.src[1].op is UOps.CONST and stmt.src[1].arg == 1:
+      # (X < c).ne(True) -> X >= c
+      if (s0:=stmt.src[0]).op is UOps.ALU and s0.arg is BinaryOps.CMPLT and s0.src[1].op is UOps.CONST:
+        X, c = s0.src[0], s0.src[1].arg
+        # X >= c, check if it's negative when X = c-1
+        for i in idx.src:
+          if is_increasing(i) and graph_rewrite(replace_uop(i, X, X.const_like(c-1)), constant_folder).vmax < 0:
             drop_stmt.append(stmt)
             break
     else:
       # X < c, check if it's out of bound when X = c
       for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
-        if is_increasing(i) and (rw:=graph_rewrite(replace_uop(i, s0, s0.const_like(stmt.src[1].arg)), constant_folder)):
-          if rw.op is UOps.CONST and rw.arg >= b:
-            drop_stmt.append(stmt)
-            break
+        if is_increasing(i) and graph_rewrite(replace_uop(i, (X:=stmt.src[0]), X.const_like(stmt.src[1].arg)), constant_folder).vmin >= b:
+          drop_stmt.append(stmt)
+          break
 
   if drop_stmt or idx.key != start_idx.key:
     new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
