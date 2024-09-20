@@ -131,8 +131,7 @@ class QCOMComputeQueue(HWComputeQueue):
                                                                state_block=adreno.SB6_CS_SHADER, num_unit=round_up(prg.image_size, 128) // 128),
              *data64_le(prg.lib_gpu.va_addr))
 
-    self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc,
-             qreg.a6xx_hlsq_cs_cntl(constlen=1024 // 4, enabled=True))
+    self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc, qreg.a6xx_hlsq_cs_cntl(constlen=1024 // 4, enabled=True))
 
     self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, qreg.a6xx_sp_cs_pvt_mem_hw_stack_offset(prg.hw_stack_offset))
     self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, qreg.a6xx_sp_cs_instrlen(prg.image_size // 4))
