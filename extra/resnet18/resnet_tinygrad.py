@@ -1,5 +1,5 @@
 from huggingface_hub import snapshot_download
-from tinygrad import nn, Tensor, TinyJit, Device
+from tinygrad import nn, Tensor, TinyJit, Device, GlobalCounters
 import time
 
 class Block:
@@ -79,10 +79,9 @@ if __name__ == "__main__":
 
   resnet18 = load()
 
-  @TinyJit
   @Tensor.test()
-  def forward(im):
-    return resnet18(im)
+  def _forward(im): return resnet18(im)
+  forward = TinyJit(_forward, prune=True)
 
   #batch_sizes = [1, 2, 4, 8, 16, 32, 64]
   #its = 200
@@ -96,11 +95,13 @@ if __name__ == "__main__":
 
     # Warmup
     for _ in range(5):
+      GlobalCounters.reset()
       output = forward(image)
     Device.default.synchronize()
 
     tic = time.time()
     for _ in range(its):
+      GlobalCounters.reset()
       output = forward(image)
     Device.default.synchronize()
     toc = time.time()
