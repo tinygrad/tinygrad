@@ -56,15 +56,17 @@ def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
     extra.append([str(new_sink)])
   return UOpRet(ctx.loc, graphs, diffs, extra)
 
-def get_ctx_groups(contexts:List[TrackedRewriteContext]) -> DefaultDict[str, List[TrackedRewriteContext]]:
-  ctx_groups: DefaultDict[str, List[TrackedRewriteContext]] = defaultdict(list)
+def get_ctx_groups(contexts:List[TrackedRewriteContext]) -> Dict[str, Tuple[List[TrackedRewriteContext], str]]:
+  ctx_groups: Dict[str, Tuple[List[TrackedRewriteContext], str]] = {}
   kernel_name = ""
+  code = ""
   for ctx in contexts:
     if ctx.loc.split("/")[-1].split(":")[0] == "schedule.py":
-      with Context(TRACK_MATCH_STATS=0): kernel_name = get_runner(Device.DEFAULT, full_ast_rewrite(ctx.sink)).p.name
+      with Context(TRACK_MATCH_STATS=0): kernel_name, code = (prg:=get_runner(Device.DEFAULT, full_ast_rewrite(ctx.sink)).p).name, prg.src
     elif ctx.kernel_name is not None: kernel_name = ctx.kernel_name
+    if ctx_groups.get(k:=to_function_name(kernel_name)) is None: ctx_groups[k] = ([], code)
     # TODO: make ansi play nice with css
-    ctx_groups[to_function_name(kernel_name)].append(ctx)
+    ctx_groups[to_function_name(kernel_name)][0].append(ctx)
   return ctx_groups
 
 class Handler(BaseHTTPRequestHandler):
@@ -87,7 +89,7 @@ class Handler(BaseHTTPRequestHandler):
       self.end_headers()
       with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
       ctx_groups = get_ctx_groups(contexts)
-      ret = json.dumps({k:[x.loc for x in v] for k,v in ctx_groups.items()}).encode()
+      ret = json.dumps({k:[x.loc for x in v[0]] for k,v in ctx_groups.items()}).encode()
     elif url.path == "/graph":
       query = parse_qs(url.query)
       self.send_response(200)
@@ -95,11 +97,11 @@ class Handler(BaseHTTPRequestHandler):
       self.end_headers()
       with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
       ctx_groups = get_ctx_groups(contexts)
-      group = ctx_groups[list(ctx_groups.keys())[int(query["kernel_idx"][0])]]
+      group, code = ctx_groups[list(ctx_groups.keys())[int(query["kernel_idx"][0])]]
       g = create_graph(group[int(query["uop_idx"][0])])
       rest = [x.loc for x in group]
       ret = json.dumps(({"loc": g.loc, "graphs": [[uop_to_json(x) for x in graph] for graph in g.graphs],
-                         "diffs": g.diffs, "extra": g.extra}, rest)).encode()
+                         "diffs": g.diffs, "extra": g.extra, "code": code}, rest)).encode()
     else:
       self.send_response(404)
       ret = b""
