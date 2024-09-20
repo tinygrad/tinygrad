@@ -20,6 +20,7 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   st1_pattern: Optional[Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]] = None
   st2_pattern: Optional[Tuple[Tuple[Tuple[int, int], ...], Tuple[Tuple[int, int], ...]]] = None
   expanded_shape: Optional[Tuple[int, ...]] = None
+  opt_seq: Tuple[str, str, str] = ("UR","UP","LC")
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
 
 @dataclass

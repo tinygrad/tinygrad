@@ -310,16 +310,17 @@ class Kernel:
         # can only fuse reduces with the same tc options
         assert all_same(tensor_core_opts)
         if tensor_core_opts[0] is None: continue
-        # tensor core -- unroll the reduce dim, create the correct thread pattern, then upcast input
+        # tensor core -- unroll the reduce dim, upcast input and local the correct thread pattern
         self.tensor_core_opts = tc_opts = tensor_core_opts[0]
 
         # attempt to pad the tensor axes that require it
         try:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
-        for tc_dim, amt in tc.reduce_axes: self.apply_opt(Opt(OptOps.UNROLL, tc_opts.axes[2]-self.first_reduce, amt), append_opt=False)
-        for tc_dim, amt in tc.threads: self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[tc_dim], amt), append_opt=False)
-        for tc_dim, amt in tc.early_upcast_axes: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], amt), append_opt=False)
+        for opt in tc.opt_seq:
+          if opt == "UR": [self.apply_opt(Opt(OptOps.UNROLL,tc_opts.axes[2]-self.first_reduce,amt), append_opt=False) for _,amt in tc.reduce_axes]
+          elif opt == "UP": [self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[tc_dim],amt), append_opt=False) for tc_dim,amt in tc.early_upcast_axes]
+          elif opt == "LC": [self.apply_opt(Opt(OptOps.LOCAL,tc_opts.axes[tc_dim],amt), append_opt=False) for tc_dim,amt in tc.threads]
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
         return True
