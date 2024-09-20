@@ -69,6 +69,9 @@ class TestValidSimplification(unittest.TestCase):
     gidx1 = Special("gidx1", 32)
     self.assertEqual(render((10, 10, 4), (gidx1).lt(10), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1))),
                      "read_imagef(data0, smp, (int2)(gidx0,gidx1))")
+    # same thing, valid has a div
+    self.assertEqual(render((10, 10, 4), (gidx1//2).lt(5), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1))),
+                     "read_imagef(data0, smp, (int2)(gidx0,gidx1))")
     # 10x20 image, not out of bound
     self.assertEqual(render((20, 10, 4), (gidx1).lt(10), UOp(UOps.VECTORIZE, dtypes.int.vec(2), (gidx0, gidx1))),
                      "((gidx1<10)?read_imagef(data0, smp, (int2)(gidx0,gidx1)):(float4)(0.0f,0.0f,0.0f,0.0f))")
