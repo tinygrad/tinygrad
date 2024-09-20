@@ -39,6 +39,10 @@ class TestHelpers(unittest.TestCase):
     self.assertTrue(is_increasing(f2))
     self.assertTrue(is_increasing(f3))
 
+    rng = UOp(UOps.RANGE, dtypes.int, arg=(2, True), src=(UOp(UOps.CONST, dtypes.int, arg=0, src=()), UOp(UOps.CONST, dtypes.int, arg=5, src=()),))
+    self.assertTrue(is_increasing(rng))
+    self.assertTrue(is_increasing(rng+2))
+
 class TestValidSimplification(unittest.TestCase):
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
