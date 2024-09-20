@@ -88,9 +88,9 @@ if __name__ == "__main__":
   def forward(im):
     return resnet18(im)
 
-  #batch_sizes = [1, 2, 4, 8, 16, 32, 64]
+  batch_sizes = [1, 2, 4, 8, 16, 32, 64]
   #its = 200
-  batch_sizes = [64]
+  #batch_sizes = [64]
   its = 20
   print(f"Batch Size | Images-per-second | Milliseconds-per-image")
   print(f"---- | ---- | ---- ")

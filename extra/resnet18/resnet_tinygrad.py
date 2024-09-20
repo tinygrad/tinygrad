@@ -1,5 +1,5 @@
 from huggingface_hub import snapshot_download
-from tinygrad import nn, Tensor, TinyJit, Device, GlobalCounters
+from tinygrad import nn, Tensor, TinyJit, Device, GlobalCounters, Context
 import time
 
 class Block:
@@ -55,8 +55,11 @@ class ResNet:
 
   def __call__(self, x:Tensor):
     x = self.bn1(self.conv1(x)).relu().max_pool2d()
-    for l in self.layer1 + self.layer2 + self.layer3 + self.layer4:
+    for l in self.layer1:
       x = l(x)
+    with Context(WINO=1):
+      for l in self.layer2 + self.layer3 + self.layer4:
+        x = l(x)
     x = x.mean([2, 3])
     x = self.fc(x)
     return x
@@ -83,9 +86,9 @@ if __name__ == "__main__":
   def _forward(im): return resnet18(im)
   forward = TinyJit(_forward, prune=True)
 
-  #batch_sizes = [1, 2, 4, 8, 16, 32, 64]
+  batch_sizes = [1, 2, 4, 8, 16, 32, 64]
   #its = 200
-  batch_sizes = [64]
+  #batch_sizes = [64]
   its = 20
   print(f"Batch Size | Images-per-second | Milliseconds-per-image")
   print(f"---- | ---- | ---- ")
