@@ -3,7 +3,7 @@ import unittest
 from tinygrad.device import Device, BufferOptions
 from tinygrad.dtype import dtypes
 
-@unittest.skipUnless(Device.DEFAULT == "QCOM", "HCQ device required to run")
+@unittest.skipUnless(Device.DEFAULT == "QCOM", "QCOM device required to run")
 class TestQcom(unittest.TestCase):
   def test_image_pitch(self):
     dev = Device["QCOM"]
