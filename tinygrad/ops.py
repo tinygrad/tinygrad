@@ -179,13 +179,13 @@ class UOp(MathTrait):
     return ret.arg
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
-  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return type(self).const(self.dtype, b)
+  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
     return UOp(UOps.VECTORIZE, self.dtype.vec(count), (self,)*count)
-  def cast(self, dtype:DType): return type(self)(UOps.CAST, dtype, (self,))
-  def bitcast(self, dtype:DType): return type(self)(UOps.BITCAST, dtype, (self,))
+  def cast(self, dtype:DType): return UOp(UOps.CAST, dtype, (self,))
+  def bitcast(self, dtype:DType): return UOp(UOps.BITCAST, dtype, (self,))
   def gep(self, i:Union[Tuple[int, ...], int]):
     if isinstance(i, int):
       # NOTE: these are just shortcuts to not have to create and fold later
@@ -196,24 +196,24 @@ class UOp(MathTrait):
     if self.dtype == dtypes.void or (i == tuple(range(len(i))) and self.dtype.count == len(i)): return self
     assert len(i) >= 1 and all(x < self.dtype.count for x in i), f"bad GEP on {self.dtype}, {i}"
     return UOp(UOps.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
-  @classmethod
-  def load(cls, *src:UOp, dtype:DType): return cls(UOps.LOAD, dtype, src)
-  @classmethod
-  def store(cls, *src:UOp): return cls(UOps.STORE, dtypes.void, src)
+  @staticmethod
+  def load(*src:UOp, dtype:DType): return UOp(UOps.LOAD, dtype, src)
+  @staticmethod
+  def store(*src:UOp): return UOp(UOps.STORE, dtypes.void, src)
   def alu(self, arg, *src:UOp):
     out_dtype = (self, *src)[-1].dtype
     if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} and out_dtype is not None:
       out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
-    return type(self)(UOps.ALU, out_dtype, (self,)+src, arg)
-  @classmethod
+    return UOp(UOps.ALU, out_dtype, (self,)+src, arg)
+  @staticmethod
   @functools.lru_cache(None)
-  def const(cls, dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return cls._const(dtype, b)
-  @classmethod
-  def _const(cls, dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
+  def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return UOp._const(dtype, b)
+  @staticmethod
+  def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return cls.define_var(b.expr, dtype, b.min, cast(int, b.max))
+    if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
-    return cls(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
+    return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType):
     return UOp(UOps.DEFINE_VAR, dtype, arg=(name, UOp.const(dtype, min_val), UOp.const(dtype, max_val)))
@@ -429,19 +429,18 @@ class UPat(MathTrait):
   def const(dtype:Optional[DType], b:ConstType|Variable): return UPat(UOps.CONST, dtype=dtype, arg=b)
 
   # copied from UOp
-  def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
-  def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
-  def gep(self, i:int): return type(self)(UOps.GEP, None, (self,), (i,))
-  @classmethod
-  def load(cls, *src:UPat, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src)
-  @classmethod
-  def store(cls, *src:UPat): return cls(UOps.STORE, dtypes.void, src)
+  def cast(self, dtype=None): return UPat(UOps.CAST, dtype, (self,))
+  def bitcast(self, dtype=None): return UPat(UOps.BITCAST, dtype, (self,))
+  def gep(self, i:int): return UPat(UOps.GEP, None, (self,), (i,))
+  @staticmethod
+  def load(*src:UPat, dtype:Optional[DType]=None): return UPat(UOps.LOAD, dtype, src)
+  @staticmethod
+  def store(*src:UPat): return UPat(UOps.STORE, dtypes.void, src)
 
-  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return type(self).const(self.dtype, b)
+  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return UPat.const(self.dtype, b)
   def alu(self, arg, *src:UPat):
     asrc = (self,)+src
-    return type(self)(UOps.ALU, None if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else asrc[-1].dtype,
-                      list(asrc) if arg in COMMUTATIVE else asrc, arg)
+    return UPat(UOps.ALU, None if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else asrc[-1].dtype, list(asrc) if arg in COMMUTATIVE else asrc, arg)
 
   def printable(self:UPat) -> str:
     try:
