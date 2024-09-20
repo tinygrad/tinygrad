@@ -55,11 +55,8 @@ class ResNet:
 
   def __call__(self, x:Tensor):
     x = self.bn1(self.conv1(x)).relu().max_pool2d()
-    for l in self.layer1:
-      x = l(x)
-    with Context(WINO=1):
-      for l in self.layer2 + self.layer3 + self.layer4:
-        x = l(x)
+    x = x.sequential(self.layer1)
+    with Context(WINO=1): x = x.sequential(self.layer2 + self.layer3 + self.layer4)
     x = x.mean([2, 3])
     x = self.fc(x)
     return x
