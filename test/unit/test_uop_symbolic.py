@@ -445,6 +445,11 @@ class TestSymbolic(unittest.TestCase):
     # TODO: simplify the true branch
     self.helper_test_variable(idx.lt(4).where(idx//4, idx.const_like(-1)), -1, 6, "((idx<4)?(idx//4):(-1))")
 
+  def test_idiv_lt(self):
+    idx = Variable("idx", 0, 24)
+    self.helper_test_variable((idx//4).lt(3), 0, 1, "(idx<12)")
+    self.helper_test_variable((idx//-4).lt(-3), 0, 1, "((idx//(-4))<(-3))")
+
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
