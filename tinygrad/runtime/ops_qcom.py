@@ -118,7 +118,7 @@ class QCOMComputeQueue(HWComputeQueue):
 
     self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
              qreg.a6xx_sp_cs_ctrl_reg0(threadsize=adreno.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
-             qreg.a6xx_sp_cs_unknown_a9b1(unk5=True, unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
+             qreg.a6xx_sp_cs_unknown_a9b1(unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.device._stack.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
 
