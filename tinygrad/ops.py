@@ -179,13 +179,13 @@ class UOp(MathTrait):
     return ret.arg
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
-  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return type(self).const(self.dtype, b)
+  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
     return UOp(UOps.VECTORIZE, self.dtype.vec(count), (self,)*count)
-  def cast(self, dtype:DType): return type(self)(UOps.CAST, dtype, (self,))
-  def bitcast(self, dtype:DType): return type(self)(UOps.BITCAST, dtype, (self,))
+  def cast(self, dtype:DType): return UOp(UOps.CAST, dtype, (self,))
+  def bitcast(self, dtype:DType): return UOp(UOps.BITCAST, dtype, (self,))
   def gep(self, i:Union[Tuple[int, ...], int]):
     if isinstance(i, int):
       # NOTE: these are just shortcuts to not have to create and fold later
@@ -196,24 +196,24 @@ class UOp(MathTrait):
     if self.dtype == dtypes.void or (i == tuple(range(len(i))) and self.dtype.count == len(i)): return self
     assert len(i) >= 1 and all(x < self.dtype.count for x in i), f"bad GEP on {self.dtype}, {i}"
     return UOp(UOps.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
-  @classmethod
-  def load(cls, *src:UOp, dtype:DType): return cls(UOps.LOAD, dtype, src)
-  @classmethod
-  def store(cls, *src:UOp): return cls(UOps.STORE, dtypes.void, src)
+  @staticmethod
+  def load(*src:UOp, dtype:DType): return UOp(UOps.LOAD, dtype, src)
+  @staticmethod
+  def store(*src:UOp): return UOp(UOps.STORE, dtypes.void, src)
   def alu(self, arg, *src:UOp):
     out_dtype = (self, *src)[-1].dtype
     if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} and out_dtype is not None:
       out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
-    return type(self)(UOps.ALU, out_dtype, (self,)+src, arg)
-  @classmethod
+    return UOp(UOps.ALU, out_dtype, (self,)+src, arg)
+  @staticmethod
   @functools.lru_cache(None)
-  def const(cls, dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return cls._const(dtype, b)
-  @classmethod
-  def _const(cls, dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
+  def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return UOp._const(dtype, b)
+  @staticmethod
+  def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return cls.define_var(b.expr, dtype, b.min, cast(int, b.max))
+    if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
-    return cls(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
+    return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType):
     return UOp(UOps.DEFINE_VAR, dtype, arg=(name, UOp.const(dtype, min_val), UOp.const(dtype, max_val)))
@@ -392,11 +392,11 @@ class UPat(MathTrait):
   __slots__ = ["op", "dtype", "arg", "name", "src", "_any"]
   def __init__(self, op:Optional[Union[UOps, Tuple[UOps, ...]]]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None,
                src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
-               name:Optional[str]=None, allow_any_len:bool=False, location=None, _any=False,
+               name:Optional[str]=None, allow_any_len:bool=False, location=None,
                custom_early_reject:Optional[Set[Tuple[UOps, Any]]]=None):
     self.op: Optional[Tuple[UOps, ...]] = (op,) if isinstance(op, UOps) else op
     self.dtype: Optional[Tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
-    self.arg, self.name, self._any = arg, name, _any
+    self.arg, self.name = arg, name
     self.src: Any = None
 
     # try all permutations if it's a list
@@ -415,7 +415,7 @@ class UPat(MathTrait):
       self.early_reject = set((pp.op[0], pp.arg) for pp in upat_match if pp.op is not None and len(pp.op) == 1)
 
   @staticmethod
-  def any(*src): return UPat(src=src, _any=True)
+  def any(*src): return UPatAny(src=src)
 
   @staticmethod
   @functools.lru_cache(None)
@@ -429,19 +429,18 @@ class UPat(MathTrait):
   def const(dtype:Optional[DType], b:ConstType|Variable): return UPat(UOps.CONST, dtype=dtype, arg=b)
 
   # copied from UOp
-  def cast(self, dtype=None): return type(self)(UOps.CAST, dtype, (self,))
-  def bitcast(self, dtype=None): return type(self)(UOps.BITCAST, dtype, (self,))
-  def gep(self, i:int): return type(self)(UOps.GEP, None, (self,), (i,))
-  @classmethod
-  def load(cls, *src:UPat, dtype:Optional[DType]=None): return cls(UOps.LOAD, dtype, src)
-  @classmethod
-  def store(cls, *src:UPat): return cls(UOps.STORE, dtypes.void, src)
+  def cast(self, dtype=None): return UPat(UOps.CAST, dtype, (self,))
+  def bitcast(self, dtype=None): return UPat(UOps.BITCAST, dtype, (self,))
+  def gep(self, i:int): return UPat(UOps.GEP, None, (self,), (i,))
+  @staticmethod
+  def load(*src:UPat, dtype:Optional[DType]=None): return UPat(UOps.LOAD, dtype, src)
+  @staticmethod
+  def store(*src:UPat): return UPat(UOps.STORE, dtypes.void, src)
 
-  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return type(self).const(self.dtype, b)
+  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return UPat.const(self.dtype, b)
   def alu(self, arg, *src:UPat):
     asrc = (self,)+src
-    return type(self)(UOps.ALU, None if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else asrc[-1].dtype,
-                      list(asrc) if arg in COMMUTATIVE else asrc, arg)
+    return UPat(UOps.ALU, None if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else asrc[-1].dtype, list(asrc) if arg in COMMUTATIVE else asrc, arg)
 
   def printable(self:UPat) -> str:
     try:
@@ -455,25 +454,27 @@ class UPat(MathTrait):
         set(x.dtype) if x.dtype else None, x.allowed_len == 0, "[%s]" if x.src and len(x.src)>1 else "(%s)")
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
-def _match(uop:UOp, pat:UPat, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
-  if pat._any:
-    for x in pat.src[0]:
-      if (match:=_match(uop, x, store.copy())): return match
+  def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
+    if (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
+      (self.dtype is not None and uop.dtype not in self.dtype) or \
+      (self.arg is not None and self.arg != uop.arg) or \
+      (self.op is not None and uop.op not in self.op) or \
+      (self.allowed_len != 0 and len(uop.src) != self.allowed_len): return []
+    if self.src is None: return [store]
+    res: List[Dict[str, UOp]] = []
+    for vp in self.src:
+      stores, new_stores = [store.copy()], []
+      for uu, vv in zip(uop.src, vp):
+        for s in stores: new_stores.extend(vv.match(uu, s))
+        stores, new_stores = new_stores, []
+      res.extend(stores)
+    return res
+
+class UPatAny(UPat):
+  def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
+    for x in self.src[0]:
+      if (match:=x.match(uop, store.copy())): return match
     return []
-  if (pat.name is not None and store.setdefault(pat.name, uop) is not uop) or \
-     (pat.dtype is not None and uop.dtype not in pat.dtype) or \
-     (pat.arg is not None and pat.arg != uop.arg) or \
-     (pat.op is not None and uop.op not in pat.op) or \
-     (pat.allowed_len != 0 and len(uop.src) != pat.allowed_len): return []
-  if pat.src is None: return [store]
-  res: List[Dict[str, UOp]] = []
-  for vp in pat.src:
-    stores, new_stores = [store.copy()], []
-    for uu, vv in zip(uop.src, vp):
-      for s in stores: new_stores.extend(_match(uu, vv, s))
-      stores, new_stores = new_stores, []
-    res.extend(stores)
-  return res
 
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
@@ -491,7 +492,7 @@ class PatternMatcher:
     ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
     for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + ([] if uop.arg is None else self.pdict[(uop.op, None)]):
       if not early_reject.issubset(ler): continue
-      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
+      if (matches := p.match(uop, {})) and (ret:=fxn(**matches[0])) is not None: return ret # NOTE: if it returns None, we keep trying to match
     return None
 
 # *** tracking pattern matcher ***
@@ -520,7 +521,7 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
-      if (matches := _match(uop, p, {})) and (ret:=fxn(**matches[0])) is not None:
+      if (matches := p.match(uop, {})) and (ret:=fxn(**matches[0])) is not None:
         match_stats[p][0] += 1
         match_stats[p][2] += (et:=time.perf_counter()-st)
         match_stats[p][3] += et
