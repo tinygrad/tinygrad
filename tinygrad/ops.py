@@ -179,7 +179,7 @@ class UOp(MathTrait):
     return ret.arg
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
-  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return UOp.const(self.dtype, b)
+  def const_like(self, b:ConstType|Variable|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
