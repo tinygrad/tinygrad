@@ -13,7 +13,7 @@ from tinygrad.shape.view import View
 
 class InvalidASTException(Exception): pass
 def helper_test_verify_ast(*stores:UOp) -> Kernel:
-  sink = UOp(UOps.SINK, None, stores)
+  sink = UOp(UOps.SINK, dtypes.void, stores)
   if DEBUG >= 3:
     for op in stores: print(op)
   try: verify_ast(sink)
@@ -50,7 +50,7 @@ class TestVerifyAST(unittest.TestCase):
     bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), i) for i in range(2)]
     a = UOp(UOps.LOAD, dtypes.float, (bufs[1], ShapeTracker.from_shape((4, 32)).to_uop()))
     b = a + UOp(UOps.REDUCE_AXIS, dtypes.float, (a,), (ReduceOps.MAX, (1,)))
-    st = UOp(UOps.STORE, None, (bufs[0], ShapeTracker.from_shape((4, 32)).to_uop(), b))
+    st = UOp(UOps.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape((4, 32)).to_uop(), b))
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
 
   def test_shrink_ok(self):

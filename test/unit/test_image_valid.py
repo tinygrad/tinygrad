@@ -19,7 +19,7 @@ def render(image_shape, valid:UOp, idx:UOp) -> str:
   return fxn.split("float4 val0 = ")[1].split(";")[0]
 
 def Special(expr, nmax): return UOp(UOps.SPECIAL, dtypes.int, (), (expr, nmax))
-def Variable(expr, nmin, nmax): return UOp(UOps.DEFINE_VAR, dtypes.int, (), (expr, UOp.const(dtypes.int, nmin), UOp.const(dtypes.int, nmax)))
+def Variable(expr, nmin, nmax): return UOp.define_var(expr, dtypes.int, nmin, nmax)
 
 class TestHelpers(unittest.TestCase):
   def test_is_increasing(self):

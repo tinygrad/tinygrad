@@ -75,12 +75,12 @@ class TestPickle(unittest.TestCase):
     ast = UOp(UOps.SINK, dtypes.void, arg=None, src=(
       UOp(UOps.STORE, dtypes.void, arg=None, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
-        x2:=UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        x2:=UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()), # noqa: E501
         UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
           UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (0, 1)), src=(
             UOp(UOps.LOAD, dtypes.float, arg=None, src=(
               UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
-              UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(Variable('i', 1, 10), 3), strides=(3, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),
+              UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(Variable('i', 1, 10), 3), strides=(3, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)), # noqa: E501
           UOp(UOps.ALU, dtypes.float, arg=UnaryOps.RECIP, src=(
             UOp(UOps.CAST, dtypes.float, arg=None, src=(
               UOp(UOps.ALU, dtypes.int, arg=BinaryOps.MUL, src=(
@@ -93,9 +93,9 @@ class TestPickle(unittest.TestCase):
                    x12,
                   UOp(UOps.CONST, dtypes.int, arg=3, src=()),
                    x14,)),)),)),)),)),)),))
-    p = Kernel(ast).to_program()
-    ps = Kernel(pickle.loads(pickle.dumps(ast))).to_program()
-    assert ps.src == p.src
+    p = Kernel(ast).to_program(name_override="test")
+    ps = Kernel(pickle.loads(pickle.dumps(ast))).to_program(name_override="test")
+    self.assertEqual(ps.src, p.src)
 
 class TestPickleJIT(unittest.TestCase):
   @classmethod
