@@ -71,8 +71,7 @@ class KernelRet:
   def to_json(self) -> Dict:
     return {"name":self.name, "code":self.code, "rewrites":[x.loc for x in self.rewrites]}
 
-def load_kernels() -> List[KernelRet]:
-  with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
+def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
   ret: Dict[str, KernelRet] = {}
   kernel_name = ""
   code = ""
@@ -102,14 +101,16 @@ class Handler(BaseHTTPRequestHandler):
       self.send_response(200)
       self.send_header("Content-type", "application/json")
       self.end_headers()
-      kernels = load_kernels()
+      with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
+      kernels = load_kernels(contexts)
       ret = json.dumps([x.to_json() for x in kernels]).encode()
     elif url.path == "/graph":
       query = parse_qs(url.query)
       self.send_response(200)
       self.send_header("Content-type", "application/json")
       self.end_headers()
-      kernels = load_kernels()
+      with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
+      kernels = load_kernels(contexts)
       k = kernels[int(query["kernel_idx"][0])]
       g = UOpRet.from_ctx(k.rewrites[int(query["uop_idx"][0])])
       ret = json.dumps((g.to_json(), [x.loc for x in k.rewrites])).encode()
