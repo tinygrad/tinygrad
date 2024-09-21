@@ -128,7 +128,7 @@ class UOps(FastEnum):
   ENDRANGE = auto()
   ENDIF = auto()
 
-BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.CONST}
+BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.VALID}
 COMMUTATIVE = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR}
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.ENDRANGE)}
 
@@ -144,7 +144,7 @@ class UOp(MathTrait):
   def replace(self, op: Optional[UOps]=None, dtype:Optional[DType]=None, src: Optional[Tuple[UOp,...]]=None, arg:Any=None):
     return UOp(op or self.op, dtype or self.dtype, self.src if src is None else src, self.arg if arg is None else arg)
   @property
-  def has_st(self) -> bool: return self.op not in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}
+  def has_st(self) -> bool: return self.op not in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL, UOps.CONST, UOps.DEFINE_VAR}
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
     if not self.has_st: return None
@@ -170,7 +170,7 @@ class UOp(MathTrait):
     return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else repr(self.arg) if isinstance(self.arg, Variable) else self.arg
   # *** uop syntactic sugar
   @property
-  def st_loc(self) -> int: return 0 if self.op is UOps.CONST else 1
+  def st_loc(self) -> int: return 0 if self.op is UOps.VALID else 1
   @property
   def st_arg(self) -> ShapeTracker:
     assert self.op in BUFFER_UOPS, f"st_arg called on {self.op}"
@@ -228,7 +228,7 @@ class UOp(MathTrait):
   def full_shape(self) -> Tuple[sint, ...]:
     if self.op is UOps.SHAPETRACKER: return self.arg.shape
     # NOTE: UOps.DEFINE_GLOBAL and UOps.DEFINE_LOCAL don't have shape
-    return tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.op not in {UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL}]))
+    return tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
@@ -586,8 +586,8 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
   (UPat(UOps.SHAPETRACKER, src=()), lambda: True),
   (UPat(UOps.SWIZZLE, src=(UPat(),)), lambda: True),
 
-  (UPat(UOps.CONST, name="x"),
-   lambda x: x.dtype == x.dtype.scalar() and (isinstance(x.arg, Variable) and x.src) or (type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)))),
+  (UPat(UOps.VALID, dtypes.bool, (UPat(UOps.SHAPETRACKER),)), lambda: True),
+  (UPat(UOps.CONST, name="x"), lambda x: x.dtype == x.dtype.scalar() and (type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)))),
 
   # early LOAD has a <buf, shapetracker, store?>
   (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.SHAPETRACKER))), lambda: True),
