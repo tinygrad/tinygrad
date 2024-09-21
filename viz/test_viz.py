@@ -47,8 +47,8 @@ class TestViz(unittest.TestCase):
     list(lower_schedule(schedule2))
     ret = load_kernels(contexts)
     assert len(ret) == 2
-    assert all(len([x for x in y.rewrites if "schedule" in x.loc]) != 0 for y in ret)
-    assert all(len([x for x in y.rewrites if "uopgraph" in x.loc]) != 0 for y in ret)
+    assert all(len([x for x in y.ctxs if "schedule" in x.loc]) != 0 for y in ret)
+    assert all(len([x for x in y.ctxs if "uopgraph" in x.loc]) != 0 for y in ret)
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()

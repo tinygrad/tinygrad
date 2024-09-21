@@ -187,9 +187,9 @@
   var ret = {};
   var cache = {};
   var kernels = null;
-  var currentUOp = null;
-  var currentKernel = null;
-  var currentRewrite = null;
+  var currentUOp = 0;
+  var currentKernel = 0;
+  var currentRewrite = 0;
   async function main() {
     checkStatus();
     // ** kernel list
@@ -199,10 +199,9 @@
     }
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
-    Object.entries(kernels).forEach(([k,v], i) => {
-      const [uopRewrites, _] = v;
-      kernelUl = Object.assign(document.createElement("ul"), { innerHTML: `<p>${k}</p>`, key: `kernel-${i}`, className: i === currentKernel ? "active" : "" });
-      uopRewrites.forEach((u, j) => {
+    kernels.forEach((k, i) => {
+      kernelUl = Object.assign(document.createElement("ul"), { innerHTML: `<p>${k.name}</p>`, key: `kernel-${i}`, className: i === currentKernel ? "active" : "" });
+      k.ctxs.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: u, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
         if (i !== currentKernel) {
           rwUl.style.display = "none";
@@ -243,8 +242,8 @@
       const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${e}</code>`, className: "code-block" });
       metadata.appendChild(pre);
     })
-    if (ret[0].code !== "") {
-      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${ret[0].code}</code>`, className: "code-block" });
+    if (kernels[currentKernel].code !== "") {
+      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${kernels[currentKernel].code}</code>`, className: "code-block" });
       metadata.appendChild(pre);
     }
     // ** rewrite list
@@ -290,7 +289,7 @@
     if (event.key == "ArrowDown") {
       event.preventDefault()
       currentRewrite = 0;
-      const totalUOps = Array.from(Object.values(kernels))[currentKernel][0].length-1;
+      const totalUOps = kernels[currentKernel].ctxs.length-1;
       currentUOp = Math.min(totalUOps, currentUOp+1)
       main()
     }
