@@ -257,10 +257,8 @@ class UOp(MathTrait):
   def vmax(self) -> ConstType: return self._min_max[1]
   @functools.cached_property
   def _min_max(self) -> Tuple[ConstType, ConstType]:
-    # NOTE: returned UOp is assumed to be CONST (TODO: it's ConstType?)
-    if self.op is UOps.DEFINE_VAR and self.arg:
-      assert all(isinstance(x, int) for x in self.arg[1:]) # TODO: delete this...
-      return self.arg[1], self.arg[2]
+    # NOTE: returned UOp is assumed to be CONST
+    if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     if self.op is UOps.EXPAND: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
