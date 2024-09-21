@@ -200,8 +200,7 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
     # some expr has lower bound > upper bound -> valid is an empty set
     if v[0] is not None and v[1] is not None and v[0] > v[1]:
       return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, valid.const_like(False)))
-    bound =  uop.const_like(uop.vmin if v[0] is None else v[0]), uop.const_like(uop.vmax if v[1] is None else v[1])
-    new = UOp(UOps.DEFINE_VAR, uop.dtype, (), ("fake", bound[0], bound[1]))
+    new = UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1])
     newidx = replace_uop(graph_rewrite(replace_uop(idx, uop, new), constant_folder), new, uop)
     if newidx.key != idx.key: idx = newidx
 
