@@ -164,6 +164,7 @@ if __name__ == "__main__":
 
   saved_binaries = set()
   binaries = []
+  gated_read_image_count = 0
   GlobalCounters.reset()
   with Context(DEBUG=max(DEBUG.value, 2)):
     for ei in eis:
@@ -173,6 +174,7 @@ if __name__ == "__main__":
         jdat['binaries'].append({"name":prg.p.function_name, "length":len(prg.lib)})
         binaries.append(prg.lib)
         saved_binaries.add(prg.p.function_name)
+      gated_read_image_count += prg.p.src.count("?read_image")
       ei.run()
       jdat['kernels'].append({
         "name": prg.p.function_name,
@@ -183,6 +185,10 @@ if __name__ == "__main__":
         "args": [to_ref(b) for b in ei.bufs],
         "arg_size": [8]*len(ei.bufs),
       })
+
+  if (allowed_gated_read_image:=getenv("ALLOWED_GATED_READ_IMAGE", -1)) != -1:
+    assert gated_read_image_count <= allowed_gated_read_image, \
+      f"too many gated read_image! {gated_read_image_count=}, {allowed_gated_read_image=}"
 
   output_fn = sys.argv[2] if len(sys.argv) >= 3 else "/tmp/output.thneed"
   print(f"saving thneed to {output_fn} with {len(weights)} buffers and {len(binaries)} binaries")

@@ -72,7 +72,7 @@ class IndependentLowerer:
     # upcast loops
     for i,g in enumerate(full_shape[first_upcasted:], start=first_upcasted):
       assert isinstance(g, int), "needs to be int to upcast/unroll"
-      self.idxs.append(UOp(UOps.EXPAND, dtypes.pyint, tuple(UOp.const(dtypes.pyint, j) for j in range(0, g)), ((i,g),)))
+      self.idxs.append(UOp(UOps.EXPAND, dtypes.pyint, (UOp.const(dtypes.pyint.vec(g), tuple(range(g))),), ((i,g),)))
 
     # late indexes (group for reduce)
     self.ridxs = self.idxs[:]
@@ -91,9 +91,9 @@ class IndependentLowerer:
   def _to_uop(self, x:UOp) -> UOp:
     if x.op in BUFFER_UOPS:
       idx, valid = x.st_arg.to_indexed_uops(self.ridxs if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL else self.idxs)
+      if x.op is UOps.VALID: return valid
       # TODO: check has_valid in UPat, not here
       has_valid = valid.op is not UOps.CONST or valid.arg is not True
-      if x.op is UOps.CONST: return valid.where(x.const_like(x.arg), x.const_like(0))
       buf = x.src[0]
       if x.op is UOps.LOAD:
         barrier = (UOp(UOps.BARRIER, dtypes.void, (self.to_uop(x.src[2]),)),) if x.src[0].op is UOps.DEFINE_LOCAL else ()
@@ -117,7 +117,7 @@ class IndependentLowerer:
         UOp(UOps.CONTRACT, dtype=in_uops[0].dtype.vec(wmma_sz[0]), src=(in_uops[0],), arg=upcast_axes[0]),
         UOp(UOps.CONTRACT, dtype=in_uops[1].dtype.vec(wmma_sz[1]), src=(in_uops[1],), arg=upcast_axes[1]),
         UOp.const(x.dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
-      return UOp(UOps.EXPAND, x.dtype, tuple(UOp(UOps.GEP, x.dtype, (ret,), (i,)) for i in range(wmma_sz[2])), arg=upcast_axes[2])
+      return UOp(UOps.EXPAND, x.dtype, (ret,), arg=upcast_axes[2])
     if x.op is UOps.REDUCE_AXIS:
       # NOTE: always using ridxs is fine here
       reduce_range, reduce_expand = partition([self.ridxs[i] for i in x.arg[1]], lambda y: y.op is UOps.RANGE)
@@ -127,6 +127,6 @@ class IndependentLowerer:
         ret = UOp(UOps.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
         ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [ret.gep(i) for i in range(ret.dtype.count)])
       return UOp(UOps.REDUCE, x.dtype, (ret,) + tuple(reduce_range), alu_op) if len(reduce_range) else ret
-    return UOp(x.op, x.dtype, in_uops, x.arg)
+    return x if x.src == in_uops else UOp(x.op, x.dtype, in_uops, x.arg)
 
 def ast_to_uop(ast:UOp, opts:Renderer) -> UOp: return IndependentLowerer().lower(ast, opts)

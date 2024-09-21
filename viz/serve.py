@@ -1,12 +1,112 @@
 #!/usr/bin/env python3
-from dataclasses import asdict, dataclass
 from typing import Dict, List, Tuple
-import pickle, re, os, sys, time, threading, webbrowser, json, difflib
-from tinygrad.helpers import getenv
-from tinygrad.ops import TrackedRewriteContext, UOp, UOps
-from tinygrad.engine.graph import uops_colors, word_wrap
+import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib
+from dataclasses import dataclass
+from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from tinygrad import Device
+from tinygrad.helpers import Context, getenv, to_function_name
+from tinygrad.ops import TrackedRewriteContext, UOp
+from tinygrad.engine.graph import uops_colors, word_wrap
+from tinygrad.engine.realize import get_runner
+from tinygrad.engine.schedule import full_ast_rewrite
 
+def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
+  assert isinstance(x, UOp)
+  graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
+  for u in x.sparents:
+    label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
+    if getenv("WITH_SHAPE"):
+      with contextlib.suppress(Exception): # if the UOp is indexed already it's fine
+        if u.st is not None: label += f"\n{u.st.shape}"
+    graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
+  return graph
+
+@dataclass(frozen=True)
+class UOpRet:
+  loc: str
+  graphs: List[Tuple[UOp, UOp, UOp, UOp]]                  # snapshot of the entire AST after each rewrite
+  diffs: List[Tuple[str, Tuple[str, int], List[str]]]      # the diffs for each rewrite
+  extra: List[List[str]]                                   # these become code blocks in the UI
+
+def replace_uop(base:UOp, replaces:Dict[bytes, UOp]) -> UOp:
+  if (found:=replaces.get(base.key)): return found
+  new_srcs = tuple(replace_uop(x, replaces) for x in base.src)
+  replaces[base.key] = ret = UOp(base.op, base.dtype, new_srcs, base.arg) if new_srcs != base.src else base
+  return ret
+
+def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
+  uops: List[UOp] = [ctx.sink]
+  graphs: List[Tuple[UOp, UOp, UOp, UOp]] = [(ctx.sink, ctx.sink, ctx.sink, ctx.sink)]
+  diffs: List[Tuple[str, Tuple[str, int], List[str]]] = []
+  extra: List[List[str]] = [[str(ctx.sink)]]
+  seen_replaces: Dict[bytes, UOp] = {}
+  for i, (first, rewritten, pattern) in enumerate(ctx.rewrites):
+    if pattern.location[0].split("/")[-1] == "ops.py": continue
+    # first, rewrite this UOp with the current rewrite + all the seen rewrites before this
+    seen_replaces[first.key] = rewritten
+    new_sink = replace_uop(uops[-1], {**seen_replaces})
+    # sanity check
+    assert new_sink is not uops[-1], f"rewritten sink wasn't rewritten! {i}\n{new_sink}\n{uops[-1]}"
+    # update ret data
+    diffs.append((str(pattern), pattern.location, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
+    graphs.append((new_sink, uops[-1], rewritten, first))
+    uops.append(new_sink)
+    extra.append([str(new_sink)])
+  return UOpRet(ctx.loc, graphs, diffs, extra)
+
+def get_ctx_groups(contexts:List[TrackedRewriteContext]) -> Dict[str, Tuple[List[TrackedRewriteContext], str]]:
+  ctx_groups: Dict[str, Tuple[List[TrackedRewriteContext], str]] = {}
+  kernel_name = ""
+  code = ""
+  for ctx in contexts:
+    if ctx.loc.split("/")[-1].split(":")[0] == "schedule.py":
+      with Context(TRACK_MATCH_STATS=0): kernel_name, code = (prg:=get_runner(Device.DEFAULT, full_ast_rewrite(ctx.sink)).p).name, prg.src
+    elif ctx.kernel_name is not None: kernel_name = ctx.kernel_name
+    if ctx_groups.get(k:=to_function_name(kernel_name)) is None: ctx_groups[k] = ([], code)
+    # TODO: make ansi play nice with css
+    ctx_groups[to_function_name(kernel_name)][0].append(ctx)
+  return ctx_groups
+
+class Handler(BaseHTTPRequestHandler):
+  def do_GET(self):
+    if (url:=urlparse(self.path)).path == "/favicon.svg":
+      self.send_response(200)
+      self.send_header("Content-type", "image/svg+xml")
+      self.end_headers()
+      with open(os.path.join(os.path.dirname(__file__), "favicon.svg"), "rb") as f:
+        ret = f.read()
+    if url.path == "/":
+      self.send_response(200)
+      self.send_header("Content-type", "text/html")
+      self.end_headers()
+      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f:
+        ret = f.read()
+    elif url.path == "/kernels":
+      self.send_response(200)
+      self.send_header("Content-type", "application/json")
+      self.end_headers()
+      with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
+      ctx_groups = get_ctx_groups(contexts)
+      ret = json.dumps({k:[x.loc for x in v[0]] for k,v in ctx_groups.items()}).encode()
+    elif url.path == "/graph":
+      query = parse_qs(url.query)
+      self.send_response(200)
+      self.send_header("Content-type", "application/json")
+      self.end_headers()
+      with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
+      ctx_groups = get_ctx_groups(contexts)
+      group, code = ctx_groups[list(ctx_groups.keys())[int(query["kernel_idx"][0])]]
+      g = create_graph(group[int(query["uop_idx"][0])])
+      rest = [x.loc for x in group]
+      ret = json.dumps(({"loc": g.loc, "graphs": [[uop_to_json(x) for x in graph] for graph in g.graphs],
+                         "diffs": g.diffs, "extra": g.extra, "code": code}, rest)).encode()
+    else:
+      self.send_response(404)
+      ret = b""
+    return self.wfile.write(ret)
+
+BROWSER = getenv("BROWSER", 1)
 stop_reloader = threading.Event()
 def reloader():
   mtime = os.stat(__file__).st_mtime
@@ -15,69 +115,6 @@ def reloader():
       print("reloading server...")
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
-
-def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
-  assert isinstance(x, UOp)
-  graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
-  for u in x.sparents:
-    label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
-    graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
-  return graph
-
-@dataclass(frozen=True)
-class UOpRet:
-  loc: str                                                            # location that called graph_rewrite
-  graphs: List[Dict[int, Tuple[str, str, List[int], str, str]]]       # a seralized version of UOp graphs
-  diffs: List[Tuple[str, List[str]]]                                  # the diffs for each rewrite
-  extra: List[List[str]]                                              # these become code blocks in the UI
-
-def replace_uop(base:UOp, prev:UOp, new:UOp, cache:Dict[UOp, UOp]) -> UOp:
-  if (u:=cache.get(base)): return u
-  new_srcs = tuple(new if x.key == prev.key else replace_uop(x, prev, new, cache) for x in base.src)
-  ret = cache[base] = base if new_srcs == base.src else UOp(base.op, base.dtype, new_srcs, base.arg)
-  return ret
-
-def create_graph(ctx:TrackedRewriteContext) -> UOpRet:
-  uops: List[UOp] = [ctx.sink]
-  diffs: List[Tuple[str, List[str]]] = []
-  extra: List[List[str]] = [[str(ctx.sink)]]
-  for (first, rewritten, pattern) in ctx.rewrites:
-    diffs.append((pattern, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
-    # if the sink was replaced, we have to replace the entire graph, otherwise just replace the parent
-    new_sink = rewritten if first.op is UOps.SINK else replace_uop(uops[-1], first, rewritten, {})
-    assert new_sink.op is UOps.SINK
-    uops.append(new_sink)
-    extra.append([str(new_sink)])
-  return UOpRet(ctx.loc, list(map(uop_to_json, uops)), diffs, extra)
-
-class Handler(BaseHTTPRequestHandler):
-  def do_GET(self):
-    if self.path == "/favicon.svg":
-      self.send_response(200)
-      self.send_header("Content-type", "image/svg+xml")
-      self.end_headers()
-      with open(os.path.join(os.path.dirname(__file__), "favicon.svg"), "rb") as f:
-        ret = f.read()
-    if self.path == "/":
-      self.send_response(200)
-      self.send_header("Content-type", "text/html")
-      self.end_headers()
-      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f:
-        ret = f.read()
-    elif re.search(r'/\d+', self.path):
-      self.send_response(200)
-      self.send_header("Content-type", "application/json")
-      self.end_headers()
-      with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
-      rest = [x.loc for x in contexts]
-      current_graph = create_graph(contexts[int(self.path.split("/")[-1])])
-      ret = json.dumps((asdict(current_graph), rest)).encode()
-    else:
-      self.send_response(404)
-      ret = b""
-    return self.wfile.write(ret)
-
-BROWSER = getenv("BROWSER", 1)
 def main():
   try:
     st = time.perf_counter()
