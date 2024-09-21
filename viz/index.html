@@ -182,9 +182,7 @@
     } catch {
       active = false;
     }
-    if (!active) {
-      document.querySelector('.status').textContent = `Connection to localhost:8000 failed, is VIZ=1 running?`;
-    }
+    document.querySelector('.status').textContent = active ? `` : `Connection to localhost:8000 failed, is VIZ=1 running?`;
   }
   var ret = {};
   var cache = {};
@@ -307,7 +305,7 @@
       main()
     }
   })
-  setInterval(checkStatus, 1000);
+  setInterval(checkStatus, 5000);
   main()
   </script>
   </body>
