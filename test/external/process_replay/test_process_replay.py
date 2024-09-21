@@ -1,4 +1,5 @@
 import unittest
+from test.external.process_replay.helpers import get_process_replay_ctx
 from test.external.process_replay.process_replay import TABLE_NAME, diff_kernel
 
 from tinygrad.codegen.kernel import Kernel
@@ -8,16 +9,17 @@ from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.tensor import Tensor
 
 def helper_append_replay(ast:UOp, name:str, src:str) -> int:
-  diskcache_put(TABLE_NAME.replace(f"_{VERSION}", ""), "test_1", (ast, ClangRenderer(), [], to_function_name(name), src, {}))
+  nm = "kernel_"+TABLE_NAME
+  diskcache_put(nm.replace(f"_{VERSION}", ""), "test_1", (ast, ClangRenderer(), [], to_function_name(name), src, get_process_replay_ctx()))
   conn = db_connection()
-  row_count = conn.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
+  row_count = conn.execute(f"select count(*) from '{nm}'").fetchone()[0]
   return row_count
 
 class TestProcessReplay(unittest.TestCase):
   def tearDown(self):
     conn = db_connection()
     cur = conn.cursor()
-    cur.execute(f"DELETE FROM '{TABLE_NAME}' WHERE key LIKE 'test_%'")
+    cur.execute(f"DELETE FROM 'kernel_{TABLE_NAME}' WHERE key LIKE 'test_%'")
     conn.commit()
     cur.close()
 

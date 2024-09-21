@@ -3,6 +3,7 @@ import shutil, importlib, uuid, os, logging, contextlib
 from collections import defaultdict
 from typing import DefaultDict, List, Set, Tuple
 from test.external.process_replay.helpers import print_diff
+from test.external.process_replay.process_replay import TABLE_NAME
 from tinygrad.engine.schedule import LBScheduleItem, ScheduleItem
 from tinygrad.helpers import CI, DEBUG, Context, ContextVar, colored, diskcache_put, fetch, getenv
 from tinygrad.lazy import LazyBuffer
@@ -17,7 +18,7 @@ def process_replay(outs:List[LazyBuffer], graph:DefaultDict[LBScheduleItem, List
   if not os.path.isfile(fp):
     shutil.copyfile(fetch(f"https://raw.githubusercontent.com/tinygrad/tinygrad/{ref_schedule}/tinygrad/engine/schedule.py", allow_caching=False), fp)
   # create the reference graph
-  ref_graph, ref_in_degree = importlib.import_module("test.external.process_replay.master_schedule")._graph_schedule(outs)
+  ref_graph, ref_in_degree, _ = importlib.import_module("test.external.process_replay.master_schedule")._graph_schedule(outs)
   # compare
   diff_schedule([(ref_graph, ref_in_degree), (graph, in_degree)])
 
@@ -26,7 +27,7 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
   for _,in_degree in s:
     for lsi in in_degree:
       for buf in lsi.outputs:
-        si_for_buf[buf].append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
+        si_for_buf[buf].append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), tuple(lsi.metadata)))
   changed = 0
   seen_diffs: Set[bytes] = set()
   for buf,si in si_for_buf.items():
@@ -39,7 +40,7 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
     if (cache_key:=ref.ast.key+compare.ast.key) in seen_diffs: continue
     seen_diffs.add(cache_key)
     changed += 1
-    if CAPTURING_PROCESS_REPLAY: diskcache_put("schedule_diff", str(uuid.uuid4()), (str(buf), [ref.ast.key, compare.ast.key]))
+    if CAPTURING_PROCESS_REPLAY: diskcache_put(f"schedule_{TABLE_NAME}", str(uuid.uuid4()), (str(buf), [ref.ast.key, compare.ast.key]))
     if not CI: print_si_diff(ref, compare)
   if DEBUG >= 1: print(f"*** process replay: {changed} unique kernel{'s' if changed>1 else ''} changed")
   return changed
