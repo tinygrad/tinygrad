@@ -48,7 +48,11 @@ libdispatch.dispatch_data_create.restype = objc_id
 def send_message(
     ptr: objc_id, selector: str, /, *args: Any, restype: type = objc_id
 ) -> objc_id:
-    sender = libobjc.objc_msgSend if restype == objc_id else libobjc["objc_msgSend"]
+    if restype == objc_id:
+        sender = libobjc.objc_msgSend
+    else:
+        sender = libobjc["objc_msgSend"]
+        sender.restype = restype
     return sender(ptr, libobjc.sel_registerName(selector.encode()), *args)
 
 

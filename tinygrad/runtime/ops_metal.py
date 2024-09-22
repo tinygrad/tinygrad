@@ -56,7 +56,7 @@ class MetalProgram:
     command_buffer = cdll.send_message(self.device.mtl_queue, "commandBuffer")
     encoder = cdll.send_message(command_buffer, "computeCommandEncoder")
     cdll.send_message(encoder, "setComputePipelineState:", self.pipeline_state)
-    for i,a in enumerate(bufs): cdll.send_message(encoder, "setBuffer:offset:atIndex:", a.device_buf, a.offset, i)
+    for i,a in enumerate(bufs): cdll.send_message(encoder, "setBuffer:offset:atIndex:", a.buf, a.offset, i)
     for i,a in enumerate(vals,start=len(bufs)): cdll.send_message(encoder, "setBytes:length:atIndex:", (ctypes.c_char * 4)(a), 4, i)
     cdll.send_message(encoder, "dispatchThreadgroups:threadsPerThreadgroup:", cdll.int_tuple_to_struct(global_size), cdll.int_tuple_to_struct(local_size))
 
@@ -67,24 +67,22 @@ class MetalProgram:
       return cdll.send_message(command_buffer, "GPUEndTime", restype=ctypes.c_ulong) - cdll.send_message(command_buffer, "GPUStartTime", restype=ctypes.c_ulong)
     self.device.mtl_buffers_in_flight.append(command_buffer)
 class MetalBuffer:
-  def __init__(self, buf:Any, device_buf: cdll.objc_id, size:int, offset=0): self.buf, self.device_buf, self.size, self.offset = buf, device_buf, size, offset
+  def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
 
 class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice):
     self.device:MetalDevice = device
     super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
-    buf_ptr = (ctypes.c_char * size)()
-    buf_memoryview = memoryview(buf_ptr).cast("B")
-    device_buf = cdll.send_message(self.device.device, "newBufferWithBytesNoCopy:length:options:deallocator:", buf_ptr, size, 0, None)
-    if device_buf.value is None: raise RuntimeError("Metal failed to allocate buffer")
-    return MetalBuffer(buf_memoryview, device_buf, size)
-  def _free(self, opaque:MetalBuffer, options): cdll.send_message(opaque.device_buf, "release")
+    ret = cdll.send_message(self.device.device, "newBufferWithLength:options:", size, 0)
+    if ret.value is None: raise RuntimeError("Metal failed to allocate buffer")
+    return MetalBuffer(ret, size)
+  def _free(self, opaque:MetalBuffer, options): cdll.send_message(opaque.buf, "release")
   def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = cdll.send_message(src_dev.mtl_queue, "commandBuffer")
     encoder = cdll.send_message(src_command_buffer, "blitCommandEncoder")
-    cdll.send_message(encoder, "copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:", src.device_buf, src.offset, dest.device_buf, dest.offset, sz)
+    cdll.send_message(encoder, "copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:", src.buf, src.offset, dest.buf, dest.offset, sz)
     cdll.send_message(encoder, "endEncoding")
     if src_dev != dest_dev:
       cdll.send_message(src_command_buffer, "encodeSignalEvent:value:", src_dev.timeline_signal, src_dev.timeline_value)
@@ -102,11 +100,13 @@ class MetalAllocator(LRUAllocator):
     return MetalBuffer(src, ret, src.nbytes)
   def as_buffer(self, src:MetalBuffer) -> memoryview:
     self.device.synchronize()
-    ret = src.buf[src.offset:src.offset+src.size]
-    return ret
+    ptr = cdll.send_message(src.buf, "contents")
+    array = (ctypes.c_char * src.size).from_address(ptr.value)
+    mem = memoryview(array).cast("B")
+    return mem[src.offset:]
   def copyin(self, dest:MetalBuffer, src:memoryview): self.as_buffer(dest)[:] = src
   def copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self.as_buffer(src)
-  def offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, buf.device_buf, size, offset)
+  def offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):

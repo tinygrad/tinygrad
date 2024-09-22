@@ -32,7 +32,7 @@ class MetalGraph(GraphRunner):
     self.needs_icb_fix = int(type(self.icb).__name__ != "AGXG15XFamilyIndirectCommandBuffer")    # not required on M3
 
     if len(self.vars): self.int_buf = self.device.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
-    all_resources = [self.int_buf.device_buf] if len(self.vars) else []
+    all_resources = [self.int_buf.buf] if len(self.vars) else []
     all_pipelines = []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
@@ -41,10 +41,10 @@ class MetalGraph(GraphRunner):
       cdll.send_message(icb_command, "setComputePipelineState:", prg.clprg.pipeline_state)
       for i,b in enumerate(ji.bufs):
         if b is not None and b not in input_rawbuffers:
-          cdll.send_message(icb_command, "setKernelBuffer:offset:atIndex:", b._buf.device_buf, b._buf.offset, i)
-          all_resources.append(b._buf.device_buf)
+          cdll.send_message(icb_command, "setKernelBuffer:offset:atIndex:", b._buf.buf, b._buf.offset, i)
+          all_resources.append(b._buf.buf)
       for i,v in enumerate(prg.p.vars):
-        cdll.send_message(icb_command, "setKernelBuffer:offset:atIndex:", self.int_buf.device_buf, self.vars.index(v)*4, len(ji.bufs)+i)
+        cdll.send_message(icb_command, "setKernelBuffer:offset:atIndex:", self.int_buf.buf, self.vars.index(v)*4, len(ji.bufs)+i)
 
       global_size, local_size = prg.p.launch_dims(var_vals)
       cdll.send_message(icb_command, "concurrentDispatchThreadgroups:threadsPerThreadgroup:", cdll.int_tuple_to_struct(global_size), cdll.int_tuple_to_struct(local_size))
@@ -59,11 +59,11 @@ class MetalGraph(GraphRunner):
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
 
     if self.command_buffer is not None and self.command_buffer in self.device.mtl_buffers_in_flight: wait_check(self.command_buffer)
-    all_resources = self.all_resources + [x._buf.device_buf for x in input_rawbuffers]
+    all_resources = self.all_resources + [x._buf.buf for x in input_rawbuffers]
 
     for (j,i),input_idx in self.input_replace.items():
       computeCommand = cdll.send_message(self.icb, "indirectComputeCommandAtIndex:", j)
-      cdll.send_message(computeCommand, "setKernelBuffer:offset:atIndex:", input_rawbuffers[input_idx]._buf.device_buf,
+      cdll.send_message(computeCommand, "setKernelBuffer:offset:atIndex:", input_rawbuffers[input_idx]._buf.buf,
                                                                                  input_rawbuffers[input_idx]._buf.offset, i)
 
     for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
