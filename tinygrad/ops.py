@@ -207,7 +207,7 @@ class UOp(MathTrait):
     return UOp(UOps.ALU, out_dtype, (self,)+src, arg)
   @property
   def alu_arg(self) -> Union[BinaryOps, UnaryOps, TernaryOps]:
-    assert self.op in {UOps.ALU, UOps.REDUCE_AXIS}, f"alu_arg called on {self.op}"
+    assert self.op in {UOps.ALU, UOps.REDUCE, UOps.REDUCE_AXIS}, f"alu_arg called on {self.op}"
     ret = self.arg[0] if self.op is UOps.REDUCE_AXIS else self.arg
     # TODO: can delete this once spec runs on UOp init
     assert isinstance(ret, (BinaryOps, UnaryOps, TernaryOps)), f"bad alu arg {ret}"
@@ -246,14 +246,16 @@ class UOp(MathTrait):
     if self.op is UOps.VCONST: return functools.reduce(math.gcd, self.arg)
     if self.op is UOps.ALU:
       if self.alu_arg is BinaryOps.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
-      if self.alu_arg is BinaryOps.MUL: return self.src[0].arg if self.src[0].op is UOps.CONST else self.src[1].arg if self.src[1].op is UOps.CONST else 1
+      if self.alu_arg is BinaryOps.MUL:
+        return self.src[0].arg if self.src[0].op is UOps.CONST else self.src[1].arg if self.src[1].op is UOps.CONST else 1
     return 1
   def divides(self, v) -> Optional[UOp]:
     if v==1: return self
     if self.op is UOps.CONST: return self.const_like(self.arg//v) if self.arg%v == 0 else None
     if self.op is UOps.VCONST: return self.const_like(tuple(x//v for x in self.arg)) if all(x%v == 0 for x in self.arg) else None
     if self.op is UOps.ALU:
-      if self.alu_arg is BinaryOps.ADD: return d0+d1 if (d0:=self.src[0].divides(v)) is not None and (d1:=self.src[1].divides(v)) is not None else None
+      if self.alu_arg is BinaryOps.ADD:
+        return d0+d1 if (d0:=self.src[0].divides(v)) is not None and (d1:=self.src[1].divides(v)) is not None else None
       if self.alu_arg is BinaryOps.MUL:
         if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
         if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
