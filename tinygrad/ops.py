@@ -208,7 +208,10 @@ class UOp(MathTrait):
   @property
   def alu_arg(self) -> Union[BinaryOps, UnaryOps, TernaryOps]:
     assert self.op in {UOps.ALU, UOps.REDUCE_AXIS}, f"alu_arg called on {self.op}"
-    return self.arg[0] if self.op is UOps.REDUCE_AXIS else self.arg
+    ret = self.arg[0] if self.op is UOps.REDUCE_AXIS else self.arg
+    # TODO: can delete this once spec runs on UOp init
+    assert isinstance(ret, (BinaryOps, UnaryOps, TernaryOps)), f"bad alu arg {ret}"
+    return ret
   @staticmethod
   @functools.lru_cache(None)
   def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return UOp._const(dtype, b)
