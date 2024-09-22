@@ -64,7 +64,7 @@ class MetalProgram:
     cdll.send_message(command_buffer, "commit")
     if wait:
       wait_check(command_buffer)
-      return cdll.send_message(command_buffer, "GPUEndTime", restype=ctypes.c_ulong) - cdll.send_message(command_buffer, "GPUStartTime", restype=ctypes.c_ulong)
+      return cdll.send_message(command_buffer, "GPUEndTime", restype=ctypes.c_double) - cdll.send_message(command_buffer, "GPUStartTime", restype=ctypes.c_double)
     self.device.mtl_buffers_in_flight.append(command_buffer)
 class MetalBuffer:
   def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
