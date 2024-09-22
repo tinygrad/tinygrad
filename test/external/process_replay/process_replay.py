@@ -27,7 +27,7 @@ if REF == "master": SKIP_PROCESS_REPLAY = True
 def diff_schedule(offset:int) -> bool:
   conn = db_connection()
   cur = conn.cursor()
-  cur.execute(f"SELECT val FROM 'schedule_{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
+  cur.execute(f"SELECT val FROM 'schedule_diff_{VERSION}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
   changed = 0
   for row in cur.fetchall():
     changed += 1
@@ -98,12 +98,12 @@ def _pmap(row_count:int, fxn:Callable[[int], bool], maxtasksperchild:int=16) -> 
 def process_replay_schedule() -> None:
   conn = db_connection()
   cur = conn.cursor()
-  try: has_diff = cur.execute(f"select name from sqlite_master where type='table' and name='schedule_{TABLE_NAME}'").fetchone()
+  try: has_diff = cur.execute(f"select name from sqlite_master where type='table' and name='schedule_diff_{VERSION}'").fetchone()
   except sqlite3.OperationalError:
-    logging.warning(f"schedule_{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
+    logging.warning(f"schedule_diff_{VERSION} isn't accessible in master, did DB_VERSION change?")
     return
   if has_diff:
-    row_count = cur.execute(f"select count(*) from 'schedule_{TABLE_NAME}'").fetchone()[0]
+    row_count = cur.execute(f"select count(*) from 'schedule_diff_{VERSION}'").fetchone()[0]
     if row_count != 0: logging.info("***** schedule diff")
     conn.commit()
     cur.close()
@@ -127,8 +127,6 @@ if __name__ == "__main__":
     logging.info("skipping process replay.")
     exit(0)
 
-  logging.info("***** process replay config")
-  logging.info(f"{ASSERT_DIFF=}")
   logging.info("***** schedule diff")
   try: process_replay_schedule()
   except Exception as e:
