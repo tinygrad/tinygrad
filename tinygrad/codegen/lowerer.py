@@ -35,6 +35,7 @@ def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int
           idx //= dims[c]
   return ret[::-1] if reverse else ret
 
+# TODO: move this to kernel.py, it doesn't depend on axes
 def lower_wmma(ctx: IndependentLowerer, x: UOp):
   upcast_axes = x.arg[-2]
   wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
