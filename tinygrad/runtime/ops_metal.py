@@ -9,8 +9,7 @@ from ctypes import c_ulong, c_double, string_at, c_int, c_char
 
 def wait_check(cbuf: Any):
   send_message(cbuf, "waitUntilCompleted")
-  if (error := send_message(cbuf, "error", restype=c_ulong)) != 0:
-    raise RuntimeError(error)
+  if (error := send_message(cbuf, "error", restype=c_ulong)) != 0: raise RuntimeError(error)
 
 class MetalCompiler(Compiler):
   def __init__(self, device:Optional[MetalDevice]):
@@ -21,17 +20,13 @@ class MetalCompiler(Compiler):
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-    options = send_message(
-                libobjc.objc_getClass(b"MTLCompileOptions"),
-                "new",
-            )
+    options = send_message(libobjc.objc_getClass(b"MTLCompileOptions"), "new")
     send_message(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
     library = send_message(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(src), options, None)
     library_contents_ptr = send_message(library, "libraryDataContents")
     library_contents_bytes_ptr = send_message(library_contents_ptr, "bytes")
     library_length = cast(int, send_message(library_contents_ptr, "length", restype=c_ulong))
-    library_bytes = string_at(library_contents_bytes_ptr, library_length)
-    return library_bytes
+    return string_at(library_contents_bytes_ptr, library_length)
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
@@ -62,13 +57,13 @@ class MetalProgram:
     for i,a in enumerate(bufs): send_message(encoder, "setBuffer:offset:atIndex:", a.buf, a.offset, i)
     for i,a in enumerate(vals,start=len(bufs)): send_message(encoder, "setBytes:length:atIndex:", bytes(c_int(a)), 4, i)
     send_message(encoder, "dispatchThreadgroups:threadsPerThreadgroup:", int_tuple_to_struct(global_size), int_tuple_to_struct(local_size))
-
     send_message(encoder, "endEncoding")
     send_message(command_buffer, "commit")
     if wait:
       wait_check(command_buffer)
       return send_message(command_buffer, "GPUEndTime", restype=c_double) - send_message(command_buffer, "GPUStartTime", restype=c_double)
     self.device.mtl_buffers_in_flight.append(command_buffer)
+
 class MetalBuffer:
   def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
 
@@ -105,12 +100,9 @@ class MetalAllocator(LRUAllocator):
     self.device.synchronize()
     ptr = send_message(src.buf, "contents")
     array = (c_char * (src.offset + src.size)).from_address(ptr.value)
-    mem = memoryview(array).cast("B")
-    return mem[src.offset:]
-  def copyin(self, dest:MetalBuffer, src:memoryview):
-    self.as_buffer(dest)[:] = src
-  def copyout(self, dest:memoryview, src:MetalBuffer):
-    dest[:] = self.as_buffer(src)
+    return memoryview(array).cast("B")[src.offset:]
+  def copyin(self, dest:MetalBuffer, src:memoryview): self.as_buffer(dest)[:] = src
+  def copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self.as_buffer(src)
   def offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
 
 class MetalDevice(Compiled):
@@ -118,10 +110,8 @@ class MetalDevice(Compiled):
     self.device = libmetal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = send_message(self.device, "newCommandQueueWithMaxCommandBufferCount:", 1024)
     if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
-
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
-
     self.timeline_signal = send_message(self.device, "newSharedEvent")
     self.timeline_value = 0
 
