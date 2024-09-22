@@ -35,6 +35,14 @@ def int_tuple_to_struct(t: Tuple[int, ...], _type: type = c_ulong):
   Struct._fields_ = [(f"field{i}", _type) for i in range(len(t))]
   return Struct(*t)
 
-MTLIndirectCommandTypeConcurrentDispatch = 32 # (1 << 5)
-MTLResourceCPUCacheModeDefaultCache = 0
-MTLResourceUsageRead_MTLResourceUsageWrite = 3 # MTLResourceUsageRead (01) | MTLResourceUsageWrite (10)
+class OPTIONS:
+  MTLIndirectCommandTypeConcurrentDispatch = 32 # (1 << 5)
+  MTLResourceCPUCacheModeDefaultCache = 0
+
+class MTLResourceOptions:
+  MTLResourceCPUCacheModeDefaultCache = 0
+
+class MTLResourceUsage:
+  MTLResourceUsageRead = 0b01
+  MTLResourceUsageWrite = 0b10
+

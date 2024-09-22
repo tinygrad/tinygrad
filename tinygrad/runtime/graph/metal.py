@@ -1,6 +1,6 @@
 from typing import List, Any, Dict, cast, Optional
-from tinygrad.runtime.support.metal import msg, libobjc, to_ns_array, int_tuple_to_struct, MTLIndirectCommandTypeConcurrentDispatch, \
-  MTLResourceCPUCacheModeDefaultCache, MTLResourceUsageRead_MTLResourceUsageWrite, objc_instance
+from tinygrad.runtime.support.metal import msg, libobjc, to_ns_array, int_tuple_to_struct, objc_instance, MTLResourceUsage, \
+  MTLIndirectCommandType, MTLResourceOptions
 from ctypes import c_ulong, c_double
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv
@@ -17,13 +17,13 @@ class MetalGraph(GraphRunner):
 
     # create metal batch exec
     icb_descriptor = msg(libobjc.objc_getClass(b"MTLIndirectCommandBufferDescriptor"), "new", restype=objc_instance)
-    msg(icb_descriptor, "setCommandTypes:", MTLIndirectCommandTypeConcurrentDispatch)
+    msg(icb_descriptor, "setCommandTypes:", MTLIndirectCommandType.MTLIndirectCommandTypeConcurrentDispatch)
     msg(icb_descriptor, "setInheritBuffers:", False)
     msg(icb_descriptor, "setInheritPipelineState:", False)
     msg(icb_descriptor, "setMaxKernelBufferBindCount:", 31)
 
     self.icb = msg(self.device.device, "newIndirectCommandBufferWithDescriptor:maxCommandCount:options:",
-      icb_descriptor, len(self.jit_cache), MTLResourceCPUCacheModeDefaultCache, restype=objc_instance)
+      icb_descriptor, len(self.jit_cache), MTLResourceOptions.MTLResourceCPUCacheModeDefaultCache, restype=objc_instance)
     if self.icb.value is None: raise GraphException("create indirect command buffer failed, does your system support this?")
     self.needs_icb_fix = int(type(self.icb).__name__ != "AGXG15XFamilyIndirectCommandBuffer")    # not required on M3
 
@@ -73,7 +73,7 @@ class MetalGraph(GraphRunner):
     command_buffer = msg(self.device.mtl_queue, "commandBuffer")
     encoder = msg(command_buffer, "computeCommandEncoder")
     msg(encoder, "useResources:count:usage:", to_ns_array(all_resources), len(all_resources),
-        MTLResourceUsageRead_MTLResourceUsageWrite)
+        MTLResourceUsage.MTLResourceUsageRead | MTLResourceUsage.MTLResourceUsageWrite)
 
     # NOTE: the pipelines likely need to be added to the used resources to fix the crash on M1/M2, but I haven't figured out how
     # this is a O(n) hack to get them used. what should work is:
