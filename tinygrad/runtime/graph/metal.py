@@ -1,6 +1,6 @@
 from typing import List, Any, Dict, cast, Optional
 from tinygrad.runtime.support.metal import msg, libobjc, to_ns_array, int_tuple_to_struct, MTLIndirectCommandTypeConcurrentDispatch, \
-  MTLResourceCPUCacheModeDefaultCache, MTLResourceUsageRead_MTLResourceUsageWrite
+  MTLResourceCPUCacheModeDefaultCache, MTLResourceUsageRead_MTLResourceUsageWrite, objc_instance
 from ctypes import c_ulong, c_double
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv
@@ -16,14 +16,14 @@ class MetalGraph(GraphRunner):
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
     # create metal batch exec
-    icb_descriptor = msg(libobjc.objc_getClass(b"MTLIndirectCommandBufferDescriptor"), "new")
+    icb_descriptor = msg(libobjc.objc_getClass(b"MTLIndirectCommandBufferDescriptor"), "new", restype=objc_instance)
     msg(icb_descriptor, "setCommandTypes:", MTLIndirectCommandTypeConcurrentDispatch)
     msg(icb_descriptor, "setInheritBuffers:", False)
     msg(icb_descriptor, "setInheritPipelineState:", False)
     msg(icb_descriptor, "setMaxKernelBufferBindCount:", 31)
 
     self.icb = msg(self.device.device, "newIndirectCommandBufferWithDescriptor:maxCommandCount:options:",
-      icb_descriptor, len(self.jit_cache), MTLResourceCPUCacheModeDefaultCache)
+      icb_descriptor, len(self.jit_cache), MTLResourceCPUCacheModeDefaultCache, restype=objc_instance)
     if self.icb.value is None: raise GraphException("create indirect command buffer failed, does your system support this?")
     self.needs_icb_fix = int(type(self.icb).__name__ != "AGXG15XFamilyIndirectCommandBuffer")    # not required on M3
 
@@ -31,7 +31,7 @@ class MetalGraph(GraphRunner):
     all_resources, all_pipelines = [self.int_buf.buf] if len(self.vars) else [], []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
-      icb_command = msg(self.icb, "indirectComputeCommandAtIndex:", j)
+      icb_command = msg(self.icb, "indirectComputeCommandAtIndex:", j, restype=objc_instance)
       all_pipelines.append(prg.clprg.pipeline_state)
       msg(icb_command, "setComputePipelineState:", prg.clprg.pipeline_state)
       for i,b in enumerate(ji.bufs):

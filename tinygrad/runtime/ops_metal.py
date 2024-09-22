@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, subprocess, pathlib, tempfile, functools
-from tinygrad.runtime.support.metal import msg, libobjc, to_ns_str, libdispatch, int_tuple_to_struct, libmetal
+from tinygrad.runtime.support.metal import msg, libobjc, to_ns_str, libdispatch, int_tuple_to_struct, libmetal, objc_instance
 from typing import List, Any, Tuple, Optional, cast
 from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.device import Compiled, Compiler, LRUAllocator
@@ -20,9 +20,9 @@ class MetalCompiler(Compiler):
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-    options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new")
+    options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
     msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
-    library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(src), options, None)
+    library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(src), options, None, restype=objc_instance)
     library_contents_ptr = msg(library, "libraryDataContents")
     library_contents_bytes_ptr = msg(library_contents_ptr, "bytes")
     library_length = cast(int, msg(library_contents_ptr, "length", restype=c_ulong))
@@ -40,13 +40,13 @@ class MetalProgram:
           print("Error running disassembler: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
     assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-    self.library = msg(self.device.device, "newLibraryWithData:error:", data, None)
-    self.fxn = msg(self.library, "newFunctionWithName:", to_ns_str(name))
-    descriptor = msg(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"), "new")
+    self.library = msg(self.device.device, "newLibraryWithData:error:", data, None, restype=objc_instance)
+    self.fxn = msg(self.library, "newFunctionWithName:", to_ns_str(name), restype=objc_instance)
+    descriptor = msg(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"), "new", restype=objc_instance)
     msg(descriptor, "setComputeFunction:", self.fxn)
     msg(descriptor, "setSupportIndirectCommandBuffers:", True)
     self.pipeline_state = msg(self.device.device, "newComputePipelineStateWithDescriptor:options:reflection:error:",
-                                       descriptor, 0, None, None)
+                                       descriptor, 0, None, None, restype=objc_instance)
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if prod(local_size) > msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=c_ulong):
@@ -72,7 +72,7 @@ class MetalAllocator(LRUAllocator):
     self.device:MetalDevice = device
     super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
-    ret = msg(self.device.device, "newBufferWithLength:options:", size, 0)
+    ret = msg(self.device.device, "newBufferWithLength:options:", size, 0, restype=objc_instance)
     if ret.value is None: raise RuntimeError("Metal failed to allocate buffer")
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): msg(opaque.buf, "release")
@@ -93,7 +93,7 @@ class MetalAllocator(LRUAllocator):
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
   def from_buffer(self, src:memoryview) -> Optional[Any]:
     ptr = (c_char * src.nbytes).from_buffer(src)
-    ret = msg(self.device.device, "newBufferWithBytesNoCopy:length:options:deallocator:", ptr, src.nbytes, 0, None)
+    ret = msg(self.device.device, "newBufferWithBytesNoCopy:length:options:deallocator:", ptr, src.nbytes, 0, None, restype=objc_instance)
     if ret: self.device.mv_in_metal.append(src)
     return MetalBuffer(ret, src.nbytes)
   def as_buffer(self, src:MetalBuffer) -> memoryview:
@@ -108,11 +108,11 @@ class MetalAllocator(LRUAllocator):
 class MetalDevice(Compiled):
   def __init__(self, device:str):
     self.device = libmetal.MTLCreateSystemDefaultDevice()
-    self.mtl_queue = msg(self.device, "newCommandQueueWithMaxCommandBufferCount:", 1024)
+    self.mtl_queue = msg(self.device, "newCommandQueueWithMaxCommandBufferCount:", 1024, restype=objc_instance)
     if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
-    self.timeline_signal = msg(self.device, "newSharedEvent")
+    self.timeline_signal = msg(self.device, "newSharedEvent", restype=objc_instance)
     self.timeline_value = 0
 
     from tinygrad.runtime.graph.metal import MetalGraph
