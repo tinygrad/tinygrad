@@ -14,8 +14,8 @@ libobjc.objc_getClass.argtypes = [c_char_p]
 libobjc.sel_registerName.restype = objc_id
 libobjc.sel_registerName.argtypes = [c_char_p]
 
-metal = load_library(os.environ.get("METALLIBPATH", "/Library/Frameworks/Metal.framework/Metal"))
-metal.MTLCreateSystemDefaultDevice.restype = objc_id
+libmetal = load_library(os.environ.get("METALLIBPATH", "/Library/Frameworks/Metal.framework/Metal"))
+libmetal.MTLCreateSystemDefaultDevice.restype = objc_id
 
 core_graphics = load_library("/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
 libdispatch = load_library("/usr/lib/libSystem.dylib")
