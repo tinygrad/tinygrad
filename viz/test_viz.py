@@ -9,7 +9,7 @@ from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import CI, all_same, DEBUG, colored, getenv
 from tinygrad.codegen.uopgraph import constant_folder, devectorize, float4_folding
 from test.external.process_replay.helpers import print_diff
-from viz.serve import create_graph, get_ctx_groups
+from viz.serve import UOpRet, load_kernels
 
 class TestViz(unittest.TestCase):
   def tearDown(self) -> None:
@@ -19,7 +19,7 @@ class TestViz(unittest.TestCase):
   def assert_valid_ctx(self, contexts):
     assert len(contexts) != 0
     for i,ctx in enumerate(contexts):
-      try: ret = create_graph(ctx)
+      try: ret = UOpRet.from_ctx(ctx)
       except Exception as e:
         print(colored(f"failed to create graph for ctx {i}", "red"))
         raise e
@@ -45,10 +45,10 @@ class TestViz(unittest.TestCase):
     schedule2 = Tensor.randn(4, 4).contiguous().schedule()
     list(lower_schedule(schedule1))
     list(lower_schedule(schedule2))
-    ret = get_ctx_groups(contexts)
-    assert len(ret.keys()) == 2
-    assert all(len([x for x in ctxs if "schedule" in x.loc]) != 0 for ctxs,_ in ret.values())
-    assert all(len([x for x in ctxs if "uopgraph" in x.loc]) != 0 for ctxs,_ in ret.values())
+    ret = load_kernels(contexts)
+    assert len(ret) == 2
+    assert all(len([x for x in y.ctxs if "schedule" in x.loc]) != 0 for y in ret)
+    assert all(len([x for x in y.ctxs if "uopgraph" in x.loc]) != 0 for y in ret)
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()
@@ -67,7 +67,7 @@ class TestViz(unittest.TestCase):
     ])
     ret = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, ret)
-    g = create_graph(contexts[0])
+    g = UOpRet.from_ctx(contexts[0])
     assert g.graphs[-1][0].key == ret.key
     self.assert_valid_ctx(contexts)
 
