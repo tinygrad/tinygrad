@@ -71,7 +71,7 @@ class MetalGraph(GraphRunner):
       global_size, local_size = global_dims or prg.p.global_size, local_dims or prg.p.local_size
       computeCommand = send_message(self.icb, "indirectComputeCommandAtIndex:", j)
       send_message(computeCommand, "concurrentDispatchThreadgroups:threadsPerThreadgroup:",
-                        int_tuple_to_struct(global_size), int_tuple_to_struct(local_size))
+                  int_tuple_to_struct(cast(tuple, global_size)), int_tuple_to_struct(cast(tuple, local_size)))
     for j, var in enumerate(self.vars): self.int_buf_view[j] = var_vals[var]
 
     command_buffer = send_message(self.device.mtl_queue, "commandBuffer")
