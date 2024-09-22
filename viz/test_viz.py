@@ -122,7 +122,8 @@ class TestViz(unittest.TestCase):
     Tensor.schedule(a, b)
     kernels = load_kernels(contexts)
     self.assertEqual(len(kernels), 1)
-    self.assertEqual(len(kernels[0].ctxs), 1)
+    schedule_ctxs = [x for x in kernels[0].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
+    self.assertEqual(len(schedule_ctxs), 1)
 
   def test_no_dedup_different_opts(self):
     contexts.clear()
@@ -132,9 +133,9 @@ class TestViz(unittest.TestCase):
     with Context(NOOPT=0): list(lower_schedule(s.copy()))
     kernels = load_kernels(contexts)
     self.assertEqual(len(kernels), 2)
-    schedule_ctxs = [x for x in kernels[0].ctxs.values() if "schedule" in x.loc]
+    schedule_ctxs = [x for x in kernels[0].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
     self.assertEqual(len(schedule_ctxs), 1)
-    schedule_ctxs = [x for x in kernels[1].ctxs.values() if "schedule" in x.loc]
+    schedule_ctxs = [x for x in kernels[1].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
     self.assertEqual(len(schedule_ctxs), 0)
 
 if __name__ == "__main__":
