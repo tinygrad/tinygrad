@@ -57,7 +57,7 @@ class MetalProgram:
     encoder = cdll.send_message(command_buffer, "computeCommandEncoder")
     cdll.send_message(encoder, "setComputePipelineState:", self.pipeline_state)
     for i,a in enumerate(bufs): cdll.send_message(encoder, "setBuffer:offset:atIndex:", a.buf, a.offset, i)
-    for i,a in enumerate(vals,start=len(bufs)): cdll.send_message(encoder, "setBytes:length:atIndex:", (ctypes.c_char * 4)(a), 4, i)
+    for i,a in enumerate(vals,start=len(bufs)): cdll.send_message(encoder, "setBytes:length:atIndex:", ctypes.c_int(a), 4, i)
     cdll.send_message(encoder, "dispatchThreadgroups:threadsPerThreadgroup:", cdll.int_tuple_to_struct(global_size), cdll.int_tuple_to_struct(local_size))
 
     cdll.send_message(encoder, "endEncoding")
