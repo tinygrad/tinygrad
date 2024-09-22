@@ -618,10 +618,10 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
   (UPat(UOps.ASSIGN, src=(UPat(UOps.DEFINE_ACC), UPat())), lambda: True),
   (UPat(UOps.ENDRANGE, dtype=dtypes.void, src=(UPat(UOps.RANGE),)), lambda: True),
 
-  # early WMMA has 2 args, <x, w>
-  (UPat(UOps.WMMA, src=(UPat(), UPat())), lambda: True),
-  # late WMMA has 3 args, <x, w, acc>
+  # all WMMA has 3 args, <x, w, acc>
   (UPat(UOps.WMMA, src=(UPat(), UPat(), UPat())), lambda: True),
+  (UPat(UOps.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
+  (UPat(UOps.EXPAND, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
 
   # if has a <gate, barrier>
   (UPat(UOps.IF, dtype=dtypes.void, src=(UPat(), UPat(UOps.BARRIER))), lambda: True),

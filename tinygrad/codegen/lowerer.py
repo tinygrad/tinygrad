@@ -35,16 +35,6 @@ def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int
           idx //= dims[c]
   return ret[::-1] if reverse else ret
 
-# TODO: move this to kernel.py, it doesn't depend on axes
-def lower_wmma(ctx: IndependentLowerer, x: UOp):
-  upcast_axes = x.arg[-2]
-  wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
-  ret = UOp(UOps.WMMA, dtype=x.dtype.vec(wmma_sz[2]), src=(
-    UOp(UOps.CONTRACT, dtype=x.src[0].dtype.vec(wmma_sz[0]), src=(x.src[0],), arg=upcast_axes[0]),
-    UOp(UOps.CONTRACT, dtype=x.src[1].dtype.vec(wmma_sz[1]), src=(x.src[1],), arg=upcast_axes[1]),
-    UOp.const(x.dtype.vec(wmma_sz[2]), 0.0)), arg=x.arg)
-  return UOp(UOps.EXPAND, x.dtype, (ret,), arg=upcast_axes[2])
-
 def lower_reduce_axis(ctx: IndependentLowerer, x: UOp):
   # NOTE: always using ridxs is fine here
   reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.arg[1]], lambda y: y.op is UOps.RANGE)
@@ -75,7 +65,6 @@ def lower_load_store(ctx: IndependentLowerer, x: UOp):
   return UOp(UOps.STORE, dtypes.void, (buf, idx, x.src[2]) + ((valid,) if has_valid else ()))
 
 pm_lowerer = PatternMatcher([
-  (UPat(UOps.WMMA, src=(UPat(), UPat()), name="x"), lower_wmma),   # 2 param -> 3 param WMMA
   (UPat(UOps.REDUCE_AXIS, name="x"), lower_reduce_axis),
   (UPat(UOps.VALID, src=(UPat(UOps.SHAPETRACKER),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
   # rewrite LOAD/STORE SHAPETRACKER to LOAD/STORE with indexed
