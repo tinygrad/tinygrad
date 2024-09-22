@@ -97,15 +97,17 @@ class MetalAllocator(LRUAllocator):
     ptr = (ctypes.c_char * src.nbytes).from_buffer(src)
     ret = cdll.send_message(self.device.device, "newBufferWithBytesNoCopy:length:options:deallocator:", ptr, src.nbytes, 0, None)
     if ret: self.device.mv_in_metal.append(src)
-    return MetalBuffer(src, ret, src.nbytes)
+    return MetalBuffer(ret, src.nbytes)
   def as_buffer(self, src:MetalBuffer) -> memoryview:
     self.device.synchronize()
     ptr = cdll.send_message(src.buf, "contents")
-    array = (ctypes.c_char * src.size).from_address(ptr.value)
+    array = (ctypes.c_char * (src.offset + src.size)).from_address(ptr.value)
     mem = memoryview(array).cast("B")
     return mem[src.offset:]
-  def copyin(self, dest:MetalBuffer, src:memoryview): self.as_buffer(dest)[:] = src
-  def copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self.as_buffer(src)
+  def copyin(self, dest:MetalBuffer, src:memoryview):
+    self.as_buffer(dest)[:] = src
+  def copyout(self, dest:memoryview, src:MetalBuffer):
+    dest[:] = self.as_buffer(src)
   def offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
 
 class MetalDevice(Compiled):
