@@ -148,7 +148,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
                            +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
     ubuf = UOp(UOps.DEFINE_GLOBAL, buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
                outputs.index(assign_targets[buf]) if buf in assign_targets else len(outputs)+inputs.setdefault(buf, len(inputs)))
-    return UOp(UOps.LOAD, dtype, (ubuf, unbound_st.to_uop()))
+    return UOp(UOps.LOAD, dtype, (ubuf.index(unbound_st.to_uop()),))
 
   # reduce ops change ShapeTracker
   if buf.op in ReduceOps:
@@ -182,7 +182,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
     output_st, vv = output_st.simplify().unbind()
     var_vals.update(vv)
     ubuf = UOp(UOps.DEFINE_GLOBAL, out.dtype if isinstance(out.dtype, ImageDType) else PtrDType(out.dtype), (), i)
-    ast.append(UOp(UOps.STORE, dtypes.void, (ubuf, output_st.to_uop(), src)))
+    ast.append(UOp(UOps.STORE, dtypes.void, (ubuf.index(output_st.to_uop()), src)))
   sink = full_ast_rewrite(ast[0].sink(*ast[1:]))
   return LBScheduleItem(sink, outs, list(inputs), dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])), var_vals
 
