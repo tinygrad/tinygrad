@@ -2,8 +2,8 @@ from __future__ import annotations
 import os, subprocess, pathlib, tempfile, functools
 from tinygrad.runtime.support.metal import send_message, libobjc, to_ns_str, libdispatch, int_tuple_to_struct, libmetal
 from typing import List, Any, Tuple, Optional, cast
-from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
-from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
+from tinygrad.helpers import prod, getenv, DEBUG
+from tinygrad.device import Compiled, Compiler, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 from ctypes import c_ulong, c_double, string_at, c_int, c_char
 

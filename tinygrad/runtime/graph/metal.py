@@ -46,7 +46,8 @@ class MetalGraph(GraphRunner):
         send_message(icb_command, "setKernelBuffer:offset:atIndex:", self.int_buf.buf, self.vars.index(v)*4, len(ji.bufs)+i)
 
       global_size, local_size = prg.p.launch_dims(var_vals)
-      send_message(icb_command, "concurrentDispatchThreadgroups:threadsPerThreadgroup:", int_tuple_to_struct(global_size), int_tuple_to_struct(local_size))
+      send_message(icb_command, "concurrentDispatchThreadgroups:threadsPerThreadgroup:",
+                   int_tuple_to_struct(global_size), int_tuple_to_struct(local_size))
       send_message(icb_command, "setBarrier")
 
     self.all_resources = dedup(all_resources)
