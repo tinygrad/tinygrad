@@ -6,7 +6,7 @@ from tinygrad import Tensor
 from tinygrad.engine.realize import lower_schedule
 from tinygrad.ops import UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.helpers import CI, all_same, DEBUG, colored, getenv
+from tinygrad.helpers import CI, Context, all_same, DEBUG, colored, getenv
 from tinygrad.codegen.uopgraph import constant_folder, devectorize, float4_folding
 from test.external.process_replay.helpers import print_diff
 from viz.serve import UOpRet, load_kernels
@@ -47,8 +47,8 @@ class TestViz(unittest.TestCase):
     list(lower_schedule(schedule2))
     ret = load_kernels(contexts)
     assert len(ret) == 2
-    assert all(len([x for x in y.ctxs if "schedule" in x.loc]) != 0 for y in ret)
-    assert all(len([x for x in y.ctxs if "uopgraph" in x.loc]) != 0 for y in ret)
+    assert all(len([x for x in y.ctxs.values() if "schedule" in x.loc]) != 0 for y in ret)
+    assert all(len([x for x in y.ctxs.values() if "uopgraph" in x.loc]) != 0 for y in ret)
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()
@@ -114,6 +114,29 @@ class TestViz(unittest.TestCase):
     simple_pm = PatternMatcher([(UPat(UOps.CONST), lambda:True)])
     simple_pm.rewrite(UOp.const(dtypes.int, 2))
     self.assertEqual(len(contexts), 0)
+
+  def test_dedup_ast(self):
+    contexts.clear()
+    a = Tensor.randn(4, 4)+2
+    b = Tensor.randn(4, 4)+2
+    Tensor.schedule(a, b)
+    kernels = load_kernels(contexts)
+    self.assertEqual(len(kernels), 1)
+    schedule_ctxs = [x for x in kernels[0].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
+    self.assertEqual(len(schedule_ctxs), 1)
+
+  def test_no_dedup_different_opts(self):
+    contexts.clear()
+    a = Tensor.empty(4, 4)+Tensor.empty(4, 4)
+    s = a.schedule()
+    with Context(NOOPT=1): list(lower_schedule(s.copy()))
+    with Context(NOOPT=0): list(lower_schedule(s.copy()))
+    kernels = load_kernels(contexts)
+    self.assertEqual(len(kernels), 2)
+    schedule_ctxs = [x for x in kernels[0].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
+    self.assertEqual(len(schedule_ctxs), 1)
+    schedule_ctxs = [x for x in kernels[1].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
+    self.assertEqual(len(schedule_ctxs), 0)
 
 if __name__ == "__main__":
   unittest.main()
