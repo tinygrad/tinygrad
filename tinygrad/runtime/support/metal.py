@@ -39,3 +39,7 @@ def int_tuple_to_struct(t: tuple[int, ...], _type: type = c_ulong):
   class Struct(Structure): pass
   Struct._fields_ = [(f"field{i}", _type) for i in range(len(t))]
   return Struct(*t)
+
+def dedup(items: list[objc_id]) -> list[objc_id]:
+  seen = set()
+  return [item for item in items if item.value not in seen and not seen.add(item.value)]
