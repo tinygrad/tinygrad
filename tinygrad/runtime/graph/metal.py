@@ -15,24 +15,19 @@ class MetalGraph(GraphRunner):
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
     # create metal batch exec
-    icb_descriptor = send_message(
-      libobjc.objc_getClass(b"MTLIndirectCommandBufferDescriptor"),
-      "new",
-    )
+    icb_descriptor = send_message(libobjc.objc_getClass(b"MTLIndirectCommandBufferDescriptor"), "new")
     send_message(icb_descriptor, "setCommandTypes:", 32)
     send_message(icb_descriptor, "setInheritBuffers:", False)
     send_message(icb_descriptor, "setInheritPipelineState:", False)
     send_message(icb_descriptor, "setMaxKernelBufferBindCount:", 31)
 
-    self.icb = send_message(self.device.device,
-      "newIndirectCommandBufferWithDescriptor:maxCommandCount:options:",
+    self.icb = send_message(self.device.device, "newIndirectCommandBufferWithDescriptor:maxCommandCount:options:",
       icb_descriptor, len(self.jit_cache),0)
     if self.icb.value is None: raise GraphException("create indirect command buffer failed, does your system support this?")
     self.needs_icb_fix = int(type(self.icb).__name__ != "AGXG15XFamilyIndirectCommandBuffer")    # not required on M3
 
     if len(self.vars): self.int_buf = self.device.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
-    all_resources = [self.int_buf.buf] if len(self.vars) else []
-    all_pipelines = []
+    all_resources, all_pipelines = [self.int_buf.buf] if len(self.vars) else [], []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
       icb_command = send_message(self.icb, "indirectComputeCommandAtIndex:", j)
@@ -50,8 +45,7 @@ class MetalGraph(GraphRunner):
                    int_tuple_to_struct(global_size), int_tuple_to_struct(local_size))
       send_message(icb_command, "setBarrier")
 
-    self.all_resources = dedup(all_resources)
-    self.all_pipelines = dedup(all_pipelines)
+    self.all_resources, self.all_pipelines = dedup(all_resources), dedup(all_pipelines)
     self.command_buffer: Any = None
     if len(self.vars): self.int_buf_view = self.device.allocator.as_buffer(self.int_buf).cast('i')
     self.range = int_tuple_to_struct((0, len(self.jit_cache)), c_ulong)

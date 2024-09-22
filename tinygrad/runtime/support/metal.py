@@ -31,8 +31,7 @@ def int_tuple_to_struct(t: Tuple[int, ...], _type: type = c_ulong):
   return Struct(*t)
 
 def dedup(items: List[objc_id]) -> List[objc_id]:
-  ret = []
-  seen = set()
+  ret, seen = [], set()
   for item in items:
     if item.value not in seen:
       seen.add(item.value)
