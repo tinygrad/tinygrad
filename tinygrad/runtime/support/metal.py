@@ -1,9 +1,10 @@
 from ctypes import CDLL, c_void_p, Structure, c_ulong
 from typing import Any, List, Tuple
 
-class objc_id(c_void_p):
+class objc_id(c_void_p): # Wrapping it so ctypes doesn't convert it to plain int
   def __hash__(self): return self.value
   def __eq__(self, other): return self.value == other.value
+  # def __del__(self): msg(self, "release")
 
 def load_library(path: str): return CDLL(path)
 
@@ -31,3 +32,7 @@ def int_tuple_to_struct(t: Tuple[int, ...], _type: type = c_ulong):
   class Struct(Structure): pass
   Struct._fields_ = [(f"field{i}", _type) for i in range(len(t))]
   return Struct(*t)
+
+MTLIndirectCommandTypeConcurrentDispatch = 0 # (1 << 5)
+MTLResourceCPUCacheModeDefaultCache = 0
+MTLResourceUsageRead_MTLResourceUsageWrite = 3 # MTLResourceUsageRead (01) | MTLResourceUsageWrite (10)
