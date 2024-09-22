@@ -1,8 +1,8 @@
 from typing import List, Any, Dict, cast, Optional
-from tinygrad.runtime.support.metal import send_message, libobjc, to_ns_array, int_tuple_to_struct
+from tinygrad.runtime.support.metal import send_message, libobjc, to_ns_array, int_tuple_to_struct, dedup
 from ctypes import c_ulong, c_double
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import dedup, getenv
+from tinygrad.helpers import getenv
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
@@ -49,8 +49,8 @@ class MetalGraph(GraphRunner):
       send_message(icb_command, "concurrentDispatchThreadgroups:threadsPerThreadgroup:", int_tuple_to_struct(global_size), int_tuple_to_struct(local_size))
       send_message(icb_command, "setBarrier")
 
-    self.all_resources = all_resources
-    self.all_pipelines = all_pipelines
+    self.all_resources = dedup(all_resources)
+    self.all_pipelines = dedup(all_pipelines)
     self.command_buffer: Any = None
     if len(self.vars): self.int_buf_view = self.device.allocator.as_buffer(self.int_buf).cast('i')
     self.range = int_tuple_to_struct((0, len(self.jit_cache)), c_ulong)
