@@ -116,6 +116,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(contexts), 0)
 
   def test_dedup_ast(self):
+    contexts.clear()
     a = Tensor.randn(4, 4)+2
     b = Tensor.randn(4, 4)+2
     Tensor.schedule(a, b)
@@ -124,6 +125,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(kernels[0].ctxs), 1)
 
   def test_no_dedup_different_opts(self):
+    contexts.clear()
     a = Tensor.empty(4, 4)+Tensor.empty(4, 4)
     s = a.schedule()
     with Context(NOOPT=1): list(lower_schedule(s.copy()))
