@@ -95,7 +95,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   ret = x.src[0]
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
     ret = UOp(UOps.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
-    ret = functools.reduce(lambda x,y: x.alu(x.alu_arg, y), [ret.gep(i) for i in range(ret.dtype.count)])
+    ret = functools.reduce(lambda a,b: a.alu(x.alu_arg, b), [ret.gep(i) for i in range(ret.dtype.count)])
   return UOp(UOps.REDUCE, x.dtype, (ret,) + tuple(reduce_range), x.alu_arg) if len(reduce_range) else ret
 
 def lower_load_store(ctx: IndexContext, x: UOp):
