@@ -12,8 +12,7 @@ from test.external.process_replay.helpers import print_diff
 PAGE_SIZE = 100
 REF = os.getenv("GITHUB_REF_NAME", "")
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
-RUN_ID = os.getenv("GITHUB_RUN_ID", "HEAD")
-TABLE_NAME = f"process_replay_{RUN_ID}_{getenv('GITHUB_RUN_ATTEMPT')}_{VERSION}"
+TABLE_NAME = f"process_replay_{VERSION}"
 os.environ["RUN_PROCESS_REPLAY"] = "0"
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -43,7 +42,7 @@ def diff_kernel(offset:int) -> bool:
   if early_stop.is_set(): return True
   conn = db_connection()
   cur = conn.cursor()
-  cur.execute(f"SELECT val FROM '{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
+  cur.execute(f"SELECT val FROM 'kernel_{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
   changed = 0
   for row in cur.fetchall():
     # try unpickle
@@ -54,7 +53,7 @@ def diff_kernel(offset:int) -> bool:
       continue
     # try linearize
     try:
-      with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache and k != "DEBUG"}):
+      with Context(**{k:v for k,v in ctx.ctx_vars.items() if k in ContextVar._cache and k != "DEBUG"}):
         k = Kernel(ast, opts=opts)
         for opt in applied_opts: k.apply_opt(opt)
         # NOTE: replay with the captured renderer, not the one in master
@@ -72,6 +71,7 @@ def diff_kernel(offset:int) -> bool:
       logging.info("PROCESS REPLAY DETECTED CHANGE")
       logging.info(ast)
       logging.info(applied_opts)
+      logging.info(ctx.loc)
       print_diff(good_src, compare_src)
       if ASSERT_DIFF: return True
       if changed > MAX_DIFF_PCT:
@@ -112,9 +112,9 @@ def process_replay_schedule() -> None:
 def process_replay_kernel() -> None:
   conn = db_connection()
   cur = conn.cursor()
-  try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
+  try: row_count = cur.execute(f"select count(*) from 'kernel_{TABLE_NAME}'").fetchone()[0]
   except sqlite3.OperationalError:
-    logging.warning(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
+    logging.warning(f"kernel_{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
     return None
   conn.commit()
   cur.close()

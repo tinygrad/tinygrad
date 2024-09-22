@@ -1715,7 +1715,7 @@ class TestHandCodedOpts(unittest.TestCase):
         k = Kernel(si.ast)
         k.hand_coded_optimizations()
         if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel)
-        if len(k.bufs) < 36: continue  # not a tile transform kernel (there's a permute kernel at the end)
+        if len(k.bufs) < 22: continue  # not a tile transform kernel (there's a permute kernel at the end)
         upcasts.append(tuple(k.full_shape[k.shape_len - k.upcasted:k.shape_len]))
       assert len(upcasts) == 3  # 3 transformation matrices
       assert len(wino_schedule) <= 4  # 4 kernels
