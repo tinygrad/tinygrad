@@ -1,6 +1,6 @@
 from typing import List, Any, Dict, cast, Optional
 from tinygrad.runtime.support.metal import send_message, libobjc, to_ns_array, int_tuple_to_struct
-from ctypes import c_uint, c_double
+from ctypes import c_ulong, c_double
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv
 from tinygrad.device import Buffer
@@ -53,7 +53,7 @@ class MetalGraph(GraphRunner):
     self.all_pipelines = all_pipelines
     self.command_buffer: Any = None
     if len(self.vars): self.int_buf_view = self.int_buf.buf.cast('i')
-    self.range = int_tuple_to_struct((0, len(self.jit_cache)), c_uint)
+    self.range = int_tuple_to_struct((0, len(self.jit_cache)), c_ulong)
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
 
