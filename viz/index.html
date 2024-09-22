@@ -182,9 +182,7 @@
     } catch {
       active = false;
     }
-    if (!active) {
-      document.querySelector('.status').textContent = `Connection to localhost:8000 failed, is VIZ=1 running?`;
-    }
+    document.querySelector('.status').textContent = active ? `` : `Connection to localhost:8000 failed, is VIZ=1 running?`;
   }
   var ret = {};
   var cache = {};
@@ -197,12 +195,13 @@
     // ** kernel list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
+      currentKernel = 0;
     }
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
-    Object.entries(kernels).forEach(([k,uopRewrites], i) => {
-      kernelUl = Object.assign(document.createElement("ul"), { innerHTML: `<p>${k}</p>`, key: `kernel-${i}`, className: i === currentKernel ? "active" : "" });
-      uopRewrites.forEach((u, j) => {
+    kernels.forEach((k, i) => {
+      kernelUl = Object.assign(document.createElement("ul"), { innerHTML: `<p>${k.name}</p>`, key: `kernel-${i}`, className: i === currentKernel ? "active" : "" });
+      k.ctxs.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: u, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
         if (i !== currentKernel) {
           rwUl.style.display = "none";
@@ -243,8 +242,8 @@
       const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${e}</code>`, className: "code-block" });
       metadata.appendChild(pre);
     })
-    if (ret[0].code !== "") {
-      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${ret[0].code}</code>`, className: "code-block" });
+    if (kernels[currentKernel].code !== "") {
+      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${kernels[currentKernel].code}</code>`, className: "code-block" });
       metadata.appendChild(pre);
     }
     // ** rewrite list
@@ -290,7 +289,7 @@
     if (event.key == "ArrowDown") {
       event.preventDefault()
       currentRewrite = 0;
-      const totalUOps = Array.from(Object.values(kernels))[currentKernel].length-1;
+      const totalUOps = kernels[currentKernel].ctxs.length-1;
       currentUOp = Math.min(totalUOps, currentUOp+1)
       main()
     }
@@ -307,7 +306,7 @@
       main()
     }
   })
-  setInterval(checkStatus, 1000);
+  setInterval(checkStatus, 5000);
   main()
   </script>
   </body>

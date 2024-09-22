@@ -12,8 +12,7 @@ from test.external.process_replay.helpers import print_diff
 PAGE_SIZE = 100
 REF = os.getenv("GITHUB_REF_NAME", "")
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
-RUN_ID = os.getenv("GITHUB_RUN_ID", "HEAD")
-TABLE_NAME = f"process_replay_{RUN_ID}_{getenv('GITHUB_RUN_ATTEMPT')}_{VERSION}"
+TABLE_NAME = f"process_replay_{VERSION}"
 os.environ["RUN_PROCESS_REPLAY"] = "0"
 early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -28,7 +27,7 @@ if REF == "master": SKIP_PROCESS_REPLAY = True
 def diff_schedule(offset:int) -> bool:
   conn = db_connection()
   cur = conn.cursor()
-  cur.execute(f"SELECT val FROM 'schedule_diff_{VERSION}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
+  cur.execute(f"SELECT val FROM 'schedule_{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
   changed = 0
   for row in cur.fetchall():
     changed += 1
@@ -43,7 +42,7 @@ def diff_kernel(offset:int) -> bool:
   if early_stop.is_set(): return True
   conn = db_connection()
   cur = conn.cursor()
-  cur.execute(f"SELECT val FROM '{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
+  cur.execute(f"SELECT val FROM 'kernel_{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
   changed = 0
   for row in cur.fetchall():
     # try unpickle
@@ -54,7 +53,7 @@ def diff_kernel(offset:int) -> bool:
       continue
     # try linearize
     try:
-      with Context(**{k:v for k,v in ctx.items() if k in ContextVar._cache and k != "DEBUG"}):
+      with Context(**{k:v for k,v in ctx.ctx_vars.items() if k in ContextVar._cache and k != "DEBUG"}):
         k = Kernel(ast, opts=opts)
         for opt in applied_opts: k.apply_opt(opt)
         # NOTE: replay with the captured renderer, not the one in master
@@ -72,6 +71,7 @@ def diff_kernel(offset:int) -> bool:
       logging.info("PROCESS REPLAY DETECTED CHANGE")
       logging.info(ast)
       logging.info(applied_opts)
+      logging.info(ctx.loc)
       print_diff(good_src, compare_src)
       if ASSERT_DIFF: return True
       if changed > MAX_DIFF_PCT:
@@ -98,12 +98,12 @@ def _pmap(row_count:int, fxn:Callable[[int], bool], maxtasksperchild:int=16) -> 
 def process_replay_schedule() -> None:
   conn = db_connection()
   cur = conn.cursor()
-  try: has_diff = cur.execute(f"select name from sqlite_master where type='table' and name='schedule_diff_{VERSION}'").fetchone()
+  try: has_diff = cur.execute(f"select name from sqlite_master where type='table' and name='schedule_{TABLE_NAME}'").fetchone()
   except sqlite3.OperationalError:
-    logging.warning(f"schedule_diff_{VERSION} isn't accessible in master, did DB_VERSION change?")
+    logging.warning(f"schedule_{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
     return
   if has_diff:
-    row_count = cur.execute(f"select count(*) from 'schedule_diff_{VERSION}'").fetchone()[0]
+    row_count = cur.execute(f"select count(*) from 'schedule_{TABLE_NAME}'").fetchone()[0]
     if row_count != 0: logging.info("***** schedule diff")
     conn.commit()
     cur.close()
@@ -112,9 +112,9 @@ def process_replay_schedule() -> None:
 def process_replay_kernel() -> None:
   conn = db_connection()
   cur = conn.cursor()
-  try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
+  try: row_count = cur.execute(f"select count(*) from 'kernel_{TABLE_NAME}'").fetchone()[0]
   except sqlite3.OperationalError:
-    logging.warning(f"{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
+    logging.warning(f"kernel_{TABLE_NAME} isn't accessible in master, did DB_VERSION change?")
     return None
   conn.commit()
   cur.close()
@@ -127,6 +127,8 @@ if __name__ == "__main__":
     logging.info("skipping process replay.")
     exit(0)
 
+  logging.info("***** process replay config")
+  logging.info(f"{ASSERT_DIFF=}")
   logging.info("***** schedule diff")
   try: process_replay_schedule()
   except Exception as e:
