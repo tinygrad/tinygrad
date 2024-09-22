@@ -5,11 +5,11 @@ from typing import List, Any, Tuple, Optional, cast
 from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.device import Compiled, Compiler, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
-from ctypes import c_ulong, c_double, string_at, c_int, c_char
+import ctypes
 
 def wait_check(cbuf: Any):
   msg(cbuf, "waitUntilCompleted")
-  if (error := msg(cbuf, "error", restype=c_ulong)) != 0: raise RuntimeError(error)
+  if (error := msg(cbuf, "error", restype=ctypes.c_ulong)) != 0: raise RuntimeError(error)
 
 class MetalCompiler(Compiler):
   def __init__(self, device:Optional[MetalDevice]):
@@ -25,8 +25,8 @@ class MetalCompiler(Compiler):
     library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(src), options, None, restype=objc_instance)
     library_contents_ptr = msg(library, "libraryDataContents")
     library_contents_bytes_ptr = msg(library_contents_ptr, "bytes")
-    library_length = cast(int, msg(library_contents_ptr, "length", restype=c_ulong))
-    return string_at(library_contents_bytes_ptr, library_length)
+    library_length = cast(int, msg(library_contents_ptr, "length", restype=ctypes.c_ulong))
+    return ctypes.string_at(library_contents_bytes_ptr, library_length)
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
@@ -49,19 +49,19 @@ class MetalProgram:
                                        descriptor, 0, None, None, restype=objc_instance)
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    if prod(local_size) > msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=c_ulong):
+    if prod(local_size) > msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=ctypes.c_ulong):
       raise RuntimeError("local size too big")
     command_buffer = msg(self.device.mtl_queue, "commandBuffer")
     encoder = msg(command_buffer, "computeCommandEncoder")
     msg(encoder, "setComputePipelineState:", self.pipeline_state)
     for i,a in enumerate(bufs): msg(encoder, "setBuffer:offset:atIndex:", a.buf, a.offset, i)
-    for i,a in enumerate(vals,start=len(bufs)): msg(encoder, "setBytes:length:atIndex:", bytes(c_int(a)), 4, i)
+    for i,a in enumerate(vals,start=len(bufs)): msg(encoder, "setBytes:length:atIndex:", bytes(ctypes.c_int(a)), 4, i)
     msg(encoder, "dispatchThreadgroups:threadsPerThreadgroup:", int_tuple_to_struct(global_size), int_tuple_to_struct(local_size))
     msg(encoder, "endEncoding")
     msg(command_buffer, "commit")
     if wait:
       wait_check(command_buffer)
-      return msg(command_buffer, "GPUEndTime", restype=c_double) - msg(command_buffer, "GPUStartTime", restype=c_double)
+      return msg(command_buffer, "GPUEndTime", restype=ctypes.c_double) - msg(command_buffer, "GPUStartTime", restype=ctypes.c_double)
     self.device.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalBuffer:
@@ -92,14 +92,14 @@ class MetalAllocator(LRUAllocator):
     msg(src_command_buffer, "commit")
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
   def from_buffer(self, src:memoryview) -> Optional[Any]:
-    ptr = (c_char * src.nbytes).from_buffer(src)
+    ptr = (ctypes.c_char * src.nbytes).from_buffer(src)
     ret = msg(self.device.device, "newBufferWithBytesNoCopy:length:options:deallocator:", ptr, src.nbytes, 0, None, restype=objc_instance)
     if ret: self.device.mv_in_metal.append(src)
     return MetalBuffer(ret, src.nbytes)
   def as_buffer(self, src:MetalBuffer) -> memoryview:
     self.device.synchronize()
     ptr = msg(src.buf, "contents")
-    array = (c_char * (src.offset + src.size)).from_address(ptr.value)
+    array = (ctypes.c_char * (src.offset + src.size)).from_address(ptr.value)
     return memoryview(array).cast("B")[src.offset:]
   def copyin(self, dest:MetalBuffer, src:memoryview): self.as_buffer(dest)[:] = src
   def copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self.as_buffer(src)

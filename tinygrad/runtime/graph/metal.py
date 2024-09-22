@@ -1,7 +1,7 @@
 from typing import List, Any, Dict, cast, Optional
 from tinygrad.runtime.support.metal import msg, libobjc, to_ns_array, int_tuple_to_struct, objc_instance, MTLResourceUsage, \
   MTLIndirectCommandType, MTLResourceOptions
-from ctypes import c_ulong, c_double
+import ctypes
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv
 from tinygrad.device import Buffer
@@ -28,7 +28,8 @@ class MetalGraph(GraphRunner):
     self.needs_icb_fix = int(type(self.icb).__name__ != "AGXG15XFamilyIndirectCommandBuffer")    # not required on M3
 
     if len(self.vars): self.int_buf = self.device.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
-    all_resources, all_pipelines = [self.int_buf.buf] if len(self.vars) else [], []
+    all_resources = [self.int_buf.buf] if len(self.vars) else []
+    all_pipelines = []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
       icb_command = msg(self.icb, "indirectComputeCommandAtIndex:", j, restype=objc_instance)
@@ -50,7 +51,7 @@ class MetalGraph(GraphRunner):
     self.all_pipelines = dedup(all_pipelines)
     self.command_buffer: Any = None
     if len(self.vars): self.int_buf_view = self.device.allocator.as_buffer(self.int_buf).cast('i')
-    self.range = int_tuple_to_struct((0, len(self.jit_cache)), c_ulong)
+    self.range = int_tuple_to_struct((0, len(self.jit_cache)), ctypes.c_ulong)
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
 
@@ -92,6 +93,6 @@ class MetalGraph(GraphRunner):
 
     if wait:
       wait_check(command_buffer)
-      return msg(command_buffer, "GPUEndTime", restype=c_double) - msg(command_buffer, "GPUStartTime", restype=c_double)
+      return msg(command_buffer, "GPUEndTime", restype=ctypes.c_double) - msg(command_buffer, "GPUStartTime", restype=ctypes.c_double)
     self.device.mtl_buffers_in_flight.append(command_buffer)
     return None

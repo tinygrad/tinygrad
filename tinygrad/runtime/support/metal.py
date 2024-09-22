@@ -1,14 +1,14 @@
-from ctypes import CDLL, c_void_p, Structure, c_ulong
+import ctypes
 from typing import Any, List, Tuple
 
-class objc_id(c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
+class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
   def __hash__(self): return self.value
   def __eq__(self, other): return self.value == other.value
 
 class objc_instance(objc_id): # method with name "new", "alloc" should be freed after use
   def __del__(self): msg(self, "release")
 
-def load_library(path: str): return CDLL(path)
+def load_library(path: str): return ctypes.CDLL(path)
 
 libobjc = load_library("/usr/lib/libobjc.dylib")
 libmetal = load_library("/Library/Frameworks/Metal.framework/Metal")
@@ -30,8 +30,8 @@ def to_ns_str(s: str) -> objc_instance: return msg(libobjc.objc_getClass(b"NSStr
 
 def to_ns_array(items: List[Any]): return (objc_instance * len(items))(*items)
 
-def int_tuple_to_struct(t: Tuple[int, ...], _type: type = c_ulong):
-  class Struct(Structure): pass
+def int_tuple_to_struct(t: Tuple[int, ...], _type: type = ctypes.c_ulong):
+  class Struct(ctypes.Structure): pass
   Struct._fields_ = [(f"field{i}", _type) for i in range(len(t))]
   return Struct(*t)
 
