@@ -79,7 +79,7 @@ def push_swizzle_up_through_reduce(swizzle:UOp, reduceop:UOp) -> Optional[UOp]:
   _, new_rshape = permute_reduce(new_input_st, reduceop.arg[1])
   new_axis = tuple(range(len(new_input_st.shape)-len(new_rshape), len(new_input_st.shape)))
   return UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda st:st+new_input_st, {}),),
-             (reduceop.arg[0], new_axis)).swizzle(ShapeTracker.from_shape(swizzle_st.shape))
+             (reduceop.alu_arg, new_axis)).swizzle(ShapeTracker.from_shape(swizzle_st.shape))
 
 def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:
   swizzle_st = unwrap(swizzle.st)
@@ -99,10 +99,10 @@ def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   return ret if ret.op is UOps.STORE else ret.swizzle(ShapeTracker.from_shape(new_shape))
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
-  assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
+  assert root.alu_arg == first_reduce.alu_arg, "can't merge reduceops with different alu"
   assert not any(x.op is UOps.REDUCE_AXIS for x in first_reduce.parents), "can't merge more than two reduceops at a time"
   new_axis: Tuple[int, ...] = root.arg[1]+first_reduce.arg[1]
-  return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], new_axis))
+  return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.alu_arg, new_axis))
 
 reduceop_fusor = PatternMatcher([
   # push a SWIZZLE up to LOAD, through a reduce (eg. expands)

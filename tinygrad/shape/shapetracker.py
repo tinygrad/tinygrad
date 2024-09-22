@@ -104,8 +104,8 @@ class ShapeTracker:
     idx = graph_rewrite(idx, pm=constant_folder)
     for c in _get_chain(idx, BinaryOps.ADD):
       if c.op is UOps.RANGE: ret[c.arg] = 1
-      if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[0].op is UOps.RANGE and c.src[1].op is UOps.CONST: ret[c.src[0].arg] = c.src[1].arg
-      if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[1].op is UOps.RANGE and c.src[0].op is UOps.CONST: ret[c.src[1].arg] = c.src[0].arg
+      if c.op is UOps.ALU and c.alu_arg is BinaryOps.MUL and c.src[0].op is UOps.RANGE and c.src[1].op is UOps.CONST: ret[c.src[0].arg] = c.src[1].arg
+      if c.op is UOps.ALU and c.alu_arg is BinaryOps.MUL and c.src[1].op is UOps.RANGE and c.src[0].op is UOps.CONST: ret[c.src[1].arg] = c.src[0].arg
     used_ranges = [x.arg for x in graph_rewrite(idx, pm=constant_folder).sparents if x.op is UOps.RANGE]
     ret = [x if i in used_ranges else 0 for i,x in enumerate(ret)]
     if not ignore_valid:
