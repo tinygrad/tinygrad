@@ -304,15 +304,18 @@ class QCOMAllocator(HCQAllocator):
 
     return self.device._gpu_alloc(size, map_to_cpu=True)
 
-  def copyin(self, dest:HCQBuffer, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
+  def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, dest_off=0, src_off=0):
+    while src_off < src_size:
+      ctypes.memmove(dest_addr+dest_off, src_addr+src_off, real_size)
+      src_off, dest_off = src_off+src_stride, dest_off+dest_stride
+
+  def copyin(self, dest:HCQBuffer, src:memoryview):
+    if hasattr(dest, 'pitch'): self._do_copy(mv_address(src), dest.va_addr, len(src), dest.real_stride, dest.real_stride, dest.pitch)
+    else: ctypes.memmove(dest.va_addr, mv_address(src), src.nbytes)
 
   def copyout(self, dest:memoryview, src:HCQBuffer):
     self.device.synchronize()
-    if hasattr(src, 'pitch'):
-      doff, soff = 0, 0
-      while soff < src.size:
-        ctypes.memmove(mv_address(dest)+doff, src.va_addr+soff, src.real_stride)
-        soff, doff = soff+src.pitch, doff+src.real_stride
+    if hasattr(src, 'pitch'): self._do_copy(src.va_addr, mv_address(dest), src.size, src.real_stride, src.pitch, src.real_stride)
     else: ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
 
   def as_buffer(self, src:HCQBuffer) -> memoryview:
