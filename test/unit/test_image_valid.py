@@ -120,7 +120,7 @@ class TestValidSimplification(unittest.TestCase):
 
     # TODO: simplify further
     self.assertEqual(render(shape, valid, idx),
-                     "(((((idx1*8)+ridx2)<1)!=1)?read_imagef(data0, smp, (int2)((((idx1*48)+(ridx2*6)+ridx0+1530)%1536),((idx2*2)+ridx1+((idx1+((ridx2+7)//8)+31)//32)+(-2)))):(float4)(0.0f,0.0f,0.0f,0.0f))")  # noqa: E501
+                     "(((((idx2+ridx1)<1)!=1)&(((idx1+ridx2)<1)!=1))?read_imagef(data0, smp, (int2)((((idx1*48)+(ridx2*6)+ridx0+1530)%1536),((idx2*2)+ridx1+((idx1+((ridx2+7)//8)+31)//32)+(-2)))):(float4)(0.0f,0.0f,0.0f,0.0f))")  # noqa: E501
 
   def test_openpilot_conv2(self):
     # conv in test/external/external_test_valid_remove.py
@@ -141,7 +141,7 @@ class TestValidSimplification(unittest.TestCase):
     idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((alu3+765)%768, alu1+((idx1+((ridx2+7)//8)+31)//32)+(-2)))
 
     self.assertEqual(render(shape, valid, idx),
-                     "(((((idx1*8)+ridx2)<1)!=1)?read_imagef(data0, smp, (int2)((((idx1*24)+(ridx2*3)+ridx0+765)%768),((idx2*2)+ridx1+((idx1+((ridx2+7)//8)+31)//32)+(-2)))):(float4)(0.0f,0.0f,0.0f,0.0f))")  # noqa: E501
+                     "(((((idx2+ridx1)<1)!=1)&(((idx1+ridx2)<1)!=1))?read_imagef(data0, smp, (int2)((((idx1*24)+(ridx2*3)+ridx0+765)%768),((idx2*2)+ridx1+((idx1+((ridx2+7)//8)+31)//32)+(-2)))):(float4)(0.0f,0.0f,0.0f,0.0f))")  # noqa: E501
 
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)
