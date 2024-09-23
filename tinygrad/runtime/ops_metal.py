@@ -63,8 +63,9 @@ class MetalCompiler(Compiler):
     compileError = objc_instance(0)
     library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(src),
                   options, ctypes.byref(compileError), restype=objc_instance)
-    if library.value is None: raise CompileError("Metal compile failed: " + bytes(msg(
-        msg(compileError, "localizedDescription", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode())
+    if library.value is None:
+      raise CompileError("Metal compile failed: " + bytes(msg(msg(compileError, "localizedDescription", restype=objc_instance),
+                                                              "UTF8String", restype=ctypes.c_char_p)).decode())
     library_contents = msg(library, "libraryDataContents", restype=objc_instance)
     return ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
 
@@ -115,7 +116,8 @@ class MetalAllocator(LRUAllocator):
     self.device:MetalDevice = device
     super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
-    ret = msg(self.device.device, "newBufferWithLength:options:", size, MTLResourceOptions.MTLResourceStorageModeShared, restype=objc_instance)
+    # Restype set to objc_id so the buffer has to be manually released by _free
+    ret = msg(self.device.device, "newBufferWithLength:options:", size, MTLResourceOptions.MTLResourceStorageModeShared, restype=objc_id)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): msg(opaque.buf, "release")
@@ -141,7 +143,7 @@ class MetalAllocator(LRUAllocator):
     return MetalBuffer(ret, src.nbytes)
   def as_buffer(self, src:MetalBuffer) -> memoryview:
     self.device.synchronize()
-    ptr = msg(src.buf, "contents", restype=objc_id) # Weak reference
+    ptr = msg(src.buf, "contents", restype=objc_id) # objc_id so we don't release when ptr goes out of scope
     array = (ctypes.c_char * (src.offset + src.size)).from_address(ptr.value)
     return memoryview(array).cast("B")[src.offset:]
   def copyin(self, dest:MetalBuffer, src:memoryview): self.as_buffer(dest)[:] = src
