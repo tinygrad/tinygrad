@@ -103,19 +103,23 @@ class UOps(FastEnum):
   VALID = auto()
   SPECIAL = auto()
   NOOP = auto()
-  GEP = auto()
-
-  # math ops
-  CAST = auto()
-  BITCAST = auto()
-  VECTORIZE = auto()
-  ALU = auto()
   REDUCE = auto()
   REDUCE_AXIS = auto()
+
+  # helper ops
+  GEP = auto()
+  VECTORIZE = auto()
+  CAST = auto()
+  BITCAST = auto()
+
+  # loads before math
+  LOAD = auto()
+
+  # math ops
+  ALU = auto()
   WMMA = auto()
 
-  # memory/assignment ops
-  LOAD = auto()
+  # assignment ops
   STORE = auto()
   ASSIGN = auto()
 
@@ -170,11 +174,9 @@ class UOp(MathTrait):
     return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else repr(self.arg) if isinstance(self.arg, Variable) else self.arg
   # *** uop syntactic sugar
   @property
-  def st_loc(self) -> int: return 0 if self.op is UOps.VALID else 1
-  @property
   def st_arg(self) -> ShapeTracker:
     assert self.op in BUFFER_UOPS, f"st_arg called on {self.op}"
-    ret = self.src[self.st_loc]
+    ret = self.src[0 if self.op is UOps.VALID else 1]
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
@@ -219,16 +221,14 @@ class UOp(MathTrait):
   @staticmethod
   def range(dtype:DType, start:ConstType, end:ConstType, idx:int):
     return UOp(UOps.RANGE, dtype=dtype, src=(UOp.const(dtype, start), UOp.const(dtype, end)), arg=(idx,))
-  def reduce(self, op, *rng): return UOp(UOps.REDUCE, self.dtype, (self,) + rng, op)
+  def reduce(self, op:BinaryOps, *rng:UOp): return UOp(UOps.REDUCE, self.dtype, (self,) + rng, op)
   @functools.cached_property
-  def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents.keys()}}
+  def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents}}
   @property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
-    if self.op is UOps.SHAPETRACKER: return self.arg.shape
-    # NOTE: UOps.DEFINE_GLOBAL and UOps.DEFINE_LOCAL don't have shape
-    return tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
+    return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
@@ -404,7 +404,7 @@ class UPat(MathTrait):
     # repeat if it's a UPat
     elif isinstance(src, UPat): self.src = [itertools.repeat(src)]
 
-    self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
+    self.allowed_len: int = -1 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
     self.location = location or get_location()
 
     if custom_early_reject is not None: self.early_reject = custom_early_reject
@@ -457,7 +457,7 @@ class UPat(MathTrait):
       (self.dtype is not None and uop.dtype not in self.dtype) or \
       (self.arg is not None and self.arg != uop.arg) or \
       (self.op is not None and uop.op not in self.op) or \
-      (self.allowed_len != 0 and len(uop.src) != self.allowed_len): return []
+      (self.allowed_len != -1 and len(uop.src) != self.allowed_len): return []
     if self.src is None: return [store]
     res: List[Dict[str, UOp]] = []
     for vp in self.src:
@@ -534,19 +534,19 @@ if TRACK_MATCH_STATS:
   import atexit, pickle
   @atexit.register
   def print_match_stats():
-    ret = [0,0,0.0,0.0]
-    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
-      loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
-      if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {v[2]*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
-      ret = [x+y for x,y in zip(ret, v)]
-    print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {ret[2]*1000.:9.2f} ms -- TOTAL")
     if TRACK_MATCH_STATS >= 2:
       with open("/tmp/rewrites.pkl", "wb") as f:
         print(f"rewrote {len(contexts)} graphs and applied {sum(len(x.rewrites) for x in contexts)} rules, saved to /tmp/rewrites.pkl")
         pickle.dump(contexts, f)
     if getenv("VIZ"):
       import viz.serve
-      viz.serve.main()
+      return viz.serve.main()
+    ret = [0,0,0.0,0.0]
+    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
+      loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
+      if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {v[2]*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
+      ret = [x+y for x,y in zip(ret, v)]
+    print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {ret[2]*1000.:9.2f} ms -- TOTAL")
 
 # *** simple graph rewrite engine ***
 
@@ -574,14 +574,17 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
 spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.bool, r) if (r:=fxn(**kw)) is not None else None, y)) for (x,y) in [
-  (UPat(UOps.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType))),
-  (UPat(UOps.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType)),
+  (UPat(UOps.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
+  (UPat(UOps.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
   (UPat(UOps.DEFINE_ACC, src=(UPat(UOps.CONST, name="c"),), name="x", allow_any_len=True),
    lambda x,c: all(y.op is UOps.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
   (UPat(UOps.DEFINE_VAR, src=(), name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
   (UPat(UOps.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
   (UPat(UOps.SPECIAL, src=()), lambda: True),
+
+  # no pyint allowed here!
+  (UPat(UOps.ALU, dtype=dtypes.pyint), lambda: False),
 
   # TODO: confirm the args of both of these are shapetrackers
   (UPat(UOps.SHAPETRACKER, src=()), lambda: True),
@@ -615,7 +618,7 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
   (UPat(UOps.ALU, arg=BinaryOps.IDIV, name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(UOps.ALU, name="x"), lambda x: all(x.dtype == y.dtype for y in x.src)),
 
-  (UPat(UOps.ASSIGN, src=(UPat(UOps.DEFINE_ACC), UPat())), lambda: True),
+  (UPat(UOps.ASSIGN, src=(UPat((UOps.DEFINE_ACC, UOps.DEFINE_GLOBAL)), UPat())), lambda: True),
   (UPat(UOps.ENDRANGE, dtype=dtypes.void, src=(UPat(UOps.RANGE),)), lambda: True),
 
   # all WMMA has 3 args, <x, w, acc>

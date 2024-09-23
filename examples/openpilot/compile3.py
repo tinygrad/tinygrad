@@ -3,6 +3,7 @@ import numpy as np
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
 if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
 if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
+if "NATIVE_MATH" not in os.environ: os.environ["NATIVE_MATH"] = "1"
 
 from tinygrad import fetch, Tensor, TinyJit, Device, Context, GlobalCounters
 from tinygrad.helpers import OSX, DEBUG, Timing

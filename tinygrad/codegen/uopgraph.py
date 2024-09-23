@@ -143,7 +143,6 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   return quo if rem is None else cast(UOp, div_folding(rem, div))//(c//div)+quo
 
 def lt_folding(x:UOp, c:int) -> Optional[UOp]:
-  if (newx:=div_folding(x,c)) is not None and newx.op is UOps.ALU and newx.arg is BinaryOps.IDIV: return newx.src[0].lt(newx.src[1])
   return cast(UOp, x.divides(g)).lt(c//g) if ((g:=math.gcd(x.const_factor(), c)) > 1) else None
 
 def fold_unrolled_divs(divs:UOp):
@@ -163,16 +162,31 @@ def fold_unrolled_divs(divs:UOp):
 
 # ***** image load valid simplification *****
 
+def is_irreducible(u:UOp): return u.op in (UOps.DEFINE_VAR, UOps.SPECIAL, UOps.RANGE)
+
+def canonicalize_simplex(X:UOp) -> Optional[UOp]:
+  # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
+  # returns x0 + x1 + ... in such case, or None if not
+  changed, ret = False, []
+  for u in _get_chain(X, BinaryOps.ADD):
+    # assumed the const is the last src of MUL
+    if u.op is UOps.ALU and u.arg is BinaryOps.MUL and u.src[1].op is UOps.CONST and u.src[1].arg > 0:
+      changed = True
+      u = u.src[0]
+    if not (is_irreducible(u) and u.vmin >= 0): return None
+    ret.append(u)
+  return functools.reduce(operator.add, ret) if changed else None
+
 def is_increasing(f:UOp):
   # is f a monotonically increasing function regards its input
-  if f.op in [UOps.CONST, UOps.DEFINE_VAR, UOps.SPECIAL, UOps.RANGE]: return True
+  if f.op is UOps.CONST or is_irreducible(f): return True
   if f.op is UOps.ALU and f.arg is BinaryOps.ADD: return is_increasing(f.src[0]) and is_increasing(f.src[1])
   if f.op is UOps.ALU and f.arg in (BinaryOps.MUL, BinaryOps.IDIV) and f.src[1].op is UOps.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
   return False  # False if not sure
 
 def replace_uop(uop:UOp, old:UOp, new:UOp):
   # replace all `old` in `uop` to `new`
-  return new if uop is old else UOp(uop.op, uop.dtype, tuple(replace_uop(s, old, new) for s in uop.src), uop.arg)
+  return new if uop.key == old.key else UOp(uop.op, uop.dtype, tuple(replace_uop(s, old, new) for s in uop.src), uop.arg)
 
 def parse_valid(valid:UOp) -> Tuple[UOp, bool, int]:
   # if it's X <= c, returns X, True, c
@@ -196,29 +210,50 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
     expr, is_upper, c = parse_valid(stmt)
     bounds[expr][int(is_upper)] = c
 
+  # simplify idx given that valid is True
   for uop,v in bounds.items():
     # some expr has lower bound > upper bound -> valid is an empty set
     if v[0] is not None and v[1] is not None and v[0] > v[1]:
       return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, valid.const_like(False)))
-    new = UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1])
-    newidx = replace_uop(graph_rewrite(replace_uop(idx, uop, new), constant_folder), new, uop)
-    if newidx.key != idx.key: idx = newidx
 
+    if uop.op is UOps.ALU and uop.arg is BinaryOps.ADD and all(is_irreducible(u) and u.vmin == 0 for u in _get_chain(uop, BinaryOps.ADD)):
+      # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
+      newidxs: List[List[UOp]] = [[], []]
+      for variable in _get_chain(uop, BinaryOps.ADD):
+        new = UOp(UOps.DEFINE_VAR, variable.dtype, (), ("fake", 1, variable.vmax))
+        newidx = replace_uop(graph_rewrite(replace_uop(idx, variable, new), constant_folder), new, variable)
+        newidxs[0].append(newidx.src[0])
+        newidxs[1].append(newidx.src[1])
+
+      if len(newidxs[0])==1 or (len(newidxs[0]) > 1 and all_same([i.key for i in newidxs[0]])): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
+      if len(newidxs[1])==1 or (len(newidxs[1]) > 1 and all_same([i.key for i in newidxs[1]])): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
+
+    else:
+      new = UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1])
+      newidx = replace_uop(graph_rewrite(replace_uop(idx, uop, new), constant_folder), new, uop)
+      if newidx.key != idx.key: idx = newidx
+
+  # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
   for stmt in _get_chain(valid, BinaryOps.AND):
-    X, is_upper, c = parse_valid(stmt)
-    if is_upper:
-      # X <= c, check if it's out of bound when X = c+1
-      for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
-        if is_increasing(i) and graph_rewrite(replace_uop(i, X, X.const_like(c+1)), constant_folder).vmin >= b:
-          drop_stmt.append(stmt)
-          break
-    else:
-      # X >= c, check if it's negative when X = c-1
-      for i in idx.src:
-        if is_increasing(i) and graph_rewrite(replace_uop(i, X, X.const_like(c-1)), constant_folder).vmax < 0:
-          drop_stmt.append(stmt)
-          break
+    X, is_upper_bound, c = parse_valid(stmt)
+
+    # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
+    if not is_upper_bound and c == 1 and X.op is UOps.ALU and X.arg is BinaryOps.ADD and \
+      all(is_irreducible(u) and u.vmin == 0 for u in _get_chain(X, BinaryOps.ADD)):
+      testidx = functools.reduce(lambda nowidx,u: replace_uop(nowidx, u, u.const_like(0)), _get_chain(X, BinaryOps.ADD), idx)
+      testidx = graph_rewrite(testidx, constant_folder)
+      if testidx.src[0].vmax < 0 or testidx.src[1].vmax < 0:
+        drop_stmt.append(stmt)
+        continue
+
+    # if X <= c, check if it's out of bound when X = c+1
+    # if X >= c, check if it's out of bound when X = c-1
+    test_value = c + 1 if is_upper_bound else c - 1
+    for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
+      if is_increasing(i):
+        rw = graph_rewrite(replace_uop(i, X, X.const_like(test_value)), constant_folder)
+        if rw.vmin >= b or rw.vmax < 0: drop_stmt.append(stmt)
 
   if drop_stmt or idx.key != start_idx.key:
     new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
@@ -311,6 +346,8 @@ constant_folder = PatternMatcher([
   (UPat(UOps.ALU, dtypes.bool, arg=BinaryOps.MUL, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.AND)),
   # self ASSIGN is just self
   (UPat(UOps.ASSIGN, src=(UPat.var('x'), UPat.var('x'))), lambda x: x),
+  # ASSIGN to global is just self
+  (UPat(UOps.ASSIGN, src=(UPat(UOps.DEFINE_GLOBAL), UPat.var("x"))), lambda x: x),
   # VECTORIZE/GEP: the expander rule allows tuple GEP creation, this is just for removal
   (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"),
    lambda vec,x: x if x.dtype == vec.dtype and tuple(y.arg[0] for y in vec.src) == tuple(range(len(vec.src))) else None),
@@ -418,6 +455,9 @@ constant_folder = PatternMatcher([
   # generic lt folding
   (UPat.var("x").lt(UPat.cvar("c", vec=False)),
     lambda x,c: lt_folding(x, c.arg) if 0 < c.arg and dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
+  # canonicalize a simplex with positive coefficients > 0
+  # not x < 1 -> X > 0
+  (UPat.var("x").lt(1).ne(True), lambda x: newx.lt(1).ne(True) if dtypes.is_int(x.dtype) and (newx:=canonicalize_simplex(x)) is not None else None),
   # ** div **
   # # div folding
   (UPat.var("x") // UPat.cvar("c", vec=False), lambda x,c:
@@ -465,6 +505,9 @@ constant_folder = PatternMatcher([
   # ** move add consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
+  # ** move mul consts to end (NOTE: this is still happening before constant folding) **
+  (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x*c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
+  (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
 ])
 
 # *** uop expander ***
@@ -705,8 +748,8 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
   range_phi = {r:[p for p in scope_children[r] if p.op is UOps.ASSIGN] for r in scope_children if r.op is UOps.RANGE}
 
-  queue:List[Tuple[int, UOp]] = []
-  def push(u:UOp):
+  # assign priorities
+  def get_priority(u:UOp):
     priority = 0
     # prefer ranges that depend on the least number of independent ranges
     if u.op is UOps.RANGE and u.arg[1]:
@@ -716,7 +759,20 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     # prefer uops that are loop children
     else:
       priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
-    heapq.heappush(queue, (priority, u))
+    return priority
+  priorities:Dict[UOp, int] = {u:get_priority(u) for u in children}
+
+  # prevent priority inversion
+  @functools.lru_cache(None)
+  def fix_priority(u:UOp, lowest_priority):
+    if u.op in {UOps.CAST, UOps.BITCAST, UOps.ALU, UOps.VECTORIZE, UOps.GEP, UOps.SPECIAL, UOps.DEFINE_LOCAL, UOps.LOAD}:
+      priorities[u] = min(priorities[u], lowest_priority)
+      if u.op is UOps.LOAD: priorities[u] += 100 # load penalty (here)
+    for x in u.src: fix_priority(x, priorities[u])
+  fix_priority(sink, 0)
+
+  queue:List[Tuple[int, UOp]] = []
+  def push(u:UOp): heapq.heappush(queue, (priorities[u], u))
 
   for u in children:
     if in_degree[u] == 0: push(u)
@@ -725,7 +781,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   _uops: List[UOp] = []
   while queue:
     p,x = heapq.heappop(queue)
-    if DEBUG >= 7: print(f"{p:5d}",x)
+    if DEBUG >= 7: print(f"{p:5d}", x.op, x.dtype, x.arg)
     if x in scope_children: scope_end[x] = x
     if x.op is UOps.DEFINE_ACC:
       idx = min([_uops.index(l) for l in x.src if l.op is UOps.RANGE])
@@ -744,12 +800,9 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
   if not skip_check:
-    bad_ops = dedup([x.op for x in _uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE, UOps.REDUCE_AXIS, UOps.SHAPETRACKER}])
     try:
       type_verify(_uops)
       assert _uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {_uops[-1]}"
-      assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
-      assert not any(x.dtype == dtypes.pyint for x in _uops), "can't return UOp with pyint"
       # TODO: this should be enabled, and the valid clause should be removed
       # NOTE: multiple identical stores to DEFINE_LOCAL is okay
       # NOTE: for PTX you have to propogate through some the calculations to determine if it is a store to DEFINE_LOCAL
