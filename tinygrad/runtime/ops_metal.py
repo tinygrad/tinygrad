@@ -1,10 +1,10 @@
 from __future__ import annotations
+import ctypes
 import os, subprocess, pathlib, tempfile, functools
 from typing import List, Any, Tuple, Optional, cast, TypeVar
 from tinygrad.helpers import prod, getenv, DEBUG
-from tinygrad.device import Compiled, Compiler, LRUAllocator
+from tinygrad.device import Compiled, Compiler, LRUAllocator, CompileError
 from tinygrad.renderer.cstyle import MetalRenderer
-import ctypes
 
 class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
   def __hash__(self): return hash(self.value)
@@ -64,7 +64,10 @@ class MetalCompiler(Compiler):
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
     options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
     msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
-    library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(src), options, None, restype=objc_instance)
+    compileError = objc_instance(0)
+    library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(src), options, ctypes.byref(compileError), restype=objc_instance)
+    if library.value is None: raise CompileError("Metal compile failed: " + str(msg(
+        msg(compileError, "localizedDescription", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)))
     library_contents = msg(library, "libraryDataContents")
     return ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
 
