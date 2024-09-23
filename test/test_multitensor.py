@@ -1,7 +1,6 @@
 import unittest, functools, random
 from typing import List
 
-from torch import t
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.ops import MetaOps, ReduceOps, BinaryOps, UOps
 from tinygrad.helpers import CI, getenv, prod, Context
