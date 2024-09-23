@@ -155,12 +155,16 @@
     <div class="container metadata"></div>
   </div>
   <script>
-  function renderGraph(graph) {
-    const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+  function renderGraph(graph, additions) {
+    const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: #2ea04326" : "display: none;"});
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
         g.setEdge(src, k)
+      }
+      if (additions.includes(parseInt(k))) {
+        g.setParent(k, "addition");
       }
     }
     const svg = d3.select("svg");
@@ -190,6 +194,7 @@
   var currentUOp = 0;
   var currentKernel = 0;
   var currentRewrite = 0;
+  var expandKernel = false;
   async function main() {
     checkStatus();
     // ** kernel list
@@ -203,9 +208,7 @@
       kernelUl = Object.assign(document.createElement("ul"), { innerHTML: `<p>${k.name}</p>`, key: `kernel-${i}`, className: i === currentKernel ? "active" : "" });
       k.ctxs.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: u, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
-        if (i !== currentKernel) {
-          rwUl.style.display = "none";
-        }
+        rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
           e.stopPropagation();
           currentUOp = j;
@@ -216,10 +219,15 @@
         kernelUl.appendChild(rwUl)
       })
       kernelUl.onclick = (e) => {
-        if (i === currentKernel) return;
+        if (i === currentKernel) {
+          expandKernel = !expandKernel;
+          main();
+          return;
+        }
         currentKernel = i;
         currentUOp = 0;
         currentRewrite = 0;
+        expandKernel = true;
         main();
       }
       kernelList.appendChild(kernelUl);
@@ -233,7 +241,7 @@
       ret = await (await fetch(`/graph?kernel_idx=${currentKernel}&uop_idx=${currentUOp}`)).json();
       cache[cacheKey] = ret;
     }
-    renderGraph(ret[0].graphs[currentRewrite][0]);
+    renderGraph(ret[0].graphs[currentRewrite], ret[0].additions[currentRewrite]);
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
     metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc }));
@@ -279,7 +287,30 @@
     }
   }
   document.addEventListener("keydown", async function(event) {
-    // up and down change the UOp from the list
+    // up and down change the UOp or kernel from the list
+    if (!expandKernel) {
+      if (event.key == "ArrowUp") {
+        event.preventDefault()
+        currentUOp = 0;
+        currentRewrite = 0;
+        currentKernel = Math.max(0, currentKernel-1)
+       return main()
+      }
+      if (event.key == "ArrowDown") {
+        event.preventDefault()
+        currentUOp = 0;
+        currentRewrite = 0;
+        currentKernel = Math.min(Array.from(Object.keys(kernels)).length-1, currentKernel+1)
+       return main()
+      }
+    }
+    if (event.key == "Enter") {
+      event.preventDefault()
+      currentUOp = 0;
+      currentRewrite = 0;
+      expandKernel = !expandKernel;
+      main();
+    }
     if (event.key == "ArrowUp") {
       event.preventDefault()
       currentRewrite = 0;

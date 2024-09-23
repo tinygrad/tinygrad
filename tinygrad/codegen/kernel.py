@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict
 
-from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify
+from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify, \
+  graph_rewrite, PatternMatcher
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType, PtrDType
@@ -742,7 +743,8 @@ class Kernel:
       elif op.op is UOps.SINK:
         arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
       return op.replace(src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
-    return fixup_ast(self.ast)
+    # NOTE: rewrite with an empty PatternMatcher to dedup UOps
+    return graph_rewrite(fixup_ast(self.ast), PatternMatcher([]))
 
   # **** this is the lowerer ****
 
@@ -785,21 +787,20 @@ class Kernel:
 
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
   if not uop.has_st or uop in sts: return
-  op, _, src, arg = uop.op, uop.dtype, uop.src, uop.arg
   # restore globals from the two stage reduce
-  if op is UOps.LOAD and src[0].op is UOps.DEFINE_LOCAL:
-    _assert_valid_uop(local_reduce:=src[2].src[2], uop.st_arg, sts)
+  if uop.op is UOps.LOAD and uop.src[0].op is UOps.DEFINE_LOCAL:
+    _assert_valid_uop(local_reduce:=uop.src[2].src[2], uop.st_arg, sts)
     sts[uop] = sts[local_reduce]
     return
-  for x in src: _assert_valid_uop(x, st, sts)
+  for x in uop.src: _assert_valid_uop(x, st, sts)
   # only reduceuop is allowed to change shape, limited to turning n to 1
-  if op in {UOps.REDUCE_AXIS, UOps.WMMA}: st = ShapeTracker.from_shape(sts[src[0]].reduce(arg[-1]))
-  # movementops are pushed to the edges with SHAPETRACKER and SWIZZLE
-  elif op in {UOps.SHAPETRACKER, UOps.SWIZZLE}: st = arg
+  if uop.op in {UOps.REDUCE_AXIS, UOps.WMMA}: st = ShapeTracker.from_shape(sts[uop.src[0]].reduce(uop.arg[-1]))
+  # movementops are pushed to SHAPETRACKER and SWIZZLE
+  elif uop.op in {UOps.SHAPETRACKER, UOps.SWIZZLE}: st = uop.arg
   # everything else inherits shape
   else:
-    assert op in {UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.CONTRACT, UOps.EXPAND, UOps.ASSIGN, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
-    st = (src_sts:=[sts[x] for x in src if x.has_st])[0]
+    assert uop.op in {UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.CONTRACT, UOps.EXPAND, UOps.ASSIGN, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
+    st = (src_sts:=[sts[x] for x in uop.src if x.has_st])[0]
     if not all_same(shapes:=[x.shape for x in src_sts]):
       if all_same(sizes:=[prod(x) for x in shapes]): raise AssertionError(f"found implicit reshape {shapes}")
       raise AssertionError(f"found implicit expand {sizes}")
@@ -807,7 +808,7 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
 
 def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
   assert ast.op is UOps.SINK and all(x.op is UOps.STORE for x in ast.src), "must be SINK"
-  assert len(set(x.st_arg.size for x in ast.src)) == 1, "outputs must be exactly the same size"
+  assert all_same([x.st_arg.size for x in ast.src]), "outputs must be exactly the same size"
   sts: Dict[UOp, ShapeTracker] = {}
   for out in ast.src: _assert_valid_uop(out, out.st_arg, sts)
   shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
