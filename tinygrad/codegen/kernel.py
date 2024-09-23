@@ -4,12 +4,12 @@ from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict
 
-from tinygrad.ops import BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify
+from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType, PtrDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, AMX, round_up, all_int, \
-                             get_contraction, to_function_name, diskcache_put, ContextVar
+from tinygrad.helpers import _CURRENT_KERNEL, all_same, colored, ansilen, dedup, getenv, prod, DEBUG, TC_OPT, USE_TC, AMX, round_up, all_int, \
+                             get_contraction, to_function_name, diskcache_put
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.view import strides_for_shape
@@ -640,7 +640,7 @@ class Kernel:
         # for locals, we use the ShapeTracker that's in the srcs
         st = op.st_arg if op.src[0].op is UOps.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
         st_uop = (st if apply_to_st is None else apply_to_st(st)).to_uop()
-        if op.op is UOps.CONST: return op.replace(src=(st_uop,))
+        if op.op is UOps.VALID: return op.replace(src=(st_uop,))
         if op.op is UOps.STORE: return op.replace(src=(op.src[0], st_uop, fixup_ast(op.src[2], apply_to_st)))
         return op.replace(src=(op.src[0], st_uop, *[fixup_ast(x, apply_to_st) for x in op.src[2:]]))
       if op.op is UOps.REDUCE_AXIS:
@@ -702,7 +702,7 @@ class Kernel:
                 st_load = [self.sts[self.bufs.index(op)].real_strides() for op in rsrc.parents if op.op is UOps.LOAD]
                 local_shape = tuple(s if max(cast(int, x[i]) for x in st_load) != 0 else 1 for i,s in enumerate(ex_shape))
                 st_uop = ShapeTracker.from_shape(local_shape).expand(ex_shape).to_uop()
-                membuf = UOp(UOps.DEFINE_LOCAL, PtrDType(tc.dtype_in), (), (f"temp{-(-1-i)}", st_uop.arg.real_size()))
+                membuf = UOp(UOps.DEFINE_LOCAL, PtrDType(tc.dtype_in, True), (), (f"temp{-(-1-i)}", st_uop.arg.real_size()))
                 local_store = fixup_ast(UOp(UOps.STORE, tc.dtype_in, (membuf, st_uop, src)), fix_st_fxn)
                 srcs.append(UOp(UOps.LOAD, tc.dtype_in, (membuf, st_uop, local_store)))
             else:
@@ -711,7 +711,14 @@ class Kernel:
             # MUL/SUM instead of WMMA
             ret = UOp(UOps.REDUCE_AXIS, tc.dtype_out, (srcs[0].alu(BinaryOps.MUL, srcs[1]).cast(tc.dtype_out),), (alu_op, wmma_arg[-1]))
           else:
-            ret = UOp(UOps.WMMA, tc.dtype_out, (fixup_ast(rsrc.src[0], fix_st1), fixup_ast(rsrc.src[1], fix_st2)), wmma_arg)
+            # real WMMA, use CONTRACT/EXPAND to get the vectorization right
+            wmma_upcast_axes = wmma_arg[-2]
+            wmma_sz = [prod(x[1] for x in l) for l in wmma_upcast_axes]
+            wmma = UOp(UOps.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(
+              UOp(UOps.CONTRACT, dtype=rsrc.src[0].dtype.vec(wmma_sz[0]), src=(fixup_ast(rsrc.src[0], fix_st1),), arg=wmma_upcast_axes[0]),
+              UOp(UOps.CONTRACT, dtype=rsrc.src[1].dtype.vec(wmma_sz[1]), src=(fixup_ast(rsrc.src[1], fix_st2),), arg=wmma_upcast_axes[1]),
+              UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), arg=wmma_arg)
+            ret = UOp(UOps.EXPAND, tc.dtype_out, (wmma,), arg=wmma_upcast_axes[2])
           new_reduce_axes = tuple(i for i in axis if i-self.first_upcast not in reduce_axes)
           return op.replace(src=(ret,), arg=(alu_op, new_reduce_axes)) if new_reduce_axes else ret
         if self.group_for_reduces:
@@ -725,7 +732,7 @@ class Kernel:
               for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
-          local_buffer = UOp(UOps.DEFINE_LOCAL, PtrDType(op.dtype), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
+          local_buffer = UOp(UOps.DEFINE_LOCAL, PtrDType(op.dtype, True), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
           local_load = UOp(UOps.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, start)))
           grouped_reduce = UOp(UOps.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], second_axis))
           if op is self.reduceops[-1]: return grouped_reduce
@@ -749,7 +756,9 @@ class Kernel:
       print(self.applied_opts)
     verify_ast(modified_ast)
 
+    if TRACK_MATCH_STATS >= 2: _CURRENT_KERNEL.set(self.name)
     self.uops:List[UOp] = linearize_uop(full_graph_rewrite(ast_to_uop(modified_ast, self.opts), self.opts))
+    if TRACK_MATCH_STATS >= 2: _CURRENT_KERNEL.set(None)
     if DEBUG >= 5: print_uops(self.uops)
     if getenv("GRAPHUOPS"):
       from tinygrad.engine.graph import graph_uops
@@ -761,8 +770,8 @@ class Kernel:
     src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
 
     if getenv("RUN_PROCESS_REPLAY"):
-      table_name = f"process_replay_{getenv('GITHUB_RUN_ID', 'HEAD')}_{getenv('GITHUB_RUN_ATTEMPT')}"
-      diskcache_put(table_name, str(id(self)), (self.ast, self.opts, self.applied_opts, name, src, {k:v.value for k,v in ContextVar._cache.items()}))
+      from test.external.process_replay.helpers import get_process_replay_ctx
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, name, src, get_process_replay_ctx()))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
@@ -775,10 +784,8 @@ class Kernel:
 # the living definition of intermediate UOps
 
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
-  if uop in sts: return
+  if not uop.has_st or uop in sts: return
   op, _, src, arg = uop.op, uop.dtype, uop.src, uop.arg
-  # NOTE: UOps.DEFINE_GLOBAL and UOps.DEFINE_LOCAL don't have shape
-  if op in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL}: return
   # restore globals from the two stage reduce
   if op is UOps.LOAD and src[0].op is UOps.DEFINE_LOCAL:
     _assert_valid_uop(local_reduce:=src[2].src[2], uop.st_arg, sts)
@@ -787,16 +794,15 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
   for x in src: _assert_valid_uop(x, st, sts)
   # only reduceuop is allowed to change shape, limited to turning n to 1
   if op in {UOps.REDUCE_AXIS, UOps.WMMA}: st = ShapeTracker.from_shape(sts[src[0]].reduce(arg[-1]))
-  elif op is UOps.SWIZZLE: st = arg
+  # movementops are pushed to the edges with SHAPETRACKER and SWIZZLE
+  elif op in {UOps.SHAPETRACKER, UOps.SWIZZLE}: st = arg
+  # everything else inherits shape
   else:
-    assert op in {UOps.SHAPETRACKER, UOps.SWIZZLE, UOps.ALU, UOps.CAST, UOps.BITCAST, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
-    # movementops are pushed to the edges with SHAPETRACKER
-    # elementwise inherits shape
-    st = arg if op is UOps.SHAPETRACKER else sts[src[uop.st_loc if op in BUFFER_UOPS else -1]]
-    for x in (src[1:] if op in BUFFER_UOPS else src):
-      if sts[x].shape != st.shape:
-        if prod(sts[x].shape) == prod(st.shape): raise AssertionError(f"found implicit reshape {x.op} {op} {sts[x].shape} != {st.shape}")
-        raise AssertionError(f"found implicit expand {x.op} {sts[x].shape} != {op} {st.shape} {prod(sts[x].shape)} != {prod(st.shape)}")
+    assert op in {UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.CONTRACT, UOps.EXPAND, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
+    st = (src_sts:=[sts[x] for x in src if x.has_st])[0]
+    if not all_same(shapes:=[x.shape for x in src_sts]):
+      if all_same(sizes:=[prod(x) for x in shapes]): raise AssertionError(f"found implicit reshape {shapes}")
+      raise AssertionError(f"found implicit expand {sizes}")
   sts[uop] = st
 
 def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:

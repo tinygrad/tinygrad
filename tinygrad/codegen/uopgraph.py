@@ -165,7 +165,7 @@ def fold_unrolled_divs(divs:UOp):
 
 def is_increasing(f:UOp):
   # is f a monotonically increasing function regards its input
-  if f.op in [UOps.CONST, UOps.DEFINE_VAR, UOps.SPECIAL]: return True
+  if f.op in [UOps.CONST, UOps.DEFINE_VAR, UOps.SPECIAL, UOps.RANGE]: return True
   if f.op is UOps.ALU and f.arg is BinaryOps.ADD: return is_increasing(f.src[0]) and is_increasing(f.src[1])
   if f.op is UOps.ALU and f.arg in (BinaryOps.MUL, BinaryOps.IDIV) and f.src[1].op is UOps.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
   return False  # False if not sure
@@ -173,6 +173,17 @@ def is_increasing(f:UOp):
 def replace_uop(uop:UOp, old:UOp, new:UOp):
   # replace all `old` in `uop` to `new`
   return new if uop is old else UOp(uop.op, uop.dtype, tuple(replace_uop(s, old, new) for s in uop.src), uop.arg)
+
+def parse_valid(valid:UOp) -> Tuple[UOp, bool, int]:
+  # if it's X <= c, returns X, True, c
+  # if it's X >= c, returns X, False, c
+
+  # (X < c).ne(True) -> X >= c
+  if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPNE and valid.src[1].op is UOps.CONST and valid.src[1].arg == 1 and \
+    (s0:=valid.src[0]).op is UOps.ALU and s0.arg is BinaryOps.CMPLT and s0.src[1].op is UOps.CONST: return s0.src[0], False, s0.src[1].arg
+  # X < c -> X <= c-1
+  if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPLT and valid.src[1].op is UOps.CONST: return valid.src[0], True, valid.src[1].arg-1
+  raise ValueError(f"not able to parse {valid=}")
 
 def simplify_valid_image_load(load:UOp, buf:UOp):
   if not isinstance(buf_dtype:=buf.dtype, ImageDType) or len(load.src) < 4: return None
@@ -182,37 +193,29 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:DefaultDict[UOp, List[Optional[ConstType]]] = defaultdict(lambda: [None, None])
   for stmt in _get_chain(valid, BinaryOps.AND):
-    if stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST:
-      if (s:=stmt.src[0]).op is UOps.ALU and s.arg is BinaryOps.MUL and s.src[1].op is UOps.CONST and s.src[1].arg == -1:
-        bounds[s.src[0]][0] = -stmt.src[1].arg+1
-      else: bounds[s][1] = stmt.src[1].arg-1
+    expr, is_upper, c = parse_valid(stmt)
+    bounds[expr][int(is_upper)] = c
 
+  # simplify idx given that valid is True
   for uop,v in bounds.items():
     # some expr has lower bound > upper bound -> valid is an empty set
     if v[0] is not None and v[1] is not None and v[0] > v[1]:
       return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, valid.const_like(False)))
-    bound =  uop.const_like(uop.vmin if v[0] is None else v[0]), uop.const_like(uop.vmax if v[1] is None else v[1])
-    new = UOp(UOps.DEFINE_VAR, uop.dtype, (), ("fake", bound[0], bound[1]))
+    new = UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1])
     newidx = replace_uop(graph_rewrite(replace_uop(idx, uop, new), constant_folder), new, uop)
     if newidx.key != idx.key: idx = newidx
 
+  # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
   for stmt in _get_chain(valid, BinaryOps.AND):
-    if not (stmt.op is UOps.ALU and stmt.arg is BinaryOps.CMPLT and stmt.src[1].op is UOps.CONST): continue
-    if (s0:=stmt.src[0]).op is UOps.ALU and s0.arg is BinaryOps.MUL and (s01:=s0.src[1]).op is UOps.CONST and s01.arg == -1:
-      # -X < c -> X > -c, check if it's negative when X = -c
-      for i in idx.src:
-        if is_increasing(i) and (rw:=graph_rewrite(replace_uop(i, s0.src[0], s0.const_like(-stmt.src[1].arg)), constant_folder)):
-          if rw.op is UOps.CONST and rw.arg < 0:
-            drop_stmt.append(stmt)
-            break
-    else:
-      # X < c, check if it's out of bound when X = c
-      for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
-        if is_increasing(i) and (rw:=graph_rewrite(replace_uop(i, s0, s0.const_like(stmt.src[1].arg)), constant_folder)):
-          if rw.op is UOps.CONST and rw.arg >= b:
-            drop_stmt.append(stmt)
-            break
+    X, is_upper_bound, c = parse_valid(stmt)
+    # if X <= c, check if it's out of bound when X = c+1
+    # if X >= c, check if it's out of bound when X = c-1
+    test_value = c + 1 if is_upper_bound else c - 1
+    for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
+      if is_increasing(i):
+        rw = graph_rewrite(replace_uop(i, X, X.const_like(test_value)), constant_folder)
+        if rw.vmin >= b or rw.vmax < 0: drop_stmt.append(stmt)
 
   if drop_stmt or idx.key != start_idx.key:
     new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
@@ -403,6 +406,9 @@ constant_folder = PatternMatcher([
   # c0*x<c1 for negative int c0 and non-positive c1
   ((UPat.cvar("c0", vec=False)*UPat.var("x")).lt(UPat.cvar("c1", vec=False)),
    lambda x,c0,c1: (-x).lt(-(math.floor(-c1.arg/-c0.arg))) if dtypes.is_int(x.dtype) and c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
+  # x//c0<c1 for positive int c0
+  ((UPat.var("x")//UPat.cvar("c0", vec=False)).lt(UPat.cvar("c1", vec=False)),
+   lambda x,c0,c1: x.lt(c1.arg*c0.arg) if dtypes.is_int(x.dtype) and c0.arg > 0 else None),
   # mul add lt
   (((UPat.cvar("c0", vec=False)*UPat.var("x"))+UPat.var("x2")).lt(UPat.cvar("c1", vec=False)),
    lambda x,x2,c0,c1: x.lt(c1//c0) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax and x2.vmin >= 0 else None),
