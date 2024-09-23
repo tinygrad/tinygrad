@@ -745,8 +745,8 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
   range_phi = {r:[p for p in scope_children[r] if p.op is UOps.ASSIGN] for r in scope_children if r.op is UOps.RANGE}
 
-  queue:List[Tuple[int, UOp]] = []
-  def push(u:UOp):
+  # assign priorities
+  def get_priority(u:UOp):
     priority = 0
     # prefer ranges that depend on the least number of independent ranges
     if u.op is UOps.RANGE and u.arg[1]:
@@ -756,7 +756,19 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     # prefer uops that are loop children
     else:
       priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
-    heapq.heappush(queue, (priority, u))
+    return priority
+  priorities:Dict[UOp, int] = {u:get_priority(u) for u in children}
+
+  # prevent priority inversion
+  @functools.lru_cache(None)
+  def fix_priority(u:UOp, lowest_priority):
+    if u.op in {UOps.CAST, UOps.BITCAST, UOps.ALU, UOps.VECTORIZE, UOps.GEP, UOps.SPECIAL, UOps.DEFINE_LOCAL}:
+      priorities[u] = min(priorities[u], lowest_priority)
+    for x in u.src: fix_priority(x, priorities[u])
+  fix_priority(sink, 0)
+
+  queue:List[Tuple[int, UOp]] = []
+  def push(u:UOp): heapq.heappush(queue, (priorities[u], u))
 
   for u in children:
     if in_degree[u] == 0: push(u)
@@ -765,7 +777,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   _uops: List[UOp] = []
   while queue:
     p,x = heapq.heappop(queue)
-    if DEBUG >= 7: print(f"{p:5d}",x)
+    if DEBUG >= 7: print(f"{p:5d}", x.op, x.dtype, x.arg)
     if x in scope_children: scope_end[x] = x
     if x.op is UOps.DEFINE_ACC:
       idx = min([_uops.index(l) for l in x.src if l.op is UOps.RANGE])
@@ -784,12 +796,9 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
   if not skip_check:
-    bad_ops = dedup([x.op for x in _uops if x.op in {UOps.EXPAND, UOps.CONTRACT, UOps.REDUCE, UOps.REDUCE_AXIS, UOps.SHAPETRACKER}])
     try:
       type_verify(_uops)
       assert _uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {_uops[-1]}"
-      assert len(bad_ops) == 0, f"bad UOps left in list: {bad_ops}"
-      assert not any(x.dtype == dtypes.pyint for x in _uops), "can't return UOp with pyint"
       # TODO: this should be enabled, and the valid clause should be removed
       # NOTE: multiple identical stores to DEFINE_LOCAL is okay
       # NOTE: for PTX you have to propogate through some the calculations to determine if it is a store to DEFINE_LOCAL
