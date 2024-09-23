@@ -62,13 +62,11 @@
     stroke-width: 1.5px;
   }
   .graph {
-    grid-column: span 10;
+    width: 70%;
     position: relative;
   }
   .main-container {
-    display: grid;
-    grid-template-columns: repeat(14, 1fr);
-    gap: 8px;
+    display: flex;
     padding: 12px;
     width: 100%;
     height: 100%;
@@ -79,12 +77,16 @@
     background-color: #111111;
     border-radius: 8px;
     padding: 8px;
+    position: relative;
   }
   .container > * + * {
     margin-top: 12px;
   }
+  .main-container > * + * {
+    margin-left: 8px;
+  }
   .kernel-list {
-    grid-column: span 1;
+    width: 10%;
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -96,8 +98,17 @@
     margin-top: 4px;
   }
   .metadata {
-    grid-column: span 3;
+    width: 20%;
     overflow-y: auto;
+  }
+  #resize-handle {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 20px;
+    cursor: w-resize;
+    background-color: transparent;
   }
   .rewrite-list {
     display: flex;
@@ -246,7 +257,36 @@
     renderGraph(ret[0].graphs[currentRewrite], ret[0].additions[currentRewrite]);
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
+    metadata.appendChild(Object.assign(document.createElement("div"), { id: "resize-handle" }));
     metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc }));
+    const resizeHandle = document.getElementById("resize-handle");
+
+    let startX;
+    let containerWidth;
+    let metadataWidth;
+    resizeHandle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      metadata.style.userSelect = "none";
+      startX = e.clientX;
+      containerWidth = document.querySelector(".main-container").getBoundingClientRect().width;
+      metadataWidth = metadata.getBoundingClientRect().width;
+      document.documentElement.addEventListener("mousemove", resize, false);
+      document.documentElement.addEventListener("mouseup", stopResize, false);
+    });
+    function resize(e) {
+      const change = e.clientX - startX;
+      const newWidth = ((metadataWidth-change) / containerWidth) * 100;
+      if (newWidth >= 20 && newWidth <= 50) {
+        metadata.style.width = `${newWidth}%`;
+        document.querySelector(".graph").style.width = `${100-newWidth-10}%`;
+      }
+    }
+    function stopResize(e) {
+      document.documentElement.removeEventListener("mousemove", resize, false);
+      document.documentElement.removeEventListener("mouseup", stopResize, false);
+      metadata.style.userSelect = "initial";
+    }
+
     ret[0].extra[currentRewrite].forEach((e, i) => {
       if (e.length == 0) return;
       const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${e}</code>`, className: "code-block" });
