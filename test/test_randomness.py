@@ -75,7 +75,6 @@ class TestRandomness(unittest.TestCase):
     assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
-  @unittest.skipIf(not THREEFRY.value, "not using threefry")
   def test_threefly_against_reference(self):
     Tensor.manual_seed(1337 ^ hash(Device.DEFAULT))  # need to undo the device specific hash in rand to make this deterministic
     # generated using
