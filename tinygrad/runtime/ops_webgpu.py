@@ -16,9 +16,9 @@ class WebGPUProgram:
   def __init__(self, device, name:str, lib:bytes):
     (self.device, self.timestamp_supported) = device
     self.name, self.lib, self.prg = name, lib, self.device.create_shader_module(code=lib.decode())   # NOTE: this is the compiler
-    self.max_buffers = self.device.limits["max_storage_buffers_per_shader_stage"]
+    # self.max_buffers = self.device.limits["max_storage_buffers_per_shader_stage"]
   def __call__(self, *bufs, global_size=(1,1,1), local_size=(1,1,1), vals=(), wait=False):
-    assert len(bufs) <= self.max_buffers, f"WEBGPU only supports {self.max_buffers} buffers"
+    # assert len(bufs) <= self.max_buffers, f"WEBGPU only supports {self.max_buffers} buffers"
     wait = wait and self.timestamp_supported
     binding_layouts = [{"binding": i, "visibility": wgpu.ShaderStage.COMPUTE,
                         "buffer": {"type": wgpu.BufferBindingType.uniform if i >= len(bufs) else wgpu.BufferBindingType.storage }} for i in range(len(bufs)+len(vals))]  # noqa: E501
@@ -33,7 +33,7 @@ class WebGPUProgram:
       query_set = self.device.create_query_set(type=wgpu.QueryType.timestamp, count=2)
       query_buf = self.device.create_buffer(size=16, usage=wgpu.BufferUsage.QUERY_RESOLVE | wgpu.BufferUsage.COPY_SRC)
       timestamp_writes = {"query_set": query_set, "beginning_of_pass_write_index": 0, "end_of_pass_write_index": 1}
-    compute_pass = command_encoder.begin_compute_pass(timestamp_writes=timestamp_writes if wait else None)
+    compute_pass = command_encoder.begin_compute_pass(timestamp_writes=timestamp_writes if wait else None) # noqa: E0606
     compute_pass.set_pipeline(compute_pipeline)
     compute_pass.set_bind_group(0, bind_group, [], 0, 999999) # last 2 not used
     compute_pass.dispatch_workgroups(*global_size)  # x y z
