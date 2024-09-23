@@ -627,6 +627,28 @@ class Tensor:
     """
     return self.full_like(1, **kwargs)
 
+  def rand_like(self, **kwargs) -> Tensor:
+    """
+    Creates a tensor with the same shape and sharding as `self`, filled with random values from a uniform distribution over the interval `[0, 1)`.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.ones(2, 3)
+    print(Tensor.rand_like(t).numpy())
+    ```
+    """
+    dtype = kwargs.pop("dtype", self.dtype)
+    if isinstance(self.device, tuple):
+      assert isinstance(self.lazydata, MultiLazyBuffer)
+      if self.lazydata.axis is not None:
+        rands = [Tensor.rand(*lb.shape, device=lb.device, dtype=dtype) for lb in self.lazydata.lbs]
+        return Tensor(MultiLazyBuffer([r.lazydata for r in rands], self.lazydata.axis, None), device=self.device, dtype=dtype, **kwargs)
+      else:
+        raise ValueError(f"rand_like doesn't support None shard axis")
+    return Tensor.rand(*self.shape, device=kwargs.pop("device", self.device), dtype=dtype, **kwargs)
+
   # ***** rng hlops *****
 
   @staticmethod
@@ -3031,7 +3053,7 @@ class Tensor:
     ```
     """
     if not Tensor.training or p == 0: return self
-    return self * (Tensor.rand(*self.shape, requires_grad=False, dtype=dtypes.default_float, device=self.device) >= p) * (1/(1.0 - p))
+    return self * (Tensor.rand_like(self, requires_grad=False, dtype=dtypes.default_float) >= p) * (1/(1.0 - p))
 
   def one_hot(self, num_classes:int=-1) -> Tensor:
     """
