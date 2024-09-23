@@ -58,9 +58,10 @@ class MetalCompiler(Compiler):
     options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
     msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
     compileError = objc_instance(0)
-    library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(src), options, ctypes.byref(compileError), restype=objc_instance)
-    if library.value is None: raise CompileError("Metal compile failed: " + str(msg(
-        msg(compileError, "localizedDescription", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)))
+    library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(src),
+                  options, ctypes.byref(compileError), restype=objc_instance)
+    if library.value is None: raise CompileError("Metal compile failed: " + bytes(msg(
+        msg(compileError, "localizedDescription", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode())
     library_contents = msg(library, "libraryDataContents")
     return ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
 
