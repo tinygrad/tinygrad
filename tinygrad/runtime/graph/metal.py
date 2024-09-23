@@ -6,13 +6,11 @@ from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.shape.symbolic import Variable
-from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, int_tuple_to_struct, objc_instance
+from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, int_tuple_to_struct, objc_instance,\
+  MTLResourceOptions
 
 class MTLIndirectCommandType:
   MTLIndirectCommandTypeConcurrentDispatch = (1 << 5)
-
-class MTLResourceOptions:
-  MTLResourceCPUCacheModeDefaultCache = 0
 
 class MTLResourceUsage:
   MTLResourceUsageRead = 0b01

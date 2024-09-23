@@ -15,6 +15,10 @@ class objc_instance(objc_id): # method with name "new", "alloc" should be freed 
 
 def load_library(path: str): return ctypes.CDLL(path)
 
+class MTLResourceOptions:
+  MTLResourceCPUCacheModeDefaultCache = 0
+  MTLResourceStorageModeShared = 0 << 4
+
 libobjc = load_library("/usr/lib/libobjc.dylib")
 libmetal = load_library("/Library/Frameworks/Metal.framework/Metal")
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
@@ -107,7 +111,7 @@ class MetalAllocator(LRUAllocator):
     self.device:MetalDevice = device
     super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
-    ret = msg(self.device.device, "newBufferWithLength:options:", size, 0, restype=objc_instance)
+    ret = msg(self.device.device, "newBufferWithLength:options:", size, MTLResourceOptions.MTLResourceStorageModeShared, restype=objc_instance)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): msg(opaque.buf, "release")
