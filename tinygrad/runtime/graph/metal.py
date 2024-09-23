@@ -7,7 +7,7 @@ from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, int_tuple_to_struct, objc_instance,\
-  MTLResourceOptions
+  MTLResourceOptions, elapsed_time
 
 class MTLIndirectCommandType:
   MTLIndirectCommandTypeConcurrentDispatch = (1 << 5)
@@ -66,7 +66,7 @@ class MetalGraph(GraphRunner):
     all_resources = self.all_resources + [x._buf.buf for x in input_rawbuffers]
 
     for (j,i),input_idx in self.input_replace.items():
-      computeCommand = msg(self.icb, "indirectComputeCommandAtIndex:", j)
+      computeCommand = msg(self.icb, "indirectComputeCommandAtIndex:", j, restype=objc_instance)
       msg(computeCommand, "setKernelBuffer:offset:atIndex:", input_rawbuffers[input_idx]._buf.buf,
                                                                                  input_rawbuffers[input_idx]._buf.offset, i)
 
@@ -100,6 +100,6 @@ class MetalGraph(GraphRunner):
 
     if wait:
       wait_check(command_buffer)
-      return msg(command_buffer, "GPUEndTime", restype=ctypes.c_double) - msg(command_buffer, "GPUStartTime", restype=ctypes.c_double)
+      return elapsed_time(command_buffer)
     self.device.mtl_buffers_in_flight.append(command_buffer)
     return None

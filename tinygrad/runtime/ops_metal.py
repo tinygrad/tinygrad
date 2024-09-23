@@ -46,6 +46,9 @@ def wait_check(cbuf: Any):
   msg(cbuf, "waitUntilCompleted")
   if (error := msg(cbuf, "error", restype=ctypes.c_ulong)) != 0: raise RuntimeError(error)
 
+def elapsed_time(cbuf: objc_instance):
+  return cast(float, msg(cbuf, "GPUEndTime", restype=ctypes.c_double)) - cast(float, msg(cbuf, "GPUStartTime", restype=ctypes.c_double))
+
 class MetalCompiler(Compiler):
   def __init__(self, device:Optional[MetalDevice]):
     self.device = device
@@ -62,7 +65,7 @@ class MetalCompiler(Compiler):
                   options, ctypes.byref(compileError), restype=objc_instance)
     if library.value is None: raise CompileError("Metal compile failed: " + bytes(msg(
         msg(compileError, "localizedDescription", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode())
-    library_contents = msg(library, "libraryDataContents")
+    library_contents = msg(library, "libraryDataContents", restype=objc_instance)
     return ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
 
 class MetalProgram:
@@ -87,12 +90,12 @@ class MetalProgram:
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     max_total_threads = msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=ctypes.c_ulong)
-    if prod(local_size) > max_total_threads:
+    if prod(local_size) > cast(int, max_total_threads):
       exec_width = msg(self.pipeline_state, "threadExecutionWidth", restype=ctypes.c_ulong)
       memory_length = msg(self.pipeline_state, "staticThreadgroupMemoryLength", restype=ctypes.c_ulong)
       raise RuntimeError(f"local size {local_size} bigger than {max_total_threads} with exec width {exec_width} memory length {memory_length}")
-    command_buffer = msg(self.device.mtl_queue, "commandBuffer")
-    encoder = msg(command_buffer, "computeCommandEncoder")
+    command_buffer = msg(self.device.mtl_queue, "commandBuffer", restype=objc_instance)
+    encoder = msg(command_buffer, "computeCommandEncoder", restype=objc_instance)
     msg(encoder, "setComputePipelineState:", self.pipeline_state)
     for i,a in enumerate(bufs): msg(encoder, "setBuffer:offset:atIndex:", a.buf, a.offset, i)
     for i,a in enumerate(vals,start=len(bufs)): msg(encoder, "setBytes:length:atIndex:", bytes(ctypes.c_int(a)), 4, i)
@@ -101,7 +104,7 @@ class MetalProgram:
     msg(command_buffer, "commit")
     if wait:
       wait_check(command_buffer)
-      return msg(command_buffer, "GPUEndTime", restype=ctypes.c_double) - msg(command_buffer, "GPUStartTime", restype=ctypes.c_double)
+      return elapsed_time(command_buffer)
     self.device.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalBuffer:
@@ -118,13 +121,13 @@ class MetalAllocator(LRUAllocator):
   def _free(self, opaque:MetalBuffer, options): msg(opaque.buf, "release")
   def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
-    src_command_buffer = msg(src_dev.mtl_queue, "commandBuffer")
-    encoder = msg(src_command_buffer, "blitCommandEncoder")
+    src_command_buffer = msg(src_dev.mtl_queue, "commandBuffer", restype=objc_instance)
+    encoder = msg(src_command_buffer, "blitCommandEncoder", restype=objc_instance)
     msg(encoder, "copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:", src.buf, src.offset, dest.buf, dest.offset, sz)
     msg(encoder, "endEncoding")
     if src_dev != dest_dev:
       msg(src_command_buffer, "encodeSignalEvent:value:", src_dev.timeline_signal, src_dev.timeline_value)
-      dest_command_buffer = msg(dest_dev.mtl_queue, "commandBuffer")
+      dest_command_buffer = msg(dest_dev.mtl_queue, "commandBuffer", restype=objc_instance)
       msg(dest_command_buffer, "encodeWaitForEvent:value:", src_dev.timeline_signal, src_dev.timeline_value)
       msg(dest_command_buffer, "commit")
       dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
@@ -138,7 +141,7 @@ class MetalAllocator(LRUAllocator):
     return MetalBuffer(ret, src.nbytes)
   def as_buffer(self, src:MetalBuffer) -> memoryview:
     self.device.synchronize()
-    ptr = msg(src.buf, "contents")
+    ptr = msg(src.buf, "contents", restype=objc_id) # Weak reference
     array = (ctypes.c_char * (src.offset + src.size)).from_address(ptr.value)
     return memoryview(array).cast("B")[src.offset:]
   def copyin(self, dest:MetalBuffer, src:memoryview): self.as_buffer(dest)[:] = src
