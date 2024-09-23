@@ -196,6 +196,7 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
     expr, is_upper, c = parse_valid(stmt)
     bounds[expr][int(is_upper)] = c
 
+  # simplify idx given that valid is True
   for uop,v in bounds.items():
     # some expr has lower bound > upper bound -> valid is an empty set
     if v[0] is not None and v[1] is not None and v[0] > v[1]:
@@ -204,21 +205,17 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
     newidx = replace_uop(graph_rewrite(replace_uop(idx, uop, new), constant_folder), new, uop)
     if newidx.key != idx.key: idx = newidx
 
+  # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
   for stmt in _get_chain(valid, BinaryOps.AND):
-    X, is_upper, c = parse_valid(stmt)
-    if is_upper:
-      # X <= c, check if it's out of bound when X = c+1
-      for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
-        if is_increasing(i) and graph_rewrite(replace_uop(i, X, X.const_like(c+1)), constant_folder).vmin >= b:
-          drop_stmt.append(stmt)
-          break
-    else:
-      # X >= c, check if it's negative when X = c-1
-      for i in idx.src:
-        if is_increasing(i) and graph_rewrite(replace_uop(i, X, X.const_like(c-1)), constant_folder).vmax < 0:
-          drop_stmt.append(stmt)
-          break
+    X, is_upper_bound, c = parse_valid(stmt)
+    # if X <= c, check if it's out of bound when X = c+1
+    # if X >= c, check if it's out of bound when X = c-1
+    test_value = c + 1 if is_upper_bound else c - 1
+    for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
+      if is_increasing(i):
+        rw = graph_rewrite(replace_uop(i, X, X.const_like(test_value)), constant_folder)
+        if rw.vmin >= b or rw.vmax < 0: drop_stmt.append(stmt)
 
   if drop_stmt or idx.key != start_idx.key:
     new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
