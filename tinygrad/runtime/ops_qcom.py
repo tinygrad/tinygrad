@@ -286,17 +286,17 @@ class QCOMAllocator(HCQAllocator):
 
       granularity = 128 if options.image.itemsize == 4 else 256
       pitch_add = (1 << pitchalign) if min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2 else 0
-      pitch = round_up(imgw * 4 * options.image.itemsize, 1 << pitchalign) + pitch_add
+      pitch = round_up((real_stride:=imgw * 4 * options.image.itemsize), 1 << pitchalign) + pitch_add
 
-      texture = self.device._gpu_alloc(pitch * round_up(imgh, 16), kgsl.KGSL_MEMTYPE_TEXTURE, map_to_cpu=True)
+      texture = self.device._gpu_alloc(pitch * imgh, kgsl.KGSL_MEMTYPE_TEXTURE, map_to_cpu=True)
 
       # Extend HCQBuffer with texture-related info.
-      texture.desc, texture.ibo = [0] * 16, [0] * 16
+      texture.pitch, texture.real_stride, texture.desc, texture.ibo = pitch, real_stride, [0] * 16, [0] * 16
 
       tex_fmt = adreno.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else adreno.FMT6_16_16_16_16_FLOAT
       texture.desc[0] = qreg.a6xx_tex_const_0(swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt)
       texture.desc[1] = qreg.a6xx_tex_const_1(width=imgw, height=imgh)
-      texture.desc[2] = qreg.a6xx_tex_const_2(type=adreno.A6XX_TEX_2D, pitch=pitch, pitchalign=pitchalign-6)
+      texture.desc[2] = qreg.a6xx_tex_const_2(type=adreno.A6XX_TEX_2D, pitch=texture.pitch, pitchalign=pitchalign-6)
       texture.desc[4:7] = [*data64_le(texture.va_addr), qreg.a6xx_tex_const_6(plane_pitch=0x400000)]
       texture.ibo = [texture.desc[0] & (~0xffff), *texture.desc[1:len(texture.desc)]]
 
@@ -308,7 +308,12 @@ class QCOMAllocator(HCQAllocator):
 
   def copyout(self, dest:memoryview, src:HCQBuffer):
     self.device.synchronize()
-    ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
+    if hasattr(src, 'pitch'):
+      doff, soff = 0, 0
+      while soff < src.size:
+        ctypes.memmove(mv_address(dest)+doff, src.va_addr+soff, src.real_stride)
+        soff, doff = soff+src.pitch, doff+src.real_stride
+    else: ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
 
   def as_buffer(self, src:HCQBuffer) -> memoryview:
     self.device.synchronize()
