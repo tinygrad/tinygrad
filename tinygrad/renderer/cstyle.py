@@ -228,7 +228,7 @@ class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
 
   # RECIP and SIN change the assembly on QCOM
-  code_for_op = {**CStyleLanguage().code_for_op, UnaryOps.RECIP: lambda x,dtype: f"native_recip({x})", UnaryOps.SIN: lambda x,dtype: f"native_sin({x})"}
+  code_for_op = {**CStyleLanguage().code_for_op, UnaryOps.SIN: lambda x,dtype: f"native_sin({x})"}
 
   # language options
   kernel_prefix = "__kernel "
