@@ -156,8 +156,8 @@
   </div>
   <script>
   function renderGraph(graph) {
-    const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    g.setNode('rewritten', {label: 'rewritten', clusterLabelPos: 'top', style: 'fill: #6E6ADE'});
+    const showDiff = currentRewrite !== 0;
+    const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
@@ -239,10 +239,7 @@
       ret = await (await fetch(`/graph?kernel_idx=${currentKernel}&uop_idx=${currentUOp}`)).json();
       cache[cacheKey] = ret;
     }
-    const g = renderGraph(ret[0].graphs[currentRewrite][0]);
-    Object.keys(ret[0].graphs[currentRewrite][2]).forEach((k) => {
-      g.setParent(k, "rewritten")
-    })
+    renderGraph(ret[0].graphs[currentRewrite]);
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
     metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc }));
@@ -301,7 +298,7 @@
         event.preventDefault()
         currentUOp = 0;
         currentRewrite = 0;
-        currentKernel = Math.min(Array.from(Object.keys(kernels)).length, currentKernel+1)
+        currentKernel = Math.min(Array.from(Object.keys(kernels)).length-1, currentKernel+1)
        return main()
       }
     }
