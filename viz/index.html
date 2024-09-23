@@ -62,13 +62,11 @@
     stroke-width: 1.5px;
   }
   .graph {
-    grid-column: span 10;
+    width: 70%;
     position: relative;
   }
   .main-container {
-    display: grid;
-    grid-template-columns: repeat(14, 1fr);
-    gap: 8px;
+    display: flex;
     padding: 12px;
     width: 100%;
     height: 100%;
@@ -83,8 +81,11 @@
   .container > * + * {
     margin-top: 12px;
   }
+  .main-container > * + * {
+    margin-left: 8px;
+  }
   .kernel-list {
-    grid-column: span 1;
+    width: 10%;
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -96,7 +97,7 @@
     margin-top: 4px;
   }
   .metadata {
-    grid-column: span 3;
+    width: 20%;
     overflow-y: auto;
   }
   .rewrite-list {
