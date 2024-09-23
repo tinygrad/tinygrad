@@ -77,7 +77,8 @@ class TestRandomness(unittest.TestCase):
 
   @unittest.skipIf(not THREEFRY.value, "not using threefry")
   def test_threefly_against_reference(self):
-    Tensor.manual_seed(1337 ^ hash(Device.DEFAULT))  # need to undo the device specific hash in rand to make this deterministic
+    # need to undo the device specific hash in rand to make this deterministic
+    Tensor.manual_seed(1337 ^ hash("CLANG" if getenv("MOCKGPU") and Device.DEFAULT.startswith("NV") else Device.DEFAULT))
     # generated using
     # (jax.extend.random.threefry_2x32((np.uint32(1337), np.uint32(0x0)), np.arange(20, dtype=np.uint32)) >> 8).astype(float) / np.float32(2**24)
     jr = np.array([0.30984968, 0.42723763, 0.92448753, 0.27268296, 0.48820806, 0.29587173, 0.3213513, 0.05805135, 0.4954177, 0.23303074,
