@@ -5,7 +5,7 @@ from enum import auto, IntEnum, Enum
 from collections import defaultdict
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
-from tinygrad.helpers import _CURRENT_KERNEL, ContextVar, pretty_print, prod, getenv, all_same
+from tinygrad.helpers import _CURRENT_KERNEL, ContextVar, pretty_print, prod, getenv, all_same, dedup
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -141,6 +141,7 @@ class UOp(MathTrait):
     #if op is UOps.VECTORIZE and dtype != dtypes.void: assert len(src) == dtype.count, f"{len(src)} invalid for {dtype}"
     #if op is UOps.ALU and arg not in (BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE): assert all_same([dtype] + [x.dtype for x in src])
     #if op is UOps.CAST: assert dtype.count == src[0].dtype.count, f"cast can't change vectorization {src[0].dtype} --> {dtype}"
+    if op in {UOps.LOAD, UOps.STORE}: assert src[0].op is UOps.INDEX, "load/store must INDEX"
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
   def replace(self, op: Optional[UOps]=None, dtype:Optional[DType]=None, src: Optional[Tuple[UOp,...]]=None, arg:Any=None):
     return UOp(op or self.op, dtype or self.dtype, self.src if src is None else src, self.arg if arg is None else arg)
@@ -172,10 +173,10 @@ class UOp(MathTrait):
   # *** uop syntactic sugar
   @property
   def st_arg(self) -> ShapeTracker:
-    assert self.op in BUFFER_UOPS, f"st_arg called on {self.op}"
-    ret = self.src[0 if self.op is UOps.VALID else 1]
-    assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
-    return ret.arg
+    search = self.src[0] if self.op in {UOps.LOAD, UOps.STORE} else self
+    sts = dedup([x.arg for x in search.sparents if x.op is UOps.SHAPETRACKER])
+    assert len(sts) == 1, f"st_arg got {len(sts)} shapetrackers on {self}, not 1"
+    return sts[0]
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
   def const_like(self, b:ConstType|Variable|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)

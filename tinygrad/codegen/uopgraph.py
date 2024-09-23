@@ -565,7 +565,7 @@ def create_gate(root:UOp) -> Optional[UOp]:
     if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
       return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, dtypes.void, (gate, u.src[-1])),), u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
-  return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
+  return None if len(root.src) == 2 or (ret:=_gate_srcs(root, root.src[2])) is root else ret
 
 expander = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
@@ -594,7 +594,7 @@ expander = PatternMatcher([
 ])
 
 def no_vectorized_load_store(ls:UOp):
-  idx = ls.src[1]
+  idx = ls.src[0].src[1]
   if idx.dtype.count == 1: return None
   # ugh, the meaning of a dtype.count idx is overloaded
   if ls.op is UOps.LOAD and idx.dtype.count != ls.dtype.count: return None

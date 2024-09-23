@@ -123,9 +123,6 @@ class Kernel:
 
     return ret
 
-  @property
-  def membufs(self) -> List[UOp]: return list({x.src[0].key:x.src[0] for x in self.bufs if x.op in {UOps.INDEX}}.values())
-
   # TODO: these need more tests or it might silently be no-op
   def float4_axis(self, i:int): return [x-self.first_upcast for x in self.sts[i].unit_stride_axes() if x >= self.first_upcast and self.sts[i].shape[x]%4 == 0]  # noqa: E501
 
@@ -238,8 +235,8 @@ class Kernel:
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
-    if isinstance(self.membufs[0].dtype, ImageDType):
-      base_shape = self.membufs[0].dtype.shape
+    if isinstance(self.ast.src[0].src[0].dtype, ImageDType):
+      base_shape = self.ast.src[0].src[0].dtype.shape
       if shape_idx_groups := get_contraction(self.output_shape, base_shape):
         special_strides: Tuple[sint, ...] = tuple()
         for i,g in enumerate(shape_idx_groups):
@@ -481,7 +478,7 @@ class Kernel:
       self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
 
   def required_optimizations(self) -> Kernel:
-    if isinstance(self.membufs[0].dtype, ImageDType):
+    if isinstance(self.ast.src[0].src[0].dtype, ImageDType):
       unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
       assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[0]}"
       if len(unit_stride_axes_mul_4) and all(x < self.first_upcast for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:  # noqa: E501
@@ -703,8 +700,8 @@ class Kernel:
                 local_shape = tuple(s if max(cast(int, x[i]) for x in st_load) != 0 else 1 for i,s in enumerate(ex_shape))
                 st_uop = ShapeTracker.from_shape(local_shape).expand(ex_shape).to_uop()
                 membuf = UOp(UOps.DEFINE_LOCAL, PtrDType(tc.dtype_in), (), (f"temp{-(-1-i)}", st_uop.arg.real_size()))
-                local_store = fixup_ast(UOp(UOps.STORE, tc.dtype_in, (membuf, st_uop, src)), fix_st_fxn)
-                srcs.append(UOp(UOps.LOAD, tc.dtype_in, (membuf, st_uop, local_store)))
+                local_store = fixup_ast(UOp(UOps.STORE, tc.dtype_in, (membuf.index(st_uop), src)), fix_st_fxn)
+                srcs.append(UOp(UOps.LOAD, tc.dtype_in, (membuf.index(st_uop), local_store)))
             else:
               # for TC=2, we can't do the shapetracker fixup
               srcs = [fixup_ast(rsrc.src[0]), fixup_ast(rsrc.src[1])]
@@ -733,7 +730,7 @@ class Kernel:
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
           local_buffer = UOp(UOps.DEFINE_LOCAL, PtrDType(op.dtype), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
-          local_load = UOp(UOps.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, start)))
+          local_load = UOp(UOps.LOAD, op.dtype, (local_buffer.index(st_uop), UOp.store(local_buffer.index(st_uop), start)))
           grouped_reduce = UOp(UOps.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], second_axis))
           if op is self.reduceops[-1]: return grouped_reduce
           st_uop = ShapeTracker.from_shape(tuple([1 if i in second_axis else a for i,a in enumerate(local_shape)])).to_uop()
@@ -798,7 +795,8 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
   elif op in {UOps.SHAPETRACKER, UOps.SWIZZLE}: st = arg
   # everything else inherits shape
   else:
-    assert op in {UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.CONTRACT, UOps.EXPAND, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
+    assert op in {UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.CONTRACT, UOps.EXPAND, UOps.LOAD, UOps.STORE, *BUFFER_UOPS}, \
+      f"bad UOp in intermediate uops {uop}"
     st = (src_sts:=[sts[x] for x in src if x.has_st])[0]
     if not all_same(shapes:=[x.shape for x in src_sts]):
       if all_same(sizes:=[prod(x) for x in shapes]): raise AssertionError(f"found implicit reshape {shapes}")
@@ -807,9 +805,9 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
 
 def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
   assert ast.op is UOps.SINK and all(x.op is UOps.STORE for x in ast.src), "must be SINK"
-  assert len(set(x.src[0].st_arg.size for x in ast.src)) == 1, "outputs must be exactly the same size"
+  assert len(set(x.st_arg.size for x in ast.src)) == 1, "outputs must be exactly the same size"
   sts: Dict[UOp, ShapeTracker] = {}
-  for out in ast.src: _assert_valid_uop(out, out.src[0].st_arg, sts)
+  for out in ast.src: _assert_valid_uop(out, out.st_arg, sts)
   shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
   assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
   type_verify(list(sts))
