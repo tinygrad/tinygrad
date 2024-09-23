@@ -19,8 +19,7 @@ libobjc = load_library("/usr/lib/libobjc.dylib")
 libmetal = load_library("/Library/Frameworks/Metal.framework/Metal")
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
 load_library("/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
-libdispatch = load_library("/usr/lib/libSystem.dylib")
-libobjc.objc_msgSend.restype = objc_id
+libdispatch = load_library("/usr/lib/libSystem.dylib") # libdispatch is part of libSystem on mac
 libobjc.objc_getClass.restype = objc_id
 libobjc.sel_registerName.restype = objc_id
 libmetal.MTLCreateSystemDefaultDevice.restype = objc_instance
@@ -67,10 +66,8 @@ class MetalCompiler(Compiler):
     options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
     msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
     library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(src), options, None, restype=objc_instance)
-    library_contents_ptr = msg(library, "libraryDataContents")
-    library_contents_bytes_ptr = msg(library_contents_ptr, "bytes")
-    library_length = cast(int, msg(library_contents_ptr, "length", restype=ctypes.c_ulong))
-    return ctypes.string_at(library_contents_bytes_ptr, library_length)
+    library_contents = msg(library, "libraryDataContents")
+    return ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
