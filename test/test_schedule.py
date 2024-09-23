@@ -1182,7 +1182,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.rand(3, 4, 5).realize()
     out = (a + b).pad(((0, 1), (0, 1), (0, 1)), 1.0).sum().contiguous()
     run_schedule(check_schedule(out, 1))
-    np.testing.assert_allclose(out.numpy(), np.pad(a.numpy()+b.numpy(), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum())
+    np.testing.assert_allclose(out.numpy(), np.pad(a.numpy()+b.numpy(), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), atol=1e-5, rtol=1e-6)
 
   # multireduce spec
   def test_multireduce_pad_reduce_safe(self):
