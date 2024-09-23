@@ -88,8 +88,11 @@ class MetalProgram:
                                        descriptor, 0, None, None, restype=objc_instance)
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    if prod(local_size) > msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=ctypes.c_ulong):
-      raise RuntimeError("local size too big")
+    max_total_threads = msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=ctypes.c_ulong)
+    if prod(local_size) > max_total_threads:
+      exec_width = msg(self.pipeline_state, "threadExecutionWidth", restype=ctypes.c_ulong)
+      memory_length = msg(self.pipeline_state, "staticThreadgroupMemoryLength", restype=ctypes.c_ulong)
+      raise RuntimeError(f"local size {local_size} bigger than {max_total_threads} with exec width {exec_width} memory length {memory_length}")
     command_buffer = msg(self.device.mtl_queue, "commandBuffer")
     encoder = msg(command_buffer, "computeCommandEncoder")
     msg(encoder, "setComputePipelineState:", self.pipeline_state)
@@ -112,7 +115,7 @@ class MetalAllocator(LRUAllocator):
     super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
     ret = msg(self.device.device, "newBufferWithLength:options:", size, 0, restype=objc_instance)
-    if ret.value is None: raise RuntimeError("Metal failed to allocate buffer")
+    if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): msg(opaque.buf, "release")
   def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
