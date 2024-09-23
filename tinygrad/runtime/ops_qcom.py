@@ -311,12 +311,12 @@ class QCOMAllocator(HCQAllocator):
       src_off, dest_off = src_off+src_stride, dest_off+dest_stride
 
   def copyin(self, dest:HCQBuffer, src:memoryview):
-    if hasattr(dest, 'pitch'): self._do_copy(mv_address(src), dest.va_addr, len(src), dest.real_stride, dest.real_stride, dest.pitch)
+    if hasattr(qd:=cast(QCOMBuffer, dest), 'pitch'): self._do_copy(mv_address(src), qd.va_addr, len(src), qd.real_stride, qd.real_stride, qd.pitch)
     else: ctypes.memmove(dest.va_addr, mv_address(src), src.nbytes)
 
   def copyout(self, dest:memoryview, src:HCQBuffer):
     self.device.synchronize()
-    if hasattr(src, 'pitch'): self._do_copy(src.va_addr, mv_address(dest), src.size, src.real_stride, src.pitch, src.real_stride)
+    if hasattr(qs:=cast(QCOMBuffer, src), 'pitch'): self._do_copy(qs.va_addr, mv_address(dest), qs.size, qs.real_stride, qs.pitch, qs.real_stride)
     else: ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
 
   def as_buffer(self, src:HCQBuffer) -> memoryview:
