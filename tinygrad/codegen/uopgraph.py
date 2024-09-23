@@ -465,6 +465,9 @@ constant_folder = PatternMatcher([
   # ** mod **
   # mod folding
   (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  # factor out gcd between const_factor and mod operand
+  (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: (cast(UOp, x.divides(g))%(c.arg//g))*g \
+   if 0 < c.arg and (g:=math.gcd(x.const_factor(), c.arg)) > 1 else None),
   # ** combine terms **
   (UPat.var("x")%UPat.cvar("c")+(UPat.var("x")//UPat.cvar("c"))*UPat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
   (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)

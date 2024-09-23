@@ -214,7 +214,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
 
   def test_mod_factor(self):
-    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 99, "((b*50)%100)")
+    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 50, {"((b*50)%100)", "((b%2)*50)"})
 
   def test_mod_to_sub(self):
     # This is mod reduction
@@ -342,7 +342,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "((((idx*-10)+99)//11)+-9)")
 
   def test_div_into_mod(self):
-    self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(((idx*4)%8)//4)")
+    self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
 
   # TODO: simplify the expression
   def test_div_neg_cancel(self):
