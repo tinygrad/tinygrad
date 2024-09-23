@@ -451,12 +451,13 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
   def test_embedding_one_kernel(self):
+    _ = Tensor.rand(1).realize() # make random consistent
     layer = Embedding(20, 30)
     a = Tensor([[1, 5, 9, 11],
                 [12, 19, 8, 1]])
     result = layer(a)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(8 if Device.DEFAULT == "GPU" else 9, len([item for item in schedule if item.ast.op is UOps.SINK]),
+    self.assertEqual(8, len([item for item in schedule if item.ast.op is UOps.SINK]),
                      "first run realizes arange, weight, and embedding")
     run_schedule(schedule)
 
