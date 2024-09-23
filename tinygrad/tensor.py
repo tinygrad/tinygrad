@@ -439,6 +439,10 @@ class Tensor:
       Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint32, requires_grad=False)
     else: had_counter = True
 
+    # when using MOCKGPU and NV generate rand on CLANG
+    if getenv("MOCKGPU") and device.startswith("NV"): _device, device = device, "CLANG"
+    else: _device = None
+
     if not THREEFRY:
       # for bfloat16, numpy rand passes buffer in float
       if to_dtype(dtype or dtypes.default_float) == dtypes.bfloat16:
@@ -471,6 +475,7 @@ class Tensor:
     # bitcast back to the original dtype and reshape
     out = bits.bitcast(dtype)[:num_].sub(1).reshape(shape)
 
+    if getenv("MOCKGPU") and _device: out = out.to(_device)
     out.requires_grad = kwargs.get("requires_grad")
     return out.contiguous()
 
