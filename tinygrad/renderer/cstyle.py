@@ -227,7 +227,7 @@ class ClangRenderer(CStyleLanguage):
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
 
-  # RECIP and SIN change the assembly on QCOM
+  # native RECIP and SIN change the assembly on QCOM, but SIN gets you all the gains
   code_for_op = {**CStyleLanguage().code_for_op, UnaryOps.SIN: lambda x,dtype: f"native_sin({x})"}
 
   # language options
