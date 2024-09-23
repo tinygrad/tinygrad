@@ -457,7 +457,7 @@ class Tensor:
 
     # threefry random bits
     x = counts2.cast(dtypes.uint64) << 32 | counts1.cast(dtypes.uint64)
-    x = F.Threefry.apply(*x._broadcasted(Tensor._seed ^ Tensor._device_seeds[device]))
+    x = F.Threefry.apply(*x._broadcasted((Tensor._seed ^ Tensor._device_seeds[device]) & 0xFFFFFFFF))
     counts1, counts2 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
     bits = counts1.cat(counts2)[:num]
 
