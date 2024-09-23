@@ -192,5 +192,20 @@ class TestValidSimplification(unittest.TestCase):
     self.assertEqual(render(data1_shape, alu9, UOp(UOps.VECTORIZE, dtypes.int.vec(2), (((alu8+(alu5*8))%64),(alu5//8)))),
                      "((idx0<256)?read_imagef(data0, smp, (int2)((((((idx0//8)%32)//4)+(alu0*8))%64),(alu0//8))):(float4)(0.0f,0.0f,0.0f,0.0f))")
 
+  def test_simplify5(self):
+    # openpilot 0.9.7, chunk replacement to simplify
+    shape = (10, 384, 4)
+    idx0 = Special("idx0", 16)
+    idx1 = Special("idx1", 24)
+    alu0 = idx0*4
+    alu1 = (idx1*256)+alu0
+    alu2 = idx1//3
+    alu3 = ((alu1+1)%768)
+    idx = ((idx0+((((alu3//640)+alu2)%8)*16)+128),((alu3//64)%10))
+    valid = alu3.lt(640)
+
+    self.assertEqual(render(shape, valid, UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx)),
+                     "((alu0<640)?read_imagef(data0, smp, (int2)((idx0+((idx1//3)*16)+128),(alu0//64))):(float4)(0.0f,0.0f,0.0f,0.0f))")
+
 if __name__ == '__main__':
   unittest.main()

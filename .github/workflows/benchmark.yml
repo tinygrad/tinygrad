@@ -45,6 +45,8 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: reset process replay
+      run: test/external/process_replay/reset.py
     - name: Run Stable Diffusion
       run: JIT=2 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run Stable Diffusion with fp16
@@ -148,6 +150,8 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: reset process replay
+      run: test/external/process_replay/reset.py
     - name: Run model inference benchmark
       run: NV=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -252,6 +256,8 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: reset process replay
+      run: test/external/process_replay/reset.py
     - name: Fuzz Padded Tensor Core GEMM (NV)
       run: NV=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: Fuzz Padded Tensor Core GEMM (PTX)
@@ -318,6 +324,8 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: reset process replay
+      run: test/external/process_replay/reset.py
     - name: Show off tinybox
       run: /opt/rocm/bin/rocm-bandwidth-test
     # TODO: unstable on AMD
@@ -420,6 +428,8 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: reset process replay
+      run: test/external/process_replay/reset.py
     - name: Train MNIST
       run: time PYTHONPATH=. AMD=1 TARGET_EVAL_ACC_PCT=97.3 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps
@@ -471,6 +481,8 @@ jobs:
       run: |
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: reset process replay
+      run: test/external/process_replay/reset.py
     - name: openpilot compile 0.9.4
       run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 python examples/openpilot/compile2.py | tee openpilot_compile_0_9_4.txt
     - name: openpilot compile 0.9.7

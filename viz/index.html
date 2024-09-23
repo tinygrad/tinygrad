@@ -155,12 +155,16 @@
     <div class="container metadata"></div>
   </div>
   <script>
-  function renderGraph(graph) {
-    const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+  function renderGraph(graph, additions) {
+    const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: #2ea04326" : "display: none;"});
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
         g.setEdge(src, k)
+      }
+      if (additions.includes(parseInt(k))) {
+        g.setParent(k, "addition");
       }
     }
     const svg = d3.select("svg");
@@ -237,7 +241,7 @@
       ret = await (await fetch(`/graph?kernel_idx=${currentKernel}&uop_idx=${currentUOp}`)).json();
       cache[cacheKey] = ret;
     }
-    renderGraph(ret[0].graphs[currentRewrite][0]);
+    renderGraph(ret[0].graphs[currentRewrite], ret[0].additions[currentRewrite]);
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
     metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc }));
@@ -296,7 +300,7 @@
         event.preventDefault()
         currentUOp = 0;
         currentRewrite = 0;
-        currentKernel = Math.min(Array.from(Object.keys(kernels)).length, currentKernel+1)
+        currentKernel = Math.min(Array.from(Object.keys(kernels)).length-1, currentKernel+1)
        return main()
       }
     }
