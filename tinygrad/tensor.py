@@ -434,7 +434,7 @@ class Tensor:
     device, had_counter = Device.canonicalize(device), False
 
     # when using MOCKGPU and NV generate rand on CLANG
-    if getenv("MOCKGPU") and device.startswith("NV"): _device, device = device, "CLANG"
+    if THREEFRY and getenv("MOCKGPU") and device.startswith("NV"): _device, device = device, "CLANG"
     else: _device = None
 
     # generate per device seeds and rng counter if we haven't seen this device yet
