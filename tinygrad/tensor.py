@@ -645,8 +645,7 @@ class Tensor:
       if self.lazydata.axis is not None:
         rands = [Tensor.rand(*lb.shape, device=lb.device, dtype=dtype) for lb in self.lazydata.lbs]
         return Tensor(MultiLazyBuffer([r.lazydata for r in rands], self.lazydata.axis, None), device=self.device, dtype=dtype, **kwargs)
-      else:
-        raise ValueError("rand_like doesn't support None shard axis")
+      raise ValueError("rand_like doesn't support None shard axis")
     return Tensor.rand(*self.shape, device=kwargs.pop("device", self.device), dtype=dtype, **kwargs)
 
   # ***** rng hlops *****
