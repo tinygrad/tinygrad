@@ -35,7 +35,7 @@ class MetalGraph(GraphRunner):
     self.needs_icb_fix = int("AGXG15XFamilyIndirectCommandBuffer" not in icb_label)    # not required on M3
 
     if len(self.vars): self.int_buf = self.device.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
-    all_resources = dedup([self.int_buf.buf] if len(self.vars) else [])
+    all_resources = [self.int_buf.buf] if len(self.vars) else []
     all_pipelines = []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
@@ -61,7 +61,7 @@ class MetalGraph(GraphRunner):
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
 
     if self.command_buffer is not None and self.command_buffer in self.device.mtl_buffers_in_flight: wait_check(self.command_buffer)
-    all_resources = self.all_resources + [x._buf.buf for x in input_rawbuffers]
+    all_resources = dedup(self.all_resources + [x._buf.buf for x in input_rawbuffers])
 
     for (j,i),input_idx in self.input_replace.items():
       computeCommand = msg(self.icb, "indirectComputeCommandAtIndex:", j, restype=objc_instance)
