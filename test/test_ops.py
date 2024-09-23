@@ -889,6 +889,8 @@ class TestOps(unittest.TestCase):
 
   def test_sum_simple(self):
     helper_test_op(None, lambda x: x.sum(), vals=[[1.,1.]])
+  # NOTE: simple test for locals
+  # FORWARD_ONLY=1 DEBUG=4 python3 test/test_ops.py TestOps.test_sum_full
   def test_sum_full(self):
     helper_test_op([(16384)], lambda x: x.sum())
   def test_sum_relu(self):
