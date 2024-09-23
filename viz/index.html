@@ -157,6 +157,7 @@
   <script>
   function renderGraph(graph) {
     const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+    g.setNode('rewritten', {label: 'rewritten', clusterLabelPos: 'top', style: 'fill: #6E6ADE'});
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
@@ -174,6 +175,7 @@
     svg.call(zoom);
     const render = new dagreD3.render();
     render(inner, g);
+    return g;
   }
   async function checkStatus() {
     active = true;
@@ -237,7 +239,10 @@
       ret = await (await fetch(`/graph?kernel_idx=${currentKernel}&uop_idx=${currentUOp}`)).json();
       cache[cacheKey] = ret;
     }
-    renderGraph(ret[0].graphs[currentRewrite][0]);
+    const g = renderGraph(ret[0].graphs[currentRewrite][0]);
+    Object.keys(ret[0].graphs[currentRewrite][2]).forEach((k) => {
+      g.setParent(k, "rewritten")
+    })
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
     metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc }));
