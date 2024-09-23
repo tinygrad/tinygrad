@@ -54,9 +54,6 @@ def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(40, 4
   x2 = tiny_func(shape).numpy().flatten()
   if numpy_func is not None: y = numpy_func(shape).flatten()
   if torch_func is not None: z = torch_func(shape).numpy().flatten()
-  # write x1 and z to file
-  np.savetxt("/tmp/x1.txt", x1)
-  np.savetxt("/tmp/z.txt", z)
   return (numpy_func is None or (kstest(x1, y) >= alpha and kstest(x2, y) >= alpha)) and \
     (torch_func is None or (kstest(x1, z) >= alpha and kstest(x2, z) >= alpha))
 
