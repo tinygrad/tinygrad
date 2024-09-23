@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
-from typing import List, Any, Tuple, Optional, cast, TypeVar
+from typing import List, Any, Tuple, Optional, cast, TypeVar, Union
 from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
@@ -30,7 +30,7 @@ libdispatch.dispatch_data_create.restype = objc_id
 
 T = TypeVar("T")
 # Ignore mypy error reporting incompatible default, because typevar default only works on python 3.12
-def msg(ptr: objc_instance, selector: str, /, *args: Any, restype: type[T] = objc_id) -> T: # type: ignore [assignment]
+def msg(ptr: objc_id, selector: str, /, *args: Any, restype: type[T] = objc_id) -> T: # type: ignore [assignment]
   sender = libobjc["objc_msgSend"] # Using attribute access returns a new reference so setting restype is safe
   sender.restype = restype
   return sender(ptr, libobjc.sel_registerName(selector.encode()), *args)
@@ -46,7 +46,7 @@ def wait_check(cbuf: Any):
   msg(cbuf, "waitUntilCompleted")
   if (error := cast(int, msg(cbuf, "error", restype=ctypes.c_ulong))) != 0: raise RuntimeError(error)
 
-def elapsed_time(cbuf: objc_instance):
+def elapsed_time(cbuf: objc_id):
   return cast(float, msg(cbuf, "GPUEndTime", restype=ctypes.c_double)) - cast(float, msg(cbuf, "GPUStartTime", restype=ctypes.c_double))
 
 class MetalCompiler(Compiler):
