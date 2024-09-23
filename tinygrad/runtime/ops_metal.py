@@ -7,7 +7,7 @@ from tinygrad.renderer.cstyle import MetalRenderer
 import ctypes
 
 class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
-  def __hash__(self): return cast(int, self.value)
+  def __hash__(self): return hash(self.value)
   def __eq__(self, other): return self.value == other.value
 
 class objc_instance(objc_id): # method with name "new", "alloc" should be freed after use
