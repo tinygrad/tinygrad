@@ -227,6 +227,11 @@ class ClangRenderer(CStyleLanguage):
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
 
+  code_for_op = {**CStyleLanguage().code_for_op,
+    #UnaryOps.SQRT: lambda x,dtype: f"native_sqrt({x})", UnaryOps.RECIP: lambda x,dtype: f"native_recip({x})",
+    #UnaryOps.EXP2: lambda x,dtype: f"native_exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"native_log2({x})",
+    UnaryOps.SIN: lambda x,dtype: f"native_sin({x})"} if getenv("NATIVE_MATH") else CStyleLanguage().code_for_op
+
   # language options
   kernel_prefix = "__kernel "
   buffer_prefix = "__global "
