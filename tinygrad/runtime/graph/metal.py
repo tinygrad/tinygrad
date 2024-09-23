@@ -1,6 +1,4 @@
 from typing import List, Any, Dict, cast, Optional
-from tinygrad.runtime.support.metal import msg, libobjc, to_ns_array, int_tuple_to_struct, objc_instance, MTLResourceUsage, \
-  MTLIndirectCommandType, MTLResourceOptions
 import ctypes
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv
@@ -8,7 +6,8 @@ from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.shape.symbolic import Variable
-from tinygrad.runtime.ops_metal import wait_check
+from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, to_ns_array, int_tuple_to_struct, objc_instance, MTLResourceUsage, \
+  MTLIndirectCommandType, MTLResourceOptions
 
 class MetalGraph(GraphRunner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
