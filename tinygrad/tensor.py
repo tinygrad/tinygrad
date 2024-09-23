@@ -430,7 +430,7 @@ class Tensor:
     """
     if not dtypes.is_float(dtype := to_dtype(dtype or dtypes.default_float)): raise ValueError(f"rand only supports float dtypes, got {dtype}")
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
-    if (had_counter := Tensor._rng_counter is None): Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
+    if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
 
     # generate per device seeds and rng counter if we haven't seen this device yet
     device, had_counter = Device.canonicalize(device), False
@@ -466,7 +466,8 @@ class Tensor:
     uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]
     bits = bits.bitcast(uint_dtype)
     # only randomize the mantissa bits and set the exponent to 1
-    bits = bits.rshift((dtype.itemsize * 8) - nmant).bitwise_or(bits._broadcasted(1)[1].bitcast(uint_dtype))
+    one = Tensor.ones_like(bits).bitcast(uint_dtype)
+    bits = bits.rshift((dtype.itemsize * 8) - nmant).bitwise_or(one)
     # bitcast back to the original dtype and reshape
     out = bits.bitcast(dtype)[:num_].sub(1).reshape(shape)
 
