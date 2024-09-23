@@ -54,17 +54,12 @@ MLPERF_CLASSES = ['Airplane', 'Antelope', 'Apple', 'Backpack', 'Balloon', 'Banan
 ]
 
 
-def openimages(base_dir:Path, subset:str):
+def openimages(base_dir:Path, subset:str, ann_file:Path):
   valid_subsets = ['train', 'validation']
   if subset not in valid_subsets:
     raise ValueError(f"{subset=} must be one of {valid_subsets}")
 
-  ann_file = base_dir / f"{subset}/labels/openimages-mlperf.json"
-
-  if not ann_file.is_file():
-    fetch_openimages(ann_file, base_dir, subset)
-
-  return ann_file
+  fetch_openimages(ann_file, base_dir, subset)
 
 # this slows down the conversion a lot!
 # maybe use https://raw.githubusercontent.com/scardine/image_size/master/get_image_size.py
@@ -142,8 +137,8 @@ def fetch_openimages(output_fn:str, base_dir:Path, subset:str):
   print("Converting annotations to COCO format...")
   export_to_coco(class_map, annotations, image_list, data_dir, output_fn, subset)
 
-def image_load(subset, fn):
-  img_folder = BASEDIR / f"{subset}/data"
+def image_load(base_dir, subset, fn):
+  img_folder = base_dir / f"{subset}/data"
   img = Image.open(img_folder / fn).convert('RGB')
   import torchvision.transforms.functional as F
   ret = F.resize(img, size=(800, 800))
@@ -163,26 +158,26 @@ def prepare_target(annotations, img_id, img_size):
   classes = classes[keep]
   return {"boxes": boxes, "labels": classes, "image_id": img_id, "image_size": img_size}
 
-def iterate(coco, bs=8):
+def iterate(coco, base_dir, bs=8):
   image_ids = sorted(coco.imgs.keys())
   for i in range(0, len(image_ids), bs):
     X, targets  = [], []
     for img_id in image_ids[i:i+bs]:
       img_dict = coco.loadImgs(img_id)[0]
-      x, original_size = image_load(img_dict['subset'], img_dict["file_name"])
+      x, original_size = image_load(base_dir, img_dict['subset'], img_dict["file_name"])
       X.append(x)
       annotations = coco.loadAnns(coco.getAnnIds(img_id))
       targets.append(prepare_target(annotations, img_id, original_size))
     yield np.array(X), targets
 
-def download_dataset(base_dir:Path, subset:str):
-  try:
-    (base_dir / subset).mkdir(parents=True)
+def download_dataset(base_dir:Path, subset:str) -> Path:
+  if (ann_file:=base_dir / f"{subset}/labels/openimages-mlperf.json").is_file(): print(f"{subset} dataset is already available")
+  else:
     print(f"Downloading {subset} dataset...")
-    openimages(base_dir, subset)
+    openimages(base_dir, subset, ann_file)
     print("Done")
-  except OSError:
-    print(f"{subset} dataset is already available")
+
+  return ann_file
 
 
 if __name__ == "__main__":
