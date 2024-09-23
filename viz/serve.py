@@ -21,13 +21,12 @@ class UOpRet:
   diffs: List[Tuple[str, Tuple[str, int], List[str]]]      # the diffs for each rewrite
   extra: List[List[str]]                                   # these become code blocks in the UI
   additions: List[List[int]]
-  deletions: List[List[int]]
   @staticmethod
   def from_ctx(ctx:TrackedRewriteContext) -> UOpRet:
     uops: List[UOp] = [ctx.sink]
     diffs: List[Tuple[str, Tuple[str, int], List[str]]] = []
     extra: List[List[str]] = [[str(ctx.sink)]]
-    additions, deletions = [[]], [[]]
+    additions: List[List[int]] = [[]]
     seen_replaces: Dict[bytes, UOp] = {}
     for i, (first, rewritten, pattern) in enumerate(ctx.rewrites):
       if pattern.location[0].split("/")[-1] == "ops.py": continue
@@ -37,12 +36,11 @@ class UOpRet:
       # sanity check
       assert new_sink is not uops[-1], f"rewritten sink wasn't rewritten! {i}\n{new_sink}\n{uops[-1]}"
       # update ret data
-      additions.append([id(x) for x in new_sink.sparents if x not in uops[-1].sparents])
-      deletions.append([id(x) for x in new_sink.sparents if x not in new_sink.sparents])
+      additions.append([id(x) for x in rewritten.sparents])
       diffs.append((str(pattern), pattern.location, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
       uops.append(new_sink)
       extra.append([str(new_sink)])
-    return UOpRet(ctx.loc, uops, diffs, extra, additions, deletions)
+    return UOpRet(ctx.loc, uops, diffs, extra, additions)
   def to_json(self) -> Dict: return {**asdict(self), "graphs": list(map(uop_to_json, self.graphs))}
 
 def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
