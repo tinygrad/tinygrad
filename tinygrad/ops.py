@@ -103,19 +103,23 @@ class UOps(FastEnum):
   VALID = auto()
   SPECIAL = auto()
   NOOP = auto()
-  GEP = auto()
-
-  # math ops
-  CAST = auto()
-  BITCAST = auto()
-  VECTORIZE = auto()
-  ALU = auto()
   REDUCE = auto()
   REDUCE_AXIS = auto()
+
+  # helper ops
+  GEP = auto()
+  VECTORIZE = auto()
+  CAST = auto()
+  BITCAST = auto()
+
+  # loads before math
+  LOAD = auto()
+
+  # math ops
+  ALU = auto()
   WMMA = auto()
 
-  # memory/assignment ops
-  LOAD = auto()
+  # assignment ops
   STORE = auto()
   ASSIGN = auto()
 
