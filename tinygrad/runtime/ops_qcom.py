@@ -113,13 +113,15 @@ class QCOMComputeQueue(HWComputeQueue):
     global_size_mp = [int(g*l) for g,l in zip(global_size, local_size)]
     self.cmd_idx_to_dims[self._cur_cmd_idx()] = [global_size, local_size]
 
+    th = adreno.THREAD128 if prod(local_size) > 128 else adreno.THREAD64
+
     self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
              qreg.a6xx_hlsq_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1),
-             global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, 0xccc0cf, 0xfc | qreg.a6xx_hlsq_cs_cntl_1(threadsize=adreno.THREAD64),
+             global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, 0xccc0cf, 0xfc | qreg.a6xx_hlsq_cs_cntl_1(threadsize=th),
              int(math.ceil(global_size[0])), int(math.ceil(global_size[1])), int(math.ceil(global_size[2])))
 
     self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
-             qreg.a6xx_sp_cs_ctrl_reg0(threadsize=adreno.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
+             qreg.a6xx_sp_cs_ctrl_reg0(threadsize=th, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
              qreg.a6xx_sp_cs_unknown_a9b1(unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.device._stack.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
