@@ -103,19 +103,23 @@ class UOps(FastEnum):
   VALID = auto()
   SPECIAL = auto()
   NOOP = auto()
-  GEP = auto()
-
-  # math ops
-  CAST = auto()
-  BITCAST = auto()
-  VECTORIZE = auto()
-  ALU = auto()
   REDUCE = auto()
   REDUCE_AXIS = auto()
+
+  # helper ops
+  GEP = auto()
+  VECTORIZE = auto()
+  CAST = auto()
+  BITCAST = auto()
+
+  # loads before math
+  LOAD = auto()
+
+  # math ops
+  ALU = auto()
   WMMA = auto()
 
-  # memory/assignment ops
-  LOAD = auto()
+  # assignment ops
   STORE = auto()
   ASSIGN = auto()
 
@@ -578,6 +582,9 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
 
   (UPat(UOps.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
   (UPat(UOps.SPECIAL, src=()), lambda: True),
+
+  # no pyint allowed here!
+  (UPat(UOps.ALU, dtype=dtypes.pyint), lambda: False),
 
   # TODO: confirm the args of both of these are shapetrackers
   (UPat(UOps.SHAPETRACKER, src=()), lambda: True),
