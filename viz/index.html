@@ -62,13 +62,11 @@
     stroke-width: 1.5px;
   }
   .graph {
-    grid-column: span 10;
+    width: 70%;
     position: relative;
   }
   .main-container {
-    display: grid;
-    grid-template-columns: repeat(14, 1fr);
-    gap: 8px;
+    display: flex;
     padding: 12px;
     width: 100%;
     height: 100%;
@@ -79,12 +77,16 @@
     background-color: #111111;
     border-radius: 8px;
     padding: 8px;
+    position: relative;
   }
   .container > * + * {
     margin-top: 12px;
   }
+  .main-container > * + * {
+    margin-left: 8px;
+  }
   .kernel-list {
-    grid-column: span 1;
+    width: 10%;
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -96,8 +98,17 @@
     margin-top: 4px;
   }
   .metadata {
-    grid-column: span 3;
+    width: 20%;
     overflow-y: auto;
+  }
+  #resize-handle {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 20px;
+    cursor: w-resize;
+    background-color: transparent;
   }
   .rewrite-list {
     display: flex;
@@ -137,12 +148,17 @@
       transform: rotate(360deg);
     }
   }
+  .status {
+    color: #EC5D5E;
+    font-weight: bold;
+  }
   </style>
 </head>
 <body>
   <div class="main-container">
     <div class="container kernel-list"></div>
     <div class="container graph">
+      <div class="status"></div>
       <svg>
         <g id="render"></g>
       </svg>
@@ -150,12 +166,16 @@
     <div class="container metadata"></div>
   </div>
   <script>
-  function renderGraph(graph) {
-    const g = new dagreD3.graphlib.Graph().setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+  function renderGraph(graph, additions) {
+    const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: #2ea04326" : "display: none;"});
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
         g.setEdge(src, k)
+      }
+      if (additions.includes(parseInt(k))) {
+        g.setParent(k, "addition");
       }
     }
     const svg = d3.select("svg");
@@ -170,26 +190,38 @@
     const render = new dagreD3.render();
     render(inner, g);
   }
+  async function checkStatus() {
+    active = true;
+    try {
+      active = (await fetch("/")).ok;
+    } catch {
+      active = false;
+    }
+    document.querySelector('.status').textContent = active ? `` : `Connection to localhost:8000 failed, is VIZ=1 running?`;
+  }
   var ret = {};
   var cache = {};
   var kernels = null;
   var currentUOp = 0;
   var currentKernel = 0;
   var currentRewrite = 0;
+  var expandKernel = false;
   async function main() {
+    checkStatus();
     // ** kernel list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
+      currentKernel = 0;
     }
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
-    Object.entries(kernels).forEach(([k,uopRewrites], i) => {
-      kernelUl = Object.assign(document.createElement("ul"), { innerHTML: `<p>${k}</p>`, key: `kernel-${i}`, className: i === currentKernel ? "active" : "" });
-      uopRewrites.forEach((u, j) => {
+    kernels.forEach((k, i) => {
+      kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "" });
+      const p = Object.assign(document.createElement("p"), {id: `kernel-${k.name}`, innerText: k.name})
+      kernelUl.appendChild(p)
+      k.ctxs.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: u, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
-        if (i !== currentKernel) {
-          rwUl.style.display = "none";
-        }
+        rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
           e.stopPropagation();
           currentUOp = j;
@@ -199,11 +231,16 @@
         }
         kernelUl.appendChild(rwUl)
       })
-      kernelUl.onclick = (e) => {
-        if (i === currentKernel) return;
+      p.onclick = (e) => {
+        if (i === currentKernel) {
+          expandKernel = !expandKernel;
+          main();
+          return;
+        }
         currentKernel = i;
         currentUOp = 0;
         currentRewrite = 0;
+        expandKernel = true;
         main();
       }
       kernelList.appendChild(kernelUl);
@@ -217,17 +254,46 @@
       ret = await (await fetch(`/graph?kernel_idx=${currentKernel}&uop_idx=${currentUOp}`)).json();
       cache[cacheKey] = ret;
     }
-    renderGraph(ret[0].graphs[currentRewrite][0]);
+    renderGraph(ret[0].graphs[currentRewrite], ret[0].additions[currentRewrite]);
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
+    metadata.appendChild(Object.assign(document.createElement("div"), { id: "resize-handle" }));
     metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc }));
+    const resizeHandle = document.getElementById("resize-handle");
+
+    let startX;
+    let containerWidth;
+    let metadataWidth;
+    resizeHandle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      metadata.style.userSelect = "none";
+      startX = e.clientX;
+      containerWidth = document.querySelector(".main-container").getBoundingClientRect().width;
+      metadataWidth = metadata.getBoundingClientRect().width;
+      document.documentElement.addEventListener("mousemove", resize, false);
+      document.documentElement.addEventListener("mouseup", stopResize, false);
+    });
+    function resize(e) {
+      const change = e.clientX - startX;
+      const newWidth = ((metadataWidth-change) / containerWidth) * 100;
+      if (newWidth >= 20 && newWidth <= 50) {
+        metadata.style.width = `${newWidth}%`;
+        document.querySelector(".graph").style.width = `${100-newWidth-10}%`;
+      }
+    }
+    function stopResize(e) {
+      document.documentElement.removeEventListener("mousemove", resize, false);
+      document.documentElement.removeEventListener("mouseup", stopResize, false);
+      metadata.style.userSelect = "initial";
+    }
+
     ret[0].extra[currentRewrite].forEach((e, i) => {
       if (e.length == 0) return;
       const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${e}</code>`, className: "code-block" });
       metadata.appendChild(pre);
     })
-    if (ret[0].code !== "") {
-      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${ret[0].code}</code>`, className: "code-block" });
+    if (kernels[currentKernel].code !== "") {
+      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${kernels[currentKernel].code}</code>`, className: "code-block" });
       metadata.appendChild(pre);
     }
     // ** rewrite list
@@ -263,7 +329,30 @@
     }
   }
   document.addEventListener("keydown", async function(event) {
-    // up and down change the UOp from the list
+    // up and down change the UOp or kernel from the list
+    if (!expandKernel) {
+      if (event.key == "ArrowUp") {
+        event.preventDefault()
+        currentUOp = 0;
+        currentRewrite = 0;
+        currentKernel = Math.max(0, currentKernel-1)
+       return main()
+      }
+      if (event.key == "ArrowDown") {
+        event.preventDefault()
+        currentUOp = 0;
+        currentRewrite = 0;
+        currentKernel = Math.min(Array.from(Object.keys(kernels)).length-1, currentKernel+1)
+       return main()
+      }
+    }
+    if (event.key == "Enter") {
+      event.preventDefault()
+      currentUOp = 0;
+      currentRewrite = 0;
+      expandKernel = !expandKernel;
+      main();
+    }
     if (event.key == "ArrowUp") {
       event.preventDefault()
       currentRewrite = 0;
@@ -273,7 +362,7 @@
     if (event.key == "ArrowDown") {
       event.preventDefault()
       currentRewrite = 0;
-      const totalUOps = Array.from(Object.values(kernels))[currentKernel].length-1;
+      const totalUOps = kernels[currentKernel].ctxs.length-1;
       currentUOp = Math.min(totalUOps, currentUOp+1)
       main()
     }
@@ -290,6 +379,7 @@
       main()
     }
   })
+  setInterval(checkStatus, 5000);
   main()
   </script>
   </body>
