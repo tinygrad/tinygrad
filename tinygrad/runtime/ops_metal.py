@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
-from typing import List, Any, Tuple, Optional, cast, TypeVar, Union
+from typing import List, Any, Tuple, Optional, cast, TypeVar
 from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer

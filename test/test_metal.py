@@ -21,7 +21,8 @@ class TestMetal(unittest.TestCase):
     ret = compiler.compile("""
 #include <metal_stdlib>
   using namespace metal;
-  kernel void E_4n1(device int* data0, const device int* data1, const device int* data2, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {
+  kernel void E_4n1(device int* data0, const device int* data1, const device int* data2,
+          uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {
     int val0 = *(data1+0);
     int val1 = *(data1+1);
     int val2 = *(data1+2);
