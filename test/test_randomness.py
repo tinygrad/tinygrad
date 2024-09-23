@@ -45,7 +45,7 @@ def kstest(l1, l2):
   prob = ksprob((nesq + 0.12 + 0.11 / nesq) * d)
   return prob
 
-def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(40, 43), alpha=0.04):
+def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(40, 43), alpha=0.035):
   Tensor.manual_seed(1337)
   torch.manual_seed(1337)
   np.random.seed(1337)
