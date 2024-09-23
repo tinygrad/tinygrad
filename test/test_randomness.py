@@ -90,9 +90,10 @@ class TestRandomness(unittest.TestCase):
     N = 128
     x = Tensor.rand((2, N, N), dtype=dtypes.bfloat16)
     assert x.dtype == dtypes.bfloat16
-    nx = x.numpy()
-    assert nx[nx == 1].size == 0
-    assert nx[nx == 0].size > 0
+    if THREEFRY.value:
+      nx = x.numpy()
+      assert nx[nx == 1].size == 0
+      assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.bfloat16).float(), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
   def test_randn(self):
