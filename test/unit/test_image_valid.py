@@ -142,6 +142,27 @@ class TestValidSimplification(unittest.TestCase):
     self.assertEqual(render(shape, valid, idx),
                      "read_imagef(data0, smp, (int2)(((idx1*24)+(ridx2*3)+ridx0+(-3)),((idx2*2)+ridx1+(-1))))")
 
+  def test_openpilot_conv3(self):
+    # in openpilot 0.9.7
+    idx0 = Special("idx0", 64)
+    idx1 = Special("idx1", 2)
+    idx2 = Special("idx2", 4)
+    ridx0 = Range(0, 7)
+    ridx1 = Range(1, 7)
+
+    alu2 = ((idx2*2)+ridx0)
+    alu4 = ((idx1*8)+ridx1)
+    alu6 = ((idx1*512)+(ridx1*64)+idx0)
+
+    valid = alu2.lt(11)&(alu4.lt(3).ne(True))
+    shape = (8, 1024, 4)
+    idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (((alu6+832)%1024),(alu2+((idx1+((ridx1+5)/8)+1)/2)+(-4))))
+
+    # TODO: simplify idx
+    # alu0 = ((idx2*2)+ridx0)
+    self.assertEqual(render(shape, valid, idx),
+      "(((alu0<11)&((((idx1*8)+ridx1)<3)!=1))?read_imagef(data0, smp, (int2)((((idx1*512)+(ridx1*64)+idx0+832)%1024),(alu0+(-4)))):(float4)(0.0f,0.0f,0.0f,0.0f))")  # noqa: E501
+
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)
     gidx = Special("gidx", 512)

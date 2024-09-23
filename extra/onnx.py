@@ -81,7 +81,7 @@ def get_run_onnx(onnx_model: ModelProto):
       return Tensor(dat, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims))
     if len(inp.raw_data) > 0:
       data = np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).astype(_to_np_dtype(dtype)).copy()
-      return Tensor(data, requires_grad=False).reshape(tuple(inp.dims))
+      return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
     return Tensor(None, requires_grad=False)
 
   def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:
