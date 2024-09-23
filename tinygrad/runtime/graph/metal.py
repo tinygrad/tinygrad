@@ -6,8 +6,17 @@ from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.shape.symbolic import Variable
-from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, int_tuple_to_struct, objc_instance, MTLResourceUsage, \
-  MTLIndirectCommandType, MTLResourceOptions
+from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, int_tuple_to_struct, objc_instance
+
+class MTLIndirectCommandType:
+  MTLIndirectCommandTypeConcurrentDispatch = (1 << 5)
+
+class MTLResourceOptions:
+  MTLResourceCPUCacheModeDefaultCache = 0
+
+class MTLResourceUsage:
+  MTLResourceUsageRead = 0b01
+  MTLResourceUsageWrite = 0b10
 
 class MetalGraph(GraphRunner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):

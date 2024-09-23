@@ -38,17 +38,6 @@ def int_tuple_to_struct(t: Tuple[int, ...], _type: type = ctypes.c_ulong):
   Struct._fields_ = [(f"field{i}", _type) for i in range(len(t))]
   return Struct(*t)
 
-class MTLIndirectCommandType:
-  MTLIndirectCommandTypeConcurrentDispatch = 32 # (1 << 5)
-  MTLResourceCPUCacheModeDefaultCache = 0
-
-class MTLResourceOptions:
-  MTLResourceCPUCacheModeDefaultCache = 0
-
-class MTLResourceUsage:
-  MTLResourceUsageRead = 0b01
-  MTLResourceUsageWrite = 0b10
-
 def wait_check(cbuf: Any):
   msg(cbuf, "waitUntilCompleted")
   if (error := msg(cbuf, "error", restype=ctypes.c_ulong)) != 0: raise RuntimeError(error)
