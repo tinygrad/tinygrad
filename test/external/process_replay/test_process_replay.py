@@ -1,5 +1,6 @@
 import unittest
-from test.external.process_replay.helpers import get_process_replay_ctx
+import contextlib, sqlite3
+from test.external.process_replay.helpers import ProcessReplayContext
 from test.external.process_replay.process_replay import TABLE_NAME, diff_kernel
 
 from tinygrad.codegen.kernel import Kernel
@@ -9,17 +10,17 @@ from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.tensor import Tensor
 
 def helper_append_replay(ast:UOp, name:str, src:str) -> int:
-  nm = "kernel_"+TABLE_NAME
-  diskcache_put(nm.replace(f"_{VERSION}", ""), "test_1", (ast, ClangRenderer(), [], to_function_name(name), src, get_process_replay_ctx()))
+  name = f"kernel_{TABLE_NAME}"
+  diskcache_put(name.replace(f"_{VERSION}", ""), "test_1", (ast, ClangRenderer(), [], to_function_name(name), src, ProcessReplayContext({})))
   conn = db_connection()
-  row_count = conn.execute(f"select count(*) from '{nm}'").fetchone()[0]
+  row_count = conn.execute(f"select count(*) from '{name}'").fetchone()[0]
   return row_count
 
 class TestProcessReplay(unittest.TestCase):
   def tearDown(self):
     conn = db_connection()
     cur = conn.cursor()
-    cur.execute(f"DELETE FROM 'kernel_{TABLE_NAME}' WHERE key LIKE 'test_%'")
+    with contextlib.suppress(sqlite3.OperationalError): cur.execute(f"DELETE FROM 'kernel_{TABLE_NAME}' WHERE key LIKE 'test_%'")
     conn.commit()
     cur.close()
 

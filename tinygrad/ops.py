@@ -171,11 +171,9 @@ class UOp(MathTrait):
     return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else repr(self.arg) if isinstance(self.arg, Variable) else self.arg
   # *** uop syntactic sugar
   @property
-  def st_loc(self) -> int: return 0 if self.op is UOps.VALID else 1
-  @property
   def st_arg(self) -> ShapeTracker:
     assert self.op in BUFFER_UOPS, f"st_arg called on {self.op}"
-    ret = self.src[self.st_loc]
+    ret = self.src[0 if self.op is UOps.VALID else 1]
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
@@ -380,8 +378,8 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
 
 def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
-  # find the real frame in the file that has the UPat
-  while frm.f_back is not None and any(fp == frm.f_back.f_code.co_filename.split("/")[-1] for fp in {"ops.py", "uopgraph.py", "schedule.py"}):
+  # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
+  while frm.f_back is not None and frm.f_back.f_code.co_filename.split("/")[-1] in {"ops.py", "uopgraph.py", "schedule.py", "lowerer.py"}:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)

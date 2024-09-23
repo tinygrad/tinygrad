@@ -20,6 +20,8 @@ def render(image_shape, valid:UOp, idx:UOp) -> str:
 
 def Special(expr, nmax): return UOp(UOps.SPECIAL, dtypes.int, (), (expr, nmax))
 def Variable(expr, nmin, nmax): return UOp.define_var(expr, dtypes.int, nmin, nmax)
+def Range(n, nmax):
+  return UOp(UOps.RANGE, dtypes.int, arg=(n, True), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, nmax),))
 
 class TestHelpers(unittest.TestCase):
   def test_is_increasing(self):
@@ -97,46 +99,49 @@ class TestValidSimplification(unittest.TestCase):
     # empty
     self.assertRaises(IndexError, lambda: render(shape, (gidx0).lt(8) & (gidx0).lt(8).ne(True), idx))
 
-  @unittest.expectedFailure  # TODO: FIXME
   def test_openpilot_conv1(self):
     # first conv in openpilot
     # kernel in tinygrad ae5d1407ee844a97a52ad3756835d38e7e2b9e1b https://gist.github.com/chenyuxyz/39c2d4e9a076b46731c67d345ff066b6
     idx1 = Special("idx1", 32)
     idx2 = Special("idx2", 64)
-    ridx0 = Variable("ridx0", 0, 5)
-    ridx1 = Variable("ridx1", 0, 2)
-    ridx2 = Variable("ridx2", 0, 2)
+    # ridx0 = Variable("ridx0", 0, 5)
+    # ridx1 = Variable("ridx1", 0, 2)
+    # ridx2 = Variable("ridx2", 0, 2)
+    ridx0 = Range(0, 6)
+    ridx1 = Range(1, 3)
+    ridx2 = Range(2, 3)
 
     alu1 = ((idx2*2)+ridx1)
     alu4 = ((idx1*48)+(ridx2*6)+ridx0)
 
-    valid = (((idx2*(-2))+(ridx1*(-1))).lt(0))&(((idx1*(-8))+(ridx2*(-1))).lt(0))
+    valid = (((idx2*2)+(ridx1)).lt(1).ne(True))&(((idx1*8)+(ridx2)).lt(1).ne(True))
     shape = (128, 1536, 4)
     idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((alu4+1530)%1536, alu1+((idx1+((ridx2+7)//8)+31)//32)+(-2)))
 
-    # (((((idx2*(-2))+(ridx1*(-1)))<0)&(((idx1*(-8))+(ridx2*(-1)))<0))?read_imagef(data0, smp,
-    # (int2)((((idx1*48)+(ridx2*6)+ridx0+1530)%1536),((idx2*2)+ridx1+((idx1+((ridx2+7)//8)+31)//32)+(-2)))):(float4)(0.0f,0.0f,0.0f,0.0f))
+    # TODO: simplify further
     self.assertEqual(render(shape, valid, idx),
-                     "read_imagef(data1, smp, (int2)((ridx0+(idx1*48)+(ridx2*6)+(-6)),((idx2*2)+ridx1+(-1))))")
+                     "(((((idx1*8)+ridx2)<1)!=1)?read_imagef(data0, smp, (int2)((((idx1*48)+(ridx2*6)+ridx0+1530)%1536),((idx2*2)+ridx1+((idx1+((ridx2+7)//8)+31)//32)+(-2)))):(float4)(0.0f,0.0f,0.0f,0.0f))")  # noqa: E501
 
-  @unittest.expectedFailure  # TODO: FIXME
   def test_openpilot_conv2(self):
     # conv in test/external/external_test_valid_remove.py
     idx1 = Special("idx1", 32)
     idx2 = Special("idx2", 64)
-    ridx0 = Variable("ridx0", 0, 2)
-    ridx1 = Variable("ridx1", 0, 2)
-    ridx2 = Variable("ridx2", 0, 2)
+    # ridx0 = Variable("ridx0", 0, 2)
+    # ridx1 = Variable("ridx1", 0, 2)
+    # ridx2 = Variable("ridx2", 0, 2)
+    ridx0 = Range(0, 3)
+    ridx1 = Range(1, 3)
+    ridx2 = Range(2, 3)
 
     alu1 = ((idx2*2)+ridx1)
     alu3 = ((idx1*24)+(ridx2*3)+ridx0)
 
-    valid = (((idx2*(-2))+(ridx1*(-1))).lt(0))&(((idx1*(-8))+(ridx2*(-1))).lt(0))
+    valid = (((idx2*2)+ridx1).lt(1).ne(True))&(((idx1*8)+ridx2).lt(1).ne(True))
     shape = (128, 768, 4)
     idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((alu3+765)%768, alu1+((idx1+((ridx2+7)//8)+31)//32)+(-2)))
 
     self.assertEqual(render(shape, valid, idx),
-                     "read_imagef(data1, smp, (int2)((ridx0+(idx1*48)+(ridx2*6)+(-3)),((idx2*2)+ridx1+(-1))))")
+                     "(((((idx1*8)+ridx2)<1)!=1)?read_imagef(data0, smp, (int2)((((idx1*24)+(ridx2*3)+ridx0+765)%768),((idx2*2)+ridx1+((idx1+((ridx2+7)//8)+31)//32)+(-2)))):(float4)(0.0f,0.0f,0.0f,0.0f))")  # noqa: E501
 
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)

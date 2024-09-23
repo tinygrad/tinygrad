@@ -794,17 +794,15 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
   for x in src: _assert_valid_uop(x, st, sts)
   # only reduceuop is allowed to change shape, limited to turning n to 1
   if op in {UOps.REDUCE_AXIS, UOps.WMMA}: st = ShapeTracker.from_shape(sts[src[0]].reduce(arg[-1]))
-  elif op is UOps.SWIZZLE: st = arg
+  # movementops are pushed to the edges with SHAPETRACKER and SWIZZLE
+  elif op in {UOps.SHAPETRACKER, UOps.SWIZZLE}: st = arg
+  # everything else inherits shape
   else:
-    assert op in {UOps.SHAPETRACKER, UOps.SWIZZLE, UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.CONTRACT, UOps.EXPAND, *BUFFER_UOPS}, \
-      f"bad UOp in intermediate uops {uop}"
-    # movementops are pushed to the edges with SHAPETRACKER
-    # elementwise inherits shape
-    st = arg if op is UOps.SHAPETRACKER else sts[src[uop.st_loc if op in BUFFER_UOPS else 0]]
-    for x in src:
-      if x.has_st and sts[x].shape != st.shape:
-        if prod(sts[x].shape) == prod(st.shape): raise AssertionError(f"found implicit reshape {x.op} {op} {sts[x].shape} != {st.shape}")
-        raise AssertionError(f"found implicit expand {x.op} {sts[x].shape} != {op} {st.shape} {prod(sts[x].shape)} != {prod(st.shape)}")
+    assert op in {UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.CONTRACT, UOps.EXPAND, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
+    st = (src_sts:=[sts[x] for x in src if x.has_st])[0]
+    if not all_same(shapes:=[x.shape for x in src_sts]):
+      if all_same(sizes:=[prod(x) for x in shapes]): raise AssertionError(f"found implicit reshape {shapes}")
+      raise AssertionError(f"found implicit expand {sizes}")
   sts[uop] = st
 
 def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
