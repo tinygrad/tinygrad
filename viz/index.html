@@ -205,7 +205,9 @@
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
     kernels.forEach((k, i) => {
-      kernelUl = Object.assign(document.createElement("ul"), { innerHTML: `<p>${k.name}</p>`, key: `kernel-${i}`, className: i === currentKernel ? "active" : "" });
+      kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "" });
+      const p = Object.assign(document.createElement("p"), {id: `kernel-${k.name}`, innerText: k.name})
+      kernelUl.appendChild(p)
       k.ctxs.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: u, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
         rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
@@ -218,7 +220,7 @@
         }
         kernelUl.appendChild(rwUl)
       })
-      kernelUl.onclick = (e) => {
+      p.onclick = (e) => {
         if (i === currentKernel) {
           expandKernel = !expandKernel;
           main();
