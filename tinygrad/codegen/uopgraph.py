@@ -228,7 +228,7 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
       if len(newidxs[0])==1 or (len(newidxs[0]) > 1 and all_same([i.key for i in newidxs[0]])): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
       if len(newidxs[1])==1 or (len(newidxs[1]) > 1 and all_same([i.key for i in newidxs[1]])): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
 
-    elif is_irreducible(uop):
+    else:
       new = UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1])
       newidx = replace_uop(graph_rewrite(replace_uop(idx, uop, new), constant_folder), new, uop)
       if newidx.key != idx.key: idx = newidx
