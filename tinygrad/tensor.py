@@ -466,7 +466,7 @@ class Tensor:
     uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]
     bits = bits.bitcast(uint_dtype)
     # only randomize the mantissa bits and set the exponent to 1
-    one = Tensor.ones_like(bits).bitcast(uint_dtype)
+    one = Tensor.ones_like(bits, device=bits.device, dtype=dtype).bitcast(uint_dtype)
     bits = bits.rshift((dtype.itemsize * 8) - nmant).bitwise_or(one)
     # bitcast back to the original dtype and reshape
     out = bits.bitcast(dtype)[:num_].sub(1).reshape(shape)
