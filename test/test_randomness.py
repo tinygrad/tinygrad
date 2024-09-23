@@ -115,6 +115,13 @@ class TestRandomness(unittest.TestCase):
     assert math.isfinite(mn), mn
     dtypes.default_float = old_default_float
 
+  def test_rand_like(self):
+    empty = Tensor.empty((80, 44))
+    rand = Tensor.rand_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
   def test_randint(self):
     self.assertFalse(normal_test(Tensor.randint))
     self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5), numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))

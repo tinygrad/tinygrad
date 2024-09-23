@@ -1,5 +1,7 @@
 import unittest, functools, random
 from typing import List
+
+from torch import t
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.ops import MetaOps, ReduceOps, BinaryOps, UOps
 from tinygrad.helpers import CI, getenv, prod, Context
@@ -554,6 +556,25 @@ class TestMultiTensor(unittest.TestCase):
     with self.assertRaises(AssertionError):
       # don't allow assigns that change axes
       t_none.assign(t_zero)
+
+  def test_rand_on_multiple_devices(self):
+    with self.assertRaises(ValueError):
+      Tensor.rand(256, device=devices_2)
+
+  def test_rand_like_on_shard(self):
+    t = Tensor.empty((16, 16)).shard(devices_2)
+    t2 = Tensor.rand_like(t)
+    assert t2.shape == t.shape
+    assert t2.device == t.device
+    assert t2.lazydata.axis == t.lazydata.axis
+
+  def test_rand_like_uneven_shard(self):
+    t = Tensor.empty((4, 42, 15)).shard(devices_3, axis=1, splits=[14, 7, 21])
+    t2 = Tensor.rand_like(t)
+    assert t2.shape == t.shape
+    assert t2.device == t.device
+    assert t2.lazydata.axis == t.lazydata.axis
+    assert all(tlb.shape == t2lb.shape for tlb, t2lb in zip(t.lazydata.lbs, t2.lazydata.lbs))
 
   def test_dropout_on_shard(self):
     with Tensor.train():
