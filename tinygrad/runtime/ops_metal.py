@@ -1,9 +1,8 @@
 from __future__ import annotations
-import ctypes
-import os, subprocess, pathlib, tempfile, functools
+import os, subprocess, pathlib, ctypes, tempfile, functools
 from typing import List, Any, Tuple, Optional, cast, TypeVar
 from tinygrad.helpers import prod, getenv, DEBUG
-from tinygrad.device import Compiled, Compiler, LRUAllocator, CompileError
+from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
 class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
