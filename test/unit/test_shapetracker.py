@@ -489,6 +489,14 @@ class TestComplexShapeTracker(unittest.TestCase):
     print(self.st.views)
     assert self.st.contiguous
 
+class TestShapeTrackerEquality(unittest.TestCase):
+  def test_simple_equals(self):
+    self.assertEqual(ShapeTracker.from_shape((10,10)), ShapeTracker.from_shape((10,10)))
+  def test_other_equals(self):
+    st1 = ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True)))
+    st2 = ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True)))
+    self.assertEqual(st1, st2)
+
 class TestSingleShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((7,4))

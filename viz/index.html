@@ -190,6 +190,7 @@
   var currentUOp = 0;
   var currentKernel = 0;
   var currentRewrite = 0;
+  var expandKernel = false;
   async function main() {
     checkStatus();
     // ** kernel list
@@ -203,9 +204,7 @@
       kernelUl = Object.assign(document.createElement("ul"), { innerHTML: `<p>${k.name}</p>`, key: `kernel-${i}`, className: i === currentKernel ? "active" : "" });
       k.ctxs.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: u, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
-        if (i !== currentKernel) {
-          rwUl.style.display = "none";
-        }
+        rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
           e.stopPropagation();
           currentUOp = j;
@@ -216,10 +215,15 @@
         kernelUl.appendChild(rwUl)
       })
       kernelUl.onclick = (e) => {
-        if (i === currentKernel) return;
+        if (i === currentKernel) {
+          expandKernel = !expandKernel;
+          main();
+          return;
+        }
         currentKernel = i;
         currentUOp = 0;
         currentRewrite = 0;
+        expandKernel = true;
         main();
       }
       kernelList.appendChild(kernelUl);
@@ -279,7 +283,30 @@
     }
   }
   document.addEventListener("keydown", async function(event) {
-    // up and down change the UOp from the list
+    // up and down change the UOp or kernel from the list
+    if (!expandKernel) {
+      if (event.key == "ArrowUp") {
+        event.preventDefault()
+        currentUOp = 0;
+        currentRewrite = 0;
+        currentKernel = Math.max(0, currentKernel-1)
+       return main()
+      }
+      if (event.key == "ArrowDown") {
+        event.preventDefault()
+        currentUOp = 0;
+        currentRewrite = 0;
+        currentKernel = Math.min(Array.from(Object.keys(kernels)).length, currentKernel+1)
+       return main()
+      }
+    }
+    if (event.key == "Enter") {
+      event.preventDefault()
+      currentUOp = 0;
+      currentRewrite = 0;
+      expandKernel = !expandKernel;
+      main();
+    }
     if (event.key == "ArrowUp") {
       event.preventDefault()
       currentRewrite = 0;
