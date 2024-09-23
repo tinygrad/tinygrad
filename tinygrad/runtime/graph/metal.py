@@ -30,9 +30,9 @@ class MetalGraph(GraphRunner):
 
     self.icb = msg(self.device.device, "newIndirectCommandBufferWithDescriptor:maxCommandCount:options:",
       icb_descriptor, len(self.jit_cache), MTLResourceOptions.MTLResourceCPUCacheModeDefaultCache, restype=objc_instance)
-    icb_label = bytes(msg(msg(self.icb, "description", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode().split(':')[0].split('<')[1]
+    icb_label = bytes(msg(msg(self.icb, "description", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode()
     if self.icb.value is None: raise GraphException("create indirect command buffer failed, does your system support this?")
-    self.needs_icb_fix = int(icb_label != "AGXG15XFamilyIndirectCommandBuffer")    # not required on M3
+    self.needs_icb_fix = int("AGXG15XFamilyIndirectCommandBuffer" not in icb_label)    # not required on M3
 
     if len(self.vars): self.int_buf = self.device.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
     all_resources = dedup([self.int_buf.buf] if len(self.vars) else [])
