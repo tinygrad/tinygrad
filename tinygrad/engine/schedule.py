@@ -15,7 +15,7 @@ from tinygrad.device import Buffer
 from tinygrad.shape.view import View, strides_for_shape
 
 # creation can recurse a lot
-sys.setrecursionlimit(10000)
+sys.setrecursionlimit(20000)
 
 # *** ScheduleItem return type ***
 
