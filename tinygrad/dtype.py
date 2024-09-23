@@ -36,6 +36,8 @@ class PtrDType(DType):
     self.base, self.local = dt, local
     super().__init__(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
   def __hash__(self): return super().__hash__()
+  def scalar(self): return PtrDType(super().scalar(), self.local)
+  def vec(self, sz:int): return PtrDType(super().vec(sz), self.local)
   def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.count==dt.count
   def __ne__(self, dt): return not (self == dt)
   def __repr__(self): return f"PtrDType({super().__repr__()}, local=True)" if self.local else f"PtrDType({super().__repr__()})"

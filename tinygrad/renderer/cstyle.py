@@ -125,9 +125,8 @@ class CStyleLanguage(Renderer):
       elif uop is UOps.STORE:
         # mark DEFINE_GLOBAL buf as writable
         assert isinstance(src[0].dtype, (ImageDType, PtrDType))
-        if src[0].op is UOps.DEFINE_GLOBAL: bufs[src[0]] = (bufs[src[0]][0], (bufs[src[0]][1][0], True))
-        rendered_store = self.render_store(r[src[0]], src[0].dtype, r[src[2]], src[2].dtype, strip_parens(r[src[1]]))
-        kk(f"if ({r[src[3]]}) {{ {rendered_store} }}" if len(src) > 3 and src[3].op is not UOps.IF else rendered_store)
+        rendered_store = self.render_store(r[src[0].src[0]], src[0].dtype, r[src[1]], src[1].dtype, strip_parens(r[src[0].src[1]]))
+        kk(f"if ({r[src[2]]}) {{ {rendered_store} }}" if len(src) > 2 and src[2].op is not UOps.IF else rendered_store)
       else:
         if uop is UOps.RANGE:
           kk(f"for (int {(expr := ssa('ridx',u))} = {r[src[0]]}; {expr} < {r[src[1]]}; {expr}++) {{")
@@ -145,13 +144,16 @@ class CStyleLanguage(Renderer):
         elif uop is UOps.SPECIAL:
           kk(f"int {args[0]} = {self.code_for_workitem[args[0][0]](args[0][-1])}; /* {args[1]} */")
           r[u] = args[0]
+        elif uop is UOps.INDEX:
+          if src[0].op is UOps.DEFINE_GLOBAL: bufs[src[0]] = (bufs[src[0]][0], (bufs[src[0]][1][0], True))
+          pass
         elif uop is UOps.DEFINE_VAR:
           assert args[0] not in seen_vars, f"duplicate variable {args[0]}"
           seen_vars.add(args[0])
           bufs[u] = (args[0], (dtype,False))
           r[u] = args[0]
         elif uop is UOps.LOAD:
-          val = self.render_load(dtype, r[src[0]], src[0].dtype, strip_parens(r[src[1]]))
+          val = self.render_load(dtype, r[src[0].src[0]], src[0].dtype, strip_parens(r[src[0].src[1]]))
           # NOTE: this relies on the load not happening if it's in the unselected branch
           if len(src) > 3 and src[3].op is UOps.ALU: val = self.code_for_op[TernaryOps.WHERE](r[src[3]], val, r[src[2]], dtype)
           kk(f"{self.render_dtype(dtype)} {ssa('val',u)} = {val};")

@@ -526,7 +526,7 @@ def do_expand(root:UOp):
         new_srcs.append(src.src[0].gep(tuple(lst)))
     else:
       # non-EXPAND input
-      if (root.op in {UOps.LOAD, UOps.STORE} and i == 0) or (root.op is UOps.REDUCE and i != 0):
+      if (root.op is UOps.INDEX and i == 0) or (root.op is UOps.REDUCE and i != 0):
         # for the first arg of LOAD/STORE and the RANGE args of REDUCE, just pass them through ignoring EXPANDS
         new_srcs.append(src)
       elif src.dtype.count > 1:
@@ -572,8 +572,9 @@ def do_contract(con:UOp):
   return UOp(UOps.EXPAND, con.dtype, (ex.src[0].gep(tuple(idxs)),), new_ex_args)
 
 def no_vectorized_alu(alu):
-  if alu.dtype.count == 1: return None
-  alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
+  cnt = alu.src[1].dtype.count if alu.op is UOps.STORE else alu.dtype.count
+  if cnt == 1: return None
+  alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(cnt))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
 def create_gate(root:UOp) -> Optional[UOp]:
@@ -594,7 +595,7 @@ expander = PatternMatcher([
   (UPat(UOps.EXPAND, name="outer", src=(UPat(UOps.EXPAND, name="inner"),)),
    lambda outer, inner: UOp(UOps.EXPAND, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
   # do expansion
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE, UOps.INDEX,
          UOps.VECTORIZE, UOps.REDUCE, UOps.IF), name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
   (UPat(UOps.CONTRACT, name="con"), do_contract),
   # remove EXPANDs from SINK
@@ -610,6 +611,11 @@ expander = PatternMatcher([
   (UPat(UOps.EXPAND, name="ex", src=tuple(UPat.var('x').gep(i)+UPat.var('y').gep(i) for i in range(256 if AMX else 8))),
     lambda ex,x,y: UOp(UOps.EXPAND, ex.dtype, tuple((x+y).gep(i) for i in range(256 if AMX else 8)), ex.arg)),
 ])
+
+def no_vectorized_index(idx:UOp):
+  if idx.dtype.count == 1: return None
+  tv = [UOp(idx.op, idx.dtype.scalar(), (idx.src[0],) + tuple(j.gep(i) for j in idx.src[1:])) for i in range(idx.dtype.count)]
+  return UOp(UOps.VECTORIZE, idx.dtype, tuple(tv))
 
 def no_vectorized_load_store(ls:UOp):
   idx = ls.src[0].src[1]
@@ -642,9 +648,11 @@ just_reduce = PatternMatcher([
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
   (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
+  (UPat((UOps.LOAD, UOps.STORE), name="alu"), no_vectorized_alu),
   (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
-  (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
+  (UPat(UOps.INDEX, name="idx"), no_vectorized_index),
+  #(UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
 ])
 
 reducer = PatternMatcher([
@@ -695,7 +703,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
     sink = graph_rewrite(sink, folder+expander)
     if getenv("DO_REDUCE", 1):
       sink = graph_rewrite(sink, folder+just_reduce)
-      sink = graph_rewrite(sink, folder+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
+      #sink = graph_rewrite(sink, folder+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
+      sink = graph_rewrite(sink, folder+devectorize)
       sink = graph_rewrite(sink, folder+reducer)
 
   # for PTX only
