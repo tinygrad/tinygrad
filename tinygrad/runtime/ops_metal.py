@@ -30,7 +30,8 @@ libmetal.MTLCreateSystemDefaultDevice.restype = objc_instance
 libdispatch.dispatch_data_create.restype = objc_instance
 
 T = TypeVar("T")
-def msg(ptr: objc_instance, selector: str, /, *args: Any, restype: type[T] = objc_id) -> T:
+# Ignore mypy error reporting incompatible default, because typevar default only works on python 3.12
+def msg(ptr: objc_instance, selector: str, /, *args: Any, restype: type[T] = objc_id) -> T: # type: ignore [assignment]
   sender = libobjc["objc_msgSend"] # Using attribute access returns a new reference so setting restype is safe
   sender.restype = restype
   return sender(ptr, libobjc.sel_registerName(selector.encode()), *args)
@@ -44,7 +45,7 @@ def int_tuple_to_struct(t: Tuple[int, ...], _type: type = ctypes.c_ulong):
 
 def wait_check(cbuf: Any):
   msg(cbuf, "waitUntilCompleted")
-  if (error := msg(cbuf, "error", restype=ctypes.c_ulong)) != 0: raise RuntimeError(error)
+  if (error := cast(int, msg(cbuf, "error", restype=ctypes.c_ulong))) != 0: raise RuntimeError(error)
 
 def elapsed_time(cbuf: objc_instance):
   return cast(float, msg(cbuf, "GPUEndTime", restype=ctypes.c_double)) - cast(float, msg(cbuf, "GPUStartTime", restype=ctypes.c_double))

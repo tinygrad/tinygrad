@@ -78,8 +78,8 @@ class MetalGraph(GraphRunner):
                   int_tuple_to_struct(cast(tuple, global_size)), int_tuple_to_struct(cast(tuple, local_size)))
     for j, var in enumerate(self.vars): self.int_buf_view[j] = var_vals[var]
 
-    command_buffer = msg(self.device.mtl_queue, "commandBuffer")
-    encoder = msg(command_buffer, "computeCommandEncoder")
+    command_buffer = msg(self.device.mtl_queue, "commandBuffer", restype=objc_instance)
+    encoder = msg(command_buffer, "computeCommandEncoder", restype=objc_instance)
     msg(encoder, "useResources:count:usage:", (objc_instance * len(all_resources))(*all_resources), len(all_resources),
         MTLResourceUsage.MTLResourceUsageRead | MTLResourceUsage.MTLResourceUsageWrite)
 
