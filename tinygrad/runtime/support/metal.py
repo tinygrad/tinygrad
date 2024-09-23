@@ -1,8 +1,8 @@
 import ctypes
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, cast
 
 class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
-  def __hash__(self): return self.value
+  def __hash__(self): return cast(int, self.value)
   def __eq__(self, other): return self.value == other.value
 
 class objc_instance(objc_id): # method with name "new", "alloc" should be freed after use
@@ -35,7 +35,7 @@ def int_tuple_to_struct(t: Tuple[int, ...], _type: type = ctypes.c_ulong):
   Struct._fields_ = [(f"field{i}", _type) for i in range(len(t))]
   return Struct(*t)
 
-class OPTIONS:
+class MTLIndirectCommandType:
   MTLIndirectCommandTypeConcurrentDispatch = 32 # (1 << 5)
   MTLResourceCPUCacheModeDefaultCache = 0
 
