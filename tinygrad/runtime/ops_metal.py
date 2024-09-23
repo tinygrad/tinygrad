@@ -116,6 +116,7 @@ class MetalAllocator(LRUAllocator):
     self.device:MetalDevice = device
     super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
+    # Buffer is explicitly released in _free() rather than garbage collected via reference count
     ret = msg(self.device.device, "newBufferWithLength:options:", size, MTLResourceOptions.MTLResourceStorageModeShared, restype=objc_id)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
