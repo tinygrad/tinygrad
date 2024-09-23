@@ -172,7 +172,7 @@
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
-        g.setEdge(src, k)
+        g.setEdge(src, k, {curve: d3.curveBasis})
       }
       if (additions.includes(parseInt(k))) {
         g.setParent(k, "addition");
