@@ -4,7 +4,7 @@ from functools import partial
 import numpy as np
 import torch
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit
-from tinygrad.helpers import THREEFRY, getenv, CI
+from tinygrad.helpers import getenv, CI, THREEFRY
 from test.helpers import is_dtype_supported
 from hypothesis import given, settings, strategies as strat
 
@@ -45,7 +45,7 @@ def kstest(l1, l2):
   prob = ksprob((nesq + 0.12 + 0.11 / nesq) * d)
   return prob
 
-def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(20, 23), alpha=0.04):
+def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(40, 43), alpha=0.04):
   Tensor.manual_seed(1337)
   torch.manual_seed(1337)
   np.random.seed(1337)
@@ -75,13 +75,18 @@ class TestRandomness(unittest.TestCase):
     assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
-  @unittest.skipIf(not THREEFRY.value, "not using threefry")
+  @unittest.skipIf(not THREEFRY.value, "not using threefry") 
+  @unittest.skipUnless(Device.DEFAULT == "GPU", "reference is on GPU")
   def test_threefly_against_reference(self):
     Tensor.manual_seed(1337)
     # generated using
-    # (jax.extend.random.threefry_2x32((np.uint32(1337), np.uint32(0x0)), np.arange(20, dtype=np.uint32)) >> 8).astype(float) / np.float32(2**24)
-    jr = np.array([0.30984968, 0.42723763, 0.92448753, 0.27268296, 0.48820806, 0.29587173, 0.3213513, 0.05805135, 0.4954177, 0.23303074,
-                   0.62478125, 0.51861334, 0.24712527, 0.12718695, 0.5236074, 0.50704265, 0.9166272, 0.6918763, 0.6530086, 0.34640658])
+    """
+    key0 = 1337
+    key1 = int.from_bytes(hashlib.sha256("GPU".encode()).digest(), "big") & 0xffffffff
+    values = (jax.extend.random.threefry_2x32((np.uint32(key0), np.uint32(key1)), np.arange(20, dtype=np.uint32)) >> 8).astype(float) / np.float32(2**24)
+    print(f"[{', '.join(f'{v}' for v in values)}]")
+    """
+    jr = np.array([0.11534780263900757, 0.8412505984306335, 0.3531438112258911, 0.6055004000663757, 0.12531155347824097, 0.9287887811660767, 0.6370040774345398, 0.6373475193977356, 0.32034915685653687, 0.1125219464302063, 0.8631687760353088, 0.0008330345153808594, 0.8682080507278442, 0.7769373655319214, 0.2587180733680725, 0.7823214530944824, 0.9144479632377625, 0.07679235935211182, 0.7554848790168762, 0.1666560173034668])
     r = Tensor.rand(20).numpy()
     np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
 
@@ -95,6 +100,13 @@ class TestRandomness(unittest.TestCase):
       assert nx[nx == 1].size == 0
       assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.bfloat16).float(), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
+
+  def test_rand_like(self):
+    empty = Tensor.empty((80, 44))
+    rand = Tensor.rand_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
 
   def test_randn(self):
     self.assertTrue(normal_test(Tensor.randn))
@@ -114,13 +126,6 @@ class TestRandomness(unittest.TestCase):
     assert math.isfinite(mx), mx
     assert math.isfinite(mn), mn
     dtypes.default_float = old_default_float
-
-  def test_rand_like(self):
-    empty = Tensor.empty((80, 44))
-    rand = Tensor.rand_like(empty)
-    assert rand.shape == empty.shape
-    assert rand.dtype == empty.dtype
-    assert rand.device == empty.device
 
   def test_randint(self):
     self.assertFalse(normal_test(Tensor.randint))
@@ -153,11 +158,11 @@ class TestRandomness(unittest.TestCase):
                                                               lambda x: np.random.uniform(-1, 1, size=x) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
   def test_kaiming_uniform(self):
-    for shape in [(128, 64, 3, 3), (20, 24), (3, 55, 5)]:
+    for shape in [(256, 128, 3, 3), (80, 44), (3, 55, 35)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), shape=shape))
 
   def test_kaiming_normal(self):
-    for shape in [(128, 64, 3, 3), (20, 24), (3, 55, 5)]:
+    for shape in [(256, 128, 3, 3), (80, 44), (3, 55, 35)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_normal, lambda x: torch.nn.init.kaiming_normal_(torch.empty(x)), shape=shape))
 
   def test_multinomial(self):
@@ -201,7 +206,7 @@ class TestRandomness(unittest.TestCase):
     assert equal_distribution(lambda *_: nn.Conv2d(*params).bias, lambda _: torch.nn.Conv2d(*params).bias.detach())
 
   def test_linear_init(self):
-    params = (64, 64)
+    params = (64, 256)
     assert equal_distribution(lambda *_: nn.Linear(*params).weight, lambda _: torch.nn.Linear(*params).weight.detach())
     assert equal_distribution(lambda *_: nn.Linear(*params).bias, lambda _: torch.nn.Linear(*params).bias.detach())
 
