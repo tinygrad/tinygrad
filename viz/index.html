@@ -9,6 +9,11 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+HK:wght@100..900&display=swap" rel="stylesheet">
   <script src="https://d3js.org/d3.v5.min.js" charset="utf-8"></script>
   <script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/default.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/c.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
   <style>
   * {
     box-sizing: border-box;
@@ -124,7 +129,6 @@
   .code-block {
     max-height: 30%;
     overflow-y: auto;
-    background-color: #191919;
     border-radius: 8px;
     padding: 8px;
   }
@@ -289,11 +293,13 @@
 
     ret[0].extra[currentRewrite].forEach((e, i) => {
       if (e.length == 0) return;
-      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${e}</code>`, className: "code-block" });
+      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${e}</code>`, className: "code-block language-python" });
+      hljs.highlightElement(pre);
       metadata.appendChild(pre);
     })
     if (kernels[currentKernel].code !== "") {
       const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${kernels[currentKernel].code}</code>`, className: "code-block" });
+      hljs.highlightElement(pre);
       metadata.appendChild(pre);
     }
     // ** rewrite list
@@ -309,8 +315,9 @@
             const [pattern, loc, diff] = ret[0].diffs[i-1];
             const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
             const parts = loc.join(":").split("/");
-            pre.appendChild(Object.assign(document.createElement("a"), { innerText: parts[parts.length-1]+"\n\n", href: "vscode://file"+parts.join("/") }));
-            pre.appendChild(Object.assign(document.createElement("code"), { innerText: pattern }));
+            pre.appendChild(Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n", href: "vscode://file"+parts.join("/") }));
+            pre.appendChild(Object.assign(document.createElement("code"), { textContent: pattern, className: "language-python" }));
+            hljs.highlightElement(pre);
             metadata.appendChild(pre);
             const diffHtml = diff.map((line) => {
               const color = line.startsWith("+") ? "#30A46C" : line.startsWith("-") ? "#E5484D" : "#EEEEEE";
