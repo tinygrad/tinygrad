@@ -7,7 +7,7 @@ from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, int_tuple_to_struct, objc_instance,\
-  MTLResourceOptions, elapsed_time
+  MTLResourceOptions, elapsed_time, objc_id
 
 class MTLIndirectCommandType:
   MTLIndirectCommandTypeConcurrentDispatch = (1 << 5)
@@ -30,7 +30,7 @@ class MetalGraph(GraphRunner):
 
     self.icb = msg(self.device.device, "newIndirectCommandBufferWithDescriptor:maxCommandCount:options:",
       icb_descriptor, len(self.jit_cache), MTLResourceOptions.MTLResourceCPUCacheModeDefaultCache, restype=objc_instance)
-    icb_label = bytes(msg(msg(self.icb, "description", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode()
+    icb_label = bytes(msg(msg(self.icb, "description", restype=objc_id), "UTF8String", restype=ctypes.c_char_p)).decode()
     if self.icb.value is None: raise GraphException("create indirect command buffer failed, does your system support this?")
     self.needs_icb_fix = int("AGXG15XFamilyIndirectCommandBuffer" not in icb_label)    # not required on M3
 
@@ -39,7 +39,7 @@ class MetalGraph(GraphRunner):
     all_pipelines = []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
-      icb_command = msg(self.icb, "indirectComputeCommandAtIndex:", j, restype=objc_instance)
+      icb_command = msg(self.icb, "indirectComputeCommandAtIndex:", j, restype=objc_id)
       all_pipelines.append(prg.clprg.pipeline_state)
       msg(icb_command, "setComputePipelineState:", prg.clprg.pipeline_state)
       for i,b in enumerate(ji.bufs):
@@ -64,7 +64,7 @@ class MetalGraph(GraphRunner):
     all_resources = dedup(self.all_resources + [x._buf.buf for x in input_rawbuffers])
 
     for (j,i),input_idx in self.input_replace.items():
-      computeCommand = msg(self.icb, "indirectComputeCommandAtIndex:", j, restype=objc_instance)
+      computeCommand = msg(self.icb, "indirectComputeCommandAtIndex:", j, restype=objc_id)
       msg(computeCommand, "setKernelBuffer:offset:atIndex:", input_rawbuffers[input_idx]._buf.buf,
                                                                                  input_rawbuffers[input_idx]._buf.offset, i)
 
@@ -76,9 +76,9 @@ class MetalGraph(GraphRunner):
                   int_tuple_to_struct(cast(tuple, global_size)), int_tuple_to_struct(cast(tuple, local_size)))
     for j, var in enumerate(self.vars): self.int_buf_view[j] = var_vals[var]
 
-    command_buffer = msg(self.device.mtl_queue, "commandBuffer", restype=objc_instance)
-    encoder = msg(command_buffer, "computeCommandEncoder", restype=objc_instance)
-    msg(encoder, "useResources:count:usage:", (objc_instance * len(all_resources))(*all_resources), len(all_resources),
+    command_buffer = msg(self.device.mtl_queue, "commandBuffer", restype=objc_id)
+    encoder = msg(command_buffer, "computeCommandEncoder", restype=objc_id)
+    msg(encoder, "useResources:count:usage:", (objc_id * len(all_resources))(*all_resources), len(all_resources),
         MTLResourceUsage.MTLResourceUsageRead | MTLResourceUsage.MTLResourceUsageWrite)
 
     # NOTE: the pipelines likely need to be added to the used resources to fix the crash on M1/M2, but I haven't figured out how
