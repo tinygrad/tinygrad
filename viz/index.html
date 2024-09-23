@@ -155,13 +155,21 @@
     <div class="container metadata"></div>
   </div>
   <script>
-  function renderGraph(graph) {
+  function renderGraph(graph, additions, deletions) {
     const showDiff = currentRewrite !== 0;
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+    g.setNode("addition", {label: "addition", clusterLabelPos: "top", style: "fill: #27B08B"});
+    g.setNode("deletion", {label: "deletion", clusterLabelPos: "top", style: "fill: #EC5D5E"});
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
         g.setEdge(src, k)
+      }
+      console.log(additions, additions.includes(k))
+      if (additions.includes(k)) {
+        g.setParent(k, "additions")
+      } else if (deletions.includes(k)) {
+        g.setParent(k, "deletions")
       }
     }
     const svg = d3.select("svg");
@@ -239,7 +247,7 @@
       ret = await (await fetch(`/graph?kernel_idx=${currentKernel}&uop_idx=${currentUOp}`)).json();
       cache[cacheKey] = ret;
     }
-    renderGraph(ret[0].graphs[currentRewrite]);
+    renderGraph(ret[0].graphs[currentRewrite], ret[0].additions[currentRewrite], ret[0].deletions[currentRewrite]);
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
     metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc }));

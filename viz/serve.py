@@ -38,7 +38,7 @@ class UOpRet:
       assert new_sink is not uops[-1], f"rewritten sink wasn't rewritten! {i}\n{new_sink}\n{uops[-1]}"
       # update ret data
       additions.append([id(x) for x in new_sink.sparents if x not in uops[-1].sparents])
-      deletions.append([id(x) for x in uops[-1].sparents if x not in new_sink.sparents])
+      deletions.append([id(x) for x in new_sink.sparents if x not in new_sink.sparents])
       diffs.append((str(pattern), pattern.location, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
       uops.append(new_sink)
       extra.append([str(new_sink)])
