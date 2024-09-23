@@ -799,7 +799,7 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
   elif uop.op in {UOps.SHAPETRACKER, UOps.SWIZZLE}: st = uop.arg
   # everything else inherits shape
   else:
-    assert uop.op in {UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.CONTRACT, UOps.EXPAND, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
+    assert uop.op in {UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.CONTRACT, UOps.EXPAND, UOps.ASSIGN, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
     st = (src_sts:=[sts[x] for x in uop.src if x.has_st])[0]
     if not all_same(shapes:=[x.shape for x in src_sts]):
       if all_same(sizes:=[prod(x) for x in shapes]): raise AssertionError(f"found implicit reshape {shapes}")
