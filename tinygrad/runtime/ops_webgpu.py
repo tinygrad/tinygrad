@@ -33,7 +33,7 @@ class WebGPUProgram:
       query_set = self.device.create_query_set(type=wgpu.QueryType.timestamp, count=2)
       query_buf = self.device.create_buffer(size=16, usage=wgpu.BufferUsage.QUERY_RESOLVE | wgpu.BufferUsage.COPY_SRC)
       timestamp_writes = {"query_set": query_set, "beginning_of_pass_write_index": 0, "end_of_pass_write_index": 1}
-    compute_pass = command_encoder.begin_compute_pass(timestamp_writes=timestamp_writes if wait else None) # noqa: E0606
+    compute_pass = command_encoder.begin_compute_pass(timestamp_writes=timestamp_writes if wait else None) # pylint: disable=E0606
     compute_pass.set_pipeline(compute_pipeline)
     compute_pass.set_bind_group(0, bind_group, [], 0, 999999) # last 2 not used
     compute_pass.dispatch_workgroups(*global_size)  # x y z
