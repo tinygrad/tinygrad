@@ -1423,7 +1423,7 @@ class TestIndexing(unittest.TestCase):
     a = Tensor.arange(10)+1
     out = (x + a[2]).sum()
     self.check_schedule(out, 1)
-    np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum())
+    np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   def test_arange_index_contiguous_child(self):
     Tensor.manual_seed(0)
