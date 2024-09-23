@@ -75,7 +75,7 @@ def export_to_coco(class_map, annotations, image_list, dataset_path, output_path
   cats = [{"id": i, "name": c, "supercategory": None} for i, c in enumerate(classes)]
   categories_map = pd.DataFrame([(i, c) for i, c in enumerate(classes)], columns=["category_id", "category_name"])
   class_map = class_map.merge(categories_map, left_on="DisplayName", right_on="category_name", how="inner")
-  annotations = annotations[np.isin(annotations["ImageID"], image_list)]
+  annotations = annotations[annotations["ImageID"].isin(image_list)]
   annotations = annotations.merge(class_map, on="LabelName", how="inner")
   annotations["image_id"] = pd.factorize(annotations["ImageID"].tolist())[0]
   annotations[["height", "width"]] = annotations.apply(lambda x: extract_dims(dataset_path / f"{x['ImageID']}.jpg"), axis=1, result_type="expand")
@@ -101,8 +101,8 @@ def export_to_coco(class_map, annotations, image_list, dataset_path, output_path
     json.dump(coco_annotations, fp)
 
 def get_image_list(class_map, annotations, classes=MLPERF_CLASSES):
-  labels = class_map[np.isin(class_map["DisplayName"], classes)]["LabelName"]
-  image_ids = annotations[np.isin(annotations["LabelName"], labels)]["ImageID"].unique()
+  labels = class_map[class_map["DisplayName"].isin(classes)]["LabelName"]
+  image_ids = annotations[annotations["LabelName"].isin(labels)]["ImageID"].unique()
   return image_ids
 
 def download_image(bucket, subset, image_id, data_dir):
