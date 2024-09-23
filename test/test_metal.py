@@ -14,3 +14,26 @@ class TestMetal(unittest.TestCase):
     compiler = MetalCompiler(device)
     with self.assertRaises(CompileError):
       compiler.compile("this is not valid metal")
+
+  def test_compile_success(self):
+    device = MetalDevice("metal")
+    compiler = MetalCompiler(device)
+    ret = compiler.compile("""
+#include <metal_stdlib>
+  using namespace metal;
+  kernel void E_4n1(device int* data0, const device int* data1, const device int* data2, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {
+    int val0 = *(data1+0);
+    int val1 = *(data1+1);
+    int val2 = *(data1+2);
+    int val3 = *(data1+3);
+    int val4 = *(data2+0);
+    int val5 = *(data2+1);
+    int val6 = *(data2+2);
+    int val7 = *(data2+3);
+    *(data0+0) = (val0+val4);
+    *(data0+1) = (val1+val5);
+    *(data0+2) = (val2+val6);
+    *(data0+3) = (val3+val7);
+  }
+""")
+    assert ret is not None
