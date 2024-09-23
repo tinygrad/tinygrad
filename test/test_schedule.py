@@ -1304,13 +1304,13 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d_fused_ast_rewrite(self): _test_conv2d(6, FUSE_CONV_BW=1, AST_REWRITE=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
-  def test_conv2d_half(self): _test_conv2d(8, dtype=dtypes.half)
+  def test_conv2d_half(self): _test_conv2d(7, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.expectedFailure
-  def test_conv2d_fused_half(self): _test_conv2d(7, dtype=dtypes.half)
+  def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.expectedFailure
-  def test_conv2d_fused_ast_rewrite_half(self): _test_conv2d(7, FUSE_CONV_BW=1, AST_REWRITE=1, dtype=dtypes.half)
+  def test_conv2d_fused_ast_rewrite_half(self): _test_conv2d(6, FUSE_CONV_BW=1, AST_REWRITE=1, dtype=dtypes.half)
 
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
