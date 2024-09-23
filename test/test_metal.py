@@ -1,7 +1,8 @@
 import unittest
 from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler
-from tinygrad.device import CompileError
+from tinygrad.device import CompileError, Device
 
+@unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
   def test_alloc_oom(self):
     device = MetalDevice("metal")
