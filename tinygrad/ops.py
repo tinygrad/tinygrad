@@ -596,10 +596,6 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
   (UPat(UOps.INDEX, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.SHAPETRACKER))), lambda: True),
   (UPat(UOps.INDEX, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(dtype=(dtypes.int32,dtypes.int64)))), lambda: True),
 
-  # early LOAD has a <buf, shapetracker, store?>
-  (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.SHAPETRACKER))), lambda: True),
-  (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.SHAPETRACKER), UPat(UOps.STORE))), lambda: True),
-
   # LOAD takes a <buf, idx, alt?, gate?, barrier?>
   (UPat(UOps.LOAD, src=(UPat(UOps.INDEX),)), lambda: True),
   (UPat(UOps.LOAD, src=(UPat(UOps.INDEX), UPat((UOps.STORE, UOps.IF, UOps.BARRIER)))), lambda: True),
