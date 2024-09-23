@@ -197,7 +197,7 @@ jobs:
       - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot model compile and size
         run: |
-          PYTHONPATH="." DEBUG=2 ALLOWED_KERNEL_COUNT=208 ALLOWED_GATED_READ_IMAGE=43 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile2.py
+          PYTHONPATH="." DEBUG=2 ALLOWED_KERNEL_COUNT=208 ALLOWED_GATED_READ_IMAGE=35 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile2.py
           python -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
       - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot model correctness (float32)
