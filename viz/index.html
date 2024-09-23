@@ -168,7 +168,7 @@
   <script>
   function renderGraph(graph, additions) {
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: #2ea04326" : "display: none;"});
+    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: #242424" : "display: none;"});
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
