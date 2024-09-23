@@ -54,6 +54,9 @@ def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(40, 4
   x2 = tiny_func(shape).numpy().flatten()
   if numpy_func is not None: y = numpy_func(shape).flatten()
   if torch_func is not None: z = torch_func(shape).numpy().flatten()
+  # write x1 and z to file
+  np.savetxt("/tmp/x1.txt", x1)
+  np.savetxt("/tmp/z.txt", z)
   return (numpy_func is None or (kstest(x1, y) >= alpha and kstest(x2, y) >= alpha)) and \
     (torch_func is None or (kstest(x1, z) >= alpha and kstest(x2, z) >= alpha))
 
@@ -146,11 +149,11 @@ class TestRandomness(unittest.TestCase):
                                                               lambda x: np.random.uniform(-1, 1, size=x) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
   def test_kaiming_uniform(self):
-    for shape in [(256, 128, 3, 3), (40, 44), (3, 55, 15)]:
+    for shape in [(256, 128, 3, 3), (80, 44), (3, 55, 25)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), shape=shape))
 
   def test_kaiming_normal(self):
-    for shape in [(256, 128, 3, 3), (40, 44), (3, 55, 15)]:
+    for shape in [(256, 128, 3, 3), (80, 44), (3, 55, 25)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_normal, lambda x: torch.nn.init.kaiming_normal_(torch.empty(x)), shape=shape))
 
   def test_multinomial(self):
