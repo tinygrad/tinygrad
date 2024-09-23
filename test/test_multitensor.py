@@ -576,6 +576,13 @@ class TestMultiTensor(unittest.TestCase):
     assert t2.lazydata.axis == t.lazydata.axis
     assert all(tlb.shape == t2lb.shape for tlb, t2lb in zip(t.lazydata.lbs, t2.lazydata.lbs))
 
+  def test_rand_like_none_shard(self):
+    t = Tensor.empty((16, 16)).shard(devices_2)
+    t2 = Tensor.rand_like(t)
+    assert t2.shape == t.shape
+    assert t2.device == t.device
+    assert t2.lazydata.axis == t.lazydata.axis
+
   def test_dropout_on_shard(self):
     with Tensor.train():
       X = Tensor.ones(256).to(devices_2)
