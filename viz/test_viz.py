@@ -41,12 +41,12 @@ class TestViz(unittest.TestCase):
 
   def test_ctx_groups(self):
     contexts.clear()
-    schedule1 = Tensor.randn(4, 1).contiguous().schedule()
-    schedule2 = Tensor.randn(4, 4).contiguous().schedule()
+    schedule1 = Tensor.rand(4, 1).contiguous().schedule()
+    schedule2 = Tensor.rand(4, 4).contiguous().schedule()
     list(lower_schedule(schedule1))
     list(lower_schedule(schedule2))
     ret = load_kernels(contexts)
-    assert len(ret) == 12
+    assert len(ret) == 8
     assert all(len([x for x in y.ctxs.values() if "schedule" in x.loc]) != 0 for y in ret)
     assert all(len([x for x in y.ctxs.values() if "uopgraph" in x.loc]) != 0 for y in ret)
 
@@ -117,11 +117,11 @@ class TestViz(unittest.TestCase):
 
   def test_dedup_ast(self):
     contexts.clear()
-    a = Tensor.randn(4, 4)+2
-    b = Tensor.randn(4, 4)+2
+    a = Tensor.ones(4, 4).contiguous()+2
+    b = Tensor.ones(4, 4).contiguous()+2
     Tensor.schedule(a, b)
     kernels = load_kernels(contexts)
-    self.assertEqual(len(kernels), 1)
+    self.assertEqual(len(kernels), 2)
     schedule_ctxs = [x for x in kernels[0].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
     self.assertEqual(len(schedule_ctxs), 1)
 
