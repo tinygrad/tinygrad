@@ -760,7 +760,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   # prevent priority inversion
   @functools.lru_cache(None)
   def fix_priority(u:UOp, lowest_priority):
-    if u.op in {UOps.CAST, UOps.BITCAST, UOps.ALU, UOps.VECTORIZE, UOps.GEP, UOps.SPECIAL}:
+    if u.op in {UOps.CAST, UOps.BITCAST, UOps.ALU, UOps.VECTORIZE, UOps.GEP, UOps.SPECIAL, UOps.DEFINE_LOCAL}:
       priorities[u] = min(priorities[u], lowest_priority)
     for x in u.src: fix_priority(x, priorities[u])
   fix_priority(sink, 0)
