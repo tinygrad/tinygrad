@@ -748,6 +748,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   # assign priorities
   def get_priority(u:UOp):
     priority = 0
+    if u.op is UOps.LOAD: priority += 100 # load penalty
     # prefer ranges that depend on the least number of independent ranges
     if u.op is UOps.RANGE and u.arg[1]:
       priority += u.arg[0]
