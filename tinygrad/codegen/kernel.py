@@ -123,6 +123,9 @@ class Kernel:
 
     return ret
 
+  @property
+  def membufs(self) -> List[UOp]: return list(dedup([x for x in self.ast.sparents if x.op in {UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL}]))
+
   # TODO: these need more tests or it might silently be no-op
   def float4_axis(self, i:int): return [x-self.first_upcast for x in self.sts[i].unit_stride_axes() if x >= self.first_upcast and self.sts[i].shape[x]%4 == 0]  # noqa: E501
 
@@ -235,8 +238,8 @@ class Kernel:
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
-    if isinstance(self.ast.src[0].src[0].dtype, ImageDType):
-      base_shape = self.ast.src[0].src[0].dtype.shape
+    if isinstance(self.membufs[0].dtype, ImageDType):
+      base_shape = self.membufs[0].dtype.shape
       if shape_idx_groups := get_contraction(self.output_shape, base_shape):
         special_strides: Tuple[sint, ...] = tuple()
         for i,g in enumerate(shape_idx_groups):
@@ -478,7 +481,7 @@ class Kernel:
       self.tensor_core_opts.fix_axes(axis) # fix up axes in TC opts if required after simplify_ones()
 
   def required_optimizations(self) -> Kernel:
-    if isinstance(self.ast.src[0].src[0].dtype, ImageDType):
+    if isinstance(self.membufs[0].dtype, ImageDType):
       unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
       assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[0]}"
       if len(unit_stride_axes_mul_4) and all(x < self.first_upcast for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:  # noqa: E501

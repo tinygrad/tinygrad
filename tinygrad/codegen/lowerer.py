@@ -99,6 +99,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
     ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [ret.gep(i) for i in range(ret.dtype.count)])
   return UOp(UOps.REDUCE, x.dtype, (ret,) + tuple(reduce_range), alu_op) if len(reduce_range) else ret
 
+"""
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL else ctx.idxs)
   # TODO: check has_valid in UPat, not here
@@ -108,21 +109,31 @@ def lower_load_store(ctx: IndexContext, x: UOp):
     barrier = (UOp(UOps.BARRIER, dtypes.void, (x.src[1],)),) if x.src[0].op is UOps.DEFINE_LOCAL else ()
     return UOp(UOps.LOAD, x.dtype, (buf.index(idx),) + ((x.const_like(0), valid) if has_valid else ()) + barrier)
   # NOTE: only store the local reduceop in the threads that are actually doing the reduce
-  store_back = x.src[0].op is UOps.DEFINE_LOCAL and x.src[2].op is UOps.REDUCE and \
-    x.src[2].src[0].op is UOps.LOAD and x.src[2].src[0].src[0].op is UOps.DEFINE_LOCAL
+  store_back = x.src[0].op is UOps.DEFINE_LOCAL and x.src[1].op is UOps.REDUCE and \
+    x.src[1].src[0].op is UOps.LOAD and x.src[2].src[0].src[0].op is UOps.DEFINE_LOCAL
   # NOTE: If we're storing the reduced value back into each thread, need to zero-out the reduced axes
-  if store_back: idx, _ = x.st_arg.to_indexed_uops([u.const_like(0) if u in x.src[2].src else u for u in ctx.idxs])
+  if store_back: idx, _ = x.st_arg.to_indexed_uops([u.const_like(0) if u in x.src[1].src else u for u in ctx.idxs])
   if x.src[0].op is UOps.DEFINE_GLOBAL or store_back:
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
       if oidx != ridx: valid = valid * oidx.eq(0)
     has_valid = valid.op is not UOps.CONST or valid.arg is not True
-  return UOp(UOps.STORE, dtypes.void, (buf.index(idx), x.src[2]) + ((valid,) if has_valid else ()))
+  return UOp(UOps.STORE, dtypes.void, (buf.index(idx), x.src[1]) + ((valid,) if has_valid else ()))
+"""
+
 
 pm_lowerer = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, name="x"), lower_reduce_axis),
-  (UPat(UOps.VALID, src=(UPat(UOps.SHAPETRACKER),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
+  (UPat(UOps.SHAPETRACKER, src=(), name="x"), lambda ctx,x: UOp(UOps.SHAPETRACKER, src=x.arg.to_indexed_uops(ctx.idxs))),
+  #(UPat(UOps.SHAPETRACKER, src=(UPat(UOps.REDUCE),), name="x"), lambda ctx,x: UOp(UOps.SHAPETRACKER, src=x.arg.to_indexed_uops(ctx.ridxs))),
+
+  # these can go elsewhere
+  (UPat(UOps.INDEX, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL), name="buf"), UPat(UOps.SHAPETRACKER, src=(UPat(name="idx"), UPat()),))),
+   lambda ctx,buf,idx: buf.index(idx)),
+  (UPat(UOps.VALID, src=(UPat(UOps.SHAPETRACKER, src=(UPat(), UPat(name="valid")),))), lambda ctx,valid: valid),
+
+  #(UPat(UOps.VALID, src=(UPat(UOps.SHAPETRACKER),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
   # rewrite LOAD/STORE SHAPETRACKER to LOAD/STORE with indexed
-  (UPat((UOps.LOAD, UOps.STORE), src=(UPat(UOps.INDEX, src=(UPat(), UPat(UOps.SHAPETRACKER),)),), allow_any_len=True, name="x"), lower_load_store),
+  #(UPat((UOps.LOAD, UOps.STORE), src=(UPat(UOps.INDEX, src=(UPat(), UPat(UOps.SHAPETRACKER),)),), allow_any_len=True, name="x"), lower_load_store),
 ])
 
 def ast_to_uop(ast:UOp, opts:Renderer) -> UOp: return graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
