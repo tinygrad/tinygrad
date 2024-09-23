@@ -402,7 +402,7 @@ class UPat(MathTrait):
     # repeat if it's a UPat
     elif isinstance(src, UPat): self.src = [itertools.repeat(src)]
 
-    self.allowed_len: int = 0 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
+    self.allowed_len: int = -1 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
     self.location = location or get_location()
 
     if custom_early_reject is not None: self.early_reject = custom_early_reject
@@ -455,7 +455,7 @@ class UPat(MathTrait):
       (self.dtype is not None and uop.dtype not in self.dtype) or \
       (self.arg is not None and self.arg != uop.arg) or \
       (self.op is not None and uop.op not in self.op) or \
-      (self.allowed_len != 0 and len(uop.src) != self.allowed_len): return []
+      (self.allowed_len != -1 and len(uop.src) != self.allowed_len): return []
     if self.src is None: return [store]
     res: List[Dict[str, UOp]] = []
     for vp in self.src:
