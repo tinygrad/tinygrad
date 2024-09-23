@@ -70,18 +70,18 @@ def _test_uops_result(output_dtype, uops, res):
   return ret[0]
 
 class TestUOps(unittest.TestCase):
-  def _equal(self, v1, v2):
+  def _equal(self, v1, v2, rtol=2e-7):
     assert isinstance(v2, (float, int, bool))
     if isinstance(v2, float):
-      np.testing.assert_allclose(v1, v2, rtol=2e-7)
+      np.testing.assert_allclose(v1, v2, rtol=rtol)
     else:
       np.testing.assert_equal(v1, v2)
 
-  def _test_uop_fxn(self, op, fxn, dts=(dtypes.float32, )):
+  def _test_uop_fxn(self, op, fxn, dts=(dtypes.float32, ), rtol=2e-7):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0.0, 1.0]:
         a = dtypes.as_const(a, dts[0])
-        self._equal(f([a], op, dts), fxn(a))
+        self._equal(f([a], op, dts), fxn(a), rtol=rtol)
 
   def _test_bop_fxn(self, op, fxn, dts=(dtypes.float32, )*2, no_b_zero=False, no_b_neg=False):
     for f in [_test_single_value, _test_single_value_const]:
@@ -107,7 +107,7 @@ class TestFloatUOps(TestUOps):
   @unittest.skipIf(Device.DEFAULT == "CLANG", 'not supported as uop')
   def test_log2(self): self._test_uop_fxn(UnaryOps.LOG2, lambda a: math.log2(a) if a > 0 else float('-inf' if a==0 else 'nan'))
   @unittest.skipIf(Device.DEFAULT == "CLANG", 'not supported as uop')
-  def test_sin(self): self._test_uop_fxn(UnaryOps.SIN, lambda a: math.sin(a))
+  def test_sin(self): self._test_uop_fxn(UnaryOps.SIN, lambda a: math.sin(a), rtol=1e-5 if Device.DEFAULT == "GPU" else 2e-7)
   def test_recip(self): self._test_uop_fxn(UnaryOps.RECIP, lambda a: 1/a if a != 0 else float('inf'))
   def test_sqrt(self): self._test_uop_fxn(UnaryOps.SQRT, lambda a: math.sqrt(a) if a >= 0 else float('nan'))
 

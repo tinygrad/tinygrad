@@ -228,7 +228,8 @@ class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
 
   # native RECIP and SIN change the assembly on QCOM, but SIN gets you all the gains
-  code_for_op = {**CStyleLanguage().code_for_op, UnaryOps.SIN: lambda x,dtype: f"native_sin({x})"}
+  code_for_op = {**CStyleLanguage().code_for_op,
+    UnaryOps.SIN: lambda x,dtype: f"native_sin({x})" if dtype != dtypes.double else f"sin({x})"}
 
   # language options
   kernel_prefix = "__kernel "
