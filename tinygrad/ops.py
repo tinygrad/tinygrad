@@ -5,7 +5,7 @@ from enum import auto, IntEnum, Enum
 from collections import defaultdict
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
-from tinygrad.helpers import _CURRENT_KERNEL, ContextVar, pretty_print, prod, getenv, all_same
+from tinygrad.helpers import _CURRENT_KERNEL, GLOBAL_WITH_BUF, ContextVar, pretty_print, prod, getenv, all_same
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -147,6 +147,9 @@ class UOp(MathTrait):
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
   def replace(self, op: Optional[UOps]=None, dtype:Optional[DType]=None, src: Optional[Tuple[UOp,...]]=None, arg:Any=None):
     return UOp(op or self.op, dtype or self.dtype, self.src if src is None else src, self.arg if arg is None else arg)
+  @staticmethod
+  def from_lbuf(x, i:int):
+    return UOp(UOps.DEFINE_GLOBAL, x.dtype if isinstance(x.dtype, ImageDType) else PtrDType(x.dtype), (), x.buffer if GLOBAL_WITH_BUF else i)
   @property
   def has_st(self) -> bool: return self.op not in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL, UOps.CONST, UOps.DEFINE_VAR}
   @functools.cached_property

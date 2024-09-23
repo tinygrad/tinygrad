@@ -146,9 +146,8 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
       # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                            +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-    ubuf = UOp(UOps.DEFINE_GLOBAL, buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
-               outputs.index(assign_targets[buf]) if buf in assign_targets else len(outputs)+inputs.setdefault(buf, len(inputs)))
-    return UOp(UOps.LOAD, dtype, (ubuf, unbound_st.to_uop()))
+    i = outputs.index(assign_targets[buf]) if buf in assign_targets else len(outputs)+inputs.setdefault(buf, len(inputs))
+    return UOp(UOps.LOAD, dtype, (UOp.from_lbuf(buf, i), unbound_st.to_uop()))
 
   # reduce ops change ShapeTracker
   if buf.op in ReduceOps:
@@ -182,8 +181,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
       output_st = out.arg[0]
     output_st, vv = output_st.simplify().unbind()
     var_vals.update(vv)
-    ubuf = UOp(UOps.DEFINE_GLOBAL, out.dtype if isinstance(out.dtype, ImageDType) else PtrDType(out.dtype), (), i)
-    ast.append(UOp(UOps.STORE, dtypes.void, (ubuf, output_st.to_uop(), src)))
+    ast.append(UOp(UOps.STORE, dtypes.void, (UOp.from_lbuf(out, i), output_st.to_uop(), src)))
   sink = full_ast_rewrite(ast[0].sink(*ast[1:]))
   return LBScheduleItem(sink, outs, list(inputs), dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])), var_vals
 
