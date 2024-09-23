@@ -46,7 +46,7 @@ class TestViz(unittest.TestCase):
     list(lower_schedule(schedule1))
     list(lower_schedule(schedule2))
     ret = load_kernels(contexts)
-    assert len(ret) == 8
+    assert len(ret) == 10
     assert all(len([x for x in y.ctxs.values() if "schedule" in x.loc]) != 0 for y in ret)
     assert all(len([x for x in y.ctxs.values() if "uopgraph" in x.loc]) != 0 for y in ret)
 
