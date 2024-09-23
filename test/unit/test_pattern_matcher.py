@@ -11,6 +11,20 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), None)
 
+  def test_match_sz_0(self):
+    match_cnt = 0
+    def fxn(x):
+      nonlocal match_cnt
+      match_cnt += 1
+      assert len(x.src) == 0
+      return UOp(UOps.CONST, src=(UOp(UOps.CONST),))
+    matcher = PatternMatcher([(UPat(UOps.CONST, src=(), name="x"), fxn)])
+    c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
+    # second rewrite shouldn't match anything
+    c1 = matcher.rewrite(c1)
+    c1 = matcher.rewrite(c1)
+    self.assertEqual(match_cnt, 1)
+
   def test_uop(self):
     matcher = PatternMatcher([(UPat(UOps.CONST, name="x"), lambda x: x)])
     c1 = UOp(UOps.CONST, dtypes.float, arg=1.0)
