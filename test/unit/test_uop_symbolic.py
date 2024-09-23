@@ -448,6 +448,19 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((idx//4).lt(3), 0, 1, "(idx<12)")
     self.helper_test_variable((idx//-4).lt(-3), 0, 1, "((idx//(-4))<(-3))")
 
+  def test_simplex_lt(self):
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    c = Variable("c", 0, 3)
+    d = Variable("d", -3, 3)
+    self.helper_test_variable((a).lt(1).ne(True), 0, 1, "((a<1)!=1)")
+    self.helper_test_variable((a+b).lt(1).ne(True), 0, 1, "(((a+b)<1)!=1)")
+    self.helper_test_variable((a*3+b*4).lt(1).ne(True), 0, 1, "(((a+b)<1)!=1)")
+    self.helper_test_variable((a*(-3)+b*4).lt(1).ne(True), 0, 1, "((((a*(-3))+(b*4))<1)!=1)")  # negative coeff, should not be simplified
+    self.helper_test_variable((a*3+d*4).lt(1).ne(True), 0, 1, "((((a*3)+(d*4))<1)!=1)")  # var can be negative, should not be simplified
+    self.helper_test_variable((a+b+c*2).lt(1).ne(True), 0, 1, "(((a+b+c)<1)!=1)")
+    self.helper_test_variable((a+b*2+c*4).lt(1).ne(True), 0, 1, "(((a+b+c)<1)!=1)")
+
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
