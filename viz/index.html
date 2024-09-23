@@ -21,8 +21,8 @@
     margin-block-end: initial;
   }
   html, body {
-    background-color: #191919;
-    color: #EEEEEE;
+    background-color: #08090e;
+    color: #f0f0f5;
     margin: 0;
     padding: 0;
     width: 100%;
@@ -36,15 +36,15 @@
     overflow: hidden;
   }
   a {
-    color: #0090FF;
+    color: #4a90e2;
   }
   ul {
     padding: 0;
-    color: #7B7B7B;
+    color: #7c7d85;
     cursor: pointer;
   }
   ul.active {
-    color: #EEEEEE;
+    color: #f0f0f5;
   }
   svg {
     width: 100%;
@@ -75,16 +75,18 @@
     padding: 12px;
     width: 100%;
     height: 100%;
-    background-color: #191919;
   }
   .container {
+    background-color: #0f1018;
     height: 100%;
-    background-color: #111111;
     border-radius: 8px;
     padding: 8px;
     position: relative;
   }
   .container > * + * {
+    margin-top: 12px;
+  }
+  .rewrite-container > * + * {
     margin-top: 12px;
   }
   .main-container > * + * {
@@ -172,7 +174,7 @@
   <script>
   function renderGraph(graph, additions) {
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: #242424" : "display: none;"});
+    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: #15161e" : "display: none;"});
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
@@ -313,12 +315,15 @@
           gUl.classList.add("active");
           if (i !== 0) {
             const [pattern, loc, diff] = ret[0].diffs[i-1];
-            const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
             const parts = loc.join(":").split("/");
-            pre.appendChild(Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n", href: "vscode://file"+parts.join("/") }));
+            const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
+            link = Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n", href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" })
+            div.appendChild(link);
+            const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
             pre.appendChild(Object.assign(document.createElement("code"), { textContent: pattern, className: "language-python" }));
+            div.appendChild(pre);
             hljs.highlightElement(pre);
-            metadata.appendChild(pre);
+            metadata.appendChild(div);
             const diffHtml = diff.map((line) => {
               const color = line.startsWith("+") ? "#30A46C" : line.startsWith("-") ? "#E5484D" : "#EEEEEE";
               return `<span style="color: ${color};">${line}</span>`;
