@@ -32,8 +32,6 @@ def msg(ptr: objc_instance, selector: str, /, *args: Any, restype: type = objc_i
 
 def to_ns_str(s: str) -> objc_instance: return msg(libobjc.objc_getClass(b"NSString"), "stringWithUTF8String:", s.encode())
 
-def to_ns_array(items: List[Any]): return (objc_instance * len(items))(*items)
-
 def int_tuple_to_struct(t: Tuple[int, ...], _type: type = ctypes.c_ulong):
   class Struct(ctypes.Structure): pass
   Struct._fields_ = [(f"field{i}", _type) for i in range(len(t))]

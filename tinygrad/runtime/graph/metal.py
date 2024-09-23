@@ -6,7 +6,7 @@ from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.shape.symbolic import Variable
-from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, to_ns_array, int_tuple_to_struct, objc_instance, MTLResourceUsage, \
+from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, int_tuple_to_struct, objc_instance, MTLResourceUsage, \
   MTLIndirectCommandType, MTLResourceOptions
 
 class MetalGraph(GraphRunner):
@@ -72,7 +72,7 @@ class MetalGraph(GraphRunner):
 
     command_buffer = msg(self.device.mtl_queue, "commandBuffer")
     encoder = msg(command_buffer, "computeCommandEncoder")
-    msg(encoder, "useResources:count:usage:", to_ns_array(all_resources), len(all_resources),
+    msg(encoder, "useResources:count:usage:", (objc_instance * len(all_resources))(*all_resources), len(all_resources),
         MTLResourceUsage.MTLResourceUsageRead | MTLResourceUsage.MTLResourceUsageWrite)
 
     # NOTE: the pipelines likely need to be added to the used resources to fix the crash on M1/M2, but I haven't figured out how
