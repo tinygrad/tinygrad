@@ -227,11 +227,8 @@ class ClangRenderer(CStyleLanguage):
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
 
-  # 0.3 ms of savings on openpilot 0.9.7
-  code_for_op = {**CStyleLanguage().code_for_op,
-    UnaryOps.SQRT: lambda x,dtype: f"native_sqrt({x})", UnaryOps.RECIP: lambda x,dtype: f"native_recip({x})",
-    UnaryOps.EXP2: lambda x,dtype: f"native_exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"native_log2({x})",
-    UnaryOps.SIN: lambda x,dtype: f"native_sin({x})"}
+  # RECIP and SIN change the assembly on QCOM
+  code_for_op = {**CStyleLanguage().code_for_op, UnaryOps.RECIP: lambda x,dtype: f"native_recip({x})", UnaryOps.SIN: lambda x,dtype: f"native_sin({x})"}
 
   # language options
   kernel_prefix = "__kernel "
