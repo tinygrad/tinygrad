@@ -117,6 +117,7 @@ class TestRandomness(unittest.TestCase):
 
     np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
 
+  @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
   def test_threefly_tensors_cnt(self):
     Tensor.manual_seed(1337)
 
