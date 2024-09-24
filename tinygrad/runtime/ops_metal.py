@@ -36,7 +36,7 @@ def msg(ptr: objc_id, selector: str, /, *args: Any, restype: type[T] = objc_id) 
   sender.restype = restype
   return sender(ptr, sel(selector), *args)
 
-def to_ns_str(s: str): return msg(libobjc.objc_getClass(b"NSString"), "stringWithUTF8String:", s.encode())
+def to_ns_str(s: str): return msg(libobjc.objc_getClass(b"NSString"), "stringWithUTF8String:", s.encode(), restype=objc_instance)
 
 def to_struct(*t: int, _type: type = ctypes.c_ulong):
   class Struct(ctypes.Structure): pass
