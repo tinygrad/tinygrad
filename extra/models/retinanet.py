@@ -1,24 +1,10 @@
 import math
+from tinygrad import Tensor, dtypes
 from tinygrad.helpers import flatten, get_child
 import tinygrad.nn as nn
+from extra.models.helpers import meshgrid, nms
 from extra.models.resnet import ResNet
 import numpy as np
-
-def nms(boxes, scores, thresh=0.5):
-  x1, y1, x2, y2 = np.rollaxis(boxes, 1)
-  areas = (x2 - x1 + 1) * (y2 - y1 + 1)
-  to_process, keep = scores.argsort()[::-1], []
-  while to_process.size > 0:
-    cur, to_process = to_process[0], to_process[1:]
-    keep.append(cur)
-    inter_x1 = np.maximum(x1[cur], x1[to_process])
-    inter_y1 = np.maximum(y1[cur], y1[to_process])
-    inter_x2 = np.minimum(x2[cur], x2[to_process])
-    inter_y2 = np.minimum(y2[cur], y2[to_process])
-    inter_area = np.maximum(0, inter_x2 - inter_x1 + 1) * np.maximum(0, inter_y2 - inter_y1 + 1)
-    iou = inter_area / (areas[cur] + areas[to_process] - inter_area)
-    to_process = to_process[np.where(iou <= thresh)[0]]
-  return keep
 
 def decode_bbox(offsets, anchors):
   dx, dy, dw, dh = np.rollaxis(offsets, 1)
@@ -34,18 +20,18 @@ def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
   assert len(scales) == len(aspect_ratios) == len(grid_sizes)
   anchors = []
   for s, ar, gs in zip(scales, aspect_ratios, grid_sizes):
-    s, ar = np.array(s), np.array(ar)
-    h_ratios = np.sqrt(ar)
+    s, ar = Tensor(s), Tensor(ar)
+    h_ratios = ar.sqrt()
     w_ratios = 1 / h_ratios
     ws = (w_ratios[:, None] * s[None, :]).reshape(-1)
     hs = (h_ratios[:, None] * s[None, :]).reshape(-1)
-    base_anchors = (np.stack([-ws, -hs, ws, hs], axis=1) / 2).round()
+    base_anchors = (Tensor.stack(-ws, -hs, ws, hs, dim=1) / 2).round()
     stride_h, stride_w = input_size[0] // gs[0], input_size[1] // gs[1]
-    shifts_x, shifts_y = np.meshgrid(np.arange(gs[1]) * stride_w, np.arange(gs[0]) * stride_h)
+    shifts_y, shifts_x = meshgrid(Tensor.arange(0, stop=gs[0], dtype=dtypes.float32) * stride_h, Tensor.arange(0, stop=gs[1], dtype=dtypes.float32) * stride_w)
     shifts_x = shifts_x.reshape(-1)
     shifts_y = shifts_y.reshape(-1)
-    shifts = np.stack([shifts_x, shifts_y, shifts_x, shifts_y], axis=1, dtype=np.float32)
-    anchors.append((shifts[:, None] + base_anchors[None, :]).reshape(-1, 4))
+    shifts = Tensor.stack(shifts_x, shifts_y, shifts_x, shifts_y, dim=1)
+    anchors.append((shifts.reshape(-1, 1, 4) + base_anchors.reshape(1, -1, 4)).reshape(-1, 4))
   return anchors
 
 class RetinaNet:
@@ -109,7 +95,7 @@ class RetinaNet:
         # bbox coords from offsets
         anchor_idxs = topk_idxs // self.num_classes
         labels_per_level = topk_idxs % self.num_classes
-        boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level[anchor_idxs])
+        boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level.numpy()[anchor_idxs]) # TODO: remove numpy conversion
         # clip to image size
         clipped_x = boxes_per_level[:, 0::2].clip(0, w)
         clipped_y = boxes_per_level[:, 1::2].clip(0, h)

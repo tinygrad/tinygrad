@@ -8,7 +8,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import get_child, fetch
 from tinygrad.nn.state import torch_load
 from extra.models.resnet import ResNet
-from extra.models.retinanet import nms as _box_nms
+from extra.models.helpers import nms as _box_nms
 
 USE_NP_GATHER = os.getenv('FULL_TINYGRAD', '0') == '0'
 
