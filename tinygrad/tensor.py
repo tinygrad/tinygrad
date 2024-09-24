@@ -415,6 +415,14 @@ class Tensor:
     Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
 
   @staticmethod
+  def _threefry_random_bits(key0, key1, counts0, counts1):
+    x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
+    key = (Tensor(key0, device=x.device, dtype=dtypes.uint64, requires_grad=False) << 32) | key1
+    x = F.Threefry.apply(*x._broadcasted(key))
+    counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
+    return counts0.cat(counts1)
+
+  @staticmethod
   def rand(*shape, device:Optional[str]=None, dtype:Optional[DTypeLike]=None, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
@@ -456,15 +464,9 @@ class Tensor:
     if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
 
     # threefry random bits
-    counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
-    counts2 = counts1 + math.ceil(num / 2)
-
-    # threefry random bits
-    x = (counts2.cast(dtypes.uint64) << 32) | counts1.cast(dtypes.uint64)
-    key = (Tensor(Tensor._seed, device=x.device, dtype=dtypes.uint64, requires_grad=False) << 32) | Tensor._device_seeds[device]
-    x = F.Threefry.apply(*x._broadcasted(key))
-    counts1, counts2 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
-    bits = counts1.cat(counts2)[:num]
+    counts0 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
+    counts1 = counts0 + math.ceil(num / 2)
+    bits = Tensor._threefry_random_bits(Tensor._seed, Tensor._device_seeds[device], counts0, counts1)[:num]
 
     # bitcast to uint with same number of bits
     _, nmant = dtypes.finfo(dtype)
