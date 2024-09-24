@@ -80,7 +80,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     mem_estimate: sint = 0
     lds_estimate: sint = 0
 
-    def is_sym_dim(dim) -> bool: return not all(isinstance(d, int) or isinstance(d, float) for d in dim)
+    def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
 
     self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
     self.symbolic_dims = dedup([tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.local_size) and is_sym_dim(d)] +
