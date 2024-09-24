@@ -113,9 +113,18 @@ reduceop_fusor = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
-def full_ast_rewrite(sink:UOp) -> UOp:
+@dataclass(frozen=True)
+class ScheduleItemContext:
+  bufs: Tuple[Buffer, ...]
+
+assign_buffers = PatternMatcher([
+  (UPat(UOps.DEFINE_GLOBAL, name="x"), lambda ctx,x: x.replace(arg=ctx.bufs.index(x.arg)) if isinstance(x.arg, Buffer) else None),
+])
+
+def full_ast_rewrite(sink:UOp, ctx:ScheduleItemContext) -> UOp:
   if not AST_REWRITE: return sink
-  return graph_rewrite(sink, reduceop_fusor)
+  sink = graph_rewrite(sink, reduceop_fusor)
+  return graph_rewrite(sink, assign_buffers, ctx)
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
 
@@ -181,7 +190,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
     output_st, vv = output_st.simplify().unbind()
     var_vals.update(vv)
     ast.append(UOp(UOps.STORE, dtypes.void, (UOp.from_lbuf(out, i), output_st.to_uop(), src)))
-  sink = full_ast_rewrite(ast[0].sink(*ast[1:]))
+  sink = full_ast_rewrite(ast[0].sink(*ast[1:]), ScheduleItemContext(tuple(x.buffer for x in outs+list(inputs))))
   return LBScheduleItem(sink, outs, list(inputs), dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])), var_vals
 
 # *** DAG creation: decide which LazyBuffers should realize ***
