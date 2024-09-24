@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
   # NOTE: the inputs to a JIT must be first level arguments
   run_onnx_jit = TinyJit(lambda **kwargs: run_onnx(kwargs), prune=True)
-  for _ in range(10):
+  for _ in range(20):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
     ret = next(iter(run_onnx_jit(**new_inputs_junk).values())).cast(dtypes.float32).numpy()
