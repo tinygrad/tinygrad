@@ -156,7 +156,7 @@ class TestValidSimplification(unittest.TestCase):
 
     valid = alu2.lt(11)&(alu4.lt(3).ne(True))
     shape = (8, 1024, 4)
-    idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (((alu6+832)%1024),(alu2+((idx1+((ridx1+5)/8)+1)/2)+(-4))))
+    idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (((alu6+832)%1024),(alu2+((idx1+((ridx1+5)//8)+1)//2)+(-4))))
 
     # TODO: simplify idx
     # alu0 = ((idx2*2)+ridx0)
