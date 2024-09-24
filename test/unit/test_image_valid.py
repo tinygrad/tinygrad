@@ -156,12 +156,12 @@ class TestValidSimplification(unittest.TestCase):
 
     valid = alu2.lt(11)&(alu4.lt(3).ne(True))
     shape = (8, 1024, 4)
-    idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (((alu6+832)%1024),(alu2+((idx1+((ridx1+5)/8)+1)/2)+(-4))))
+    idx = UOp(UOps.VECTORIZE, dtypes.int.vec(2), (((alu6+832)%1024),(alu2+((idx1+((ridx1+5)//8)+1)//2)+(-4))))
 
     # TODO: simplify idx
     # alu0 = ((idx2*2)+ridx0)
     self.assertEqual(render(shape, valid, idx),
-      "(((alu0<11)&((((idx1*8)+ridx1)<3)!=1))?read_imagef(data0, smp, (int2)((((idx1*512)+(ridx1*64)+idx0+832)%1024),(alu0+(-4)))):(float4)(0.0f,0.0f,0.0f,0.0f))")  # noqa: E501
+      "(((alu0<11)&((((idx1*8)+ridx1)<3)!=1))?read_imagef(data0, smp, (int2)((((idx1*512)+(ridx1*64)+idx0+832)%1024),(alu0+((idx1+((ridx1+5)//8)+1)//2)+(-4)))):(float4)(0.0f,0.0f,0.0f,0.0f))")  # noqa: E501
 
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)
