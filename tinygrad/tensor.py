@@ -1052,7 +1052,7 @@ class Tensor:
 
       # for advanced setitem, returns whole tensor with indices replaced
       if v is not None:
-        v = v._broadcast_to(_broadcast_shape(ret.shape, v.shape))
+        v = v.cast(self.dtype)._broadcast_to(_broadcast_shape(ret.shape, v.shape))
         # add back reduced dims from sum
         for dim in sum_axis: v = v.unsqueeze(dim)
         # axis to be reduced to match self.shape
@@ -1081,7 +1081,7 @@ class Tensor:
     res = self.realize()._getitem(indices, v)
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.lazydata is not self.lazydata:
-      self.assign(res.cast(self.dtype).contiguous()).realize()
+      self.assign(res).realize()
     else: # no copy, basic setitem
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
       res.assign(v).realize()
