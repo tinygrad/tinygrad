@@ -26,7 +26,7 @@ class TestJit(unittest.TestCase):
   @given(strat.sampled_from([Tensor.exp2, Tensor.log2, Tensor.sin]))
   def test_approx_jit_timeout(self, op):
     with Context(TRANSCENDENTAL=2):
-      model = [ResBlock(16, 24, 16) for _ in range(3)]
+      model = [ResBlock(16, 24, 16) for _ in range(4)]
       @TinyJit
       def fw_approx(t, t2):
         for l in model: t = l(t, t2)
