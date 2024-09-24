@@ -40,8 +40,8 @@ class TestViz(unittest.TestCase):
 
   def test_ctx_groups(self):
     contexts.clear()
-    schedule1 = Tensor.rand(4, 1).contiguous().schedule()
-    schedule2 = Tensor.rand(4, 4).contiguous().schedule()
+    schedule1 = Tensor.randn(4, 1).contiguous().schedule()
+    schedule2 = Tensor.randn(4, 4).contiguous().schedule()
     list(lower_schedule(schedule1))
     list(lower_schedule(schedule2))
     ret = load_kernels(contexts)
