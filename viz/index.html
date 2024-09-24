@@ -116,7 +116,8 @@
     top: 0;
     bottom: 0;
     width: 20px;
-    cursor: w-resize;
+    height: 100%;
+    cursor: col-resize;
     background-color: transparent;
   }
   .rewrite-list {
@@ -174,28 +175,23 @@
     <div class="container metadata"></div>
   </div>
   <script>
-    // extra definitions for UOps
-    hljs.registerLanguage("python", (hljs) => {
-      const LOOKAHEAD_TAG_END = '(?=[.\\s\\n[:,(])'; // https://github.com/highlightjs/highlight.js/blob/a9756e3efbaa2600e49a4957f2d798c5a49754b7/src/languages/stylus.js#L38
-      return {
-        ...hljs.getLanguage("python"),
-        case_insensitive: false,
-        contains: [
-          { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-]*(\\.[a-zA-Z_][a-zA-Z0-9_-]*)*' + LOOKAHEAD_TAG_END, className: "type" },
-          { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-].vec*' + LOOKAHEAD_TAG_END, className: "type" },
-          { begin: '[a-zA-Z_][a-zA-Z0-9_-]*\\.[a-zA-Z_][a-zA-Z0-9_-]*' + '(?=[.\\s\\n[:,()])',  className: "operator" },
-          { begin: '[A-Z][a-zA-Z0-9_]*(?=\\()', className: "section", ignoreEnd: true },
-          ...hljs.getLanguage("python").contains,
-        ]
-      }
-    });
-    // extra definitions for float4
-    hljs.registerLanguage("cpp", (hljs) => {
-      return {
-        ...hljs.getLanguage('cpp'),
-        contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
-      };
-    });
+  // extra definitions for UOps
+  hljs.registerLanguage("python", (hljs) => ({
+    ...hljs.getLanguage("python"),
+    case_insensitive: false,
+    contains: [
+      { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-]*(\\.[a-zA-Z_][a-zA-Z0-9_-]*)*' + '(?=[.\\s\\n[:,(])', className: "type" },
+      { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-].vec*' + '(?=[.\\s\\n[:,(])', className: "type" },
+      { begin: '[a-zA-Z_][a-zA-Z0-9_-]*\\.[a-zA-Z_][a-zA-Z0-9_-]*' + '(?=[.\\s\\n[:,()])',  className: "operator" },
+      { begin: '[A-Z][a-zA-Z0-9_]*(?=\\()', className: "section", ignoreEnd: true },
+      ...hljs.getLanguage("python").contains,
+    ]
+  }));
+  // extra definitions for float4
+  hljs.registerLanguage("cpp", (hljs) => ({
+    ...hljs.getLanguage('cpp'),
+    contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
+  }));
   function renderGraph(graph, additions) {
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
     g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5); rx: 8; ry: 8;" : "display: none;"});
@@ -238,7 +234,7 @@
   var expandKernel = false;
   async function main() {
     checkStatus();
-    // ** kernel list
+    // ***** LHS kernels list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
       currentKernel = 0;
@@ -275,7 +271,7 @@
       }
       kernelList.appendChild(kernelUl);
     });
-    // ** uop graph
+    // ***** UOp graph
     cacheKey = `${currentKernel}-${currentUOp}`;
     if (cacheKey in cache) {
       ret = cache[cacheKey];
@@ -285,18 +281,20 @@
       cache[cacheKey] = ret;
     }
     renderGraph(ret[0].graphs[currentRewrite], ret[0].additions[currentRewrite]);
+    // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
-    metadata.appendChild(Object.assign(document.createElement("div"), { id: "resize-handle" }));
     metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc }));
+    // ** resizer
+    metadata.appendChild(Object.assign(document.createElement("div"), { id: "resize-handle" }));
     const resizeHandle = document.getElementById("resize-handle");
-
     let startX;
     let containerWidth;
     let metadataWidth;
     resizeHandle.addEventListener("mousedown", (e) => {
       e.preventDefault();
       metadata.style.userSelect = "none";
+      document.documentElement.style.cursor = "col-resize";
       startX = e.clientX;
       containerWidth = document.querySelector(".main-container").getBoundingClientRect().width;
       metadataWidth = metadata.getBoundingClientRect().width;
@@ -314,9 +312,10 @@
     function stopResize(e) {
       document.documentElement.removeEventListener("mousemove", resize, false);
       document.documentElement.removeEventListener("mouseup", stopResize, false);
+      document.documentElement.style.cursor = "initial";
       metadata.style.userSelect = "initial";
     }
-
+    // ** code blocks
     ret[0].extra[currentRewrite].forEach((e, i) => {
       if (e.length == 0) return;
       const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(e)}</code>`, className: "code-block language-python" });
