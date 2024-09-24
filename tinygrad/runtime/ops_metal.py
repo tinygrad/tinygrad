@@ -4,7 +4,7 @@ from typing import List, Any, Tuple, Optional, cast, TypeVar
 from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
-from ctypes.macholib.dyld import dyld_find 
+from ctypes.macholib.dyld import dyld_find
 
 class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
   def __hash__(self): return hash(self.value)
