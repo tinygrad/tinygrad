@@ -212,26 +212,28 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
 
   # simplify idx given that valid is True
   for uop,v in bounds.items():
-    # some expr has lower bound > upper bound -> valid is an empty set
+    # some expr has lower bound > upper bound -> valid is an empty set and we return early
     if v[0] is not None and v[1] is not None and v[0] > v[1]:
       return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, valid.const_like(False)))
 
+    # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the idx into a same output, we rewrite idx
+    candidates = []
     if uop.op is UOps.ALU and uop.arg is BinaryOps.ADD and all(is_irreducible(u) and u.vmin == 0 for u in _get_chain(uop, BinaryOps.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      newidxs: List[List[UOp]] = [[], []]
-      for variable in _get_chain(uop, BinaryOps.ADD):
-        new = UOp(UOps.DEFINE_VAR, variable.dtype, (), ("fake", 1, variable.vmax))
-        newidx = replace_uop(graph_rewrite(replace_uop(idx, variable, new), constant_folder), new, variable)
+      candidates.append([(Xi, UOp(UOps.DEFINE_VAR, Xi.dtype, (), ("fake", 1, Xi.vmax))) for Xi in _get_chain(uop, BinaryOps.ADD)])
+    # try checking the whole clause
+    candidates.append([(uop, UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1]))])
+
+    for candidate in candidates:
+      newidxs:List[List[UOp]] = [[], []]
+      for X,newX in candidate:
+        newidx = replace_uop(graph_rewrite(replace_uop(idx, X, newX), constant_folder), newX, X)
         newidxs[0].append(newidx.src[0])
         newidxs[1].append(newidx.src[1])
 
+      # if every branch in candidate gives the same simplified output, we can rewrite the idx
       if len(newidxs[0])==1 or (len(newidxs[0]) > 1 and all_same([i.key for i in newidxs[0]])): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
       if len(newidxs[1])==1 or (len(newidxs[1]) > 1 and all_same([i.key for i in newidxs[1]])): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
-
-    else:
-      new = UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1])
-      newidx = replace_uop(graph_rewrite(replace_uop(idx, uop, new), constant_folder), new, uop)
-      if newidx.key != idx.key: idx = newidx
 
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
@@ -253,7 +255,9 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
     for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
       if is_increasing(i):
         rw = graph_rewrite(replace_uop(i, X, X.const_like(test_value)), constant_folder)
-        if rw.vmin >= b or rw.vmax < 0: drop_stmt.append(stmt)
+        if rw.vmin >= b or rw.vmax < 0:
+          drop_stmt.append(stmt)
+          break
 
   if drop_stmt or idx.key != start_idx.key:
     new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
@@ -269,12 +273,13 @@ def transcendental_folding(ops):
 
 # ***** threefry *****
 
-def threefry2x32(x: UOp, seed: UOp):
+def threefry2x32(x: UOp, key: UOp):
   # split x into two uint32, since x in a uint64
   x0, x1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
 
   rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
-  ks = [0x0, (seed := seed.cast(dtypes.uint32)) ^ 0x1BD11BDA, seed]
+  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
+  ks = [key1, key0 ^ key1 ^ 0x1BD11BDA, key0]
   xr = [x0 + ks[-1], x1 + ks[0]]
   for i in range(5):
     for r in rotations[i % 2]: xr[0], xr[1] = (x0 := xr[0] + xr[1]), x0 ^ ((xr[1] * 2**r) + (xr[1] // 2**(32 - r)))
@@ -378,7 +383,7 @@ constant_folder = PatternMatcher([
   (UPat.var("add") + UPat(UOps.WMMA, name="wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry
-  (UPat(UOps.ALU, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("seed")), arg=BinaryOps.THREEFRY), threefry2x32),
+  (UPat(UOps.ALU, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key")), arg=BinaryOps.THREEFRY), threefry2x32),
   # arange loop folding
   (UPat(UOps.REDUCE, src=(UPat.any(m2:=UPat.any(
     m1:=(UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, name="rng")),
