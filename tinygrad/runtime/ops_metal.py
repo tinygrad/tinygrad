@@ -4,7 +4,7 @@ import Metal, libdispatch
 from typing import List, Any, Tuple, Optional
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
-from tinygrad.renderer.cstyle2 import CStyle2Language
+from tinygrad.renderer.cstyle2 import MetalRenderer
 
 def wait_check(cbuf: Any):
   cbuf.waitUntilCompleted()
@@ -112,7 +112,7 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(device, MetalAllocator(self), CStyle2Language(), MetalCompiler(None if getenv("METAL_XCODE") else self),
+    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler(None if getenv("METAL_XCODE") else self),
                      functools.partial(MetalProgram, self), MetalGraph)
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)

@@ -708,7 +708,7 @@ linearize_cnt = 0
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   global linearize_cnt, acc_number
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
-  folder = constant_folder + transcendental_folding(tuple() if TRANSCENDENTAL >= 2 or opts is None else tuple(opts.code_for_op.keys()))
+  folder = constant_folder  #+ transcendental_folding(tuple() if TRANSCENDENTAL >= 2 or opts is None else tuple(opts.code_for_op.keys()))
 
   # do graph rewrite
   acc_number = 0
