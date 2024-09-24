@@ -58,7 +58,7 @@ def fuzz_schedule(outs:List[LazyBuffer]):
           if x in assign_targets and assign_targets[x] in rawbufs: rawbufs[x] = rawbufs[assign_targets[x]]
           elif x.device == "NPY": rawbufs[x] = x.buffer
           # copy the pre realized input
-          else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=prerealized[x])
+          else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=bytes(prerealized[x]))
       si = ScheduleItem(lsi.ast, tuple(rawbufs[x] for x in lsi.outputs+lsi.inputs if x.size != 0))
       _exec_si(si, seed)
       for out in lsi.outputs:
