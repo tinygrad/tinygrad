@@ -10,7 +10,6 @@ def tensors_allocated():
 class TestGC(unittest.TestCase):
 
   def test_gc(self):
-    Tensor.manual_seed(0)
     a = Tensor.rand(4, 4, requires_grad=True)
     b = Tensor.zeros(4, 4, requires_grad=True)
     (a*b).mean().backward()
@@ -19,7 +18,6 @@ class TestGC(unittest.TestCase):
     assert (tensors_allocated() == 2) # one for Tensor._device_rng_counters
 
   def test_gc_complex(self):
-    Tensor.manual_seed(0)
     a = Tensor(np.zeros((4, 4), dtype=np.float32), requires_grad=True)
     b = Tensor.rand(4, 4, requires_grad=True)
     assert (tensors_allocated() == 4)
