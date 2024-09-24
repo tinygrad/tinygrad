@@ -451,14 +451,13 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
 
   def test_embedding_one_kernel(self):
-    Tensor.manual_seed(20)
-    Tensor.rand(1).realize() # make rand consistent
     layer = Embedding(20, 30)
+    layer.weight = Tensor.zeros_like(layer.weight).contiguous()
     a = Tensor([[1, 5, 9, 11],
                 [12, 19, 8, 1]])
     result = layer(a)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(8, len([item for item in schedule if item.ast.op is UOps.SINK]),
+    self.assertEqual(3, len([item for item in schedule if item.ast.op is UOps.SINK]),
                      "first run realizes arange, weight, and embedding")
     run_schedule(schedule)
 
