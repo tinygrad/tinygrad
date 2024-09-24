@@ -96,8 +96,8 @@ class TestRandomness(unittest.TestCase):
 
     np.testing.assert_allclose(jr, r)
 
-  @unittest.skipIf(not THREEFRY.value, "not using threefry")
   @unittest.skipUnless(Device.DEFAULT == "GPU", "reference is on GPU")
+  @unittest.skipIf(not THREEFRY.value, "not using threefry")
   def test_threefly_against_reference_full(self):
     Tensor.manual_seed(1337)
 
