@@ -31,7 +31,7 @@ class MetalGraph(GraphRunner):
     self.icb = msg(self.device.device, "newIndirectCommandBufferWithDescriptor:maxCommandCount:options:",
       icb_descriptor, len(self.jit_cache), MTLResourceOptions.MTLResourceCPUCacheModeDefaultCache, restype=objc_instance)
     if self.icb.value is None: raise GraphException("create indirect command buffer failed, does your system support this?")
-    icb_label = bytes(msg(msg(self.icb, "description", restype=objc_id), "UTF8String", restype=ctypes.c_char_p)).decode()
+    icb_label = bytes(msg(msg(self.icb, "description", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode()
     self.needs_icb_fix = int("AGXG15XFamilyIndirectCommandBuffer" not in icb_label)    # not required on M3
 
     if len(self.vars): self.int_buf = self.device.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
@@ -39,7 +39,7 @@ class MetalGraph(GraphRunner):
     all_pipelines = []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
-      icb_command = msg(self.icb, "indirectComputeCommandAtIndex:", j, restype=objc_id)
+      icb_command = msg(self.icb, "indirectComputeCommandAtIndex:", j, restype=objc_instance)
       all_pipelines.append(prg.clprg.pipeline_state)
       msg(icb_command, "setComputePipelineState:", prg.clprg.pipeline_state)
       for i,b in enumerate(ji.bufs):
@@ -76,8 +76,8 @@ class MetalGraph(GraphRunner):
                   to_struct(*cast(tuple, global_size)), to_struct(*cast(tuple, local_size)))
     for j, var in enumerate(self.vars): self.int_buf_view[j] = var_vals[var]
 
-    command_buffer = msg(self.device.mtl_queue, "commandBuffer", restype=objc_id)
-    encoder = msg(command_buffer, "computeCommandEncoder", restype=objc_id)
+    command_buffer = msg(self.device.mtl_queue, "commandBuffer", restype=objc_instance)
+    encoder = msg(command_buffer, "computeCommandEncoder", restype=objc_instance)
     msg(encoder, "useResources:count:usage:", (objc_id * len(all_resources))(*all_resources), len(all_resources),
         MTLResourceUsage.MTLResourceUsageRead | MTLResourceUsage.MTLResourceUsageWrite)
 
