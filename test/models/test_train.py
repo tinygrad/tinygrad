@@ -32,7 +32,6 @@ def check_gc():
     assert print_objects() == 0
 
 class TestTrain(unittest.TestCase):
-  @unittest.skipIf(CI and Device.DEFAULT == "METAL", "broken on ci metal")
   def test_convnext(self):
     model = ConvNeXt(depths=[1], dims=[16])
     X = np.zeros((BS,3,224,224), dtype=np.float32)
@@ -57,7 +56,6 @@ class TestTrain(unittest.TestCase):
     train_one_step(model,X,Y)
     check_gc()
 
-  @unittest.skipIf(CI and Device.DEFAULT == "METAL", "broken on ci metal")
   def test_transformer(self):
     # this should be small GPT-2, but the param count is wrong
     # (real ff_dim is 768*4)
