@@ -117,6 +117,24 @@ class TestRandomness(unittest.TestCase):
 
     np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
 
+  def test_threefly_tensors_cnt(self):
+    Tensor.manual_seed(1337)
+
+    Tensor.rand(20).realize()
+
+    assert len(Tensor._device_rng_counters) == 1
+    assert len(Tensor._device_seeds) == 1
+
+    Tensor.rand(20, device=f"{Device.DEFAULT}:1").realize()
+
+    assert len(Tensor._device_rng_counters) == 2
+    assert len(Tensor._device_seeds) == 2
+
+    Tensor.manual_seed(2)
+
+    assert len(Tensor._device_rng_counters) == 0
+    assert len(Tensor._device_seeds) == 0
+
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "need bfloat16 support")
   def test_rand_bfloat16(self):
     N = 128
@@ -133,6 +151,34 @@ class TestRandomness(unittest.TestCase):
     rand = Tensor.rand_like(empty)
     assert rand.shape == empty.shape
     assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
+  def test_rand_like_zero_shape(self):
+    empty = Tensor.empty(0, 20)
+    rand = Tensor.rand_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
+  def test_rand_like_more_dims(self):
+    empty = Tensor.empty((1, 2, 3, 4, 5, 6))
+    rand = Tensor.rand_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
+  def test_rand_like_dtype(self):
+    empty = Tensor.empty((80, 44), dtype=dtypes.float16)
+    rand = Tensor.rand_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
+    empty = Tensor.empty((80, 44))
+    rand = Tensor.rand_like(empty, dtype=dtypes.float16)
+    assert rand.shape == empty.shape
+    assert rand.dtype == dtypes.float16
     assert rand.device == empty.device
 
   def test_randn(self):
