@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from tinygrad import Device
 from tinygrad.helpers import Context, getenv, to_function_name
-from tinygrad.ops import TrackedRewriteContext, UOp
+from tinygrad.ops import TrackedRewriteContext, UOp, UOps
 from tinygrad.engine.graph import uops_colors, word_wrap
 from tinygrad.engine.realize import get_runner
 from tinygrad.engine.schedule import full_ast_rewrite
@@ -36,7 +36,7 @@ class UOpRet:
       # sanity check
       assert new_sink is not uops[-1], f"rewritten sink wasn't rewritten! {i}\n{new_sink}\n{uops[-1]}"
       # update ret data
-      additions.append([id(x) for x in rewritten.sparents])
+      additions.append([id(x) for x in rewritten.sparents if x.op is not UOps.CONST])
       diffs.append((str(pattern), pattern.location, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
       uops.append(new_sink)
       extra.append([str(new_sink)])
@@ -47,11 +47,14 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   for u in x.sparents:
+    if u.op is UOps.CONST and u is not x: continue
     label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
+    for idx,x in enumerate(u.src):
+      if x.op is UOps.CONST: label += f"\nCONST {idx} {x.arg:g}"
     if getenv("WITH_SHAPE"):
       with contextlib.suppress(Exception): # if the UOp is indexed already it's fine
         if u.st is not None: label += f"\n{u.st.shape}"
-    graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src], str(u.arg), uops_colors.get(u.op, "#ffffff"))
+    graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x.op is not UOps.CONST], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
 
 def replace_uop(base:UOp, replaces:Dict[bytes, UOp]) -> UOp:
