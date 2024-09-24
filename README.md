@@ -91,6 +91,8 @@ tinygrad already supports numerous accelerators, including:
 
 And it is easy to add more! Your accelerator of choice only needs to support a total of ~25 low level ops.
 
+To check default accelerator run: `python3 -c "from tinygrad import Device; print(Device.DEFAULT)"`
+
 ## Installation
 
 The current recommended way to install tinygrad is from source.

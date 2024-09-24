@@ -50,7 +50,8 @@ def fuzz_schedule(outs:List[LazyBuffer]):
     rawbufs: Dict[LazyBuffer, Buffer] = {}
     for lsi in ts:
       for out in lsi.outputs:
-        rawbufs[out] = Buffer(out.buffer.device, out.buffer.size, out.buffer.dtype)
+        base = rawbufs[lsi.inputs[0]].base if out.op is MetaOps.VIEW else None
+        rawbufs[out] = Buffer(out.buffer.device, out.buffer.size, out.buffer.dtype, base=base)
         if out.op is MetaOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
       for x in lsi.inputs:
         if x not in rawbufs:
@@ -58,8 +59,8 @@ def fuzz_schedule(outs:List[LazyBuffer]):
           if x in assign_targets and assign_targets[x] in rawbufs: rawbufs[x] = rawbufs[assign_targets[x]]
           elif x.device == "NPY": rawbufs[x] = x.buffer
           # copy the pre realized input
-          else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=prerealized[x])
-      si = ScheduleItem(lsi.ast, tuple(rawbufs[x] for x in lsi.outputs+lsi.inputs if x.size != 0))
+          else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=bytes(prerealized[x]))
+      si = ScheduleItem(lsi.ast, tuple(rawbufs[x] for x in lsi.bufs if x.size != 0))
       _exec_si(si, seed)
       for out in lsi.outputs:
         outbuf = np.frombuffer(rawbufs[out].as_buffer(), _to_np_dtype(out.dtype))

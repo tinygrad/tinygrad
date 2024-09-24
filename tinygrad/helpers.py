@@ -110,7 +110,7 @@ GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPAT
 MULTIOUTPUT, PROFILE, PROFILEPATH = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
 USE_TC, TC_OPT, AMX, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0), ContextVar("TRANSCENDENTAL", 1)
 FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
-SPLIT_REDUCEOP, AST_REWRITE = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("AST_REWRITE", 1)
+SPLIT_REDUCEOP, AST_REWRITE, NO_MEMORY_PLANNER = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("AST_REWRITE", 1), ContextVar("NO_MEMORY_PLANNER", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -121,6 +121,8 @@ class Metadata:
   def __repr__(self): return str(self) + (f" - {self.caller}" if self.caller else "")
   def __str__(self): return self.name + (" bw" if self.backward else "")
 _METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
+
+_CURRENT_KERNEL: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_CURRENT_KERNEL", default=None)
 
 # **************** global state Counters ****************
 
@@ -262,12 +264,23 @@ def diskcache(func):
 
 # *** http support ***
 
+def _ensure_downloads_dir() -> pathlib.Path:
+  # if we are on a tinybox, use the raid array
+  if pathlib.Path("/etc/tinybox-release").is_file():
+    # try creating dir with sudo
+    if not (downloads_dir := pathlib.Path("/raid/downloads")).exists():
+      subprocess.run(["sudo", "mkdir", "-p", downloads_dir], check=True)
+      subprocess.run(["sudo", "chown", "tiny:root", downloads_dir], check=True)
+      subprocess.run(["sudo", "chmod", "775", downloads_dir], check=True)
+    return downloads_dir
+  return pathlib.Path(_cache_dir) / "tinygrad" / "downloads"
+
 def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional[str]=None, gunzip:bool=False,
           allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
   else:
-    fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (subdir or "") / \
+    fp = _ensure_downloads_dir() / (subdir or "") / \
       ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + (".gunzip" if gunzip else ""))
   if not fp.is_file() or not allow_caching:
     with urllib.request.urlopen(url, timeout=10) as r:

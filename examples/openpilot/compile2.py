@@ -186,7 +186,7 @@ if __name__ == "__main__":
         "arg_size": [8]*len(ei.bufs),
       })
 
-  if (allowed_gated_read_image:=getenv("ALLOWED_GATED_READ_IMAGE", 0)):
+  if (allowed_gated_read_image:=getenv("ALLOWED_GATED_READ_IMAGE", -1)) != -1:
     assert gated_read_image_count <= allowed_gated_read_image, \
       f"too many gated read_image! {gated_read_image_count=}, {allowed_gated_read_image=}"
 

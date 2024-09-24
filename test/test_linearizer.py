@@ -271,7 +271,7 @@ class TestLinearizer(unittest.TestCase):
     ]])
 
     # make sure that going over the smem limit does raise an error
-    with self.assertRaises(RuntimeError):
+    with self.assertRaises(KernelOptError):
       helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=[[
           Opt(OptOps.UPCAST, 0, 6),
           Opt(OptOps.GROUPTOP, 0, grouping), Opt(OptOps.GROUPTOP, 1, grouping), 
@@ -989,7 +989,7 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
     # LOAD -> RANGE -> LOAD -> ASSIGN
-    assert lin.uops[ranges[0]-2].op is UOps.LOAD
+    assert len([x for x in lin.uops[:ranges[0]] if x.op is UOps.LOAD]) == 1
 
   def test_range_outer_op_before_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -1828,7 +1828,7 @@ class TestHandCodedOpts(unittest.TestCase):
         k = Kernel(si.ast)
         k.hand_coded_optimizations()
         if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel)
-        if len(k.bufs) < 36: continue  # not a tile transform kernel (there's a permute kernel at the end)
+        if len(k.bufs) < 22: continue  # not a tile transform kernel (there's a permute kernel at the end)
         upcasts.append(tuple(k.full_shape[k.shape_len - k.upcasted:k.shape_len]))
       assert len(upcasts) == 3  # 3 transformation matrices
       assert len(wino_schedule) <= 4  # 4 kernels
