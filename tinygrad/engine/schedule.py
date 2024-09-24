@@ -36,10 +36,7 @@ class ScheduleItem:
 class LBScheduleItem:
   ast: UOp
   bufs: Tuple[LazyBuffer, ...]
-  metadata: List[Metadata] = field(default_factory=list)
-  def __hash__(self):
-    """The unique identifier of a schedule item in the toposort."""
-    return hash(self.outputs[0])
+  metadata: Optional[Tuple[Metadata, ...]] = None
   @property
   def outputs(self) -> Tuple[LazyBuffer, ...]: return self.bufs[:len(self.ast.src)] if self.ast.op is UOps.SINK else self.bufs[0:1]
   @property
@@ -188,7 +185,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
     ubuf = UOp(UOps.DEFINE_GLOBAL, out.dtype if isinstance(out.dtype, ImageDType) else PtrDType(out.dtype), (), i)
     ast.append(UOp(UOps.STORE, dtypes.void, (ubuf, output_st.to_uop(), src)))
   sink = full_ast_rewrite(ast[0].sink(*ast[1:]))
-  return LBScheduleItem(sink, tuple(outs+inputs), dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])), var_vals
+  return LBScheduleItem(sink, tuple(outs+inputs), tuple(dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))), var_vals
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
@@ -415,7 +412,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       kernel_number += 1
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     for out in lsi.outputs: del out.srcs  # can only schedule once
-    schedule.append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), tuple(lsi.metadata)))
+    schedule.append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.bufs if x.size != 0), lsi.metadata))
     for x in graph[lsi]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
