@@ -45,7 +45,7 @@ def kstest(l1, l2):
   prob = ksprob((nesq + 0.12 + 0.11 / nesq) * d)
   return prob
 
-def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(20, 23), alpha=0.04):
+def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(40, 43), alpha=0.04):
   Tensor.manual_seed(1337)
   torch.manual_seed(1337)
   np.random.seed(1337)
@@ -78,12 +78,63 @@ class TestRandomness(unittest.TestCase):
   @unittest.skipIf(not THREEFRY.value, "not using threefry")
   def test_threefly_against_reference(self):
     Tensor.manual_seed(1337)
-    # generated using
-    # (jax.extend.random.threefry_2x32((np.uint32(1337), np.uint32(0x0)), np.arange(20, dtype=np.uint32)) >> 8).astype(float) / np.float32(2**24)
-    jr = np.array([0.30984968, 0.42723763, 0.92448753, 0.27268296, 0.48820806, 0.29587173, 0.3213513, 0.05805135, 0.4954177, 0.23303074,
-                   0.62478125, 0.51861334, 0.24712527, 0.12718695, 0.5236074, 0.50704265, 0.9166272, 0.6918763, 0.6530086, 0.34640658])
+
+    # reference generated using
+    """
+    key0 = 1337
+    key1 = 0
+    values = jax.extend.random.threefry_2x32((np.uint32(key1), np.uint32(key0)), np.arange(20, dtype=np.uint32))
+    print(f"[{', '.join(f'{v}' for v in values)}]")
+    """
+    jr = np.array([2221762175, 1752107825, 653745012, 1967534793, 1395205442, 3840423848, 2159346757,
+                   603508235, 3319473678, 3363866483, 3544324138, 1436466838, 2169858556, 2570072943,
+                   2387150698, 3678370550, 2911697663, 403244401, 2560861638, 1692360114])
+
+    counts = Tensor.arange(20, dtype=dtypes.uint32)
+    counts0, counts1 = counts.chunk(2)
+    r = Tensor._threefry_random_bits(1337, 0, counts0, counts1).numpy()
+
+    np.testing.assert_allclose(jr, r)
+
+  @unittest.skipUnless(Device.DEFAULT == "GPU", "reference is on GPU")
+  @unittest.skipIf(not THREEFRY.value, "not using threefry")
+  def test_threefly_against_reference_full(self):
+    Tensor.manual_seed(1337)
+
+    # reference generated using
+    """
+    key0 = 1337
+    key1 = 0
+    values = jax.extend.random.threefry_2x32((np.uint32(key1), np.uint32(key0)), np.arange(20, dtype=np.uint32))
+    print(f"[{', '.join(f'{v}' for v in values)}]")
+    """
+    jr = np.array([0.7882130146026611, 0.0680311918258667, 0.6758031845092773, 0.2525523900985718, 0.5712389945983887,
+                   0.8758237361907959, 0.13559412956237793, 0.9069793224334717, 0.8781528472900391, 0.7737162113189697,
+                   0.050452232360839844, 0.1645597219467163, 0.06776463985443115, 0.09560704231262207, 0.2754603624343872,
+                   0.10108339786529541, 0.3488548994064331, 0.7904064655303955, 0.2519160509109497, 0.7925788164138794], dtype=np.float32)
+
     r = Tensor.rand(20).numpy()
+
     np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
+
+  @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
+  def test_threefly_tensors_cnt(self):
+    Tensor.manual_seed(1337)
+
+    Tensor.rand(20).realize()
+
+    assert len(Tensor._device_rng_counters) == 1
+    assert len(Tensor._device_seeds) == 1
+
+    Tensor.rand(20, device=f"{Device.DEFAULT}:1").realize()
+
+    assert len(Tensor._device_rng_counters) == 2
+    assert len(Tensor._device_seeds) == 2
+
+    Tensor.manual_seed(2)
+
+    assert len(Tensor._device_rng_counters) == 0
+    assert len(Tensor._device_seeds) == 0
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "need bfloat16 support")
   def test_rand_bfloat16(self):
@@ -95,6 +146,41 @@ class TestRandomness(unittest.TestCase):
       assert nx[nx == 1].size == 0
       assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.bfloat16).float(), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
+
+  def test_rand_like(self):
+    empty = Tensor.empty((80, 44))
+    rand = Tensor.rand_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
+  def test_rand_like_zero_shape(self):
+    empty = Tensor.empty(0, 20)
+    rand = Tensor.rand_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
+  def test_rand_like_more_dims(self):
+    empty = Tensor.empty((1, 2, 3, 4, 5, 6))
+    rand = Tensor.rand_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
+  def test_rand_like_dtype(self):
+    empty = Tensor.empty((80, 44), dtype=dtypes.float16)
+    rand = Tensor.rand_like(empty)
+    assert rand.shape == empty.shape
+    assert rand.dtype == empty.dtype
+    assert rand.device == empty.device
+
+    empty = Tensor.empty((80, 44))
+    rand = Tensor.rand_like(empty, dtype=dtypes.float16)
+    assert rand.shape == empty.shape
+    assert rand.dtype == dtypes.float16
+    assert rand.device == empty.device
 
   def test_randn(self):
     self.assertTrue(normal_test(Tensor.randn))
@@ -146,11 +232,11 @@ class TestRandomness(unittest.TestCase):
                                                               lambda x: np.random.uniform(-1, 1, size=x) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
   def test_kaiming_uniform(self):
-    for shape in [(128, 64, 3, 3), (20, 24), (3, 55, 5)]:
+    for shape in [(256, 128, 3, 3), (80, 44), (3, 55, 35)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), shape=shape))
 
   def test_kaiming_normal(self):
-    for shape in [(128, 64, 3, 3), (20, 24), (3, 55, 5)]:
+    for shape in [(256, 128, 3, 3), (80, 44), (3, 55, 35)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_normal, lambda x: torch.nn.init.kaiming_normal_(torch.empty(x)), shape=shape))
 
   def test_multinomial(self):
@@ -194,7 +280,7 @@ class TestRandomness(unittest.TestCase):
     assert equal_distribution(lambda *_: nn.Conv2d(*params).bias, lambda _: torch.nn.Conv2d(*params).bias.detach())
 
   def test_linear_init(self):
-    params = (64, 64)
+    params = (64, 256)
     assert equal_distribution(lambda *_: nn.Linear(*params).weight, lambda _: torch.nn.Linear(*params).weight.detach())
     assert equal_distribution(lambda *_: nn.Linear(*params).bias, lambda _: torch.nn.Linear(*params).bias.detach())
 
