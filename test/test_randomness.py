@@ -4,7 +4,7 @@ from functools import partial
 import numpy as np
 import torch
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit
-from tinygrad.helpers import getenv, CI, THREEFRY
+from tinygrad.helpers import THREEFRY, getenv, CI
 from test.helpers import is_dtype_supported
 from hypothesis import given, settings, strategies as strat
 
