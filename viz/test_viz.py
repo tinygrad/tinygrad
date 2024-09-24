@@ -23,8 +23,7 @@ class TestViz(unittest.TestCase):
       except Exception as e:
         print(colored(f"failed to create graph for ctx {i}", "red"))
         raise e
-      rewrites = [x[0] for x in ret.graphs]
-      for j,(x,y) in enumerate(zip(rewrites, rewrites[1:])):
+      for j,(x,y) in enumerate(zip(ret.graphs, ret.graphs[1:])):
         if x.key == y.key:
           raise AssertionError(f"failed to generate the correct diff at rewrite {j} ctx {i}")
 
@@ -68,7 +67,7 @@ class TestViz(unittest.TestCase):
     ret = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, ret)
     g = UOpRet.from_ctx(contexts[0])
-    assert g.graphs[-1][0].key == ret.key
+    assert g.graphs[-1].key == ret.key
     self.assert_valid_ctx(contexts)
 
   def test_devectorize_viz(self):
