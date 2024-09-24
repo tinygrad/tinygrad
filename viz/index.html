@@ -361,7 +361,7 @@
         });
       })
     } else {
-      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: "No rewrites" }));
+      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${ret[0].loc}.` }));
     }
   }
   document.addEventListener("keydown", async function(event) {
