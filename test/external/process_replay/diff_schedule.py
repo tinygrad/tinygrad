@@ -26,7 +26,7 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
   for _,in_degree in s:
     for lsi in in_degree:
       for buf in lsi.outputs:
-        si_for_buf[buf].append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), tuple(lsi.metadata)))
+        si_for_buf[buf].append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
   changed = 0
   seen_diffs: Set[bytes] = set()
   for buf,si in si_for_buf.items():
