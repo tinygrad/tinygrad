@@ -5,7 +5,7 @@ from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
 from tinygrad.ops import UPat, PatternMatcher, graph_rewrite
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition, all_same
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, AMX, prod, CI, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -212,26 +212,26 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
 
   # simplify idx given that valid is True
   for uop,v in bounds.items():
-    # some expr has lower bound > upper bound -> valid is an empty set and we return early
+    # some expr has lower bound > upper bound -> valid is an empty set
     if v[0] is not None and v[1] is not None and v[0] > v[1]:
       return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, valid.const_like(False)))
 
     if uop.op is UOps.ALU and uop.arg is BinaryOps.ADD and all(is_irreducible(u) and u.vmin == 0 for u in _get_chain(uop, BinaryOps.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      to_check = [(Xi, UOp(UOps.DEFINE_VAR, Xi.dtype, (), ("fake", 1, Xi.vmax))) for Xi in _get_chain(uop, BinaryOps.ADD)]
+      newidxs: List[List[UOp]] = [[], []]
+      for variable in _get_chain(uop, BinaryOps.ADD):
+        new = UOp(UOps.DEFINE_VAR, variable.dtype, (), ("fake", 1, variable.vmax))
+        newidx = replace_uop(graph_rewrite(replace_uop(idx, variable, new), constant_folder), new, variable)
+        newidxs[0].append(newidx.src[0])
+        newidxs[1].append(newidx.src[1])
+
+      if len(newidxs[0])==1 or (len(newidxs[0]) > 1 and all_same([i.key for i in newidxs[0]])): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
+      if len(newidxs[1])==1 or (len(newidxs[1]) > 1 and all_same([i.key for i in newidxs[1]])): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
+
     else:
-      # try checking the whole clause
-      to_check = [(uop, UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1]))]
-
-    newidxs:List[List[UOp]] = [[], []]
-    for X,newX in to_check:
-      newidx = replace_uop(graph_rewrite(replace_uop(idx, X, newX), constant_folder), newX, X)
-      newidxs[0].append(newidx.src[0])
-      newidxs[1].append(newidx.src[1])
-
-    # if every branch in to_check gives the same simplified output, we can rewrite the idx
-    if len(newidxs[0])==1 or (len(newidxs[0]) > 1 and all_same([i.key for i in newidxs[0]])): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
-    if len(newidxs[1])==1 or (len(newidxs[1]) > 1 and all_same([i.key for i in newidxs[1]])): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
+      new = UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1])
+      newidx = replace_uop(graph_rewrite(replace_uop(idx, uop, new), constant_folder), new, uop)
+      if newidx.key != idx.key: idx = newidx
 
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
@@ -253,9 +253,7 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
     for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
       if is_increasing(i):
         rw = graph_rewrite(replace_uop(i, X, X.const_like(test_value)), constant_folder)
-        if rw.vmin >= b or rw.vmax < 0:
-          drop_stmt.append(stmt)
-          break
+        if rw.vmin >= b or rw.vmax < 0: drop_stmt.append(stmt)
 
   if drop_stmt or idx.key != start_idx.key:
     new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
@@ -710,7 +708,7 @@ linearize_cnt = 0
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   global linearize_cnt, acc_number
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
-  folder = constant_folder + transcendental_folding(tuple() if TRANSCENDENTAL >= 2 or opts is None else tuple(opts.code_for_op.keys()))
+  folder = constant_folder  #+ transcendental_folding(tuple() if TRANSCENDENTAL >= 2 or opts is None else tuple(opts.code_for_op.keys()))
 
   # do graph rewrite
   acc_number = 0
@@ -767,7 +765,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   # prevent priority inversion
   @functools.lru_cache(None)
   def fix_priority(u:UOp, lowest_priority):
-    if u.op in {UOps.CAST, UOps.BITCAST, UOps.ALU, UOps.VECTORIZE, UOps.GEP, UOps.SPECIAL, UOps.DEFINE_LOCAL, UOps.LOAD}:
+    if u.op in {UOps.CAST, UOps.BITCAST, UOps.ALU, UOps.VECTORIZE, UOps.GEP, UOps.SPECIAL, UOps.DEFINE_LOCAL, UOps.LOAD, UOps.INDEX}:
       priorities[u] = min(priorities[u], lowest_priority)
       if u.op is UOps.LOAD: priorities[u] += 100 # load penalty (here)
     for x in u.src: fix_priority(x, priorities[u])

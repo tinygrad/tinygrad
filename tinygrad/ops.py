@@ -131,6 +131,7 @@ class UOps(FastEnum):
   # ops that are not graph nodes
   ENDRANGE = auto()
   ENDIF = auto()
+  INDEX = auto()
 
 BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.VALID}
 COMMUTATIVE = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR}
@@ -164,7 +165,7 @@ class UOp(MathTrait):
     if self.op is UOps.DEFINE_VAR: arg = self.arg[0]
     elif self.op is UOps.ALU: arg = self.arg.value
     else: arg = self.arg
-    return (self.op.value, arg, self.dtype, self.src)
+    return (self.op.value, arg, self.dtype.base if isinstance(self.dtype, PtrDType) else self.dtype, self.src)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   @functools.cached_property
   def key(self) -> bytes:
@@ -202,6 +203,7 @@ class UOp(MathTrait):
   def load(*src:UOp, dtype:DType): return UOp(UOps.LOAD, dtype, src)
   @staticmethod
   def store(*src:UOp): return UOp(UOps.STORE, dtypes.void, src)
+  def index(self, idx:UOp): return UOp(UOps.INDEX, self.dtype, (self, idx))
   def alu(self, arg, *src:UOp):
     out_dtype = (self, *src)[-1].dtype
     if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} and out_dtype is not None:
@@ -349,11 +351,19 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   if ignore_indexing:
     for u in uops:
       if u.op is UOps.LOAD:
-        dont_count = dont_count.union(u.src[1].sparents)
-        if len(u.src) > 3: dont_count = dont_count.union(u.src[2].sparents)
+        if u.src[0].op in {UOps.INDEX, UOps.CAST}:
+          dont_count = dont_count.union(u.src[0].sparents)
+          if len(u.src) > 2: dont_count = dont_count.union(u.src[2].sparents)
+        else:
+          dont_count = dont_count.union(u.src[1].sparents)
+          if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
       elif u.op is UOps.STORE:
-        dont_count = dont_count.union(u.src[1].sparents)
-        if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
+        if u.src[0].op in {UOps.INDEX, UOps.CAST}:
+          dont_count = dont_count.union(u.src[0].sparents)
+          if len(u.src) > 2: dont_count = dont_count.union(u.src[2].sparents)
+        else:
+          dont_count = dont_count.union(u.src[1].sparents)
+          if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
       elif u.op is UOps.IF:
         dont_count = dont_count.union(u.src[0].sparents)
   for u in uops:
@@ -367,7 +377,10 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
     elif u.op is UOps.LOAD:
       mem += u.dtype.itemsize * mults
     elif u.op is UOps.STORE:
-      mem += u.src[2].dtype.itemsize * mults
+      if u.src[0].op in {UOps.INDEX, UOps.CAST}:
+        mem += u.src[1].dtype.itemsize * mults
+      else:
+        mem += u.src[2].dtype.itemsize * mults
     elif u.op is UOps.ALU and u not in dont_count:
       flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
     elif u.op is UOps.WMMA and u not in dont_count:
@@ -580,6 +593,16 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
    lambda x,c: all(y.op is UOps.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
   (UPat(UOps.DEFINE_VAR, src=(), name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
+  # *** new cstyle LOAD/STORE ***
+  (UPat(UOps.INDEX, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(dtype=(dtypes.int32,dtypes.int64)))), lambda: True),
+  (UPat(UOps.LOAD, src=(UPat((UOps.CAST, UOps.INDEX)),)), lambda: True),
+  (UPat(UOps.LOAD, src=(UPat((UOps.CAST, UOps.INDEX)), UPat((UOps.STORE, UOps.IF, UOps.BARRIER)))), lambda: True),
+  (UPat(UOps.LOAD, src=(UPat((UOps.CAST, UOps.INDEX)), UPat(name="alt"), UPat(dtype=dtypes.bool)), name="ld"),
+    lambda ld,alt: ld.dtype == alt.dtype),
+  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat((UOps.CAST, UOps.INDEX)), UPat())), lambda: True),
+  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat((UOps.CAST, UOps.INDEX)), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
+  # *** end new cstyle LOAD/STORE ***
+
   (UPat(UOps.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
   (UPat(UOps.SPECIAL, src=()), lambda: True),
 
@@ -633,8 +656,8 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
   (UPat(UOps.REDUCE_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in BinaryOps),
   (UPat(UOps.GEP, src=(UPat(name="src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
   (UPat(UOps.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.count and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
-  (UPat((UOps.BITCAST, UOps.CAST), src=(UPat(),), name="x"), lambda x: x.arg is None and x.dtype.count == 1),
-  (UPat(UOps.BARRIER, dtypes.void, src=UPat(UOps.STORE, src=(UPat(UOps.DEFINE_LOCAL),), allow_any_len=True)), lambda: True),
+  (UPat((UOps.BITCAST, UOps.CAST), src=(UPat(),), name="x"), lambda x: x.arg is None),
+  (UPat(UOps.BARRIER, dtypes.void, src=UPat(UOps.STORE, src=(UPat.var(name="buf"),), allow_any_len=True)), lambda buf: buf.dtype.local),
 
   # NOTE: for testing, we let sinks be anything
   #(UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
