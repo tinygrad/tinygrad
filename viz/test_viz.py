@@ -116,11 +116,11 @@ class TestViz(unittest.TestCase):
 
   def test_dedup_ast(self):
     contexts.clear()
-    a = Tensor.ones(4, 4).contiguous()+2
-    b = Tensor.ones(4, 4).contiguous()+2
+    a = Tensor.randn(4, 4)+2
+    b = Tensor.randn(4, 4)+2
     Tensor.schedule(a, b)
     kernels = load_kernels(contexts)
-    self.assertEqual(len(kernels), 2)
+    self.assertEqual(len(kernels), 7)
     schedule_ctxs = [x for x in kernels[0].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
     self.assertEqual(len(schedule_ctxs), 1)
 
