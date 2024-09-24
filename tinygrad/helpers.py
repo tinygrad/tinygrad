@@ -268,9 +268,10 @@ def _ensure_downloads_dir() -> pathlib.Path:
   # if we are on a tinybox, use the raid array
   if pathlib.Path("/etc/tinybox-release").is_file():
     # try creating dir with sudo
-    subprocess.run(["sudo", "mkdir", "-p", downloads_dir := pathlib.Path("/raid/downloads")], check=True)
-    subprocess.run(["sudo", "chown", "tiny:root", downloads_dir], check=True)
-    subprocess.run(["sudo", "chmod", "775", downloads_dir], check=True)
+    if not (downloads_dir := pathlib.Path("/raid/downloads")).exists():
+      subprocess.run(["sudo", "mkdir", "-p", downloads_dir], check=True)
+      subprocess.run(["sudo", "chown", "tiny:root", downloads_dir], check=True)
+      subprocess.run(["sudo", "chmod", "775", downloads_dir], check=True)
     return downloads_dir
   return pathlib.Path(_cache_dir) / "tinygrad" / "downloads"
 
