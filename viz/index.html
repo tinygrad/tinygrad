@@ -12,7 +12,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/default.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/c.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cpp.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/1.0.3/purify.min.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
   <style>
   * {
@@ -67,11 +68,6 @@
     fill: #4a4b57;
     stroke-width: 1.4px;
   }
-  #arrowhead {
-   stroke: blue;
-   fill: blue;
-   stroke-width: 1.5px;
-  }
   .graph {
     width: 70%;
     position: relative;
@@ -120,7 +116,8 @@
     top: 0;
     bottom: 0;
     width: 20px;
-    cursor: w-resize;
+    height: 100%;
+    cursor: col-resize;
     background-color: transparent;
   }
   .rewrite-list {
@@ -178,6 +175,23 @@
     <div class="container metadata"></div>
   </div>
   <script>
+  // extra definitions for UOps
+  hljs.registerLanguage("python", (hljs) => ({
+    ...hljs.getLanguage("python"),
+    case_insensitive: false,
+    contains: [
+      { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-]*(\\.[a-zA-Z_][a-zA-Z0-9_-]*)*' + '(?=[.\\s\\n[:,(])', className: "type" },
+      { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-].vec*' + '(?=[.\\s\\n[:,(])', className: "type" },
+      { begin: '[a-zA-Z_][a-zA-Z0-9_-]*\\.[a-zA-Z_][a-zA-Z0-9_-]*' + '(?=[.\\s\\n[:,()])',  className: "operator" },
+      { begin: '[A-Z][a-zA-Z0-9_]*(?=\\()', className: "section", ignoreEnd: true },
+      ...hljs.getLanguage("python").contains,
+    ]
+  }));
+  // extra definitions for float4
+  hljs.registerLanguage("cpp", (hljs) => ({
+    ...hljs.getLanguage('cpp'),
+    contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
+  }));
   function renderGraph(graph, additions) {
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
     g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5); rx: 8; ry: 8;" : "display: none;"});
@@ -220,7 +234,7 @@
   var expandKernel = false;
   async function main() {
     checkStatus();
-    // ** kernel list
+    // ***** LHS kernels list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
       currentKernel = 0;
@@ -257,7 +271,7 @@
       }
       kernelList.appendChild(kernelUl);
     });
-    // ** uop graph
+    // ***** UOp graph
     cacheKey = `${currentKernel}-${currentUOp}`;
     if (cacheKey in cache) {
       ret = cache[cacheKey];
@@ -267,18 +281,20 @@
       cache[cacheKey] = ret;
     }
     renderGraph(ret[0].graphs[currentRewrite], ret[0].additions[currentRewrite]);
+    // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
-    metadata.appendChild(Object.assign(document.createElement("div"), { id: "resize-handle" }));
     metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc }));
+    // ** resizer
+    metadata.appendChild(Object.assign(document.createElement("div"), { id: "resize-handle" }));
     const resizeHandle = document.getElementById("resize-handle");
-
     let startX;
     let containerWidth;
     let metadataWidth;
     resizeHandle.addEventListener("mousedown", (e) => {
       e.preventDefault();
       metadata.style.userSelect = "none";
+      document.documentElement.style.cursor = "col-resize";
       startX = e.clientX;
       containerWidth = document.querySelector(".main-container").getBoundingClientRect().width;
       metadataWidth = metadata.getBoundingClientRect().width;
@@ -296,17 +312,19 @@
     function stopResize(e) {
       document.documentElement.removeEventListener("mousemove", resize, false);
       document.documentElement.removeEventListener("mouseup", stopResize, false);
+      document.documentElement.style.cursor = "initial";
       metadata.style.userSelect = "initial";
     }
-
+    // ** code blocks
     ret[0].extra[currentRewrite].forEach((e, i) => {
       if (e.length == 0) return;
-      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${e}</code>`, className: "code-block language-python" });
+      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(e)}</code>`, className: "code-block language-python" });
       hljs.highlightElement(pre);
       metadata.appendChild(pre);
     })
     if (kernels[currentKernel].code !== "") {
-      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${kernels[currentKernel].code}</code>`, className: "code-block" });
+      const code = kernels[currentKernel].code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(code)}</code>`, className: "code-block language-cpp" });
       hljs.highlightElement(pre);
       metadata.appendChild(pre);
     }
@@ -326,7 +344,7 @@
             link = Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n", href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" })
             div.appendChild(link);
             const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
-            pre.appendChild(Object.assign(document.createElement("code"), { textContent: pattern, className: "language-python" }));
+            pre.appendChild(Object.assign(document.createElement("code"), { textContent: DOMPurify.sanitize(pattern), className: "language-python" }));
             div.appendChild(pre);
             hljs.highlightElement(pre);
             metadata.appendChild(div);
@@ -343,7 +361,7 @@
         });
       })
     } else {
-      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: "No rewrites" }));
+      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${ret[0].loc}.` }));
     }
   }
   document.addEventListener("keydown", async function(event) {

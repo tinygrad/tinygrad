@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Literal
 from collections import defaultdict
@@ -393,7 +393,8 @@ class Tensor:
     return Tensor._metaop(MetaOps.EMPTY, argfix(*shape), **kwargs)
 
   _seed: int = int(time.time())
-  _rng_counter: Optional[Tensor] = None
+  _device_seeds: Dict[str, int] = {}
+  _device_rng_counters: Dict[str, Tensor] = {}
   @staticmethod
   def manual_seed(seed=0):
     """
@@ -410,10 +411,18 @@ class Tensor:
     print(Tensor.rand(5).numpy())
     ```
     """
-    Tensor._seed, Tensor._rng_counter = seed, None
+    Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
 
   @staticmethod
-  def rand(*shape, device:Optional[Union[Tuple[str, ...], str]]=None, dtype:Optional[DTypeLike]=None, **kwargs) -> Tensor:
+  def _threefry_random_bits(key0, key1, counts0, counts1):
+    x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
+    key = (Tensor(key0, device=x.device, dtype=dtypes.uint64, requires_grad=False) << 32) | key1
+    x = F.Threefry.apply(*x._broadcasted(key))
+    counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
+    return counts0.cat(counts1)
+
+  @staticmethod
+  def rand(*shape, device:Optional[str]=None, dtype:Optional[DTypeLike]=None, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
 
@@ -428,7 +437,18 @@ class Tensor:
     """
     if not dtypes.is_float(dtype := to_dtype(dtype or dtypes.default_float)): raise ValueError(f"rand only supports float dtypes, got {dtype}")
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
-    if (had_counter := Tensor._rng_counter is None): Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
+    if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
+    device, had_counter = Device.canonicalize(device), False
+
+    # when using MOCKGPU and NV generate rand on CLANG
+    if THREEFRY and getenv("MOCKGPU") and device.startswith("NV"): _device, device = device, "CLANG"
+    else: _device = None
+
+    # generate per device seeds and rng counter if we haven't seen this device yet
+    if device not in Tensor._device_seeds:
+      Tensor._device_seeds[device] = int.from_bytes(hashlib.sha256(device.encode()).digest(), "big") & 0xffffffff
+      Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint32, requires_grad=False)
+    else: had_counter = True
 
     if not THREEFRY:
       # for bfloat16, numpy rand passes buffer in float
@@ -436,17 +456,16 @@ class Tensor:
         return Tensor.rand(*shape, **kwargs, device=device, dtype=dtypes.float).cast(dtypes.bfloat16)
       return Tensor._metaop(MetaOps.CUSTOM, shape, arg=custom_random, device=device, dtype=dtype, **kwargs)
 
-    # threefry
+    # if shape has 0, return zero tensor
     if (num := math.ceil(((num_ := prod(shape)) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
-    if not had_counter: Tensor._rng_counter.assign(Tensor._rng_counter + num)
-    counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device))
-    counts2 = counts1 + math.ceil(num / 2)
+
+    # increment rng counter for devices
+    if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
 
     # threefry random bits
-    x = counts2.cast(dtypes.uint64) << 32 | counts1.cast(dtypes.uint64)
-    x = F.Threefry.apply(*x._broadcasted(Tensor._seed))
-    counts1, counts2 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
-    bits = counts1.cat(counts2)[:num]
+    counts0 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
+    counts1 = counts0 + math.ceil(num / 2)
+    bits = Tensor._threefry_random_bits(Tensor._seed, Tensor._device_seeds[device], counts0, counts1)[:num]
 
     # bitcast to uint with same number of bits
     _, nmant = dtypes.finfo(dtype)
@@ -455,9 +474,12 @@ class Tensor:
     # only randomize the mantissa bits and set the exponent to 1
     one = Tensor.ones_like(bits, device=bits.device, dtype=dtype).bitcast(uint_dtype)
     bits = bits.rshift((dtype.itemsize * 8) - nmant).bitwise_or(one)
-
-    # bitcast back to the original dtype
+    # bitcast back to the original dtype and reshape
     out = bits.bitcast(dtype)[:num_].sub(1).reshape(shape)
+
+    # move back to the original device if we were using MOCKGPU
+    if getenv("MOCKGPU") and _device: out = out.to(_device)
+
     out.requires_grad = kwargs.get("requires_grad")
     return out.contiguous()
 
@@ -609,6 +631,29 @@ class Tensor:
     """
     return self.full_like(1, **kwargs)
 
+  def rand_like(self, **kwargs) -> Tensor:
+    """
+    Creates a tensor with the same shape and sharding as `self`, filled with random values from a uniform distribution over the interval `[0, 1)`.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.ones(2, 3)
+    print(Tensor.rand_like(t).numpy())
+    ```
+    """
+    dtype = kwargs.pop("dtype", self.dtype)
+    device = kwargs.pop("device", self.device)
+    if isinstance(self.device, tuple):
+      assert isinstance(self.lazydata, MultiLazyBuffer)
+      if self.lazydata.axis is not None:
+        rands = [Tensor.rand(*lb.shape, device=lb.device, dtype=dtype) for lb in self.lazydata.lbs]
+        return Tensor(MultiLazyBuffer([cast(LazyBuffer, r.lazydata) for r in rands], self.lazydata.axis, None),
+                      device=self.device, dtype=dtype, **kwargs)
+      return Tensor.rand(*self.shape, dtype=dtype, **kwargs).shard(self.device)
+    return Tensor.rand(*self.shape, device=device, dtype=dtype, **kwargs)
+
   # ***** rng hlops *****
 
   @staticmethod
@@ -750,7 +795,7 @@ class Tensor:
     assert replacement or num_samples == 1, "no replacement only supports num_samples = 1"
     weight = self.unsqueeze(0) if self.ndim == 1 else self
     cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
-    unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1, device=self.device)
+    unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1).to(self.device)
     indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
@@ -3013,7 +3058,7 @@ class Tensor:
     ```
     """
     if not Tensor.training or p == 0: return self
-    return self * (Tensor.rand(*self.shape, requires_grad=False, dtype=dtypes.default_float, device=self.device) >= p) * (1/(1.0 - p))
+    return self * (Tensor.rand_like(self, requires_grad=False, dtype=dtypes.default_float) >= p) * (1/(1.0 - p))
 
   def one_hot(self, num_classes:int=-1) -> Tensor:
     """
