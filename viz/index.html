@@ -9,6 +9,11 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+HK:wght@100..900&display=swap" rel="stylesheet">
   <script src="https://d3js.org/d3.v5.min.js" charset="utf-8"></script>
   <script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/default.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/c.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
   <style>
   * {
     box-sizing: border-box;
@@ -16,8 +21,8 @@
     margin-block-end: initial;
   }
   html, body {
-    background-color: #191919;
-    color: #EEEEEE;
+    background-color: #08090e;
+    color: #f0f0f5;
     margin: 0;
     padding: 0;
     width: 100%;
@@ -31,15 +36,15 @@
     overflow: hidden;
   }
   a {
-    color: #0090FF;
+    color: #4a90e2;
   }
   ul {
     padding: 0;
-    color: #7B7B7B;
+    color: #7c7d85;
     cursor: pointer;
   }
   ul.active {
-    color: #EEEEEE;
+    color: #f0f0f5;
   }
   svg {
     width: 100%;
@@ -50,16 +55,22 @@
     user-select: none;
   }
   .node rect {
-    stroke: #313131;
+    stroke: #4a4b57;
     stroke-width: 1.5px;
   }
   .label text {
-    color: black;
+    color: #08090e;
     font-weight: 350;
   }
   .edgePath path {
-    stroke: #606060;
-    stroke-width: 1.5px;
+    stroke: #4a4b57;
+    fill: #4a4b57;
+    stroke-width: 1.4px;
+  }
+  #arrowhead {
+   stroke: blue;
+   fill: blue;
+   stroke-width: 1.5px;
   }
   .graph {
     width: 70%;
@@ -70,16 +81,18 @@
     padding: 12px;
     width: 100%;
     height: 100%;
-    background-color: #191919;
   }
   .container {
+    background-color: #0f1018;
     height: 100%;
-    background-color: #111111;
     border-radius: 8px;
     padding: 8px;
     position: relative;
   }
   .container > * + * {
+    margin-top: 12px;
+  }
+  .rewrite-container > * + * {
     margin-top: 12px;
   }
   .main-container > * + * {
@@ -124,7 +137,6 @@
   .code-block {
     max-height: 30%;
     overflow-y: auto;
-    background-color: #191919;
     border-radius: 8px;
     padding: 8px;
   }
@@ -168,7 +180,7 @@
   <script>
   function renderGraph(graph, additions) {
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: #242424" : "display: none;"});
+    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5); rx: 8; ry: 8;" : "display: none;"});
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
@@ -289,11 +301,13 @@
 
     ret[0].extra[currentRewrite].forEach((e, i) => {
       if (e.length == 0) return;
-      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${e}</code>`, className: "code-block" });
+      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${e}</code>`, className: "code-block language-python" });
+      hljs.highlightElement(pre);
       metadata.appendChild(pre);
     })
     if (kernels[currentKernel].code !== "") {
       const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${kernels[currentKernel].code}</code>`, className: "code-block" });
+      hljs.highlightElement(pre);
       metadata.appendChild(pre);
     }
     // ** rewrite list
@@ -307,13 +321,17 @@
           gUl.classList.add("active");
           if (i !== 0) {
             const [pattern, loc, diff] = ret[0].diffs[i-1];
-            const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
             const parts = loc.join(":").split("/");
-            pre.appendChild(Object.assign(document.createElement("a"), { innerText: parts[parts.length-1]+"\n\n", href: "vscode://file"+parts.join("/") }));
-            pre.appendChild(Object.assign(document.createElement("code"), { innerText: pattern }));
-            metadata.appendChild(pre);
+            const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
+            link = Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n", href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" })
+            div.appendChild(link);
+            const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
+            pre.appendChild(Object.assign(document.createElement("code"), { textContent: pattern, className: "language-python" }));
+            div.appendChild(pre);
+            hljs.highlightElement(pre);
+            metadata.appendChild(div);
             const diffHtml = diff.map((line) => {
-              const color = line.startsWith("+") ? "#30A46C" : line.startsWith("-") ? "#E5484D" : "#EEEEEE";
+              const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
               return `<span style="color: ${color};">${line}</span>`;
             }).join("<br>");
             metadata.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${diffHtml}</code>`, className: "wrap" }));
