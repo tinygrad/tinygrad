@@ -12,17 +12,15 @@ class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response 
 class objc_instance(objc_id): # method with name "new", "alloc" should be freed after use
   def __del__(self): msg(self, "release")
 
-def load_library(path: str): return ctypes.CDLL(path)
-
 class MTLResourceOptions:
   MTLResourceCPUCacheModeDefaultCache = 0
   MTLResourceStorageModeShared = 0 << 4
 
-libobjc = load_library("/usr/lib/libobjc.dylib")
-libmetal = load_library("/Library/Frameworks/Metal.framework/Metal")
+libobjc = ctypes.CDLL("/usr/lib/libobjc.dylib")
+libmetal = ctypes.CDLL("/Library/Frameworks/Metal.framework/Metal")
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
-load_library("/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
-libdispatch = load_library("/usr/lib/libSystem.dylib") # libdispatch is part of libSystem on mac
+ctypes.CDLL("/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+libdispatch = ctypes.CDLL("/usr/lib/libSystem.dylib") # libdispatch is part of libSystem on mac
 libobjc.objc_getClass.restype = objc_id
 libobjc.sel_registerName.restype = objc_id
 libmetal.MTLCreateSystemDefaultDevice.restype = objc_instance
