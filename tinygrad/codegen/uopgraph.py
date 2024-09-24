@@ -662,6 +662,10 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   if len(root.src) == 3 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[3]: return None
   return UOp(UOps.STORE, root.dtype, root.src[:3], root.arg)
 
+def update_gates(root:UOp) -> Optional[UOp]:
+  if len(root.src) < 4 or root.src[3].op is UOps.IF: return None
+  return UOp(UOps.STORE, root.dtype, root.src[:3] + (UOp(UOps.IF, dtypes.void, (root.src[3], root.src[2])),), root.arg)
+
 just_reduce = PatternMatcher([
   # do reduce
   (UPat(UOps.REDUCE, name="root"), do_reduce),
@@ -686,6 +690,7 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
   # image load valid simplification
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), simplify_valid_image_load),
+  (UPat(UOps.STORE, name="root"), update_gates)
 ])
 
 no_pyint = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE), name="x"),

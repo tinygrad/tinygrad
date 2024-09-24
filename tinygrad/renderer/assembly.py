@@ -64,10 +64,6 @@ ptx_matcher = PatternMatcher([
     lambda root,z: UOp(root.op, root.dtype, root.src[:2] + (z.cast(dtypes.uint8),), root.arg)),
   (UPat(UOps.STORE, name="root", src=(UPat(),UPat(),UPat(),UPat.var("g", dtypes.int))),
     lambda root,g: UOp(root.op, root.dtype, root.src[:3] + (g.cast(dtypes.uint8),), root.arg)),
-  (UPat(UOps.STORE, name="root", src=(UPat(),UPat(),UPat(),UPat(UOps.IF, name="g"))),
-    lambda root,g: UOp(root.op, root.dtype, root.src[:3] + (UOp(g.op, g.dtype,
-      (UOp(UOps.ALU, dtypes.bool, (g.src[0], UOp.const(dtypes.bool, True)), BinaryOps.XOR),) + g.src[1:], g.arg),), root.arg)
-      if g.src[0].arg is not BinaryOps.XOR else None),
   # ptr_ar (load/store)
   (UPat((UOps.LOAD, UOps.STORE), name="root", allow_any_len=True, src=(UPat((UOps.DEFINE_LOCAL,UOps.DEFINE_GLOBAL)),
                                UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat.var("alu"), UPat.cvar("const")]))),
@@ -83,8 +79,8 @@ ptx_matcher = PatternMatcher([
     lambda root, alu: UOp(root.op, root.dtype,
       (alu.cast(dtypes.int64)*UOp.const(dtypes.int64, root.src[0].dtype.itemsize)+root.src[0].cast(dtypes.int64),
        UOp.const(dtypes.int64, 0))+root.src[2:])),
-  (UPat(UOps.IF, name="root", dtype=dtypes.void, src=(UPat(UOps.CAST, name="gate"),UPat())),
-    lambda root, gate: UOp(root.op, root.dtype, (UOp.eq(gate.src[0], UOp.const(dtypes.int, 0)),) + root.src[1:], root.arg)),
+  (UPat(UOps.IF, name="x", dtype=dtypes.void, src=(UPat(UOps.CAST), UPat())),
+    lambda x: UOp(x.op, x.dtype, (UOp(UOps.ALU, x.src[0].dtype, (x.src[0], UOp.const(dtypes.bool, True)), BinaryOps.XOR), x.src[1]))),
 ])
 
 class PTXRenderer(Renderer):
