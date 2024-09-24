@@ -320,7 +320,12 @@ class CUDARenderer(CStyleLanguage):
     st1_pattern=(((1,1),(1,0),(0,2),(0,3),(0,4)),((1,3),(1,5),(1,2),(0,0),(0,1),(1,4))),
     st2_pattern=(((1,1),(1,0),(1,4),(0,0),(0,1)),((0,4),(0,2),(1,5),(0,3),(1,3),(1,2))), reduce_axes=[(0,8),(1,2)],
     upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
-  def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
+  # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-1688
+  tensor_cores_75 = [TensorCore(dims=(8,16,8), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=dtypes.half, dtype_out=dtypes.float,
+    st1_pattern=(((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,4), (1,2), (0,0), (0,1), (1,3))), expanded_shape=(2,2,2,2,2), reduce_axes=[(0,4),(1,2)],
+    st2_pattern=(((1,1), (1,0), (1,3), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,2))), upcast_axes=([(0,4)],[(3,2)],[(3,2),(2,2)]))]
+  def __init__(self, arch:str):
+    self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else CUDARenderer.tensor_cores_75 if int(arch[3:]) >= 75 else []
 
   # language options
   kernel_prefix = "extern \"C\" __global__ "
@@ -345,14 +350,16 @@ class CUDARenderer(CStyleLanguage):
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype in {dtypes.half, dtypes.bfloat16}):
       prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [self.render_vector_prefix(dtype.vec(sz)) for sz in [4, 8]]
 
-    # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
     dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
-    for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      fn, ti, to, ci, co = arg[0], self.render_dtype(arg[2]), self.render_dtype(arg[3]), dt_map[arg[2]], dt_map[arg[3]]
-      prefix.append(f"""__device__ {to}4 __{fn}({ti}8 a, {ti}4 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
-asm( "mma.sync.aligned.m16n8k16.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5, %6, %7 }}, {{ %8, %9 }}, {{ %0, %1, %2, %3 }};"
-  : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]), "r"(a_pk[2]),  "r"(a_pk[3]), "r"(b_pk[0]), "r"(b_pk[1]) );
-return c;}}""")
+    for name, (N, M, K), dti, dto, _, _, (upc_a, upc_b, upc_c), _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
+      szc, sza, szb = (prod(sz for _, sz in upc) for upc in (upc_c, upc_a, upc_b))
+      dtc, dta, dtb = (self.render_dtype(dt.vec(sz)) for dt,sz in ((dto,szc),(dti,sza),(dti,szb)))
+      inc, ina, inb = (list(i for i in range(sz*dt.itemsize//4)) for dt,sz in ((dto,szc), (dti,sza), (dti,szb)))
+      argc, arga, argb = ", ".join([f"%{c}" for c in inc]), ", ".join([f"%{a+len(inc)}" for a in ina]), ", ".join([f"%{b+len(inc+ina)}" for b in inb])
+      a_pks, b_pks = (", ".join([f'"r"({v}_pk[{i}])' for i in inp]) for inp,v in ((ina,'a'),(inb,'b')))
+      prefix.append(f"""__device__ {dtc} __{name}({dta} a, {dtb} b, {dtc} c){{\n  int *a_pk = (int *)(&a), *b_pk = (int *)(&b);
+  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map[dto]}.{dt_map[dti]}.{dt_map[dti]}.{dt_map[dto]} {{{argc}}}, {{{arga}}}, {{{argb}}}, {{{argc}}};"
+    : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w)\n    : {a_pks}, {b_pks});\n  return c;\n}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
