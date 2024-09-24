@@ -97,6 +97,7 @@ class TestSymbolic(unittest.TestCase):
   def test_div_reduction(self):
     self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
+  @unittest.expectedFailure
   def test_var_becomes_num(self):
     self.helper_test_variable(Variable("a", 2, 2), 2, 2, "2")
 
