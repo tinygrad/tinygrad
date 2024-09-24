@@ -52,7 +52,6 @@ class TestPTXFailures(unittest.TestCase):
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
 
-  @unittest.skip("not still valid?")
   def test_gated_store_with_if(self):
     a = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
     gate_alu = (lidx0:=UOp(UOps.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
@@ -62,11 +61,7 @@ class TestPTXFailures(unittest.TestCase):
     sink = UOp(UOps.SINK, dtypes.void, (gated_alu_store,))
     uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
-
-    if getenv("PTX"):
-      with self.assertRaises(AssertionError):
-        np.testing.assert_equal(ret, [0, 1, 1, 1])
-    else: np.testing.assert_equal(ret, [0, 1, 1, 1])
+    np.testing.assert_equal(ret, [0, 1, 1, 1])
 
 if __name__ == '__main__':
   unittest.main()
