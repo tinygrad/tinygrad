@@ -56,6 +56,10 @@ def wait_check(cbuf: Any):
 def elapsed_time(cbuf: objc_id):
   return cast(float, msg(cbuf, "GPUEndTime", restype=ctypes.c_double)) - cast(float, msg(cbuf, "GPUStartTime", restype=ctypes.c_double))
 
+def error_check(error: objc_instance, error_constructor: type[Exception] = RuntimeError):
+  if error.value is None: return None
+  raise error_constructor(bytes(msg(msg(error, "localizedDescription", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode())
+
 class MetalCompiler(Compiler):
   def __init__(self, device:Optional[MetalDevice]):
     self.device = device
@@ -70,9 +74,7 @@ class MetalCompiler(Compiler):
     compileError = objc_instance(0)
     library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(src),
                   options, ctypes.byref(compileError), restype=objc_instance)
-    if library.value is None:
-      raise CompileError("Metal compile failed: " + bytes(msg(msg(compileError, "localizedDescription", restype=objc_instance),
-                                                              "UTF8String", restype=ctypes.c_char_p)).decode())
+    error_check(compileError, CompileError)
     library_contents = msg(library, "libraryDataContents", restype=objc_instance)
     return ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
 
@@ -88,13 +90,17 @@ class MetalProgram:
           print("Error running disassembler: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
     assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-    self.library = msg(self.device.device, "newLibraryWithData:error:", data, None, restype=objc_instance)
+    error_library_creation = objc_instance(0)
+    self.library = msg(self.device.device, "newLibraryWithData:error:", data, ctypes.byref(error_library_creation), restype=objc_instance)
+    error_check(error_library_creation)
     self.fxn = msg(self.library, "newFunctionWithName:", to_ns_str(name), restype=objc_instance)
     descriptor = msg(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"), "new", restype=objc_instance)
     msg(descriptor, "setComputeFunction:", self.fxn)
     msg(descriptor, "setSupportIndirectCommandBuffers:", True)
+    error_pipeline_creation = objc_instance(0)
     self.pipeline_state = msg(self.device.device, "newComputePipelineStateWithDescriptor:options:reflection:error:",
-                              descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, None, restype=objc_instance)
+      descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation), restype=objc_instance)
+    error_check(error_pipeline_creation)
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     max_total_threads = msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=ctypes.c_ulong)

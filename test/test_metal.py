@@ -1,7 +1,7 @@
 import unittest
 from tinygrad.device import CompileError, Device
 if Device.DEFAULT=="METAL":
-  from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler
+  from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
   def test_alloc_oom(self):
@@ -38,3 +38,17 @@ class TestMetal(unittest.TestCase):
   }
 """)
     assert ret is not None
+
+  def test_failed_newLibraryWithData(self):
+    device = MetalDevice("metal")
+    compiler = MetalCompiler(device)
+    compiled = compiler.compile("""
+#include <metal_stdlib>
+kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]){
+  data0[0] = 0;
+}
+""")
+    with self.assertRaises(RuntimeError):
+      compiled = compiled[:40] # corrupt the compiled program
+      MetalProgram(device, "r_5", compiled)
+
