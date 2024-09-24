@@ -18,17 +18,27 @@ def render_store(r:CStyleLanguage, x:UOp):
   rendered_store = r.render_store(r[x.src[0]], x.src[0].dtype, r[x.src[2]], x.src[2].dtype, strip_parens(r[x.src[1]]))
   return f"if ({r[x.src[3]]}) {{ {rendered_store} }}" if len(x.src) > 3 and x.src[3].op is not UOps.IF else rendered_store
 
+def render_alu(r:CStyleLanguage, x:UOp):
+  if x.arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}: operands = [strip_parens(r[v]) if v.arg == x.arg else r[v] for v in x.src]
+  elif x.arg is BinaryOps.MAX: operands = [r.render_cast(r[v], v.dtype) if v.op is UOps.CONST else r[v] for v in x.src]
+  else: operands = [r[v] for v in x.src]
+  return r.code_for_op[x.arg](*operands, x.dtype)
+
+def render_gep(r:CStyleLanguage, x:UOp):
+  from_ssa = x.src[0].op in {UOps.LOAD, UOps.WMMA, UOps.DEFINE_ACC}
+  return (r[x.src[0]] if from_ssa else f"{(r[x.src[0]])}") + \
+    (f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if r.device in {"CUDA", "NV"} else 4) \
+    or r.device == 'CLANG' else f".{'xyzwabcd'[x.arg[0]]}")
+
 base_pm = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
   (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} = {r[x.src[1]]};"),
   (UPat(UOps.IF, name="x"), lambda r,x: f"if ({r[x.src[0]]}) {{"),
   (UPat((UOps.ENDIF, UOps.ENDRANGE)), lambda r: "}"),
   (UPat(UOps.WMMA, name="x"), lambda r,x: f"__{x.arg[0]}({r[x.src[0]]}, {r[x.src[1]]}, {r[x.src[2]]})"),
-  (UPat(UOps.GEP, name="x"), lambda r,x: f"{r[x.src[0]]}.{'xyzw'[x.arg[0]]}"),
   # r method accesses
-  (UPat(UOps.CONST, name="x"), lambda r,x: r.render_const(x.arg, x.dtype)),
+  (UPat(UOps.CONST, name="x"), lambda r,x: r.render_const(x.arg, x.dtype) if x.arg >= 0 else f"({r.render_const(x.arg, x.dtype)})"),
   (UPat(UOps.RANGE, name="x"), lambda r,x: f"for ({r.render_dtype(x.dtype)} {r[x]} = {r[x.src[0]]}; {r[x]} < {r[x.src[1]]}; {r[x]}++) {{"),
-  (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](*[r[y] for y in x.src], x.dtype)),
   (UPat(UOps.VECTORIZE, name="x"), lambda r,x: r.render_vectorize([r[y] for y in x.src], x.dtype)),
   (UPat(UOps.CAST, name="x"), lambda r,x: r.render_cast(r[x.src[0]], x.dtype, False)),
   (UPat(UOps.BITCAST, name="x"), lambda r,x: r.render_cast(r[x.src[0]], x.dtype, True)),
@@ -38,6 +48,8 @@ base_pm = PatternMatcher([
   # function calls
   (UPat(UOps.LOAD, name="x"), render_load),
   (UPat(UOps.STORE, name="x"), render_store),
+  (UPat(UOps.ALU, name="x"), render_alu),
+  (UPat(UOps.GEP, name="x"), render_gep),
 ])
 
 class CStyleLanguage(Renderer):
