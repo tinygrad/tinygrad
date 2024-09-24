@@ -181,11 +181,11 @@
         ...hljs.getLanguage("python"),
         case_insensitive: false,
         contains: [
-          hljs.C_NUMBER_MODE, hljs.QUOTE_STRING_MODE,
           { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-]*(\\.[a-zA-Z_][a-zA-Z0-9_-]*)*' + LOOKAHEAD_TAG_END, className: "type" },
           { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-].vec*' + LOOKAHEAD_TAG_END, className: "type" },
           { begin: '[a-zA-Z_][a-zA-Z0-9_-]*\\.[a-zA-Z_][a-zA-Z0-9_-]*' + '(?=[.\\s\\n[:,()])',  className: "operator" },
           { begin: '[A-Z][a-zA-Z0-9_]*(?=\\()', className: "section", ignoreEnd: true },
+          ...hljs.getLanguage("python").contains,
         ]
       }
     });
