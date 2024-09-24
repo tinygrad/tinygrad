@@ -6,8 +6,9 @@ from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, UOps, UnaryOps, BinaryOps, TernaryOps
 
-def render_dtype(x:DType):
+def render_dtype(x:DType, hdr=False):
   if isinstance(x, PtrDType): return f"device {x.name}*" if not x.local else f"threadgroup {x.name}*"
+  if hdr: return f"constant {x.name}&"
   return x.name
 
 pm = PatternMatcher([
@@ -109,5 +110,5 @@ class CStyle2Language(Renderer):
         c[prefix] += 1  # if it was used, increment
       if u.op in {UOps.IF, UOps.RANGE}: depth += 1
 
-    return f"kernel void {name}(" + ', '.join([f"{render_dtype(u.dtype)} {r[u]}" for u in bufs]) + \
+    return f"kernel void {name}(" + ', '.join([f"{render_dtype(u.dtype, hdr=True)} {r[u]}" for u in bufs]) + \
       ", uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {\n" + '\n'.join(lines) + "\n}"
