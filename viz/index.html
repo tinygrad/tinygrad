@@ -301,7 +301,7 @@
       metadata.appendChild(pre);
     })
     if (kernels[currentKernel].code !== "") {
-      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${kernels[currentKernel].code}</code>`, className: "code-block" });
+      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${kernels[currentKernel].code}</code>`, className: "code-block language-cpp" });
       hljs.highlightElement(pre);
       metadata.appendChild(pre);
     }
