@@ -37,7 +37,7 @@ class UOpRet:
       assert new_sink is not uops[-1], f"rewritten sink wasn't rewritten! {i}\n{new_sink}\n{uops[-1]}"
       # update ret data
       additions.append([id(x) for x in rewritten.sparents if x.op is not UOps.CONST])
-      diffs.append((str(pattern), pattern.location, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
+      diffs.append((pattern.printable(), pattern.location, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
       uops.append(new_sink)
       extra.append([str(new_sink)])
     return UOpRet(ctx.loc, uops, diffs, extra, additions)
@@ -71,7 +71,7 @@ class KernelRet:
   code: str
   ctxs: Dict[Tuple[str, bytes], TrackedRewriteContext]
   def to_json(self) -> Dict:
-    return {"name":self.name, "code":self.code, "ctxs":[f"{x.loc} - {len(x.rewrites)}" for x in self.ctxs.values()]}
+    return {"name":self.name, "code":self.code, "ctxs":[f"{x.loc} - {len([y for y in x.rewrites if "ops.py" not in y[2].location[0]])}" for x in self.ctxs.values()]}
 
 def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
   ret: Dict[str, KernelRet] = {}
