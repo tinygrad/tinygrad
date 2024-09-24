@@ -2,6 +2,8 @@ import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast, get_args
+from weakref import WeakValueDictionary
+import weakref
 from tinygrad.ops import REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, UnaryOps, UOp, UOps, PatternMatcher, UPat, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
@@ -115,10 +117,15 @@ reduceop_fusor = PatternMatcher([
 
 @dataclass(frozen=True)
 class ScheduleItemContext:
-  bufs: Tuple[Buffer, ...]
+  bufs: Tuple[weakref.ref, ...]
+
+
+def do_replace(ctx:ScheduleItemContext, x:UOp):
+  if isinstance(x.arg, int): return None
+  return x.replace(arg=ctx.bufs.index(x.arg))
 
 assign_buffers = PatternMatcher([
-  (UPat(UOps.DEFINE_GLOBAL, name="x"), lambda ctx,x: x.replace(arg=ctx.bufs.index(x.arg)) if isinstance(x.arg, Buffer) else None),
+  (UPat(UOps.DEFINE_GLOBAL, name="x"), do_replace),
 ])
 
 def full_ast_rewrite(sink:UOp, ctx:ScheduleItemContext) -> UOp:
@@ -190,7 +197,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
     output_st, vv = output_st.simplify().unbind()
     var_vals.update(vv)
     ast.append(UOp(UOps.STORE, dtypes.void, (UOp.from_lbuf(out, i), output_st.to_uop(), src)))
-  sink = full_ast_rewrite(ast[0].sink(*ast[1:]), ScheduleItemContext(tuple(x.buffer for x in outs+list(inputs))))
+  sink = full_ast_rewrite(ast[0].sink(*ast[1:]), ScheduleItemContext(tuple(weakref.ref(x.buffer) for x in outs+list(inputs))))
   return LBScheduleItem(sink, outs, list(inputs), dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])), var_vals
 
 # *** DAG creation: decide which LazyBuffers should realize ***
