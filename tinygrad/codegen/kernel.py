@@ -410,8 +410,13 @@ class Kernel:
     if self.reduceop and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
       acc_sz = self.reduceop.dtype.itemsize
       upcast_sz = prod([a for a,b in zip(self.full_shape[self.first_upcast:], self.sts[0].shape[self.first_upcast:]) if a == b])
-      local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce+self.group_for_reduces])
-      smem_sz = amt*acc_sz*upcast_sz*local_sz
+      local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
+      grouped_reduce_sizes = [
+        prod(amt if i == axis else s[1] for i,s in enumerate(zip(self.sts[len(self.bufs)+r*2].shape, self.sts[len(self.bufs)+r*2+1].shape))
+             if (i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) or i == axis) and s[0]!=s[1])
+        for r in range(len(self.reduceops))
+      ]
+      smem_sz = sum(acc_sz*upcast_sz*local_sz * r for r in grouped_reduce_sizes)
       check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
 
     if opt.op is OptOps.LOCAL:    # cyan
@@ -718,6 +723,7 @@ class Kernel:
           start = UOp(UOps.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0], apply_to_st),), arg=(alu_op, axis))
           second_axis = tuple(i for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces) \
                       if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
+          print("second axis=", second_axis)
           # NOTE: if there's a grouped reduce, but no reduce axes for this reduce, we can skip it
           if len(second_axis) == 0: return start
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
