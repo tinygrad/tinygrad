@@ -55,16 +55,22 @@
     user-select: none;
   }
   .node rect {
-    stroke: #313131;
+    stroke: #4a4b57;
     stroke-width: 1.5px;
   }
   .label text {
-    color: black;
+    color: #08090e;
     font-weight: 350;
   }
   .edgePath path {
-    stroke: #606060;
-    stroke-width: 1.5px;
+    stroke: #4a4b57;
+    fill: #4a4b57;
+    stroke-width: 1.4px;
+  }
+  #arrowhead {
+   stroke: blue;
+   fill: blue;
+   stroke-width: 1.5px;
   }
   .graph {
     width: 70%;
@@ -174,7 +180,7 @@
   <script>
   function renderGraph(graph, additions) {
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: #15161e" : "display: none;"});
+    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5); rx: 8; ry: 8;" : "display: none;"});
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
@@ -325,7 +331,7 @@
             hljs.highlightElement(pre);
             metadata.appendChild(div);
             const diffHtml = diff.map((line) => {
-              const color = line.startsWith("+") ? "#30A46C" : line.startsWith("-") ? "#E5484D" : "#EEEEEE";
+              const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
               return `<span style="color: ${color};">${line}</span>`;
             }).join("<br>");
             metadata.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${diffHtml}</code>`, className: "wrap" }));
