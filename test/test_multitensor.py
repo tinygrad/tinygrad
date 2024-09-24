@@ -583,7 +583,7 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_dropout_on_shard(self):
     with Tensor.train():
-      X = Tensor.ones(256).shard(devices_2, axis=0)
+      X = Tensor.ones(256).to(devices_2)
       output = X.dropout(0.5).numpy()
       unique, counts = np.unique(output, return_counts=True)
       assert set(unique) == {0, 2}, unique
