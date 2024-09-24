@@ -1,5 +1,6 @@
-from typing import List, Dict
+from typing import List, Dict, DefaultDict, cast
 import math
+from collections import defaultdict, Counter
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, UOps, UnaryOps, BinaryOps, TernaryOps
@@ -47,7 +48,7 @@ pm = PatternMatcher([
   (UPat(UOps.BARRIER), lambda r: "threadgroup_barrier(metal::mem_flags::mem_threadgroup);"),
 ])
 
-# TODO: this use of INDEX should be universal
+# TODO: this use of INDEX should be universal and this should be removed
 prepm = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL), name='buf'), UPat.var('idx')), allow_any_len=True, name="ld"),
    lambda buf,idx,ld:
@@ -62,29 +63,41 @@ class CStyle2Language(Renderer):
 
   def render(self, name:str, uops:List[UOp]) -> str:
     # register assignment
-    r: Dict[UOp, str] = {x:f"v{i}" for i,x in enumerate(uops)}
+    c: DefaultDict[str, int] = defaultdict(int)
+    r: Dict[UOp, str] = {}
 
-    #print_uops(uops)
+    child_count = Counter(v for ru in uops for v in ru.src)
 
     bufs = []
     lines = []
     depth = 1
     for u in uops:
       if u.op is UOps.DEFINE_GLOBAL:
+        r[u] = f"data{u.arg}"
         bufs.append(u)
         continue
+      # naming
+      if u.op is UOps.DEFINE_LOCAL:
+        # these shouldn't be named here
+        r[u] = u.arg[0]
+      else:
+        prefix = {UOps.RANGE: "ridx", UOps.ALU: "alu", UOps.WMMA: "wmma",
+                  UOps.DEFINE_ACC: "acc", UOps.SPECIAL: "idx", UOps.LOAD: "val"}.get(u.op, "unk")
+        r[u] = f"{prefix}{c[prefix]}"
 
-      l = pm.rewrite(u, ctx=r)
+      l = cast(str, pm.rewrite(u, ctx=r))
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
-      if u.op in {UOps.RANGE, UOps.ASSIGN, UOps.DEFINE_LOCAL} or u.dtype == dtypes.void:
-        if u.op in {UOps.ENDIF, UOps.ENDRANGE}: depth -= 1
-        if u.op is UOps.ASSIGN: r[u] = r[u.src[0]]
-        lines.append("  "*depth + l)
-      elif u.op in {UOps.INDEX, UOps.CONST}:
+      if u.op in {UOps.ENDIF, UOps.ENDRANGE}: depth -= 1
+      if u.op in {UOps.INDEX, UOps.CONST} or (u.op is UOps.ALU and child_count[u] == 1 and u.arg is not BinaryOps.MAX):
         r[u] = l
       else:
-        lines.append("  "*depth + f"{render_dtype(u.dtype)} {r[u]} = {l};")
+        if u.op in {UOps.RANGE, UOps.ASSIGN, UOps.DEFINE_LOCAL} or u.dtype == dtypes.void:
+          if u.op is UOps.ASSIGN: r[u] = r[u.src[0]]
+        else:
+          l = f"{render_dtype(u.dtype)} {r[u]} = {l};"
+        lines.append("  "*depth + l)
+        c[prefix] += 1  # if it was used, increment
       if u.op in {UOps.IF, UOps.RANGE}: depth += 1
 
     return f"kernel void {name}(" + ', '.join([f"{render_dtype(u.dtype)} {r[u]}" for u in bufs]) + \

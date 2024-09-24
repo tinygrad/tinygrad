@@ -343,7 +343,6 @@ def print_uops(uops:List[UOp]):
     print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):25s} " f"{str(formatted_parents):32s} {u.arg}")
 
 def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
-  return 0,0
   flops: sint = 0
   mem: sint = 0
   mults: sint = 1
@@ -352,11 +351,19 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   if ignore_indexing:
     for u in uops:
       if u.op is UOps.LOAD:
-        dont_count = dont_count.union(u.src[1].sparents)
-        if len(u.src) > 3: dont_count = dont_count.union(u.src[2].sparents)
+        if u.src[0].op in {UOps.INDEX, UOps.CAST}:
+          dont_count = dont_count.union(u.src[0].sparents)
+          if len(u.src) > 2: dont_count = dont_count.union(u.src[2].sparents)
+        else:
+          dont_count = dont_count.union(u.src[1].sparents)
+          if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
       elif u.op is UOps.STORE:
-        dont_count = dont_count.union(u.src[1].sparents)
-        if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
+        if u.src[0].op in {UOps.INDEX, UOps.CAST}:
+          dont_count = dont_count.union(u.src[0].sparents)
+          if len(u.src) > 2: dont_count = dont_count.union(u.src[2].sparents)
+        else:
+          dont_count = dont_count.union(u.src[1].sparents)
+          if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
       elif u.op is UOps.IF:
         dont_count = dont_count.union(u.src[0].sparents)
   for u in uops:
@@ -370,7 +377,10 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
     elif u.op is UOps.LOAD:
       mem += u.dtype.itemsize * mults
     elif u.op is UOps.STORE:
-      mem += u.src[2].dtype.itemsize * mults
+      if u.src[0].op in {UOps.INDEX, UOps.CAST}:
+        mem += u.src[1].dtype.itemsize * mults
+      else:
+        mem += u.src[2].dtype.itemsize * mults
     elif u.op is UOps.ALU and u not in dont_count:
       flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
     elif u.op is UOps.WMMA and u not in dont_count:
