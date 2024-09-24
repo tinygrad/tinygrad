@@ -113,7 +113,7 @@ class QCOMComputeQueue(HWComputeQueue):
     global_size_mp = [int(g*l) for g,l in zip(global_size, local_size)]
     self.cmd_idx_to_dims[self._cur_cmd_idx()] = [global_size, local_size]
 
-    th = adreno.THREAD128 if prod(local_size) > 128 else adreno.THREAD64
+    th = adreno.THREAD128 if prg.fregs < 10 and prg.brnchstck == 0 else adreno.THREAD64
 
     self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
              qreg.a6xx_hlsq_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1),
