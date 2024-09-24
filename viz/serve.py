@@ -50,7 +50,7 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
     if u.op is UOps.CONST and u is not x: continue
     label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
-      if x.op is UOps.CONST: label += f"\nCONST {idx} {x.arg:g}"
+      if x.op is UOps.CONST: label += f"\nCONST{idx} {x.arg:g}"
     if getenv("WITH_SHAPE"):
       with contextlib.suppress(Exception): # if the UOp is indexed already it's fine
         if u.st is not None: label += f"\n{u.st.shape}"
@@ -71,7 +71,7 @@ class KernelRet:
   code: str
   ctxs: Dict[Tuple[str, bytes], TrackedRewriteContext]
   def to_json(self) -> Dict:
-    return {"name":self.name, "code":self.code, "ctxs":[x.loc for x in self.ctxs.values()]}
+    return {"name":self.name, "code":self.code, "ctxs":[f"{x.loc} - {len(x.rewrites)}" for x in self.ctxs.values()]}
 
 def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
   ret: Dict[str, KernelRet] = {}
