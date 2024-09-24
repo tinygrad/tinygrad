@@ -6,7 +6,7 @@ from tinygrad.device import Buffer
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.shape.symbolic import Variable
-from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, int_tuple_to_struct, objc_instance,\
+from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, to_struct, objc_instance,\
   MTLResourceOptions, elapsed_time, objc_id
 
 class MTLIndirectCommandType:
@@ -49,14 +49,14 @@ class MetalGraph(GraphRunner):
       for i,v in enumerate(prg.p.vars): msg(icb_command, "setKernelBuffer:offset:atIndex:", self.int_buf.buf, self.vars.index(v)*4, len(ji.bufs)+i)
 
       global_size, local_size = prg.p.launch_dims(var_vals)
-      msg(icb_command, "concurrentDispatchThreadgroups:threadsPerThreadgroup:", int_tuple_to_struct(global_size), int_tuple_to_struct(local_size))
+      msg(icb_command, "concurrentDispatchThreadgroups:threadsPerThreadgroup:", to_struct(*global_size), to_struct(*local_size))
       msg(icb_command, "setBarrier")
 
     self.all_resources = dedup(all_resources)
     self.all_pipelines = dedup(all_pipelines)
     self.command_buffer: Any = None
     if len(self.vars): self.int_buf_view = self.device.allocator.as_buffer(self.int_buf).cast('i')
-    self.range = int_tuple_to_struct((0, len(self.jit_cache)), ctypes.c_ulong)
+    self.range = to_struct(0, len(self.jit_cache))
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
 
@@ -73,7 +73,7 @@ class MetalGraph(GraphRunner):
       global_size, local_size = global_dims or prg.p.global_size, local_dims or prg.p.local_size
       computeCommand = msg(self.icb, "indirectComputeCommandAtIndex:", j)
       msg(computeCommand, "concurrentDispatchThreadgroups:threadsPerThreadgroup:",
-                  int_tuple_to_struct(cast(tuple, global_size)), int_tuple_to_struct(cast(tuple, local_size)))
+                  to_struct(*cast(tuple, global_size)), to_struct(*cast(tuple, local_size)))
     for j, var in enumerate(self.vars): self.int_buf_view[j] = var_vals[var]
 
     command_buffer = msg(self.device.mtl_queue, "commandBuffer", restype=objc_id)
@@ -89,7 +89,7 @@ class MetalGraph(GraphRunner):
     if getenv("FIX_METAL_ICB", self.needs_icb_fix):
       for ps in self.all_pipelines:
         msg(encoder, "setComputePipelineState:", ps)
-        msg(encoder, "dispatchThreadgroups:threadsPerThreadgroup:", int_tuple_to_struct((0,0,0)), int_tuple_to_struct((0,0,0)))
+        msg(encoder, "dispatchThreadgroups:threadsPerThreadgroup:", to_struct(0,0,0), to_struct(0,0,0))
 
     msg(encoder, "executeCommandsInBuffer:withRange:", self.icb, self.range)
     msg(encoder, "endEncoding")
