@@ -12,6 +12,9 @@ class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response 
 class objc_instance(objc_id): # method with name "new", "alloc" should be freed after use
   def __del__(self): msg(self, "release")
 
+@functools.lru_cache(None)
+def sel(name: str): return libobjc.sel_registerName(name.encode())
+
 class MTLResourceOptions:
   MTLResourceCPUCacheModeDefaultCache = 0
   MTLResourceStorageModeShared = 0 << 4
@@ -31,7 +34,7 @@ T = TypeVar("T")
 def msg(ptr: objc_id, selector: str, /, *args: Any, restype: type[T] = objc_id) -> T: # type: ignore [assignment]
   sender = libobjc["objc_msgSend"] # Using attribute access returns a new reference so setting restype is safe
   sender.restype = restype
-  return sender(ptr, libobjc.sel_registerName(selector.encode()), *args)
+  return sender(ptr, sel(selector), *args)
 
 def to_ns_str(s: str): return msg(libobjc.objc_getClass(b"NSString"), "stringWithUTF8String:", s.encode())
 
