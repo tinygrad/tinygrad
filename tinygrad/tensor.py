@@ -441,8 +441,8 @@ class Tensor:
     device, had_counter = Device.canonicalize(device), False
 
     # when using MOCKGPU and NV generate rand on CLANG
-    if getenv("MOCKGPU") and device.startswith("NV"): _device, device = device, "CLANG"
-    else: _device = None
+    _device = device
+    if getenv("MOCKGPU") and device.startswith("NV"): device = "CLANG"
 
     # generate per device seeds and rng counter if we haven't seen this device yet
     if device not in Tensor._device_seeds:
@@ -451,7 +451,7 @@ class Tensor:
     else: had_counter = True
 
     # if shape has 0, return zero tensor
-    if (num := math.ceil(((num_ := prod(shape)) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
+    if (num := math.ceil(((num_ := prod(shape)) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
 
     # increment rng counter for devices
     if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
