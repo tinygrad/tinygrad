@@ -181,7 +181,7 @@ def eval_bert():
   from examples.mlperf.metrics import f1_score
   from transformers import BertTokenizer
 
-  tokenizer = BertTokenizer(str(Path(__file__).parents[2] / "weights/bert_vocab.txt"))
+  tokenizer = BertTokenizer(str(Path(__file__).parents[2] / "extra/weights/bert_vocab.txt"))
 
   c = 0
   f1 = 0.0
