@@ -457,10 +457,6 @@ class Tensor:
     if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
 
     # threefry random bits
-    counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
-    counts2 = counts1 + math.ceil(num / 2)
-
-    # threefry random bits
     counts0 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
     counts1 = counts0 + math.ceil(num / 2)
     bits = Tensor._threefry_random_bits(Tensor._seed, Tensor._device_seeds[device], counts0, counts1)[:num]
