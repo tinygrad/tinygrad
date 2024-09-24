@@ -159,12 +159,15 @@ class CStyleLanguage(Renderer):
     for u in uops:
       if u.op is UOps.DEFINE_GLOBAL:
         r[u] = f"data{u.arg}"
-        bufs[u] = (r[u], (u.dtype, True))
+        bufs[u] = (r[u], (u.dtype, False))
         continue
       if u.op is UOps.DEFINE_VAR:
         r[u] = u.arg[0]
         bufs[u] = (r[u], (u.dtype, False))
         continue
+
+      # mark buffers that we store to writable
+      if u.op is UOps.STORE and u.src[0].op is UOps.DEFINE_GLOBAL: bufs[u.src[0]] = (bufs[u.src[0]][0], (bufs[u.src[0]][1][0], True))
 
       # naming
       prefix = None
