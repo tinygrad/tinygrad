@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Dict, List, Tuple
 import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from tinygrad import Device
@@ -17,15 +17,16 @@ from tinygrad.engine.schedule import full_ast_rewrite
 @dataclass(frozen=True)
 class UOpRet:
   loc: str
-  graphs: List[Tuple[UOp, UOp, UOp, UOp]]                  # snapshot of the entire AST after each rewrite
+  graphs: List[UOp]                                        # snapshot of the entire AST after each rewrite
   diffs: List[Tuple[str, Tuple[str, int], List[str]]]      # the diffs for each rewrite
   extra: List[List[str]]                                   # these become code blocks in the UI
+  additions: List[List[int]]
   @staticmethod
   def from_ctx(ctx:TrackedRewriteContext) -> UOpRet:
     uops: List[UOp] = [ctx.sink]
-    graphs: List[Tuple[UOp, UOp, UOp, UOp]] = [(ctx.sink, ctx.sink, ctx.sink, ctx.sink)]
     diffs: List[Tuple[str, Tuple[str, int], List[str]]] = []
     extra: List[List[str]] = [[str(ctx.sink)]]
+    additions: List[List[int]] = [[]]
     seen_replaces: Dict[bytes, UOp] = {}
     for i, (first, rewritten, pattern) in enumerate(ctx.rewrites):
       if pattern.location[0].split("/")[-1] == "ops.py": continue
@@ -35,14 +36,12 @@ class UOpRet:
       # sanity check
       assert new_sink is not uops[-1], f"rewritten sink wasn't rewritten! {i}\n{new_sink}\n{uops[-1]}"
       # update ret data
+      additions.append([id(x) for x in rewritten.sparents])
       diffs.append((str(pattern), pattern.location, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
-      graphs.append((new_sink, uops[-1], rewritten, first))
       uops.append(new_sink)
       extra.append([str(new_sink)])
-    return UOpRet(ctx.loc, graphs, diffs, extra)
-  def to_json(self) -> Dict:
-    return {"loc": self.loc, "graphs": [[uop_to_json(x) for x in graph] for graph in self.graphs],
-            "diffs": self.diffs, "extra": self.extra}
+    return UOpRet(ctx.loc, uops, diffs, extra, additions)
+  def to_json(self) -> Dict: return {**asdict(self), "graphs": list(map(uop_to_json, self.graphs))}
 
 def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)

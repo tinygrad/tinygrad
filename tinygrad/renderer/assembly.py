@@ -4,7 +4,8 @@ from collections import defaultdict
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp
 from tinygrad.ops import PatternMatcher, UPat
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
-from tinygrad.renderer import Renderer, TensorCore
+from tinygrad.renderer import Renderer
+from tinygrad.renderer.cstyle import CUDARenderer
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -86,7 +87,7 @@ class PTXRenderer(Renderer):
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
-  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do) for (di, do) in ([(dtypes.half, dtypes.float)])] # noqa: E501
+  tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
   def __init__(self, arch:str, device="CUDA"): self.device, self.tensor_cores = device, PTXRenderer.tensor_cores if int(arch[3:]) >= 80 else []

@@ -876,7 +876,7 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is UOps.RANGE]
     # LOAD -> RANGE -> LOAD -> ASSIGN
-    assert lin.uops[ranges[0]-2].op is UOps.LOAD
+    assert len([x for x in lin.uops[:ranges[0]] if x.op is UOps.LOAD]) == 1
 
   def test_range_outer_op_before_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
