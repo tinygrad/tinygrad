@@ -438,16 +438,16 @@ class Tensor:
     if not dtypes.is_float(dtype := to_dtype(dtype or dtypes.default_float)): raise ValueError(f"rand only supports float dtypes, got {dtype}")
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
-    device, had_counter = Device.canonicalize(device), False
+    _device = device = Device.canonicalize(device)
 
     # when using MOCKGPU and NV generate rand on CLANG
-    _device = device
     if getenv("MOCKGPU") and device.startswith("NV"): device = "CLANG"
 
     # generate per device seeds and rng counter if we haven't seen this device yet
     if device not in Tensor._device_seeds:
       Tensor._device_seeds[device] = int.from_bytes(hashlib.sha256(device.encode()).digest(), "big") & 0xffffffff
       Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint32, requires_grad=False)
+      had_counter = False
     else: had_counter = True
 
     # if shape has 0, return zero tensor
