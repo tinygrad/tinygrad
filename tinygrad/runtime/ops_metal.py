@@ -19,6 +19,9 @@ class MTLResourceOptions:
   MTLResourceCPUCacheModeDefaultCache = 0
   MTLResourceStorageModeShared = 0 << 4
 
+class MTLPipelineOption:
+  MTLPipelineOptionNone = 0
+
 libobjc = ctypes.CDLL("/usr/lib/libobjc.dylib")
 libmetal = ctypes.CDLL("/Library/Frameworks/Metal.framework/Metal")
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
@@ -88,7 +91,7 @@ class MetalProgram:
     msg(descriptor, "setComputeFunction:", self.fxn)
     msg(descriptor, "setSupportIndirectCommandBuffers:", True)
     self.pipeline_state = msg(self.device.device, "newComputePipelineStateWithDescriptor:options:reflection:error:",
-                                       descriptor, 0, None, None, restype=objc_instance)
+                              descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, None, restype=objc_instance)
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     max_total_threads = msg(self.pipeline_state, "maxTotalThreadsPerThreadgroup", restype=ctypes.c_ulong)
