@@ -180,7 +180,7 @@ class QCOMArgsState(HCQArgsState):
 
     if len(bufs) + len(vals) != len(prg.buf_info): raise RuntimeError(f'incorrect args size given={len(bufs)+len(vals)} != want={len(prg.buf_info)}')
 
-    self.buf_info, self.args_info = prg.buf_info[:len(bufs)], prg.buf_info[len(bufs):]
+    self.buf_info, self.args_info, self.args_view = prg.buf_info[:len(bufs)], prg.buf_info[len(bufs):], to_mv(ptr, prg.kernargs_alloc_size).cast('Q')
 
     for cnst_val, cnst_off, cnst_sz in prg.consts_info:
       ctypes.memmove(self.ptr + cnst_off, (ctypes.c_int8 * cnst_sz).from_buffer_copy(cnst_val.to_bytes(cnst_sz, byteorder='little')), cnst_sz)
@@ -193,10 +193,10 @@ class QCOMArgsState(HCQArgsState):
     for i, v in enumerate(vals): self.update_var(i, v)
 
   def update_buffer(self, index:int, buf:HCQBuffer):
-    if self.buf_info[index].type is not BUFTYPE_BUF: to_mv(self.ptr+self.buf_info[index].offset+0x10, 8).cast('Q')[0] = buf.va_addr
-    else: to_mv(self.ptr + self.buf_info[index].offset, 8).cast('Q')[0] = buf.va_addr
+    if self.buf_info[index].type is not BUFTYPE_BUF: self.args_view[self.buf_info[index].offset//8 + 2] = buf.va_addr
+    else: self.args_view[self.buf_info[index].offset//8] = buf.va_addr
 
-  def update_var(self, index:int, val:int): to_mv(self.ptr + self.args_info[index].offset, 8).cast('Q')[0] = val
+  def update_var(self, index:int, val:int): self.args_view[self.args_info[index].offset//8] = val
 
 class QCOMProgram(HCQProgram):
   def __init__(self, device: QCOMDevice, name: str, lib: bytes):
