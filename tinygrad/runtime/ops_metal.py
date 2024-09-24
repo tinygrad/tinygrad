@@ -4,6 +4,7 @@ from typing import List, Any, Tuple, Optional, cast, TypeVar
 from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
+from ctypes.macholib.dyld import dyld_find 
 
 class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
   def __hash__(self): return hash(self.value)
@@ -15,6 +16,8 @@ class objc_instance(objc_id): # method with name "new", "alloc" should be freed 
 @functools.lru_cache(None)
 def sel(name: str): return libobjc.sel_registerName(name.encode())
 
+def find_and_load(name: str): return ctypes.CDLL(dyld_find(name))
+
 class MTLResourceOptions:
   MTLResourceCPUCacheModeDefaultCache = 0
   MTLResourceStorageModeShared = 0 << 4
@@ -22,11 +25,11 @@ class MTLResourceOptions:
 class MTLPipelineOption:
   MTLPipelineOptionNone = 0
 
-libobjc = ctypes.CDLL("/usr/lib/libobjc.dylib")
-libmetal = ctypes.CDLL("/Library/Frameworks/Metal.framework/Metal")
+libobjc = find_and_load("/usr/lib/libobjc.dylib")
+libmetal = find_and_load("/Library/Frameworks/Metal.framework/Metal")
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
-ctypes.CDLL("/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
-libdispatch = ctypes.CDLL("/usr/lib/libSystem.dylib") # libdispatch is part of libSystem on mac
+find_and_load("/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+libdispatch = find_and_load("/usr/lib/libSystem.dylib") # libdispatch is part of libSystem on mac
 libobjc.objc_getClass.restype = objc_id
 libobjc.sel_registerName.restype = objc_id
 libmetal.MTLCreateSystemDefaultDevice.restype = objc_instance
