@@ -75,19 +75,41 @@ class TestRandomness(unittest.TestCase):
     assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
-  @unittest.skipIf(not THREEFRY.value, "not using threefry") 
-  @unittest.skipUnless(Device.DEFAULT == "GPU", "reference is on GPU")
+  @unittest.skipIf(not THREEFRY.value, "not using threefry")
   def test_threefly_against_reference(self):
     Tensor.manual_seed(1337)
-    # generated using
+
+    # reference generated using
     """
     key0 = 1337
-    key1 = int.from_bytes(hashlib.sha256("GPU".encode()).digest(), "big") & 0xffffffff
-    values = (jax.extend.random.threefry_2x32((np.uint32(key0), np.uint32(key1)), np.arange(20, dtype=np.uint32)) >> 8).astype(float) / np.float32(2**24)
+    key1 = 0
+    values = jax.extend.random.threefry_2x32((np.uint32(key1), np.uint32(key0)), np.arange(20, dtype=np.uint32))
     print(f"[{', '.join(f'{v}' for v in values)}]")
     """
-    jr = np.array([0.11534780263900757, 0.8412505984306335, 0.3531438112258911, 0.6055004000663757, 0.12531155347824097, 0.9287887811660767, 0.6370040774345398, 0.6373475193977356, 0.32034915685653687, 0.1125219464302063, 0.8631687760353088, 0.0008330345153808594, 0.8682080507278442, 0.7769373655319214, 0.2587180733680725, 0.7823214530944824, 0.9144479632377625, 0.07679235935211182, 0.7554848790168762, 0.1666560173034668])
+    jr = np.array([2221762175, 1752107825, 653745012, 1967534793, 1395205442, 3840423848, 2159346757, 603508235, 3319473678, 3363866483, 3544324138, 1436466838, 2169858556, 2570072943, 2387150698, 3678370550, 2911697663, 403244401, 2560861638, 1692360114])
+
+    counts = Tensor.arange(20, dtype=dtypes.uint32)
+    counts0, counts1 = counts.chunk(2)
+    r = Tensor._threefry_random_bits(1337, 0, counts0, counts1).numpy()
+
+    np.testing.assert_allclose(jr, r)
+
+  @unittest.skipIf(not THREEFRY.value, "not using threefry")
+  @unittest.skipUnless(Device.DEFAULT == "GPU", "reference is on GPU")
+  def test_threefly_against_reference_full(self):
+    Tensor.manual_seed(1337)
+
+    # reference generated using
+    """
+    key0 = 1337
+    key1 = 0
+    values = jax.extend.random.threefry_2x32((np.uint32(key1), np.uint32(key0)), np.arange(20, dtype=np.uint32))
+    print(f"[{', '.join(f'{v}' for v in values)}]")
+    """
+    jr = np.array([0.7882130146026611, 0.0680311918258667, 0.6758031845092773, 0.2525523900985718, 0.5712389945983887, 0.8758237361907959, 0.13559412956237793, 0.9069793224334717, 0.8781528472900391, 0.7737162113189697, 0.050452232360839844, 0.1645597219467163, 0.06776463985443115, 0.09560704231262207, 0.2754603624343872, 0.10108339786529541, 0.3488548994064331, 0.7904064655303955, 0.2519160509109497, 0.7925788164138794], dtype=np.float32)
+
     r = Tensor.rand(20).numpy()
+
     np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "need bfloat16 support")
