@@ -452,6 +452,7 @@ class TestNN(unittest.TestCase):
 
   def test_embedding_one_kernel(self):
     Tensor.manual_seed(20)
+    Tensor.rand(1).realize() # make rand consistent
     layer = Embedding(20, 30)
     a = Tensor([[1, 5, 9, 11],
                 [12, 19, 8, 1]])
