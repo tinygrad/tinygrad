@@ -67,6 +67,13 @@ class TestMultiTensor(unittest.TestCase):
       ei.run()
     assert names[-2] == names[-1], "function was relinearized"
 
+  def test_sharded_memory_schedule(self):
+    mem_base = GlobalCounters.mem_used
+    X = Tensor.ones(256).contiguous().realize()
+    assert GlobalCounters.mem_used-mem_base== X.dtype.itemsize * 256, GlobalCounters.mem_used-mem_base
+    X.shard_(devices_4).schedule()
+    self.assertEqual(GlobalCounters.mem_used-mem_base, 0)
+
   def test_sharded_memory(self):
     # Buffer may be stuck in track_cross_buffer
     for x in (d0, d1, d2, d3, d4): Device[x].synchronize()
