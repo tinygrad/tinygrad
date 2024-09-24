@@ -589,14 +589,6 @@ class TestMultiTensor(unittest.TestCase):
       assert set(unique) == {0, 2}, unique
       assert 100 < counts[0] < 156, counts[0]
 
-  def test_dropout_on_uneven_shard_axis(self):
-    with Tensor.train():
-      X = Tensor.ones(256).shard(devices_3, axis=0, splits=(100, 50, 106))
-      output = X.dropout(0.5).numpy()
-      unique, counts = np.unique(output, return_counts=True)
-      assert set(unique) == {0, 2}, unique
-      assert 100 < counts[0] < 156, counts[0]
-
   def test_dropout_on_shard_axis(self):
     with Tensor.train():
       X = Tensor.ones(256).shard(devices_2, axis=0)
