@@ -583,9 +583,15 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
    lambda x,c: all(y.op is UOps.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
   (UPat(UOps.DEFINE_VAR, src=(), name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
-  # new cstyle LOAD/STORE
-  (UPat((UOps.LOAD, UOps.STORE), src=(UPat(name="ptr"),)), lambda ptr: isinstance(ptr.dtype, PtrDType)),
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, name="x"), lambda x: True if isinstance(x.src[0].dtype, PtrDType) else None),
+  # *** new cstyle LOAD/STORE ***
+  (UPat(UOps.INDEX, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(dtype=(dtypes.int32,dtypes.int64)))), lambda: True),
+  (UPat(UOps.LOAD, src=(UPat((UOps.CAST, UOps.INDEX)),)), lambda: True),
+  (UPat(UOps.LOAD, src=(UPat((UOps.CAST, UOps.INDEX)), UPat((UOps.STORE, UOps.IF, UOps.BARRIER)))), lambda: True),
+  (UPat(UOps.LOAD, src=(UPat((UOps.CAST, UOps.INDEX)), UPat(name="alt"), UPat(dtype=dtypes.bool)), name="ld"),
+    lambda ld,alt: ld.dtype == alt.dtype),
+  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat((UOps.CAST, UOps.INDEX)), UPat())), lambda: True),
+  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat((UOps.CAST, UOps.INDEX)), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
+  # *** end new cstyle LOAD/STORE ***
 
   (UPat(UOps.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
   (UPat(UOps.SPECIAL, src=()), lambda: True),
@@ -640,8 +646,8 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
   (UPat(UOps.REDUCE_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in BinaryOps),
   (UPat(UOps.GEP, src=(UPat(name="src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
   (UPat(UOps.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.count and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
-  (UPat((UOps.BITCAST, UOps.CAST), src=(UPat(),), name="x"), lambda x: x.arg is None and x.dtype.count == 1),
-  (UPat(UOps.BARRIER, dtypes.void, src=UPat(UOps.STORE, src=(UPat(UOps.DEFINE_LOCAL),), allow_any_len=True)), lambda: True),
+  (UPat((UOps.BITCAST, UOps.CAST), src=(UPat(),), name="x"), lambda x: x.arg is None),
+  (UPat(UOps.BARRIER, dtypes.void, src=UPat(UOps.STORE, src=(UPat.var(name="buf"),), allow_any_len=True)), lambda buf: buf.dtype.local),
 
   # NOTE: for testing, we let sinks be anything
   #(UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
@@ -653,7 +659,6 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
 ]])
 
 def type_verify(uops:List[UOp]):
-  return
   for u in uops:
     chk = spec.rewrite(u)
     assert chk is not None and chk.arg is True, f"UOp verification failed on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"

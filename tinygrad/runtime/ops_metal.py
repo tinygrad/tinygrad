@@ -4,7 +4,6 @@ import Metal, libdispatch
 from typing import List, Any, Tuple, Optional
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
-from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.renderer.cstyle2 import CStyle2Language
 
 def wait_check(cbuf: Any):
