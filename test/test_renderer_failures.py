@@ -5,7 +5,7 @@ from tinygrad.codegen.uopgraph import full_graph_rewrite, linearize_uop
 from tinygrad.device import Buffer, Device
 from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.engine.realize import CompiledRunner
-from tinygrad.helpers import dedup, flatten, getenv, prod
+from tinygrad.helpers import dedup, flatten, prod
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.ops import BinaryOps, UOp, UOps
 from tinygrad.renderer import Program
