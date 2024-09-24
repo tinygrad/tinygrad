@@ -411,7 +411,7 @@ class Kernel:
       acc_sz = self.reduceop.dtype.itemsize
       upcast_sz = prod([a for a,b in zip(self.full_shape[self.first_upcast:], self.sts[0].shape[self.first_upcast:]) if a == b])
       local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
-      smem_sz = sum(acc_sz*upcast_sz*local_sz * prod(amt if i == axis else s[1] \
+      smem_sz = acc_sz*upcast_sz*local_sz * sum(prod(amt if i == axis else s[1] \
           for i,s in enumerate(zip(self.sts[reduce_index].shape, self.sts[reduce_index+1].shape)) \
           if s[0] != s[1] and (i == axis or i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
         for reduce_index in [r*2 + len(self.bufs) for r in range(len(self.reduceops))])
