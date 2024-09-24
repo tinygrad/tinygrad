@@ -242,9 +242,9 @@ class TestRandomness(unittest.TestCase):
     assert equal_distribution(lambda *_: nn.BatchNorm2d(*params).weight, lambda _: torch.nn.BatchNorm2d(*params).weight.detach())
     assert equal_distribution(lambda *_: nn.BatchNorm2d(*params).bias, lambda _: torch.nn.BatchNorm2d(*params).bias.detach())
 
-d0 = f"{Device.DEFAULT}:0"
-d1 = f"{Device.DEFAULT}:1"
-d2 = f"{Device.DEFAULT}:2"
+d0 = f"{Device.DEFAULT}:1"
+d1 = f"{Device.DEFAULT}:2"
+d2 = f"{Device.DEFAULT}:3"
 devices_2 = (d0, d1)
 devices_3 = (d0, d1, d2)
 class TestRandomnessMulti(unittest.TestCase):
