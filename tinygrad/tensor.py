@@ -478,7 +478,9 @@ class Tensor:
     # bitcast back to the original dtype and reshape
     out = bits.bitcast(dtype)[:num_].sub(1).reshape(shape)
 
+    # move back to the original device if we were using MOCKGPU
     if getenv("MOCKGPU") and _device: out = out.to(_device)
+
     out.requires_grad = kwargs.get("requires_grad")
     return out.contiguous()
 
