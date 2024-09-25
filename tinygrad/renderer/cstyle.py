@@ -8,7 +8,7 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
 
 def render_load(r:CStyleLanguage, load:UOp, buf:UOp) -> str:
-  sidx = strip_parens(r[load.src[1]])
+  sidx = strip_parens(r[load.src[1]]) if load.src[1].arg == BinaryOps.ADD else r[load.src[1]]
   if isinstance(buf.dtype, ImageDType):
     assert load.dtype == dtypes.float.vec(4), f"images must be float4, getting {load.dtype}"
     val = f"read_imagef({r[buf]}, smp, {sidx})"
@@ -24,7 +24,7 @@ def render_load(r:CStyleLanguage, load:UOp, buf:UOp) -> str:
   return val
 
 def render_store(r:CStyleLanguage, store:UOp, buf:UOp, var:UOp) -> str:
-  sidx = strip_parens(r[store.src[1]])
+  sidx = strip_parens(r[store.src[1]]) if store.src[1].arg == BinaryOps.ADD else r[store.src[1]]
   if isinstance(buf.dtype, ImageDType):
     assert var.dtype == dtypes.float.vec(4), f"images must be float4, getting {var.dtype}"
     val = f"write_imagef({r[buf]}, {sidx}, {r[var]});"
