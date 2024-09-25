@@ -1315,9 +1315,7 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d_fused_ast_rewrite_half(self): _test_conv2d(7, FUSE_CONV_BW=1, AST_REWRITE=1, dtype=dtypes.half)
 
   def test_buf_cnt_at_limit(self): _test_buf_cnt(5, buf_max=5, allowed=1)
-  @unittest.expectedFailure
   def test_buf_cnt_over_limit(self): _test_buf_cnt(7, buf_max=5, allowed=2)
-  @unittest.expectedFailure
   def test_buf_cnt_over_limit_alt(self): _test_buf_cnt(11, buf_max=5, allowed=3)
 
 class TestIndexing(unittest.TestCase):

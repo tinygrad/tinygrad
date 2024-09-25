@@ -266,20 +266,16 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
 def get_inputs(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict[LazyBuffer, List[LazyBuffer]], first=True) -> List[LazyBuffer]:
   if (r:=cache.get(buf)) is not None: return r
   if buf.realized is not None or (buf in realizes and not first): return [buf]
-  cache[buf] = ret = flatten([get_inputs(x.base, realizes, cache, first=False) for x in buf.srcs])
+  cache[buf] = ret = flatten([get_inputs(x.base, realizes, cache, first=False) for x in buf.srcs if x.base.op is not MetaOps.CONST])
   return ret
 
-def split_realize(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> List[LazyBuffer]:
-  if (buf_max:=Device[buf.device].renderer.buf_max) is None: return [buf]
-  ret: List[LazyBuffer] = [buf]
-  cache: Dict[LazyBuffer, List[LazyBuffer]] = {}
-  inputs = dedup(get_inputs(buf, realizes, cache))
-  if len(inputs) > buf_max:
-    raise Exception(len(inputs))
-    #raise Exception(len(dedup(get_inputs(buf.srcs[0], realizes, cache))))
-    #ret.append(buf.srcs[0].srcs[0].base)
-    #ret.append(buf.srcs[0].base)
-  return ret
+def split_realize(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]):
+  if (buf_max:=Device[buf.device].renderer.buf_max) is None: return
+  inputs = dedup(get_inputs(buf, realizes, {}))
+  if len(inputs) < buf_max-1:
+    if buf not in realizes: realizes[buf] = None
+    return
+  for x in buf.srcs: split_realize(x.base, realizes)
 
 def _get_output_groups(outs:List[LazyBuffer]) -> \
   Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]],  # these are the output groups
@@ -358,8 +354,7 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
     if DEBUG_ARANGE: print(colored(f"folding {r}", "green"))
     for tr in group: del realizes[tr]
 
-  for buf in realizes.copy():
-    realizes.update((x, None) for x in split_realize(buf, realizes))
+  for buf in realizes.copy(): split_realize(buf, realizes)
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   for buf in realizes:
@@ -429,6 +424,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   kernel_number = GlobalCounters.kernel_count
   while queue:
     lsi = queue.popleft()
+    if (m:=Device[lsi.outputs[0].device].renderer.buf_max) and len(lsi.bufs) >= m:
+      raise Exception(f"ScheduleItem {lsi} exceeded the buffer count limit")
     if GRAPH:
       kernel_number += 1
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
