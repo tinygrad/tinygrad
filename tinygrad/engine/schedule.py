@@ -408,13 +408,13 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   kernel_number = GlobalCounters.kernel_count
   while queue:
     lsi = queue.popleft()
-    if (m:=Device[(device:=lsi.outputs[0].device)].renderer.buf_max) and len(lsi.bufs) >= m:
-      raise RuntimeError(f"{lsi} exceeded the buffer count limit for {device}")
     if GRAPH:
       kernel_number += 1
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     for out in lsi.outputs: del out.srcs  # can only schedule once
-    schedule.append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.bufs if x.size != 0), lsi.metadata))
+    schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.bufs if x.size != 0), lsi.metadata))
+    if (m:=Device[(device:=si.outputs[0].device)].renderer.buf_max) and len(si.bufs) >= m:
+      raise RuntimeError(f"{si} exceeded the buffer count limit for {device}: {len(si.bufs)} >= {m}")
     for x in graph[lsi]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)

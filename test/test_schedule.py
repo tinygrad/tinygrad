@@ -77,6 +77,7 @@ def _test_buf_cnt(cnt:int, buf_max:int, allowed:int):
   r = CStyleLanguage()
   r.buf_max = buf_max
   alu = functools.reduce(lambda x,y: x+y, [Tensor.ones((1, 1)).contiguous().realize() for _ in range(cnt-1)])
+  Device[Device.DEFAULT].renderer = r
   s = alu.schedule()
   assert len(s) == allowed
   Device[Device.DEFAULT].renderer = backup_renderer
@@ -1326,7 +1327,7 @@ class TestSchedule(unittest.TestCase):
   @unittest.expectedFailure
   def test_conv2d_fused_ast_rewrite_half(self): _test_conv2d(6, FUSE_CONV_BW=1, AST_REWRITE=1, dtype=dtypes.half)
 
-  def test_buf_cnt_at_limit(self): _test_buf_cnt(5, buf_max=5, allowed=1)
+  def test_buf_cnt_at_limit(self): _test_buf_cnt(4, buf_max=5, allowed=1)
   @unittest.expectedFailure
   def test_buf_cnt_over_limit(self): _test_buf_cnt(7, buf_max=5, allowed=2)
   @unittest.expectedFailure
