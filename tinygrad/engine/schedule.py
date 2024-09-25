@@ -269,12 +269,10 @@ def get_inputs(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict[LazyB
   cache[buf] = ret = flatten([get_inputs(x.base, realizes, cache, first=False) for x in buf.srcs if x.base.op is not MetaOps.CONST])
   return ret
 
-def split_realize(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]):
+def split_realize(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> None:
   if (buf_max:=Device[buf.device].renderer.buf_max) is None: return
   inputs = dedup(get_inputs(buf, realizes, {}))
-  if len(inputs) < buf_max-1:
-    if buf not in realizes: realizes[buf] = None
-    return
+  if len(inputs) < buf_max-1: return realizes.setdefault(buf)
   for x in buf.srcs: split_realize(x.base, realizes)
 
 def _get_output_groups(outs:List[LazyBuffer]) -> \
@@ -424,8 +422,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   kernel_number = GlobalCounters.kernel_count
   while queue:
     lsi = queue.popleft()
-    if (m:=Device[lsi.outputs[0].device].renderer.buf_max) and len(lsi.bufs) >= m:
-      raise Exception(f"ScheduleItem {lsi} exceeded the buffer count limit")
+    if (m:=Device[lsi.outputs[0].device].renderer.buf_max) and len(lsi.bufs) >= m: raise RuntimeError(f"{lsi} exceeded the buffer count limit")
     if GRAPH:
       kernel_number += 1
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
