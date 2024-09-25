@@ -1,7 +1,7 @@
 import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast, get_args
+from typing import Callable, Set, Tuple, List, Dict, Optional, DefaultDict, cast, get_args
 from tinygrad.ops import REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, UnaryOps, UOp, UOps, PatternMatcher, UPat, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
@@ -263,6 +263,18 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
+def get_inputs(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], visited:Set[LazyBuffer], ret:Dict[LazyBuffer, None], first=True):
+  if buf.op is MetaOps.CONST or buf in visited: return
+  visited.add(buf)
+  if buf.realized is not None or (buf in realizes and not first): ret[buf] = None
+  else:
+    for x in buf.srcs: get_inputs(x.base, realizes, visited, ret, first=False)
+
+def split_realize(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> List[LazyBuffer]:
+  inputs: Dict[LazyBuffer, None] = {}
+  get_inputs(buf, realizes, set(), inputs)
+  return [buf]
+
 def _get_output_groups(outs:List[LazyBuffer]) -> \
   Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]],  # these are the output groups
         Dict[LazyBuffer, None],                     # these are all the realizes in the graph
@@ -341,20 +353,21 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
     for tr in group: del realizes[tr]
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
-  for buf in realizes:
-    if buf.realized is not None or buf.op is MetaOps.CONST: continue
-    output_groups[reduce_for_op[buf] if buf in reduce_for_op and MULTIOUTPUT else buf].append(buf)
+  for r in realizes:
+    if r.realized is not None or r.op is MetaOps.CONST: continue
+    for buf in split_realize(r, realizes):
+      output_groups[reduce_for_op[buf] if buf in reduce_for_op and MULTIOUTPUT else buf].append(buf)
 
-    # make things that can't be images not images
-    if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
-                                              not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
-      if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
-      buf.dtype = dtypes.float32
-      # hack the underlying buffer too
-      if buf.base is buf:
-        assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
-        buf.buffer.dtype = dtypes.float32
-        buf.buffer.options = None
+      # make things that can't be images not images
+      if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
+                                                not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
+        if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
+        buf.dtype = dtypes.float32
+        # hack the underlying buffer too
+        if buf.base is buf:
+          assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
+          buf.buffer.dtype = dtypes.float32
+          buf.buffer.options = None
   return output_groups, realizes, assign_targets
 
 SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
