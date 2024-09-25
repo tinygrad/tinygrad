@@ -42,7 +42,7 @@ base_pm = PatternMatcher([
   (UPat(UOps.VECTORIZE, name="x"), lambda r,x: r.render_vectorize([r[y] for y in x.src], x.dtype)),
   (UPat(UOps.CAST, name="x"), lambda r,x: r.render_cast(r[x.src[0]], x.dtype, False)),
   (UPat(UOps.BITCAST, name="x"), lambda r,x: r.render_cast(r[x.src[0]], x.dtype, True)),
-  (UPat(UOps.DEFINE_LOCAL, name="x"), lambda r,x: f"{r.smem_align} {r.smem_prefix} {r.render_dtype(x.dtype.base)} {r[x]}[{x.arg[1]}];"),
+  (UPat(UOps.DEFINE_LOCAL, name="x"), lambda r,x: f"{r.smem_align}{r.smem_prefix}{r.render_dtype(x.dtype.base)} {r[x]}[{x.arg[1]}];"),
   (UPat(UOps.BARRIER), lambda r: r.barrier),
   (UPat(UOps.SPECIAL, name="x"), lambda r,x: f"{r.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {x.arg[1]} */"),
   # function calls
@@ -175,7 +175,7 @@ class CStyleLanguage(Renderer):
       if u.op is UOps.SPECIAL:
         r[u] = u.arg[0]
       else:
-        prefix = {UOps.RANGE: "ridx", UOps.ALU: "alu", UOps.WMMA: "wmma", UOps.DEFINE_LOCAL: "local",
+        prefix = {UOps.RANGE: "ridx", UOps.ALU: "alu", UOps.WMMA: "wmma", UOps.DEFINE_LOCAL: "temp",
                   UOps.CAST: "cast", UOps.BITCAST: "cast", UOps.GEP: "gep", UOps.VECTORIZE: "cast",
                   UOps.DEFINE_ACC: "acc", UOps.LOAD: "val"}.get(u.op, "unk")
         r[u] = f"{prefix}{c[prefix]}"
