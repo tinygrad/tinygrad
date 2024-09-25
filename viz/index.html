@@ -246,7 +246,7 @@
       const p = Object.assign(document.createElement("p"), {id: `kernel-${k.name}`, innerText: k.name})
       kernelUl.appendChild(p)
       k.ctxs.forEach((u, j) => {
-        const rwUl = Object.assign(document.createElement("ul"), { innerText: u, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
+        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${u.filename} - ${u.match_count}`, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
         rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
           e.stopPropagation();
@@ -284,7 +284,10 @@
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
-    metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc }));
+    metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc.filename }));
+    const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(ret[0].loc.code)}</code>`, className: "wrap code-block language-python" });
+    metadata.appendChild(pre);
+    hljs.highlightElement(pre);
     // ** resizer
     metadata.appendChild(Object.assign(document.createElement("div"), { id: "resize-handle" }));
     const resizeHandle = document.getElementById("resize-handle");
@@ -361,7 +364,7 @@
         });
       })
     } else {
-      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${ret[0].loc}.` }));
+      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${ret[0].loc.filename}.` }));
     }
   }
   document.addEventListener("keydown", async function(event) {
