@@ -68,7 +68,7 @@ class MetalCompiler(Compiler):
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
     options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
     msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
-    compileError = objc_instance(0)
+    compileError = objc_instance()
     library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(src),
                   options, ctypes.byref(compileError), restype=objc_instance)
     error_check(compileError, CompileError)
@@ -87,14 +87,14 @@ class MetalProgram:
           print("Error running disassembler: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
     assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-    error_library_creation = objc_instance(0)
+    error_library_creation = objc_instance()
     self.library = msg(self.device.device, "newLibraryWithData:error:", data, ctypes.byref(error_library_creation), restype=objc_instance)
     error_check(error_library_creation)
     self.fxn = msg(self.library, "newFunctionWithName:", to_ns_str(name), restype=objc_instance)
     descriptor = msg(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"), "new", restype=objc_instance)
     msg(descriptor, "setComputeFunction:", self.fxn)
     msg(descriptor, "setSupportIndirectCommandBuffers:", True)
-    error_pipeline_creation = objc_instance(0)
+    error_pipeline_creation = objc_instance()
     self.pipeline_state = msg(self.device.device, "newComputePipelineStateWithDescriptor:options:reflection:error:",
       descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation), restype=objc_instance)
     error_check(error_pipeline_creation)
