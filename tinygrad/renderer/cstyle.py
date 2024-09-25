@@ -69,8 +69,11 @@ base_pm = PatternMatcher([
   # const
   (UPat(UOps.CONST, arg=math.inf), lambda r: r.infinity),
   (UPat(UOps.CONST, arg=-math.inf), lambda r: "-"+r.infinity),
+  (UPat(UOps.CONST, dtype=dtypes.double, name="x"), lambda r,x: f"{x.arg}" if not math.isnan(x.arg) else r.nan),
   (UPat(UOps.CONST, dtype=dtypes.float, name="x"), lambda r,x: f"{x.arg}f" if not math.isnan(x.arg) else r.nan),
-  (UPat(UOps.CONST, dtype=dtypes.uint64, name="x"), lambda r,x: f"{x.arg}ULL"),
+  (UPat(UOps.CONST, dtype=dtypes.int64, name="x"), lambda r,x: f"{x.arg}ll"),
+  (UPat(UOps.CONST, dtype=dtypes.uint64, name="x"), lambda r,x: f"{x.arg}ull"),
+  (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda r,x: f"{x.arg}u"),
   (UPat(UOps.CONST, dtype=dtypes.bool, name="x"), lambda r,x: "1" if x.arg else "0"),
   (UPat(UOps.CONST, name="x"), lambda r,x: str(x.arg) if x.arg >= 0 else f"({x.arg})"),  # TODO: this is not needed, fix tests
   # function calls
@@ -81,8 +84,8 @@ base_pm = PatternMatcher([
 ])
 
 extra_pm = PatternMatcher([
-  # double/half consts are rendered as float and casted
-  (UPat(UOps.CONST, (dtypes.half, dtypes.double), name="c"), lambda c: UOp.const(dtypes.float, c.arg).cast(c.dtype)),
+  # half consts are rendered as float and casted
+  (UPat(UOps.CONST, dtypes.half, name="c"), lambda c: UOp.const(dtypes.float, c.arg).cast(c.dtype)),
   # insert a NOOP before BITCAST to force it to be rendered. not needed on all backends?
   (UPat(UOps.BITCAST, name="x"),
    lambda x: UOp(UOps.BITCAST, x.dtype, (UOp(UOps.NOOP, x.src[0].dtype, x.src),)) if x.src[0].op is not UOps.NOOP else None),
