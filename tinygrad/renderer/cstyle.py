@@ -176,7 +176,7 @@ class CStyleLanguage(Renderer):
         r[u] = u.arg[0]
       else:
         prefix = {UOps.RANGE: "ridx", UOps.ALU: "alu", UOps.WMMA: "wmma", UOps.DEFINE_LOCAL: "local",
-                  UOps.CAST: "cast", UOps.BITCAST: "cast", UOps.GEP: "gep",
+                  UOps.CAST: "cast", UOps.BITCAST: "cast", UOps.GEP: "gep", UOps.VECTORIZE: "cast",
                   UOps.DEFINE_ACC: "acc", UOps.LOAD: "val"}.get(u.op, "unk")
         r[u] = f"{prefix}{c[prefix]}"
 
