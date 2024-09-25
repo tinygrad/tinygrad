@@ -75,7 +75,7 @@ def benchmark_model(m, devices, validate_outs=False):
       del inputs, tinygrad_model, tinygrad_jitted_model
     except CompileError as e:
       # METAL fails with buffer count limit
-      if m == "dm" and device == "METAL": return
+      #if m == "dm" and device == "METAL": return
       raise e
 
   # convert model to torch
