@@ -6,6 +6,8 @@ from tinygrad.helpers import to_mv, getenv
 from tinygrad.runtime.autogen import adreno
 sys.path.append(pathlib.Path(__file__).parent.parent.parent.as_posix())
 
+IOCTL = getenv("IOCTL", 0)
+
 ops = {}
 import xml.etree.ElementTree as ET
 xml = ET.parse(pathlib.Path(__file__).parent / "adreno_pm4.xml")
@@ -85,15 +87,15 @@ def parse_cmd_buf(dat):
         num_unit = vals[0]>>22
         print(f"{num_unit=} {state_block=} {state_src=} {state_type=} {dst_off=}")
 
-        if state_block == SB6_CS_SHADER:
+        if state_block == SB6_CS_SHADER and IOCTL > 2:
           from extra.disassemblers.adreno import disasm_raw
-          if state_type == ST6_SHADER and getenv("DISASM"): disasm_raw(get_mem(((vals[2] << 32) | vals[1]), num_unit * 128))
-          if state_type == ST6_CONSTANTS and getenv("CONSTANTS"): hexdump(get_mem(((vals[2] << 32) | vals[1]), min(0x180, num_unit*4)))
+          if state_type == ST6_SHADER: disasm_raw(get_mem(((vals[2] << 32) | vals[1]), num_unit * 128))
+          if state_type == ST6_CONSTANTS: hexdump(get_mem(((vals[2] << 32) | vals[1]), min(0x180, num_unit*4)))
           if state_type == ST6_IBO:
             ibos_bytes = get_mem((vals[2] << 32) | vals[1], num_unit * 16 * 4)
             print('texture ibos')
             hexdump(ibos_bytes)
-        elif state_block == SB6_CS_TEX:
+        elif state_block == SB6_CS_TEX and IOCTL > 2:
           if state_type == ST6_SHADER:
             samplers_bytes = get_mem((vals[2] << 32) | vals[1], num_unit * 4 * 4)
             print('texture samplers')
@@ -151,7 +153,7 @@ def ioctl(fd, request, argp):
         cmd = get_struct(s.cmdlist+ctypes.sizeof(msm_kgsl.struct_kgsl_command_object)*i, msm_kgsl.struct_kgsl_command_object)
         print(f"cmd {i}:", format_struct(cmd))
         #hexdump(get_mem(cmd.gpuaddr, cmd.size))
-        parse_cmd_buf(get_mem(cmd.gpuaddr, cmd.size))
+        if IOCTL > 1: parse_cmd_buf(get_mem(cmd.gpuaddr, cmd.size))
       for i in range(s.numobjs):
         obj = get_struct(s.objlist+s.objsize*i, msm_kgsl.struct_kgsl_command_object)
         print(f"obj {i}:", format_struct(obj))

@@ -15,10 +15,9 @@ from weakref import WeakKeyDictionary
 
 class GraphException(Exception): pass
 
-def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]) -> List[ExecItem]:
+def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], max_batch_size=0) -> List[ExecItem]:
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
-  max_batch_size = getenv("JIT_BATCH_SIZE", 32)
   graphed_jit_cache: List[ExecItem] = []
   current_batch: List[ExecItem] = []
   current_device: Optional[Compiled] = None
@@ -50,7 +49,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
     can_be_graphed = ji_graph_dev and ji_graph_dev.graph
     can_share_graph = (ji_graph_dev == current_device or (isinstance(graph_class, type) and issubclass(graph_class, MultiGraphRunner)) and
                        type(ji_graph_dev) is type(current_device))
-    can_extend_graph_batch = can_be_graphed and len(current_batch) < max_batch_size and can_share_graph
+    can_extend_graph_batch = can_be_graphed and (max_batch_size == 0 or len(current_batch) < max_batch_size) and can_share_graph
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
 
     if can_be_graphed: current_batch.append(ji)
@@ -161,7 +160,7 @@ class CapturedJit(Generic[ReturnType]):
 
     # Condense the items into a graph executor.
     if JIT < 2 and not self._graphed:
-      self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals)
+      self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
       self._input_replace = get_input_replace(self._jit_cache, input_buffers)
       self._graphed = True
 

@@ -48,8 +48,8 @@ class TestViz(unittest.TestCase):
     list(lower_schedule(schedule2))
     ret = load_kernels(contexts)
     assert len(ret) == 2
-    assert all(len([x for x in y.ctxs.values() if "schedule" in x.loc]) != 0 for y in ret)
-    assert all(len([x for x in y.ctxs.values() if "uopgraph" in x.loc]) != 0 for y in ret)
+    assert all(len([x for x in y.ctxs.values() if "schedule" in x.loc[0]]) != 0 for y in ret)
+    assert all(len([x for x in y.ctxs.values() if "uopgraph" in x.loc[0]]) != 0 for y in ret)
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()
@@ -100,7 +100,7 @@ class TestViz(unittest.TestCase):
     new_sink = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, new_sink, unified=0)
     self.assert_valid_ctx(contexts)
-    assert all(ctx.loc.split("/")[-1].split(":")[0] == __file__.split("/")[-1] for ctx in contexts)
+    assert all(ctx.loc[0].split("/")[-1] == __file__.split("/")[-1] for ctx in contexts)
 
   @unittest.skipIf(CI, "slow, it's generating diffs for 36202 rules")
   def test_fuzz_resnet(self):
