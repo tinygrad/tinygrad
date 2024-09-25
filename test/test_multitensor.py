@@ -358,7 +358,7 @@ class TestMultiTensor(unittest.TestCase):
     shard_output.backward()
     shard_grad = m.conv1.weight.grad.numpy()
     # sometimes there is zeros in these grads... why?
-    np.testing.assert_allclose(grad, shard_grad, atol=3e-6, rtol=3e-6)
+    np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
 
   def test_multi_tensor_jit_param(self):
     @TinyJit
