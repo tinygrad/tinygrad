@@ -4,17 +4,8 @@ import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
-from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
+from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
-
-def render_const(r:CStyleLanguage, x:ConstType, dtype:DType) -> str:
-  if math.isnan(x): val = r.nan
-  elif math.isinf(x): val = ("-" if x < 0 else "") + r.infinity
-  elif dtype == dtypes.bool: val = "1" if x else "0"
-  elif dtype == dtypes.float: val = f"{x}f"
-  elif dtype == dtypes.uint64: val = f"{x}ULL"
-  else: val = str(x)
-  return val
 
 def render_load(r:CStyleLanguage, load:UOp, buf:UOp) -> str:
   sidx = strip_parens(r[load.src[1]])
@@ -75,8 +66,14 @@ base_pm = PatternMatcher([
   (UPat(UOps.BARRIER), lambda r: r.barrier),
   (UPat(UOps.NOOP, name="x"), lambda r,x: r[x.src[0]]),
   (UPat(UOps.SPECIAL, name="x"), lambda r,x: f"{r.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}"),
+  # const
+  (UPat(UOps.CONST, arg=math.inf), lambda r: r.infinity),
+  (UPat(UOps.CONST, arg=-math.inf), lambda r: "-"+r.infinity),
+  (UPat(UOps.CONST, dtype=dtypes.float, name="x"), lambda r,x: f"{x.arg}f" if not math.isnan(x.arg) else r.nan),
+  (UPat(UOps.CONST, dtype=dtypes.uint64, name="x"), lambda r,x: f"{x.arg}ULL"),
+  (UPat(UOps.CONST, dtype=dtypes.bool, name="x"), lambda r,x: "1" if x.arg else "0"),
+  (UPat(UOps.CONST, name="x"), lambda r,x: str(x.arg) if x.arg >= 0 else f"({x.arg})"),  # TODO: this is not needed, fix tests
   # function calls
-  (UPat(UOps.CONST, name="x"), lambda r,x: render_const(r, x.arg, x.dtype) if x.arg >= 0 else f"({render_const(r, x.arg, x.dtype)})"),
   (UPat(UOps.LOAD, src=(UPat.var("buf"),), allow_any_len=True, name="load"), render_load),
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat.var("var")), allow_any_len=True, name="store"), render_store),
   (UPat(UOps.ALU, name="x"), render_alu),
@@ -84,8 +81,8 @@ base_pm = PatternMatcher([
 ])
 
 extra_pm = PatternMatcher([
-  # half consts are rendered as float and casted
-  (UPat(UOps.CONST, dtypes.half, name="c"), lambda c: UOp.const(dtypes.float, c.arg).cast(dtypes.half)),
+  # double/half consts are rendered as float and casted
+  (UPat(UOps.CONST, (dtypes.half, dtypes.double), name="c"), lambda c: UOp.const(dtypes.float, c.arg).cast(c.dtype)),
   # insert a NOOP before BITCAST to force it to be rendered. not needed on all backends?
   (UPat(UOps.BITCAST, name="x"),
    lambda x: UOp(UOps.BITCAST, x.dtype, (UOp(UOps.NOOP, x.src[0].dtype, x.src),)) if x.src[0].op is not UOps.NOOP else None),
