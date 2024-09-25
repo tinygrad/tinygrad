@@ -81,6 +81,10 @@ ptx_matcher = PatternMatcher([
        UOp.const(dtypes.int64, 0))+root.src[2:])),
   (UPat(UOps.IF, name="x", dtype=dtypes.void, src=(UPat(UOps.CAST), UPat())),
     lambda x: UOp(x.op, x.dtype, (UOp(UOps.ALU, x.src[0].dtype, (x.src[0], UOp.const(dtypes.bool, True)), BinaryOps.XOR), x.src[1]))),
+  (UPat(UOps.IF, name="x", dtype=dtypes.void, src=(UPat(arg=BinaryOps.CMPLT), UPat())),
+    lambda x: UOp(x.op, x.dtype, (UOp(UOps.ALU, x.src[0].dtype, (x.src[0], UOp.const(dtypes.bool, True)), BinaryOps.XOR), x.src[1]))),
+  (UPat(UOps.IF, name="x", dtype=dtypes.void, src=(UPat(arg=BinaryOps.AND), UPat())),
+    lambda x: UOp(x.op, x.dtype, (UOp(UOps.ALU, x.src[0].dtype, (x.src[0], UOp.const(dtypes.bool, True)), BinaryOps.XOR), x.src[1]))),
 ])
 
 class PTXRenderer(Renderer):
