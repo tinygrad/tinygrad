@@ -10,7 +10,7 @@ from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, Device
 from tinygrad.shape.view import View, strides_for_shape
 
 # creation can recurse a lot
@@ -271,8 +271,11 @@ def get_inputs(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], visited:Set[Lazy
     for x in buf.srcs: get_inputs(x.base, realizes, visited, ret, first=False)
 
 def split_realize(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> List[LazyBuffer]:
+  print(Device[buf.device].renderer.buf_max, buf.device)
+  if (buf_max:=Device[buf.device].renderer.buf_max) is None: return [buf]
   inputs: Dict[LazyBuffer, None] = {}
   get_inputs(buf, realizes, set(), inputs)
+  if len(inputs) > buf_max: raise Exception(buf)
   return [buf]
 
 def _get_output_groups(outs:List[LazyBuffer]) -> \
