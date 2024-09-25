@@ -22,7 +22,7 @@ def helper_exec_op(device, outbuf, inbufs):
       for i in range(1, len(inbufs)): s = s.xor(fst[i])
 
       si = create_schedule([s.lazydata])[-1]
-      prg = get_runner(device, si.ast)
+      prg = get_runner(si)
     cached_prgs[(device, len(inbufs))] = prg
 
   return ExecItem(cached_prgs[(device, len(inbufs))], [outbuf] + inbufs)

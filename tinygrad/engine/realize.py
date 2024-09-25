@@ -4,11 +4,11 @@ from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, dedup
 from tinygrad.helpers import NO_MEMORY_PLANNER
-from tinygrad.ops import MetaOps, UOps, UOp
+from tinygrad.ops import MetaOps, UOps
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
-from tinygrad.renderer import Renderer, Program
+from tinygrad.renderer import Program
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import ScheduleItem
 
