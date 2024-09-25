@@ -75,7 +75,7 @@ base_pm = PatternMatcher([
   (UPat(UOps.CONST, dtype=dtypes.uint64, name="x"), lambda r,x: f"{x.arg}ull"),
   (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda r,x: f"{x.arg}u"),
   (UPat(UOps.CONST, dtype=dtypes.bool, name="x"), lambda r,x: "1" if x.arg else "0"),
-  (UPat(UOps.CONST, name="x"), lambda r,x: str(x.arg) if x.arg >= 0 else f"({x.arg})"),  # TODO: this is not needed, fix tests
+  (UPat(UOps.CONST, name="x"), lambda r,x: str(x.arg)),
   # function calls
   (UPat(UOps.LOAD, src=(UPat.var("buf"),), allow_any_len=True, name="load"), render_load),
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat.var("var")), allow_any_len=True, name="store"), render_store),

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-from typing import Dict, List, Tuple
-import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib
+from typing import Dict, List, Optional, Tuple
+import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, re
 from dataclasses import dataclass, asdict
 from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from tinygrad import Device
 from tinygrad.helpers import Context, getenv, to_function_name
-from tinygrad.ops import TrackedRewriteContext, UOp, UOps
+from tinygrad.ops import TrackedRewriteContext, UOp, UOps, lines
 from tinygrad.engine.graph import uops_colors, word_wrap
 from tinygrad.engine.realize import get_runner
 from tinygrad.engine.schedule import full_ast_rewrite
@@ -18,8 +18,22 @@ from tinygrad.engine.schedule import full_ast_rewrite
 def graph_rewrites(ctx:TrackedRewriteContext): return [x for x in ctx.rewrites if x[2].location[0].split("/")[-1] != "ops.py"]
 
 @dataclass(frozen=True)
+class RewriteLocation:
+  filename: str
+  code: str
+  matcher_name: Optional[str]
+  match_count: int
+  @staticmethod
+  def from_ctx(ctx:TrackedRewriteContext) -> RewriteLocation:
+    fp, lineno = ctx.loc
+    p = r"graph_rewrite\([^,]+,\s*([^>]+)\)"
+    match = re.search(p, code:=lines(fp)[lineno-1].strip())
+    return RewriteLocation(f"{fp.split('/')[-1]}:{lineno}", code, match.group(1) if match is not None else None, len(graph_rewrites(ctx)))
+  def to_json(self): return asdict(self)
+
+@dataclass(frozen=True)
 class UOpRet:
-  loc: str
+  loc: RewriteLocation
   graphs: List[UOp]                                        # snapshot of the entire AST after each rewrite
   diffs: List[Tuple[str, Tuple[str, int], List[str]]]      # the diffs for each rewrite
   extra: List[List[str]]                                   # these become code blocks in the UI
@@ -42,8 +56,8 @@ class UOpRet:
       diffs.append((pattern.printable(), pattern.location, list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines()))))
       uops.append(new_sink)
       extra.append([str(new_sink)])
-    return UOpRet(ctx.loc, uops, diffs, extra, additions)
-  def to_json(self) -> Dict: return {**asdict(self), "graphs": list(map(uop_to_json, self.graphs))}
+    return UOpRet(RewriteLocation.from_ctx(ctx), uops, diffs, extra, additions)
+  def to_json(self) -> Dict: return {**asdict(self), "loc":self.loc.to_json(), "graphs": list(map(uop_to_json, self.graphs))}
 
 def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
@@ -71,16 +85,16 @@ def replace_uop(base:UOp, replaces:Dict[bytes, UOp]) -> UOp:
 class KernelRet:
   name: str
   code: str
-  ctxs: Dict[Tuple[str, bytes], TrackedRewriteContext]
+  ctxs: Dict[Tuple[Tuple, bytes], TrackedRewriteContext]
   def to_json(self) -> Dict:
-    return {"name":self.name, "code":self.code, "ctxs":[f"{x.loc} - {len(graph_rewrites(x))}" for x in self.ctxs.values()]}
+    return {"name":self.name, "code":self.code, "ctxs":[RewriteLocation.from_ctx(x).to_json() for x in self.ctxs.values()]}
 
 def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
   ret: Dict[str, KernelRet] = {}
   kernel_name = ""
   code = ""
   for ctx in contexts:
-    if ctx.loc.split("/")[-1].split(":")[0] == "schedule.py":
+    if ctx.loc[0].split("/")[-1] == "schedule.py":
       with Context(TRACK_MATCH_STATS=0): kernel_name, code = (prg:=get_runner(Device.DEFAULT, full_ast_rewrite(ctx.sink)).p).name, prg.src
     elif ctx.kernel_name is not None: kernel_name, code = ctx.kernel_name, ""
     if ret.get(k:=to_function_name(kernel_name)) is None: ret[k] = KernelRet(k, code, {})
