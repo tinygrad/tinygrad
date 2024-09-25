@@ -457,8 +457,7 @@ class TestNN(unittest.TestCase):
                 [12, 19, 8, 1]])
     result = layer(a)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(3, len([item for item in schedule if item.ast.op is UOps.SINK]),
-                     "first run realizes arange, weight, and embedding")
+    self.assertEqual(3, len([item for item in schedule if item.ast.op is UOps.SINK]), "first run realizes arange, weight, and embedding")
     run_schedule(schedule)
 
     b = Tensor([[1, 2, 3],
