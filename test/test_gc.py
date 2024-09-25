@@ -2,10 +2,14 @@
 import gc
 import unittest
 import numpy as np
+from tinygrad.device import Buffer
 from tinygrad.tensor import Tensor
 
 def tensors_allocated():
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])
+
+def bufs_allocated():
+  return sum([isinstance(x, Buffer) for x in gc.get_objects()])
 
 class TestGC(unittest.TestCase):
 
@@ -34,6 +38,16 @@ class TestGC(unittest.TestCase):
     assert (tensors_allocated() == 5)
     del b
     assert (tensors_allocated() == 3)
+
+  def test_schedule_gc(self):
+    Tensor.ones(256).contiguous().realize()
+    Tensor.ones(5, 5).contiguous().schedule()
+    self.assertEqual(bufs_allocated(), 0)
+
+  def test_schedule_gc_with_inputs(self):
+    x = Tensor.ones(256).contiguous().realize()
+    (x+Tensor.ones(256).contiguous()).schedule()
+    self.assertEqual(bufs_allocated(), 1)
 
 if __name__ == '__main__':
   unittest.main()
