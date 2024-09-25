@@ -87,10 +87,10 @@ def diff_kernel(offset:int) -> Union[Tuple[int, int], bool]:
 
 # *** generic runner for executing fxn across all rows of a table in parallel
 
-def _pmap(row_count:int, fxn:Callable[[int], Union[bool, Tuple[int, int, int]]], maxtasksperchild:int=16) -> None:
+def _pmap(row_count:int, fxn:Callable[[int], Union[bool, Tuple[int, int]]], maxtasksperchild:int=16) -> None:
   with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), maxtasksperchild=maxtasksperchild) as pool:
     inputs = list(range(0, row_count, PAGE_SIZE))
-    ret: List[Union[bool, Tuple[int, int, int]]] = list(tqdm(pool.imap_unordered(fxn, inputs), total=len(inputs)))
+    ret: List[Union[bool, Tuple[int, int]]] = list(tqdm(pool.imap_unordered(fxn, inputs), total=len(inputs)))
     pool.close()
     pool.join()
     pool.terminate()
