@@ -84,8 +84,10 @@ base_pm = PatternMatcher([
 ])
 
 extra_pm = PatternMatcher([
-  # half consts are rendered as float and casted
+  # consts are rendered to larger type and casted
   (UPat(UOps.CONST, (dtypes.bfloat16, dtypes.half), name="c"), lambda c: UOp.const(dtypes.float, c.arg).cast(c.dtype)),
+  (UPat(UOps.CONST, (dtypes.uint8, dtypes.uint16), name="c"), lambda c: UOp.const(dtypes.uint32, c.arg).cast(c.dtype)),
+  (UPat(UOps.CONST, (dtypes.int8, dtypes.int16), name="c"), lambda c: UOp.const(dtypes.int32, c.arg).cast(c.dtype)),
   # insert a NOOP before BITCAST to force it to be rendered. not needed on all backends?
   (UPat(UOps.BITCAST, name="x"),
    lambda x: UOp(UOps.BITCAST, x.dtype, (UOp(UOps.NOOP, x.src[0].dtype, x.src),)) if x.src[0].op is not UOps.NOOP else None),
