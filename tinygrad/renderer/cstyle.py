@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
 import os, math
-from collections import defaultdict
+from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
@@ -144,13 +144,14 @@ class CStyleLanguage(Renderer):
     r: Dict[UOp, str] = {}
     self.r = r
 
-    # get children
-    children = defaultdict(list)
+    # get should render
+    child_count = Counter(v for ru in uops for v in ru.src)
+    dont_render: Dict[UOp, bool] = {}
     for u in uops:
-      for v in u.src:
-        # BITCAST is a double child so that it always renders the input
-        if u.op is UOps.BITCAST: children[v].append(u)
-        children[v].append(u)
+      # bitcast src must be rendered
+      if u.op is UOps.BITCAST: dont_render[u.src[0]] = True
+      dont_render[u] = u.op in {UOps.CONST, UOps.GEP} or \
+        (u.op in {UOps.VECTORIZE, UOps.ALU} and child_count[u] == 1 and u.arg is not BinaryOps.MAX and not getenv("EXPAND_SSA"))
 
     bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
     kernel = []
@@ -175,6 +176,7 @@ class CStyleLanguage(Renderer):
         r[u] = u.arg[0]
       else:
         prefix = {UOps.RANGE: "ridx", UOps.ALU: "alu", UOps.WMMA: "wmma", UOps.DEFINE_LOCAL: "local",
+                  UOps.CAST: "cast", UOps.BITCAST: "cast",
                   UOps.DEFINE_ACC: "acc", UOps.LOAD: "val"}.get(u.op, "unk")
         r[u] = f"{prefix}{c[prefix]}"
 
@@ -182,9 +184,7 @@ class CStyleLanguage(Renderer):
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {UOps.ENDIF, UOps.ENDRANGE}: depth -= 1
-      if u.op in {UOps.CONST, UOps.GEP} or (u.op in {UOps.VECTORIZE, UOps.ALU} and len(children[u]) == 1 and
-                                            u.arg is not BinaryOps.MAX and not getenv("EXPAND_SSA")):
-        r[u] = l #"("+l+")" if u.op is UOps.ALU else l
+      if dont_render[u]: r[u] = l
       else:
         if u.op in {UOps.RANGE, UOps.ASSIGN, UOps.DEFINE_LOCAL} or u.dtype == dtypes.void:
           if u.op is UOps.ASSIGN: r[u] = r[u.src[0]]
