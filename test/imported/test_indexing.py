@@ -33,9 +33,9 @@ def copy_(src:Tensor, other:Tensor) -> Tensor: return copy.copy(src)
 def data_ptr(tensor:Tensor): return tensor.lazydata
 
 # https://pytorch.org/docs/stable/generated/torch.Tensor.index_put_.html
-# TODO this is setitem
 def index_put_(tensor:Tensor, indices, values, accumulate) -> Tensor:
-  tensor[indices] = values
+  if accumulate: tensor[indices] += values
+  else: tensor[indices] = values
 
 # https://pytorch.org/docs/stable/generated/torch.argsort.html
 def argsort(tensor:Tensor) -> Tensor:
@@ -207,18 +207,14 @@ class TestIndexing(unittest.TestCase):
       numpy_testing_assert_equal_helper(x[[2, 3, 4]], np.array([4, 4, 4]))
       x[ri([2, 3, 4]), ] = 3
       numpy_testing_assert_equal_helper(x[ri([2, 3, 4]), ], np.array([3, 3, 3]))
-      x[ri([0, 2, 4]), ] = np.array([5, 4, 3])
+      x[ri([0, 2, 4]), ] = Tensor([5, 4, 3])
       numpy_testing_assert_equal_helper(x[ri([0, 2, 4]), ], np.array([5, 4, 3]))
 
     # Case 1: Purely Integer Array Indexing
     reference = consec((10,))
     validate_indexing(reference)
-
     # setting values
-    # TODO: advanced setitem
-    '''
     validate_setting(reference)
-    '''
 
     # Tensor with stride != 1
     # strided is [1, 3, 5, 7]
@@ -276,21 +272,17 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(reference[rows, columns], np.array([[1, 2],
                                                                           [4, 5]]))
 
-    # TODO: advanced setitem
-    '''
     # setting values
     reference[ri([0]), ri([1])] = -1
     numpy_testing_assert_equal_helper(reference[ri([0]), ri([1])], np.array([-1]))
-    reference[ri([0, 1, 2]), ri([0])] = np.array([-1, 2, -4])
+    reference[ri([0, 1, 2]), ri([0])] = Tensor([-1, 2, -4])
     numpy_testing_assert_equal_helper(reference[ri([0, 1, 2]), ri([0])],
                       np.array([-1, 2, -4]))
-    reference[rows, columns] = np.array([[4, 6], [2, 3]])
+    reference[rows, columns] = Tensor([[4, 6], [2, 3]])
     numpy_testing_assert_equal_helper(reference[rows, columns],
                       np.array([[4, 6], [2, 3]]))
-    '''
 
     # Verify still works with Transposed (i.e. non-contiguous) Tensors
-
     reference = Tensor([[0, 1, 2, 3],
                         [4, 5, 6, 7],
                         [8, 9, 10, 11]]).T
@@ -323,7 +315,7 @@ class TestIndexing(unittest.TestCase):
                   [1, 2]])
     numpy_testing_assert_equal_helper(reference[rows, columns], np.array([[0, 4], [5, 11]]))
 
-    # TODO: advanced setitem
+    # TODO: non contiguous setitem
     '''
     # setting values
     reference[ri([0]), ri([1])] = -1
@@ -388,19 +380,18 @@ class TestIndexing(unittest.TestCase):
 
     numpy_testing_assert_equal_helper(strided[ri([0]), ri([1])],
                       np.array([11]))
-    # TODO advanced setitem
+    # TODO non contiguous setitem
     '''
     strided[ri([0]), ri([1])] = -1
     numpy_testing_assert_equal_helper(strided[ri([0]), ri([1])],
                       Tensor([-1]))
     '''
-
     reference = Tensor.arange(0., 24).reshape(3, 8)
     strided = set_(reference, (2,2), (7,1), 10)
 
     numpy_testing_assert_equal_helper(strided[ri([0, 1]), ri([1, 0])],
                       np.array([11, 17]))
-    # TODO advanced setitem
+    # TODO non contiguous setitem
     '''
     strided[ri([0, 1]), ri([1, 0])] = Tensor([-1, 2])
     numpy_testing_assert_equal_helper(strided[ri([0, 1]), ri([1, 0])],
@@ -416,7 +407,7 @@ class TestIndexing(unittest.TestCase):
                   [0, 1]])
     numpy_testing_assert_equal_helper(strided[rows, columns],
                       np.array([[10, 11], [17, 18]]))
-    # TODO advanced setitem
+    # TODO non contiguous setitem
     '''
     strided[rows, columns] = Tensor([[4, 6], [2, 3]])
     numpy_testing_assert_equal_helper(strided[rows, columns],
@@ -524,12 +515,9 @@ class TestIndexing(unittest.TestCase):
       assert_get_eq(reference, indexer)
       assert_backward_eq(reference, indexer)
 
-    # TODO advanced setitem
-    '''
     for indexer in indices_to_test:
       assert_set_eq(reference, indexer, 44)
       assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
-    '''
 
     reference = Tensor.arange(0., 160).reshape(4, 8, 5)
 
@@ -579,11 +567,9 @@ class TestIndexing(unittest.TestCase):
 
     for indexer in indices_to_test:
       assert_get_eq(reference, indexer)
-      # TODO advanced setitem
-      '''
+
       assert_set_eq(reference, indexer, 212)
       assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
-      '''
       assert_backward_eq(reference, indexer)
 
     reference = Tensor.arange(0., 1296).reshape(3, 9, 8, 6)
@@ -653,21 +639,16 @@ class TestIndexing(unittest.TestCase):
 
     for indexer in indices_to_test:
       assert_get_eq(reference, indexer)
-      # TODO advanced setitem
-      '''
       assert_set_eq(reference, indexer, 1333)
       assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
-      '''
+
     indices_to_test += [
       [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
       [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
     ]
     for indexer in indices_to_test:
       assert_get_eq(reference, indexer)
-      # TODO advanced setitem
-      '''
       assert_set_eq(reference, indexer, 1333)
-      '''
       assert_backward_eq(reference, indexer)
 
   # TODO setitem backward
@@ -1520,10 +1501,7 @@ class TestNumpy(unittest.TestCase):
   def test_broaderrors_indexing(self):
     a = Tensor.zeros(5, 5)
     self.assertRaises(IndexError, a.__getitem__, ([0, 1], [0, 1, 2]))
-    # TODO: fancy setitem
-    '''
     self.assertRaises(IndexError, a.contiguous().__setitem__, ([0, 1], [0, 1, 2]), 0)
-    '''
 
   # TODO out of bound getitem does not raise error
   '''

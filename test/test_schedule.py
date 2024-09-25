@@ -4,11 +4,13 @@
 
 import unittest
 import numpy as np
+import functools
 from typing import List, Optional, Union, cast
 
 from tinygrad import nn, dtypes
 from tinygrad.device import Device
 from tinygrad.dtype import DType, PtrDType
+from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
@@ -66,6 +68,18 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
     assert ref_img.grad is not None and ref_w.grad is not None and img.grad is not None and w.grad is not None
     np.testing.assert_allclose(img.grad.numpy(), ref_img.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
     np.testing.assert_allclose(w.grad.numpy(), ref_w.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
+
+def _test_buf_cnt(cnt:int, buf_max:int, allowed:int):
+  backup_renderer = Device[Device.DEFAULT].renderer
+  r = CStyleLanguage()
+  r.buf_max = buf_max
+  alu = functools.reduce(lambda x,y: x+y, [Tensor.ones((1, 1)).contiguous().realize() for _ in range(cnt-1)])
+  s = alu.schedule()
+  assert len(s) == allowed
+  Device[Device.DEFAULT].renderer = backup_renderer
+  run_schedule(s)
+  expected = functools.reduce(lambda x,y: x+y, [np.ones((1, 1)) for _ in range(cnt-1)])
+  np.testing.assert_equal(alu.numpy(), expected)
 
 class TestSchedule(unittest.TestCase):
   def test_basic_binop_fusion(self):
@@ -1299,6 +1313,12 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.expectedFailure
   def test_conv2d_fused_ast_rewrite_half(self): _test_conv2d(7, FUSE_CONV_BW=1, AST_REWRITE=1, dtype=dtypes.half)
+
+  def test_buf_cnt_at_limit(self): _test_buf_cnt(5, buf_max=5, allowed=1)
+  @unittest.expectedFailure
+  def test_buf_cnt_over_limit(self): _test_buf_cnt(7, buf_max=5, allowed=2)
+  @unittest.expectedFailure
+  def test_buf_cnt_over_limit_alt(self): _test_buf_cnt(11, buf_max=5, allowed=3)
 
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
