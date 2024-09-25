@@ -123,19 +123,34 @@ def idx_given_valid(valid:UOp, idx:UOp) -> Optional[UOp]:
     candidates.append([(uop, UOp.variable("fake", uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1], uop.dtype))])
 
     for candidate in candidates:
-      newidxs:List[List[UOp]] = [[], []]
-      for X,newX in candidate:
-        newidx = replace_uop(graph_rewrite(replace_uop(idx, X, newX), sym), newX, X)
-        newidxs[0].append(newidx.src[0])
-        newidxs[1].append(newidx.src[1])
+      if idx.op is UOps.VECTORIZE:
+        newidxs: List[List[UOp]] = [[], []]
+        for X,newX in candidate:
+          newidx = replace_uop(graph_rewrite(replace_uop(idx, X, newX), sym), newX, X)
+          newidxs[0].append(newidx.src[0])
+          newidxs[1].append(newidx.src[1])
 
-      # if every branch in candidate gives the same simplified output, we can rewrite the idx
-      if len(newidxs[0])==1 or (len(newidxs[0]) > 1 and all_same(newidxs[0])): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
-      if len(newidxs[1])==1 or (len(newidxs[1]) > 1 and all_same(newidxs[1])): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
+        # if every branch in candidate gives the same simplified output, we can rewrite the idx
+        if all_same(newidxs[0]): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
+        if all_same(newidxs[1]): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
+      else:
+        buf_newidxs = []
+        for X,newX in candidate: buf_newidxs.append(replace_uop(graph_rewrite(replace_uop(idx, X, newX), sym), newX, X))
+        if all_same(buf_newidxs): idx = buf_newidxs[0]
+
   return idx
 
-def simplify_valid_image_load(load:UOp, buf:UOp):
-  if not isinstance(buf_dtype:=buf.dtype, ImageDType) or len(load.src) < 4: return None
+def simplify_buffer_load(load:UOp):
+  if not isinstance(load.src[0].dtype, PtrDType) or len(load.src) != 4: return None
+  buf, start_idx, invalid_val, valid = load.src
+  try:
+    if (idx:=idx_given_valid(valid, start_idx)) is None: return load.replace(src=(buf, start_idx, invalid_val, valid.const_like(False)))
+  except ValueError: return None
+  if idx.key == start_idx.key: return None
+  return load.replace(src=((buf, idx, invalid_val, valid)))
+
+def simplify_image_load(load:UOp):
+  if not isinstance(buf_dtype:=load.src[0].dtype, ImageDType) or len(load.src) != 4: return None
   buf, start_idx, invalid_val, valid = load.src
   if (idx:=idx_given_valid(valid, start_idx)) is None: return load.replace(src=(buf, start_idx, invalid_val, valid.const_like(False)))
 
@@ -534,8 +549,10 @@ reducer = PatternMatcher([
   (UPat(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
-  # image load valid simplification
-  (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), simplify_valid_image_load),
+  # image load valid idx simplification
+  (UPat(UOps.LOAD, name="load"), simplify_image_load),
+  # buffer load valid idx simplification
+  (UPat(UOps.LOAD, name="load"), simplify_buffer_load),
 ])
 
 # *** uop graph ***
