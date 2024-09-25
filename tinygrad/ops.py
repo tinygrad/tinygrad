@@ -1,10 +1,10 @@
 from __future__ import annotations
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar, DefaultDict
-import sys, time, functools, itertools, math, operator, ctypes, struct, hashlib
+import sys, time, functools, itertools, math, operator, hashlib
 from enum import auto, IntEnum, Enum
 from collections import defaultdict
 from dataclasses import dataclass, field
-from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
+from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
 from tinygrad.helpers import _CURRENT_KERNEL, ContextVar, pretty_print, prod, getenv, all_same
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
@@ -310,18 +310,6 @@ python_alu: Dict[Op, Callable]  = {
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else x*math.inf,
   TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
-def truncate_fp16(x):
-  try: return struct.unpack("@e", struct.pack("@e", float(x)))[0]
-  except OverflowError: return math.copysign(math.inf, x)
-
-truncate: Dict[DType, Callable] = {dtypes.bool: bool,
-  # TODO: bfloat16
-  dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
-  dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
-  dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
-  dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value \
-      if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}
-
 def exec_alu(op:Op, dtype:DType, operands):
   if dtype.count > 1:
     return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
@@ -573,7 +561,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
 
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
-spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.bool, r) if (r:=fxn(**kw)) is not None else None, y)) for (x,y) in [
+spec = PatternMatcher([
   (UPat(UOps.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
   (UPat(UOps.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
   (UPat(UOps.DEFINE_ACC, src=(UPat(UOps.CONST, name="c"),), name="x", allow_any_len=True),
@@ -643,9 +631,9 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
   # PTX LOAD/STORE
   (UPat((UOps.LOAD, UOps.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
   (UPat(UOps.BARRIER, dtypes.void, src=UPat(UOps.STORE, src=(UPat(dtype=dtypes.int64),), allow_any_len=True)), lambda: True),
-]])
+])
 
 def type_verify(uops:List[UOp]):
   for u in uops:
-    chk = spec.rewrite(u)
-    assert chk is not None and chk.arg is True, f"UOp verification failed on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
+    chk = cast(bool, spec.rewrite(u))
+    assert chk is True, f"UOp verification failed on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
