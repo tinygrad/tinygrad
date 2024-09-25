@@ -42,23 +42,25 @@ class TestGC(unittest.TestCase):
     assert (tensors_allocated() == 3)
 
   def test_schedule_gc(self):
+    init = bufs_allocated()
     x = Tensor.ones(256).contiguous().realize()
     y = Tensor.ones(5, 5).contiguous()
     y.schedule()
     del x
     del y
-    self.assertEqual(bufs_allocated(), 0)
+    self.assertEqual(bufs_allocated()-init, 0)
 
   def test_schedule_gc_with_inputs(self):
+    init = bufs_allocated()
     x = Tensor.ones(256).contiguous().realize()
     y = x+Tensor.ones(256).contiguous()
     ys = y.schedule()
     del x
     run_schedule(ys)
     np.testing.assert_equal(y.numpy(), np.full((256,), 2))
-    self.assertEqual(bufs_allocated(), 1)
+    self.assertEqual(bufs_allocated()-init, 1)
     del y
-    self.assertEqual(bufs_allocated(), 0)
+    self.assertEqual(bufs_allocated()-init, 0)
 
 if __name__ == '__main__':
   unittest.main()
