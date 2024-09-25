@@ -3,6 +3,8 @@ import gc
 import unittest
 import numpy as np
 from tinygrad.device import Buffer
+from tinygrad.engine.realize import run_schedule
+from tinygrad.helpers import GlobalCounters
 from tinygrad.tensor import Tensor
 
 def tensors_allocated():
@@ -40,14 +42,23 @@ class TestGC(unittest.TestCase):
     assert (tensors_allocated() == 3)
 
   def test_schedule_gc(self):
-    Tensor.ones(256).contiguous().realize()
-    Tensor.ones(5, 5).contiguous().schedule()
+    x = Tensor.ones(256).contiguous().realize()
+    y = Tensor.ones(5, 5).contiguous()
+    y.schedule()
+    del x
+    del y
     self.assertEqual(bufs_allocated(), 0)
 
   def test_schedule_gc_with_inputs(self):
     x = Tensor.ones(256).contiguous().realize()
-    (x+Tensor.ones(256).contiguous()).schedule()
+    y = x+Tensor.ones(256).contiguous()
+    ys = y.schedule()
+    del x
+    run_schedule(ys)
+    np.testing.assert_equal(y.numpy(), np.full((256,), 2))
     self.assertEqual(bufs_allocated(), 1)
+    del y
+    self.assertEqual(bufs_allocated(), 0)
 
 if __name__ == '__main__':
   unittest.main()
