@@ -96,21 +96,22 @@ class TestRandomness(unittest.TestCase):
 
     np.testing.assert_allclose(jr, r)
 
-  @unittest.skipUnless(Device.DEFAULT == "GPU", "reference is on GPU")
   def test_threefly_against_reference_full(self):
     Tensor.manual_seed(1337)
 
     # reference generated using
     """
     key0 = 1337
-    key1 = 0
+    key1 = int.from_bytes(hashlib.sha256(int(0).to_bytes(4)).digest(), "big") & 0xffffffff
     values = jax.extend.random.threefry_2x32((np.uint32(key1), np.uint32(key0)), np.arange(20, dtype=np.uint32))
+    values = (values >> (32 - 23)) | np.array(1, dtype=np.float32).view(np.uint32)
+    values =  values.view(np.float32) - 1
     print(f"[{', '.join(f'{v}' for v in values)}]")
     """
-    jr = np.array([0.7882130146026611, 0.0680311918258667, 0.6758031845092773, 0.2525523900985718, 0.5712389945983887,
-                   0.8758237361907959, 0.13559412956237793, 0.9069793224334717, 0.8781528472900391, 0.7737162113189697,
-                   0.050452232360839844, 0.1645597219467163, 0.06776463985443115, 0.09560704231262207, 0.2754603624343872,
-                   0.10108339786529541, 0.3488548994064331, 0.7904064655303955, 0.2519160509109497, 0.7925788164138794], dtype=np.float32)
+    jr = np.array([0.9073467254638672, 0.8235964775085449, 0.6872662305831909, 0.9920015335083008, 0.4941047430038452,
+                   0.3108327388763428, 0.09639489650726318, 0.004686474800109863, 0.8435229063034058, 0.824237585067749,
+                   0.5873836278915405, 0.4232727289199829, 0.2530076503753662, 0.40300023555755615, 0.03966474533081055,
+                   0.27904558181762695, 0.9150195121765137, 0.48057758808135986, 0.23821306228637695, 0.7676635980606079], dtype=np.float32)
 
     r = Tensor.rand(20).numpy()
 
