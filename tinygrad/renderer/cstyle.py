@@ -182,14 +182,14 @@ class CStyleLanguage(Renderer):
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {UOps.ENDIF, UOps.ENDRANGE}: depth -= 1
-      if u.op in {UOps.CONST} or (u.op in {UOps.VECTORIZE, UOps.ALU} and len(children[u]) == 1 and
-                                  u.arg is not BinaryOps.MAX and not getenv("EXPAND_SSA")):
+      if u.op in {UOps.CONST, UOps.GEP} or (u.op in {UOps.VECTORIZE, UOps.ALU} and len(children[u]) == 1 and
+                                            u.arg is not BinaryOps.MAX and not getenv("EXPAND_SSA")):
         r[u] = l #"("+l+")" if u.op is UOps.ALU else l
       else:
         if u.op in {UOps.RANGE, UOps.ASSIGN, UOps.DEFINE_LOCAL} or u.dtype == dtypes.void:
           if u.op is UOps.ASSIGN: r[u] = r[u.src[0]]
         else:
-          l = f"{self.render_dtype(u.dtype)} {r[u]} = {l};"
+          l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not UOps.SPECIAL else "")
         kernel.append("  "*depth + l)
         if prefix: c[prefix] += 1  # if it was used, increment
       if u.op in {UOps.IF, UOps.RANGE}: depth += 1
