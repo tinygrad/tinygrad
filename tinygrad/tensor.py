@@ -416,7 +416,7 @@ class Tensor:
   @staticmethod
   def _threefry_random_bits(key0, key1, counts0, counts1):
     x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
-    key = (Tensor(key0, device=x.device, dtype=dtypes.uint64, requires_grad=False) << 32) | key1
+    key = (Tensor([key0], device=x.device, dtype=dtypes.uint64, requires_grad=False) << 32) | key1
     x = F.Threefry.apply(*x._broadcasted(key))
     counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
     return counts0.cat(counts1)
