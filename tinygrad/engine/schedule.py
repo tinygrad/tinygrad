@@ -10,7 +10,7 @@ from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, Device
 from tinygrad.shape.view import View, strides_for_shape
 
 # creation can recurse a lot
@@ -408,6 +408,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   kernel_number = GlobalCounters.kernel_count
   while queue:
     lsi = queue.popleft()
+    if (m:=Device[device:=lsi.outputs[0].device].renderer.buf_max) and len(lsi.bufs) >= m:
+      raise RuntimeError(f"{lsi} exceeded the buffer count limit for {device}")
     if GRAPH:
       kernel_number += 1
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
