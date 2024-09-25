@@ -36,14 +36,14 @@ void test(int* restrict a, const int* restrict b) {
 }
     """
     offset = helper_append_replay(ast, "test", test_src)
-    assert diff_kernel(offset-1)
+    assert diff_kernel(offset-1) == (5, 4)
 
   def test_identical_run(self):
     out = Tensor([1, 2, 3])+1
     ast = out.schedule()[-1].ast
     test_prg = Kernel(ast, ClangRenderer()).to_program()
     offset = helper_append_replay(ast, test_prg.name, test_prg.src)
-    assert not diff_kernel(offset)
+    assert diff_kernel(offset) == (0, 0)
 
 if __name__ == "__main__":
   unittest.main()
