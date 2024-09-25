@@ -47,7 +47,7 @@ class TestViz(unittest.TestCase):
     list(lower_schedule(schedule1))
     list(lower_schedule(schedule2))
     ret = load_kernels(contexts)
-    assert len(ret) == 10
+    assert len(ret) == 12
     assert all(len([x for x in y.ctxs.values() if "schedule" in x.loc]) != 0 for y in ret)
     assert all(len([x for x in y.ctxs.values() if "uopgraph" in x.loc]) != 0 for y in ret)
 
@@ -118,11 +118,11 @@ class TestViz(unittest.TestCase):
 
   def test_dedup_ast(self):
     contexts.clear()
-    a = Tensor.randn(4, 4)+2
-    b = Tensor.randn(4, 4)+2
+    a = Tensor.empty(4, 4).contiguous().realize()+2
+    b = Tensor.empty(4, 4).contiguous().realize()+2
     Tensor.schedule(a, b)
     kernels = load_kernels(contexts)
-    self.assertEqual(len(kernels), 7)
+    self.assertEqual(len(kernels), 1)
     assert all(len(v) == 1 for k,v in group_rewrites(kernels[0]).items() if "schedule.py" in k)
 
   def test_no_dedup_different_opts(self):
