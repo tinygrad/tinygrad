@@ -64,9 +64,8 @@ class dtypes:
     if isinstance(val, tuple):
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
-    # TODO: truncate should do that
-    tval = int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
-    return truncate.get(dtype, lambda x: x)(tval)
+    # TODO: should truncate here
+    return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   @functools.lru_cache(None)
   def min(dtype:DType):
