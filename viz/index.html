@@ -69,7 +69,7 @@
     stroke-width: 1.4px;
   }
   .graph {
-    width: 70%;
+    width: 66%;
     position: relative;
   }
   .main-container {
@@ -95,7 +95,7 @@
     margin-left: 8px;
   }
   .kernel-list {
-    width: 10%;
+    width: 14%;
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -160,6 +160,36 @@
   .status {
     color: #EC5D5E;
     font-weight: bold;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    border-spacing: 0;
+    table-layout: fixed;
+  }
+  th, td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 8px;
+    border: 1px solid #2a2b36;
+    text-align: left;
+  }
+  tr:hover {
+    background-color: #1a1b26;
+  }
+  tr.active {
+    background-color: #1a1b26;
+    color: #f0f0f5;
+  }
+  tr {
+    color: #7c7d85;
+  }
+  th:not(:last-child) {
+    border: 1px solid #2a2b36;
+  }
+  .rewrite-row {
+    cursor: pointer;
   }
   </style>
 </head>
@@ -242,21 +272,32 @@
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
     kernels.forEach((k, i) => {
-      kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "" });
-      const p = Object.assign(document.createElement("p"), {id: `kernel-${k.name}`, innerText: k.name})
+      kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "", style: "overflow-x: auto; cursor: initial;" });
+      const p = Object.assign(document.createElement("p"), {id: `kernel-${k.name}`, innerText: k.name, style: "cursor: pointer;"});
       kernelUl.appendChild(p)
+      const table = Object.assign(document.createElement("table"), {id: `kernel-table-${k.name}`, style: "margin-top: 12px;" })
+      const tr = Object.assign(document.createElement("tr"), {style: "pointer-events: none;"})
+      table.appendChild(tr)
+      const columns = ["location", "rewrites", "matcher"];
+      columns.forEach((x, i) => {
+        tr.appendChild(Object.assign(document.createElement("th"), { innerText: x }))
+      });
       k.ctxs.forEach((u, j) => {
-        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${u.filename} - ${u.match_count}`, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
-        rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
-        rwUl.onclick = (e) => {
+        const tr = Object.assign(document.createElement("tr"), { className: "rewrite-row" });
+        const row = [u.filename, u.match_count, u.matcher_name];
+        row.forEach((r) => tr.appendChild(Object.assign(document.createElement("td"), { innerText: r })))
+        table.appendChild(tr)
+        if (j === currentUOp && i == currentKernel) tr.classList.add("active");
+        tr.onclick = (e) => {
           e.stopPropagation();
           currentUOp = j;
           currentKernel = i;
           currentRewrite = 0;
           main();
         }
-        kernelUl.appendChild(rwUl)
       })
+      table.style.display = i === currentKernel && expandKernel ? "block" : "none";
+      kernelUl.appendChild(table)
       p.onclick = (e) => {
         if (i === currentKernel) {
           expandKernel = !expandKernel;
