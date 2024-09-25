@@ -167,16 +167,16 @@ class QCOMComputeQueue(HWComputeQueue):
 
   def _update_exec(self, cmd_idx, global_size, local_size):
     if global_size is not None:
-      self._patch(cmd_idx, offset=23, data=[int(math.ceil(global_size[0])), int(math.ceil(global_size[1])), int(math.ceil(global_size[2]))])
+      self._patch(cmd_idx, offset=29, data=[int(math.ceil(global_size[0])), int(math.ceil(global_size[1])), int(math.ceil(global_size[2]))])
       self.cmd_idx_to_dims[cmd_idx][0] = global_size
 
     if local_size is not None:
       payload = qreg.a6xx_hlsq_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1)
-      self._patch(cmd_idx, offset=14, data=[payload])
+      self._patch(cmd_idx, offset=20, data=[payload])
       self.cmd_idx_to_dims[cmd_idx][1] = local_size
 
     global_size_mp = [int(g*l) for g,l in zip(self.cmd_idx_to_dims[cmd_idx][0], self.cmd_idx_to_dims[cmd_idx][1])]
-    self._patch(cmd_idx, offset=15, data=[global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0])
+    self._patch(cmd_idx, offset=21, data=[global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0])
 
 class QCOMArgsState(HCQArgsState):
   def __init__(self, ptr:int, prg:QCOMProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
