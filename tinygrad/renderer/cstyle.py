@@ -74,7 +74,7 @@ base_pm = PatternMatcher([
   (UPat(UOps.BITCAST, name="x"), lambda r,x: r.render_cast(r[x.src[0]], x.dtype, True)),
   (UPat(UOps.DEFINE_LOCAL, name="x"), lambda r,x: f"{r.smem_align}{r.smem_prefix}{r.render_dtype(x.dtype.base)} {r[x]}[{x.arg[1]}];"),
   (UPat(UOps.BARRIER), lambda r: r.barrier),
-  (UPat(UOps.SPECIAL, name="x"), lambda r,x: f"{r.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {x.arg[1]} */"),
+  (UPat(UOps.SPECIAL, name="x"), lambda r,x: f"{r.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}"),
   # function calls
   (UPat(UOps.CONST, name="x"), lambda r,x: render_const(r, x.arg, x.dtype) if x.arg >= 0 else f"({render_const(r, x.arg, x.dtype)})"),
   (UPat(UOps.LOAD, src=(UPat.var("buf"),), allow_any_len=True, name="load"), render_load),
@@ -148,7 +148,6 @@ class CStyleLanguage(Renderer):
     kernel = []
     depth = 1
     c: DefaultDict[str, int] = defaultdict(int)
-    c['temp'] += 1   # hack for process replay
     for u in uops:
       if u.op is UOps.DEFINE_GLOBAL:
         r[u] = f"data{u.arg}"
@@ -181,7 +180,7 @@ class CStyleLanguage(Renderer):
         if u.op in {UOps.RANGE, UOps.ASSIGN, UOps.DEFINE_LOCAL} or u.dtype == dtypes.void:
           if u.op is UOps.ASSIGN: r[u] = r[u.src[0]]
         else:
-          l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not UOps.SPECIAL else "")
+          l = f"{self.render_dtype(u.dtype)} {r[u]} = {l};"
         kernel.append("  "*depth + l)
         if prefix: c[prefix] += 1  # if it was used, increment
       if u.op in {UOps.IF, UOps.RANGE}: depth += 1
