@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional, cast, Generator, Tuple, Union
-import time, pprint
+import time, pprint, copy
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, dedup
@@ -25,7 +25,7 @@ def get_kernel(si:ScheduleItem) -> Kernel:
     if BEAM >= 1:
       from tinygrad.engine.search import beam_search, time_linearizer
       kb, k_opt = Kernel(si.ast, opts=renderer, rawbufs=si.bufs).required_optimizations(), k
-      rawbufs = si.bufs
+      rawbufs = copy.deepcopy(si.bufs)
       if BEAM.value >= 100:
         from extra.mcts_search import mcts_search
         k = mcts_search(kb, rawbufs, BEAM.value)
