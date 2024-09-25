@@ -4,7 +4,6 @@ import unittest
 import numpy as np
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import run_schedule
-from tinygrad.helpers import GlobalCounters
 from tinygrad.tensor import Tensor
 
 def tensors_allocated():
