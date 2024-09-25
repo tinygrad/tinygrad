@@ -7,16 +7,45 @@ from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
 from tinygrad.renderer import Renderer, TensorCore
 
-def render_load(r:CStyleLanguage, x:UOp):
-  val = r.render_load(x.dtype, r[x.src[0]], x.src[0].dtype, strip_parens(r[x.src[1]]))
+def render_const(r:CStyleLanguage, x:ConstType, dtype:DType) -> str:
+  assert dtype.count == 1, f"consts should be scalar, got {dtype}"
+  if math.isnan(x): val = r.nan
+  elif math.isinf(x): val = ("-" if x < 0 else "") + r.infinity
+  elif dtype == dtypes.bool: val = "1" if x else "0"
+  elif dtype == dtypes.float: val = f"{x}f"
+  elif dtype == dtypes.uint64: val = f"{x}ULL"
+  else: val = str(x)
+  return (r.render_cast(val, dtype) if dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
+
+def render_load(r:CStyleLanguage, load:UOp, buf:UOp) -> str:
+  sidx = strip_parens(r[load.src[1]])
+  if isinstance(buf.dtype, ImageDType):
+    assert load.dtype == dtypes.float.vec(4), f"images must be float4, getting {load.dtype}"
+    val = f"read_imagef({r[buf]}, smp, {sidx})"
+  elif r.uses_vload and buf.dtype.scalar() == dtypes.float16 and load.dtype.scalar() != dtypes.float16:
+    val = f"vload_half{'' if load.dtype.count == 1 else str(load.dtype.count)}(0, {r[buf]}+{sidx})"
+  elif load.dtype.count > 1 and isinstance(buf.dtype, PtrDType):
+    val = f"*(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(load.dtype)}*)({r[buf]}+{sidx}))"
+  else:
+    val = f"*({r[buf]}+{sidx})" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}]"
+
   # NOTE: this relies on the load not happening if it's in the unselected branch
-  if len(x.src) > 3 and x.src[3].op is UOps.ALU: val = r.code_for_op[TernaryOps.WHERE](r[x.src[3]], val, r[x.src[2]], x.dtype)
+  if len(load.src) > 3 and load.src[3].op is UOps.ALU: val = r.code_for_op[TernaryOps.WHERE](r[load.src[3]], val, r[load.src[2]], load.dtype)
   return val
 
-def render_store(r:CStyleLanguage, x:UOp):
-  assert isinstance(x.src[0].dtype, (ImageDType, PtrDType))
-  rendered_store = r.render_store(r[x.src[0]], x.src[0].dtype, r[x.src[2]], x.src[2].dtype, strip_parens(r[x.src[1]]))
-  return f"if ({r[x.src[3]]}) {{ {rendered_store} }}" if len(x.src) > 3 and x.src[3].op is not UOps.IF else rendered_store
+def render_store(r:CStyleLanguage, store:UOp, buf:UOp, var:UOp) -> str:
+  sidx = strip_parens(r[store.src[1]])
+  if isinstance(buf.dtype, ImageDType):
+    assert var.dtype == dtypes.float.vec(4), f"images must be float4, getting {var.dtype}"
+    val = f"write_imagef({r[buf]}, {sidx}, {r[var]});"
+  elif r.uses_vload and buf.dtype.scalar() == dtypes.float16 and var.dtype.scalar() != dtypes.float16:
+    val = f"vstore_half{'' if var.dtype.count == 1 else str(var.dtype.count)}({r[var]}, 0, {r[buf]}+{sidx});"
+  elif var.dtype.count > 1 and isinstance(buf.dtype, PtrDType):
+    prefix = r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix
+    val = f"*(({prefix}{r.render_dtype(var.dtype)}*)({r[buf]}+{sidx})) = {r[var]};"
+  else:
+    val = f"*({r[buf]}+{sidx}) = {r[var]};" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}] = {r[var]};"
+  return f"if ({r[store.src[3]]}) {{ {val} }}" if len(store.src) > 3 and store.src[3].op is not UOps.IF else val
 
 def render_alu(r:CStyleLanguage, x:UOp):
   if x.arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}: operands = [strip_parens(r[v]) if v.arg == x.arg else r[v] for v in x.src]
@@ -37,17 +66,19 @@ base_pm = PatternMatcher([
   (UPat((UOps.ENDIF, UOps.ENDRANGE)), lambda r: "}"),
   (UPat(UOps.WMMA, name="x"), lambda r,x: f"__{x.arg[0]}({r[x.src[0]]}, {r[x.src[1]]}, {r[x.src[2]]})"),
   # r method accesses
-  (UPat(UOps.CONST, name="x"), lambda r,x: r.render_const(x.arg, x.dtype) if x.arg >= 0 else f"({r.render_const(x.arg, x.dtype)})"),
   (UPat(UOps.RANGE, name="x"), lambda r,x: f"for ({r.render_dtype(x.dtype)} {r[x]} = {r[x.src[0]]}; {r[x]} < {r[x.src[1]]}; {r[x]}++) {{"),
-  (UPat(UOps.VECTORIZE, name="x"), lambda r,x: r.render_vectorize([r[y] for y in x.src], x.dtype)),
+  (UPat(UOps.VECTORIZE, name="x"),
+   lambda r,x: f"{r.float4.replace('float4', r.render_dtype(x.dtype))}" + \
+    (f"{{{','.join([r[y] for y in x.src])}}}" if r.device == "CLANG" else f"({','.join([r[y] for y in x.src])})")),
   (UPat(UOps.CAST, name="x"), lambda r,x: r.render_cast(r[x.src[0]], x.dtype, False)),
   (UPat(UOps.BITCAST, name="x"), lambda r,x: r.render_cast(r[x.src[0]], x.dtype, True)),
   (UPat(UOps.DEFINE_LOCAL, name="x"), lambda r,x: f"{r.smem_align}{r.smem_prefix}{r.render_dtype(x.dtype.base)} {r[x]}[{x.arg[1]}];"),
   (UPat(UOps.BARRIER), lambda r: r.barrier),
   (UPat(UOps.SPECIAL, name="x"), lambda r,x: f"{r.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {x.arg[1]} */"),
   # function calls
-  (UPat(UOps.LOAD, name="x"), render_load),
-  (UPat(UOps.STORE, name="x"), render_store),
+  (UPat(UOps.CONST, name="x"), lambda r,x: render_const(r, x.arg, x.dtype) if x.arg >= 0 else f"({render_const(r, x.arg, x.dtype)})"),
+  (UPat(UOps.LOAD, src=(UPat.var("buf"),), allow_any_len=True, name="load"), render_load),
+  (UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat.var("var")), allow_any_len=True, name="store"), render_store),
   (UPat(UOps.ALU, name="x"), render_alu),
   (UPat(UOps.GEP, name="x"), render_gep),
 ])
@@ -84,34 +115,6 @@ class CStyleLanguage(Renderer):
     if bitcast: return f"(*(({self.buffer_prefix}{self.render_dtype(var_dtype)}*)&{x}))"
     return f"({self.render_dtype(var_dtype)})({x})"
 
-  # returns a str expression of the vectorized xs with the given type
-  def render_vectorize(self, x:List[str], var_dtype:DType) -> str:
-    assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
-    assert self.float4 is not None, "vectorized cast is not supported on this platform"
-    return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}" + (f"{{{','.join(x)}}}" if self.device == "CLANG" else f"({','.join(x)})")
-
-  # returns a str expression of the const with the given type
-  def render_const(self, x:ConstType, dtype:DType) -> str:
-    assert dtype.count == 1, f"consts should be scalar, got {dtype}"
-    if math.isnan(x): val = self.nan
-    elif math.isinf(x): val = ("-" if x < 0 else "") + self.infinity
-    elif dtype == dtypes.bool: val = "1" if x else "0"
-    elif dtype == dtypes.float: val = f"{x}f"
-    elif dtype == dtypes.uint64: val = f"{x}ULL"
-    else: val = str(x)
-    return (self.render_cast(val, dtype) if dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
-
-  # returns a str expression of the loaded value with the output type
-  def render_load(self, output_dtype, buf_name, buf_dtype, idx) -> str:
-    if isinstance(buf_dtype, ImageDType):
-      assert output_dtype == dtypes.float.vec(4), f"images must be float4, getting {output_dtype}"
-      return f"read_imagef({buf_name}, smp, {idx})"
-    if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and output_dtype.scalar() != dtypes.float16:
-      return f"vload_half{'' if output_dtype.count == 1 else str(output_dtype.count)}(0, {buf_name}+{idx})"
-    if output_dtype.count > 1:
-      return f"*(({self.smem_prefix if buf_dtype.local and self.smem_prefix_for_cast else self.buffer_prefix}{self.render_dtype(output_dtype)}*)({buf_name}+{idx}))"  # noqa: E501
-    return f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
-
   def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
@@ -122,18 +125,6 @@ class CStyleLanguage(Renderer):
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
-
-  # returns a str statement that does the store
-  def render_store(self, buf_name:str, buf_dtype:Union[ImageDType, PtrDType], var_name:str, var_dtype:DType, idx:str) -> str:
-    if isinstance(buf_dtype, ImageDType):
-      assert var_dtype == dtypes.float.vec(4), f"images must be float4, getting {var_dtype}"
-      return f"write_imagef({buf_name}, {idx}, {var_name});"
-    if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and var_dtype.scalar() != dtypes.float16:
-      return f"vstore_half{'' if var_dtype.count == 1 else str(var_dtype.count)}({var_name}, 0, {buf_name}+{idx});"
-    if var_dtype.count > 1:
-      prefix = self.smem_prefix if buf_dtype.local and self.smem_prefix_for_cast else self.buffer_prefix
-      return f"*(({prefix}{self.render_dtype(var_dtype)}*)({buf_name}+{idx})) = {var_name};"
-    return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
 
   def render_dtype(self, var_dtype:DType) -> str:
     return self.type_map.get(scalar:=var_dtype.scalar(), scalar.name) + (str(var_dtype.count) if (var_dtype.count) > 1 else "")
