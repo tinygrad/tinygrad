@@ -60,7 +60,8 @@ s = UOp(UOps.SINK, dtypes.void, (st_0,))
 
 # convert the computation to a "linearized" format (print the format)
 from tinygrad.engine.realize import get_kernel, CompiledRunner
-kernel = get_kernel(Device[DEVICE].renderer, s).linearize()
+from tinygrad.engine.schedule import ScheduleItem
+kernel = get_kernel(ScheduleItem(s, [out, a, b])).linearize()
 
 # compile a program (and print the source)
 fxn = CompiledRunner(kernel.to_program())

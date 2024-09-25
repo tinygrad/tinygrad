@@ -385,7 +385,7 @@ class TestUOpStr(unittest.TestCase):
     t = t + t * Tensor.rand(10)
     # nice big complicated uop
     with Context(NOOPT=1):
-      sink = UOp(UOps.SINK, dtypes.void, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
+      sink = UOp(UOps.SINK, dtypes.void, (get_kernel(t.schedule()[-1]).linearize().uops[-1],))
     assert_equiv_uops(sink, eval(str(sink)))
 
   def test_variable_const(self):
