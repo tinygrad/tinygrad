@@ -8,7 +8,7 @@ import numpy as np
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY, _METADATA, Metadata, TRACEMETA
+from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import MetaOps, truncate
@@ -438,26 +438,20 @@ class Tensor:
     if not dtypes.is_float(dtype := to_dtype(dtype or dtypes.default_float)): raise ValueError(f"rand only supports float dtypes, got {dtype}")
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
-    device, had_counter = Device.canonicalize(device), False
+    _device = device = Device.canonicalize(device)
 
     # when using MOCKGPU and NV generate rand on CLANG
-    if THREEFRY and getenv("MOCKGPU") and device.startswith("NV"): _device, device = device, "CLANG"
-    else: _device = None
+    if getenv("MOCKGPU") and device.startswith("NV"): device = "CLANG"
 
     # generate per device seeds and rng counter if we haven't seen this device yet
     if device not in Tensor._device_seeds:
-      Tensor._device_seeds[device] = int.from_bytes(hashlib.sha256(device.encode()).digest(), "big") & 0xffffffff
+      Tensor._device_seeds[device] = int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big") & 0xffffffff
       Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint32, requires_grad=False)
+      had_counter = False
     else: had_counter = True
 
-    if not THREEFRY:
-      # for bfloat16, numpy rand passes buffer in float
-      if to_dtype(dtype or dtypes.default_float) == dtypes.bfloat16:
-        return Tensor.rand(*shape, **kwargs, device=device, dtype=dtypes.float).cast(dtypes.bfloat16)
-      return Tensor._metaop(MetaOps.CUSTOM, shape, arg=custom_random, device=device, dtype=dtype, **kwargs)
-
     # if shape has 0, return zero tensor
-    if (num := math.ceil(((num_ := prod(shape)) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
+    if (num := math.ceil(((num_ := prod(shape)) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
 
     # increment rng counter for devices
     if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
@@ -3461,14 +3455,6 @@ if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)
   setattr(Tensor, "conv2d", Tensor.image_conv2d)
   setattr(Tensor, "dot", Tensor.image_dot)
-
-# TODO: eventually remove this
-def custom_random(out:Buffer):
-  Tensor._seed += 1
-  rng = np.random.default_rng(Tensor._seed)
-  if out.dtype == dtypes.half: rng_np_buffer = (rng.integers(low=0, high=2047, size=out.size) / 2048).astype(np.half, copy=False)
-  else: rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=_to_np_dtype(out.dtype), copy=False)
-  out.copyin(rng_np_buffer.data)
 
 def _metadata_wrapper(fn):
   def _wrapper(*args, **kwargs):

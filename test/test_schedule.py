@@ -47,13 +47,16 @@ def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_pr
     l.linearize()
   return sched
 
+def _realize_weights(m):
+  for p in nn.state.get_parameters(m): p.realize()
+
 def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
   old_default_float, dtypes.default_float = dtypes.default_float, dtype
   dtypes.default_float = dtype
   Tensor.manual_seed(0)
   BS, CIN = 2, 3
-  img = Tensor.randn(BS, CIN, 64, 64, requires_grad=True)
-  w = Tensor.uniform(16, CIN, 3, 3, requires_grad=True)
+  img = Tensor.randn(BS, CIN, 64, 64, requires_grad=True).realize()
+  w = Tensor.uniform(16, CIN, 3, 3, requires_grad=True).realize()
   ret = Tensor.conv2d(img, w).relu().mean().backward()
   dtypes.default_float = old_default_float
   with Context(**kwargs): s = create_schedule([ret.lazydata, img.grad.lazydata, w.grad.lazydata])
@@ -256,12 +259,13 @@ class TestSchedule(unittest.TestCase):
 
   def test_fold_conv_batchnorm_optim(self):
     # this is too high
-    for optim, cnt in [(nn.optim.Adam, 19), (nn.optim.SGD, 17)]:
+    for optim, cnt in [(nn.optim.Adam, 17), (nn.optim.SGD, 15)]:
       with self.subTest(optim=optim.__name__):
         with Tensor.train():
           img = Tensor.ones(1,3,4,4)
           c1 = nn.Conv2d(3,32,3)
           bn = nn.BatchNorm2d(32, track_running_stats=False)
+          _realize_weights([c1, bn])
           opt = optim(nn.state.get_parameters([c1, bn]))
           img_bn = bn(c1(img)).elu().sum()
           opt.zero_grad()
@@ -919,57 +923,63 @@ class TestSchedule(unittest.TestCase):
     with Tensor.train():
       x = Tensor.empty(4, 64, 768)
       layer = nn.Linear(768, 768*4)
+      _realize_weights(layer)
       opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
       layer(x).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 11)
+      check_schedule(opt.schedule_step(), 9)
 
   def test_adam_conv_fuse(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,32,3)
+      _realize_weights(c1)
       opt = nn.optim.Adam(nn.state.get_parameters(c1), lr=1e-4)
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 11)
+      check_schedule(opt.schedule_step(), 9)
 
   def test_adam_2convs_fuse(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,16,3,bias=False)
       c2 = nn.Conv2d(16,32,3,bias=False)
+      _realize_weights([c1, c2])
       opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 13)
+      check_schedule(opt.schedule_step(), 12)
 
   def test_sgd_conv_fuse(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,32,3)
+      _realize_weights(c1)
       opt = nn.optim.SGD(nn.state.get_parameters(c1))
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 7)
+      check_schedule(opt.schedule_step(), 5)
 
   def test_sgd_2convs_fuse(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,16,3,bias=False)
       c2 = nn.Conv2d(16,32,3,bias=False)
+      _realize_weights([c1, c2])
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]))
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 7)
+      check_schedule(opt.schedule_step(), 6)
 
   def test_fold_2convs_sgd_nesterov_momentum_wd(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,16,3,bias=False)
       c2 = nn.Conv2d(16,32,3,bias=False)
+      _realize_weights([c1, c2])
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]), nesterov=True, momentum=0.9, weight_decay=0.1)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 9)
+      check_schedule(opt.schedule_step(), 8)
 
   def test_sgd_4convs_fuse(self):
     with Tensor.train():
@@ -978,10 +988,11 @@ class TestSchedule(unittest.TestCase):
       c2 = nn.Conv2d(4,8,3,bias=False)
       c3 = nn.Conv2d(8,16,3,bias=False)
       c4 = nn.Conv2d(16,32,3,bias=False)
+      _realize_weights([c1, c2, c3, c4])
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
       opt.zero_grad()
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 22)
+      check_schedule(opt.schedule_step(), 18)
 
   def test_sgd_4convs_fuse_conv_bw(self):
     with Tensor.train():
@@ -990,10 +1001,11 @@ class TestSchedule(unittest.TestCase):
       c2 = nn.Conv2d(4,8,3,bias=False)
       c3 = nn.Conv2d(8,16,3,bias=False)
       c4 = nn.Conv2d(16,32,3,bias=False)
+      _realize_weights([c1, c2, c3, c4])
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
       opt.zero_grad()
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-      with Context(FUSE_CONV_BW=1): check_schedule(opt.schedule_step(), 19)
+      with Context(FUSE_CONV_BW=1): check_schedule(opt.schedule_step(), 15)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):
@@ -1184,7 +1196,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.rand(3, 4, 5).realize()
     out = (a + b).pad(((0, 1), (0, 1), (0, 1)), 1.0).sum().contiguous()
     run_schedule(check_schedule(out, 1))
-    np.testing.assert_allclose(out.numpy(), np.pad(a.numpy()+b.numpy(), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum())
+    np.testing.assert_allclose(out.numpy(), np.pad(a.numpy()+b.numpy(), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), atol=1e-5, rtol=1e-6)
 
   # multireduce spec
   def test_multireduce_pad_reduce_safe(self):
@@ -1202,7 +1214,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.rand(3, 4, 5).realize()
     out = a.log2().pad(((0, 1), (0, 1), (0, 1)), 1.0).sum().contiguous()
     run_schedule(check_schedule(out, 2))
-    np.testing.assert_allclose(out.numpy(), np.pad(np.log2(a.numpy()), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), rtol=1e-6)
+    np.testing.assert_allclose(out.numpy(), np.pad(np.log2(a.numpy()), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), atol=1e-5, rtol=1e-6)
 
   # multireduce spec
   def test_multireduce_pad_reduce_unsafe(self):
@@ -1213,7 +1225,7 @@ class TestSchedule(unittest.TestCase):
     # run_schedule(check_schedule(out, 1))
     run_schedule(check_schedule(out, 4))
     np.testing.assert_allclose(out.numpy(), np.pad(np.log2(np.abs(np.pad(np.log2(a.numpy()), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum() + \
-                                                   b.numpy())), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), atol=1e-4, rtol=1e-6)
+                                                   b.numpy())), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), atol=3e-4, rtol=1e-6)
 
   def test_shrink_pad_safe(self):
     a = Tensor.ones((3, )).contiguous().realize()
@@ -1301,18 +1313,18 @@ class TestSchedule(unittest.TestCase):
     out = x.argmax(1)
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
-  def test_conv2d(self): _test_conv2d(8)
-  def test_conv2d_fused(self): _test_conv2d(7, FUSE_CONV_BW=1)
-  def test_conv2d_fused_ast_rewrite(self): _test_conv2d(7, FUSE_CONV_BW=1, AST_REWRITE=1)
+  def test_conv2d(self): _test_conv2d(7)
+  def test_conv2d_fused(self): _test_conv2d(6, FUSE_CONV_BW=1)
+  def test_conv2d_fused_ast_rewrite(self): _test_conv2d(6, FUSE_CONV_BW=1, AST_REWRITE=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
-  def test_conv2d_half(self): _test_conv2d(8, dtype=dtypes.half)
+  def test_conv2d_half(self): _test_conv2d(7, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.expectedFailure
-  def test_conv2d_fused_half(self): _test_conv2d(7, dtype=dtypes.half)
+  def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.expectedFailure
-  def test_conv2d_fused_ast_rewrite_half(self): _test_conv2d(7, FUSE_CONV_BW=1, AST_REWRITE=1, dtype=dtypes.half)
+  def test_conv2d_fused_ast_rewrite_half(self): _test_conv2d(6, FUSE_CONV_BW=1, AST_REWRITE=1, dtype=dtypes.half)
 
   def test_buf_cnt_at_limit(self): _test_buf_cnt(5, buf_max=5, allowed=1)
   @unittest.expectedFailure
@@ -1395,18 +1407,18 @@ class TestIndexing(unittest.TestCase):
 
   def test_arange_transposed(self):
     Tensor.manual_seed(0)
-    x = Tensor.randint(4, 1)
+    x = Tensor.randint(4, 1).realize()
     a = (Tensor.arange(4,)*x).T
-    self.check_schedule(a, 2)
+    self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T)
 
   def test_arange_transposed_descendants(self):
     Tensor.manual_seed(0)
-    x = Tensor.randint(4, 1)
+    x = Tensor.randint(4, 1).realize()
     a = (Tensor.arange(4,)*x).T
     b = Tensor.randint(4, 4).realize()
     out = a+b
-    self.check_schedule(out, 2)
+    self.check_schedule(out, 1)
     np.testing.assert_equal(out.numpy(), (np.arange(4)*x.numpy()).T+b.numpy())
 
   def test_arange_index(self):
@@ -1415,7 +1427,7 @@ class TestIndexing(unittest.TestCase):
     a = Tensor.arange(10)
     out = (x + a[2]).sum()
     self.check_schedule(out, 1)
-    np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum())
+    np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   def test_arange_index_contiguous(self):
     Tensor.manual_seed(0)
@@ -1423,7 +1435,7 @@ class TestIndexing(unittest.TestCase):
     a = Tensor.arange(10).contiguous()
     out = (x + a[2]).sum()
     self.check_schedule(out, 2)
-    np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum())
+    np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   def test_arange_index_child(self):
     Tensor.manual_seed(0)
@@ -1431,7 +1443,7 @@ class TestIndexing(unittest.TestCase):
     a = Tensor.arange(10)+1
     out = (x + a[2]).sum()
     self.check_schedule(out, 1)
-    np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum())
+    np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   def test_arange_index_contiguous_child(self):
     Tensor.manual_seed(0)
@@ -1439,7 +1451,7 @@ class TestIndexing(unittest.TestCase):
     a = (Tensor.arange(10)+1).contiguous()
     out = (x + a[2]).sum()
     self.check_schedule(out, 2)
-    np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum())
+    np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   def test_arange_childless_base(self):
     a = Tensor.arange(4)
@@ -1453,7 +1465,7 @@ class TestIndexing(unittest.TestCase):
 
   def test_arange_group_childless_base(self):
     Tensor.manual_seed(0)
-    x = Tensor.randint(4)
+    x = Tensor.randint(4).realize()
     a = Tensor.arange(4)+x
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), np.arange(4)+x.numpy())
@@ -1527,8 +1539,8 @@ class TestIndexing(unittest.TestCase):
     from tinygrad.nn.datasets import mnist
     import torch
     _, Y_train, _, _ = mnist()
-    samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1]))
-    yt = Tensor.randn(BS, 10)
+    samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1])).realize()
+    yt = Tensor.randn(BS, 10).realize()
     with Context(SPLIT_REDUCEOP=0):
       loss = yt.sparse_categorical_crossentropy(Y_train[samples])
       self.check_schedule(loss, 6)

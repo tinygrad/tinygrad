@@ -239,9 +239,6 @@ jobs:
         name: Test MLPerf datasets
         run: GPU=1 python -m pytest -n=auto test/external/external_test_datasets.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
-        name: Test THREEFRY
-        run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py --durations=20
-      - if: ${{ matrix.task == 'onnx' }}
         name: Run handcode_opt
         run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
       - name: Run process replay tests
