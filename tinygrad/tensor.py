@@ -1,7 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import dataclasses
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Literal
 from collections import defaultdict
@@ -9,7 +8,7 @@ import numpy as np
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY, _METADATA, Metadata, TRACEMETA
+from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import MetaOps, truncate
@@ -394,7 +393,8 @@ class Tensor:
     return Tensor._metaop(MetaOps.EMPTY, argfix(*shape), **kwargs)
 
   _seed: int = int(time.time())
-  _rng_counter: Optional[Tensor] = None
+  _device_seeds: Dict[str, int] = {}
+  _device_rng_counters: Dict[str, Tensor] = {}
   @staticmethod
   def manual_seed(seed=0):
     """
@@ -411,10 +411,18 @@ class Tensor:
     print(Tensor.rand(5).numpy())
     ```
     """
-    Tensor._seed, Tensor._rng_counter = seed, None
+    Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
 
   @staticmethod
-  def rand(*shape, device:Optional[Union[Tuple[str, ...], str]]=None, dtype:Optional[DTypeLike]=None, **kwargs) -> Tensor:
+  def _threefry_random_bits(key0, key1, counts0, counts1):
+    x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
+    key = (Tensor([key0], device=x.device, dtype=dtypes.uint64, requires_grad=False) << 32) | key1
+    x = F.Threefry.apply(*x._broadcasted(key))
+    counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
+    return counts0.cat(counts1)
+
+  @staticmethod
+  def rand(*shape, device:Optional[str]=None, dtype:Optional[DTypeLike]=None, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
 
@@ -429,25 +437,29 @@ class Tensor:
     """
     if not dtypes.is_float(dtype := to_dtype(dtype or dtypes.default_float)): raise ValueError(f"rand only supports float dtypes, got {dtype}")
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
-    if (had_counter := Tensor._rng_counter is None): Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
+    if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
+    _device = device = Device.canonicalize(device)
 
-    if not THREEFRY:
-      # for bfloat16, numpy rand passes buffer in float
-      if to_dtype(dtype or dtypes.default_float) == dtypes.bfloat16:
-        return Tensor.rand(*shape, **kwargs, device=device, dtype=dtypes.float).cast(dtypes.bfloat16)
-      return Tensor._metaop(MetaOps.CUSTOM, shape, arg=custom_random, device=device, dtype=dtype, **kwargs)
+    # when using MOCKGPU and NV generate rand on CLANG
+    if getenv("MOCKGPU") and device.startswith("NV"): device = "CLANG"
 
-    # threefry
-    if (num := math.ceil(((num_ := prod(shape)) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
-    if not had_counter: Tensor._rng_counter.assign(Tensor._rng_counter + num)
-    counts1 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device))
-    counts2 = counts1 + math.ceil(num / 2)
+    # generate per device seeds and rng counter if we haven't seen this device yet
+    if device not in Tensor._device_seeds:
+      Tensor._device_seeds[device] = int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big") & 0xffffffff
+      Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint32, requires_grad=False)
+      had_counter = False
+    else: had_counter = True
+
+    # if shape has 0, return zero tensor
+    if (num := math.ceil(((num_ := prod(shape)) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
+
+    # increment rng counter for devices
+    if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
 
     # threefry random bits
-    x = counts2.cast(dtypes.uint64) << 32 | counts1.cast(dtypes.uint64)
-    x = F.Threefry.apply(*x._broadcasted(Tensor._seed))
-    counts1, counts2 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
-    bits = counts1.cat(counts2)[:num]
+    counts0 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
+    counts1 = counts0 + math.ceil(num / 2)
+    bits = Tensor._threefry_random_bits(Tensor._seed, Tensor._device_seeds[device], counts0, counts1)[:num]
 
     # bitcast to uint with same number of bits
     _, nmant = dtypes.finfo(dtype)
@@ -456,9 +468,12 @@ class Tensor:
     # only randomize the mantissa bits and set the exponent to 1
     one = Tensor.ones_like(bits, device=bits.device, dtype=dtype).bitcast(uint_dtype)
     bits = bits.rshift((dtype.itemsize * 8) - nmant).bitwise_or(one)
-
-    # bitcast back to the original dtype
+    # bitcast back to the original dtype and reshape
     out = bits.bitcast(dtype)[:num_].sub(1).reshape(shape)
+
+    # move back to the original device if we were using MOCKGPU
+    if getenv("MOCKGPU") and _device: out = out.to(_device)
+
     out.requires_grad = kwargs.get("requires_grad")
     return out.contiguous()
 
@@ -610,6 +625,29 @@ class Tensor:
     """
     return self.full_like(1, **kwargs)
 
+  def rand_like(self, **kwargs) -> Tensor:
+    """
+    Creates a tensor with the same shape and sharding as `self`, filled with random values from a uniform distribution over the interval `[0, 1)`.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.ones(2, 3)
+    print(Tensor.rand_like(t).numpy())
+    ```
+    """
+    dtype = kwargs.pop("dtype", self.dtype)
+    device = kwargs.pop("device", self.device)
+    if isinstance(self.device, tuple):
+      assert isinstance(self.lazydata, MultiLazyBuffer)
+      if self.lazydata.axis is not None:
+        rands = [Tensor.rand(*lb.shape, device=lb.device, dtype=dtype) for lb in self.lazydata.lbs]
+        return Tensor(MultiLazyBuffer([cast(LazyBuffer, r.lazydata) for r in rands], self.lazydata.axis, None),
+                      device=self.device, dtype=dtype, **kwargs)
+      return Tensor.rand(*self.shape, dtype=dtype, **kwargs).shard(self.device)
+    return Tensor.rand(*self.shape, device=device, dtype=dtype, **kwargs)
+
   # ***** rng hlops *****
 
   @staticmethod
@@ -751,7 +789,7 @@ class Tensor:
     assert replacement or num_samples == 1, "no replacement only supports num_samples = 1"
     weight = self.unsqueeze(0) if self.ndim == 1 else self
     cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
-    unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1, device=self.device)
+    unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1).to(self.device)
     indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
@@ -949,7 +987,7 @@ class Tensor:
   #   2. Bool indexing is not supported
   #   3. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
-  def __getitem__(self, indices) -> Tensor:
+  def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
@@ -973,7 +1011,6 @@ class Tensor:
 
     # record None for dimension injection later and filter None and record rest of indices
     type_dim[None] = [dim for dim, i in enumerate(indices) if i is None]
-    tensor_dims = [dim for dim, i in enumerate(indices) if isinstance(i, Tensor)]
     indices_filtered = [i for i in indices if i is not None]
     for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
@@ -993,11 +1030,10 @@ class Tensor:
       if (index := indices_filtered[dim]).step == 0: raise ValueError(f"{index=} on {dim=} cannot have 0 as step")
       s, e, st = index.indices(self.shape[dim])
       indices_filtered[dim] = ((0, 0) if (st * (e - s)) < 0 else (s, e) if st > 0 else (e+1, s+1), st)
-    # record tensors and skip all Tensor dims for basic indexing
-    tensor_index: List[Tensor] = []
+    # skip all Tensor dims for basic indexing
     for dim in type_dim[Tensor]:
-      tensor_index.append(index := indices_filtered[dim])
-      if not dtypes.is_int(index.dtype): raise IndexError(f"{index.dtype=} on {dim=} is not supported, only int tensor indexing is supported")
+      dtype = indices_filtered[dim].dtype
+      if not dtypes.is_int(dtype): raise IndexError(f"{dtype=} on {dim=} is not supported, only int tensor indexing is supported")
       indices_filtered[dim] = ((0, self.shape[dim]), 1)
 
     new_slice, strides = ((), ()) if not indices_filtered else zip(*indices_filtered)
@@ -1020,6 +1056,7 @@ class Tensor:
 
     # 3. advanced indexing (copy)
     if type_dim[Tensor]:
+      dim_tensors = [(dim, i) for dim, i in enumerate(indices) if isinstance(i, Tensor)]
       # calculate dim of current ret by subtracting dims collapsed and adding dims injected up until tensor_dim
       def calc_dim(tensor_dim:int) -> int:
         return tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d)
@@ -1027,7 +1064,7 @@ class Tensor:
       assert all_int(ret.shape), f"does not support symbolic shape {ret.shape}"
       # track tensor_dim and tensor_index using a dict
       # calc_dim to get dim and use that to normalize the negative tensor indices
-      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(tensor_dims, tensor_index)}
+      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in dim_tensors}
 
       masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
       pre_reduce_shape = ret.shape[:first_dim] + (big_shape := _broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
@@ -1045,29 +1082,47 @@ class Tensor:
       # inject 1's for the extra dims added in create masks
       reshape_arg = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
       # sum reduce the extra dims introduced in create masks
-      ret = (ret.reshape(reshape_arg) * mask).sum(tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
+      ret = (ret.reshape(reshape_arg) * mask).sum(sum_axis:=tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
 
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
         ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
+
+      # for advanced setitem, returns whole tensor with indices replaced
+      if v is not None:
+        v = v.cast(self.dtype)._broadcast_to(_broadcast_shape(ret.shape, v.shape))
+        # add back reduced dims from sum
+        for dim in sum_axis: v = v.unsqueeze(dim)
+        # axis to be reduced to match self.shape
+        axis = tuple(range(first_dim, first_dim + len(big_shape)))
+        # apply mask to v(broadcasted) and reduce such that if v contains repeated indices the last one remains
+        v = v * mask
+        for dim in axis: v = functools.reduce(lambda x,y: y.where(y, x), v.split(1, dim))
+        # reduce mask and select from v(get rid of extra dims from reduce) for each True element in mask else select from self
+        ret = mask.any(axis).where(v.squeeze(), self)
+
     return ret
+
+  def __getitem__(self, indices) -> Tensor:
+    return self._getitem(indices)
 
   def __setitem__(self, indices, v:Union[Tensor, ConstType]) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
-      self.__getitem__(indices).assign(v)
+      self._getitem(indices).assign(v)
       return
     # NOTE: check that setitem target is valid first
-    assert all(lb.st.contiguous for lb in self.lazydata.lbs), "setitem target needs to be contiguous"
+    if not all(lb.st.contiguous for lb in self.lazydata.lbs): raise RuntimeError("setitem target needs to be contiguous")
     if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-    if isinstance(indices, (Tensor, list)) or (isinstance(indices, tuple) and any(isinstance(i, (Tensor, list)) for i in indices)):
-      raise NotImplementedError("Advanced indexing setitem is not currently supported")
 
-    assign_to = self.realize().__getitem__(indices)
-    # NOTE: contiguous to prevent const folding.
-    v = v.cast(assign_to.dtype)._broadcast_to(_broadcast_shape(assign_to.shape, v.shape)).contiguous()
-    assign_to.assign(v).realize()
+    res = self.realize()._getitem(indices, v)
+    # if shapes match and data is not shared it's a copy and we assign to self
+    if res.shape == self.shape and res.lazydata is not self.lazydata:
+      self.assign(res).realize()
+    else: # no copy, basic setitem
+      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
+      res.assign(v).realize()
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
@@ -3014,7 +3069,7 @@ class Tensor:
     ```
     """
     if not Tensor.training or p == 0: return self
-    return self * (Tensor.rand(*self.shape, requires_grad=False, dtype=dtypes.default_float, device=self.device) >= p) * (1/(1.0 - p))
+    return self * (Tensor.rand_like(self, requires_grad=False, dtype=dtypes.default_float) >= p) * (1/(1.0 - p))
 
   def one_hot(self, num_classes:int=-1) -> Tensor:
     """
@@ -3103,7 +3158,7 @@ class Tensor:
     """
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
     assert reduction in ("mean", "sum", "none"), "reduction must be one of ['mean', 'sum', 'none']"
-    log_probs, loss_mask = self.log_softmax(), (Y != ignore_index)
+    log_probs, loss_mask = self.log_softmax(), (Y != ignore_index) if ignore_index != -1 else Y.ones_like(dtype=dtypes.bool)
     y_counter = Tensor.arange(self.shape[-1], requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
     y = ((y_counter == Y.flatten().reshape(-1, 1)) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
     smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
@@ -3400,14 +3455,6 @@ if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)
   setattr(Tensor, "conv2d", Tensor.image_conv2d)
   setattr(Tensor, "dot", Tensor.image_dot)
-
-# TODO: eventually remove this
-def custom_random(out:Buffer):
-  Tensor._seed += 1
-  rng = np.random.default_rng(Tensor._seed)
-  if out.dtype == dtypes.half: rng_np_buffer = (rng.integers(low=0, high=2047, size=out.size) / 2048).astype(np.half, copy=False)
-  else: rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=_to_np_dtype(out.dtype), copy=False)
-  out.copyin(rng_np_buffer.data)
 
 def _metadata_wrapper(fn):
   def _wrapper(*args, **kwargs):
