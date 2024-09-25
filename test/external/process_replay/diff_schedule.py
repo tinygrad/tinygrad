@@ -26,7 +26,7 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
   for _,in_degree in s:
     for lsi in in_degree:
       for buf in lsi.outputs:
-        si_for_buf[buf].append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), tuple(lsi.metadata)))
+        si_for_buf[buf].append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata))
   changed = 0
   seen_diffs: Set[bytes] = set()
   for buf,si in si_for_buf.items():
@@ -39,7 +39,7 @@ def diff_schedule(s:List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]]
     if (cache_key:=ref.ast.key+compare.ast.key) in seen_diffs: continue
     seen_diffs.add(cache_key)
     changed += 1
-    if CAPTURING_PROCESS_REPLAY: diskcache_put("schedule_diff", str(uuid.uuid4()), (str(buf), [ref.ast.key, compare.ast.key]))
+    if CAPTURING_PROCESS_REPLAY: diskcache_put("schedule_diff", str(uuid.uuid4()), (str(buf), [ref.ast, compare.ast]))
     if not CI: print_si_diff(ref, compare)
   if DEBUG >= 1: print(f"*** process replay: {changed} unique kernel{'s' if changed>1 else ''} changed")
   return changed

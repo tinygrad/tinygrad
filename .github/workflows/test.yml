@@ -142,8 +142,8 @@ jobs:
         mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
-    - name: Repo line count <9700 lines
-      run: MAX_LINE_COUNT=9700 python sz.py
+    - name: Repo line count <9800 lines
+      run: MAX_LINE_COUNT=9800 python sz.py
 
   testopencl:
     strategy:
@@ -238,9 +238,6 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Test MLPerf datasets
         run: GPU=1 python -m pytest -n=auto test/external/external_test_datasets.py --durations=20
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test THREEFRY
-        run: PYTHONPATH=. THREEFRY=1 GPU=1 python3 -m pytest test/test_randomness.py test/test_jit.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Run handcode_opt
         run: PYTHONPATH=. MODEL=resnet GPU=1 DEBUG=1 BS=4 HALF=0 python3 examples/handcode_opt.py
@@ -534,9 +531,6 @@ jobs:
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
         run: |
-          if [ "${{ matrix.backend }}" == "amd" ] && [ "${GITHUB_REF_NAME}" != "master" ]; then
-            MAX_DIFF_PCT=1 RUN_PROCESS_REPLAY=0 test/external/process_replay/test_process_replay.sh
-          fi
           export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py

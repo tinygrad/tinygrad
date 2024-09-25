@@ -1,5 +1,5 @@
 import unittest
-import os
+import os, itertools
 os.environ["TRACK_MATCH_STATS"] = "2"
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor
@@ -9,7 +9,9 @@ from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import CI, Context, all_same, DEBUG, colored, getenv
 from tinygrad.codegen.uopgraph import constant_folder, devectorize, float4_folding
 from test.external.process_replay.helpers import print_diff
-from viz.serve import UOpRet, load_kernels
+from viz.serve import KernelRet, UOpRet, load_kernels, uop_to_json
+
+def group_rewrites(kernels:KernelRet): return {k:list(v) for k,v in itertools.groupby(kernels.ctxs.values(), lambda x:x.loc)}
 
 class TestViz(unittest.TestCase):
   def tearDown(self) -> None:
@@ -40,14 +42,14 @@ class TestViz(unittest.TestCase):
 
   def test_ctx_groups(self):
     contexts.clear()
-    schedule1 = Tensor.randn(4, 1).contiguous().schedule()
-    schedule2 = Tensor.randn(4, 4).contiguous().schedule()
+    schedule1 = Tensor.zeros(4, 1).contiguous().exp().schedule()
+    schedule2 = Tensor.zeros(4, 1).contiguous().exp().schedule()
     list(lower_schedule(schedule1))
     list(lower_schedule(schedule2))
     ret = load_kernels(contexts)
     assert len(ret) == 2
-    assert all(len([x for x in y.ctxs.values() if "schedule" in x.loc]) != 0 for y in ret)
-    assert all(len([x for x in y.ctxs.values() if "uopgraph" in x.loc]) != 0 for y in ret)
+    assert all(len([x for x in y.ctxs.values() if "schedule" in x.loc[0]]) != 0 for y in ret)
+    assert all(len([x for x in y.ctxs.values() if "uopgraph" in x.loc[0]]) != 0 for y in ret)
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()
@@ -98,7 +100,7 @@ class TestViz(unittest.TestCase):
     new_sink = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, new_sink, unified=0)
     self.assert_valid_ctx(contexts)
-    assert all(ctx.loc.split("/")[-1].split(":")[0] == __file__.split("/")[-1] for ctx in contexts)
+    assert all(ctx.loc[0].split("/")[-1] == __file__.split("/")[-1] for ctx in contexts)
 
   @unittest.skipIf(CI, "slow, it's generating diffs for 36202 rules")
   def test_fuzz_resnet(self):
@@ -116,13 +118,12 @@ class TestViz(unittest.TestCase):
 
   def test_dedup_ast(self):
     contexts.clear()
-    a = Tensor.randn(4, 4)+2
-    b = Tensor.randn(4, 4)+2
+    a = Tensor.empty(4, 4).contiguous().realize()+2
+    b = Tensor.empty(4, 4).contiguous().realize()+2
     Tensor.schedule(a, b)
     kernels = load_kernels(contexts)
     self.assertEqual(len(kernels), 1)
-    schedule_ctxs = [x for x in kernels[0].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
-    self.assertEqual(len(schedule_ctxs), 1)
+    assert all(len(v) == 1 for k,v in group_rewrites(kernels[0]).items() if "schedule.py" in k)
 
   def test_no_dedup_different_opts(self):
     contexts.clear()
@@ -132,10 +133,22 @@ class TestViz(unittest.TestCase):
     with Context(NOOPT=0): list(lower_schedule(s.copy()))
     kernels = load_kernels(contexts)
     self.assertEqual(len(kernels), 2)
-    schedule_ctxs = [x for x in kernels[0].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
-    self.assertEqual(len(schedule_ctxs), 1)
-    schedule_ctxs = [x for x in kernels[1].ctxs.values() if x.loc.split("/")[-1].split(":")[0] == "schedule.py"]
-    self.assertEqual(len(schedule_ctxs), 0)
+    assert all(len(v) == 1 for _,v in group_rewrites(kernels[0]).items())
+    assert all(len(v) == 0 for k,v in group_rewrites(kernels[1]).items() if "schedule.py" in k)
+
+  def test_fold_const_nodes(self):
+    a = Tensor.empty(4, 4)+2
+    contexts.clear()
+    sink = a.schedule()[-1].ast
+    ret = uop_to_json(sink)
+    for v in ret.values(): print(v)
+    assert not any(v[0].startswith("CONST") for v in ret.values())
+    assert len([x for x in ret.values() if "CONST" in x[0]]) == 1
+
+  def test_no_fold_single_const(self):
+    node = UOp(UOps.CONST, dtypes.float, (), 1.0)
+    ret = uop_to_json(node)
+    assert len(ret) == 1
 
 if __name__ == "__main__":
   unittest.main()

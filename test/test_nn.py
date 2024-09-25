@@ -452,6 +452,7 @@ class TestNN(unittest.TestCase):
 
   def test_embedding_one_kernel(self):
     layer = Embedding(20, 30)
+    layer.weight = Tensor.zeros_like(layer.weight).contiguous()
     a = Tensor([[1, 5, 9, 11],
                 [12, 19, 8, 1]])
     result = layer(a)
