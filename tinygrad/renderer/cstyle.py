@@ -4,18 +4,8 @@ import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
-from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, ConstType
+from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
-
-def render_const(r:CStyleLanguage, x:ConstType, dtype:DType) -> str:
-  assert dtype.count == 1, f"consts should be scalar, got {dtype}"
-  if math.isnan(x): val = r.nan
-  elif math.isinf(x): val = ("-" if x < 0 else "") + r.infinity
-  elif dtype == dtypes.bool: val = "1" if x else "0"
-  elif dtype == dtypes.float: val = f"{x}f"
-  elif dtype == dtypes.uint64: val = f"{x}ULL"
-  else: val = str(x)
-  return (r.render_cast(val, dtype) if dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
 
 def render_load(r:CStyleLanguage, load:UOp, buf:UOp) -> str:
   sidx = strip_parens(r[load.src[1]])
@@ -49,7 +39,6 @@ def render_store(r:CStyleLanguage, store:UOp, buf:UOp, var:UOp) -> str:
 
 def render_alu(r:CStyleLanguage, x:UOp):
   if x.arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}: operands = [strip_parens(r[v]) if v.arg == x.arg else r[v] for v in x.src]
-  elif x.arg is BinaryOps.MAX: operands = [r.render_cast(r[v], v.dtype) if v.op is UOps.CONST else r[v] for v in x.src]
   else: operands = [r[v] for v in x.src]
   return r.code_for_op[x.arg](*operands, x.dtype)
 
@@ -74,13 +63,33 @@ base_pm = PatternMatcher([
   (UPat(UOps.BITCAST, name="x"), lambda r,x: r.render_cast(r[x.src[0]], x.dtype, True)),
   (UPat(UOps.DEFINE_LOCAL, name="x"), lambda r,x: f"{r.smem_align}{r.smem_prefix}{r.render_dtype(x.dtype.base)} {r[x]}[{x.arg[1]}];"),
   (UPat(UOps.BARRIER), lambda r: r.barrier),
+  (UPat(UOps.NOOP, name="x"), lambda r,x: r[x.src[0]]),
   (UPat(UOps.SPECIAL, name="x"), lambda r,x: f"{r.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {x.arg[1]} */"),
+  # const
+  (UPat(UOps.CONST, arg=math.inf), lambda r: r.infinity),
+  (UPat(UOps.CONST, arg=-math.inf), lambda r: "-"+r.infinity),
+  (UPat(UOps.CONST, dtype=dtypes.double, name="x"), lambda r,x: f"{x.arg}" if not math.isnan(x.arg) else r.nan),
+  (UPat(UOps.CONST, dtype=dtypes.float, name="x"), lambda r,x: f"{x.arg}f" if not math.isnan(x.arg) else r.nan),
+  (UPat(UOps.CONST, dtype=dtypes.int64, name="x"), lambda r,x: f"{x.arg}ll"),
+  (UPat(UOps.CONST, dtype=dtypes.uint64, name="x"), lambda r,x: f"{x.arg}ull"),
+  (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda r,x: f"{x.arg}u"),
+  (UPat(UOps.CONST, dtype=dtypes.bool, name="x"), lambda r,x: "1" if x.arg else "0"),
+  (UPat(UOps.CONST, name="x"), lambda r,x: str(x.arg)),
   # function calls
-  (UPat(UOps.CONST, name="x"), lambda r,x: render_const(r, x.arg, x.dtype)),
   (UPat(UOps.LOAD, src=(UPat.var("buf"),), allow_any_len=True, name="load"), render_load),
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat.var("var")), allow_any_len=True, name="store"), render_store),
   (UPat(UOps.ALU, name="x"), render_alu),
   (UPat(UOps.GEP, name="x"), render_gep),
+])
+
+extra_pm = PatternMatcher([
+  # consts are rendered to larger type and casted
+  (UPat(UOps.CONST, (dtypes.bfloat16, dtypes.half), name="c"), lambda c: UOp.const(dtypes.float, c.arg).cast(c.dtype)),
+  (UPat(UOps.CONST, (dtypes.uint8, dtypes.uint16), name="c"), lambda c: UOp.const(dtypes.uint32, c.arg).cast(c.dtype)),
+  (UPat(UOps.CONST, (dtypes.int8, dtypes.int16), name="c"), lambda c: UOp.const(dtypes.int32, c.arg).cast(c.dtype)),
+  # insert a NOOP before BITCAST to force it to be rendered. not needed on all backends?
+  (UPat(UOps.BITCAST, name="x"),
+   lambda x: UOp(UOps.BITCAST, x.dtype, (UOp(UOps.NOOP, x.src[0].dtype, x.src),)) if x.src[0].op is not UOps.NOOP else None),
 ])
 
 class CStyleLanguage(Renderer):
@@ -110,6 +119,8 @@ class CStyleLanguage(Renderer):
     BinaryOps.AND: lambda a,b,dtype: f"({a}&{b})", BinaryOps.OR: lambda a,b,dtype: f"({a}|{b})",
     TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"}
 
+  extra_matcher = extra_pm
+
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:str, var_dtype:DType, bitcast=False) -> str:
     if bitcast: return f"(*(({self.buffer_prefix}{self.render_dtype(var_dtype)}*)&{x}))"
@@ -134,21 +145,11 @@ class CStyleLanguage(Renderer):
     r: Dict[UOp, str] = {}
     self.r = r
 
-    # get should render
     child_count = Counter(v for ru in uops for v in ru.src)
-    dont_render: Dict[UOp, bool] = {}
-    for u in uops:
-      # bitcast src must be rendered (always earlier, so this is safe)
-      if u.op is UOps.BITCAST: dont_render[u.src[0]] = False
-      dont_render[u] = u.op in {UOps.CONST, UOps.GEP} or \
-        (u.op in {UOps.VECTORIZE, UOps.ALU, UOps.CAST, UOps.BITCAST} and child_count[u] == 1 \
-         and u.arg is not BinaryOps.MAX and not getenv("EXPAND_SSA"))
-
     bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
     kernel = []
     depth = 1
     c: DefaultDict[str, int] = defaultdict(int)
-    c['temp'] += 1   # hack for process replay
     for u in uops:
       if u.op is UOps.DEFINE_GLOBAL:
         r[u] = f"data{u.arg}"
@@ -168,7 +169,7 @@ class CStyleLanguage(Renderer):
         r[u] = u.arg[0]
       else:
         prefix = {UOps.RANGE: "ridx", UOps.ALU: "alu", UOps.WMMA: "wmma", UOps.DEFINE_LOCAL: "temp", UOps.CONST: "const",
-                  UOps.CAST: "cast", UOps.BITCAST: "cast", UOps.GEP: "gep", UOps.VECTORIZE: "cast",
+                  UOps.CAST: "cast", UOps.BITCAST: "cast", UOps.GEP: "gep", UOps.VECTORIZE: "cast", UOps.NOOP: "precast",
                   UOps.DEFINE_ACC: "acc", UOps.LOAD: "val"}.get(u.op, "unk")
         r[u] = f"{prefix}{c[prefix]}"
 
@@ -176,7 +177,9 @@ class CStyleLanguage(Renderer):
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {UOps.ENDIF, UOps.ENDRANGE}: depth -= 1
-      if dont_render[u]: r[u] = l
+      if u.op in {UOps.CONST, UOps.GEP} or (u.op in {UOps.VECTORIZE, UOps.ALU, UOps.CAST, UOps.BITCAST}
+                                            and child_count[u] == 1 and u.arg is not BinaryOps.MAX and not getenv("EXPAND_SSA")):
+        r[u] = l
       else:
         if u.op in {UOps.RANGE, UOps.ASSIGN, UOps.DEFINE_LOCAL} or u.dtype == dtypes.void:
           if u.op is UOps.ASSIGN: r[u] = r[u.src[0]]
