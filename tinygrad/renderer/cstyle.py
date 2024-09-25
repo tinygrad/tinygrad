@@ -76,7 +76,7 @@ base_pm = PatternMatcher([
   (UPat(UOps.BARRIER), lambda r: r.barrier),
   (UPat(UOps.SPECIAL, name="x"), lambda r,x: f"{r.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {x.arg[1]} */"),
   # function calls
-  (UPat(UOps.CONST, name="x"), lambda r,x: render_const(r, x.arg, x.dtype) if x.arg >= 0 else f"({render_const(r, x.arg, x.dtype)})"),
+  (UPat(UOps.CONST, name="x"), lambda r,x: render_const(r, x.arg, x.dtype)),
   (UPat(UOps.LOAD, src=(UPat.var("buf"),), allow_any_len=True, name="load"), render_load),
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat.var("var")), allow_any_len=True, name="store"), render_store),
   (UPat(UOps.ALU, name="x"), render_alu),

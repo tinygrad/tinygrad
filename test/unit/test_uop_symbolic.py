@@ -143,10 +143,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 8)+NumNode(1), 1, 9, {"(1+a)", "(a+1)"})
 
   def test_sub_1(self):
-    self.helper_test_variable(Variable("a", 0, 8)-1, -1, 7, {"(-1+a)", "(a+(-1))"})
+    self.helper_test_variable(Variable("a", 0, 8)-1, -1, 7, {"(-1+a)", "(a+(-1))", "(a+-1)"})
 
   def test_sub_num_1(self):
-    self.helper_test_variable(Variable("a", 0, 8)-NumNode(1), -1, 7, {"(-1+a)", "(a+(-1))"})
+    self.helper_test_variable(Variable("a", 0, 8)-NumNode(1), -1, 7, {"(-1+a)", "(a+(-1))", "(a+-1)"})
 
   def test_add_self(self):
     a = Variable("a", 0, 8)
@@ -219,7 +219,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_mod_to_sub(self):
     # This is mod reduction
-    self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, {"(-1+a)", "(a+(-1))"})
+    self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, {"(-1+a)", "(a+(-1))", "(a+-1)"})
 
   def test_sum_div_const(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 4, 0, 7, "a")
@@ -321,7 +321,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Node.sum([Variable("a", 0, 1) * -4 + 1, Variable("a", 0, 1) * 4]), 1, 1, "1")
 
   def test_div_cancel(self):
-    self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, {"(-1+b)", "(b+(-1))"})
+    self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, {"(-1+b)", "(b+(-1))", "(b+-1)"})
 
   def test_mod_cancel(self):
     self.helper_test_variable(Node.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, 0, 20, "(a*2)")
@@ -331,8 +331,8 @@ class TestSymbolic(unittest.TestCase):
 
   def test_add_div(self):
     # careful about the lower bounds and upper bounds
-    self.helper_test_variable((Variable("a", 0, 5)-2)//4, -1, 0, "(((a+2)//4)+(-1))")
-    self.helper_test_variable((Variable("a", 0, 5)-1)//4, -1, 1, "(((a+3)//4)+(-1))")
+    self.helper_test_variable((Variable("a", 0, 5)-2)//4, -1, 0, {"(((a+2)//4)+(-1))", "(((a+2)//4)+-1)"})
+    self.helper_test_variable((Variable("a", 0, 5)-1)//4, -1, 1, {"(((a+3)//4)+(-1))", "(((a+3)//4)+-1)"})
     self.helper_test_variable((Variable("a", 0, 5))//4, 0, 1, "(a//4)")
     self.helper_test_variable((Variable("a", 0, 5)+1)//4, 0, 1, "((a+1)//4)")
     self.helper_test_variable((Variable("a", 0, 5)+2)//4, 0, 1, "((a+2)//4)")
@@ -358,9 +358,9 @@ class TestSymbolic(unittest.TestCase):
 
   # TODO: simplify the expression
   def test_div_neg_cancel(self):
-    self.helper_test_variable((-Variable("idx", 0, 100)+199)//-4 + 50, 1, 26, "((((idx*(-1))+199)//(-4))+50)")
-    self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "((((idx*(-1))+200)//(-4))+50)")
-    self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, 0, 25, "((((idx*(-1))+201)//(-4))+50)")
+    self.helper_test_variable((-Variable("idx", 0, 100)+199)//-4 + 50, 1, 26, {"((((idx*(-1))+199)//(-4))+50)", "((((idx*-1)+199)//-4)+50)"})
+    self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, {"((((idx*(-1))+200)//(-4))+50)", "((((idx*-1)+200)//-4)+50)"})
+    self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, 0, 25, {"((((idx*(-1))+201)//(-4))+50)", "((((idx*-1)+201)//-4)+50)"})
 
   def test_sum_div_big_const(self):
     gidx0 = Variable("gidx0", 0, 24)
@@ -416,10 +416,10 @@ class TestSymbolic(unittest.TestCase):
   def test_div_neg_all_range(self):
     gidx = Variable("gidx", 0, 124)
     lidx = Variable("lidx", 0, 7)
-    self.helper_test_variable((-gidx*8-lidx+999)//-4 + 250, 1, 250, "((((gidx*(-8))+(lidx*(-1))+999)//(-4))+250)")
-    self.helper_test_variable((-gidx*8-lidx+1000)//-4 + 250, 0, 250, "((((gidx*(-8))+(lidx*(-1))+1000)//(-4))+250)")
-    self.helper_test_variable((-gidx*8-lidx+1001)//-4 + 250, 0, 250, "((((gidx*(-8))+(lidx*(-1))+1001)//(-4))+250)")
-    self.helper_test_variable((-gidx*8-lidx+1002)//-4 + 250, 0, 250, "((((gidx*(-8))+(lidx*(-1))+1002)//(-4))+250)")
+    self.helper_test_variable((-gidx*8-lidx+999)//-4 + 250, 1, 250, "((((gidx*-8)+(lidx*-1)+999)//-4)+250)")
+    self.helper_test_variable((-gidx*8-lidx+1000)//-4 + 250, 0, 250, "((((gidx*-8)+(lidx*-1)+1000)//-4)+250)")
+    self.helper_test_variable((-gidx*8-lidx+1001)//-4 + 250, 0, 250, "((((gidx*-8)+(lidx*-1)+1001)//-4)+250)")
+    self.helper_test_variable((-gidx*8-lidx+1002)//-4 + 250, 0, 250, "((((gidx*-8)+(lidx*-1)+1002)//-4)+250)")
 
   # NOTE: tests are not correct in symbolic
   def test_div_neg_then_neg(self):
@@ -428,8 +428,9 @@ class TestSymbolic(unittest.TestCase):
     lidx1 = Variable("lidx1", 0, 7)
     alu2 = -lidx0-lidx1
     self.helper_test_variable((((alu2+14)//(-32))+4), 4, 4, "4")
-    self.helper_test_variable(-(((alu2+14)//(-32))+4), -4, -4, "(-4)")
-    self.helper_test_variable((((alu2+134)//(-32))+4), 0, 1, "((((lidx0*(-1))+(lidx1*(-1))+134)//(-32))+4)")
+    self.helper_test_variable(-(((alu2+14)//(-32))+4), -4, -4, {"(-4)", "-4"})
+    self.helper_test_variable((((alu2+134)//(-32))+4), 0, 1, {"((((lidx0*(-1))+(lidx1*(-1))+134)//(-32))+4)",
+                                                              "((((lidx0*-1)+(lidx1*-1)+134)//-32)+4)"})
     self.helper_test_variable((((alu2+142)//(-32))+4), 0, 0, "0")
     self.helper_test_variable((((alu2+150)//(-32))+4), 0, 0, "0")
     self.helper_test_variable((((alu2+158)//(-32))+4), 0, 0, "0")
@@ -453,12 +454,12 @@ class TestSymbolic(unittest.TestCase):
     idx = Variable("idx", 0, 24)
     self.helper_test_variable(idx//4, 0, 6, "(idx//4)")
     # TODO: simplify the true branch
-    self.helper_test_variable(idx.lt(4).where(idx//4, idx.const_like(-1)), -1, 6, "((idx<4)?(idx//4):(-1))")
+    self.helper_test_variable(idx.lt(4).where(idx//4, idx.const_like(-1)), -1, 6, {"((idx<4)?(idx//4):(-1))", "((idx<4)?(idx//4):-1)"})
 
   def test_idiv_lt(self):
     idx = Variable("idx", 0, 24)
     self.helper_test_variable((idx//4).lt(3), 0, 1, "(idx<12)")
-    self.helper_test_variable((idx//-4).lt(-3), 0, 1, "((idx//(-4))<(-3))")
+    self.helper_test_variable((idx//-4).lt(-3), 0, 1, {"((idx//(-4))<(-3))", "((idx//-4)<-3)"})
 
   def test_simplex_lt(self):
     a = Variable("a", 0, 3)
@@ -468,7 +469,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a).lt(1).ne(True), 0, 1, "((a<1)!=1)")
     self.helper_test_variable((a+b).lt(1).ne(True), 0, 1, "(((a+b)<1)!=1)")
     self.helper_test_variable((a*3+b*4).lt(1).ne(True), 0, 1, "(((a+b)<1)!=1)")
-    self.helper_test_variable((a*(-3)+b*4).lt(1).ne(True), 0, 1, "((((a*(-3))+(b*4))<1)!=1)")  # negative coeff, should not be simplified
+    self.helper_test_variable((a*(-3)+b*4).lt(1).ne(True), 0, 1, "((((a*-3)+(b*4))<1)!=1)")  # negative coeff, should not be simplified
     self.helper_test_variable((a*3+d*4).lt(1).ne(True), 0, 1, "((((a*3)+(d*4))<1)!=1)")  # var can be negative, should not be simplified
     self.helper_test_variable((a+b+c*2).lt(1).ne(True), 0, 1, "(((a+b+c)<1)!=1)")
     self.helper_test_variable((a+b*2+c*4).lt(1).ne(True), 0, 1, "(((a+b+c)<1)!=1)")

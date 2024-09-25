@@ -113,20 +113,20 @@ class TestImageSimplification(unittest.TestCase):
     gidx1 = Special("gidx1", 32)
     shape = (10, 10, 4)
     load = get_load_image_uop(shape, (gidx1).lt(1).ne(True), (gidx0, gidx1-1))
-    self.assertEqual(render(load), "read_imagef(data0, smp, (int2)(gidx0,(gidx1+(-1))))")
+    self.assertEqual(render(load), "read_imagef(data0, smp, (int2)(gidx0,(gidx1+-1)))")
     load = get_load_image_uop(shape, (gidx1).lt(1).ne(True), (gidx0, gidx1-2))
-    self.assertEqual(render(load), "read_imagef(data0, smp, (int2)(gidx0,(gidx1+(-2))))")
+    self.assertEqual(render(load), "read_imagef(data0, smp, (int2)(gidx0,(gidx1+-2)))")
 
     # should match any one of the AND clause and drop the matched statement from valid
     valid = (gidx0).lt(1).ne(True) & (gidx1).lt(1).ne(True)
     load = get_load_image_uop(shape, valid, (gidx0+1, gidx1-1))
     self.assertEqual(render(load),
-                     "(((gidx0<1)!=1)?read_imagef(data0, smp, (int2)((gidx0+1),(gidx1+(-1)))):(float4)(0.0f,0.0f,0.0f,0.0f))")
+                     "(((gidx0<1)!=1)?read_imagef(data0, smp, (int2)((gidx0+1),(gidx1+-1))):(float4)(0.0f,0.0f,0.0f,0.0f))")
 
     valid = (gidx1).lt(1).ne(True) & (gidx1).lt(1).ne(True)
     load = get_load_image_uop(shape, valid, (gidx0, gidx1-1))
     self.assertEqual(render(load),
-                     "read_imagef(data0, smp, (int2)(gidx0,(gidx1+(-1))))")
+                     "read_imagef(data0, smp, (int2)(gidx0,(gidx1+-1)))")
 
   def test_idx_lt_bound(self):
     # (idx1 < image_bound) ? (..., idx1) : 0 can drop the valid
@@ -191,7 +191,7 @@ class TestImageSimplification(unittest.TestCase):
 
     load = get_load_image_uop(shape, valid, idx)
     self.assertEqual(render(load),
-                     "read_imagef(data0, smp, (int2)(((idx1*48)+(ridx2*6)+ridx0+(-6)),((idx2*2)+ridx1+(-1))))")
+                     "read_imagef(data0, smp, (int2)(((idx1*48)+(ridx2*6)+ridx0+-6),((idx2*2)+ridx1+-1)))")
 
   def test_openpilot_conv2(self):
     # conv in test/external/external_test_valid_remove.py
@@ -213,7 +213,7 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, valid, idx)
 
     self.assertEqual(render(load),
-                     "read_imagef(data0, smp, (int2)(((idx1*24)+(ridx2*3)+ridx0+(-3)),((idx2*2)+ridx1+(-1))))")
+                     "read_imagef(data0, smp, (int2)(((idx1*24)+(ridx2*3)+ridx0+-3),((idx2*2)+ridx1+-1)))")
 
   def test_openpilot_conv3(self):
     # in openpilot 0.9.7
@@ -235,7 +235,7 @@ class TestImageSimplification(unittest.TestCase):
     # TODO: simplify idx
     # alu0 = ((idx2*2)+ridx0)
     self.assertEqual(render(load),
-      "(((alu0<11)&((((idx1*8)+ridx1)<3)!=1))?read_imagef(data0, smp, (int2)((((idx1*512)+(ridx1*64)+idx0+832)%1024),(alu0+((idx1+((ridx1+5)//8)+1)//2)+(-4)))):(float4)(0.0f,0.0f,0.0f,0.0f))")  # noqa: E501
+      "(((alu0<11)&((((idx1*8)+ridx1)<3)!=1))?read_imagef(data0, smp, (int2)((((idx1*512)+(ridx1*64)+idx0+832)%1024),(alu0+((idx1+((ridx1+5)//8)+1)//2)+-4))):(float4)(0.0f,0.0f,0.0f,0.0f))")  # noqa: E501
 
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)
@@ -245,7 +245,7 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop((1, 26, 4), valid, idx)
     # alu0 is ((gidx*3)+18)
     self.assertEqual(render(load),
-                     "read_imagef(data0, smp, (int2)(((gidx*3)+(-1438)),0))")
+                     "read_imagef(data0, smp, (int2)(((gidx*3)+-1438),0))")
 
   def test_simplify2(self):
     # from GPU=1 DEBUG=4 FORWARD_ONLY=1 IMAGE=2 python3 test/test_ops.py TestOps.test_simple_padding_conv2d
@@ -254,7 +254,7 @@ class TestImageSimplification(unittest.TestCase):
     idx = ((lidx+1)%2, (lidx+1)//2-1)
     load = get_load_image_uop((1, 2, 4), valid, idx)
     self.assertEqual(render(load),
-                     "read_imagef(data0, smp, (int2)((lidx+(-1)),0))")
+                     "read_imagef(data0, smp, (int2)((lidx+-1),0))")
 
   def test_simplify3(self):
     # from openpilot
@@ -263,7 +263,7 @@ class TestImageSimplification(unittest.TestCase):
     idx = ((idx0+55)%64, (idx0+55)//64-4)
     load = get_load_image_uop((1, 64, 4), valid, idx)
     self.assertEqual(render(load),
-                     "read_imagef(data0, smp, (int2)((idx0+(-201)),0))")
+                     "read_imagef(data0, smp, (int2)((idx0+-201),0))")
 
   def test_simplify4(self):
     idx0 = Special("idx0", 512)
