@@ -39,7 +39,6 @@ def render_store(r:CStyleLanguage, store:UOp, buf:UOp, var:UOp) -> str:
 
 def render_alu(r:CStyleLanguage, x:UOp):
   if x.arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}: operands = [strip_parens(r[v]) if v.arg == x.arg else r[v] for v in x.src]
-  elif x.arg is BinaryOps.MAX: operands = [r.render_cast(r[v], v.dtype) if v.op is UOps.CONST else r[v] for v in x.src]
   else: operands = [r[v] for v in x.src]
   return r.code_for_op[x.arg](*operands, x.dtype)
 
@@ -65,7 +64,7 @@ base_pm = PatternMatcher([
   (UPat(UOps.DEFINE_LOCAL, name="x"), lambda r,x: f"{r.smem_align}{r.smem_prefix}{r.render_dtype(x.dtype.base)} {r[x]}[{x.arg[1]}];"),
   (UPat(UOps.BARRIER), lambda r: r.barrier),
   (UPat(UOps.NOOP, name="x"), lambda r,x: r[x.src[0]]),
-  (UPat(UOps.SPECIAL, name="x"), lambda r,x: f"{r.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}"),
+  (UPat(UOps.SPECIAL, name="x"), lambda r,x: f"{r.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {x.arg[1]} */"),
   # const
   (UPat(UOps.CONST, arg=math.inf), lambda r: r.infinity),
   (UPat(UOps.CONST, arg=-math.inf), lambda r: "-"+r.infinity),
@@ -185,7 +184,7 @@ class CStyleLanguage(Renderer):
         if u.op in {UOps.RANGE, UOps.ASSIGN, UOps.DEFINE_LOCAL} or u.dtype == dtypes.void:
           if u.op is UOps.ASSIGN: r[u] = r[u.src[0]]
         else:
-          l = f"{self.render_dtype(u.dtype)} {r[u]} = {l};"
+          l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not UOps.SPECIAL else "")
         kernel.append("  "*depth + l)
         if prefix: c[prefix] += 1  # if it was used, increment
       if u.op in {UOps.IF, UOps.RANGE}: depth += 1
