@@ -500,7 +500,7 @@ jobs:
     - name: openpilot compile3 0.9.7
       run: PYTHONPATH="." QCOM=1 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx
     - name: openpilot compile3 0.9.7+ tomb raider
-      run: JIT_BATCH_SIZE=10000 PYTHONPATH="." QCOM=1 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/e8bea2c78ffa92685ece511e9b554122aaf1a79d/selfdrive/modeld/models/supercombo.onnx
+      run: PYTHONPATH="." QCOM=1 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/e8bea2c78ffa92685ece511e9b554122aaf1a79d/selfdrive/modeld/models/supercombo.onnx
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
     - uses: actions/upload-artifact@v4
