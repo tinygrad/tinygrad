@@ -157,6 +157,7 @@ class CStyleLanguage(Renderer):
     kernel = []
     depth = 1
     c: DefaultDict[str, int] = defaultdict(int)
+    c['temp'] += 1   # hack for process replay
     for u in uops:
       if u.op is UOps.DEFINE_GLOBAL:
         r[u] = f"data{u.arg}"
@@ -175,7 +176,7 @@ class CStyleLanguage(Renderer):
       if u.op is UOps.SPECIAL:
         r[u] = u.arg[0]
       else:
-        prefix = {UOps.RANGE: "ridx", UOps.ALU: "alu", UOps.WMMA: "wmma", UOps.DEFINE_LOCAL: "temp",
+        prefix = {UOps.RANGE: "ridx", UOps.ALU: "alu", UOps.WMMA: "wmma", UOps.DEFINE_LOCAL: "temp", UOps.CONST: "const",
                   UOps.CAST: "cast", UOps.BITCAST: "cast", UOps.GEP: "gep", UOps.VECTORIZE: "cast",
                   UOps.DEFINE_ACC: "acc", UOps.LOAD: "val"}.get(u.op, "unk")
         r[u] = f"{prefix}{c[prefix]}"
