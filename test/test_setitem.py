@@ -40,7 +40,7 @@ class TestSetitem(unittest.TestCase):
   def test_setitem_into_noncontiguous(self):
     t = Tensor.ones(4)
     assert not t.lazydata.st.contiguous
-    with self.assertRaises(AssertionError): t[1] = 5
+    with self.assertRaises(RuntimeError): t[1] = 5
 
   def test_setitem_inplace_operator(self):
     t = Tensor.arange(4).reshape(2, 2).contiguous()
@@ -77,8 +77,6 @@ class TestSetitem(unittest.TestCase):
     t[1] -= 1
     np.testing.assert_allclose(t.numpy(), [[0, 1], [3, 4]])
 
-  # TODO: implement fancy setitem
-  @unittest.expectedFailure
   def test_fancy_setitem(self):
     t = Tensor.zeros(6,6).contiguous()
     t[[1,2], [3,2]] = 3
