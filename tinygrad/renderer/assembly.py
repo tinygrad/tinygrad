@@ -1,8 +1,8 @@
 from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
 import struct, math
 from collections import defaultdict
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp
-from tinygrad.ops import PatternMatcher, UPat
+from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp, PatternMatcher, UPat
+from tinygrad.codegen.uopgraph import constant_folder
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -34,7 +34,7 @@ asm_for_op: Dict[Op, Callable] = {
 
 supports_half: List[Op] = [UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
 shiftable_consts = set([2**i for i in range(64)])
-ptx_matcher = PatternMatcher([
+ptx_matcher = constant_folder+PatternMatcher([
   (UPat(UOps.ALU, arg=BinaryOps.MUL, name="root", dtype=tuple([dt for dt in dtypes.fields().values() if dtypes.is_int(dt)]),
       src=[UPat.cvar("const"), UPat.var("mul")]),
     lambda root, mul, const: UOp(UOps.ALU, root.dtype,
