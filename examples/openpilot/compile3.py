@@ -3,9 +3,10 @@ import numpy as np
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
 if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
 if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
+if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
 
 from tinygrad import fetch, Tensor, TinyJit, Device, Context, GlobalCounters
-from tinygrad.helpers import OSX, DEBUG, Timing
+from tinygrad.helpers import OSX, DEBUG, getenv
 from tinygrad.tensor import _from_np_dtype
 
 import onnx
@@ -56,7 +57,7 @@ def compile():
   print("**** compile done ****")
   return test_val
 
-def test(test_val):
+def test(test_val=None):
   with open(OUTPUT, "rb") as f:
     run = pickle.load(f)
   Tensor.manual_seed(100)
@@ -70,10 +71,10 @@ def test(test_val):
     et = time.perf_counter()
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {(et-st)*1e3:6.2f} ms")
   print(out, val.shape, val.dtype)
-  np.testing.assert_equal(test_val, val)
+  if test_val is not None: np.testing.assert_equal(test_val, val)
   print("**** test done ****")
 
 if __name__ == "__main__":
-  test_val = compile()
+  test_val = compile() if not getenv("RUN") else None
   test(test_val)
 

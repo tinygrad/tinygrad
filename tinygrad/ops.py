@@ -499,7 +499,7 @@ TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
 match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedRewriteContext:
-  loc: str                                                                # location that called graph_rewrite
+  loc: Tuple[str, int]                                                    # location that called graph_rewrite
   sink: UOp                                                               # the sink passed into the rewrite
   kernel_name: Optional[str] = None                                       # the name of the kernel being rewritten
   rewrites: List[Tuple[UOp, UOp, UPat]] = field(default_factory=list)     # all rewrites of sparents. (before, after, UPat)
@@ -566,7 +566,7 @@ class RewriteContext:
     return found
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
   if TRACK_MATCH_STATS >= 2:
-    contexts.append(TrackedRewriteContext(f"{(f:=sys._getframe(1)).f_code.co_filename.split('/')[-1]}:{f.f_lineno}", sink, _CURRENT_KERNEL.get()))
+    contexts.append(TrackedRewriteContext(((f:=sys._getframe(1)).f_code.co_filename, f.f_lineno), sink, _CURRENT_KERNEL.get()))
   return RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
