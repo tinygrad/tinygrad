@@ -148,10 +148,11 @@ class CStyleLanguage(Renderer):
     child_count = Counter(v for ru in uops for v in ru.src)
     dont_render: Dict[UOp, bool] = {}
     for u in uops:
-      # bitcast src must be rendered
-      if u.op is UOps.BITCAST: dont_render[u.src[0]] = True
+      # bitcast src must be rendered (always earlier, so this is safe)
+      if u.op is UOps.BITCAST: dont_render[u.src[0]] = False
       dont_render[u] = u.op in {UOps.CONST, UOps.GEP} or \
-        (u.op in {UOps.VECTORIZE, UOps.ALU} and child_count[u] == 1 and u.arg is not BinaryOps.MAX and not getenv("EXPAND_SSA"))
+        (u.op in {UOps.VECTORIZE, UOps.ALU, UOps.CAST, UOps.BITCAST} and child_count[u] == 1 \
+         and u.arg is not BinaryOps.MAX and not getenv("EXPAND_SSA"))
 
     bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
     kernel = []
