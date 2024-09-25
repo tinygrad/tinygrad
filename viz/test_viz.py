@@ -1,15 +1,17 @@
 import unittest
-import os
+import os, itertools
 os.environ["TRACK_MATCH_STATS"] = "2"
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor
 from tinygrad.engine.realize import lower_schedule
 from tinygrad.ops import UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.helpers import CI, all_same, DEBUG, colored, getenv
+from tinygrad.helpers import CI, Context, all_same, DEBUG, colored, getenv
 from tinygrad.codegen.uopgraph import constant_folder, devectorize, float4_folding
 from test.external.process_replay.helpers import print_diff
-from viz.serve import create_graph
+from viz.serve import KernelRet, UOpRet, load_kernels, uop_to_json
+
+def group_rewrites(kernels:KernelRet): return {k:list(v) for k,v in itertools.groupby(kernels.ctxs.values(), lambda x:x.loc)}
 
 class TestViz(unittest.TestCase):
   def tearDown(self) -> None:
@@ -19,12 +21,11 @@ class TestViz(unittest.TestCase):
   def assert_valid_ctx(self, contexts):
     assert len(contexts) != 0
     for i,ctx in enumerate(contexts):
-      try: ret = create_graph(ctx)
+      try: ret = UOpRet.from_ctx(ctx)
       except Exception as e:
         print(colored(f"failed to create graph for ctx {i}", "red"))
         raise e
-      rewrites = [x[0] for x in ret.graphs]
-      for j,(x,y) in enumerate(zip(rewrites, rewrites[1:])):
+      for j,(x,y) in enumerate(zip(ret.graphs, ret.graphs[1:])):
         if x.key == y.key:
           raise AssertionError(f"failed to generate the correct diff at rewrite {j} ctx {i}")
 
@@ -38,6 +39,17 @@ class TestViz(unittest.TestCase):
     a = Tensor.ones(4, 1).contiguous().realize()
     out = a + a.reshape(1, 4)
     self.assert_valid_graph(out)
+
+  def test_ctx_groups(self):
+    contexts.clear()
+    schedule1 = Tensor.randn(4, 1).contiguous().schedule()
+    schedule2 = Tensor.randn(4, 4).contiguous().schedule()
+    list(lower_schedule(schedule1))
+    list(lower_schedule(schedule2))
+    ret = load_kernels(contexts)
+    assert len(ret) == 2
+    assert all(len([x for x in y.ctxs.values() if "schedule" in x.loc]) != 0 for y in ret)
+    assert all(len([x for x in y.ctxs.values() if "uopgraph" in x.loc]) != 0 for y in ret)
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()
@@ -56,8 +68,8 @@ class TestViz(unittest.TestCase):
     ])
     ret = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, ret)
-    g = create_graph(contexts[0])
-    assert g.graphs[-1][0].key == ret.key
+    g = UOpRet.from_ctx(contexts[0])
+    assert g.graphs[-1].key == ret.key
     self.assert_valid_ctx(contexts)
 
   def test_devectorize_viz(self):
@@ -98,6 +110,45 @@ class TestViz(unittest.TestCase):
     sched = out.schedule()
     list(lower_schedule(sched))
     self.assert_valid_ctx(contexts)
+
+  def test_no_ctx(self):
+    simple_pm = PatternMatcher([(UPat(UOps.CONST), lambda:True)])
+    simple_pm.rewrite(UOp.const(dtypes.int, 2))
+    self.assertEqual(len(contexts), 0)
+
+  def test_dedup_ast(self):
+    contexts.clear()
+    a = Tensor.randn(4, 4)+2
+    b = Tensor.randn(4, 4)+2
+    Tensor.schedule(a, b)
+    kernels = load_kernels(contexts)
+    self.assertEqual(len(kernels), 1)
+    assert all(len(v) == 1 for k,v in group_rewrites(kernels[0]).items() if "schedule.py" in k)
+
+  def test_no_dedup_different_opts(self):
+    contexts.clear()
+    a = Tensor.empty(4, 4)+Tensor.empty(4, 4)
+    s = a.schedule()
+    with Context(NOOPT=1): list(lower_schedule(s.copy()))
+    with Context(NOOPT=0): list(lower_schedule(s.copy()))
+    kernels = load_kernels(contexts)
+    self.assertEqual(len(kernels), 2)
+    assert all(len(v) == 1 for _,v in group_rewrites(kernels[0]).items())
+    assert all(len(v) == 0 for k,v in group_rewrites(kernels[1]).items() if "schedule.py" in k)
+
+  def test_fold_const_nodes(self):
+    a = Tensor.empty(4, 4)+2
+    contexts.clear()
+    sink = a.schedule()[-1].ast
+    ret = uop_to_json(sink)
+    for v in ret.values(): print(v)
+    assert not any(v[0].startswith("CONST") for v in ret.values())
+    assert len([x for x in ret.values() if "CONST" in x[0]]) == 1
+
+  def test_no_fold_single_const(self):
+    node = UOp(UOps.CONST, dtypes.float, (), 1.0)
+    ret = uop_to_json(node)
+    assert len(ret) == 1
 
 if __name__ == "__main__":
   unittest.main()

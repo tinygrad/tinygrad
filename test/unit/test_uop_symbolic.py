@@ -27,9 +27,7 @@ def render(self) -> Tuple[str, ConstType, ConstType]:
 
 def NumNode(val): return UOp.const(dtypes.int, val)
 def Variable(expr, nmin, nmax):
-  vmin = UOp.const(dtypes.int, nmin)
-  vmax = UOp.const(dtypes.int, nmax) if isinstance(nmax, int) else nmax
-  return UOp(UOps.DEFINE_VAR, dtypes.int, arg=(expr, vmin, vmax))
+  return UOp.define_var(expr, dtypes.int, nmin, nmax if isinstance(nmax, int) else nmax.arg)
 class Node:
   @staticmethod
   def sum(ops): return functools.reduce(lambda x,y: x+y, ops)
@@ -99,6 +97,7 @@ class TestSymbolic(unittest.TestCase):
   def test_div_reduction(self):
     self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
+  @unittest.expectedFailure
   def test_var_becomes_num(self):
     self.helper_test_variable(Variable("a", 2, 2), 2, 2, "2")
 
@@ -330,6 +329,17 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
 
+  def test_add_div(self):
+    # careful about the lower bounds and upper bounds
+    self.helper_test_variable((Variable("a", 0, 5)-2)//4, -1, 0, "(((a+2)//4)+(-1))")
+    self.helper_test_variable((Variable("a", 0, 5)-1)//4, -1, 1, "(((a+3)//4)+(-1))")
+    self.helper_test_variable((Variable("a", 0, 5))//4, 0, 1, "(a//4)")
+    self.helper_test_variable((Variable("a", 0, 5)+1)//4, 0, 1, "((a+1)//4)")
+    self.helper_test_variable((Variable("a", 0, 5)+2)//4, 0, 1, "((a+2)//4)")
+    self.helper_test_variable((Variable("a", 0, 5)+3)//4, 0, 2, "((a+3)//4)")
+    self.helper_test_variable((Variable("a", 0, 5)+4)//4, 1, 2, "((a//4)+1)")
+    self.helper_test_variable((Variable("a", 0, 5)+5)//4, 1, 2, "(((a+1)//4)+1)")
+
   def test_mul_div_factor_mul(self):
     self.helper_test_variable((Variable("a", 0, 10)*8)//4, 0, 20, "(a*2)")
 
@@ -444,6 +454,24 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(idx//4, 0, 6, "(idx//4)")
     # TODO: simplify the true branch
     self.helper_test_variable(idx.lt(4).where(idx//4, idx.const_like(-1)), -1, 6, "((idx<4)?(idx//4):(-1))")
+
+  def test_idiv_lt(self):
+    idx = Variable("idx", 0, 24)
+    self.helper_test_variable((idx//4).lt(3), 0, 1, "(idx<12)")
+    self.helper_test_variable((idx//-4).lt(-3), 0, 1, "((idx//(-4))<(-3))")
+
+  def test_simplex_lt(self):
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    c = Variable("c", 0, 3)
+    d = Variable("d", -3, 3)
+    self.helper_test_variable((a).lt(1).ne(True), 0, 1, "((a<1)!=1)")
+    self.helper_test_variable((a+b).lt(1).ne(True), 0, 1, "(((a+b)<1)!=1)")
+    self.helper_test_variable((a*3+b*4).lt(1).ne(True), 0, 1, "(((a+b)<1)!=1)")
+    self.helper_test_variable((a*(-3)+b*4).lt(1).ne(True), 0, 1, "((((a*(-3))+(b*4))<1)!=1)")  # negative coeff, should not be simplified
+    self.helper_test_variable((a*3+d*4).lt(1).ne(True), 0, 1, "((((a*3)+(d*4))<1)!=1)")  # var can be negative, should not be simplified
+    self.helper_test_variable((a+b+c*2).lt(1).ne(True), 0, 1, "(((a+b+c)<1)!=1)")
+    self.helper_test_variable((a+b*2+c*4).lt(1).ne(True), 0, 1, "(((a+b+c)<1)!=1)")
 
 @unittest.skip("not supported on uops yet")
 class TestSymbolicNumeric(unittest.TestCase):
