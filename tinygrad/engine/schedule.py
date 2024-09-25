@@ -1,6 +1,6 @@
 import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast, get_args
 from tinygrad.ops import REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, UnaryOps, UOp, UOps, PatternMatcher, UPat, graph_rewrite
 from tinygrad.engine.graph import log_lazybuffer, realized_lazybuffer
@@ -35,12 +35,12 @@ class ScheduleItem:
 @dataclass(frozen=True)
 class LBScheduleItem:
   ast: UOp
-  outputs: List[LazyBuffer]
-  inputs: List[LazyBuffer]
-  metadata: List[Metadata] = field(default_factory=list)
-  def __hash__(self):
-    """The unique identifier of a schedule item in the toposort."""
-    return hash(self.outputs[0])
+  bufs: Tuple[LazyBuffer, ...]
+  metadata: Optional[Tuple[Metadata, ...]] = None
+  @property
+  def outputs(self) -> Tuple[LazyBuffer, ...]: return self.bufs[:len(self.ast.src)] if self.ast.op is UOps.SINK else self.bufs[0:1]
+  @property
+  def inputs(self) -> Tuple[LazyBuffer, ...]: return self.bufs[len(self.ast.src):] if self.ast.op is UOps.SINK else self.bufs[1:]
 
 # *** UOp with SWIZZLE (movementops) rewriting to UOp we can index ***
 
@@ -119,7 +119,7 @@ def full_ast_rewrite(sink:UOp) -> UOp:
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
 
-def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], inputs:Dict[LazyBuffer, int],
+def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], inputs:List[LazyBuffer],
                       realizes:Dict[LazyBuffer, None], assign_targets:Dict[LazyBuffer, LazyBuffer],
                       cache:Dict[Tuple[LazyBuffer, ShapeTracker], UOp]) -> UOp:
   """recursively create a UOp"""
@@ -145,8 +145,9 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
       # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                            +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
+    if buf not in assign_targets and buf not in inputs: inputs.append(buf)
     ubuf = UOp(UOps.DEFINE_GLOBAL, buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
-               outputs.index(assign_targets[buf]) if buf in assign_targets else len(outputs)+inputs.setdefault(buf, len(inputs)))
+               outputs.index(assign_targets[buf]) if buf in assign_targets else len(outputs)+inputs.index(buf))
     return UOp(UOps.LOAD, dtype, (ubuf, unbound_st.to_uop()))
 
   # reduce ops change ShapeTracker
@@ -167,13 +168,13 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
 def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) -> Tuple[LBScheduleItem, Dict[Variable, int]]:
   """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
   if (out:=outs[0]).op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}:
-    return LBScheduleItem(UOp(UOps.EXT, out.dtype, (), (out.op, out.arg)), outs, [x.base for x in out.srcs]), {}
+    return LBScheduleItem(UOp(UOps.EXT, out.dtype, (), (out.op, out.arg)), (out,)+tuple(x.base for x in out.srcs)), {}
   # create the stores
   var_vals = merge_dicts([out.st.var_vals.copy() for out in outs])
   assign_targets = {x.srcs[1]:x for x in outs if x.op is MetaOps.ASSIGN}
   cache: Dict[Tuple[LazyBuffer, ShapeTracker], UOp] = {}
   ast: List[UOp] = []
-  inputs: Dict[LazyBuffer, int] = {}
+  inputs: List[LazyBuffer] = []
   for i, out in enumerate(outs):
     src = _recursive_uop(out, output_st:=ShapeTracker.from_shape(out.shape), tuple(outs), var_vals, inputs, realizes, assign_targets, cache=cache)
     if out.op is MetaOps.ASSIGN and out.arg:
@@ -184,7 +185,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
     ubuf = UOp(UOps.DEFINE_GLOBAL, out.dtype if isinstance(out.dtype, ImageDType) else PtrDType(out.dtype), (), i)
     ast.append(UOp(UOps.STORE, dtypes.void, (ubuf, output_st.to_uop(), src)))
   sink = full_ast_rewrite(ast[0].sink(*ast[1:]))
-  return LBScheduleItem(sink, outs, list(inputs), dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs])), var_vals
+  return LBScheduleItem(sink, tuple(outs+inputs), tuple(dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))), var_vals
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
@@ -411,7 +412,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       kernel_number += 1
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     for out in lsi.outputs: del out.srcs  # can only schedule once
-    schedule.append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), tuple(lsi.metadata)))
+    schedule.append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.bufs if x.size != 0), lsi.metadata))
     for x in graph[lsi]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)

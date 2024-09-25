@@ -85,6 +85,7 @@ class Renderer:
   global_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   local_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   shared_max: int = 32768
+  buf_max: Optional[int] = None
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
   code_for_op: Dict[Op, Callable] = {}
