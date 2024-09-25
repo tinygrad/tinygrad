@@ -53,7 +53,7 @@ class Node:
       if b.__class__ is NumNode: return self.__floordiv__(b.b, factoring_allowed)
       if self == b: return NumNode(1)
       if (b - self).min > 0 and self.min >= 0: return NumNode(0) # b - self simplifies the node
-      raise RuntimeError(f"not supported: {self} // {b}")
+      return create_node(DivNode(self, b))
     assert b != 0
     if b < 0: return (self*-1).__floordiv__(-b, factoring_allowed)
     if b == 1: return self
@@ -71,7 +71,7 @@ class Node:
       if b.__class__ is NumNode: return self % b.b
       if self == b: return NumNode(0)
       if (b - self).min > 0 and self.min >= 0: return self # b - self simplifies the node
-      raise RuntimeError(f"not supported: {self} % {b}")
+      return create_node(ModNode(self, b))
     assert b > 0
     if b == 1: return NumNode(0)
     if isinstance(self.max, int) and isinstance(self.min, int):
@@ -135,6 +135,10 @@ class Variable(Node):
 
 class NumNode(Node):
   def __init__(self, num:int):
+    if isinstance(num, NumNode):
+      self.b = num.b
+      self.min, self.max = num.b, num.b
+      return
     assert isinstance(num, int), f"{num} is not an int"
     self.b:int = num
     self.min, self.max = num, num
@@ -152,6 +156,12 @@ def create_node(ret:Node):
   return ret
 
 def create_lt_node(lhs:Node, b:Union[Node, int]):
+  if isinstance(b, int):
+    if lhs.max < b: return NumNode(1)
+    if lhs.min >= b: return NumNode(0)
+  else:
+    if lhs.max < b.min: return NumNode(1)
+    if lhs.min >= b.max: return NumNode(0)
   if isinstance(lhs, SumNode):
     if isinstance(b, int):
       new_sum = []
@@ -211,8 +221,10 @@ class MulNode(OpNode):
 class DivNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], _=False): return self.a//(self.b*b) # two divs is one div
   def get_bounds(self) -> Tuple[int, sint]:
-    assert self.a.min >= 0 and isinstance(self.b, int)
-    return self.a.min//self.b, self.a.max//self.b
+    assert self.a.min >= 0
+    if isinstance(self.b, int): return self.a.min//self.b, self.a.max//self.b
+    assert self.b.min > 0
+    return 0, self.a
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self.a.substitute(var_vals) // self.b
 
 class ModNode(OpNode):
@@ -222,9 +234,11 @@ class ModNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     return (self.a//b) % (self.b//b) if self.b % b == 0 else Node.__floordiv__(self, b, factoring_allowed)
   def get_bounds(self) -> Tuple[int, sint]:
-    assert self.a.min >= 0 and isinstance(self.b, int)
-    if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b): return (0, self.b-1)
-    return (self.a.min%self.b, self.a.max%self.b)
+    assert self.a.min >= 0
+    if isinstance(self.b, int):
+      if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b): return (0, self.b-1)
+      return (self.a.min%self.b, self.a.max%self.b)
+    return 0, self.b - 1
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self.a.substitute(var_vals) % self.b
 
 class RedNode(Node):
