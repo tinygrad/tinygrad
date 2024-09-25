@@ -555,9 +555,14 @@ class TestMultiTensor(unittest.TestCase):
       # don't allow assigns that change axes
       t_none.assign(t_zero)
 
-  def test_rand_on_multiple_devices(self):
+  def test_rand_with_multiple_devices(self):
     with self.assertRaises(ValueError):
       Tensor.rand(256, device=devices_2)
+
+  def test_rand_on_multiple_devices(self):
+    d0_rand = Tensor.rand(256, device=d0).realize()
+    d1_rand = Tensor.rand(256, device=d1).realize()
+    assert not np.allclose(d0_rand.numpy(), d1_rand.numpy())
 
   def test_rand_like_on_shard(self):
     t = Tensor.empty((16, 16)).shard(devices_2)
@@ -591,11 +596,11 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_dropout_on_shard_axis(self):
     with Tensor.train():
-      X = Tensor.ones(256).shard(devices_2, axis=0)
+      X = Tensor.ones(512).shard(devices_2, axis=0)
       output = X.dropout(0.5).numpy()
       unique, counts = np.unique(output, return_counts=True)
       assert set(unique) == {0, 2}, unique
-      assert 100 < counts[0] < 156, counts[0]
+      assert 228 < counts[0] < 284, counts[0]
 
   def test_dropout_on_uneven_shard_axis(self):
     with Tensor.train():
