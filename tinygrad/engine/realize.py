@@ -15,16 +15,15 @@ from tinygrad.engine.schedule import ScheduleItem
 # **************** Program Creation ****************
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
-def get_kernel(renderer:Renderer, ast:UOp) -> Kernel:
+def get_kernel(renderer:Renderer, ast:UOp, rawbufs:List[Buffer]) -> Kernel:
   if DEBUG >= 5:
     print(ast)
-  k = Kernel(ast, opts=renderer).required_optimizations()
+  k = Kernel(ast, opts=renderer, rawbufs=rawbufs).required_optimizations()
   if not NOOPT:
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
     if BEAM >= 1:
-      from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
-      kb, k_opt = Kernel(ast, opts=renderer).required_optimizations(), k
-      rawbufs = bufs_from_lin(kb, allocate=False)
+      from tinygrad.engine.search import beam_search, time_linearizer
+      kb, k_opt = Kernel(ast, opts=renderer, rawbufs=rawbufs).required_optimizations(), k
       if BEAM.value >= 100:
         from extra.mcts_search import mcts_search
         k = mcts_search(kb, rawbufs, BEAM.value)
@@ -148,14 +147,14 @@ class BufferXfer(BufferCopy):
 # **************** method cache ****************
 
 method_cache: Dict[Tuple[str, bytes, int, int, bool], CompiledRunner] = {}
-def get_runner(dname:str, ast:UOp) -> CompiledRunner:
+def get_runner(dname:str, ast:UOp, bufs:List[Buffer]) -> CompiledRunner:
   ckey = (dname, ast.key, BEAM.value, NOOPT.value, False)
   if cret:=method_cache.get(ckey): return cret
   bkey = (dname.split(":")[0], ast.key, BEAM.value, NOOPT.value, True)
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
   else:
-    prg: Program = get_kernel(Device[dname].renderer, ast).to_program()
+    prg: Program = get_kernel(Device[dname].renderer, ast, bufs).to_program()
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
       return UOpsFuzzerRunner(replace(prg, dname=dname))
@@ -190,7 +189,7 @@ class ExecItem:
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   assert len(set(x.device for x in si.bufs)) == 1 or (si.ast.op is UOps.EXT and si.ast.arg[0] is MetaOps.COPY)
   if si.ast.op is UOps.SINK:
-    runner = get_runner(si.outputs[0].device, si.ast)
+    runner = get_runner(si.outputs[0].device, si.ast, si.bufs)
     return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
   out, (op, arg) = si.outputs[0], si.ast.arg
   if op is MetaOps.COPY:
@@ -266,4 +265,4 @@ def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
   # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
   assigned = _internal_memory_planner([si.bufs for si in schedule],
                                       noopt_buffers={b for si in schedule if si.ast.op is not UOps.SINK for b in si.bufs})
-  return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs), si.metadata) for si in schedule]
+  return [ScheduleItem(si.ast, [assigned.get(x, x) for x in si.bufs], si.metadata) for si in schedule]

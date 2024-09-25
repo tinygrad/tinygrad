@@ -7,7 +7,7 @@ from enum import Enum, auto
 
 from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify, \
   graph_rewrite, PatternMatcher
-from tinygrad.device import Device
+from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, get_contraction, to_function_name, diskcache_put
@@ -53,10 +53,11 @@ class TensorCoreOptions:
     self.axes, self.axes_exist = tuple(axes), tuple(axes_exist)
 
 class Kernel:
-  def __init__(self, ast:UOp, opts:Optional[Renderer]=None):
+  def __init__(self, ast:UOp, opts:Optional[Renderer]=None, rawbufs:Optional[List[Buffer]]=None):
     if ast.op is UOps.SINK: self.ast = ast
-
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
+    self.rawbufs = rawbufs # to split kernel, can only split if rawbufs is not None
+
     try: uop_sts_map = verify_ast(self.ast)
     except AssertionError as e:
       print("INVALID AST")

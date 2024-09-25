@@ -21,16 +21,16 @@ sys.setrecursionlimit(10000)
 @dataclass(frozen=True)
 class ScheduleItem:
   ast: UOp
-  bufs: Tuple[Buffer, ...]
+  bufs: List[Buffer]
   metadata: Optional[Tuple[Metadata, ...]] = None
   @property
   def outputs(self) -> Tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
-    return self.bufs[:len(self.ast.src)] if self.ast.op is UOps.SINK else self.bufs[0:1]
+    return tuple(self.bufs[:len(self.ast.src)] if self.ast.op is UOps.SINK else self.bufs[0:1])
   @property
   def inputs(self) -> Tuple[Buffer, ...]:
     """Read only buffers in the schedule."""
-    return self.bufs[len(self.ast.src):] if self.ast.op is UOps.SINK else self.bufs[1:]
+    return tuple(self.bufs[len(self.ast.src):] if self.ast.op is UOps.SINK else self.bufs[1:])
 
 @dataclass(frozen=True)
 class LBScheduleItem:
@@ -412,7 +412,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       kernel_number += 1
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     for out in lsi.outputs: del out.srcs  # can only schedule once
-    schedule.append(ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.bufs if x.size != 0), lsi.metadata))
+    schedule.append(ScheduleItem(lsi.ast, [x.buffer for x in lsi.bufs if x.size != 0], lsi.metadata))
     for x in graph[lsi]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
