@@ -78,7 +78,7 @@ class TestProfiler(unittest.TestCase):
     TestProfiler.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
 
-    TestProfiler.runner = get_runner(TestProfiler.d0.dname, si.ast)
+    TestProfiler.runner = get_runner(si)
     TestProfiler.b.lazydata.buffer.allocate()
 
     TestProfiler.kernargs_ba_ptr = TestProfiler.runner.clprg.fill_kernargs([TestProfiler.b.lazydata.buffer._buf, TestProfiler.a.lazydata.buffer._buf])
