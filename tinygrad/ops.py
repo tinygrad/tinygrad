@@ -471,8 +471,7 @@ class PatternMatcher:
     for p,fxn in self.patterns:
       assert p.op is not None
       for uop in p.op:
-        if (key:=(uop, p.arg)) not in self.pdict: self.pdict[key] = []
-        self.pdict[key].append((p, fxn, p.early_reject))
+        self.pdict.setdefault((uop, p.arg), []).append((p, fxn, p.early_reject))
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
