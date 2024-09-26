@@ -58,7 +58,7 @@ def openimages(base_dir:Path, subset:str, ann_file:Path):
   valid_subsets = ['train', 'validation']
   if subset not in valid_subsets:
     raise ValueError(f"{subset=} must be one of {valid_subsets}")
-  
+
   fetch_openimages(ann_file, base_dir, subset)
 
 # this slows down the conversion a lot!
