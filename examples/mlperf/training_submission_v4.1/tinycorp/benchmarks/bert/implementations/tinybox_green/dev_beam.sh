@@ -4,7 +4,7 @@ export PYTHONPATH="."
 export MODEL="bert"
 export DEFAULT_FLOAT="HALF" GPUS=6 BS=54 EVAL_BS=6
 
-export BEAM=4
+export BEAM=2
 export BASEDIR="/raid/datasets/wiki"
 
 export DEBUG=2
