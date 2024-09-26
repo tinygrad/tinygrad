@@ -51,13 +51,9 @@ class TestGC(unittest.TestCase):
     ])
     ret = matcher.rewrite(uop)
     del uop
+    del buf
     assert ret.arg == 0
-    try:
-      self.assertEqual(bufs_allocated()-init, 0)
-    except AssertionError as e:
-      print(f"{buf} wasn't gced, refs:")
-      print(gc.get_referrers(buf))
-      raise e
+    self.assertEqual(bufs_allocated()-init, 0)
 
 if __name__ == '__main__':
   unittest.main()
