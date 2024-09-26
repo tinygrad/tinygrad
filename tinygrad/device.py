@@ -27,16 +27,19 @@ class _Device:
     return ret
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
+  def get_available_backends(self) -> List[str]:
+    ret = []
+    for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM"]:
+      with contextlib.suppress(Exception): ret.append(self[device].dname)
+    return ret
   @functools.cached_property
   def DEFAULT(self) -> str:
     if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
-    for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM"]:
-      try:
-        if self[device]:
-          os.environ[device] = "1"   # we set this in environment for spawned children
-          return device
-      except Exception: pass
-    raise RuntimeError("no usable devices")
+    available_backends = self.get_available_backends()
+    if not available_backends: raise RuntimeError("no usable devices")
+    device = available_backends[0]
+    os.environ[device] = "1"    # we set this in environment for spawned children
+    return device
 Device = _Device()
 
 # **************** Buffer + Allocators ****************
