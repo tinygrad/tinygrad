@@ -441,7 +441,7 @@ class UPat(MathTrait):
 
   def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
     if (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
-      (self.dtype is not None and uop.dtype not in self.dtype) or \
+      (self.dtype is not None and uop.dtype.scalar() not in self.dtype) or \
       (self.arg is not None and self.arg != uop.arg) or \
       (self.op is not None and uop.op not in self.op) or \
       (self.allowed_len != -1 and len(uop.src) != self.allowed_len): return []
