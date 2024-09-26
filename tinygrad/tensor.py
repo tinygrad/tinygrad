@@ -43,14 +43,14 @@ def _metaop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str,
   if isinstance(device, str): return LazyBuffer.metaop(op, shape, dtype, device, arg, src)
   return MultiLazyBuffer([LazyBuffer.metaop(op, shape, dtype, d, arg, src) for d in device], None)
 
-def _from_np_dtype(npdtype:np.dtype) -> DType: # type: ignore [name-defined] # noqa: F821
+def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
   import numpy as np
   return dtypes.fields()[np.dtype(npdtype).name]
 def _to_np_dtype(dtype:DType) -> Optional[type]:
   import numpy as np
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 
-def _fromnp(x: np.ndarray) -> LazyBuffer:  # type: ignore [name-defined] # noqa: F821
+def _fromnp(x: 'np.ndarray') -> LazyBuffer:  # type: ignore [name-defined] # noqa: F821
   ret = LazyBuffer.metaop(MetaOps.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
   # fake realize
   ret.buffer.allocate(x)
