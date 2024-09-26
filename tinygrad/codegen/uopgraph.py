@@ -4,7 +4,7 @@ import functools, itertools, heapq, math, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
-from tinygrad.ops import UPat, PatternMatcher, graph_rewrite
+from tinygrad.ops import UPat, PatternMatcher, graph_rewrite, TernaryOps
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
@@ -286,8 +286,9 @@ def get_extra_patterns(ops):
       UOp(UOps.ALU, root.dtype, (div, UOp.const(dtypes.int, int(math.log2(const.arg)))), BinaryOps.SHR) if const.arg in shiftable_consts else None)]
   if UnaryOps.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(UnaryOps.NEG))]
-    if BinaryOps.SUB in ops:
-      pat += [(UPat.var('x')+UPat(UOps.ALU, src=(UPat.var('y'),), arg=UnaryOps.NEG), lambda x,y: x.alu(BinaryOps.SUB, y))]
+    if BinaryOps.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(UnaryOps.NEG), lambda x,y: x.alu(BinaryOps.SUB, y))]
+  if TernaryOps.MULACC in ops:
+    pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(TernaryOps.MULACC, b, c))]
   return PatternMatcher(pat)
 
 # ***** threefry *****
