@@ -8,7 +8,7 @@ from tinygrad.runtime.ops_gpu import GPUDevice
 from tinygrad.helpers import getenv, round_up, to_mv, mv_address
 from tinygrad.device import BufferOptions
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad import Tensor
+from tinygrad import Tensor, TinyJit
 from tinygrad.runtime.autogen import opencl as cl
 
 if getenv("IOCTL"): 
@@ -38,6 +38,23 @@ rawbuf_ptr = to_mv(cl_buf_desc_ptr, 0x100).cast('Q')[20] # offset 0xA0 is a raw 
 x = Tensor.from_blob(rawbuf_ptr, (8, 8), dtype=dtypes.int, device='QCOM')
 y = (x + 1).numpy()
 print(y)
+
+# all together with jit
+@TinyJit
+def calc(x): return x + 2
+
+for i in range(4):
+  cl_buf = cl.clCreateBuffer(gdev.context, cl.CL_MEM_READ_WRITE, 2*2*4, None, status := ctypes.c_int32())
+  assert status.value == 0
+  data = memoryview(array.array('I', [x+i for x in range(2*2)]))
+  cl.clEnqueueWriteBuffer(gdev.queue, cl_buf, False, 0, 2*2*4, mv_address(data), 0, None, None)
+  cl.clFinish(gdev.queue) # wait writes to complete
+
+  cl_buf_desc_ptr = to_mv(ctypes.addressof(cl_buf), 8).cast('Q')[0]
+  rawbuf_ptr = to_mv(cl_buf_desc_ptr, 0x100).cast('Q')[20]
+
+  y = calc(x = Tensor.from_blob(rawbuf_ptr, (2, 2), dtype=dtypes.int, device='QCOM')).numpy()
+  print(f'jit {i}\n', y)
 
 # now images!
 
