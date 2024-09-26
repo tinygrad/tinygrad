@@ -578,7 +578,7 @@ class TestAutoCastType(unittest.TestCase):
   def tearDown(self):
     dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
 
-  @given(strat.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_int(d) and is_dtype_supported(d)]))
+  @given(strat.sampled_from([d for d in core_dtypes if dtypes.is_int(d) and is_dtype_supported(d)]))
   def test_int_to_float_unary_func(self, dtype):
     for func in [
       lambda t: t.exp(),
