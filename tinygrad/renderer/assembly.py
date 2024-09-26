@@ -49,7 +49,7 @@ ptx_matcher = constant_folder+PatternMatcher([
     for op in asm_for_op.keys() if op not in supports_half],
   # load/store bool -> uint8
   (UPat(UOps.LOAD, dtypes.bool, name="x"),
-   lambda x: UOp(x.op, dtypes.uint, x.src[0:2] + ((x.src[2].cast(dtypes.uint8),) if len(x.src) >= 3 else ()) + x.src[3:])),
+   lambda x: UOp(x.op, dtypes.uint8, x.src[0:2] + ((x.src[2].cast(dtypes.uint8),) if len(x.src) >= 3 else ()) + x.src[3:])),
   (UPat(UOps.STORE, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
    lambda x: UOp(x.op, dtypes.void, x.src[0:2] + (x.src[2].cast(dtypes.uint8),) + x.src[3:])),
   # load/store use pointer arithmetic
