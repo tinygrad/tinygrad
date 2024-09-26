@@ -4,7 +4,6 @@ import time, math, itertools, functools, struct, sys, inspect, pathlib, string, 
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Literal
 from collections import defaultdict
-import numpy as np
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten, dedup
@@ -44,10 +43,14 @@ def _metaop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str,
   if isinstance(device, str): return LazyBuffer.metaop(op, shape, dtype, device, arg, src)
   return MultiLazyBuffer([LazyBuffer.metaop(op, shape, dtype, d, arg, src) for d in device], None)
 
-def _from_np_dtype(npdtype:np.dtype) -> DType: return dtypes.fields()[np.dtype(npdtype).name]
-def _to_np_dtype(dtype:DType) -> Optional[type]: return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
+def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
+  import numpy as np
+  return dtypes.fields()[np.dtype(npdtype).name]
+def _to_np_dtype(dtype:DType) -> Optional[type]:
+  import numpy as np
+  return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 
-def _fromnp(x: np.ndarray) -> LazyBuffer:
+def _fromnp(x: 'np.ndarray') -> LazyBuffer:  # type: ignore [name-defined] # noqa: F821
   ret = LazyBuffer.metaop(MetaOps.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
   # fake realize
   ret.buffer.allocate(x)
@@ -62,7 +65,7 @@ def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> LazyBuffer:
     truncate_function = truncate[dtype]
     data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
   # fake realize
-  ret.buffer.allocate(memoryview(data))
+  ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
   del ret.srcs
   return ret
 
@@ -106,7 +109,7 @@ class Tensor:
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
-  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, np.ndarray, bytes, MultiLazyBuffer, Variable, pathlib.Path],
+  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, 'np.ndarray', bytes, MultiLazyBuffer, Variable, pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
@@ -132,12 +135,14 @@ class Tensor:
       if dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
         else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
-      if dtype == dtypes.bfloat16: data = Tensor(_fromnp(np.array(data, np.float32)), device=device).cast(dtypes.bfloat16).lazydata
-      else: data = _fromnp(np.array(data).astype(_to_np_dtype(dtype)))
+      if dtype == dtypes.bfloat16: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtypes.bfloat16).lazydata
+      else: data = _frompy(data, dtype)
     elif data is None: data = _metaop(MetaOps.EMPTY, (0,), dtype or dtypes.default_float, device)
-    elif isinstance(data, np.ndarray):
+    elif str(type(data)) == "<class 'numpy.ndarray'>":
+      import numpy as np
+      assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
       if data.shape == (): data = _metaop(MetaOps.CONST, tuple(), dtype or _from_np_dtype(data.dtype), device, data.item())
-      else: data = _fromnp(data.astype(npdtype) if dtype is not None and (npdtype:=_to_np_dtype(dtype)) is not None else data)
+      else: data = _fromnp(data.astype(npdtype) if dtype is not None and (npdtype:=_to_np_dtype(dtype)) is not None else data)  # type: ignore [name-defined]
     elif isinstance(data, pathlib.Path):
       dtype = dtype or dtypes.uint8
       data = _metaop(MetaOps.EMPTY, (data.stat().st_size // dtype.itemsize,), dtype, f"DISK:{data.resolve()}")
@@ -295,7 +300,7 @@ class Tensor:
     """
     return self.data().tolist()
 
-  def numpy(self) -> np.ndarray:
+  def numpy(self) -> 'np.ndarray':  # type: ignore [name-defined] # noqa: F821
     """
     Returns the value of this tensor as a `numpy.ndarray`.
 
@@ -304,6 +309,7 @@ class Tensor:
     print(repr(t.numpy()))
     ```
     """
+    import numpy as np
     if self.dtype == dtypes.bfloat16: return self.float().numpy()
     assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
