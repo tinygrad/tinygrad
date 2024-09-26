@@ -470,8 +470,7 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      for uop in p.op:
-        self.pdict.setdefault((uop, p.arg), []).append((p, fxn, p.early_reject))
+      for uop in p.op: self.pdict.setdefault((uop, p.arg), []).append((p, fxn, p.early_reject))
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
