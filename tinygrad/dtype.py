@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
+from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable
+import math, struct, ctypes
 from dataclasses import dataclass
 import functools
 from tinygrad.helpers import getenv
@@ -26,7 +27,7 @@ class ImageDType(DType):
   shape: Tuple[int, ...]   # arbitrary arg for the dtype, used in image for the shape
   base: DType
   local: bool = False  # images are never local
-  def scalar(self): return self.base
+  def scalar(self) -> DType: return self.base
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
@@ -43,13 +44,13 @@ class PtrDType(DType):
 class dtypes:
   @staticmethod
   @functools.lru_cache(None)
-  def is_float(x: DType) -> bool: return x.scalar() in {dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64}
+  def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   @functools.lru_cache(None)
-  def is_int(x: DType) -> bool: return x.scalar() in {dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.pyint} or dtypes.is_unsigned(x)
+  def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints
   @staticmethod
   @functools.lru_cache(None)
-  def is_unsigned(x: DType) -> bool: return x.scalar() in {dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64}
+  def is_unsigned(x: DType) -> bool: return x.scalar() in dtypes.uints
   @staticmethod
   def from_py(x) -> DType:
     if x.__class__ is float: return dtypes.default_float
@@ -63,6 +64,7 @@ class dtypes:
     if isinstance(val, tuple):
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
+    # TODO: should truncate here
     return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   @functools.lru_cache(None)
@@ -112,6 +114,11 @@ class dtypes:
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
 
+  floats = (float16, bfloat16, float32, float64)
+  uints = (uint8, uint16, uint32, uint64)
+  sints = (int8, int16, int32, int64, pyint)
+  ints = uints + sints
+
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
   dtypes.default_float = getattr(dtypes, env_default_float.lower())
   assert dtypes.is_float(dtypes.default_float), f"{env_default_float} is not a float dtype"
@@ -135,7 +142,8 @@ def least_upper_dtype(*ds:DType) -> DType:
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.float32)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not (k.startswith(('__', 'default', 'void')) or v.__class__ is staticmethod)}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not (k.startswith(('__', 'default', 'void'))
+                                                                or v.__class__ is staticmethod or isinstance(v, tuple))}
 INVERSE_DTYPES_DICT = {v.name:k for k,v in DTYPES_DICT.items()}
 INVERSE_DTYPES_DICT['void'] = 'void'
 
@@ -144,3 +152,15 @@ def sum_acc_dtype(dt:DType):
   if dtypes.is_unsigned(dt): return least_upper_dtype(dt, dtypes.uint)
   if dtypes.is_int(dt) or dt == dtypes.bool: return least_upper_dtype(dt, dtypes.int)
   return least_upper_dtype(dt, dtypes.float)
+
+def truncate_fp16(x):
+  try: return struct.unpack("@e", struct.pack("@e", float(x)))[0]
+  except OverflowError: return math.copysign(math.inf, x)
+
+truncate: Dict[DType, Callable] = {dtypes.bool: bool,
+  # TODO: bfloat16
+  dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
+  dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
+  dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
+  dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value \
+      if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}

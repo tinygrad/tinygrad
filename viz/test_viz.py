@@ -42,8 +42,8 @@ class TestViz(unittest.TestCase):
 
   def test_ctx_groups(self):
     contexts.clear()
-    schedule1 = Tensor.randn(4, 1).contiguous().schedule()
-    schedule2 = Tensor.randn(4, 4).contiguous().schedule()
+    schedule1 = Tensor.zeros(4, 1).contiguous().exp().schedule()
+    schedule2 = Tensor.zeros(4, 1).contiguous().exp().schedule()
     list(lower_schedule(schedule1))
     list(lower_schedule(schedule2))
     ret = load_kernels(contexts)
@@ -118,8 +118,8 @@ class TestViz(unittest.TestCase):
 
   def test_dedup_ast(self):
     contexts.clear()
-    a = Tensor.randn(4, 4)+2
-    b = Tensor.randn(4, 4)+2
+    a = Tensor.empty(4, 4).contiguous().realize()+2
+    b = Tensor.empty(4, 4).contiguous().realize()+2
     Tensor.schedule(a, b)
     kernels = load_kernels(contexts)
     self.assertEqual(len(kernels), 1)
