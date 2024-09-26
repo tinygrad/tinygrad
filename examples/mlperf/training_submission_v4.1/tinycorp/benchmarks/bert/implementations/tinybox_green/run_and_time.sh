@@ -16,7 +16,7 @@ DATETIME=$(date "+%m%d%H%M")
 LOGFILE="bert_green_${DATETIME}_${SEED}.log"
 
 # init
-BENCHMARK=10 INITMLPERF=1 python3 examples/mlperf/model_train.py | tee $LOGFILE
+INITMLPERF=1 python3 examples/mlperf/model_train.py | tee $LOGFILE
 
 # run
 RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a $LOGFILE

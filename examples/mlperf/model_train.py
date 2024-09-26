@@ -833,10 +833,8 @@ def train_bert():
         et = time.time()
         eval_times.append(et - st)
 
-        if BENCHMARK and j == BENCHMARK:
-          # assume INITMLPERF has BENCHMARK set # TODO: why?
-          if MLLOGGER and INITMLPERF:
-            MLLOGGER.event(key=mllog_constants.INIT_STOP, value=None)
+        if MLLOGGER and INITMLPERF and j == 10:
+          MLLOGGER.event(key=mllog_constants.INIT_STOP, value=None)
           return
 
       eval_step_bert.reset()
