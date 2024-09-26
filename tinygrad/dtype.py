@@ -111,9 +111,6 @@ class dtypes:
   @staticmethod
   def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, shape=shp, base=dtypes.float32)
 
-  # generic "scalar" image
-  default_image: Final[DType] = ImageDType(100, 0, "image", None, 1, shape=(), base=float32)
-
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
 
