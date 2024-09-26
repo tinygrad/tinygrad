@@ -401,8 +401,8 @@ class Tensor:
   @staticmethod
   def from_blob(ptr:int, shape:Tuple[int, ...], **kwargs) -> Tensor:
     """
-    Exposes the pointer as a Tensor without taking ownership of the original data. The pointer should remain valid during the whole
-    lifetime of the created Tensor.
+    Exposes the pointer as a Tensor without taking ownership of the original data.
+    The pointer must remain valid for the entire lifetime of the created Tensor.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
