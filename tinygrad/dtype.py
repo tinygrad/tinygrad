@@ -27,7 +27,7 @@ class ImageDType(DType):
   shape: Tuple[int, ...]   # arbitrary arg for the dtype, used in image for the shape
   base: DType
   local: bool = False  # images are never local
-  def scalar(self): return self.base
+  def scalar(self) -> DType: return dtypes.default_image
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
@@ -110,6 +110,9 @@ class dtypes:
   def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, shape=shp, base=dtypes.float32)
   @staticmethod
   def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, shape=shp, base=dtypes.float32)
+
+  # generic "scalar" image
+  default_image: Final[DType] = ImageDType(100, 0, "image", None, 1, shape=(), base=float32)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32

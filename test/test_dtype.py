@@ -295,8 +295,8 @@ class TestBoolDType(TestDType): DTYPE = dtypes.bool
 
 class TestImageDType(unittest.TestCase):
   def test_image_scalar(self):
-    assert dtypes.imagef((10,10)).scalar() == dtypes.float32
-    assert dtypes.imageh((10,10)).scalar() == dtypes.float32
+    assert dtypes.imagef((10,10)).scalar() == dtypes.default_image
+    assert dtypes.imageh((10,10)).scalar() == dtypes.default_image
   def test_image_vec(self):
     assert dtypes.imagef((10,10)).vec(4) == dtypes.float32.vec(4)
     assert dtypes.imageh((10,10)).vec(4) == dtypes.float32.vec(4)
