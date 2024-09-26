@@ -35,7 +35,9 @@ def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in 
 def fully_flatten(l):
   if hasattr(l, "__len__") and hasattr(l, "__getitem__") and not isinstance(l, str):
     flattened = []
-    for i in range(len(l)): flattened.extend(fully_flatten(l[i]))
+    if hasattr(l, "shape") and l.shape == (): flattened.append(l[()])
+    else:
+      for i in range(len(l)): flattened.extend(fully_flatten(l[i]))
     return flattened
   else: return [l]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
@@ -67,10 +69,12 @@ def get_child(obj, key):
   return obj
 
 def get_shape(x) -> Tuple[int, ...]:
-  if not isinstance(x, (list, tuple)): return ()
+  if not hasattr(x, "__len__") or not hasattr(x, "__getitem__") or isinstance(x, str): return ()
+  if (aapi := (hasattr(x, "shape") and x.shape == ())): return ()
   subs = [get_shape(xi) for xi in x]
   if not all_same(subs): raise ValueError(f"inhomogeneous shape from {x}")
-  return (len(subs),) + (subs[0] if subs else ())
+  slen = 1 if aapi else len(subs)
+  return (slen,) + (subs[0] if subs else ())
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> Optional[List[List[int]]]:
