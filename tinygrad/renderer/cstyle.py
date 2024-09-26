@@ -48,6 +48,8 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
+  (UPat(UOps.ALU, arg=BinaryOps.SHL, name="op"), lambda r,op: f"({r[op.src[0]]}<<{r[op.src[1]]})"),
+  (UPat(UOps.ALU, arg=BinaryOps.SHR, name="op"), lambda r,op: f"({r[op.src[0]]}>>{r[op.src[1]]})"),
   (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](
     *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]), x.dtype)),
   (UPat(UOps.GEP, name="x"), lambda r,x: r[x.src[0]] + \
@@ -88,7 +90,7 @@ class CStyleLanguage(Renderer):
     UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
     UnaryOps.NEG: lambda x,dtype: f"-{x}",
     UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
-    BinaryOps.SHL: lambda a,b,dtype: f"({a}<<{b})", BinaryOps.SHR: lambda a,b,dtype: f"({a}>>{b})",
+    # BinaryOps.SHL: lambda a,b,dtype: f"({a}<<{b})", BinaryOps.SHR: lambda a,b,dtype: f"({a}>>{b})",
     BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})",
     BinaryOps.IDIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
