@@ -404,7 +404,7 @@ class Tensor:
 
     r = Tensor._metaop(MetaOps.EMPTY, shape, **kwargs)
     r.lazydata.buffer.allocate(external_ptr=ptr)
-    del r.lazydata.srcs
+    del r.lazydata.srcs # fake realize
     return r
 
   _seed: int = int(time.time())
