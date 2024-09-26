@@ -53,7 +53,7 @@ def get_sched_bert():
       # ignore grad norm and loss scaler for now
       loss.backward()
       targets += [x.lazydata for x in optim.schedule_step()]
-    sched = create_schedule(targets, seen)
+    sched = create_schedule(targets)
     print(f"schedule length {len(sched)}")
   return sched
 
