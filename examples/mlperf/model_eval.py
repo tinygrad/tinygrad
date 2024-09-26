@@ -113,7 +113,7 @@ def eval_retinanet():
     if dat.shape[0] == bs:
       outs = mdlrun(dat).numpy()
     else:
-      mdlrun.jit_cache = None
+      mdlrun._jit_cache = []
       outs =  mdl(input_fixup(dat)).numpy()
     et = time.perf_counter()
     predictions = mdl.postprocess_detections(outs, input_size=dat.shape[1:3], orig_image_sizes=[t["image_size"] for t in targets])
