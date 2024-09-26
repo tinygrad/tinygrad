@@ -627,7 +627,6 @@ def train_bert():
     MLLOGGER.logger.propagate = False
 
     if INITMLPERF:
-      assert BENCHMARK, f"BENCHMARK must be set for INITMLPERF"
       MLLOGGER.event(key=mllog_constants.SUBMISSION_ORG, value="tinycorp")
       MLLOGGER.event(key=mllog_constants.SUBMISSION_PLATFORM, value=getenv("SUBMISSION_PLATFORM", "tinybox"))
       MLLOGGER.event(key=mllog_constants.SUBMISSION_DIVISION, value=mllog_constants.CLOSED)
