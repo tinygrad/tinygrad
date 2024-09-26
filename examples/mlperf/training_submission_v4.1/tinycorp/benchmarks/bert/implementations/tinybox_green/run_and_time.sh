@@ -5,7 +5,7 @@ export MODEL="bert"
 export SUBMISSION_PLATFORM="tinybox_green"
 export DEFAULT_FLOAT="HALF" GPUS=6 BS=54 EVAL_BS=6
 
-export IGNORE_JIT_FIRST_BEAM=1 BEAM=2
+export IGNORE_JIT_FIRST_BEAM=1 BEAM=4
 export BASEDIR="/raid/datasets/wiki"
 
 # pip install -e ".[mlperf]"
