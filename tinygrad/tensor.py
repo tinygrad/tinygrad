@@ -51,7 +51,6 @@ def _to_np_dtype(dtype:DType) -> Optional[type]:
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 
 def _fromnp(x: 'np.ndarray') -> LazyBuffer:
-  import numpy as np
   ret = LazyBuffer.metaop(MetaOps.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
   # fake realize
   ret.buffer.allocate(x)
