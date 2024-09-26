@@ -411,7 +411,7 @@ class UPat(MathTrait):
     return UPat((UOps.CONST, UOps.VCONST) if vec else UOps.CONST, dtype=dtype, name=name)
   @staticmethod
   @functools.lru_cache(None)
-  def const(dtype:Optional[DType], b:ConstType|Variable): return UPat(UOps.CONST, dtype=dtype, arg=b)
+  def const(dtype:Optional[DType], b:ConstType): return UPat(UOps.CONST, dtype=dtype, arg=b)
 
   # copied from UOp
   def cast(self, dtype=None): return UPat(UOps.CAST, dtype, (self,))
