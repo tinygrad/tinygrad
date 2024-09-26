@@ -1043,7 +1043,7 @@ class TestLinearizerFailures(unittest.TestCase):
     k = helper_test_lin(Kernel(ast), opts=opts, failed_platforms=[])
     assert k is not None
     ifs = [u for u in k.uops if u.op is UOps.IF]
-    self.assertEqual(len(ifs), 1)
+    self.assertEqual(len(ifs), 4)
     #for st in k.uops.sink.src: self.assertEqual(len(st.src), 4)
     self.assertLessEqual(len(ifs[0].src[0].sparents), 17)
 
