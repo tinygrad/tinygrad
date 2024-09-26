@@ -4,7 +4,7 @@ import functools, itertools, heapq, math, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
-from tinygrad.ops import UPat, PatternMatcher, graph_rewrite
+from tinygrad.ops import UPat, PatternMatcher, graph_rewrite, TernaryOps
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
@@ -284,6 +284,11 @@ def get_extra_patterns(ops):
       UOp(UOps.ALU, root.dtype, (mul, UOp.const(dtypes.int, int(math.log2(const.arg)))), BinaryOps.SHL) if const.arg in shiftable_consts else None),
     (UPat(UOps.ALU, arg=BinaryOps.IDIV, name="root", src=(UPat.var("div"), UPat.cvar("const"))), lambda root, div, const:
       UOp(UOps.ALU, root.dtype, (div, UOp.const(dtypes.int, int(math.log2(const.arg)))), BinaryOps.SHR) if const.arg in shiftable_consts else None)]
+  if UnaryOps.NEG in ops:
+    pat += [(UPat.var('x')*-1, lambda x: x.alu(UnaryOps.NEG))]
+    if BinaryOps.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(UnaryOps.NEG), lambda x,y: x.alu(BinaryOps.SUB, y))]
+  if TernaryOps.MULACC in ops:
+    pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(TernaryOps.MULACC, b, c))]
   return PatternMatcher(pat)
 
 # ***** threefry *****
@@ -361,9 +366,10 @@ def no_vectorized_wmma(wmma:UOp):
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
-  # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
-  (UPat(UOps.ALU, dtypes.bool, arg=BinaryOps.ADD, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.OR)),
-  (UPat(UOps.ALU, dtypes.bool, arg=BinaryOps.MUL, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.AND)),
+  # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
+  (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
+  (UPat.var('x', dtype=dtypes.bool) + UPat.var('y'), lambda x,y: x|y),
+  (UPat.var('x', dtype=dtypes.bool).max(UPat.var('y')), lambda x,y: x|y),
   # self ASSIGN is just self
   (UPat(UOps.ASSIGN, src=(UPat.var('x'), UPat.var('x'))), lambda x: x),
   # ASSIGN to global is just self
