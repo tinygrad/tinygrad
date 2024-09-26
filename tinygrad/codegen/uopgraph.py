@@ -278,6 +278,7 @@ transcendental_patterns = [
 def get_extra_patterns(ops):
   pat = [(p[0], cast(Callable, p[1])) for p in transcendental_patterns if p[0].arg not in ops or TRANSCENDENTAL >= 2]
   if BinaryOps.SHL in ops and BinaryOps.SHR in ops:
+    shiftable_consts = set([2**i for i in range(64)])
     pat += [
     (UPat(UOps.ALU, arg=BinaryOps.MUL, name="root", dtype=dtypes.ints, src=[UPat.cvar("const"), UPat.var("mul")]), lambda root, mul, const:
       UOp(UOps.ALU, root.dtype, (mul, UOp.const(dtypes.int, int(math.log2(const.arg)))), BinaryOps.SHL) if const.arg in shiftable_consts else None),
@@ -694,7 +695,6 @@ devectorize = PatternMatcher([
   (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
 ])
 
-shiftable_consts = set([2**i for i in range(64)])
 reducer = PatternMatcher([
   (UPat(UOps.CONST, name='c'),
    lambda c: UOp(UOps.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.count) if c.dtype.count > 1 else None),
@@ -743,7 +743,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
     if getenv("DO_REDUCE", 1):
       sink = graph_rewrite(sink, constant_folder+just_reduce)
       sink = graph_rewrite(sink, constant_folder+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
-      sink = graph_rewrite(sink, constant_folder+reducer+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else ()))
+      sink = graph_rewrite(sink, constant_folder+reducer)
+      sink = graph_rewrite(sink, constant_folder+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else ()))
 
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, opts.extra_matcher)
   return sink
