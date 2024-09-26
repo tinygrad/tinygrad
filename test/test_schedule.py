@@ -15,7 +15,7 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
 from tinygrad.ops import graph_rewrite
-from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod
+from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import create_schedule, reduceop_fusor, st_fixup
 from tinygrad.engine.realize import CompiledRunner, run_schedule
@@ -1327,6 +1327,18 @@ class TestSchedule(unittest.TestCase):
   def test_buf_cnt_over_limit(self): self._test_buf_cnt(32, allowed=2)
   @unittest.expectedFailure
   def test_buf_cnt_over_limit_alt(self): self._test_buf_cnt(63, allowed=3)
+
+  def test_schedule_mem_used(self):
+    base = GlobalCounters.mem_used
+    Tensor.ones(256).contiguous().realize()
+    Tensor.ones(5, 5).contiguous().schedule()
+    self.assertEqual(GlobalCounters.mem_used-base, 0)
+
+  def test_schedule_mem_used_with_inputs(self):
+    base = GlobalCounters.mem_used
+    x = Tensor.ones(256).contiguous().realize()
+    (x+Tensor.ones(256).contiguous()).schedule()
+    self.assertEqual(GlobalCounters.mem_used-base, 1024)
 
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
