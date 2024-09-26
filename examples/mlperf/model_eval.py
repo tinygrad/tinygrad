@@ -94,11 +94,11 @@ def eval_retinanet():
     x /= input_std
     return x
 
-  from extra.datasets.openimages import openimages, iterate
+  from extra.datasets.openimages import download_dataset, iterate, BASEDIR
   from pycocotools.coco import COCO
   from pycocotools.cocoeval import COCOeval
   from contextlib import redirect_stdout
-  coco = COCO(openimages('validation'))
+  coco = COCO(download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), 'validation'))
   coco_eval = COCOeval(coco, iouType="bbox")
   coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
 
@@ -107,7 +107,7 @@ def eval_retinanet():
 
   n, bs = 0, 8
   st = time.perf_counter()
-  for x, targets in iterate(coco, bs):
+  for x, targets in iterate(coco, base_dir, bs):
     dat = Tensor(x.astype(np.float32))
     mt = time.perf_counter()
     if dat.shape[0] == bs:
