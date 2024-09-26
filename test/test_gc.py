@@ -3,7 +3,9 @@ import gc
 import unittest
 import numpy as np
 from tinygrad.device import Buffer
+from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.engine.realize import run_schedule
+from tinygrad.ops import PatternMatcher, UOp, UOps, UPat
 from tinygrad.tensor import Tensor
 
 def tensors_allocated():
@@ -60,6 +62,24 @@ class TestGC(unittest.TestCase):
     self.assertEqual(bufs_allocated()-init, 1)
     del y
     self.assertEqual(bufs_allocated()-init, 0)
+
+  @unittest.expectedFailure
+  def test_pattern_matcher_gc(self):
+    init = bufs_allocated()
+    buf = Tensor.ones(4, 4).contiguous().realize().lazydata.buffer
+    uop = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), buf)
+    matcher = PatternMatcher([
+      (UPat(UOps.DEFINE_GLOBAL, name="x"), lambda x:UOp(UOps.DEFINE_GLOBAL, x.dtype, (), 0))
+    ])
+    ret = matcher.rewrite(uop)
+    del uop
+    assert ret.arg == 0
+    try:
+      self.assertEqual(bufs_allocated()-init, 0)
+    except AssertionError as e:
+      print(f"{buf} wasn't gced, refs:")
+      print(gc.get_referrers(buf))
+      raise e
 
 if __name__ == '__main__':
   unittest.main()
