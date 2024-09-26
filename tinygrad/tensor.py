@@ -43,14 +43,14 @@ def _metaop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str,
   if isinstance(device, str): return LazyBuffer.metaop(op, shape, dtype, device, arg, src)
   return MultiLazyBuffer([LazyBuffer.metaop(op, shape, dtype, d, arg, src) for d in device], None)
 
-def _from_np_dtype(npdtype:'np.dtype') -> DType:  # noqa: F821
+def _from_np_dtype(npdtype) -> DType:
   import numpy as np
   return dtypes.fields()[np.dtype(npdtype).name]
 def _to_np_dtype(dtype:DType) -> Optional[type]:
   import numpy as np
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 
-def _fromnp(x: 'np.ndarray') -> LazyBuffer:  # noqa: F821
+def _fromnp(x) -> LazyBuffer:
   ret = LazyBuffer.metaop(MetaOps.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
   # fake realize
   ret.buffer.allocate(x)
@@ -109,7 +109,7 @@ class Tensor:
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
-  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, 'np.ndarray', bytes, MultiLazyBuffer, Variable, pathlib.Path],  # noqa: F821
+  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, bytes, MultiLazyBuffer, Variable, pathlib.Path],
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
@@ -300,7 +300,7 @@ class Tensor:
     """
     return self.data().tolist()
 
-  def numpy(self) -> 'np.ndarray':  # noqa: F821
+  def numpy(self):
     """
     Returns the value of this tensor as a `numpy.ndarray`.
 
