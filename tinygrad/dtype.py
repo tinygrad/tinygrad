@@ -27,7 +27,7 @@ class ImageDType(DType):
   shape: Tuple[int, ...]   # arbitrary arg for the dtype, used in image for the shape
   base: DType
   local: bool = False  # images are never local
-  def scalar(self): return self.base
+  def scalar(self) -> DType: return self.base
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
