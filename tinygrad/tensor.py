@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib, ctypes
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Literal
 from collections import defaultdict
@@ -391,6 +391,13 @@ class Tensor:
     ```
     """
     return Tensor._metaop(MetaOps.EMPTY, argfix(*shape), **kwargs)
+
+  @staticmethod
+  def from_blob(ptr, shape, **kwargs) -> Tensor:
+    r = Tensor._metaop(MetaOps.EMPTY, shape, **kwargs)
+    r.lazydata.buffer.allocate(external_ptr=ptr)
+    del r.lazydata.srcs
+    return r
 
   _seed: int = int(time.time())
   _device_seeds: Dict[str, int] = {}
