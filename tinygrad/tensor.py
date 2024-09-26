@@ -4,7 +4,10 @@ import time, math, itertools, functools, struct, sys, inspect, pathlib, string, 
 from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Literal
 from collections import defaultdict
-import numpy as np
+try:
+  import numpy as np
+  NUMPY_AVAILABLE = True
+except: NUMPY_AVAILABLE = False
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten, dedup
@@ -106,7 +109,7 @@ class Tensor:
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
-  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, np.ndarray, bytes, MultiLazyBuffer, Variable, pathlib.Path],
+  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, 'np.ndarray', bytes, MultiLazyBuffer, Variable, pathlib.Path],
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
@@ -132,10 +135,10 @@ class Tensor:
       if dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
         else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
-      if dtype == dtypes.bfloat16: data = Tensor(_fromnp(np.array(data, np.float32)), device=device).cast(dtypes.bfloat16).lazydata
-      else: data = _fromnp(np.array(data).astype(_to_np_dtype(dtype)))
+      if dtype == dtypes.bfloat16: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtypes.bfloat16).lazydata
+      else: data = _frompy(data, dtype)
     elif data is None: data = _metaop(MetaOps.EMPTY, (0,), dtype or dtypes.default_float, device)
-    elif isinstance(data, np.ndarray):
+    elif NUMPY_AVAILABLE and isinstance(data, np.ndarray):
       if data.shape == (): data = _metaop(MetaOps.CONST, tuple(), dtype or _from_np_dtype(data.dtype), device, data.item())
       else: data = _fromnp(data.astype(npdtype) if dtype is not None and (npdtype:=_to_np_dtype(dtype)) is not None else data)
     elif isinstance(data, pathlib.Path):
@@ -295,7 +298,7 @@ class Tensor:
     """
     return self.data().tolist()
 
-  def numpy(self) -> np.ndarray:
+  def numpy(self) -> 'np.ndarray':
     """
     Returns the value of this tensor as a `numpy.ndarray`.
 
@@ -304,6 +307,7 @@ class Tensor:
     print(repr(t.numpy()))
     ```
     """
+    if not NUMPY_AVAILABLE: raise RuntimeError("numpy not available")
     if self.dtype == dtypes.bfloat16: return self.float().numpy()
     assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
