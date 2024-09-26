@@ -393,7 +393,15 @@ class Tensor:
     return Tensor._metaop(MetaOps.EMPTY, argfix(*shape), **kwargs)
 
   @staticmethod
-  def from_blob(ptr, shape, **kwargs) -> Tensor:
+  def from_blob(ptr:int, shape:Tuple[int, ...], **kwargs) -> Tensor:
+    """
+    Exposes the pointer as a Tensor without taking ownership of the original data. The pointer should remain valid during the whole
+    lifetime of the created Tensor.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+    """
+
     r = Tensor._metaop(MetaOps.EMPTY, shape, **kwargs)
     r.lazydata.buffer.allocate(external_ptr=ptr)
     del r.lazydata.srcs
