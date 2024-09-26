@@ -644,6 +644,13 @@ def train_bert():
   else:
     MLLOGGER = None
 
+  # ** init wandb **
+  WANDB = getenv("WANDB")
+  if WANDB:
+    import wandb
+    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb.init(config=config, **wandb_args, project="MLPerf-BERT")
+
   # ** hyperparameters **
   BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 11 * len(GPUS) if dtypes.default_float in (dtypes.float16, dtypes.bfloat16) else 8 * len(GPUS))
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
@@ -672,7 +679,7 @@ def train_bert():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
-  model = get_mlperf_bert_model(init_ckpt if not INITMLPERF else None)
+  model = get_mlperf_bert_model(init_ckpt if RUNMLPERF else None)
   
   for _, x in get_state_dict(model).items():
     x.realize().to_(GPUS)
@@ -727,14 +734,8 @@ def train_bert():
     start_step = int(scheduler_wd.epoch_counter.numpy().item())
     print(f"resuming from {ckpt} at step {start_step}")
 
-  # ** init wandb **
-  WANDB = getenv("WANDB")
-  if WANDB:
-    import wandb
-    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
-    wandb.init(config=config, **wandb_args, project="MLPerf-BERT")
-
-  if not INITMLPERF:
+  if RUNMLPERF:
+    # only load real data with RUNMLPERF
     eval_it = iter(batch_load_val_bert(EVAL_BS))
     train_it = iter(tqdm(batch_load_train_bert(BS), total=train_steps, disable=BENCHMARK))
     for _ in range(start_step): next(train_it) # Fast forward
@@ -743,10 +744,12 @@ def train_bert():
   step_times = []
   # ** train loop **
   wc_start = time.perf_counter()
-  if INITMLPERF:
-    i, train_data = start_step, get_fake_data_bert(GPUS, BS)
-  else:
+  if RUNMLPERF:
+    # only load real data with RUNMLPERF
     i, train_data = start_step, get_data_bert(GPUS, train_it)
+  else:
+    i, train_data = start_step, get_fake_data_bert(GPUS, BS)
+
   while train_data is not None and i < train_steps and not achieved:
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
@@ -759,10 +762,10 @@ def train_bert():
     pt = time.perf_counter()
 
     try:
-      if INITMLPERF:
-        next_data = get_fake_data_bert(GPUS, BS)
-      else:
+      if RUNMLPERF:
         next_data = get_data_bert(GPUS, train_it)
+      else:
+        next_data = get_fake_data_bert(GPUS, BS)
     except StopIteration:
       next_data = None
 
@@ -792,6 +795,7 @@ def train_bert():
       print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
       print(f"epoch global_ops: {train_steps * GlobalCounters.global_ops:_}, "
             f"epoch global_mem: {train_steps * GlobalCounters.global_mem:_}")
+      return
 
     # ** eval loop **
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
@@ -830,7 +834,7 @@ def train_bert():
         eval_times.append(et - st)
 
         if BENCHMARK and j == BENCHMARK:
-          # assume INITMLPERF has BENCHMARK set
+          # assume INITMLPERF has BENCHMARK set # TODO: why?
           if MLLOGGER and INITMLPERF:
             MLLOGGER.event(key=mllog_constants.INIT_STOP, value=None)
           return
