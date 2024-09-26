@@ -284,6 +284,10 @@ def get_extra_patterns(ops):
       UOp(UOps.ALU, root.dtype, (mul, UOp.const(dtypes.int, int(math.log2(const.arg)))), BinaryOps.SHL) if const.arg in shiftable_consts else None),
     (UPat(UOps.ALU, arg=BinaryOps.IDIV, name="root", src=(UPat.var("div"), UPat.cvar("const"))), lambda root, div, const:
       UOp(UOps.ALU, root.dtype, (div, UOp.const(dtypes.int, int(math.log2(const.arg)))), BinaryOps.SHR) if const.arg in shiftable_consts else None)]
+  if UnaryOps.NEG in ops:
+    pat += [(UPat.var('x')*-1, lambda x: x.alu(UnaryOps.NEG))]
+    if BinaryOps.SUB in ops:
+      pat += [(UPat.var('x')+UPat(UOps.ALU, src=(UPat.var('y'),), arg=UnaryOps.NEG), lambda x,y: x.alu(BinaryOps.SUB, y))]
   return PatternMatcher(pat)
 
 # ***** threefry *****
