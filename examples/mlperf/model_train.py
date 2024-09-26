@@ -797,7 +797,7 @@ def train_bert():
       return
 
     # ** eval loop **
-    if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
+    if i % eval_step_freq == 0 or INITMLPERF:
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": 1, "epoch_count": 1, "step_num": i})
       train_step_bert.reset()
@@ -810,10 +810,10 @@ def train_bert():
       BEAM.value = EVAL_BEAM
 
       for j in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps, disable=BENCHMARK):
-        if INITMLPERF:
-          eval_data = get_fake_data_bert(GPUS, EVAL_BS)
-        else:
+        if RUNMLPERF:
           eval_data = get_data_bert(GPUS, eval_it)
+        else:
+          eval_data = get_fake_data_bert(GPUS, EVAL_BS)
         GlobalCounters.reset()
         st = time.time()
 
