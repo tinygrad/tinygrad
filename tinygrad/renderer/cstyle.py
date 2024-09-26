@@ -44,11 +44,11 @@ base_pm = PatternMatcher([
   (UPat((UOps.ENDIF, UOps.ENDRANGE)), lambda r: "}"),
   (UPat(UOps.WMMA, name="x"), lambda r,x: f"__{x.arg[0]}({r[x.src[0]]}, {r[x.src[1]]}, {r[x.src[2]]})"),
   # load/store image
-  (UPat(UOps.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf', dtypes.default_image), UPat.var('idx'), UPat.var("var"), UPat.var("gate"))),
+  (UPat(UOps.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf'), UPat.var('idx', dtype=dtypes.int.vec(2)), UPat.var("var"), UPat.var("gate"))),
    lambda r,buf,idx,var,gate: f"({r[gate]}?read_imagef({r[buf]}, smp, {r[idx]}):{r[var]})"),
-  (UPat(UOps.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf', dtypes.default_image), UPat.var('idx'))),
+  (UPat(UOps.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf'), UPat.var('idx', dtype=dtypes.int.vec(2)))),
    lambda r,buf,idx: f"read_imagef({r[buf]}, smp, {r[idx]})"),
-  (UPat(UOps.STORE, src=(UPat.var('buf', dtypes.default_image), UPat.var('idx'), UPat.var("var", dtype=dtypes.float.vec(4)))),
+  (UPat(UOps.STORE, src=(UPat.var('buf'), UPat.var('idx', dtype=dtypes.int.vec(2)), UPat.var("var", dtype=dtypes.float.vec(4)))),
    lambda r,buf,idx,var: f"write_imagef({r[buf]}, {r[idx]}, {r[var]});"),
   # r method accesses
   (UPat(UOps.RANGE, name="x"), lambda r,x: f"for ({r.render_dtype(x.dtype)} {r[x]} = {r[x.src[0]]}; {r[x]} < {r[x.src[1]]}; {r[x]}++) {{"),
