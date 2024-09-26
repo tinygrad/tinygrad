@@ -32,6 +32,9 @@ x = Tensor.from_blob(rawbuf_ptr, (8, 8), dtype=dtypes.int, device='QCOM')
 y = (x + 1).numpy()
 print(y)
 
+# all calculations are done, save to free the object
+cl.clReleaseMemObject(cl_buf)
+
 # all together with jit
 @TinyJit
 def calc(x): return x + 2
@@ -48,6 +51,9 @@ for i in range(4):
 
   y = calc(x = Tensor.from_blob(rawbuf_ptr, (2, 2), dtype=dtypes.int, device='QCOM')).numpy()
   print(f'jit {i}\n', y)
+
+  # all calculations are done, save to free the object
+  cl.clReleaseMemObject(cl_buf)
 
 # now images!
 
@@ -76,3 +82,6 @@ rawbuf_ptr = to_mv(cl_buf_desc_ptr, 0x100).cast('Q')[20] # offset 0xA0 is a raw 
 x = Tensor.from_blob(rawbuf_ptr, (h*w*4,), dtype=dtypes.imagef((h,w)), device='QCOM')
 y = (x + 1).numpy()
 print(y)
+
+# all calculations are done, save to free the object
+cl.clReleaseMemObject(cl_img)
