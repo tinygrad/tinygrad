@@ -50,16 +50,13 @@ ptx_matcher = constant_folder+PatternMatcher([
   (UPat((UOps.LOAD, UOps.STORE), name="root", allow_any_len=True, src=(UPat((UOps.DEFINE_LOCAL,UOps.DEFINE_GLOBAL)),
                                UPat(UOps.ALU, arg=BinaryOps.ADD, src=[UPat.var("alu"), UPat.cvar("const")]))),
     lambda root, alu, const: UOp(root.op, root.dtype,
-      (alu.cast(dtypes.int64)*UOp.const(dtypes.int64, root.src[0].dtype.itemsize)+root.src[0].cast(dtypes.int64),
-       const*root.src[0].dtype.itemsize)+root.src[2:])),
+      (alu.cast(dtypes.int64)*root.src[0].dtype.itemsize + root.src[0].cast(dtypes.int64), const*root.src[0].dtype.itemsize)+root.src[2:])),
   (UPat((UOps.LOAD, UOps.STORE), name="root", allow_any_len=True, src=(UPat((UOps.DEFINE_LOCAL,UOps.DEFINE_GLOBAL)), UPat.cvar("const"))),
     lambda root, const: UOp(root.op, root.dtype,
-      (root.src[0].cast(dtypes.int64),
-       UOp.const(dtypes.int64, const.arg*root.src[0].dtype.itemsize),)+root.src[2:])),
+      (root.src[0].cast(dtypes.int64), UOp.const(dtypes.int64, const.arg*root.src[0].dtype.itemsize),)+root.src[2:])),
   (UPat((UOps.LOAD, UOps.STORE), name="root", allow_any_len=True, src=(UPat((UOps.DEFINE_LOCAL,UOps.DEFINE_GLOBAL)), UPat.var("alu"))),
     lambda root, alu: UOp(root.op, root.dtype,
-      (alu.cast(dtypes.int64)*UOp.const(dtypes.int64, root.src[0].dtype.itemsize)+root.src[0].cast(dtypes.int64),
-       UOp.const(dtypes.int64, 0))+root.src[2:])),
+      (alu.cast(dtypes.int64)*root.src[0].dtype.itemsize + root.src[0].cast(dtypes.int64), UOp.const(dtypes.int64, 0))+root.src[2:])),
 ])
 
 class PTXRenderer(Renderer):
