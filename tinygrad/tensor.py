@@ -139,6 +139,8 @@ class Tensor:
       else: data = _frompy(data, dtype)
     elif data is None: data = _metaop(MetaOps.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif str(type(data)) == "<class 'numpy.ndarray'>":
+      import numpy as np
+      assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
       if data.shape == (): data = _metaop(MetaOps.CONST, tuple(), dtype or _from_np_dtype(data.dtype), device, data.item())
       else: data = _fromnp(data.astype(npdtype) if dtype is not None and (npdtype:=_to_np_dtype(dtype)) is not None else data)
     elif isinstance(data, pathlib.Path):
