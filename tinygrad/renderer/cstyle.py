@@ -8,7 +8,7 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
 
 def render_load(r:CStyleLanguage, load:UOp, buf:UOp) -> str:
-  sidx = strip_parens(r[load.src[1]])
+  sidx = strip_parens(r[load.src[1]]) if load.src[1].arg == BinaryOps.ADD else r[load.src[1]]
   if isinstance(buf.dtype, ImageDType):
     assert load.dtype == dtypes.float.vec(4), f"images must be float4, getting {load.dtype}"
     val = f"read_imagef({r[buf]}, smp, {sidx})"
@@ -24,7 +24,7 @@ def render_load(r:CStyleLanguage, load:UOp, buf:UOp) -> str:
   return val
 
 def render_store(r:CStyleLanguage, store:UOp, buf:UOp, var:UOp) -> str:
-  sidx = strip_parens(r[store.src[1]])
+  sidx = strip_parens(r[store.src[1]]) if store.src[1].arg == BinaryOps.ADD else r[store.src[1]]
   if isinstance(buf.dtype, ImageDType):
     assert var.dtype == dtypes.float.vec(4), f"images must be float4, getting {var.dtype}"
     val = f"write_imagef({r[buf]}, {sidx}, {r[var]});"
@@ -113,6 +113,7 @@ class CStyleLanguage(Renderer):
     UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",
     UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
+    BinaryOps.SHL: lambda a,b,dtype: f"({a}<<{b})", BinaryOps.SHR: lambda a,b,dtype: f"({a}>>{b})",
     BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})",
     BinaryOps.IDIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",

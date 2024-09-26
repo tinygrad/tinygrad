@@ -1,5 +1,5 @@
 from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
-import struct, math
+import struct
 from collections import defaultdict
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp, PatternMatcher, UPat
 from tinygrad.codegen.uopgraph import constant_folder
@@ -35,14 +35,6 @@ asm_for_op: Dict[Op, Callable] = {
 supports_half: List[Op] = [UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
 shiftable_consts = set([2**i for i in range(64)])
 ptx_matcher = constant_folder+PatternMatcher([
-  (UPat(UOps.ALU, arg=BinaryOps.MUL, name="root", dtype=tuple([dt for dt in dtypes.fields().values() if dtypes.is_int(dt)]),
-      src=[UPat.cvar("const"), UPat.var("mul")]),
-    lambda root, mul, const: UOp(UOps.ALU, root.dtype,
-                                 (mul, UOp.const(dtypes.int, int(math.log2(const.arg)))), BinaryOps.SHL) if const.arg in shiftable_consts else None),
-  (UPat(UOps.ALU, arg=BinaryOps.IDIV, name="root", dtype=tuple([dt for dt in dtypes.fields().values() if dtypes.is_int(dt)]),
-      src=[UPat.cvar("const"), UPat.var("div")]),
-    lambda root, div, const: UOp(UOps.ALU, root.dtype,
-                                 (div, UOp.const(dtypes.int, int(math.log2(const.arg)))), BinaryOps.SHR) if const.arg in shiftable_consts else None),
   (UPat(UOps.ALU, arg=BinaryOps.CMPNE, src=(UPat(dtype=dtypes.bool),UPat()), name="root"),
    lambda root: UOp(root.op, root.dtype, root.src, BinaryOps.XOR)),
   (UPat(UOps.ALU, arg=BinaryOps.CMPLT, src=(UPat.var("x", dtype=dtypes.bool),UPat.var("y")), name="root"),
