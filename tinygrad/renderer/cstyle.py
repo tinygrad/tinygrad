@@ -7,23 +7,11 @@ from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
 
-def render_load(r:CStyleLanguage, load:UOp, buf:UOp) -> str:
-  sidx = strip_parens(r[load.src[1]]) if load.src[1].arg == BinaryOps.ADD else r[load.src[1]]
-  if load.dtype.count > 1 and isinstance(buf.dtype, PtrDType):
-    val = f"*(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(load.dtype)}*)({r[buf]}+{sidx}))"
-  else:
-    val = f"*({r[buf]}+{sidx})" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}]"
-
-  # NOTE: this relies on the load not happening if it's in the unselected branch
-  if len(load.src) > 3 and load.src[3].op is UOps.ALU: val = r.code_for_op[TernaryOps.WHERE](r[load.src[3]], val, r[load.src[2]], load.dtype)
-  return val
-
-def render_store(r:CStyleLanguage, buf:UOp, idx:UOp, var:UOp) -> str:
+def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
   sidx = strip_parens(r[idx]) if idx.arg == BinaryOps.ADD else r[idx]
-  if var.dtype.count > 1 and isinstance(buf.dtype, PtrDType):
-    prefix = r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix
-    return f"*(({prefix}{r.render_dtype(var.dtype)}*)({r[buf]}+{sidx})) = {r[var]};"
-  return f"*({r[buf]}+{sidx}) = {r[var]};" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}] = {r[var]};"
+  if dtype.count > 1 and isinstance(buf.dtype, PtrDType):
+    return f"*(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
+  return f"*({r[buf]}+{sidx})" if r.uses_ptr_arithmetic else f"{r[buf]}[{sidx}]"
 
 def render_alu(r:CStyleLanguage, x:UOp):
   if x.arg in {BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR}: operands = [strip_parens(r[v]) if v.arg == x.arg else r[v] for v in x.src]
@@ -63,9 +51,14 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda r,x: f"{x.arg}u"),
   (UPat(UOps.CONST, dtype=dtypes.bool, name="x"), lambda r,x: "1" if x.arg else "0"),
   (UPat(UOps.CONST, name="x"), lambda r,x: str(x.arg)),
+  # load/store
+  (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var"), UPat.var("gate")), name="load"),
+   lambda r,buf,idx,load,var,gate: f"({r[gate]}?{_render_index(r, buf, idx, load.dtype)}:{r[var]})"),
+  (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('idx')), allow_any_len=True, name="load"),
+   lambda r,buf,idx,load: _render_index(r, buf, idx, load.dtype)),
+  (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
+   lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # function calls
-  (UPat(UOps.LOAD, src=(UPat.var("buf"),), allow_any_len=True, name="load"), render_load),
-  (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True), render_store),
   (UPat(UOps.ALU, name="x"), render_alu),
   (UPat(UOps.GEP, name="x"), render_gep),
 ])
