@@ -165,7 +165,8 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
     else: super().free(opaque, size, options)
 
 class _MallocAllocator(LRUAllocator):
-  def _alloc(self, size:int, options:BufferOptions): return (ctypes.c_uint8 * size)()
+  def _alloc(self, size:int, options:BufferOptions):
+    return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else (ctypes.c_uint8 * size)()
   def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
