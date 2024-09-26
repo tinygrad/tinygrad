@@ -1,18 +1,11 @@
-import struct, array
-import timeit
-
-import math, ctypes
+import ctypes, array
 from hexdump import hexdump
-from tinygrad.runtime.ops_qcom import QCOMDevice
 from tinygrad.runtime.ops_gpu import GPUDevice
-from tinygrad.helpers import getenv, round_up, to_mv, mv_address
-from tinygrad.device import BufferOptions
-from tinygrad.dtype import dtypes, ImageDType
+from tinygrad.helpers import getenv, to_mv, mv_address
+from tinygrad.dtype import dtypes
 from tinygrad import Tensor, TinyJit
 from tinygrad.runtime.autogen import opencl as cl
-
-if getenv("IOCTL"): 
-  import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
+if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 # create raw opencl buffer.
 gdev = GPUDevice()
