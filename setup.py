@@ -37,6 +37,7 @@ setup(name='tinygrad',
         ],
         #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@4.0.0-rc2"],
         'testing': [
+            "numpy",
             "torch",
             "pillow",
             "pytest",
@@ -63,7 +64,8 @@ setup(name='tinygrad',
             "mkdocstrings[python]",
             "markdown-callouts",
             "markdown-exec[ansi]",
-            "black"
+            "black",
+            "numpy",
         ],
         'testing_tf': [
             "tensorflow==2.15.1",
