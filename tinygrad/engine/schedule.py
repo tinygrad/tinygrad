@@ -422,7 +422,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       from tinygrad.engine.graph import realized_lazybuffer
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     for out in lsi.outputs: del out.srcs  # can only schedule once
-    schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.bufs if x.size != 0), lsi.metadata))
+    schedule.append(si:=ScheduleItem(lsi.ast, [x.buffer for x in lsi.bufs if x.size != 0], lsi.metadata))
     if (m:=Device[(device:=si.outputs[0].device)].renderer.buf_max) and len(si.bufs) >= m:
       raise RuntimeError(f"{si} exceeded the buffer count limit for {device}: {len(si.bufs)} >= {m}")
     for x in graph[lsi]:
