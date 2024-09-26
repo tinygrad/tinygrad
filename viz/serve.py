@@ -10,12 +10,14 @@ from tinygrad.helpers import Context, getenv, to_function_name
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, lines
 from tinygrad.engine.graph import uops_colors, word_wrap
 from tinygrad.engine.realize import get_runner
-from tinygrad.engine.schedule import full_ast_rewrite
+from tinygrad.engine.schedule import ScheduleItemContext, full_ast_rewrite
 
 # **** /graph - detailed UOp + rewrites
 
 # NOTE: UPats in ops.py are spec
-def graph_rewrites(ctx:TrackedRewriteContext): return [x for x in ctx.rewrites if x[2].location[0].split("/")[-1] != "ops.py"]
+# TODO: fix key for uop with buffer
+def graph_rewrites(ctx:TrackedRewriteContext):
+  return [x for x in ctx.rewrites if x[2].location[0].split("/")[-1] != "ops.py" and not ("schedule" in ctx.loc[0] and "DEFINE_GLOBAL" in str(x[2]))]
 
 @dataclass(frozen=True)
 class RewriteLocation:
@@ -95,7 +97,8 @@ def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
   code = ""
   for ctx in contexts:
     if ctx.loc[0].split("/")[-1] == "schedule.py":
-      with Context(TRACK_MATCH_STATS=0): kernel_name, code = (prg:=get_runner(Device.DEFAULT, full_ast_rewrite(ctx.sink)).p).name, prg.src
+      si_ctx = ScheduleItemContext(bufs=tuple(x.arg for x in ctx.sink.sparents if x.op is UOps.DEFINE_GLOBAL))
+      with Context(TRACK_MATCH_STATS=0): kernel_name, code = (prg:=get_runner(Device.DEFAULT, full_ast_rewrite(ctx.sink, si_ctx)).p).name, prg.src
     elif ctx.kernel_name is not None: kernel_name, code = ctx.kernel_name, ""
     if ret.get(k:=to_function_name(kernel_name)) is None: ret[k] = KernelRet(k, code, {})
     ret[k].ctxs[(ctx.loc, ctx.sink.key)] = ctx
