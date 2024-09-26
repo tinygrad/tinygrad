@@ -7,7 +7,7 @@ from collections import defaultdict
 try:
   import numpy as np
   NUMPY_AVAILABLE = True
-except: NUMPY_AVAILABLE = False
+except ImportError: NUMPY_AVAILABLE = False
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten, dedup
