@@ -199,10 +199,10 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
     kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       kernel_type = BufferXfer
-    return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), si.bufs)
-  if op is MetaOps.CUSTOM: return ExecItem(CustomOp(arg), si.bufs)
-  if op is MetaOps.EMPTY: return ExecItem(EmptyOp(out), si.bufs)
-  if op is MetaOps.VIEW: return ExecItem(ViewOp(out), si.bufs)
+    return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
+  if op is MetaOps.CUSTOM: return ExecItem(CustomOp(arg), list(si.bufs))
+  if op is MetaOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
+  if op is MetaOps.VIEW: return ExecItem(ViewOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {si.ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
