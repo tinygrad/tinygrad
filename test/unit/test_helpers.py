@@ -3,6 +3,7 @@ from PIL import Image
 from tinygrad.helpers import Context, ContextVar
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, get_contraction, get_shape
 from tinygrad.shape.symbolic import Variable, NumNode
+import numpy as np
 
 VARIABLE = ContextVar("VARIABLE", 0)
 
@@ -187,6 +188,12 @@ class TestFullyFlatten(unittest.TestCase):
     self.assertEqual(fully_flatten([[[[1], 2], 3], 4]), [1, 2, 3, 4])
     self.assertEqual(fully_flatten([[1, 2, [3, 4]], [5, 6], 7]), [1, 2, 3, 4, 5, 6, 7])
     self.assertEqual(fully_flatten([[1, "ab"], [True, None], [3.14, [5, "b"]]]), [1, "ab", True, None, 3.14, 5, "b"])
+
+  def test_fully_flatten_numpy(self):
+    self.assertEqual(fully_flatten([np.array([1, 3]), np.array([1, 2])]), [1, 3, 1, 2])
+    self.assertEqual(fully_flatten((np.array([1, 3]), np.array([1, 2]))), [1, 3, 1, 2])
+    self.assertEqual(fully_flatten([np.array([[1], [3]]), np.array([[1], [2]])]), [1, 3, 1, 2])
+    self.assertEqual(fully_flatten([[1, "ab"], [True, None], np.array([[3.14], [6.28]])]), [1, "ab", True, None, 3.14, 6.28])
 
 class TestMemoryview(unittest.TestCase):
   def test_from_mv_to_mv(self):

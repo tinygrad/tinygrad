@@ -388,11 +388,6 @@ class TestUOpStr(unittest.TestCase):
       sink = UOp(UOps.SINK, dtypes.void, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
     assert_equiv_uops(sink, eval(str(sink)))
 
-  def test_variable_const(self):
-    # TODO: this is not possible after VALID.
-    uop = UOp(UOps.CONST, dtypes.int, (), arg=Variable("a",1,10))
-    assert str(eval(str(uop))) == str(uop)
-
   def test_vectorized_str(self):
     vec = UOp(UOps.VECTORIZE, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
     assert str(eval(str(vec))) == str(vec)
