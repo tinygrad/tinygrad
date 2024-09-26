@@ -35,8 +35,7 @@ class _Device:
   @functools.cached_property
   def DEFAULT(self) -> str:
     if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
-    available_backends = self.get_available_backends()
-    if not available_backends: raise RuntimeError("no usable devices")
+    if not (available_backends := self.get_available_backends()): raise RuntimeError("no usable devices")
     device = available_backends[0]
     os.environ[device] = "1"    # we set this in environment for spawned children
     return device
