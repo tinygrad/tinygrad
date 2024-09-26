@@ -74,7 +74,9 @@ def benchmark_model(m, devices, validate_outs=False):
       del inputs, tinygrad_model, tinygrad_jitted_model
     except RuntimeError as e:
       # TODO: we don't run the dm model on METAL for now
-      if Device.DEFAULT == "METAL": assert "buffer count limit" in str(e)
+      if Device.DEFAULT == "METAL":
+        assert "buffer count limit" in str(e)
+        return
       else: raise e
 
   # convert model to torch
