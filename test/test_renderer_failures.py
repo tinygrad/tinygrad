@@ -33,10 +33,12 @@ class TestCStyleFailures(unittest.TestCase):
     b = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 1)
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.int, (b, idx))
-    alu = ld.alu(BinaryOps.MAX, UOp.const(dtypes.int, dtypes.min(dtypes.int)))
+    alu = ld.alu(BinaryOps.MAX, UOp.const(dtypes.int, dtypes.min(dtypes.int)+1))
     store = UOp.store(a, idx, alu)
+    sink = UOp(UOps.SINK, dtypes.void, (store,))
+    uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
     # CLANG doesn't use the max function
-    ret = _test_uop_result([Tensor([1])], [store])[0]
+    ret = _test_uop_result([Tensor([1])], uops)[0]
     self.assertEqual(ret[0], 1)
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")

@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, decimal, math
 from types import SimpleNamespace
 from typing import Tuple, List, Any, cast
-from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState, hcq_command
+from tinygrad.device import BufferOptions, HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
@@ -103,19 +103,20 @@ class QCOMComputeQueue(HWComputeQueue):
     else: submit_req, _ = self._build_gpu_command(device)
     kgsl.IOCTL_KGSL_GPU_COMMAND(device.fd, __payload=submit_req)
 
-  @hcq_command
-  def setup(self):
-    self.cmd(adreno.CP_SET_MARKER, qreg.a6xx_cp_set_marker_0(mode=adreno.RM6_COMPUTE))
-    self.reg(adreno.REG_A6XX_SP_CS_TEX_COUNT, qreg.a6xx_sp_cs_tex_count(0xff))
-    self.reg(adreno.REG_A6XX_SP_CS_IBO_COUNT, qreg.a6xx_sp_cs_ibo_count(0xff))
-    self.reg(adreno.REG_A6XX_SP_MODE_CONTROL, qreg.a6xx_sp_mode_control(isammode=adreno.ISAMMODE_CL))
-    self.reg(adreno.REG_A6XX_SP_PERFCTR_ENABLE, qreg.a6xx_sp_perfctr_enable(cs=True))
-    self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, qreg.a6xx_sp_tp_mode_cntl(isammode=adreno.ISAMMODE_CL, unk3=2))
-    self.cmd(adreno.CP_WAIT_FOR_IDLE)
-
   def _exec(self, prg, args_state, global_size, local_size):
     global_size_mp = [int(g*l) for g,l in zip(global_size, local_size)]
     self.cmd_idx_to_dims[self._cur_cmd_idx()] = [global_size, local_size]
+
+    self.cmd(adreno.CP_SET_MARKER, qreg.a6xx_cp_set_marker_0(mode=adreno.RM6_COMPUTE))
+    self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, qreg.a6xx_hlsq_invalidate_cmd(cs_state=True, cs_ibo=True))
+    self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x0)
+    self.reg(adreno.REG_A6XX_SP_CS_TEX_COUNT, qreg.a6xx_sp_cs_tex_count(0x80))
+    self.reg(adreno.REG_A6XX_SP_CS_IBO_COUNT, qreg.a6xx_sp_cs_ibo_count(0x40))
+    self.reg(adreno.REG_A6XX_SP_MODE_CONTROL, qreg.a6xx_sp_mode_control(isammode=adreno.ISAMMODE_CL))
+    self.reg(adreno.REG_A6XX_SP_PERFCTR_ENABLE, qreg.a6xx_sp_perfctr_enable(cs=True))
+    self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, qreg.a6xx_sp_tp_mode_cntl(isammode=adreno.ISAMMODE_CL, unk3=2))
+    self.reg(adreno.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
+    self.cmd(adreno.CP_WAIT_FOR_IDLE)
 
     self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
              qreg.a6xx_hlsq_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1),
@@ -166,16 +167,16 @@ class QCOMComputeQueue(HWComputeQueue):
 
   def _update_exec(self, cmd_idx, global_size, local_size):
     if global_size is not None:
-      self._patch(cmd_idx, offset=10, data=[int(math.ceil(global_size[0])), int(math.ceil(global_size[1])), int(math.ceil(global_size[2]))])
+      self._patch(cmd_idx, offset=29, data=[int(math.ceil(global_size[0])), int(math.ceil(global_size[1])), int(math.ceil(global_size[2]))])
       self.cmd_idx_to_dims[cmd_idx][0] = global_size
 
     if local_size is not None:
       payload = qreg.a6xx_hlsq_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1)
-      self._patch(cmd_idx, offset=1, data=[payload])
+      self._patch(cmd_idx, offset=20, data=[payload])
       self.cmd_idx_to_dims[cmd_idx][1] = local_size
 
     global_size_mp = [int(g*l) for g,l in zip(self.cmd_idx_to_dims[cmd_idx][0], self.cmd_idx_to_dims[cmd_idx][1])]
-    self._patch(cmd_idx, offset=2, data=[global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0])
+    self._patch(cmd_idx, offset=21, data=[global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0])
 
 class QCOMArgsState(HCQArgsState):
   def __init__(self, ptr:int, prg:QCOMProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
@@ -349,8 +350,6 @@ class QCOMDevice(HCQCompiled):
 
     super().__init__(device, QCOMAllocator(self), QCOMRenderer(), QCOMCompiler(device), functools.partial(QCOMProgram, self),
                      QCOMSignal, QCOMComputeQueue, None, timeline_signals=(QCOMSignal(), QCOMSignal()))
-
-    QCOMComputeQueue().setup().submit(self)
 
   def _ctx_create(self):
     cr = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=(kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT |
