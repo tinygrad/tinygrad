@@ -147,7 +147,8 @@ def reloader():
       print("reloading server...")
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
-def main():
+
+if __name__ == "__main__":
   with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
   global kernels
   kernels = load_kernels(contexts)
@@ -166,5 +167,3 @@ def main():
     print("viz is shutting down...")
     stop_reloader.set()
 
-if __name__ == "__main__":
-  main()
