@@ -137,7 +137,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
 
   # buffer ops define ShapeTracker
-  if buf.realized is not None or (buf in realizes and buf not in outputs):
+  if buf in realizes and buf not in outputs:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     # if it's a const, we generate it
@@ -154,7 +154,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                            +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
     if buf not in assign_targets and buf not in inputs: inputs.append(buf)
-    return UOp(UOps.LOAD, dtype, (buf.buffer.to_uop(), unbound_st.to_uop()))
+    return UOp(UOps.LOAD, dtype, (UOp.define_global(buf.dtype, buf.buffer), unbound_st.to_uop()))
 
   # reduce ops change ShapeTracker
   if buf.op in ReduceOps:
@@ -188,7 +188,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], realizes:Dict[LazyBuffer, None]) ->
       output_st = out.arg[0]
     output_st, vv = output_st.simplify().unbind()
     var_vals.update(vv)
-    ast.append(UOp(UOps.STORE, dtypes.void, (out.buffer.to_uop(), output_st.to_uop(), src)))
+    ast.append(UOp(UOps.STORE, dtypes.void, (UOp.define_global(out.dtype, out.buffer), output_st.to_uop(), src)))
   sink = full_ast_rewrite(ast[0].sink(*ast[1:]), ScheduleItemContext(bufs=tuple(x.buffer for x in outs+inputs)))
   return LBScheduleItem(sink, tuple(outs+inputs), tuple(dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))), var_vals
 
@@ -198,7 +198,8 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
                 children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer],
                 double_reduces:Dict[LazyBuffer, None], scheduled=False) -> None:
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
-  if buf in allbufs or buf.base.realized is not None: return
+  if buf in allbufs: return None
+  if buf.base.realized is not None: return realizes.setdefault(buf.base)
   if GRAPH:
     from tinygrad.engine.graph import log_lazybuffer
     log_lazybuffer(buf, scheduled)
@@ -233,7 +234,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
 
 def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
-  if buf in realizes or buf.realized is not None: return True
+  if buf in realizes: return True
   # NOTE: this broke to_image_idx and coder with JIT
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)

@@ -5,8 +5,7 @@ from collections import defaultdict
 from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type, Iterator
 import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib, array
 from tinygrad.helpers import SAVE_SCHEDULE, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
-from tinygrad.dtype import DType, ImageDType, PtrDType
-from tinygrad.ops import UOp, UOps
+from tinygrad.dtype import DType, ImageDType
 from tinygrad.renderer import Renderer
 
 # **************** Device ****************
@@ -522,7 +521,7 @@ class HCQCompiled(Compiled):
     self.devices.append(self)
 
   def synchronize(self):
-    self.timeline_signal.wait(self.timeline_value - 1)
+    self.timeline_signal.wait(self.timeline_value - 1) if not hasattr(self, '_syncdev') else self._syncdev()
 
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE:
