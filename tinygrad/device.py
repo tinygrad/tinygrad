@@ -38,7 +38,7 @@ class _Device:
       device = next(self._get_available_backends())
       os.environ[device] = "1"   # we set this in environment for spawned children
       return device
-    except StopIteration: raise RuntimeError("no usable devices")
+    except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device = _Device()
 
 # **************** Buffer + Allocators ****************
