@@ -124,16 +124,12 @@ class Handler(BaseHTTPRequestHandler):
       self.send_response(200)
       self.send_header("Content-type", "application/json")
       self.end_headers()
-      with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
-      kernels = load_kernels(contexts)
       ret = json.dumps([x.to_json() for x in kernels]).encode()
     elif url.path == "/graph":
       query = parse_qs(url.query)
       self.send_response(200)
       self.send_header("Content-type", "application/json")
       self.end_headers()
-      with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
-      kernels = load_kernels(contexts)
       k = kernels[int(query["kernel_idx"][0])]
       g = UOpRet.from_ctx(list(k.ctxs.values())[int(query["uop_idx"][0])])
       ret = json.dumps((g.to_json(), [x.loc for x in k.ctxs.values()])).encode()
@@ -152,6 +148,9 @@ def reloader():
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
 def main():
+  with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
+  global kernels
+  kernels = load_kernels(contexts)
   try:
     st = time.perf_counter()
     reloader_thread = threading.Thread(target=reloader)
