@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
-import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, re
+import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, re, signal
 from dataclasses import dataclass, asdict
 from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -152,16 +152,15 @@ if __name__ == "__main__":
   with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
   global kernels
   kernels = load_kernels(contexts)
+  server = HTTPServer(('', 8000), Handler)
   try:
     st = time.perf_counter()
     reloader_thread = threading.Thread(target=reloader)
     reloader_thread.start()
     print("serving at port 8000")
-    server_thread = threading.Thread(target=HTTPServer(('', 8000), Handler).serve_forever, daemon=True)
-    server_thread.start()
+    server.serve_forever()
     if BROWSER: webbrowser.open("http://localhost:8000")
     print(f"{(time.perf_counter()-st):.2f}s startup time")
-    server_thread.join()
     reloader_thread.join()
   except KeyboardInterrupt:
     print("viz is shutting down...")
