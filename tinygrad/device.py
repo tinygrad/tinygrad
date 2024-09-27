@@ -28,15 +28,14 @@ class _Device:
     return ret
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
-  def get_available_backends(self) -> List[str]: return list(self._get_available_backends())
-  def _get_available_backends(self) -> Iterator[str]:
+  def get_available_backends(self) -> Iterator[str]:
     for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM"]:
       with contextlib.suppress(Exception): yield self[device].dname
   @functools.cached_property
   def DEFAULT(self) -> str:
     if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
     try:
-      device = next(self._get_available_backends())
+      device = next(self.get_available_backends())
       os.environ[device] = "1"   # we set this in environment for spawned children
       return device
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
@@ -134,7 +133,6 @@ class Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
     if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
     return Buffer(self.device, size, dtype, base=self, offset=offset)
-  def to_uop(self) -> UOp: return UOp(UOps.DEFINE_GLOBAL, self.dtype if isinstance(self.dtype, ImageDType) else PtrDType(self.dtype), (), self)
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
