@@ -97,8 +97,6 @@
   }
   .kernel-list {
     width: 10%;
-    display: flex;
-    flex-direction: column;
     overflow-y: auto;
   }
   .kernel-list > ul > ul {
@@ -109,6 +107,7 @@
   }
   .metadata {
     width: 20%;
+    padding-left: 20px;
     overflow-y: auto;
   }
   #resize-handle {
@@ -232,7 +231,7 @@
   var currentUOp = 0;
   var currentKernel = 0;
   var currentRewrite = 0;
-  var expandKernel = false;
+  var expandKernel = true;
   async function main() {
     checkStatus();
     // ***** LHS kernels list
@@ -419,7 +418,6 @@
       main()
     }
   })
-  setInterval(checkStatus, 5000);
   main()
   </script>
   </body>
