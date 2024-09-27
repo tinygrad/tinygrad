@@ -2,7 +2,7 @@ from __future__ import annotations
 import multiprocessing, decimal, statistics, random
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type
+from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type, Iterator
 import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib, array
 from tinygrad.helpers import SAVE_SCHEDULE, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
 from tinygrad.dtype import DType, ImageDType
@@ -27,18 +27,18 @@ class _Device:
     return ret
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
-  def get_available_backends(self) -> List[str]:
-    ret = []
+  def get_available_backends(self) -> List[str]: return list(self._get_available_backends())
+  def _get_available_backends(self) -> Iterator[str]:
     for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM"]:
-      with contextlib.suppress(Exception): ret.append(self[device].dname)
-    return ret
+      with contextlib.suppress(Exception): yield self[device].dname
   @functools.cached_property
   def DEFAULT(self) -> str:
     if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
-    if not (available_backends := self.get_available_backends()): raise RuntimeError("no usable devices")
-    device = available_backends[0]
-    os.environ[device] = "1"    # we set this in environment for spawned children
-    return device
+    try:
+      device = next(self._get_available_backends())
+      os.environ[device] = "1"  # Set this in environment for spawned children
+      return device
+    except StopIteration: raise RuntimeError("no usable devices")
 Device = _Device()
 
 # **************** Buffer + Allocators ****************
