@@ -349,14 +349,15 @@ class CUDARenderer(CStyleLanguage):
       sza, szb, szc = (prod(sz for _, sz in upc) for upc in upcast_axes)
       dtype_a, dtype_b, dtype_c = (self.render_dtype(dt.vec(sz)) for dt,sz in ((dtype_in,sza),(dtype_in,szb),(dtype_out,szc)))
       inc, ina, inb = (list(i for i in range(sz*dt.itemsize//4)) for dt,sz in ((dtype_out,szc), (dtype_in,sza), (dtype_in,szb)))
-      argc = ", ".join([f"%{c}" for c in inc])
-      arga = ", ".join([f"%{a+len(inc)}" for a in ina])
-      argb = ", ".join([f"%{b+len(inc+ina)}" for b in inb])
-      c_pks = ", ".join([f'"+f"(c_pk[{i}])' for i in inc])
+      operands_c = ", ".join([f"%{c}" for c in inc])
+      operands_a = ", ".join([f"%{a+len(inc)}" for a in ina])
+      operands_b = ", ".join([f"%{b+len(inc+ina)}" for b in inb])
+      c_pks = ", ".join([f'"+f"(c.{_nms[i]})' for i in inc])
       a_pks, b_pks = (", ".join([f'"r"({v}_pk[{i}])' for i in inp]) for inp,v in ((ina,'a'),(inb,'b')))
       prefix.append(f"""__device__ {dtype_c} __{name}({dtype_a} a, {dtype_b} b, {dtype_c} c){{\n  int *a_pk = (int *)(&a), *b_pk = (int *)(&b);
-  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map[dtype_out]}.{dt_map[dtype_in]}.{dt_map[dtype_in]}.{dt_map[dtype_out]}
-    {{{argc}}}, {{{arga}}}, {{{argb}}}, {{{argc}}};"\n  : {c_pks}\n  : {a_pks}, {b_pks});\n  return c;\n}}""")
+  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map[dtype_out]}.{dt_map[dtype_in]}.{dt_map[dtype_in]}.{dt_map[dtype_out]}"
+      "{{{operands_c}}}, {{{operands_a}}}, {{{operands_b}}}, {{{operands_c}}};"
+    : {c_pks}\n    : {a_pks}, {b_pks});\n  return c;\n}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
