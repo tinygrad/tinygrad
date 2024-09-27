@@ -151,7 +151,6 @@ def reloader():
 if __name__ == "__main__":
   print("*** viz is starting")
   with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
-  global kernels
   print("*** unpickled saved rewrites")
   kernels = load_kernels(contexts)
   print("*** loaded kernels")
