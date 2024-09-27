@@ -36,7 +36,7 @@ class _Device:
     if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
     try:
       device = next(self._get_available_backends())
-      os.environ[device] = "1"  # Set this in environment for spawned children
+      os.environ[device] = "1"   # we set this in environment for spawned children
       return device
     except StopIteration: raise RuntimeError("no usable devices")
 Device = _Device()
