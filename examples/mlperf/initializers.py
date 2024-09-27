@@ -81,7 +81,7 @@ class Conv2dNormal(nn.Conv2d):
     if bias:
       if prior_prob:
         prior_prob = Tensor(prior_prob, device=self.bias.device, dtype=self.bias.dtype).expand(*self.bias.shape)
-        self.bias = (-(((1 - prior_prob) / prior_prob).log()))
+        self.bias = -(((1 - prior_prob) / prior_prob).log())
       else: self.bias = Tensor.zeros_like(self.bias)
 
 class Conv2dKaimingUniform(nn.Conv2d):
