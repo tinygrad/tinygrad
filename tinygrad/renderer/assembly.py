@@ -2,7 +2,7 @@ from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
 import struct
 from collections import defaultdict
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp, PatternMatcher, UPat
-from tinygrad.codegen.uopgraph import constant_folder
+from tinygrad.codegen.uopgraph import sym
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -39,7 +39,7 @@ def load_store_ptr_arithmetic(x:UOp, buf:UOp, alu:Optional[UOp]=None, const:Opti
   return x.replace(src=tuple(src))
 
 supports_half: List[Op] = [UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
-ptx_matcher = constant_folder+PatternMatcher([
+ptx_matcher = sym+PatternMatcher([
   # bool CMPNE is XOR, bool CMPLT is XOR+AND (universal makes this slow, this is for renderer only)
   (UPat.var('x', dtype=dtypes.bool).ne(UPat.var('y')), lambda x,y: x^y),
   (UPat.var('x', dtype=dtypes.bool).lt(UPat.var('y')), lambda x,y: (x^True)&y),
