@@ -1825,33 +1825,21 @@ class TestOps(unittest.TestCase):
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="linear", align_corners=True),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True))
 
-  def test_interpolate_nearest(self):
-    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
+  def test_interpolate_nearest(self, mode="nearest"):
+    for in_sz, out_sz in [((13,),(9,)), ((9,),(13,))]:
       helper_test_op([(2,3)+in_sz],
-        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest"),
-        lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest"))
-    for in_sz, out_sz in [((52,40),(29,31)), ((52,29),(31,40)), ((29,31),(40,52))]:
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode=mode),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode=mode))
+    for in_sz, out_sz in [((13,10),(9,11)), ((13,9),(11,10)), ((9,11),(10,13))]:
       helper_test_op([(2,3)+in_sz],
-        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest"),
-        lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest"))
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode=mode),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode=mode))
     for in_sz, out_sz in [((5,2,8),(3,6,4))]:
       helper_test_op([(2,3)+in_sz],
-        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest"),
-        lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest"))
+        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode=mode),
+        lambda x: Tensor.interpolate(x, size=out_sz, mode=mode))
 
-  def test_interpolate_nearest_exact(self):
-    for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
-      helper_test_op([(2,3)+in_sz],
-        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest-exact"),
-        lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest-exact"))
-    for in_sz, out_sz in [((52,40),(29,31)), ((52,29),(31,40)), ((29,31),(40,52))]:
-      helper_test_op([(2,3)+in_sz],
-        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest-exact"),
-        lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest-exact"))
-    for in_sz, out_sz in [((5,2,8),(3,6,4))]:
-      helper_test_op([(2,3)+in_sz],
-        lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="nearest-exact"),
-        lambda x: Tensor.interpolate(x, size=out_sz, mode="nearest-exact"))
+  def test_interpolate_nearest_exact(self): self.test_interpolate_nearest("nearest-exact")
 
   def test_interpolate_bilinear(self):
     for in_sz, out_sz in [((52,40),(29,31)), ((52,29),(31,40)), ((29,31),(40,52))]:

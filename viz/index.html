@@ -42,6 +42,7 @@
   ul {
     padding: 0;
     color: #7c7d85;
+    white-space: nowrap;
     cursor: pointer;
   }
   ul.active {
@@ -96,8 +97,6 @@
   }
   .kernel-list {
     width: 10%;
-    display: flex;
-    flex-direction: column;
     overflow-y: auto;
   }
   .kernel-list > ul > ul {
@@ -108,6 +107,7 @@
   }
   .metadata {
     width: 20%;
+    padding-left: 20px;
     overflow-y: auto;
   }
   #resize-handle {
@@ -231,7 +231,7 @@
   var currentUOp = 0;
   var currentKernel = 0;
   var currentRewrite = 0;
-  var expandKernel = false;
+  var expandKernel = true;
   async function main() {
     checkStatus();
     // ***** LHS kernels list
@@ -242,11 +242,11 @@
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
     kernels.forEach((k, i) => {
-      kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "" });
-      const p = Object.assign(document.createElement("p"), {id: `kernel-${k.name}`, innerText: k.name})
+      kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "", style: "overflow-x: auto; cursor: initial;" });
+      const p = Object.assign(document.createElement("p"), {id: `kernel-${k.name}`, innerText: k.name, style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       k.ctxs.forEach((u, j) => {
-        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${u.filename} - ${u.match_count}`, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
+        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${u.filename} - ${u.match_count} - ${u.matcher_name}`, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
         rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
           e.stopPropagation();
@@ -418,7 +418,6 @@
       main()
     }
   })
-  setInterval(checkStatus, 5000);
   main()
   </script>
   </body>

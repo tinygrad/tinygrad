@@ -1,11 +1,12 @@
 from __future__ import annotations
 import multiprocessing, decimal, statistics, random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type
 import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib, array
 from tinygrad.helpers import SAVE_SCHEDULE, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
-from tinygrad.dtype import DType, ImageDType
+from tinygrad.dtype import DType, ImageDType, PtrDType
+from tinygrad.ops import UOp, UOps
 from tinygrad.renderer import Renderer
 
 # **************** Device ****************
@@ -48,6 +49,7 @@ class BufferOptions:
   cpu_access: bool = False
   host: bool = False
   nolru: bool = False
+  external_ptr: Optional[int] = None
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None,
@@ -75,9 +77,11 @@ class Buffer:
   def ref(self, cnt): self.base._lb_refcount += cnt
   def is_allocated(self) -> bool: return hasattr(self, '_buf')
   def ensure_allocated(self) -> Buffer: return self.allocate() if not hasattr(self, '_buf') else self
-  def allocate(self, opaque=None) -> Buffer:
+  def allocate(self, opaque=None, external_ptr=None) -> Buffer:
     assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
     self.allocator = Device[self.device].allocator
+    if external_ptr is not None:
+      self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferOptions(external_ptr=external_ptr)
     if self._base is not None:
       self._base.ensure_allocated()
       assert hasattr(self.allocator, "offset"), "offset function required for view"
@@ -99,7 +103,7 @@ class Buffer:
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
     if not hasattr(self, '_buf'): return
-    if self._base is None:
+    if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self):
@@ -128,6 +132,7 @@ class Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
     if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
     return Buffer(self.device, size, dtype, base=self, offset=offset)
+  def to_uop(self) -> UOp: return UOp(UOps.DEFINE_GLOBAL, self.dtype if isinstance(self.dtype, ImageDType) else PtrDType(self.dtype), (), self)
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
@@ -162,7 +167,8 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
     else: super().free(opaque, size, options)
 
 class _MallocAllocator(LRUAllocator):
-  def _alloc(self, size:int, options:BufferOptions): return (ctypes.c_uint8 * size)()
+  def _alloc(self, size:int, options:BufferOptions):
+    return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else (ctypes.c_uint8 * size)()
   def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
