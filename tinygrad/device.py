@@ -5,8 +5,7 @@ from collections import defaultdict
 from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type
 import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib, array
 from tinygrad.helpers import SAVE_SCHEDULE, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
-from tinygrad.dtype import DType, ImageDType, PtrDType
-from tinygrad.ops import UOp, UOps
+from tinygrad.dtype import DType, ImageDType
 from tinygrad.renderer import Renderer
 
 # **************** Device ****************
@@ -132,7 +131,6 @@ class Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
     if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
     return Buffer(self.device, size, dtype, base=self, offset=offset)
-  def to_uop(self) -> UOp: return UOp(UOps.DEFINE_GLOBAL, self.dtype if isinstance(self.dtype, ImageDType) else PtrDType(self.dtype), (), self)
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
