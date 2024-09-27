@@ -95,7 +95,7 @@ class Buffer:
     if self._base is not None:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, hasattr(self, '_buf'))
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
-    if self.is_allocated() and not SAVE_SCHEDULE:
+    if self.is_allocated() and not SAVE_SCHEDULE and not getenv("VIZ"):
       buf = bytearray(self.nbytes)
       self.copyout(memoryview(buf))
     return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
