@@ -522,7 +522,7 @@ class HCQCompiled(Compiled):
     self.devices.append(self)
 
   def synchronize(self):
-    self.timeline_signal.wait(self.timeline_value - 1)
+    self.timeline_signal.wait(self.timeline_value - 1) if not hasattr(self, '_syncdev') else self._syncdev()
 
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE:
