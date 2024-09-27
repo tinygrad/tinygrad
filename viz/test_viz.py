@@ -7,7 +7,7 @@ from tinygrad.engine.realize import lower_schedule
 from tinygrad.ops import UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import CI, Context, all_same, DEBUG, colored, getenv
-from tinygrad.codegen.uopgraph import constant_folder, devectorize, float4_folding
+from tinygrad.codegen.uopgraph import sym, devectorize, float4_folding
 from test.external.process_replay.helpers import print_diff
 from viz.serve import KernelRet, UOpRet, load_kernels, uop_to_json
 
@@ -96,7 +96,7 @@ class TestViz(unittest.TestCase):
           UOp(UOps.LOAD, dtypes.float.vec(4), arg=None, src=(
              x11,
              x7,)),)),)),))
-    pm = constant_folder+(devectorize+float4_folding)
+    pm = sym+(devectorize+float4_folding)
     new_sink = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, new_sink, unified=0)
     self.assert_valid_ctx(contexts)

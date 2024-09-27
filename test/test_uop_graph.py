@@ -7,7 +7,7 @@ from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, UOps, UOp, KernelInfo
 from tinygrad.ops import UPat, PatternMatcher
 from tinygrad.codegen.lowerer import ast_to_uop
-from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, graph_rewrite, expander, reducer, constant_folder, float4_folding
+from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, graph_rewrite, expander, reducer, sym, float4_folding
 from tinygrad.shape.shapetracker import ShapeTracker, View
 
 simple_pm = PatternMatcher([
@@ -71,21 +71,21 @@ class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
     v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
     v2 = v1.gep(1)
-    ret = graph_rewrite(v2, constant_folder)
+    ret = graph_rewrite(v2, sym)
     self.assertEqual(ret.dtype, dtypes.int)
     self.assertEqual(ret.arg, 1)
 
   def test_gep_const_single(self):
     v1 = UOp.const(dtypes.int.vec(3), 4)
     v2 = v1.gep(1)
-    ret = graph_rewrite(v2, constant_folder)
+    ret = graph_rewrite(v2, sym)
     self.assertEqual(ret.dtype, dtypes.int)
     self.assertEqual(ret.arg, 4)
 
   def test_add_const(self):
     v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
     v2 = UOp.const(dtypes.int.vec(3), (5,6,7))
-    ret = graph_rewrite(v1+v2, constant_folder)
+    ret = graph_rewrite(v1+v2, sym)
     self.assertEqual(ret.op, UOps.VCONST)
     self.assertEqual(ret.dtype, dtypes.int.vec(3))
     self.assertEqual(ret.arg, (5,7,9))
@@ -93,7 +93,7 @@ class TestGraphRewriteConst(unittest.TestCase):
   def test_add_const_lose_v(self):
     v1 = UOp.const(dtypes.int.vec(3), (0,1,2))
     v2 = UOp.const(dtypes.int.vec(3), (2,1,0))
-    ret = graph_rewrite(v1+v2, constant_folder)
+    ret = graph_rewrite(v1+v2, sym)
     self.assertEqual(ret.op, UOps.CONST)
     self.assertEqual(ret.dtype, dtypes.int.vec(3))
     self.assertEqual(ret.arg, 2)
@@ -168,7 +168,7 @@ class TestGraphRewrite(unittest.TestCase):
     d = UOp.define_var('d', dtypes.int, 0, 1)
     outs = [2+a, 2+a+d+3+b+c+4, UOp(UOps.ALU, a.dtype, src=(a.const_like(2), a), arg=BinaryOps.ADD), (4+d)+c+(2+a)+b]
     for out in outs:
-      sink = graph_rewrite(out, constant_folder)
+      sink = graph_rewrite(out, sym)
       print(sink)
       self.assertEqual(sink.op, UOps.ALU)
       self.assertEqual(sink.src[1].op, UOps.CONST)
@@ -433,9 +433,9 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(endranges[-1].src[0], ranges[0])
 
 def expander_rewrite(sink):
-  sink = graph_rewrite(sink, constant_folder + expander)
-  return graph_rewrite(sink, constant_folder + reducer)
-def float4_rewrite(sink): return graph_rewrite(sink, constant_folder + expander + float4_folding)
+  sink = graph_rewrite(sink, sym + expander)
+  return graph_rewrite(sink, sym + reducer)
+def float4_rewrite(sink): return graph_rewrite(sink, sym + expander + float4_folding)
 
 class TestExpander(unittest.TestCase):
   def test_expand_add_broadcast(self):
@@ -645,7 +645,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     print(sink)
     assert len([x for x in sink.sparents if x.op is UOps.STORE]) == 3
 
-def gate_rewrite(sink): return graph_rewrite(sink, constant_folder + expander + reducer)
+def gate_rewrite(sink): return graph_rewrite(sink, sym + expander + reducer)
 
 class TestIFUOps(unittest.TestCase):
   def test_create_ifs(self):

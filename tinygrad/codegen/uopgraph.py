@@ -224,7 +224,7 @@ def idx_given_valid(valid:UOp, idx:UOp) -> Optional[UOp]:
     for candidate in candidates:
       newidxs:List[List[UOp]] = [[], []]
       for X,newX in candidate:
-        newidx = replace_uop(graph_rewrite(replace_uop(idx, X, newX), constant_folder), newX, X)
+        newidx = replace_uop(graph_rewrite(replace_uop(idx, X, newX), sym), newX, X)
         newidxs[0].append(newidx.src[0])
         newidxs[1].append(newidx.src[1])
 
@@ -247,7 +247,7 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
     if not is_upper_bound and c == 1 and X.op is UOps.ALU and X.arg is BinaryOps.ADD and \
       all(is_irreducible(u) and u.vmin == 0 for u in _get_chain(X, BinaryOps.ADD)):
       testidx = functools.reduce(lambda nowidx,u: replace_uop(nowidx, u, u.const_like(0)), _get_chain(X, BinaryOps.ADD), idx)
-      testidx = graph_rewrite(testidx, constant_folder)
+      testidx = graph_rewrite(testidx, sym)
       if testidx.src[0].vmax < 0 or testidx.src[1].vmax < 0:
         drop_stmt.append(stmt)
         continue
@@ -257,7 +257,7 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
     test_value = c + 1 if is_upper_bound else c - 1
     for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
       if is_increasing(i):
-        rw = graph_rewrite(replace_uop(i, X, X.const_like(test_value)), constant_folder)
+        rw = graph_rewrite(replace_uop(i, X, X.const_like(test_value)), sym)
         if rw.vmin >= b or rw.vmax < 0:
           drop_stmt.append(stmt)
           break
@@ -365,7 +365,7 @@ def no_vectorized_wmma(wmma:UOp):
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 # this is symbolic 2.0
-constant_folder = PatternMatcher([
+sym = PatternMatcher([
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y'), lambda x,y: x|y),
@@ -737,7 +737,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
 
   # do graph rewrite
   acc_number = 0
-  sink = graph_rewrite(sink, constant_folder)
+  sink = graph_rewrite(sink, sym)
 
   # rewrite pyint to int32
   sink = graph_rewrite(sink, no_pyint)
@@ -745,12 +745,12 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # expand
   linearize_cnt += 1
   if linearize_cnt != (de:=getenv("DEBUG_EXPAND", 0)) and de != -1:
-    sink = graph_rewrite(sink, constant_folder+expander)
+    sink = graph_rewrite(sink, sym+expander)
     if getenv("DO_REDUCE", 1):
-      sink = graph_rewrite(sink, constant_folder+just_reduce)
-      sink = graph_rewrite(sink, constant_folder+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
-      sink = graph_rewrite(sink, constant_folder+reducer)
-      sink = graph_rewrite(sink, constant_folder+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
+      sink = graph_rewrite(sink, sym+just_reduce)
+      sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
+      sink = graph_rewrite(sink, sym+reducer)
+      sink = graph_rewrite(sink, sym+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
 
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, opts.extra_matcher)
   return sink
