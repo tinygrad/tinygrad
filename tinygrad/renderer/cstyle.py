@@ -348,12 +348,11 @@ class CUDARenderer(CStyleLanguage):
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       sza, szb, szc = (prod(sz for _, sz in upc) for upc in upcast_axes)
       dtype_a, dtype_b, dtype_c = (self.render_dtype(dt.vec(sz)) for dt,sz in ((dtype_in,sza),(dtype_in,szb),(dtype_out,szc)))
-      inc, ina, inb = (list(i for i in range(sz*dt.itemsize//4)) for dt,sz in ((dtype_out,szc), (dtype_in,sza), (dtype_in,szb)))
-      operands_c = ", ".join([f"%{c}" for c in inc])
-      operands_a = ", ".join([f"%{a+len(inc)}" for a in ina])
-      operands_b = ", ".join([f"%{b+len(inc+ina)}" for b in inb])
-      c_pks = ", ".join([f'"+f"(c.{_nms[i]})' for i in inc])
-      a_pks, b_pks = (", ".join([f'"r"({v}_pk[{i}])' for i in inp]) for inp,v in ((ina,'a'),(inb,'b')))
+      operands_c = ", ".join([f"%{c}" for c in range(szc*dtype_out.itemsize//4)]) # %0, %1, ... operands
+      operands_a = ", ".join([f"%{a+len(operands_c)}" for a in range(sza*dtype_in.itemsize//4)])
+      operands_b = ", ".join([f"%{b+len(operands_c+operands_a)}" for b in range(szb*dtype_in.itemsize//4)])
+      c_pks = ", ".join([f'"+f"(c.{_nms[i]})' for i in range(szc*dtype_out.itemsize//4)]) # "+f"(c.x), "+f"(c.y), ...
+      a_pks, b_pks = (", ".join([f'"r"({v}_pk[{i}])' for i in range(sz*dtype_in.itemsize//4)]) for sz,v in ((sza,'a'),(szb,'b'))) # "r"(a_pk[0]), "r"(a_pk[1]), ...
       prefix.append(f"""__device__ {dtype_c} __{name}({dtype_a} a, {dtype_b} b, {dtype_c} c){{\n  int *a_pk = (int *)(&a), *b_pk = (int *)(&b);
   asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map[dtype_out]}.{dt_map[dtype_in]}.{dt_map[dtype_in]}.{dt_map[dtype_out]}"
       "{{{operands_c}}}, {{{operands_a}}}, {{{operands_b}}}, {{{operands_c}}};"
