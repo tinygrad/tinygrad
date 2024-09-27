@@ -38,6 +38,13 @@ class _Device:
           return device
       except Exception: pass
     raise RuntimeError("no usable devices")
+  def get_available_backends(self) -> List[str]:
+    def is_usable(device: str) -> bool:
+      try:
+        return bool(self[device])
+      except Exception:
+        return False
+    return [device for device in self._devices if is_usable(device)]
 Device = _Device()
 
 # **************** Buffer + Allocators ****************
