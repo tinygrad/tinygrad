@@ -149,21 +149,19 @@ def reloader():
     time.sleep(0.1)
 
 if __name__ == "__main__":
-  print("-- start VIZ")
+  print("*** viz is starting")
   with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
   global kernels
-  print("-- loaded rewrites.pkl")
+  print("*** unpickled saved rewrites")
   kernels = load_kernels(contexts)
-  print("-- loaded kernels")
+  print("*** loaded kernels")
   server = HTTPServer(('', 8000), Handler)
-  print("-- start")
   st = time.perf_counter()
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
-  print("serving at port 8000")
   if BROWSER: webbrowser.open("http://localhost:8000")
   try:
     server.serve_forever()
   except KeyboardInterrupt:
-    print("viz is shutting down...")
+    print("*** viz is shutting down...")
     stop_reloader.set()
