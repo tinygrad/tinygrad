@@ -137,7 +137,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
 
   # buffer ops define ShapeTracker
-  if buf.realized is not None or (buf in realizes and buf not in outputs):
+  if buf in realizes and buf not in outputs:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     # if it's a const, we generate it
@@ -198,7 +198,8 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
                 children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer],
                 double_reduces:Dict[LazyBuffer, None], scheduled=False) -> None:
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
-  if buf in allbufs or buf.base.realized is not None: return
+  if buf in allbufs: return None
+  if buf.base.realized is not None: return realizes.setdefault(buf.base)
   if GRAPH:
     from tinygrad.engine.graph import log_lazybuffer
     log_lazybuffer(buf, scheduled)
@@ -233,7 +234,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
 
 def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
-  if buf in realizes or buf.realized is not None: return True
+  if buf in realizes: return True
   # NOTE: this broke to_image_idx and coder with JIT
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
