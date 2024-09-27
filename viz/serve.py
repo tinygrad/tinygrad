@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
-import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, re, signal
+import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, re
 from dataclasses import dataclass, asdict
 from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
