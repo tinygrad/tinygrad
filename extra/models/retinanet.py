@@ -2,6 +2,7 @@ import math
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import flatten, get_child
 import tinygrad.nn as nn
+from examples.mlperf.initializers import Conv2dNormal, Conv2dKaimingUniform
 from extra.models.helpers import meshgrid, nms
 from extra.models.resnet import ResNet
 import numpy as np
@@ -131,10 +132,10 @@ class RetinaNet:
     return detections
 
 class ClassificationHead:
-  def __init__(self, in_channels, num_anchors, num_classes):
+  def __init__(self, in_channels, num_anchors, num_classes, prior_prob=0.01):
     self.num_classes = num_classes
-    self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
-    self.cls_logits = nn.Conv2d(in_channels, num_anchors * num_classes, kernel_size=3, padding=1)
+    self.conv = flatten([(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
+    self.cls_logits = Conv2dNormal(in_channels, num_anchors * num_classes, kernel_size=3, padding=1, prior_prob=prior_prob)
   def __call__(self, x):
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
     return out[0].cat(*out[1:], dim=1).sigmoid()
@@ -142,7 +143,7 @@ class ClassificationHead:
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
     self.conv = flatten([(nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
-    self.bbox_reg = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=3, padding=1)
+    self.bbox_reg = Conv2dNormal(in_channels, num_anchors * 4, kernel_size=3, padding=1)
   def __call__(self, x):
     out = [self.bbox_reg(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, 4) for feat in x]
     return out[0].cat(*out[1:], dim=1)
@@ -194,8 +195,8 @@ class FPN:
   def __init__(self, in_channels_list, out_channels, extra_blocks=None):
     self.inner_blocks, self.layer_blocks = [], []
     for in_channels in in_channels_list:
-      self.inner_blocks.append(nn.Conv2d(in_channels, out_channels, kernel_size=1))
-      self.layer_blocks.append(nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1))
+      self.inner_blocks.append(Conv2dKaimingUniform(in_channels, out_channels, kernel_size=1))
+      self.layer_blocks.append(Conv2dKaimingUniform(out_channels, out_channels, kernel_size=3, padding=1))
     self.extra_blocks = ExtraFPNBlock(256, 256) if extra_blocks is None else extra_blocks
 
   def __call__(self, x):

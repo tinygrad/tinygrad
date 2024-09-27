@@ -342,8 +342,28 @@ def train_resnet():
         safe_save(get_training_state(model, optimizer_group, scheduler_group), fn)
 
 def train_retinanet():
-  # TODO: Retinanet
-  pass
+  from examples.mlperf.initializers import FrozenBatchNorm2d
+  from extra.datasets.openimages import MLPERF_CLASSES
+  from extra.models.retinanet import RetinaNet
+  from extra.models import resnet
+
+  NUM_CLASSES = len(MLPERF_CLASSES)
+
+  def _freeze_backbone_layers(backbone, trainable_layers):
+    model_layers = ["layer4", "layer3", "layer2", "layer1", "conv1"][:trainable_layers]
+    for model_layer in model_layers:
+      if hasattr(backbone, model_layer):
+        getattr(backbone, model_layer).requires_grad = False
+
+  # ** model initializers **
+  resnet.BatchNorm = FrozenBatchNorm2d
+
+  # ** model setup **
+  backbone = resnet.ResNeXt50_32X4D(num_classes=NUM_CLASSES)
+  backbone.load_from_pretrained()
+  _freeze_backbone_layers(backbone, 3)
+
+  model = RetinaNet(backbone, num_classes=NUM_CLASSES)
 
 def train_unet3d():
   """
