@@ -198,7 +198,8 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
                 children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer],
                 double_reduces:Dict[LazyBuffer, None], scheduled=False) -> None:
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
-  if buf in allbufs or buf.base.realized is not None: return
+  if buf in allbufs: return None
+  if buf.base.realized is not None: return realizes.setdefault(buf.base)
   if GRAPH:
     from tinygrad.engine.graph import log_lazybuffer
     log_lazybuffer(buf, scheduled)
