@@ -140,14 +140,14 @@ class TestViz(unittest.TestCase):
     a = Tensor.empty(4, 4)+2
     contexts.clear()
     sink = a.schedule()[-1].ast
-    ret = uop_to_json(sink)
+    ret = uop_to_json(sink, base=sink)
     for v in ret.values(): print(v)
     assert not any(v[0].startswith("CONST") for v in ret.values())
     assert len([x for x in ret.values() if "CONST" in x[0]]) == 1
 
   def test_no_fold_single_const(self):
     node = UOp(UOps.CONST, dtypes.float, (), 1.0)
-    ret = uop_to_json(node)
+    ret = uop_to_json(node, base=node)
     assert len(ret) == 1
 
 if __name__ == "__main__":
