@@ -30,7 +30,8 @@ class RewriteLocation:
     fp, lineno = ctx.loc
     p = r"graph_rewrite\([^,]+,\s*([^>]+)\)"
     match = re.search(p, code:=lines(fp)[lineno-1].strip())
-    return RewriteLocation(f"{fp.split('/')[-1]}:{lineno}", code, match.group(1) if match is not None else None, len(graph_rewrites(ctx)))
+    return RewriteLocation(f"{fp.split('/')[-1]}:{lineno}", code, match.group(1).split(",")[0] if match is not None else None,
+                           len(graph_rewrites(ctx)))
   def to_json(self): return asdict(self)
 
 @dataclass(frozen=True)
