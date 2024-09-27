@@ -704,6 +704,7 @@ class Kernel:
   # **** this is the lowerer ****
 
   def linearize(self) -> Kernel:
+    if TRACK_MATCH_STATS >= 2: _CURRENT_KERNEL.set(self.name)
     modified_ast = self.get_optimized_ast()
 
     if DEBUG >= 3:
@@ -713,7 +714,6 @@ class Kernel:
       print(self.applied_opts)
     verify_ast(modified_ast)
 
-    if TRACK_MATCH_STATS >= 2: _CURRENT_KERNEL.set(self.name)
     self.uops:List[UOp] = linearize_uop(full_graph_rewrite(ast_to_uop(modified_ast, self.opts), self.opts))
     if TRACK_MATCH_STATS >= 2: _CURRENT_KERNEL.set(None)
     if DEBUG >= 5: print_uops(self.uops)

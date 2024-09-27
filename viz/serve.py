@@ -30,7 +30,8 @@ class RewriteLocation:
     fp, lineno = ctx.loc
     p = r"graph_rewrite\([^,]+,\s*([^>]+)\)"
     match = re.search(p, code:=lines(fp)[lineno-1].strip())
-    return RewriteLocation(f"{fp.split('/')[-1]}:{lineno}", code, match.group(1) if match is not None else None, len(graph_rewrites(ctx)))
+    return RewriteLocation(f"{fp.split('/')[-1]}:{lineno}", code, match.group(1).split(",")[0] if match is not None else None,
+                           len(graph_rewrites(ctx)))
   def to_json(self): return asdict(self)
 
 @dataclass(frozen=True)
@@ -59,13 +60,14 @@ class UOpRet:
       uops.append(new_sink)
       extra.append([str(new_sink)])
     return UOpRet(RewriteLocation.from_ctx(ctx), uops, diffs, extra, additions)
-  def to_json(self) -> Dict: return {**asdict(self), "loc":self.loc.to_json(), "graphs": list(map(uop_to_json, self.graphs))}
+  def to_json(self) -> Dict:
+    return {**asdict(self), "loc":self.loc.to_json(), "graphs": list(map(lambda x:uop_to_json(x, self.graphs[0]), self.graphs))}
 
-def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
+def uop_to_json(x:UOp, base:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   for u in x.sparents:
-    if u.op is UOps.CONST and u is not x: continue
+    if u.op is UOps.CONST and u is not base: continue
     label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
       if x.op is UOps.CONST: label += f"\nCONST{idx} {x.arg:g}"
