@@ -399,6 +399,4 @@ class QCOMDevice(HCQCompiled):
       self._gpu_free(self._stack)
       self._stack = self._gpu_alloc(sz)
 
-  def _syncdev(self):
-    if self.last_cmd is not None: kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.fd,context_id=self.ctx,timestamp=self.last_cmd,timeout=0xffffffff)
-    self.last_cmd = None
+  def _syncdev(self): kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.fd, context_id=self.ctx, timestamp=self.last_cmd, timeout=0xffffffff)
