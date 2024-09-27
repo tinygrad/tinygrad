@@ -56,7 +56,9 @@ class Kernel:
   def __init__(self, ast:UOp, opts:Optional[Renderer]=None, rawbufs:Optional[List[Buffer]]=None):
     if ast.op is UOps.SINK: self.ast = ast
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
-    self.rawbufs = rawbufs # to split kernel, can only split if rawbufs is not None
+    import weakref
+    # weakset so the dangling kernels don't impede buffers from being deleted
+    self.rawbufs = weakref.WeakSet(rawbufs)
 
     try: uop_sts_map = verify_ast(self.ast)
     except AssertionError as e:
