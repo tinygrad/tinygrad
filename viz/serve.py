@@ -30,7 +30,8 @@ class RewriteLocation:
     fp, lineno = ctx.loc
     p = r"graph_rewrite\([^,]+,\s*([^>]+)\)"
     match = re.search(p, code:=lines(fp)[lineno-1].strip())
-    return RewriteLocation(f"{fp.split('/')[-1]}:{lineno}", code, match.group(1) if match is not None else None, len(graph_rewrites(ctx)))
+    return RewriteLocation(f"{fp.split('/')[-1]}:{lineno}", code, match.group(1).split(",")[0] if match is not None else None,
+                           len(graph_rewrites(ctx)))
   def to_json(self): return asdict(self)
 
 @dataclass(frozen=True)
@@ -59,13 +60,14 @@ class UOpRet:
       uops.append(new_sink)
       extra.append([str(new_sink)])
     return UOpRet(RewriteLocation.from_ctx(ctx), uops, diffs, extra, additions)
-  def to_json(self) -> Dict: return {**asdict(self), "loc":self.loc.to_json(), "graphs": list(map(uop_to_json, self.graphs))}
+  def to_json(self) -> Dict:
+    return {**asdict(self), "loc":self.loc.to_json(), "graphs": list(map(lambda x:uop_to_json(x, self.graphs[0]), self.graphs))}
 
-def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
+def uop_to_json(x:UOp, base:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   for u in x.sparents:
-    if u.op is UOps.CONST and u is not x: continue
+    if u.op is UOps.CONST and u is not base: continue
     label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
       if x.op is UOps.CONST: label += f"\nCONST{idx} {x.arg:g}"
@@ -122,16 +124,12 @@ class Handler(BaseHTTPRequestHandler):
       self.send_response(200)
       self.send_header("Content-type", "application/json")
       self.end_headers()
-      with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
-      kernels = load_kernels(contexts)
       ret = json.dumps([x.to_json() for x in kernels]).encode()
     elif url.path == "/graph":
       query = parse_qs(url.query)
       self.send_response(200)
       self.send_header("Content-type", "application/json")
       self.end_headers()
-      with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
-      kernels = load_kernels(contexts)
       k = kernels[int(query["kernel_idx"][0])]
       g = UOpRet.from_ctx(list(k.ctxs.values())[int(query["uop_idx"][0])])
       ret = json.dumps((g.to_json(), [x.loc for x in k.ctxs.values()])).encode()
@@ -149,21 +147,20 @@ def reloader():
       print("reloading server...")
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
-def main():
-  try:
-    st = time.perf_counter()
-    reloader_thread = threading.Thread(target=reloader)
-    reloader_thread.start()
-    print("serving at port 8000")
-    server_thread = threading.Thread(target=HTTPServer(('', 8000), Handler).serve_forever, daemon=True)
-    server_thread.start()
-    if BROWSER: webbrowser.open("http://localhost:8000")
-    print(f"{(time.perf_counter()-st):.2f}s startup time")
-    server_thread.join()
-    reloader_thread.join()
-  except KeyboardInterrupt:
-    print("viz is shutting down...")
-    stop_reloader.set()
 
 if __name__ == "__main__":
-  main()
+  print("*** viz is starting")
+  with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
+  print("*** unpickled saved rewrites")
+  kernels = load_kernels(contexts)
+  print("*** loaded kernels")
+  server = HTTPServer(('', 8000), Handler)
+  st = time.perf_counter()
+  reloader_thread = threading.Thread(target=reloader)
+  reloader_thread.start()
+  if BROWSER: webbrowser.open("http://localhost:8000")
+  try:
+    server.serve_forever()
+  except KeyboardInterrupt:
+    print("*** viz is shutting down...")
+    stop_reloader.set()

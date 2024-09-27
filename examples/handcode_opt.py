@@ -33,7 +33,7 @@ def get_sched_bert():
   optim = nn.optim.LAMB(nn.state.get_parameters(mdl))
 
   # fake data
-  BS = getenv("BS", 2)
+  BS = getenv("BS", 9)
   input_ids = Tensor.empty((BS, 512), dtype=dtypes.float32)
   segment_ids = Tensor.empty((BS, 512), dtype=dtypes.float32)
   attention_mask = Tensor.empty((BS, 512), dtype=dtypes.default_float)
