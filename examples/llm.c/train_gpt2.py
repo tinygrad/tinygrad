@@ -177,7 +177,7 @@ if __name__ == "__main__":
       loss = step(x.contiguous(), y.contiguous())
       Device[Device.DEFAULT].synchronize()
       t1 = time.time()
-      print(f"iteration {i}, loss: {loss.item()}, time: {(t1-t0)*1000:.3f}ms")
+      print(f"iteration {i}, loss: {loss.item():.6f}, time: {(t1-t0)*1000:.3f}ms, {int(B*T/(t1-t0))} tok/s")
 
   if not args.skip_test:
     start = "<|endoftext|>"
