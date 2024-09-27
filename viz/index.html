@@ -112,9 +112,8 @@
     width: 20%;
     overflow-y: auto;
   }
-  #resize-handle {
+  .resize-handle {
     position: absolute;
-    left: 0;
     top: 0;
     bottom: 0;
     width: 20px;
@@ -273,6 +272,37 @@
       }
       kernelList.appendChild(kernelUl);
     });
+    // ** resizer
+    kernelList.appendChild(Object.assign(document.createElement("div"), { id: "resize-handle-kernel", className: "resize-handle", style: "right: 0;" }));
+    const resizeHandleKernel = document.getElementById("resize-handle-kernel");
+    let startXKernel;
+    let containerWidth;
+    let kernelWidth;
+    resizeHandleKernel.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      kernelList.style.userSelect = "none";
+      document.documentElement.style.cursor = "col-resize";
+      startXKernel = e.clientX;
+      containerWidth = document.querySelector(".main-container").getBoundingClientRect().width;
+      kernelWidth = kernelList.getBoundingClientRect().width;
+      document.documentElement.addEventListener("mousemove", resizeKernel, false);
+      document.documentElement.addEventListener("mouseup", stopResizeKernel, false);
+    });
+    function resizeKernel(e) {
+      const change = e.clientX - startXKernel;
+      const newWidth = ((kernelWidth-(-change)) / containerWidth) * 100;
+      console.log(kernelWidth, change)
+      if (newWidth >= 5 && newWidth <= 20) {
+        kernelList.style.width = `${newWidth}%`;
+        document.querySelector(".graph").style.width = `${100-newWidth-10}%`;
+      }
+    }
+    function stopResizeKernel(e) {
+      document.documentElement.removeEventListener("mousemove", resizeKernel, false);
+      document.documentElement.removeEventListener("mouseup", stopResizeKernel, false);
+      document.documentElement.style.cursor = "initial";
+      kernelList.style.userSelect = "initial";
+    }
     // ***** UOp graph
     cacheKey = `${currentKernel}-${currentUOp}`;
     if (cacheKey in cache) {
@@ -291,10 +321,9 @@
     metadata.appendChild(pre);
     hljs.highlightElement(pre);
     // ** resizer
-    metadata.appendChild(Object.assign(document.createElement("div"), { id: "resize-handle" }));
-    const resizeHandle = document.getElementById("resize-handle");
+    metadata.appendChild(Object.assign(document.createElement("div"), { id: "resize-handle-metadata", className: "resize-handle", style: "left-0" }));
+    const resizeHandle = document.getElementById("resize-handle-metadata");
     let startX;
-    let containerWidth;
     let metadataWidth;
     resizeHandle.addEventListener("mousedown", (e) => {
       e.preventDefault();
