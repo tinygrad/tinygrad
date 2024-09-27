@@ -60,12 +60,12 @@ ptx_matcher = sym+PatternMatcher([
 
 class PTXRenderer(Renderer):
   suffix = "PTX"
+  global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
   tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
   def __init__(self, arch:str, device="CUDA"):
     self.device = device
-    self.global_max, self.local_max, self.shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
     self.tensor_cores = PTXRenderer.tensor_cores if int(arch[3:])>=80 else CUDARenderer.tensor_cores_75 if int(arch[3:])>=75 else []
 
   # language options
@@ -226,15 +226,15 @@ class PTXRenderer(Renderer):
           dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
           kk(*self.render_load(nm, ssa('dat', u, self.types[dt]), dt, ss=".param"))
         elif uop is UOps.WMMA:
-          _, (N, M, K), dti, _, _, _, (upc_a, _, _), _ = args
-          wmma, sza = [], prod(sz for _, sz in upc_a) * dti.itemsize // 4
+          _, (N, M, K), dtype_in, _, _, _, upcast_axes, _ = args
+          wmma, sz = [], prod(sz for _, sz in upcast_axes[0]) * dtype_in.itemsize // 4
           for vv in src[:2]:
             for i in range(0, len(r[vv]), 2):
               wmma.append(ssa("wmma", dtype="b32"))
               kk(f'mov.b32 {wmma[-1]}, {{{", ".join(r[vv][i:i+2])}}};')
           r[u] = [ssa("wmma", dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
           kk(f'mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.f16.f16.f32\
-            {{{", ".join(r[u])}}}, {{{", ".join(wmma[:sza])}}}, {{{", ".join(wmma[sza:])}}}, {{{", ".join(r[src[2]])}}};')
+            {{{", ".join(r[u])}}}, {{{", ".join(wmma[:sz])}}}, {{{", ".join(wmma[sz:])}}}, {{{", ".join(r[src[2]])}}};')
         else: raise NotImplementedError(f"no code for {uop}")
 
     return self.render_kernel(kernel, name, bufs, c.items())

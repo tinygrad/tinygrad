@@ -345,15 +345,18 @@ class CUDARenderer(CStyleLanguage):
       prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [self.render_vector_prefix(dtype.vec(sz)) for sz in [4, 8]]
 
     dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
-    for name, (N, M, K), dti, dto, _, _, (upc_a, upc_b, upc_c), _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      szc, sza, szb = (prod(sz for _, sz in upc) for upc in (upc_c, upc_a, upc_b))
-      dtc, dta, dtb = (self.render_dtype(dt.vec(sz)) for dt,sz in ((dto,szc),(dti,sza),(dti,szb)))
-      inc, ina, inb = (list(i for i in range(sz*dt.itemsize//4)) for dt,sz in ((dto,szc), (dti,sza), (dti,szb)))
-      argc, arga, argb = ", ".join([f"%{c}" for c in inc]), ", ".join([f"%{a+len(inc)}" for a in ina]), ", ".join([f"%{b+len(inc+ina)}" for b in inb])
+    for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
+      sza, szb, szc = (prod(sz for _, sz in upc) for upc in upcast_axes)
+      dtype_a, dtype_b, dtype_c = (self.render_dtype(dt.vec(sz)) for dt,sz in ((dtype_in,sza),(dtype_in,szb),(dtype_out,szc)))
+      inc, ina, inb = (list(i for i in range(sz*dt.itemsize//4)) for dt,sz in ((dtype_out,szc), (dtype_in,sza), (dtype_in,szb)))
+      argc = ", ".join([f"%{c}" for c in inc])
+      arga = ", ".join([f"%{a+len(inc)}" for a in ina])
+      argb = ", ".join([f"%{b+len(inc+ina)}" for b in inb])
+      c_pks = ", ".join([f'"+f"(c_pk[{i}])' for i in inc])
       a_pks, b_pks = (", ".join([f'"r"({v}_pk[{i}])' for i in inp]) for inp,v in ((ina,'a'),(inb,'b')))
-      prefix.append(f"""__device__ {dtc} __{name}({dta} a, {dtb} b, {dtc} c){{\n  int *a_pk = (int *)(&a), *b_pk = (int *)(&b);
-  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map[dto]}.{dt_map[dti]}.{dt_map[dti]}.{dt_map[dto]} {{{argc}}}, {{{arga}}}, {{{argb}}}, {{{argc}}};"
-    : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w)\n    : {a_pks}, {b_pks});\n  return c;\n}}""")
+      prefix.append(f"""__device__ {dtype_c} __{name}({dtype_a} a, {dtype_b} b, {dtype_c} c){{\n  int *a_pk = (int *)(&a), *b_pk = (int *)(&b);
+  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.{dt_map[dtype_out]}.{dt_map[dtype_in]}.{dt_map[dtype_in]}.{dt_map[dtype_out]}
+    {{{argc}}}, {{{arga}}}, {{{argb}}}, {{{argc}}};"\n  : {c_pks}\n  : {a_pks}, {b_pks});\n  return c;\n}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
