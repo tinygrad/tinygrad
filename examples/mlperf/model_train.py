@@ -644,13 +644,6 @@ def train_bert():
   else:
     MLLOGGER = None
 
-  # ** init wandb **
-  WANDB = getenv("WANDB")
-  if WANDB:
-    import wandb
-    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
-    wandb.init(config=config, **wandb_args, project="MLPerf-BERT")
-
   # ** hyperparameters **
   BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 11 * len(GPUS) if dtypes.default_float in (dtypes.float16, dtypes.bfloat16) else 8 * len(GPUS))
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
@@ -679,13 +672,22 @@ def train_bert():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
+  assert 10000 <= (EVAL_BS * max_eval_steps), "Evaluation batchsize * max_eval_steps must greater or equal 10000 to iterate over full eval dataset"
+
+  # ** init wandb **
+  WANDB = getenv("WANDB")
+  if WANDB:
+    import wandb
+    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb.init(config=config, **wandb_args, project="MLPerf-BERT")
+
+  # ** init model **
+
   model = get_mlperf_bert_model(init_ckpt if RUNMLPERF else None)
   
   for _, x in get_state_dict(model).items():
     x.realize().to_(GPUS)
   parameters = get_parameters(model)
-
-  assert 10000 <= (EVAL_BS * max_eval_steps), "Evaluation batchsize * max_eval_steps must greater or equal 10000 to iterate over full eval dataset"
 
   # ** Log run config **
   for key, value in config.items(): print(f'HParam: "{key}": {value}')
@@ -839,6 +841,7 @@ def train_bert():
           return
 
       eval_step_bert.reset()
+      del eval_data, eval_result
       avg_lm_loss = sum(eval_lm_losses) / len(eval_lm_losses)
       avg_clsf_loss = sum(eval_clsf_losses) / len(eval_clsf_losses)
       avg_lm_acc = sum(eval_lm_accs) / len(eval_lm_accs)
