@@ -377,7 +377,6 @@ class TestUOpMethod(unittest.TestCase):
   def test_replace(self):
     x = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.void), (), 0)
     self.assertIs(x.replace(arg=None).arg, None)
-    x = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.void), (), 0)
     with self.assertRaises(AssertionError): x.replace(field="a")
 
 class TestUOpStr(unittest.TestCase):
