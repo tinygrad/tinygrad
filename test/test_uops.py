@@ -374,6 +374,11 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual((gidx0*3+6).const_factor(), 3)
     self.assertEqual((gidx0*3+1).const_factor(), 1)
 
+  def test_replace(self):
+    x = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.void), (), 0)
+    self.assertIs(x.replace(arg=None).arg, None)
+    with self.assertRaises(AssertionError): x.replace(field="a")
+
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0) + UOp(UOps.CONST, dtypes.float, (), 3.0)
