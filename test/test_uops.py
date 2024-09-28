@@ -1,3 +1,4 @@
+from dataclasses import dataclass, replace as dataclass_replace
 from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
@@ -373,6 +374,19 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual((gidx0*3).const_factor(), 3)
     self.assertEqual((gidx0*3+6).const_factor(), 3)
     self.assertEqual((gidx0*3+1).const_factor(), 1)
+
+  def test_replace(self):
+    x = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.void), (), 0)
+    @dataclass
+    class DUOp:
+      op: Any
+      dtype: Any
+      src: Any
+      arg: Any
+    xd = DUOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.void), (), 0)
+    assert dataclass_replace(xd, arg=None).arg is None
+    assert x.replace(arg=None).arg is None
+    #assert_equiv_uops(x.replace(arg=None), dataclass_replace(xd, arg=None))
 
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
