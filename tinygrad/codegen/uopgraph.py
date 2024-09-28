@@ -440,7 +440,8 @@ sym = PatternMatcher([
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # gate.where(1, 0) -> cast(gate)
-  (UPat.var("gate").where(UPat.cvar("c1"), UPat.cvar("c0")), lambda gate, c1, c0: gate.cast(c1.dtype) if c1.arg == 1 and c0.arg == 0 else None),
+  (UPat.var("gate").where(UPat.cvar("c1", vec=False), UPat.cvar("c0", vec=False)),
+   lambda gate, c1, c0: gate.cast(c1.dtype) if c1.arg == 1 and c0.arg == 0 else None),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat((UOps.VCONST, UOps.CONST))),
    lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
