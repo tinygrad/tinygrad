@@ -2,16 +2,11 @@
 import gc
 import unittest
 import numpy as np
-from tinygrad.device import Buffer
-from tinygrad.dtype import PtrDType, dtypes
-from tinygrad.ops import PatternMatcher, UOp, UOps, UPat
+from tinygrad.ops import KernelInfo, PatternMatcher, UOp, UOps, UPat
 from tinygrad.tensor import Tensor
 
 def tensors_allocated():
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])
-
-def bufs_allocated():
-  return sum([isinstance(x, Buffer) for x in gc.get_objects()])
 
 class TestGC(unittest.TestCase):
 
@@ -41,19 +36,18 @@ class TestGC(unittest.TestCase):
     del b
     assert (tensors_allocated() == 3)
 
-  @unittest.expectedFailure
   def test_pattern_matcher_gc(self):
-    init = bufs_allocated()
-    buf = Tensor.ones(4, 4).contiguous().realize().lazydata.buffer
-    uop = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), buf)
+    obj = KernelInfo()
+    uop = UOp(UOps.SINK, arg=obj)
     matcher = PatternMatcher([
-      (UPat(UOps.DEFINE_GLOBAL, name="x"), lambda x:UOp(UOps.DEFINE_GLOBAL, x.dtype, (), 0))
+      (UPat(UOps.SINK, name="x"), lambda x:UOp(UOps.SINK, arg=None) if isinstance(x.arg, KernelInfo) else None)
     ])
     ret = matcher.rewrite(uop)
     del uop
-    del buf
-    assert ret.arg == 0
-    self.assertEqual(bufs_allocated()-init, 0)
+    del obj
+    assert ret.arg is None
+    objs_allocated = [x for x in gc.get_objects() if isinstance(x, KernelInfo)]
+    self.assertEqual(len(objs_allocated), 0)
 
 if __name__ == '__main__':
   unittest.main()
