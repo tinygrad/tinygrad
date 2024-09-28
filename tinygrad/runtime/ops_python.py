@@ -164,13 +164,14 @@ class PythonProgram:
             def c_map(lane, elem): return (lane%16, lane//16+elem*2) # (i, j), C, D (8 elements on 32 threads): row major
             ul[i] = wmma_helper(32, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif arg[4] == "CUDA":
-            # A (8 elements on 32 threads)
+            # A (8 for shape 81616 else 4 elements on 32 threads)
             def a_elem(x, i, j, goff): return x[(i%2)+(j//8)*2+(i//8)*4][goff+((i//2)%4)+(j%8)*4]
-            # B (4 elements on 32 threads)
+            # B (4 for shape 81616 else 2 elements on 32 threads)
             def b_elem(x, i, j, goff): return x[(j%2)+(j//8)*2][goff+(j//2)%4+(i)*4]
             # (i, j), C, D (4 elements on 32 threads)
             def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
-            ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
+            sza, szb, szc = (prod(sz for _, sz in upc) for upc in arg[6])
+            ul[i] = wmma_helper(32, arg[1][2], sza, szb, szc, a_elem, b_elem, c_map)
           elif arg[4] == "INTEL":
             # A (16 elements on 8 threads)
             def a_elem(x, i, j, goff): return x[i%2+j*2][goff+i//2]

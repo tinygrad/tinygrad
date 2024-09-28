@@ -310,10 +310,15 @@ class CUDARenderer(CStyleLanguage):
   local_max = (1024, 1024, 64)
   shared_max = 49152
   # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
-  tensor_cores = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do, expanded_shape=(2,2,2,2,2,2),
+  tensor_cores_81616 = [TensorCore(dims=(8,16,16), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=di, dtype_out=do, expanded_shape=(2,2,2,2,2,2),
     st1_pattern=(((1,1),(1,0),(0,2),(0,3),(0,4)),((1,3),(1,5),(1,2),(0,0),(0,1),(1,4))),
     st2_pattern=(((1,1),(1,0),(1,4),(0,0),(0,1)),((0,4),(0,2),(1,5),(0,3),(1,3),(1,2))), reduce_axes=[(0,8),(1,2)],
     upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
+  # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-1688
+  tensor_cores_8168 = [TensorCore(dims=(8,16,8), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=dtypes.float, dtype_out=dtypes.float,
+    st1_pattern=(((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,4), (1,2), (0,0), (0,1), (1,3))), expanded_shape=(2,2,2,2,2), reduce_axes=[(0,4),(1,2)],
+    st2_pattern=(((1,1), (1,0), (1,3), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,2))), upcast_axes=([(0,4)],[(3,2)],[(3,2),(2,2)]))]
+  tensor_cores = tensor_cores_81616 + tensor_cores_8168
   def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
 
   # language options
@@ -339,14 +344,19 @@ class CUDARenderer(CStyleLanguage):
     for dtype in dedup(uop.dtype for uop in uops if uop.dtype in {dtypes.half, dtypes.bfloat16}):
       prefix += [f"#include <cuda_{'fp' if dtype == dtypes.half else 'bf'}16.h>"] + [self.render_vector_prefix(dtype.vec(sz)) for sz in [4, 8]]
 
-    # TODO: this has to be way better to generate for arbitrary M,N,K: use arg[1] for MNK, use arg[4] for vec sizes, encode register packing
-    dt_map = { dtypes.float: "f32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
-    for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      fn, ti, to, ci, co = arg[0], self.render_dtype(arg[2]), self.render_dtype(arg[3]), dt_map[arg[2]], dt_map[arg[3]]
-      prefix.append(f"""__device__ {to}4 __{fn}({ti}8 a, {ti}4 b, {to}4 c) {{ int *a_pk = (int *) (&a), *b_pk = (int *) (&b);
-asm( "mma.sync.aligned.m16n8k16.row.col.{co}.{ci}.{ci}.{co} {{ %0, %1, %2, %3 }}, {{ %4, %5, %6, %7 }}, {{ %8, %9 }}, {{ %0, %1, %2, %3 }};"
-  : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]), "r"(a_pk[2]),  "r"(a_pk[3]), "r"(b_pk[0]), "r"(b_pk[1]) );
-return c;}}""")
+    dt_in_map = { dtypes.float: "tf32", dtypes.half: "f16", dtypes.bfloat16: "bf16" }
+    for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
+      sza, szb, szc = (prod(sz for _, sz in upc) for upc in upcast_axes)
+      dtype_a, dtype_b, dtype_c = (self.render_dtype(dt.vec(sz)) for dt,sz in ((dtype_in,sza),(dtype_in,szb),(dtype_out,szc)))
+      operands_c = [f"%{c}" for c in range(szc*dtype_out.itemsize//4)] # %0, %1, ... operands
+      operands_a = [f"%{a+len(operands_c)}" for a in range(sza*dtype_in.itemsize//4)]
+      operands_b = [f"%{b+len(operands_c+operands_a)}" for b in range(szb*dtype_in.itemsize//4)]
+      c_pks = ", ".join([f'"+f"(c.{_nms[i]})' for i in range(szc*dtype_out.itemsize//4)]) # "+f"(c.x), "+f"(c.y), ...
+      a_pks, b_pks = (", ".join([f'"r"({v}_pk[{i}])' for i in range(sz*dtype_in.itemsize//4)]) for sz,v in ((sza,'a'),(szb,'b'))) # "r"(a_pk[0]), ...
+      prefix.append(f"""__device__ {dtype_c} __{name}({dtype_a} a, {dtype_b} b, {dtype_c} c){{\n  int *a_pk = (int *)(&a), *b_pk = (int *)(&b);
+  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_in_map[dtype_in]}.{dt_in_map[dtype_in]}.f32"
+      "{{{",".join(operands_c)}}}, {{{",".join(operands_a)}}}, {{{",".join(operands_b)}}}, {{{",".join(operands_c)}}};"
+    : {c_pks}\n    : {a_pks}, {b_pks});\n  return c;\n}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
