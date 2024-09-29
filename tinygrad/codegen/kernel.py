@@ -398,7 +398,7 @@ class Kernel:
         if sh0[axis] != sh1[axis]: reduce_sz *= amt
         grouped_sz += reduce_sz
 
-      # another way to do it in even fewer lines but a bit less clear
+      # another way to do it in fewer lines but a bit less clear
       # grouped_sz = sum(prod(s1 for s0,s1 in list(zip(sh0, sh1))[self.first_reduce:self.first_reduce+self.group_for_reduces] if s0 != s1) \
       #   * (amt if sh0[axis] != sh1[axis] else 1) \
       #   for sh0,sh1 in [(self.sts[r*2+len(self.bufs)].shape, self.sts[r*2+len(self.bufs)+1].shape) for r in range(len(self.reduceops))])
