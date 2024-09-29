@@ -391,26 +391,18 @@ class Kernel:
       upcast_sz = prod([a for a,b in zip(self.full_shape[self.first_upcast:], self.sts[0].shape[self.first_upcast:]) if a == b])
       local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
 
-      # simplest way to do the sum
+      # simplest way to do the sum imo
       grouped_sz = 0
-      for reduce_index in [r*2 + len(self.bufs) for r in range(len(self.reduceops))]:
-        reduce_sz = 1
-        for i,s in enumerate(zip(self.sts[reduce_index].shape, self.sts[reduce_index+1].shape)):
-          if s[0] != s[1] and (i == axis or i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)):
-            reduce_sz *= amt if i == axis else s[1]
+      for sh0,sh1 in [(self.sts[ridx:=r*2+len(self.bufs)].shape, self.sts[ridx+1].shape) for r in range(len(self.reduceops))]:
+        reduce_sz = prod(s1 for s0,s1 in list(zip(sh0, sh1))[self.first_reduce:self.first_reduce+self.group_for_reduces] if s0 != s1)
+        if sh0[axis] != sh1[axis]: reduce_sz *= amt
         grouped_sz += reduce_sz
 
-      # another way with fewer lines
-      # grouped_sz = 0
-      # for reduce_index in [r*2 + len(self.bufs) for r in range(len(self.reduceops))]:
-      #  grouped_sz += prod(amt if i == axis else s[1] for i,s in enumerate(zip(self.sts[reduce_index].shape, self.sts[reduce_index+1].shape)) \
-      #   if s[0] != s[1] and (i == axis or i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
-
       # another way to do it in even fewer lines but a bit less clear
-      # grouped_sz = sum(prod(amt if i == axis else s[1] for i,s in enumerate(zip(self.sts[reduce_index].shape, self.sts[reduce_index+1].shape)) \
-      #     if s[0] != s[1] and (i == axis or i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
-      #   for reduce_index in [r*2 + len(self.bufs) for r in range(len(self.reduceops))])
-      
+      # grouped_sz = sum(prod(s1 for s0,s1 in list(zip(sh0, sh1))[self.first_reduce:self.first_reduce+self.group_for_reduces] if s0 != s1) \
+      #   * (amt if sh0[axis] != sh1[axis] else 1) \
+      #   for sh0,sh1 in [(self.sts[r*2+len(self.bufs)].shape, self.sts[r*2+len(self.bufs)+1].shape) for r in range(len(self.reduceops))])
+
       smem_sz = (amt if opt.op in {OptOps.UPCAST, OptOps.LOCAL} else 1) * acc_sz*upcast_sz*local_sz*grouped_sz
       check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
 
