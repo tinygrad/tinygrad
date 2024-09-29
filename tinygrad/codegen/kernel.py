@@ -389,8 +389,29 @@ class Kernel:
     if self.reduceop and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
       acc_sz = self.reduceop.dtype.itemsize
       upcast_sz = prod([a for a,b in zip(self.full_shape[self.first_upcast:], self.sts[0].shape[self.first_upcast:]) if a == b])
-      local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce+self.group_for_reduces])
-      smem_sz = amt*acc_sz*upcast_sz*local_sz
+      local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
+
+      # simplest way to do the sum
+      grouped_sz = 0
+      for reduce_index in [r*2 + len(self.bufs) for r in range(len(self.reduceops))]:
+        reduce_sz = 1
+        for i,s in enumerate(zip(self.sts[reduce_index].shape, self.sts[reduce_index+1].shape)):
+          if s[0] != s[1] and (i == axis or i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)):
+            reduce_sz *= amt if i == axis else s[1]
+        grouped_sz += reduce_sz
+
+      # another way with fewer lines
+      # grouped_sz = 0
+      # for reduce_index in [r*2 + len(self.bufs) for r in range(len(self.reduceops))]:
+      #  grouped_sz += prod(amt if i == axis else s[1] for i,s in enumerate(zip(self.sts[reduce_index].shape, self.sts[reduce_index+1].shape)) \
+      #   if s[0] != s[1] and (i == axis or i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
+
+      # another way to do it in even fewer lines but a bit less clear
+      # grouped_sz = sum(prod(amt if i == axis else s[1] for i,s in enumerate(zip(self.sts[reduce_index].shape, self.sts[reduce_index+1].shape)) \
+      #     if s[0] != s[1] and (i == axis or i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)))
+      #   for reduce_index in [r*2 + len(self.bufs) for r in range(len(self.reduceops))])
+      
+      smem_sz = (amt if opt.op in {OptOps.UPCAST, OptOps.LOCAL} else 1) * acc_sz*upcast_sz*local_sz*grouped_sz
       check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
 
     if opt.op is OptOps.LOCAL:    # cyan
