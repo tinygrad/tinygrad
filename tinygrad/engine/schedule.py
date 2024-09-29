@@ -85,13 +85,14 @@ def push_swizzle_up_through_reduce(swizzle:UOp, reduceop:UOp) -> Optional[UOp]:
 
 def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:
   swizzle_st, pre = unwrap(swizzle.st), unwrap(swizzle.src[0].st)
+  op, axis = root.arg
+  output_shape = swizzle_st.reduce(axis)
   assert swizzle_st.contiguous, "can't push a non contiguous SWIZZLE down to STORE"
   assert prod(swizzle_st.shape) == prod(pre.shape), "can't push expands down to STORE"
-  op, axis = root.arg
-  shape_dims = [dedup(dims) for dims in zip(*[x.shape for x in [swizzle_st, pre]])]
-  if any(len(dims) != 1 for dims in shape_dims):
-    axis = tuple(0 if s in unwrap(root.st).shape else 1 for s in pre.shape)
-  return UOp(UOps.REDUCE_AXIS, root.dtype, swizzle.src, (op, axis)).swizzle(ShapeTracker.from_shape(swizzle_st.reduce(axis)))
+  #print(output_shape, pre.shape)
+  axis = tuple(0 if s == u else 1 for s,u in zip(pre.shape, output_shape))
+  #print(tuple((s, u) for s,u in zip(pre.shape, output_shape)), axis, root.arg[1])
+  return UOp(UOps.REDUCE_AXIS, root.dtype, swizzle.src, (op, axis)).swizzle(ShapeTracker.from_shape(output_shape))
 
 def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   swizzles = [x for x in root.src if x.op is UOps.SWIZZLE]
