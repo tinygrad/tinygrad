@@ -15,9 +15,8 @@ from tinygrad.engine.schedule import ScheduleItemContext, full_ast_rewrite
 # **** /graph - detailed UOp + rewrites
 
 # NOTE: UPats in ops.py are spec
-# TODO: fix key for uop with buffer
 def graph_rewrites(ctx:TrackedRewriteContext):
-  return [x for x in ctx.rewrites if x[2].location[0].split("/")[-1] != "ops.py" and not ("schedule" in ctx.loc[0] and "DEFINE_GLOBAL" in str(x[2]))]
+  return [x for x in ctx.rewrites if x[2].location[0].split("/")[-1] != "ops.py"]
 
 @dataclass(frozen=True)
 class RewriteLocation:
@@ -61,13 +60,13 @@ class UOpRet:
       extra.append([str(new_sink)])
     return UOpRet(RewriteLocation.from_ctx(ctx), uops, diffs, extra, additions)
   def to_json(self) -> Dict:
-    return {**asdict(self), "loc":self.loc.to_json(), "graphs": list(map(lambda x:uop_to_json(x, self.graphs[0]), self.graphs))}
+    return {**asdict(self), "loc":self.loc.to_json(), "graphs": list(map(uop_to_json, self.graphs))}
 
-def uop_to_json(x:UOp, base:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
+def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   for u in x.sparents:
-    if u.op is UOps.CONST and u is not base: continue
+    if u.op is UOps.CONST: continue
     label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
       if x.op is UOps.CONST: label += f"\nCONST{idx} {x.arg:g}"
