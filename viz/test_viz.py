@@ -1,6 +1,7 @@
 import unittest
 import os, itertools
 os.environ["TRACK_MATCH_STATS"] = "2"
+os.environ["PRINT_MATCH_STATS"] = "0"
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor
 from tinygrad.engine.realize import lower_schedule
