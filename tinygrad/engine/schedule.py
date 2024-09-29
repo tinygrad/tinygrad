@@ -116,9 +116,7 @@ reduceop_fusor = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
-enumerate_bufs = PatternMatcher([
-  (UPat(UOps.DEFINE_GLOBAL, name="x"), lambda ctx,x: x.replace(arg=ctx.bufs.index(int(x.arg))) if isinstance(x.arg, str) else None),
-])
+enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp.define_global(x.dtype, ctx.bufs.index(x.arg)))])
 
 def full_ast_rewrite(sink:UOp, ctx:ScheduleItemContext) -> UOp:
   if not AST_REWRITE: return sink
@@ -154,7 +152,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                            +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
     if buf not in assign_targets and buf not in inputs: inputs.append(buf)
-    return UOp(UOps.LOAD, dtype, (UOp.define_global(buf.dtype, str(bufs.index(buf.buffer))), unbound_st.to_uop()))
+    return UOp(UOps.LOAD, dtype, (UOp(UOps.BUFFER, buf.dtype, (), bufs.index(buf.buffer)), unbound_st.to_uop()))
 
   # reduce ops change ShapeTracker
   if buf.op in ReduceOps:
@@ -188,7 +186,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], bufs:Tuple[Buffer, ...]) -> Tuple[L
       output_st = out.arg[0]
     output_st, vv = output_st.simplify().unbind()
     var_vals.update(vv)
-    ast.append(UOp(UOps.STORE, dtypes.void, (UOp.define_global(out.dtype, str(bufs.index(out.buffer))), output_st.to_uop(), src)))
+    ast.append(UOp(UOps.STORE, dtypes.void, (UOp(UOps.BUFFER, out.dtype, (), bufs.index(out.buffer)), output_st.to_uop(), src)))
   sink = full_ast_rewrite(ast[0].sink(*ast[1:]), ScheduleItemContext(bufs=tuple(dedup(bufs.index(x.buffer) for x in outs+inputs))))
   return LBScheduleItem(sink, tuple(outs+inputs), tuple(dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))), var_vals
 
