@@ -99,7 +99,7 @@ def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
   code = ""
   for ctx in contexts:
     if ctx.loc[0].split("/")[-1] == "schedule.py":
-      si_ctx = ScheduleItemContext(bufs=tuple(x.arg for x in ctx.sink.sparents if x.op is UOps.DEFINE_GLOBAL))
+      si_ctx = ScheduleItemContext(bufs=tuple(x.arg for x in ctx.sink.sparents if x.op is UOps.BUFFER))
       with Context(TRACK_MATCH_STATS=0): kernel_name, code = (prg:=get_runner(Device.DEFAULT, full_ast_rewrite(ctx.sink, si_ctx)).p).name, prg.src
     elif ctx.kernel_name is not None: kernel_name, code = ctx.kernel_name, ""
     if ret.get(k:=to_function_name(kernel_name)) is None: ret[k] = KernelRet(k, code, {})
