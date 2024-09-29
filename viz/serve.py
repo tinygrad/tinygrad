@@ -15,9 +15,8 @@ from tinygrad.engine.schedule import ScheduleItemContext, full_ast_rewrite
 # **** /graph - detailed UOp + rewrites
 
 # NOTE: UPats in ops.py are spec
-# TODO: fix key for uop with buffer
 def graph_rewrites(ctx:TrackedRewriteContext):
-  return [x for x in ctx.rewrites if x[2].location[0].split("/")[-1] != "ops.py" and not ("schedule" in ctx.loc[0] and "DEFINE_GLOBAL" in str(x[2]))]
+  return [x for x in ctx.rewrites if x[2].location[0].split("/")[-1] != "ops.py"]
 
 @dataclass(frozen=True)
 class RewriteLocation:
@@ -61,13 +60,13 @@ class UOpRet:
       extra.append([str(new_sink)])
     return UOpRet(RewriteLocation.from_ctx(ctx), uops, diffs, extra, additions)
   def to_json(self) -> Dict:
-    return {**asdict(self), "loc":self.loc.to_json(), "graphs": list(map(lambda x:uop_to_json(x, self.graphs[0]), self.graphs))}
+    return {**asdict(self), "loc":self.loc.to_json(), "graphs": list(map(uop_to_json, self.graphs))}
 
-def uop_to_json(x:UOp, base:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
+def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   for u in x.sparents:
-    if u.op is UOps.CONST and u is not base: continue
+    if u.op is UOps.CONST: continue
     label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
       if x.op is UOps.CONST: label += f"\nCONST{idx} {x.arg:g}"
@@ -89,9 +88,8 @@ def replace_uop(base:UOp, replaces:Dict[bytes, UOp]) -> UOp:
 class KernelRet:
   name: str
   code: str
-  ctxs: Dict[Tuple[Tuple, bytes], TrackedRewriteContext]
-  def to_json(self) -> Dict:
-    return {"name":self.name, "code":self.code, "ctxs":[RewriteLocation.from_ctx(x).to_json() for x in self.ctxs.values()]}
+  ctxs: List[TrackedRewriteContext]
+  def to_json(self) -> Dict: return {"name":self.name, "code":self.code, "ctxs":[RewriteLocation.from_ctx(x).to_json() for x in self.ctxs]}
 
 def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
   ret: Dict[str, KernelRet] = {}
@@ -102,8 +100,8 @@ def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
       si_ctx = ScheduleItemContext(bufs=tuple(x.arg for x in ctx.sink.sparents if x.op is UOps.BUFFER))
       with Context(TRACK_MATCH_STATS=0): kernel_name, code = (prg:=get_runner(Device.DEFAULT, full_ast_rewrite(ctx.sink, si_ctx)).p).name, prg.src
     elif ctx.kernel_name is not None: kernel_name, code = ctx.kernel_name, ""
-    if ret.get(k:=to_function_name(kernel_name)) is None: ret[k] = KernelRet(k, code, {})
-    ret[k].ctxs[(ctx.loc, ctx.sink.key)] = ctx
+    if ret.get(k:=to_function_name(kernel_name)) is None: ret[k] = KernelRet(k, code, [])
+    ret[k].ctxs.append(ctx)
   return list(ret.values())
 
 class Handler(BaseHTTPRequestHandler):
@@ -131,8 +129,8 @@ class Handler(BaseHTTPRequestHandler):
       self.send_header("Content-type", "application/json")
       self.end_headers()
       k = kernels[int(query["kernel_idx"][0])]
-      g = UOpRet.from_ctx(list(k.ctxs.values())[int(query["uop_idx"][0])])
-      ret = json.dumps((g.to_json(), [x.loc for x in k.ctxs.values()])).encode()
+      g = UOpRet.from_ctx(k.ctxs[int(query["uop_idx"][0])])
+      ret = json.dumps((g.to_json(), [x.loc for x in k.ctxs])).encode()
     else:
       self.send_response(404)
       ret = b""

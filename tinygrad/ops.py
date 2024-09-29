@@ -533,13 +533,13 @@ if TRACK_MATCH_STATS:
     if getenv("VIZ"):
       os.environ["VIZ"] = "0"
       os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), "..", "viz", "serve.py")])
-    ret = [0,0,0.0,0.0]
-    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
-      loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
-      if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {v[2]*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
-      ret = [x+y for x,y in zip(ret, v)]
-    print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {ret[2]*1000.:9.2f} ms -- TOTAL")
-
+    if getenv("PRINT_MATCH_STATS", 1):
+      ret = [0,0,0.0,0.0]
+      for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
+        loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
+        if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {v[2]*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
+        ret = [x+y for x,y in zip(ret, v)]
+      print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {ret[2]*1000.:9.2f} ms -- TOTAL")
 
 # *** simple graph rewrite engine ***
 
