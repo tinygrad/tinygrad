@@ -393,7 +393,7 @@ class Kernel:
 
       # simplest way to do the sum imo
       grouped_sz = 0
-      for sh0,sh1 in [(self.sts[ridx:=r*2+len(self.bufs)].shape, self.sts[ridx+1].shape) for r in range(len(self.reduceops))]:
+      for sh0,sh1 in [(self.sts[ridx:=(r*2+len(self.bufs))].shape, self.sts[ridx+1].shape) for r in range(len(self.reduceops))]:
         reduce_sz = prod(s1 for s0,s1 in list(zip(sh0, sh1))[self.first_reduce:self.first_reduce+self.group_for_reduces] if s0 != s1)
         if sh0[axis] != sh1[axis]: reduce_sz *= amt
         grouped_sz += reduce_sz
