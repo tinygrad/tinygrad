@@ -291,11 +291,16 @@ class RMSNorm:
   print(norm(t).numpy())
   ```
   """
-  def __init__(self, dim, eps=1e-6): self.eps, self.weight = eps, Tensor.ones(dim)
+  def __init__(self, normalized_shape: Union[int, Tuple[int, ...]], eps: float = 1e-5, elementwise_affine: bool = True):
+    self.normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
+    self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(self.normalized_shape))), eps, elementwise_affine
+    self.weight = Tensor.ones(*self.normalized_shape) if elementwise_affine else None
 
-  def _norm(self, x:Tensor): return x * (x.square().mean(-1, keepdim=True) + self.eps).rsqrt()
-
-  def __call__(self, x:Tensor) -> Tensor: return self._norm(x.float()).cast(x.dtype) * self.weight
+  def __call__(self, x: Tensor) -> Tensor:
+    assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"Last dimensions of {x.shape} must match {self.normalized_shape}"
+    x = x * (x.square().mean(axis=self.axis, keepdim=True) + self.eps).rsqrt()
+    if not self.elementwise_affine: return x
+    return x * self.weight
 
 class Embedding:
   """

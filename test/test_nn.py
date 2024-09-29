@@ -381,28 +381,18 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
 
   def test_rmsnorm(self):
-    class TorchRMSNorm(torch.nn.Module):
-      # https://github.com/meta-llama/llama/blob/be327c427cc5e89cc1d3ab3d3fec4484df771245/llama/model.py#L34C1-L77C36
-      def __init__(self, dim: int, eps: float = 1e-6):
-        super().__init__()
-        self.eps = eps
-        self.weight = torch.nn.Parameter(torch.ones(dim))
+    N, C, H, W = 20, 5, 10, 10
 
-      def _norm(self, x):
-        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+    # create in torch
+    torch_layer = torch.nn.RMSNorm([H, W], elementwise_affine=True, eps=1e-5).eval()
 
-      def forward(self, x):
-        output = self._norm(x.float()).type_as(x)
-        return output * self.weight
-
-    B, T, embed_size = 4, 10, 20
-    torch_layer = TorchRMSNorm(embed_size)
-    layer = RMSNorm(embed_size)
-    layer.weight.requires_grad = True
+    # create in tinygrad
+    layer = RMSNorm([H, W], elementwise_affine=True, eps=1e-5)
+    layer.weight = Tensor(torch_layer.weight.detach().numpy(), requires_grad=True)
 
     for _ in range(10):
       # forward
-      x = Tensor.randn(B, T, embed_size, requires_grad=True)
+      x = Tensor.randn(N, C, H, W, requires_grad=True)
       z = layer(x)
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
@@ -411,8 +401,8 @@ class TestNN(unittest.TestCase):
       # backward
       z.sum().backward()
       torch_z.sum().backward(retain_graph=True)
-      np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
-      np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=2e-3, rtol=1e-3)
+      np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
+      np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
@@ -531,6 +521,8 @@ class TestNN(unittest.TestCase):
     out_c.realize()
     assert layer.bias_hh is None
     assert layer.bias_ih is None
-
+    
 if __name__ == '__main__':
-  unittest.main()
+    suite = unittest.TestSuite()
+    suite.addTest(TestNN('test_rmsnorm'))
+    unittest.TextTestRunner().run(suite)
