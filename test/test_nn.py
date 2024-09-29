@@ -519,8 +519,8 @@ class TestNN(unittest.TestCase):
     out_h, out_c = layer(inp, (h, c))
     out_h.realize()
     out_c.realize()
-    assert layer.bias_hh is None
+    assert layer.bias_hh is None  
     assert layer.bias_ih is None
-    
+
 if __name__ == '__main__':
   unittest.main()
