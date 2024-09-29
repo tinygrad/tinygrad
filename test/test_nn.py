@@ -523,6 +523,4 @@ class TestNN(unittest.TestCase):
     assert layer.bias_ih is None
     
 if __name__ == '__main__':
-    suite = unittest.TestSuite()
-    suite.addTest(TestNN('test_rmsnorm'))
-    unittest.TextTestRunner().run(suite)
+  unittest.main()
