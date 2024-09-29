@@ -89,9 +89,8 @@ def replace_uop(base:UOp, replaces:Dict[bytes, UOp]) -> UOp:
 class KernelRet:
   name: str
   code: str
-  ctxs: Dict[Tuple[Tuple, bytes], TrackedRewriteContext]
-  def to_json(self) -> Dict:
-    return {"name":self.name, "code":self.code, "ctxs":[RewriteLocation.from_ctx(x).to_json() for x in self.ctxs.values()]}
+  ctxs: List[TrackedRewriteContext]
+  def to_json(self) -> Dict: return {"name":self.name, "code":self.code, "ctxs":[RewriteLocation.from_ctx(x).to_json() for x in self.ctxs]}
 
 def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
   ret: Dict[str, KernelRet] = {}
@@ -102,8 +101,8 @@ def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
       si_ctx = ScheduleItemContext(bufs=tuple(x.arg for x in ctx.sink.sparents if x.op is UOps.BUFFER))
       with Context(TRACK_MATCH_STATS=0): kernel_name, code = (prg:=get_runner(Device.DEFAULT, full_ast_rewrite(ctx.sink, si_ctx)).p).name, prg.src
     elif ctx.kernel_name is not None: kernel_name, code = ctx.kernel_name, ""
-    if ret.get(k:=to_function_name(kernel_name)) is None: ret[k] = KernelRet(k, code, {})
-    ret[k].ctxs[(ctx.loc, ctx.sink.key)] = ctx
+    if ret.get(k:=to_function_name(kernel_name)) is None: ret[k] = KernelRet(k, code, [])
+    ret[k].ctxs.append(ctx)
   return list(ret.values())
 
 class Handler(BaseHTTPRequestHandler):
@@ -131,8 +130,8 @@ class Handler(BaseHTTPRequestHandler):
       self.send_header("Content-type", "application/json")
       self.end_headers()
       k = kernels[int(query["kernel_idx"][0])]
-      g = UOpRet.from_ctx(list(k.ctxs.values())[int(query["uop_idx"][0])])
-      ret = json.dumps((g.to_json(), [x.loc for x in k.ctxs.values()])).encode()
+      g = UOpRet.from_ctx(k.ctxs[int(query["uop_idx"][0])])
+      ret = json.dumps((g.to_json(), [x.loc for x in k.ctxs])).encode()
     else:
       self.send_response(404)
       ret = b""
