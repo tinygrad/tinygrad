@@ -1,10 +1,25 @@
-import unittest, pickle
+import unittest, pickle, types
 import numpy as np
 from test.helpers import assert_equiv_uops
-from tinygrad import Tensor, TinyJit, Variable
+from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.engine.schedule import create_schedule
+from tinygrad.ops import PatternMatcher, UPat, UOp
 
 class TestPickle(unittest.TestCase):
+  def test_pickle_code_object(self):
+    y = lambda x: x*2  # noqa: E731
+    code_str = pickle.dumps(y.__code__)
+    fxn = types.FunctionType(pickle.loads(code_str), globals())
+    self.assertEqual(fxn(2), 4)
+
+  def test_pickle_pattern_matcher(self):
+    pm = PatternMatcher([(UPat.cvar('x'), lambda x: x*2)])
+    sink = UOp.const(dtypes.int, 2)
+    tt = pm.rewrite(sink)
+    pm_str = pickle.dumps(pm)
+    pm2 = pickle.loads(pm_str)
+    self.assertEqual(pm2.rewrite(sink).key, tt.key)
+
   def test_pickle_realized_tensor(self):
     t = Tensor.rand(10, 10).realize()
     st = pickle.dumps(t)
