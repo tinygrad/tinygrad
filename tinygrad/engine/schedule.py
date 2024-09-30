@@ -409,6 +409,11 @@ new_sched = PatternMatcher([
   (UPat.load(UPat(UOps.BUFFER, name="buf"), UPat(UOps.SHAPETRACKER, name="st"),
              UPat.store(UPat(UOps.BUFFER, name="buf"), UPat(UOps.SHAPETRACKER, name="st"),
                         UPat(UOps.ALU, name='inp'))), lambda buf,st,inp: inp),
+  # rewrite const load/store to valid (or just const)
+  (UPat.load(UPat(UOps.BUFFER, name="buf"), UPat(UOps.SHAPETRACKER, name="st1"),
+             UPat.store(UPat(UOps.BUFFER, name="buf"), UPat(UOps.SHAPETRACKER, name="st2"),  # assuming st2 is contig
+                        UPat.cvar('c'))),
+    lambda buf,st1,st2,c: UOp.where(UOp(UOps.VALID, dtypes.bool, (st1,)), c, c.const_like(0)) if any(x.mask for x in st1.arg.views) else c),
 ])
 
 break_sched = PatternMatcher([
@@ -422,6 +427,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   bufs_by_number = []
   @functools.lru_cache(None)
   def lazy_to_uop(lb:LazyBuffer) -> UOp:
+    # assign a buffer
     lbuf = lb.base.buffer
     if lbuf not in buf_uops:
       buf_uops[lbuf] = UOp(UOps.BUFFER, lb.dtype, (), (len(buf_uops), (lbuf.device, lbuf.size, lbuf.dtype)))
@@ -429,10 +435,12 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     ubuf = buf_uops[lb.base.buffer]
     if lb.is_realized(): return ubuf
     if lb._base is None:
+      # this is a base
       if lb.op in MetaOps:
         usrcs = (ubuf,) + tuple(lazy_to_uop(x) for x in lb.srcs)
         del lb.srcs
-        return UOp(UOps.EXT, lb.dtype, usrcs, (lb.op, lb.arg))
+        if lb.op is MetaOps.CONST: return UOp.store(ubuf, lb.st.to_uop(), UOp.const(lb.dtype, lb.arg))
+        else: return UOp(UOps.EXT, lb.dtype, usrcs, (lb.op, lb.arg))
       else:
         # load all the inputs
         uop_srcs = []
@@ -448,9 +456,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       del lb.srcs
       return UOp.store(ubuf, lb.st.to_uop(), out)
     else:
-      # NOOP for a view
-      del lb.srcs
-      return lazy_to_uop(lb.base)
+     return lazy_to_uop(lb.base) # NOOP for a view
 
   # rewrite LazyBuffers into the big graph!
   sink = UOp.sink(*[lazy_to_uop(x) for x in outs])
@@ -465,7 +471,11 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   for i,k in enumerate(kernels):
     numbered = [x.arg[0] for x in k.sparents if x.op is UOps.BUFFER]
     ast = graph_rewrite(k, number_bufs, numbered)
-    if ast.op is UOps.EXT: ast = ast.replace(src=())
+    if ast.op is UOps.EXT:
+      if ast.arg[0] is MetaOps.CONTIGUOUS:
+        ast = ast.replace(src=(), arg=(MetaOps.COPY, None))
+      else:
+        ast = ast.replace(src=())
     schedule.append(ScheduleItem(ast, tuple(bufs_by_number[x] for x in numbered)))
 
   return schedule, {}
