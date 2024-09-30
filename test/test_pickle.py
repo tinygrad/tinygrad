@@ -1,8 +1,9 @@
 import unittest, pickle, types
 import numpy as np
 from test.helpers import assert_equiv_uops
-from tinygrad import Tensor, TinyJit, Variable
+from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.engine.schedule import create_schedule
+from tinygrad.ops import PatternMatcher, UPat, UOp
 
 class TestPickle(unittest.TestCase):
   def test_pickle_code_object(self):
