@@ -431,6 +431,7 @@ class TestNN(unittest.TestCase):
       torch_x = torch.tensor(x.numpy(), requires_grad=True)
       torch_z = torch_layer(torch_x)
       np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
+
       # backward
       z.sum().backward()
       torch_z.sum().backward(retain_graph=True)
