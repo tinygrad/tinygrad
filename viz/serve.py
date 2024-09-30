@@ -5,10 +5,9 @@ import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, 
 from dataclasses import dataclass, asdict
 from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from tinygrad.helpers import Context, getenv, to_function_name
+from tinygrad.helpers import getenv, to_function_name
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, lines
 from tinygrad.engine.graph import uops_colors, word_wrap
-from tinygrad.engine.schedule import ScheduleItemContext, full_ast_rewrite
 
 # **** /graph - detailed UOp + rewrites
 
@@ -91,16 +90,10 @@ class KernelRet:
 
 def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
   ret: Dict[str, KernelRet] = {}
-  asts = {ctx.kernel.ast.key:ctx.kernel for ctx in contexts if ctx.kernel is not None}
   for ctx in contexts:
-    if ctx.loc[0].endswith("/schedule.py"):
-      si_ctx = ScheduleItemContext(bufs=tuple(x.arg for x in ctx.sink.sparents if x.op is UOps.BUFFER))
-      with Context(TRACK_MATCH_STATS=0): kernel = asts.get(full_ast_rewrite(ctx.sink, si_ctx).key, None)
-    else:
-      kernel = ctx.kernel
-    name = kernel.name if kernel is not None else "UNPARENTED"
+    name = ctx.kernel.name if ctx.kernel is not None else "UNPARENTED"
     if ret.get(k:=to_function_name(name)) is None:
-      ret[k] = KernelRet(k, kernel.to_program().src if kernel is not None else "", [])
+      ret[k] = KernelRet(k, ctx.kernel.to_program().src if ctx.kernel is not None else "", [])
     ret[k].ctxs.append(ctx)
   return list(ret.values())
 
