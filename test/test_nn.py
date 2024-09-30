@@ -384,10 +384,10 @@ class TestNN(unittest.TestCase):
     N, C, H, W = 20, 5, 10, 10
 
     # create in torch
-    torch_layer = torch.nn.RMSNorm([H, W], elementwise_affine=True, eps=1e-5).eval()
+    torch_layer = torch.nn.RMSNorm([H, W], elementwise_affine=True, eps=1e-6).eval()
 
     # create in tinygrad
-    layer = RMSNorm([H, W], elementwise_affine=True, eps=1e-5)
+    layer = RMSNorm([H, W], elementwise_affine=True, eps=1e-6)
     layer.weight = Tensor(torch_layer.weight.detach().numpy(), requires_grad=True)
 
     for _ in range(10):

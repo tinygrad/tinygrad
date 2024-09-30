@@ -291,7 +291,7 @@ class RMSNorm:
   print(norm(t).numpy())
   ```
   """
-  def __init__(self, normalized_shape: Union[int, Tuple[int, ...]], eps: float = 1e-5, elementwise_affine: bool = True):
+  def __init__(self, normalized_shape: Union[int, Tuple[int, ...]], eps: float = 1e-6, elementwise_affine: bool = True):
     self.normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
     self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(self.normalized_shape))), eps, elementwise_affine
     self.weight = Tensor.ones(*self.normalized_shape) if elementwise_affine else None
