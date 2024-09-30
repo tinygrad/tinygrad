@@ -95,10 +95,12 @@ def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
   for ctx in contexts:
     if ctx.loc[0].endswith("/schedule.py"):
       si_ctx = ScheduleItemContext(bufs=tuple(x.arg for x in ctx.sink.sparents if x.op is UOps.BUFFER))
-      with Context(TRACK_MATCH_STATS=0): kernel = asts[full_ast_rewrite(ctx.sink, si_ctx).key]
+      with Context(TRACK_MATCH_STATS=0): kernel = asts.get(full_ast_rewrite(ctx.sink, si_ctx).key, None)
     else:
       kernel = ctx.kernel
-    if ret.get(k:=to_function_name(kernel.name)) is None: ret[k] = KernelRet(k, kernel.to_program().src, [])
+    if kernel is not None: name, src = kernel.name, kernel.to_program().src
+    else: name, src = "UNPARENTED", ""
+    if ret.get(k:=to_function_name(name)) is None: ret[k] = KernelRet(k, src, [])
     ret[k].ctxs.append(ctx)
   return list(ret.values())
 
