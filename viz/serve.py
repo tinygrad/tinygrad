@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
-import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, re
+import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, re, traceback
 from dataclasses import dataclass, asdict
 from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -101,7 +101,7 @@ def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
         si_ctx = ScheduleItemContext(bufs=tuple(x.arg for x in ctx.sink.sparents if x.op is UOps.BUFFER))
         with Context(TRACK_MATCH_STATS=0): kernel_name, code = (prg:=get_runner(Device.DEFAULT, full_ast_rewrite(ctx.sink, si_ctx)).p).name, prg.src
       elif ctx.kernel_name is not None: kernel_name, code = ctx.kernel_name, ""
-    except Exception as e: kernel_name, code = "RENDERING_ERROR", str(e)
+    except Exception: kernel_name, code = "RENDERING_ERROR", traceback.format_exc()
     if ret.get(k:=to_function_name(kernel_name)) is None: ret[k] = KernelRet(k, code, [])
     ret[k].ctxs.append(ctx)
   return list(ret.values())
