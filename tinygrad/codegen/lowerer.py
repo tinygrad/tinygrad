@@ -91,7 +91,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
 
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
   # NOTE: always using ridxs is fine here
-  reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.arg[1]], lambda y: y.op is UOps.RANGE)
+  reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is UOps.RANGE)
   alu_op: BinaryOps = x.arg[0]
   ret = x.src[0]
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip
-import itertools, urllib.request, subprocess, shutil, math, json, contextvars
+import itertools, urllib.request, subprocess, shutil, math, json, contextvars, types, copyreg, inspect
 from dataclasses import dataclass
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -32,7 +32,14 @@ def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
-def fully_flatten(l): return [item for sublist in l for item in (fully_flatten(sublist) if isinstance(sublist, (tuple, list)) else [sublist])]
+def fully_flatten(l):
+  if hasattr(l, "__len__") and hasattr(l, "__getitem__") and not isinstance(l, str):
+    flattened = []
+    if hasattr(l, "shape") and l.shape == (): flattened.append(l[()])
+    else:
+      for i in range(len(l)): flattened.extend(fully_flatten(l[i]))
+    return flattened
+  return [l]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def round_up(num, amt:int): return (num+amt-1)//amt * amt
@@ -62,10 +69,12 @@ def get_child(obj, key):
   return obj
 
 def get_shape(x) -> Tuple[int, ...]:
-  if not isinstance(x, (list, tuple)): return ()
+  if not hasattr(x, "__len__") or not hasattr(x, "__getitem__") or isinstance(x, str): return ()
+  if (aapi := (hasattr(x, "shape") and x.shape == ())): return ()
   subs = [get_shape(xi) for xi in x]
   if not all_same(subs): raise ValueError(f"inhomogeneous shape from {x}")
-  return (len(subs),) + (subs[0] if subs else ())
+  slen = 1 if aapi else len(subs)
+  return (slen,) + (subs[0] if subs else ())
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> Optional[List[List[int]]]:
@@ -105,7 +114,7 @@ class ContextVar:
   def __lt__(self, x): return self.value < x
 
 DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0), ContextVar("JIT", 1)
-WINO, THREEFRY, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
+WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
 MULTIOUTPUT, PROFILE, PROFILEPATH = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
 USE_TC, TC_OPT, AMX, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0), ContextVar("TRANSCENDENTAL", 1)
@@ -121,8 +130,6 @@ class Metadata:
   def __repr__(self): return str(self) + (f" - {self.caller}" if self.caller else "")
   def __str__(self): return self.name + (" bw" if self.backward else "")
 _METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
-
-_CURRENT_KERNEL: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_CURRENT_KERNEL", default=None)
 
 # **************** global state Counters ****************
 
@@ -366,3 +373,14 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d} x{cx[0]}"
   cx[2], srcs = True, ('None' if srcfn(x) is None else ''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
+
+# *** universal support for code object pickling
+
+def _reconstruct_code(*args): return types.CodeType(*args)
+def _serialize_code(code:types.CodeType):
+  # NOTE: this works in Python 3.8 and up
+  if sys.version_info >= (3, 10): args = inspect.signature(types.CodeType).parameters
+  else: args = ['argcount', 'posonlyargcount', 'kwonlyargcount', 'nlocals', 'stacksize', 'flags', 'codestring',
+                'constants', 'names', 'varnames', 'filename', 'name', 'firstlineno', 'lnotab', 'freevars', 'cellvars']
+  return _reconstruct_code, tuple(code.__getattribute__('co_'+x.replace('codestring', 'code').replace('constants', 'consts')) for x in args)
+copyreg.pickle(types.CodeType, _serialize_code)

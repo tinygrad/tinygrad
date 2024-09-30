@@ -101,7 +101,7 @@ class QCOMComputeQueue(HWComputeQueue):
   def _submit(self, device):
     if self.binded_device == device: submit_req = self.submit_req
     else: submit_req, _ = self._build_gpu_command(device)
-    kgsl.IOCTL_KGSL_GPU_COMMAND(device.fd, __payload=submit_req)
+    device.last_cmd = kgsl.IOCTL_KGSL_GPU_COMMAND(device.fd, __payload=submit_req).timestamp
 
   def _exec(self, prg, args_state, global_size, local_size):
     global_size_mp = [int(g*l) for g,l in zip(global_size, local_size)]
@@ -294,7 +294,8 @@ class QCOMAllocator(HCQAllocator):
       pitch_add = (1 << pitchalign) if min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2 else 0
       pitch = round_up((real_stride:=imgw * 4 * options.image.itemsize), 1 << pitchalign) + pitch_add
 
-      texture = self.device._gpu_alloc(pitch * imgh, kgsl.KGSL_MEMTYPE_TEXTURE, map_to_cpu=True)
+      if options.external_ptr: texture = QCOMBuffer(options.external_ptr, size)
+      else: texture = self.device._gpu_alloc(pitch * imgh, kgsl.KGSL_MEMTYPE_TEXTURE, map_to_cpu=True)
 
       # Extend HCQBuffer with texture-related info.
       texture.pitch, texture.real_stride, texture.desc, texture.ibo = pitch, real_stride, [0] * 16, [0] * 16
@@ -308,7 +309,7 @@ class QCOMAllocator(HCQAllocator):
 
       return texture
 
-    return self.device._gpu_alloc(size, map_to_cpu=True)
+    return QCOMBuffer(options.external_ptr, size) if options.external_ptr else self.device._gpu_alloc(size, map_to_cpu=True)
 
   def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, dest_off=0, src_off=0):
     while src_off < src_size:
@@ -344,7 +345,7 @@ class QCOMDevice(HCQCompiled):
     QCOMDevice.dummy_addr = self._gpu_alloc(0x1000, map_to_cpu=False).va_addr
     QCOMDevice.signals_page = self._gpu_alloc(16 * 65536, map_to_cpu=True, uncached=True)
     QCOMDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
-    info, self.ctx, self.cmd_buf, self.cmd_buf_ptr = self._info(), self._ctx_create(), self._gpu_alloc(0x1000000, map_to_cpu=True), 0
+    info, self.ctx, self.cmd_buf, self.cmd_buf_ptr, self.last_cmd = self._info(), self._ctx_create(), self._gpu_alloc(0x1000000, map_to_cpu=True), 0,0
     QCOMDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
     if QCOMDevice.gpu_id >= 700: raise RuntimeError(f"Unsupported GPU: {QCOMDevice.gpu_id}")
 
@@ -397,3 +398,5 @@ class QCOMDevice(HCQCompiled):
       self.synchronize()
       self._gpu_free(self._stack)
       self._stack = self._gpu_alloc(sz)
+
+  def _syncdev(self): kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.fd, context_id=self.ctx, timestamp=self.last_cmd, timeout=0xffffffff)

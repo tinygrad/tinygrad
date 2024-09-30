@@ -10,7 +10,7 @@ from tinygrad.ops import UOps, UOp, UPat, UnaryOps, BinaryOps, TernaryOps, Reduc
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule, reduceop_fusor
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
-from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, constant_folder
+from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, sym
 from tinygrad.shape.symbolic import Variable
 from test.helpers import is_dtype_supported, assert_equiv_uops
 
@@ -374,6 +374,11 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual((gidx0*3+6).const_factor(), 3)
     self.assertEqual((gidx0*3+1).const_factor(), 1)
 
+  def test_replace(self):
+    x = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.void), (), 0)
+    self.assertIs(x.replace(arg=None).arg, None)
+    with self.assertRaises(AssertionError): x.replace(field="a")
+
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0) + UOp(UOps.CONST, dtypes.float, (), 3.0)
@@ -387,11 +392,6 @@ class TestUOpStr(unittest.TestCase):
     with Context(NOOPT=1):
       sink = UOp(UOps.SINK, dtypes.void, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
     assert_equiv_uops(sink, eval(str(sink)))
-
-  def test_variable_const(self):
-    # TODO: this is not possible after VALID.
-    uop = UOp(UOps.CONST, dtypes.int, (), arg=Variable("a",1,10))
-    assert str(eval(str(uop))) == str(uop)
 
   def test_vectorized_str(self):
     vec = UOp(UOps.VECTORIZE, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
@@ -438,7 +438,7 @@ class TestIndexingOrdering(unittest.TestCase):
 
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
-    self.assertEqual(constant_folder.patterns[0][0].location[0].split("/")[-1], "uopgraph.py")
+    self.assertEqual(sym.patterns[0][0].location[0].split("/")[-1], "uopgraph.py")
     self.assertEqual(reduceop_fusor.patterns[0][0].location[0].split("/")[-1], "schedule.py")
     self.assertEqual(spec.patterns[0][0].location[0].split("/")[-1], "ops.py")
     with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?

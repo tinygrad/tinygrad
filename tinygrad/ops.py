@@ -1,14 +1,15 @@
 from __future__ import annotations
-from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar, DefaultDict
-import sys, time, functools, itertools, math, operator, ctypes, struct, hashlib
+from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar
+from types import FrameType
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle
 from enum import auto, IntEnum, Enum
-from collections import defaultdict
 from dataclasses import dataclass, field
-from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
-from tinygrad.helpers import _CURRENT_KERNEL, ContextVar, pretty_print, prod, getenv, all_same
+from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
+from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
+  from tinygrad.codegen.kernel import Kernel
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
@@ -21,11 +22,11 @@ class FastEnum(IntEnum):
 # NOTE: many GPUs don't have DIV, but UnaryOps.RECIP doesn't work for integer division
 class UnaryOps(FastEnum):
   """A -> A (elementwise)"""
-  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto() # noqa: E702
+  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 class BinaryOps(FastEnum):
   """A + A -> A (elementwise)"""
   ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto() # noqa: E702
+  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto() # noqa: E702
 class TernaryOps(FastEnum):
   """A + A + A -> A (elementwise)"""
   WHERE = auto(); MULACC = auto() # noqa: E702
@@ -95,6 +96,7 @@ class UOps(FastEnum):
   SHAPETRACKER = auto()
   SWIZZLE = auto()
   DEFINE_GLOBAL = auto()
+  BUFFER = auto()
   DEFINE_VAR = auto()
   DEFINE_LOCAL = auto()
   DEFINE_ACC = auto()
@@ -145,10 +147,11 @@ class UOp(MathTrait):
     #if op is UOps.ALU and arg not in (BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE): assert all_same([dtype] + [x.dtype for x in src])
     #if op is UOps.CAST: assert dtype.count == src[0].dtype.count, f"cast can't change vectorization {src[0].dtype} --> {dtype}"
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
-  def replace(self, op: Optional[UOps]=None, dtype:Optional[DType]=None, src: Optional[Tuple[UOp,...]]=None, arg:Any=None):
-    return UOp(op or self.op, dtype or self.dtype, self.src if src is None else src, self.arg if arg is None else arg)
+  def replace(self, **kwargs) -> UOp:
+    for k in kwargs: assert k in self.__slots__, f"unkown replace arg, expected one of {self.__slots__}, got {k}"
+    return UOp(kwargs.get("op", self.op), kwargs.get("dtype", self.dtype), kwargs.get("src", self.src), kwargs.get("arg", self.arg))
   @property
-  def has_st(self) -> bool: return self.op not in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL, UOps.CONST, UOps.DEFINE_VAR}
+  def has_st(self) -> bool: return self.op not in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL, UOps.BUFFER, UOps.CONST, UOps.DEFINE_VAR}
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
     if not self.has_st: return None
@@ -157,7 +160,7 @@ class UOp(MathTrait):
     src_sts = [x.st for x in self.src if x.st is not None]
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
     from tinygrad.shape.shapetracker import ShapeTracker
-    return ShapeTracker.from_shape(src_sts[0].reduce(self.arg[1])) if self.op is UOps.REDUCE_AXIS else src_sts[0]
+    return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg)) if self.op is UOps.REDUCE_AXIS else src_sts[0]
   @functools.cached_property
   def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
@@ -170,8 +173,7 @@ class UOp(MathTrait):
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
-  def argstr(self):
-    return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else repr(self.arg) if isinstance(self.arg, Variable) else self.arg
+  def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
   # *** uop syntactic sugar
   @property
   def st_arg(self) -> ShapeTracker:
@@ -179,6 +181,12 @@ class UOp(MathTrait):
     ret = self.src[0 if self.op is UOps.VALID else 1]
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
+  @property
+  def axis_arg(self) -> Tuple[int, ...]:
+    assert self.op in {UOps.REDUCE_AXIS, UOps.WMMA}, f"axis_arg called on {self.op}"
+    ret = self.arg[1] if self.op is UOps.REDUCE_AXIS else self.arg[7]
+    assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
+    return ret
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
   def const_like(self, b:ConstType|Variable|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)
@@ -218,6 +226,8 @@ class UOp(MathTrait):
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
+  @staticmethod
+  def define_global(dtype:DType, arg): return UOp(UOps.DEFINE_GLOBAL, dtype if isinstance(dtype, ImageDType) else PtrDType(dtype), (), arg)
   @staticmethod
   def range(dtype:DType, start:ConstType, end:ConstType, idx:int):
     return UOp(UOps.RANGE, dtype=dtype, src=(UOp.const(dtype, start), UOp.const(dtype, end)), arg=(idx,))
@@ -304,23 +314,12 @@ python_alu: Dict[Op, Callable]  = {
   UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, UnaryOps.EXP2: hook_overflow(math.inf, lambda x: 2**x),
   UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
   UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
-  BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift, BinaryOps.MUL: operator.mul, BinaryOps.ADD: operator.add,
+  UnaryOps.NEG: operator.neg, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub,
+  BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift, BinaryOps.MUL: operator.mul,
   BinaryOps.XOR: operator.xor, BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt,
   BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_,
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else x*math.inf,
   TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
-
-def truncate_fp16(x):
-  try: return struct.unpack("@e", struct.pack("@e", float(x)))[0]
-  except OverflowError: return math.copysign(math.inf, x)
-
-truncate: Dict[DType, Callable] = {dtypes.bool: bool,
-  # TODO: bfloat16
-  dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
-  dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
-  dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
-  dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value \
-      if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}
 
 def exec_alu(op:Op, dtype:DType, operands):
   if dtype.count > 1:
@@ -424,7 +423,7 @@ class UPat(MathTrait):
     return UPat((UOps.CONST, UOps.VCONST) if vec else UOps.CONST, dtype=dtype, name=name)
   @staticmethod
   @functools.lru_cache(None)
-  def const(dtype:Optional[DType], b:ConstType|Variable): return UPat(UOps.CONST, dtype=dtype, arg=b)
+  def const(dtype:Optional[DType], b:ConstType): return UPat(UOps.CONST, dtype=dtype, arg=b)
 
   # copied from UOp
   def cast(self, dtype=None): return UPat(UOps.CAST, dtype, (self,))
@@ -454,7 +453,7 @@ class UPat(MathTrait):
 
   def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
     if (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
-      (self.dtype is not None and uop.dtype not in self.dtype) or \
+      (self.dtype is not None and uop.dtype not in self.dtype and uop.dtype.scalar() not in self.dtype) or \
       (self.arg is not None and self.arg != uop.arg) or \
       (self.op is not None and uop.op not in self.op) or \
       (self.allowed_len != -1 and len(uop.src) != self.allowed_len): return []
@@ -474,21 +473,35 @@ class UPatAny(UPat):
       if (match:=x.match(uop, store.copy())): return match
     return []
 
+def deconstruct_function(fxn:Callable) -> Tuple:
+  new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
+  for co in fxn.__code__.co_consts:
+    if isinstance(co, types.CodeType): new_globals.update({k:v for k,v in fxn.__globals__.items() if k in co.co_names})
+  new_code_obj = pickle.loads(pickle.dumps(fxn.__code__)) if getenv("TEST_PICKLE") else fxn.__code__  # NOTE: optional round trip through pickle!
+  assert fxn.__closure__ is None, "closures are not supported in pattern matchers"
+  return new_code_obj, new_globals, fxn.__name__, fxn.__defaults__
+
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     self.patterns = patterns
-    self.pdict: DefaultDict[Tuple[UOps, Any], List[Tuple[UPat, Callable, Set]]] = defaultdict(list)
+    # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
+    self.pdict: Dict[Tuple[UOps, Any], List[Tuple[UPat, Callable, Set]]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      for uop in p.op: self.pdict[(uop, p.arg)].append((p, fxn, p.early_reject))
+      tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
+      tuple_fxn[1]['__builtins__'] = __builtins__  # NOTE: Python 3.8 requires this for "all" and "len" and friends
+      real_fxn = types.FunctionType(*tuple_fxn)
+      for uop in p.op: self.pdict.setdefault((uop, p.arg), []).append((p, real_fxn, p.early_reject))
+
+  def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None) -> Optional[UOp]:
     ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
-    for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + ([] if uop.arg is None else self.pdict[(uop.op, None)]):
+    for p,fxn,early_reject in self.pdict.get((uop.op, uop.arg), []) + ([] if uop.arg is None else self.pdict.get((uop.op, None), [])):
       if not early_reject.issubset(ler): continue
       if (matches := p.match(uop, {})) and (ret:=(fxn(ctx, **matches[0]) if ctx is not None else fxn(**matches[0]))) is not None: return ret
     return None
@@ -501,7 +514,7 @@ match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 class TrackedRewriteContext:
   loc: Tuple[str, int]                                                    # location that called graph_rewrite
   sink: UOp                                                               # the sink passed into the rewrite
-  kernel_name: Optional[str] = None                                       # the name of the kernel being rewritten
+  kernel: Optional[Kernel] = None                                         # the kernel being rewritten
   rewrites: List[Tuple[UOp, UOp, UPat]] = field(default_factory=list)     # all rewrites of sparents. (before, after, UPat)
 contexts: List[TrackedRewriteContext] = []
 class TrackedPatternMatcher(PatternMatcher):
@@ -513,7 +526,7 @@ class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None) -> Optional[UOp]:
     ret = None
     ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
-    for p,fxn,early_reject in self.pdict[(uop.op, uop.arg)] + ([] if uop.arg is None else self.pdict[(uop.op, None)]):
+    for p,fxn,early_reject in self.pdict.get((uop.op, uop.arg), []) + ([] if uop.arg is None else self.pdict.get((uop.op, None), [])):
       st = time.perf_counter()
       if not early_reject.issubset(ler):
         match_stats[p][2] += time.perf_counter()-st
@@ -531,7 +544,7 @@ class TrackedPatternMatcher(PatternMatcher):
 
 if TRACK_MATCH_STATS:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
-  import atexit, pickle
+  import atexit
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
@@ -539,14 +552,15 @@ if TRACK_MATCH_STATS:
         print(f"rewrote {len(contexts)} graphs and applied {sum(len(x.rewrites) for x in contexts)} rules, saved to /tmp/rewrites.pkl")
         pickle.dump(contexts, f)
     if getenv("VIZ"):
-      import viz.serve
-      return viz.serve.main()
-    ret = [0,0,0.0,0.0]
-    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
-      loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
-      if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {v[2]*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
-      ret = [x+y for x,y in zip(ret, v)]
-    print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {ret[2]*1000.:9.2f} ms -- TOTAL")
+      os.environ["VIZ"] = "0"
+      os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), "..", "viz", "serve.py")])
+    if getenv("PRINT_MATCH_STATS", 1):
+      ret = [0,0,0.0,0.0]
+      for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
+        loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
+        if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {v[2]*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
+        ret = [x+y for x,y in zip(ret, v)]
+      print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {ret[2]*1000.:9.2f} ms -- TOTAL")
 
 # *** simple graph rewrite engine ***
 
@@ -566,17 +580,22 @@ class RewriteContext:
     return found
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
   if TRACK_MATCH_STATS >= 2:
-    contexts.append(TrackedRewriteContext(((f:=sys._getframe(1)).f_code.co_filename, f.f_lineno), sink, _CURRENT_KERNEL.get()))
+    from tinygrad.codegen.kernel import Kernel
+    frm = sys._getframe(1)
+    # get Kernel we are rewriting in the context of
+    frm_walk: Optional[FrameType] = frm
+    while frm_walk is not None and not isinstance(kernel:=frm_walk.f_locals.get("self", None), Kernel): kernel, frm_walk = None, frm_walk.f_back
+    contexts.append(TrackedRewriteContext((frm.f_code.co_filename, frm.f_lineno), sink, kernel))
   return RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
 
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
-spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.bool, r) if (r:=fxn(**kw)) is not None else None, y)) for (x,y) in [
+spec = PatternMatcher([
   (UPat(UOps.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
   (UPat(UOps.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
-  (UPat(UOps.DEFINE_ACC, src=(UPat(UOps.CONST, name="c"),), name="x", allow_any_len=True),
+  (UPat(UOps.DEFINE_ACC, src=(UPat.var("c"),), name="x", allow_any_len=True),
    lambda x,c: all(y.op is UOps.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
   (UPat(UOps.DEFINE_VAR, src=(), name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
@@ -606,6 +625,7 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
   # STORE takes a <buf, idx, val, gate?>
   (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(), UPat())), lambda: True),
   (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
+  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(), UPat(), UPat(UOps.IF))), lambda: True),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(UOps.ALU, name="w", src=(UPat(dtype=dtypes.bool), UPat(name="x"), UPat(name="y")), arg=TernaryOps.WHERE),
@@ -626,7 +646,8 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
   (UPat(UOps.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
   (UPat(UOps.EXPAND, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
 
-  # if has a <gate, barrier>
+  # if has a <gate, barrier?>
+  (UPat(UOps.IF, dtype=dtypes.void, src=(UPat(),)), lambda: True),
   (UPat(UOps.IF, dtype=dtypes.void, src=(UPat(), UPat(UOps.BARRIER))), lambda: True),
   (UPat(UOps.ENDIF, dtype=dtypes.void, src=(UPat(UOps.IF),)), lambda: True),
 
@@ -639,13 +660,14 @@ spec = PatternMatcher([(x, functools.partial(lambda fxn,**kw: UOp.const(dtypes.b
   # NOTE: for testing, we let sinks be anything
   #(UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
   (UPat(UOps.SINK, dtypes.void), lambda: True),
+  (UPat(UOps.NOOP), lambda: True),
 
   # PTX LOAD/STORE
   (UPat((UOps.LOAD, UOps.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
   (UPat(UOps.BARRIER, dtypes.void, src=UPat(UOps.STORE, src=(UPat(dtype=dtypes.int64),), allow_any_len=True)), lambda: True),
-]])
+])
 
 def type_verify(uops:List[UOp]):
   for u in uops:
-    chk = spec.rewrite(u)
-    assert chk is not None and chk.arg is True, f"UOp verification failed on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
+    chk = cast(bool, spec.rewrite(u))
+    assert chk is True, f"UOp verification failed on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"

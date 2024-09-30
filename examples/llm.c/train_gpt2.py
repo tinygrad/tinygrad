@@ -8,6 +8,7 @@ from dataclasses import dataclass
 class GPTConfig:
   block_size: int = 1024
   vocab_size: int = 50257
+  padded_vocab_size: int = 50304
   n_layer: int = 12
   n_head: int = 12
   n_embd: int = 768
@@ -68,19 +69,21 @@ class GPT:
   def __init__(self, config:GPTConfig):
     self.config = config
 
-    self.wte = nn.Embedding(config.vocab_size, config.n_embd)
+    self.wte = nn.Embedding(config.padded_vocab_size, config.n_embd)
     self.wpe = nn.Embedding(config.block_size, config.n_embd)
     self.h = [Block(config) for _ in range(config.n_layer)]
     self.ln_f = nn.LayerNorm(config.n_embd)
-    self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+    self.lm_head = nn.Linear(config.n_embd, config.padded_vocab_size, bias=False)
     self.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
   def load_pretrained(self):
     weights = nn.state.torch_load(fetch(f'https://huggingface.co/gpt2/resolve/main/pytorch_model.bin'))
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
     for k in weights:
+      if k == "wte.weight":
+        weights[k] = weights[k].pad(((0, self.config.padded_vocab_size-self.config.vocab_size), (0,0))).to(None).contiguous()
       if k.endswith(transposed):
-        weights[k] = weights[k].to(Device.DEFAULT).T.contiguous()
+        weights[k] = weights[k].to(None).T.contiguous()
     # lm head and wte are tied
     weights['lm_head.weight'] = weights['wte.weight']
     nn.state.load_state_dict(self, weights)
@@ -105,10 +108,10 @@ class GPT:
     x = self.ln_f(x.sequential(self.h))
 
     if targets is not None:
-      logits = self.lm_head(x)
+      logits = self.lm_head(x)[:, :, :self.config.vocab_size]
       loss = logits.sparse_categorical_crossentropy(targets)
     else:
-      logits = self.lm_head(x[:, [-1], :])
+      logits = self.lm_head(x[:, [-1], :])[:, :, :self.config.vocab_size]
       loss = None
 
     return logits, loss
@@ -120,6 +123,7 @@ if __name__ == "__main__":
   parser.add_argument("--num_iterations", type=int, default=10, help="number of iterations to run")
   parser.add_argument("--batch_size", type=int, default=4, help="batch size")
   parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
+  parser.add_argument("--skip_test", action="store_true", help="skip test")
   args = parser.parse_args()
   B, T = args.batch_size, args.sequence_length
   assert 1 <= T <= 1024
@@ -135,10 +139,7 @@ if __name__ == "__main__":
   # load the tokens
   # prefer to use tiny_shakespeare if it's available, otherwise use tiny_stories
   # we're using val instead of train split just because it is smaller/faster
-  shake_tokens_bin = "data/tiny_shakespeare_val.bin"
-  story_tokens_bin = "data/TinyStories_val.bin"
-  assert os.path.isfile(shake_tokens_bin) or os.path.isfile(story_tokens_bin), "you must run prepro on some dataset"
-  tokens_bin = shake_tokens_bin if os.path.isfile(shake_tokens_bin) else story_tokens_bin
+  tokens_bin = fetch("https://huggingface.co/datasets/karpathy/llmc-starter-pack/resolve/main/tiny_shakespeare_val.bin")
   assert os.path.isfile(tokens_bin)
   print(f"loading cached tokens in {tokens_bin}")
   with open(tokens_bin, "rb") as f:
@@ -169,8 +170,7 @@ if __name__ == "__main__":
     _, loss = model(x, y)
     optimizer.zero_grad()
     loss.backward()
-    optimizer.step()
-    return loss
+    return loss.realize(*optimizer.schedule_step())
 
   with Tensor.train():
     for i in range(args.num_iterations):
@@ -179,14 +179,15 @@ if __name__ == "__main__":
       loss = step(x.contiguous(), y.contiguous())
       Device[Device.DEFAULT].synchronize()
       t1 = time.time()
-      print(f"iteration {i}, loss: {loss.item()}, time: {(t1-t0)*1000:.3f}ms")
+      print(f"iteration {i}, loss: {loss.item():.6f}, time: {(t1-t0)*1000:.3f}ms, {int(B*T/(t1-t0))} tok/s")
 
-  start = "<|endoftext|>"
-  start_ids = encode(start)
-  x = (Tensor(start_ids)[None, ...])
-  max_new_tokens = 16
-  temperature = 1.0
-  top_k = 40
-  y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
-  print(decode(y[0].tolist()))
+  if not args.skip_test:
+    start = "<|endoftext|>"
+    start_ids = encode(start)
+    x = (Tensor(start_ids)[None, ...])
+    max_new_tokens = 16
+    temperature = 1.0
+    top_k = 40
+    y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+    print(decode(y[0].tolist()))
 
