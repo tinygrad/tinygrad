@@ -426,10 +426,13 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     if lbuf not in buf_uops:
       buf_uops[lbuf] = UOp(UOps.BUFFER, lb.dtype, (), (len(buf_uops), (lbuf.device, lbuf.size, lbuf.dtype)))
       bufs_by_number.append(lbuf)
+    ubuf = buf_uops[lb.base.buffer]
+    if lb.is_realized(): return ubuf
     if lb._base is None:
       if lb.op in MetaOps:
-        return UOp(UOps.EXT, lb.dtype,
-                   (buf_uops[lb.base.buffer],) + (tuple(lazy_to_uop(x) for x in lb.srcs) if hasattr(lb, 'srcs') else ()), (lb.op, lb.arg))
+        usrcs = (ubuf,) + tuple(lazy_to_uop(x) for x in lb.srcs)
+        del lb.srcs
+        return UOp(UOps.EXT, lb.dtype, usrcs, (lb.op, lb.arg))
       else:
         # load all the inputs
         uop_srcs = []
@@ -442,9 +445,11 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
         else:
           # ALU node
           out = UOp(UOps.ALU, lb.dtype, tuple(uop_srcs), lb.op)
-      return UOp.store(buf_uops[lb.base.buffer], lb.st.to_uop(), out)
+      del lb.srcs
+      return UOp.store(ubuf, lb.st.to_uop(), out)
     else:
       # NOOP for a view
+      del lb.srcs
       return lazy_to_uop(lb.base)
 
   # rewrite LazyBuffers into the big graph!
@@ -458,10 +463,9 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
 
   schedule: List[ScheduleItem] = []
   for i,k in enumerate(kernels):
-    print(f"****** kernel {i}")
-    print(k)
     numbered = [x.arg[0] for x in k.sparents if x.op is UOps.BUFFER]
     ast = graph_rewrite(k, number_bufs, numbered)
+    if ast.op is UOps.EXT: ast = ast.replace(src=())
     schedule.append(ScheduleItem(ast, tuple(bufs_by_number[x] for x in numbered)))
 
   return schedule, {}
