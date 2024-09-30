@@ -1,4 +1,4 @@
-import sys, pickle, atexit, importlib, contextlib
+import sys, pickle, atexit, importlib, contextlib, functools
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast, get_args
@@ -404,7 +404,46 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
 
 # *** DAG ordering: breadth first search ***
 
+new_sched = PatternMatcher([
+  # remove non swizzled load/stores
+  (UPat.load(UPat(UOps.BUFFER, name="buf"), UPat(UOps.SHAPETRACKER, name="st"),
+             UPat.store(UPat(UOps.BUFFER, name="buf"), UPat(UOps.SHAPETRACKER, name="st"),
+                        UPat(UOps.ALU, name='inp'))), lambda buf,st,inp: inp),
+])
+
+break_sched = PatternMatcher([
+  (UPat(UOps.LOAD, src=(UPat(), UPat(), UPat()), name="ld"), lambda ld: UOp.load(ld.src[0], ld.src[1], dtype=ld.dtype)),
+])
+
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  buffers = []
+  @functools.lru_cache(None)
+  def lazy_to_uop(lb:LazyBuffer) -> UOp:
+    if lb.base.buffer not in buffers: buffers.append(lb.base.buffer)
+    # this buffer is optional...
+    buf = UOp(UOps.BUFFER, lb.dtype, (), buffers.index(lb.base.buffer))
+    if lb._base is None:
+      if lb.op in MetaOps:
+        out = UOp(UOps.EXT, lb.dtype, (), (lb.op, lb.arg))
+      else:
+        # ALU node
+        out = UOp(UOps.ALU, lb.dtype, tuple(lazy_to_uop(x) for x in lb.srcs), lb.op)
+      return UOp.load(buf, lb.st.to_uop(), UOp.store(buf, lb.st.to_uop(), out), dtype=lb.dtype)
+    else:
+      return UOp.load(buf, lb.st.to_uop(), lazy_to_uop(lb.base), dtype=lb.dtype)
+
+  # rewrite LazyBuffers into the big graph!
+  sink = UOp.sink(*[lazy_to_uop(x).src[2] for x in outs])
+  sink = graph_rewrite(sink, new_sched)
+
+  # break on LOAD/STORE boundaries
+  kernels = [graph_rewrite(x, break_sched) for x in sink.parents if x.op is UOps.STORE][::-1]   # BFS order?
+
+  for k in kernels:
+    print(k)
+
+
+  """
   graph, in_degree, var_vals = _graph_schedule(outs)
   if getenv("RUN_PROCESS_REPLAY") and getenv("COMPARE_SCHEDULE", 1):
     # NOTE: process relpay needs PYTHONPATH=., remove this once it just pickles LazyBuffers
@@ -432,6 +471,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(in_degree)} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, var_vals
+  """
 
 def create_schedule(outs:List[LazyBuffer]) -> List[ScheduleItem]:
   schedule, var_vals = create_schedule_with_vars(outs)
