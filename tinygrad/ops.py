@@ -475,12 +475,12 @@ class UPatAny(UPat):
 
 def deconstruct_function(fxn:Callable) -> Tuple:
   new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
-  new_globals.update({k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names})
   for co in fxn.__code__.co_consts:
     if isinstance(co, types.CodeType): new_globals.update({k:v for k,v in fxn.__globals__.items() if k in co.co_names})
+  new_code_obj = pickle.loads(pickle.dumps(fxn.__code__))  # NOTE: a round trip through pickle for consistency!
   assert fxn.__closure__ is None, "closures are not supported in pattern matchers"
   new_globals.update(globals())  # NOTE: Python 3.8 requires this for things like "all()"
-  return fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
+  return new_code_obj, new_globals, fxn.__name__, fxn.__defaults__
 
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
