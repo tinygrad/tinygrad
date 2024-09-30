@@ -1340,6 +1340,14 @@ class TestSchedule(unittest.TestCase):
     (x+Tensor.ones(256).contiguous()).schedule()
     self.assertEqual(GlobalCounters.mem_used-base, 1024)
 
+  def test_const_schedule(self):
+    constv = Tensor.empty(2, 2).lazydata.const_like(10)
+    self.assertEqual(len(create_schedule([constv])), 0)
+
+  def test_const_schedule_contig(self):
+    constv = Tensor.empty(2, 2).lazydata.const_like(10).contiguous()
+    self.assertEqual(len(create_schedule([constv])), 1)
+
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
