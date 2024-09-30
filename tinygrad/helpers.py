@@ -1,8 +1,8 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip
-import itertools, urllib.request, subprocess, shutil, math, json, contextvars
+import itertools, urllib.request, subprocess, shutil, math, json, contextvars, types, copyreg
 from dataclasses import dataclass
-from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
+from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence, cast
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
   from tinygrad.shape.shapetracker import sint
@@ -375,3 +375,12 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d} x{cx[0]}"
   cx[2], srcs = True, ('None' if srcfn(x) is None else ''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
+
+# *** universal support for code object pickling
+
+def _reconstruct_code(*args): return types.CodeType(*args)
+def _serialize_code(code:types.CodeType):
+  args = [x.strip('(=,').split('=')[0].replace('codestring', 'code').replace('constants', 'consts') \
+          for x in cast(str, types.CodeType.__text_signature__).replace("\n", "").split() if x[0] != '/']
+  return _reconstruct_code, tuple(code.__getattribute__('co_'+x) for x in args)
+copyreg.pickle(types.CodeType, _serialize_code)

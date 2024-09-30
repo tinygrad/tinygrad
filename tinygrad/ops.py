@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar
-import sys, time, functools, itertools, math, operator, hashlib, os, types, copyreg, pickle
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
@@ -471,22 +471,14 @@ class UPatAny(UPat):
       if (match:=x.match(uop, store.copy())): return match
     return []
 
-def _reconstruct_code(*args): return types.CodeType(*args)
-def _serialize_code(code:types.CodeType):
-  # TODO: make work for all versions of Python
-  return _reconstruct_code, (code.co_argcount, code.co_posonlyargcount, code.co_kwonlyargcount, code.co_nlocals, code.co_stacksize, code.co_flags,
-                             code.co_code, code.co_consts, code.co_names, code.co_varnames, code.co_filename, code.co_name, code.co_qualname,
-                             code.co_firstlineno, code.co_linetable, code.co_exceptiontable, code.co_freevars, code.co_cellvars)
-copyreg.pickle(types.CodeType, _serialize_code)
-
 def fixup_function(fxn:Callable):
   if fxn.__name__ != "<lambda>": return fxn
   new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
   for co in fxn.__code__.co_consts:
-    if isinstance(co, types.CodeType):
-      new_globals.update({k:v for k,v in fxn.__globals__.items() if k in co.co_names})
+    if isinstance(co, types.CodeType): new_globals.update({k:v for k,v in fxn.__globals__.items() if k in co.co_names})
   new_code_obj = pickle.loads(pickle.dumps(fxn.__code__))
-  return new_code_obj, new_globals
+  assert fxn.__closure__ is None, "closures are not supported in pattern matchers"
+  return new_code_obj, new_globals, fxn.__name__, fxn.__defaults__
 
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
