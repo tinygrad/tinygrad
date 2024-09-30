@@ -48,9 +48,9 @@ class TestViz(unittest.TestCase):
     list(lower_schedule(schedule1))
     list(lower_schedule(schedule2))
     ret = load_kernels(contexts)
-    assert len(ret) == 2
-    assert all(len([x for x in y.ctxs if "schedule" in x.loc[0]]) != 0 for y in ret)
-    assert all(len([x for x in y.ctxs if "uopgraph" in x.loc[0]]) != 0 for y in ret)
+    assert len(ret) == 3
+    assert all(len([x for x in y.ctxs if "schedule" in x.loc[0]]) == 0 for y in ret[1:])
+    assert all(len([x for x in y.ctxs if "uopgraph" in x.loc[0]]) != 0 for y in ret[1:])
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()
@@ -132,10 +132,9 @@ class TestViz(unittest.TestCase):
     s = a.schedule()
     with Context(NOOPT=1): list(lower_schedule(s.copy()))
     with Context(NOOPT=0): list(lower_schedule(s.copy()))
-    kernels = load_kernels(contexts)
+    kernels = load_kernels(contexts)[1:]
     self.assertEqual(len(kernels), 2)
     assert all(len(v) == 1 for _,v in group_rewrites(kernels[0]).items())
-    assert all(len(v) == 0 for k,v in group_rewrites(kernels[1]).items() if "schedule.py" in k)
 
   def test_fold_const_nodes(self):
     a = Tensor.empty(4, 4)+2

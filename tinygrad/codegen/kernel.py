@@ -5,13 +5,12 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict
 from enum import Enum, auto
 
-from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify, \
-  graph_rewrite, PatternMatcher
+from tinygrad.ops import BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify, graph_rewrite, PatternMatcher
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, get_contraction, to_function_name, diskcache_put
-from tinygrad.helpers import _CURRENT_KERNEL, DEBUG, TC_OPT, USE_TC, AMX
+from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.view import strides_for_shape
@@ -704,7 +703,6 @@ class Kernel:
   # **** this is the lowerer ****
 
   def linearize(self) -> Kernel:
-    if TRACK_MATCH_STATS >= 2: _CURRENT_KERNEL.set(self.name)
     modified_ast = self.get_optimized_ast()
 
     if DEBUG >= 3:
@@ -715,7 +713,6 @@ class Kernel:
     verify_ast(modified_ast)
 
     self.uops:List[UOp] = linearize_uop(full_graph_rewrite(ast_to_uop(modified_ast, self.opts), self.opts))
-    if TRACK_MATCH_STATS >= 2: _CURRENT_KERNEL.set(None)
     if DEBUG >= 5: print_uops(self.uops)
     if getenv("GRAPHUOPS"):
       from tinygrad.engine.graph import graph_uops
