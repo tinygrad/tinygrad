@@ -477,9 +477,8 @@ def deconstruct_function(fxn:Callable) -> Tuple:
   new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
   for co in fxn.__code__.co_consts:
     if isinstance(co, types.CodeType): new_globals.update({k:v for k,v in fxn.__globals__.items() if k in co.co_names})
-  new_code_obj = pickle.loads(pickle.dumps(fxn.__code__))  # NOTE: a round trip through pickle for consistency!
+  new_code_obj = pickle.loads(pickle.dumps(fxn.__code__)) if getenv("TEST_PICKLE") else fxn.__code__  # NOTE: optional round trip through pickle!
   assert fxn.__closure__ is None, "closures are not supported in pattern matchers"
-  new_globals.update(globals())  # NOTE: Python 3.8 requires this for things like "all()"
   return new_code_obj, new_globals, fxn.__name__, fxn.__defaults__
 
 class PatternMatcher:
@@ -490,7 +489,9 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      real_fxn = types.FunctionType(*(fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)))
+      tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
+      tuple_fxn[1].update(globals())  # NOTE: Python 3.8 requires this for "all()"
+      real_fxn = types.FunctionType(*tuple_fxn)
       for uop in p.op: self.pdict.setdefault((uop, p.arg), []).append((p, real_fxn, p.early_reject))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
