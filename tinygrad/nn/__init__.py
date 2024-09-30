@@ -299,8 +299,7 @@ class RMSNorm:
   def __call__(self, x: Tensor) -> Tensor:
     assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"Last dimensions of {x.shape} must match {self.normalized_shape}"
     x = x * (x.square().mean(axis=self.axis, keepdim=True) + self.eps).rsqrt()
-    if not self.elementwise_affine: return x
-    return x * self.weight
+    return x * self.weight if self.weight is not None else x
 
 class Embedding:
   """
