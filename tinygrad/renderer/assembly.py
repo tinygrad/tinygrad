@@ -226,13 +226,13 @@ class PTXRenderer(Renderer):
         elif uop is UOps.WMMA:
           _, (N, M, K), dtype_in, _, _, _, upcast_axes, _ = args
           wmma, sza = [], prod(sz for _, sz in upcast_axes[0]) * dtype_in.itemsize // 4
-          dt_in_map = { dtypes.float: "tf32", dtypes.half: "f16"}
+          dt_map = { dtypes.float: "tf32", dtypes.half: "f16"}
           for vv in src[:2]:
             for i in range(0, len(r[vv]), 2):
               wmma.append(ssa("wmma", dtype="b32"))
               kk(f'mov.b32 {wmma[-1]}, {{{", ".join(r[vv][i:i+2])}}};')
           r[u] = [ssa("wmma", dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
-          kk(f'mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_in_map[dtype_in]}.{dt_in_map[dtype_in]}.f32\
+          kk(f'mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_map[dtype_in]}.{dt_map[dtype_in]}.f32\
             {{{", ".join(r[u])}}}, {{{", ".join(wmma[:sza])}}}, {{{", ".join(wmma[sza:])}}}, {{{", ".join(r[src[2]])}}};')
         else: raise NotImplementedError(f"no code for {uop}")
 
