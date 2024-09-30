@@ -8,6 +8,7 @@ from dataclasses import dataclass
 class GPTConfig:
   block_size: int = 1024
   vocab_size: int = 50257
+  padded_vocab_size: int = 50304
   n_layer: int = 12
   n_head: int = 12
   n_embd: int = 768
@@ -68,19 +69,21 @@ class GPT:
   def __init__(self, config:GPTConfig):
     self.config = config
 
-    self.wte = nn.Embedding(config.vocab_size, config.n_embd)
+    self.wte = nn.Embedding(config.padded_vocab_size, config.n_embd)
     self.wpe = nn.Embedding(config.block_size, config.n_embd)
     self.h = [Block(config) for _ in range(config.n_layer)]
     self.ln_f = nn.LayerNorm(config.n_embd)
-    self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+    self.lm_head = nn.Linear(config.n_embd, config.padded_vocab_size, bias=False)
     self.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
   def load_pretrained(self):
     weights = nn.state.torch_load(fetch(f'https://huggingface.co/gpt2/resolve/main/pytorch_model.bin'))
     transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
     for k in weights:
+      if k == "wte.weight":
+        weights[k] = weights[k].pad(((0, self.config.padded_vocab_size-self.config.vocab_size), (0,0))).to(None).contiguous()
       if k.endswith(transposed):
-        weights[k] = weights[k].to(Device.DEFAULT).T.contiguous()
+        weights[k] = weights[k].to(None).T.contiguous()
     # lm head and wte are tied
     weights['lm_head.weight'] = weights['wte.weight']
     nn.state.load_state_dict(self, weights)
@@ -105,10 +108,10 @@ class GPT:
     x = self.ln_f(x.sequential(self.h))
 
     if targets is not None:
-      logits = self.lm_head(x)
+      logits = self.lm_head(x)[:, :, :self.config.vocab_size]
       loss = logits.sparse_categorical_crossentropy(targets)
     else:
-      logits = self.lm_head(x[:, [-1], :])
+      logits = self.lm_head(x[:, [-1], :])[:, :, :self.config.vocab_size]
       loss = None
 
     return logits, loss
