@@ -1364,11 +1364,10 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(xt, 3)
     np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [1, 2]])
 
-  @unittest.expectedFailure
   def test_advanced_indexing(self):
     X = Tensor.arange(10)+1
     xt = X[[0]]
-    self.check_schedule(xt, 3)
+    self.check_schedule(xt, 2)
     np.testing.assert_equal(xt.numpy(), (np.arange(10)+1)[[0]])
 
   @unittest.expectedFailure
