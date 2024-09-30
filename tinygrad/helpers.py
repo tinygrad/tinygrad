@@ -378,7 +378,9 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 
 def _reconstruct_code(*args): return types.CodeType(*args)
 def _serialize_code(code:types.CodeType):
-  # TODO: this doesn't work in Python 3.8. fix only if cleaner!
-  args = ['co_'+x.replace('codestring', 'code').replace('constants', 'consts') for x in inspect.signature(types.CodeType).parameters]
-  return _reconstruct_code, tuple(code.__getattribute__(x) for x in args)
+  # NOTE: this works in Python 3.8 and up
+  if sys.version_info >= (3, 10): args = inspect.signature(types.CodeType).parameters
+  else: args = ['argcount', 'posonlyargcount', 'kwonlyargcount', 'nlocals', 'stacksize', 'flags', 'codestring',
+                'constants', 'names', 'varnames', 'filename', 'name', 'firstlineno', 'lnotab', 'freevars', 'cellvars']
+  return _reconstruct_code, tuple(code.__getattribute__('co_'+x.replace('codestring', 'code').replace('constants', 'consts')) for x in args)
 copyreg.pickle(types.CodeType, _serialize_code)
