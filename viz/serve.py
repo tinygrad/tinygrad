@@ -98,9 +98,9 @@ def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
       with Context(TRACK_MATCH_STATS=0): kernel = asts.get(full_ast_rewrite(ctx.sink, si_ctx).key, None)
     else:
       kernel = ctx.kernel
-    if kernel is not None: name, src = kernel.name, kernel.to_program().src
-    else: name, src = "UNPARENTED", ""
-    if ret.get(k:=to_function_name(name)) is None: ret[k] = KernelRet(k, src, [])
+    name = kernel.name if kernel is not None else "UNPARENTED"
+    if ret.get(k:=to_function_name(name)) is None:
+      ret[k] = KernelRet(k, kernel.to_program().src if kernel is not None else "", [])
     ret[k].ctxs.append(ctx)
   return list(ret.values())
 
