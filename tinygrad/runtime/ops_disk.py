@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, sys, mmap, _posixshmem, io, ctypes, ctypes.util, platform, contextlib
-from typing import Optional, Generator, Tuple, Callable, List
+from typing import Generator, Tuple, Callable, List
 from tinygrad.helpers import OSX, round_up
 from tinygrad.device import Compiled, Allocator
 from tinygrad.runtime.autogen import io_uring, libc
@@ -23,7 +23,7 @@ class DiskAllocator(Allocator):
   def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def copyout(self, dest:memoryview, src:DiskBuffer):
-    if OSX and hasattr(self.device, 'fd'):
+    if OSX and self.device.fd:
       # OSX doesn't seem great at mmap, this is faster
       with io.FileIO(self.device.fd, "a+b", closefd=False) as fo:
         fo.seek(src.offset)
@@ -71,14 +71,14 @@ class DiskDevice(Compiled):
   def __init__(self, device:str):
     if not DiskDevice._tried_io_uring_init: self._iouring_setup()
 
-    self.size: Optional[int] = None
-    self.count = 0
+    self.size = self.fd = self.count = 0
     super().__init__(device, DiskAllocator(self), None, None, None)
   def _might_open(self, size):
     self.count += 1
-    assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
-    if self.size is not None: return
+    assert self.size == 0 or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
     filename = self.dname[len("disk:"):]
+    unlinked = not filename.startswith("shm:") and self.fd and os.fstat(self.fd).st_nlink == 0
+    if self.size and not unlinked: return
     self.size = size
 
     if filename.startswith("shm:"):
@@ -86,6 +86,7 @@ class DiskDevice(Compiled):
       self.mem = mmap.mmap(fd, self.size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
       os.close(fd)
     else:
+      if unlinked: os.close(self.fd)
       try: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT|(0 if OSX else os.O_DIRECT))
       except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
       if os.fstat(self.fd).st_size < self.size: os.ftruncate(self.fd, self.size)
@@ -95,8 +96,8 @@ class DiskDevice(Compiled):
   def _might_close(self):
     self.count -= 1
     if self.count == 0:
-      if hasattr(self, 'fd'): os.close(self.fd)
-      self.size = None
+      if self.fd: os.close(self.fd)
+      self.fd = self.size = 0
   def _iouring_setup(self):
     DiskDevice._tried_io_uring_init = True
 

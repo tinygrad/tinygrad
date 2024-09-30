@@ -107,6 +107,9 @@ class TestSafetensors(unittest.TestCase):
         assert f.read() == g.read()
     ret2 = safe_load(temp("real.safetensors_alt"))
     for k,v in tensors.items(): np.testing.assert_array_equal(ret2[k].numpy(), v.numpy())
+    safe_save(ret2, temp("real.safetensors_alt2"))
+    ret3 = safe_load(temp("real.safetensors_alt2"))
+    for k,v in tensors.items(): np.testing.assert_array_equal(ret3[k].numpy(), v.numpy())
 
   def test_real_safetensors_open(self):
     fn = temp("real_safe")
