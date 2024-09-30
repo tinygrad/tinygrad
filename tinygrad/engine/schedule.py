@@ -427,6 +427,8 @@ def _lazy_to_uop(outs:List[LazyBuffer]) -> Tuple[UOp, List[Buffer], Dict[Buffer,
   bufs_by_number:List[Buffer] = []
   buf_to_lbs:Dict[Buffer, List[LazyBuffer]] = {}
   @functools.lru_cache(None)
+  def __st_to_uop(st:ShapeTracker) -> UOp: return st.to_uop()
+  @functools.lru_cache(None)
   def __lazy_to_uop(lb:LazyBuffer) -> UOp:
     # assign a buffer (should be deduped to remove lazycache!)
     lbuf = lb.base.buffer
@@ -445,7 +447,7 @@ def _lazy_to_uop(outs:List[LazyBuffer]) -> Tuple[UOp, List[Buffer], Dict[Buffer,
           # TODO: mark graph to not be broken here
           x = lb.srcs[0]
           x_uop = __lazy_to_uop(x)
-          out = UOp.load(buf_uops[x.base.buffer], x.st.to_uop(), x_uop, dtype=x.dtype)
+          out = UOp.load(buf_uops[x.base.buffer], __st_to_uop(x.st), x_uop, dtype=x.dtype)
         else:
           return UOp(UOps.EXT, lb.dtype, usrcs, (lb.op, lb.arg))
       else:
@@ -453,7 +455,7 @@ def _lazy_to_uop(outs:List[LazyBuffer]) -> Tuple[UOp, List[Buffer], Dict[Buffer,
         uop_srcs = []
         for x in lb.srcs:
           x_uop = __lazy_to_uop(x)
-          uop_srcs.append(UOp.load(buf_uops[x.base.buffer], x.st.to_uop(), x_uop, dtype=x.dtype))
+          uop_srcs.append(UOp.load(buf_uops[x.base.buffer], __st_to_uop(x.st), x_uop, dtype=x.dtype))
         if lb.op in ReduceOps:
           # reduce node
           out = UOp(UOps.REDUCE_AXIS, lb.dtype, tuple(uop_srcs), (REDUCE_ALU[cast(ReduceOps, lb.op)], lb.arg))
@@ -461,7 +463,7 @@ def _lazy_to_uop(outs:List[LazyBuffer]) -> Tuple[UOp, List[Buffer], Dict[Buffer,
           if lb.op is UnaryOps.CAST: out = UOp(UOps.CAST, lb.dtype, tuple(uop_srcs))
           elif lb.op is UnaryOps.BITCAST: out = UOp(UOps.BITCAST, lb.dtype, tuple(uop_srcs))
           else: out = UOp(UOps.ALU, lb.dtype, tuple(uop_srcs), lb.op)
-      return UOp.store(ubuf, lb.st.to_uop(), out)
+      return UOp.store(ubuf, __st_to_uop(lb.st), out)
     else:
      return __lazy_to_uop(lb.base) # NOOP for a view
   return UOp.sink(*[__lazy_to_uop(x) for x in outs]), bufs_by_number, buf_to_lbs
