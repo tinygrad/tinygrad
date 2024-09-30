@@ -501,7 +501,7 @@ match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 class TrackedRewriteContext:
   loc: Tuple[str, int]                                                    # location that called graph_rewrite
   sink: UOp                                                               # the sink passed into the rewrite
-  kernel: Optional[Kernel] = None                                         # the name of the kernel being rewritten
+  kernel: Optional[Kernel] = None                                         # the kernel being rewritten
   rewrites: List[Tuple[UOp, UOp, UPat]] = field(default_factory=list)     # all rewrites of sparents. (before, after, UPat)
 contexts: List[TrackedRewriteContext] = []
 class TrackedPatternMatcher(PatternMatcher):
