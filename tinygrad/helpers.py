@@ -1,8 +1,8 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip
-import itertools, urllib.request, subprocess, shutil, math, json, contextvars, types, copyreg
+import itertools, urllib.request, subprocess, shutil, math, json, contextvars, types, copyreg, inspect
 from dataclasses import dataclass
-from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence, cast
+from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
   from tinygrad.shape.shapetracker import sint
@@ -378,8 +378,7 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 
 def _reconstruct_code(*args): return types.CodeType(*args)
 def _serialize_code(code:types.CodeType):
-  # TODO: this doens't work in Python 3.8. fix only if cleaner!
-  args = [x.strip('(=,').split('=')[0].replace('codestring', 'code').replace('constants', 'consts') \
-          for x in cast(str, types.CodeType.__text_signature__).replace("\n", "").split() if x[0] != '/']
-  return _reconstruct_code, tuple(code.__getattribute__('co_'+x) for x in args)
+  # TODO: this doesn't work in Python 3.8. fix only if cleaner!
+  args = inspect.signature(types.CodeType).parameters.keys()
+  return _reconstruct_code, tuple(code.__getattribute__('co_'+x.replace('codestring', 'code').replace('constants', 'consts')) for x in args)
 copyreg.pickle(types.CodeType, _serialize_code)
