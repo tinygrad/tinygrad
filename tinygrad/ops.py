@@ -471,8 +471,7 @@ class UPatAny(UPat):
       if (match:=x.match(uop, store.copy())): return match
     return []
 
-def fixup_function(fxn:Callable):
-  if fxn.__name__ != "<lambda>": return fxn
+def deconstruct_function(fxn:Callable) -> Tuple:
   new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
   for co in fxn.__code__.co_consts:
     if isinstance(co, types.CodeType): new_globals.update({k:v for k,v in fxn.__globals__.items() if k in co.co_names})
@@ -488,11 +487,10 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      tmp = fxn if isinstance(fxn, tuple) else fixup_function(fxn)
-      real_fxn = types.FunctionType(*tmp) if isinstance(tmp, tuple) else tmp
+      real_fxn = types.FunctionType(*(fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)))
       for uop in p.op: self.pdict.setdefault((uop, p.arg), []).append((p, real_fxn, p.early_reject))
 
-  def __reduce__(self): return PatternMatcher, ([(x,fixup_function(fxn)) for x,fxn in self.patterns],)
+  def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
