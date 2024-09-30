@@ -35,7 +35,7 @@ def _lazy_to_uop(outs:List[LazyBuffer]) -> Tuple[UOp, List[Buffer], Dict[Buffer,
   def __lazy_to_uop(lb:LazyBuffer) -> UOp:
     # assign a buffer (should be deduped to remove lazycache!)
     lbuf = lb.base.buffer
-    buf_to_lbs.setdefault(lbuf, []).append(lb)
+    if lb.base not in buf_to_lbs.setdefault(lbuf, []): buf_to_lbs[lb.base.buffer].append(lb.base)
     if lbuf not in buf_uops:
       buf_uops[lbuf] = UOp(UOps.BUFFER, lb.dtype, (), (len(buf_uops), (lbuf.device, lbuf.size, lbuf.dtype)))
       bufs_by_number.append(lbuf)
@@ -89,8 +89,7 @@ def create_schedule(outs:List[LazyBuffer]) -> Tuple[List[UOp], List[Tuple[Buffer
     # delete srcs of the buffers we realize
     store_number = k.src[0].arg[0] if k.op is UOps.EXT else k.src[0].src[0].arg[0]
     for lb in buf_to_lbs[bufs_by_number[store_number]]:
-      # TODO: when does this not mean realized?
-      if hasattr(lb, 'srcs'): del lb.srcs
+      del lb.srcs
 
     numbered = tuple(x.arg[0] for x in k.sparents if x.op is UOps.BUFFER)
     ast = graph_rewrite(k, number_bufs, numbered)
