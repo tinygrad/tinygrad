@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar
-import sys, time, functools, itertools, math, operator, hashlib, os
+import sys, time, functools, itertools, math, operator, hashlib, os, types, copyreg, pickle
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
@@ -471,6 +471,23 @@ class UPatAny(UPat):
       if (match:=x.match(uop, store.copy())): return match
     return []
 
+def _reconstruct_code(*args): return types.CodeType(*args)
+def _serialize_code(code:types.CodeType):
+  # TODO: make work for all versions of Python
+  return _reconstruct_code, (code.co_argcount, code.co_posonlyargcount, code.co_kwonlyargcount, code.co_nlocals, code.co_stacksize, code.co_flags,
+                             code.co_code, code.co_consts, code.co_names, code.co_varnames, code.co_filename, code.co_name, code.co_qualname,
+                             code.co_firstlineno, code.co_linetable, code.co_exceptiontable, code.co_freevars, code.co_cellvars)
+copyreg.pickle(types.CodeType, _serialize_code)
+
+def fixup_function(fxn:Callable):
+  if fxn.__name__ != "<lambda>": return fxn
+  new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
+  for co in fxn.__code__.co_consts:
+    if isinstance(co, types.CodeType):
+      new_globals.update({k:v for k,v in fxn.__globals__.items() if k in co.co_names})
+  new_code_obj = pickle.loads(pickle.dumps(fxn.__code__))
+  return new_code_obj, new_globals
+
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     self.patterns = patterns
@@ -479,7 +496,11 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      for uop in p.op: self.pdict.setdefault((uop, p.arg), []).append((p, fxn, p.early_reject))
+      tmp = fxn if isinstance(fxn, tuple) else fixup_function(fxn)
+      real_fxn = types.FunctionType(*tmp) if isinstance(tmp, tuple) else tmp
+      for uop in p.op: self.pdict.setdefault((uop, p.arg), []).append((p, real_fxn, p.early_reject))
+
+  def __reduce__(self): return PatternMatcher, ([(x,fixup_function(fxn)) for x,fxn in self.patterns],)
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
@@ -529,7 +550,7 @@ class TrackedPatternMatcher(PatternMatcher):
 
 if TRACK_MATCH_STATS:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
-  import atexit, pickle
+  import atexit
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
