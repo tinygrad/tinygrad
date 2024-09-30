@@ -378,6 +378,7 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 
 def _reconstruct_code(*args): return types.CodeType(*args)
 def _serialize_code(code:types.CodeType):
+  # TODO: this doens't work in Python 3.8. fix only if cleaner!
   args = [x.strip('(=,').split('=')[0].replace('codestring', 'code').replace('constants', 'consts') \
           for x in cast(str, types.CodeType.__text_signature__).replace("\n", "").split() if x[0] != '/']
   return _reconstruct_code, tuple(code.__getattribute__('co_'+x) for x in args)
