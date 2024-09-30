@@ -105,6 +105,15 @@ class TestGraphRewrite(unittest.TestCase):
     nout = graph_rewrite(v1+v2, PatternMatcher([]))
     self.assertIs(nout.src[0], nout.src[1])
 
+  # NOTE: this shows why we can't have a UOp in arg
+  @unittest.expectedFailure
+  def test_no_dedup_args(self):
+    a1 = UOp(UOps.DEFINE_VAR, dtypes.int, (), ("a1", UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 11)))
+    a2 = UOp(UOps.DEFINE_VAR, dtypes.int, (), ("a2", UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 11)))
+    sink = a1.sink(a2)
+    define_vars = [x for x in graph_rewrite(sink, PatternMatcher([])).sparents if x.op is UOps.DEFINE_VAR]
+    self.assertEqual(len(define_vars), 1)
+
   def test_simple(self):
     c1 = UOp.const(dtypes.float, 1.0)
     c2 = UOp.const(dtypes.float, 2.0)

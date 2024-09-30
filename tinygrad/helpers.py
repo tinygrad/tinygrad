@@ -131,8 +131,6 @@ class Metadata:
   def __str__(self): return self.name + (" bw" if self.backward else "")
 _METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
 
-_CURRENT_KERNEL: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_CURRENT_KERNEL", default=None)
-
 # **************** global state Counters ****************
 
 class GlobalCounters:
