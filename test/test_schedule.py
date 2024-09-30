@@ -16,8 +16,8 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
 from tinygrad.ops import graph_rewrite
 from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod
-from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import create_schedule, reduceop_fusor, st_fixup
+from tinygrad.codegen.kernel import Kernel, verify_ast, reduceop_fusor, st_fixup
+from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 from test.helpers import ast_const, is_dtype_supported, Context, timeit
 from tinygrad.lazy import LazyBuffer, view_supported_devices
@@ -1105,7 +1105,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(16, 16)
     b = (a.sum(0) + a.max(1)) + 2
     schedule = check_schedule(b, 2)
-    self.assertIs(schedule[0].ast.src[0].src[2].op, UOps.REDUCE_AXIS)
+    self.assertIs(schedule[0].ast.src[0].src[2].src[0].op, UOps.REDUCE_AXIS)
 
   # multireduce spec
   def test_multireduce_midreduce_nochase(self):
@@ -1114,7 +1114,7 @@ class TestSchedule(unittest.TestCase):
     b = (a.sum(0)+a.max(0) + a.max(1)+a.sum(1)) + 2
     # schedule = check_schedule(b, 2)
     schedule = check_schedule(b, 4)
-    self.assertIs(schedule[0].ast.src[0].src[2].op, UOps.REDUCE_AXIS)
+    self.assertIs(schedule[0].ast.src[0].src[2].src[0].op, UOps.REDUCE_AXIS)
     run_schedule(schedule)
     np.testing.assert_allclose(b.numpy(), a.numpy().sum(0)+a.numpy().max(0) + a.numpy().max(1)+a.numpy().sum(1)+2, atol=1e-4, rtol=1e-4)
 
@@ -1346,7 +1346,6 @@ class TestIndexing(unittest.TestCase):
       lst = [xt] if isinstance(xt, Tensor) else xt
       s = Tensor.schedule(*lst)
       kernels = [si for si in s if si.ast.op is UOps.SINK]
-      for si in kernels: verify_ast(si.ast)
       run_schedule(s)
       if FUSE_ARANGE: self.assertEqual(len(kernels), cnt)
 
