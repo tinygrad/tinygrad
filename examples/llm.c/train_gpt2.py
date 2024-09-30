@@ -170,8 +170,7 @@ if __name__ == "__main__":
     _, loss = model(x, y)
     optimizer.zero_grad()
     loss.backward()
-    optimizer.step()
-    return loss
+    return loss.realize(*optimizer.schedule_step())
 
   with Tensor.train():
     for i in range(args.num_iterations):
