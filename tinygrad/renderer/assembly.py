@@ -59,6 +59,7 @@ ptx_matcher = sym+PatternMatcher([
 ])
 
 class PTXRenderer(Renderer):
+  device = "CUDA"
   suffix = "PTX"
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
   tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in != dtypes.bfloat16]
