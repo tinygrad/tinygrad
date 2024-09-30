@@ -9,6 +9,7 @@ from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same
 from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
+  from tinygrad.codegen.kernel import Kernel
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
@@ -500,7 +501,7 @@ match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 class TrackedRewriteContext:
   loc: Tuple[str, int]                                                    # location that called graph_rewrite
   sink: UOp                                                               # the sink passed into the rewrite
-  kernel_name: Optional[str] = None                                       # the name of the kernel being rewritten
+  kernel: Optional[Kernel] = None                                         # the name of the kernel being rewritten
   rewrites: List[Tuple[UOp, UOp, UPat]] = field(default_factory=list)     # all rewrites of sparents. (before, after, UPat)
 contexts: List[TrackedRewriteContext] = []
 class TrackedPatternMatcher(PatternMatcher):
@@ -571,7 +572,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
     # get Kernel we are rewriting in the context of
     frm_walk: Optional[FrameType] = frm
     while frm_walk is not None and not isinstance(kernel:=frm_walk.f_locals.get("self", None), Kernel): kernel, frm_walk = None, frm_walk.f_back
-    contexts.append(TrackedRewriteContext((frm.f_code.co_filename, frm.f_lineno), sink, kernel.name if kernel is not None else None))
+    contexts.append(TrackedRewriteContext((frm.f_code.co_filename, frm.f_lineno), sink, kernel))
   return RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
