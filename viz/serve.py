@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
-import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, re, traceback
+import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, re, multiprocessing
 from dataclasses import dataclass, asdict
 from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from tinygrad import Device
 from tinygrad.helpers import Context, getenv, to_function_name
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, lines
 from tinygrad.engine.graph import uops_colors, word_wrap
-from tinygrad.engine.realize import get_runner
 from tinygrad.engine.schedule import ScheduleItemContext, full_ast_rewrite
 
 # **** /graph - detailed UOp + rewrites
@@ -93,12 +91,14 @@ class KernelRet:
 
 def load_kernels(contexts:List[TrackedRewriteContext]) -> List[KernelRet]:
   ret: Dict[str, KernelRet] = {}
-  kernel_name = ""
-  code = ""
+  asts = {ctx.kernel.ast.key:ctx.kernel for ctx in contexts if ctx.kernel is not None}
   for ctx in contexts:
-    if ctx.kernel is not None: kernel_name, code = ctx.kernel.name, ctx.kernel.to_program().src
-    else: kernel_name, code = "FAKE", ""
-    if ret.get(k:=to_function_name(kernel_name)) is None: ret[k] = KernelRet(k, code, [])
+    if ctx.loc[0].endswith("/schedule.py"):
+      si_ctx = ScheduleItemContext(bufs=tuple(x.arg for x in ctx.sink.sparents if x.op is UOps.BUFFER))
+      with Context(TRACK_MATCH_STATS=0): kernel = asts[full_ast_rewrite(ctx.sink, si_ctx).key]
+    else:
+      kernel = ctx.kernel
+    if ret.get(k:=to_function_name(kernel.name)) is None: ret[k] = KernelRet(k, kernel.to_program().src, [])
     ret[k].ctxs.append(ctx)
   return list(ret.values())
 
@@ -145,6 +145,7 @@ def reloader():
     time.sleep(0.1)
 
 if __name__ == "__main__":
+  multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
   print("*** viz is starting")
   with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
   print("*** unpickled saved rewrites")
