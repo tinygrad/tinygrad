@@ -416,32 +416,55 @@ break_sched = PatternMatcher([
 ])
 
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  buffers = []
+  # TODO: add all LazyBuffers owned by a Tensor to outs
+
+  buf_uops = {}
+  bufs_by_number = []
   @functools.lru_cache(None)
   def lazy_to_uop(lb:LazyBuffer) -> UOp:
-    if lb.base.buffer not in buffers: buffers.append(lb.base.buffer)
-    # this buffer is optional...
-    buf = UOp(UOps.BUFFER, lb.dtype, (), buffers.index(lb.base.buffer))
+    lbuf = lb.base.buffer
+    if lbuf not in buf_uops:
+      buf_uops[lbuf] = UOp(UOps.BUFFER, lb.dtype, (), (len(buf_uops), (lbuf.device, lbuf.size, lbuf.dtype)))
+      bufs_by_number.append(lbuf)
     if lb._base is None:
       if lb.op in MetaOps:
-        out = UOp(UOps.EXT, lb.dtype, (), (lb.op, lb.arg))
+        return UOp(UOps.EXT, lb.dtype,
+                   (buf_uops[lb.base.buffer],) + (tuple(lazy_to_uop(x) for x in lb.srcs) if hasattr(lb, 'srcs') else ()), (lb.op, lb.arg))
       else:
-        # ALU node
-        out = UOp(UOps.ALU, lb.dtype, tuple(lazy_to_uop(x) for x in lb.srcs), lb.op)
-      return UOp.load(buf, lb.st.to_uop(), UOp.store(buf, lb.st.to_uop(), out), dtype=lb.dtype)
+        # load all the inputs
+        uop_srcs = []
+        for x in lb.srcs:
+          x_uop = lazy_to_uop(x)
+          uop_srcs.append(UOp.load(buf_uops[x.base.buffer], x.st.to_uop(), x_uop, dtype=x.dtype))
+        if lb.op in ReduceOps:
+          # reduce node
+          out = UOp(UOps.REDUCE_AXIS, lb.dtype, tuple(uop_srcs), (REDUCE_ALU[cast(ReduceOps, lb.op)], lb.arg))
+        else:
+          # ALU node
+          out = UOp(UOps.ALU, lb.dtype, tuple(uop_srcs), lb.op)
+      return UOp.store(buf_uops[lb.base.buffer], lb.st.to_uop(), out)
     else:
-      return UOp.load(buf, lb.st.to_uop(), lazy_to_uop(lb.base), dtype=lb.dtype)
+      # NOOP for a view
+      return lazy_to_uop(lb.base)
 
   # rewrite LazyBuffers into the big graph!
-  sink = UOp.sink(*[lazy_to_uop(x).src[2] for x in outs])
+  sink = UOp.sink(*[lazy_to_uop(x) for x in outs])
   sink = graph_rewrite(sink, new_sched)
 
-  # break on LOAD/STORE boundaries
-  kernels = [graph_rewrite(x, break_sched) for x in sink.parents if x.op is UOps.STORE][::-1]   # BFS order?
+  # break on STORE boundaries (no multioutput)
+  kernels = [graph_rewrite(x.sink() if x.op is UOps.STORE else x, break_sched) for x in sink.parents if x.op in (UOps.EXT, UOps.STORE)][::-1]   # BFS order?
 
-  for k in kernels:
+  number_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp.define_global(x.dtype, ctx.index(x.arg[0])))])
+
+  schedule: List[ScheduleItem] = []
+  for i,k in enumerate(kernels):
+    print(f"****** kernel {i}")
     print(k)
+    numbered = [x.arg[0] for x in k.sparents if x.op is UOps.BUFFER]
+    ast = graph_rewrite(k, number_bufs, numbered)
+    schedule.append(ScheduleItem(ast, tuple(bufs_by_number[x] for x in numbered)))
 
+  return schedule, {}
 
   """
   graph, in_degree, var_vals = _graph_schedule(outs)
