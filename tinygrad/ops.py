@@ -94,6 +94,7 @@ class UOps(FastEnum):
   SHAPETRACKER = auto()
   SWIZZLE = auto()
   DEFINE_GLOBAL = auto()
+  BUFFER = auto()
   DEFINE_VAR = auto()
   DEFINE_LOCAL = auto()
   DEFINE_ACC = auto()
@@ -148,7 +149,7 @@ class UOp(MathTrait):
     for k in kwargs: assert k in self.__slots__, f"unkown replace arg, expected one of {self.__slots__}, got {k}"
     return UOp(kwargs.get("op", self.op), kwargs.get("dtype", self.dtype), kwargs.get("src", self.src), kwargs.get("arg", self.arg))
   @property
-  def has_st(self) -> bool: return self.op not in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL, UOps.CONST, UOps.DEFINE_VAR}
+  def has_st(self) -> bool: return self.op not in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL, UOps.BUFFER, UOps.CONST, UOps.DEFINE_VAR}
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
     if not self.has_st: return None
@@ -157,7 +158,7 @@ class UOp(MathTrait):
     src_sts = [x.st for x in self.src if x.st is not None]
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
     from tinygrad.shape.shapetracker import ShapeTracker
-    return ShapeTracker.from_shape(src_sts[0].reduce(self.arg[1])) if self.op is UOps.REDUCE_AXIS else src_sts[0]
+    return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg)) if self.op is UOps.REDUCE_AXIS else src_sts[0]
   @functools.cached_property
   def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
@@ -178,6 +179,12 @@ class UOp(MathTrait):
     ret = self.src[0 if self.op is UOps.VALID else 1]
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
+  @property
+  def axis_arg(self) -> Tuple[int, ...]:
+    assert self.op in {UOps.REDUCE_AXIS, UOps.WMMA}, f"axis_arg called on {self.op}"
+    ret = self.arg[1] if self.op is UOps.REDUCE_AXIS else self.arg[7]
+    assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
+    return ret
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
   def const_like(self, b:ConstType|Variable|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)
@@ -532,13 +539,13 @@ if TRACK_MATCH_STATS:
     if getenv("VIZ"):
       os.environ["VIZ"] = "0"
       os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), "..", "viz", "serve.py")])
-    ret = [0,0,0.0,0.0]
-    for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
-      loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
-      if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {v[2]*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
-      ret = [x+y for x,y in zip(ret, v)]
-    print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {ret[2]*1000.:9.2f} ms -- TOTAL")
-
+    if getenv("PRINT_MATCH_STATS", 1):
+      ret = [0,0,0.0,0.0]
+      for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
+        loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
+        if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {v[2]*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
+        ret = [x+y for x,y in zip(ret, v)]
+      print(f"{ret[0]:6d} / {ret[1]:7d} -- {ret[3]*1000.:9.2f} / {ret[2]*1000.:9.2f} ms -- TOTAL")
 
 # *** simple graph rewrite engine ***
 
