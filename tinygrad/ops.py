@@ -158,7 +158,7 @@ class UOp(MathTrait):
     src_sts = [x.st for x in self.src if x.st is not None]
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
     from tinygrad.shape.shapetracker import ShapeTracker
-    return ShapeTracker.from_shape(src_sts[0].reduce(self.arg[1])) if self.op is UOps.REDUCE_AXIS else src_sts[0]
+    return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg)) if self.op is UOps.REDUCE_AXIS else src_sts[0]
   @functools.cached_property
   def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
     # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
@@ -179,6 +179,12 @@ class UOp(MathTrait):
     ret = self.src[0 if self.op is UOps.VALID else 1]
     assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
     return ret.arg
+  @property
+  def axis_arg(self) -> Tuple[int, ...]:
+    assert self.op in {UOps.REDUCE_AXIS, UOps.WMMA}, f"axis_arg called on {self.op}"
+    ret = self.arg[1] if self.op is UOps.REDUCE_AXIS else self.arg[7]
+    assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
+    return ret
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
   def const_like(self, b:ConstType|Variable|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)
