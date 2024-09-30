@@ -438,9 +438,15 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       # this is a base
       if lb.op in MetaOps:
         usrcs = (ubuf,) + tuple(lazy_to_uop(x) for x in lb.srcs)
-        del lb.srcs
-        if lb.op is MetaOps.CONST: return UOp.store(ubuf, lb.st.to_uop(), UOp.const(lb.dtype, lb.arg))
-        else: return UOp(UOps.EXT, lb.dtype, usrcs, (lb.op, lb.arg))
+        if lb.op is MetaOps.CONST: out = UOp.const(lb.dtype, lb.arg)
+        elif lb.op is MetaOps.CONTIGUOUS:
+          # TODO: mark graph to not be broken here
+          x = lb.srcs[0]
+          x_uop = lazy_to_uop(x)
+          out = UOp.load(buf_uops[x.base.buffer], x.st.to_uop(), x_uop, dtype=x.dtype)
+        else:
+          del lb.srcs
+          return UOp(UOps.EXT, lb.dtype, usrcs, (lb.op, lb.arg))
       else:
         # load all the inputs
         uop_srcs = []
