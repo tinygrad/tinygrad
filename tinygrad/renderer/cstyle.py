@@ -316,8 +316,8 @@ class CUDARenderer(CStyleLanguage):
     upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
   # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-1688
   tensor_cores_8168 = [TensorCore(dims=(8,16,8), threads=[(0,2),(0,2),(1,2),(1,2),(1,2)], dtype_in=dtypes.float, dtype_out=dtypes.float,
-    st1_pattern=(((1,1), (1,0), (0,2), (0,3), (0,4)), ((1,4), (1,2), (0,0), (0,1), (1,3))), expanded_shape=(2,2,2,2,2), reduce_axes=[(0,4),(1,2)],
-    st2_pattern=(((1,1), (1,0), (1,3), (0,0), (0,1)), ((0,4), (0,2), (1,4), (0,3), (1,2))), upcast_axes=([(0,4)],[(3,2)],[(3,2),(2,2)]))]
+    st1_pattern=(((1,1),(1,0),(0,2),(0,3),(0,4)),((1,4),(1,2),(0,0),(0,1),(1,3))), expanded_shape=(2,2,2,2,2), reduce_axes=[(0,4),(1,2)],
+    st2_pattern=(((1,1),(1,0),(1,3),(0,0),(0,1)),((0,4),(0,2),(1,4),(0,3),(1,2))), upcast_axes=([(0,4)],[(3,2)],[(3,2),(2,2)]))]
   tensor_cores = tensor_cores_81616 + tensor_cores_8168
   def __init__(self, arch:str): self.tensor_cores = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else []
 
