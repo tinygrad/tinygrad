@@ -35,7 +35,7 @@ setup(name='tinygrad',
             "ruff",
             "types-tqdm",
         ],
-        #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@4.0.0-rc2"],
+        #'mlperf': ["mlperf-logging @ git+https://github.com/mlperf/logging.git@4.1.0-rc3"],
         'testing': [
             "numpy",
             "torch",
