@@ -490,9 +490,10 @@ def deconstruct_function(fxn:Callable) -> Tuple:
   new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
   for co in fxn.__code__.co_consts:
     if isinstance(co, types.CodeType): new_globals.update({k:v for k,v in fxn.__globals__.items() if k in co.co_names})
-  new_code_obj = pickle.loads(pickle.dumps(fxn.__code__)) if getenv("TEST_PICKLE") else fxn.__code__  # NOTE: optional round trip through pickle!
+  # NOTE: optional round trip through pickle!
   assert fxn.__closure__ is None, "closures are not supported in pattern matchers"
-  return new_code_obj, new_globals, fxn.__name__, fxn.__defaults__
+  ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
+  return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
