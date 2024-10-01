@@ -275,8 +275,7 @@ class TestOps(unittest.TestCase):
   def _test_cmp(self, fxn, reverse=True):
     # test different dtypes
     helper_test_op(None, fxn, fxn, forward_only=True, vals=[[0.,1,2], [2.,1,0]])
-    if Device.DEFAULT != "WEBGPU": # no int64
-      helper_test_op(None, fxn, fxn, forward_only=True, vals=[[0,1,2], [2,1,0]])
+    helper_test_op(None, fxn, fxn, forward_only=True, vals=np.array([[0,1,2], [2,1,0]], dtype=np.int32))
     helper_test_op(None, fxn, fxn, forward_only=True, vals=[[True, True, False], [False,True,False]])
     # test broadcasting
     for shps in [[(3, 4, 5), (3, 4, 5)], [(3, 4, 5), (5,)], [(5,), (3, 4, 5)]]:
@@ -567,7 +566,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.sin())
     helper_test_op([()], lambda x: x.sin())
     # works on real CUDA but not CI
-    if not (getenv("MOCKGPU") and Device.DEFAULT == "NV") and Device.DEFAULT != "WEBGPU": # why is this inaccurate on webgpu?
+    if not (getenv("MOCKGPU") and Device.DEFAULT == "NV") and Device.DEFAULT != "WEBGPU": # sin is only precise in (-pi,pi) on webgpu
       helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf]])
       helper_test_op(None, lambda x: x.sin(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
@@ -2020,12 +2019,12 @@ class TestOps(unittest.TestCase):
 
   def test_slice_fancy_indexing_tuple_indices(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
-    # helper_test_op([(2,5,6,5,3,4)], lambda x: x[(((0,),),)], lambda x: x[(((0,),),)])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(((0,),),)], lambda x: x[(((0,),),)])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[(0,),b,c,d,:], lambda x: x[(0,),j,k,o,:])
-    # helper_test_op([(2,5,6,5,3,4)], lambda x: x[(1,0),b,c,d,:], lambda x: x[(1,0),j,k,o,:])
-    # helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,(1,2,3),...], lambda x: x[i,j,k,(1,2,3),...])
-    # helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,((2,),(1,),(0,)),c,(2,1,0)], lambda x: x[i,((2,),(1,),(0,)),k,(2,1,0)])
-    # helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,(2,1,0),None,c,(2,1,0),e], lambda x: x[1,(2,1,0),None,k,(2,1,0),p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(1,0),b,c,d,:], lambda x: x[(1,0),j,k,o,:])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,(1,2,3),...], lambda x: x[i,j,k,(1,2,3),...])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,((2,),(1,),(0,)),c,(2,1,0)], lambda x: x[i,((2,),(1,),(0,)),k,(2,1,0)])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,(2,1,0),None,c,(2,1,0),e], lambda x: x[1,(2,1,0),None,k,(2,1,0),p])
 
   def test_slice_fancy_indexing_list_with_tensors(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
@@ -2129,8 +2128,7 @@ class TestOps(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
   def test_cast(self):
     helper_test_op([(3, 3)], lambda x: x.float())
-    if Device.DEFAULT != "WEBGPU": # no int64
-      helper_test_op(None, lambda x: x.float(), vals=[[0, 1, 2, 3]], forward_only=True)
+    helper_test_op(None, lambda x: x.float(), vals=np.array([[0, 1, 2, 3]], dtype=np.int32), forward_only=True)
     helper_test_op(None, lambda x: x.float(), vals=[[True, False]], forward_only=True)
     helper_test_op([(3, 3)], lambda x: x.int(), forward_only=True)
     helper_test_op([(3, 3)], lambda x: x.bool(), forward_only=True)
