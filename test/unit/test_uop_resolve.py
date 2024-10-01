@@ -55,6 +55,20 @@ class TestUOpResolve(unittest.TestCase):
     u = UOp.define_var("b", dtypes.bool, False, True) | True
     self.assertTrue(u)
 
+  def test_or_false(self):
+    with self.assertRaises(ValueError):
+      u = UOp.define_var("b", dtypes.bool, False, True) | False
+      self.assertTrue(u)
+
+  def test_and_false(self):
+    u = UOp.define_var("b", dtypes.bool, False, True) & False
+    self.assertFalse(u)
+
+  def test_and_true(self):
+    with self.assertRaises(ValueError):
+      u = UOp.define_var("b", dtypes.bool, False, True) & True
+      self.assertFalse(u)
+
   @unittest.skip("too fancy to be supported right now")
   def test_var_cmp_range(self):
     v = UOp.define_var("i", dtypes.pyint, 1, 10)
