@@ -65,9 +65,12 @@ class MathTrait:
   def eq(self, x): return self.ne(x).ne(True)
   def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
   def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
-  # TODO: use this one instead
   def ge(self, x): return self.lt(x).ne(True)
-  #def ge(self, x): return (-self).lt(-x+1)
+  def le(self, x): return self.gt(x).ne(True)
+  def __lt__(self, x): return self.lt(x)
+  def __gt__(self, x): return self.gt(x)
+  def __ge__(self, x): return self.ge(x)
+  def __le__(self, x): return self.le(x)
   def max(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
@@ -166,6 +169,16 @@ class UOp(MathTrait):
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
+  # *** uop evaluation ***
+  def _eval(self, dtype, expected_type) -> ConstType:
+    assert self.dtype in dtype, f"eval with wrong dtype {self}"
+    vmin, vmax = self._min_max
+    if vmin != vmax: raise ValueError(f"eval failed to be a single number, range is {vmin} to {vmax}")
+    assert type(vmin) is expected_type, f"vmin is wrong dtype {vmin} != {expected_type}"
+    return vmin
+  def __bool__(self): return self._eval((dtypes.bool,), bool)
+  def __int__(self): return self._eval(dtypes.ints, int)
+  def __float__(self): return self._eval(dtypes.floats, float)
   # *** uop syntactic sugar
   @property
   def st_arg(self) -> ShapeTracker:
@@ -270,6 +283,7 @@ class UOp(MathTrait):
     if self.op is UOps.ALU and self.dtype.count == 1:
       s0,s1,s2 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(3)]
       if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
+      if self.arg is BinaryOps.OR and self.dtype is dtypes.bool: return s0.vmin or s1.vmin, s0.vmax or s1.vmax
       if self.arg is BinaryOps.MUL:
         # both are non-positive
         if (s0.vmax <= 0 and s1.vmax <= 0): return s0.vmax*s1.vmax, s0.vmin*s1.vmin
@@ -563,12 +577,12 @@ class RewriteContext:
     self.nodes: Dict[Tuple, UOp] = {}
     self.replace: Dict[UOp, UOp] = {}
   def rewrite(self, n:UOp) -> UOp:
-    if rn := self.replace.get(n): return rn
+    if (rn := self.replace.get(n)) is not None: return rn
     replace_source = (n.op, n.dtype, new_src:=tuple(map(self.rewrite, n.src)), n.arg)
-    if found := self.nodes.get(replace_source): self.replace[n] = found
+    if (found := self.nodes.get(replace_source)) is not None: self.replace[n] = found
     else:
       x = UOp(*replace_source) if new_src != n.src else n
-      self.nodes[replace_source] = self.replace[n] = found = self.rewrite(new_x) if (new_x := self.pm.rewrite(x, self.ctx)) else x
+      self.nodes[replace_source] = self.replace[n] = found = self.rewrite(new_x) if (new_x := self.pm.rewrite(x, self.ctx)) is not None else x
     return found
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
   if TRACK_MATCH_STATS >= 2:

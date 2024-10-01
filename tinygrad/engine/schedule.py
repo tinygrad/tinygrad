@@ -50,7 +50,7 @@ class ScheduleItemContext:
 # ** helpers for doing movementops on uops
 
 def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], cache:Dict[UOp, UOp]) -> UOp:
-  if (n:=cache.get(u)): return n
+  if (n:=cache.get(u)) is not None: return n
   if u.op is UOps.SHAPETRACKER:
     new_st = apply_to_st(u.arg)
     return u if u.arg == new_st else UOp(UOps.SHAPETRACKER, dtypes.void, (), new_st)
@@ -140,7 +140,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
 
   # buffer ops define ShapeTracker
   # if it's realized, it's a load and we add it to the inputs
-  if (ubuf:=buf_uops.get(buf.buffer)) and buf not in outputs:
+  if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     if buf.op is MetaOps.CONST:

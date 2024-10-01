@@ -39,7 +39,7 @@ def fold_expanded(ex, buf):
         if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
           load_1 = new_srcs[offsets[o]]
           new_src = list(load_1.src)
-          if not new_src[1].divides(fold_length): continue
+          if new_src[1].divides(fold_length) is None: continue
           # for images, we rewrite the index. it must evenly divide 4 from the above check
           if is_image:
             new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((new_src[1] // 4) % buf.dtype.shape[1], (new_src[1] // (4 * buf.dtype.shape[1]))))
@@ -264,7 +264,7 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
 
   if not drop_stmt and idx.key == start_idx.key: return None
   new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
-  return load.replace(src=((buf, idx, invalid_val, new_valid) if new_valid else (buf, idx)))
+  return load.replace(src=((buf, idx, invalid_val, new_valid) if new_valid is not None else (buf, idx)))
 
 # ***** optional patterns *****
 
