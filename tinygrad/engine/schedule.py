@@ -108,7 +108,7 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
 
 reduceop_fusor = PatternMatcher([
-  # SWIZZLE on VALID is a new VALID
+  # SWIZZLE on VALID merges the views
   (UPat(UOps.SWIZZLE, src=(UPat(UOps.ALU, src=(UPat(UOps.VALID, name="valid"), UPat.var(), UPat.var()), arg=TernaryOps.WHERE),), name="swizzle"),
    lambda swizzle,valid: UOp(UOps.VALID, dtypes.bool, ((valid.st_arg+unwrap(swizzle.st)).to_uop(),)).where(*swizzle.src[0].src[1:])),
   # push a SWIZZLE up to LOAD, through a reduce (eg. expands)
@@ -362,7 +362,8 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
           assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
           buf.buffer.dtype = dtypes.float32
           buf.buffer.options = None
-    if buf.op is MetaOps.CONST: uop = UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(UOp.const(buf.dtype, buf.arg), UOp.const(buf.dtype, 0))
+    if buf.op is MetaOps.CONST:
+      uop = UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(buf.dtype.scalar(), buf.arg), v.const_like(0))
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
     else: uop = UOp(UOps.BUFFER, buf.buffer.dtype, (), len(buf_uops))
     buf_uops.setdefault(buf.buffer, uop)
