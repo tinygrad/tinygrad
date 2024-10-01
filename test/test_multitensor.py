@@ -618,7 +618,7 @@ class TestMultiTensor(unittest.TestCase):
         ast = si.ast.src[0]
         assert ast.op is UOps.STORE
         assert ast.src[2].arg is BinaryOps.ADD
-        assert ast.src[2].src[0].op is UOps.LOAD and ast.src[2].src[0]
+        assert ast.src[2].src[0].op is UOps.LOAD
         assert ast.src[2].src[1].src[1].op is UOps.CONST and ast.src[2].src[1].src[1].arg == 1
       t = 2 * t
       for si in t.schedule():

@@ -144,7 +144,7 @@ class PTXRenderer(Renderer):
 
     def _cast(a, dtype:DType, atype:DType, bitcast=False, u=None, pred=False):
       if atype == dtype or isinstance(atype, PtrDType):
-        if u: r[u] = a
+        if u is not None: r[u] = a
         return a
       kk(*self.render_cast((ret:=ssa('cast', u, self.types[dtype])), a, dtype, atype, bitcast))
       return ret
