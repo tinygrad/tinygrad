@@ -162,14 +162,6 @@ class UOp(MathTrait):
     from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg)) if self.op is UOps.REDUCE_AXIS else src_sts[0]
   @functools.cached_property
-  def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
-    # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
-    if self.op is UOps.DEFINE_VAR: arg = self.arg[0]
-    elif self.op is UOps.ALU: arg = self.arg.value
-    else: arg = self.arg
-    return (self.op.value, arg, self.dtype, self.src)
-  def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
-  @functools.cached_property
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
