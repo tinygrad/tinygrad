@@ -30,7 +30,7 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
     if s == 1: continue
     # merge last dim with this dim if merging or strides matched
     if merging or last_st == s * st: ret[-1] = (last_s * s, st, (s if merging else last_pre_expand_s * s) if st else 0)
-    else: ret.append((s, st, s if st else 0))
+    else: ret.append((s, st, s if st > 0 else 0))
     # merge this dim to next dim if size is 1
     merging = (mask[i][1] - mask[i][0] == 1) if mask is not None else s == 1
   return tuple(ret)
@@ -300,9 +300,10 @@ class View:
     for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
       acc = 1
       # TODO: this <= and != is for symbolic!?
-      while acc <= merged_dim and acc != merged_dim and (new_dim := next(r_new_shape, None)) > 0:
+      while acc <= merged_dim and acc != merged_dim and (new_dim := next(r_new_shape, 0)) > 0:
         strides.append(new_stride)
-        if new_dim != 1: new_stride *= (new_dim if (acc :=  acc * new_dim) < real_dim else 0)
+        # TODO: what did this do?
+        #if new_dim != 1: new_stride *= (new_dim if (acc := acc * new_dim) < real_dim else 0)
       if acc != merged_dim: break
     else:
       strides += [0,] * (len(new_shape) - len(strides))

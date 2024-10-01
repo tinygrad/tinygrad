@@ -31,7 +31,8 @@ class TestSymbolic(unittest.TestCase):
     k = Variable("k", 1, 5).bind(3)
     t = Tensor.rand(3, 4).reshape(i, 4).cat(Tensor.rand(3, 4).reshape(j, 4), dim=0).cat(Tensor.rand(3, 4).reshape(k, 4), dim=0)
     st = t.lazydata.st
-    assert st.shape == (i+j+k, 4)
+    assert st.shape[0].eq(i+j+k)
+    assert st.shape[1] == 4
     assert st.real_strides() == (4, 1)
     t = Tensor.rand(3, 3).reshape(i, 3).cat(Tensor.rand(3, 3).reshape(i, 3), dim=0).cat(Tensor.rand(3, 3), dim=0)
     st = t.lazydata.st
@@ -58,7 +59,7 @@ class TestSymbolicVarVals(unittest.TestCase):
   def test_var_vals_offset(self):
     x = Variable("x", 1, 100).bind(3)
     st = ShapeTracker.from_shape((4, 3)).shrink(((x, x+1), (0, 3)))
-    assert st.views[-1].offset == x * 3
+    assert st.views[-1].offset.eq(x * 3)
     assert st.var_vals == {Variable("x", 1, 100): 3}
 
   def test_var_vals_mask(self):
