@@ -6,7 +6,7 @@ from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same
-from tinygrad.shape.symbolic import Variable, sint
+#from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.codegen.kernel import Kernel
@@ -217,15 +217,18 @@ class UOp(MathTrait):
     return UOp(UOps.ALU, out_dtype, (self,)+src, arg)
   @staticmethod
   @functools.lru_cache(None)
-  def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return UOp._const(dtype, b)
+  def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType): return UOp._const(dtype, b)
   @staticmethod
-  def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
+  def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
+    #if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
+  def bind(self, val:ConstType):
+    assert self.op is UOps.DEFINE_VAR and len(self.arg) == 3
+    return self.replace(src=self.arg + (val,))
   @staticmethod
   def define_global(dtype:DType, arg): return UOp(UOps.DEFINE_GLOBAL, dtype if isinstance(dtype, ImageDType) else PtrDType(dtype), (), arg)
   @staticmethod
