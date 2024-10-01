@@ -335,7 +335,7 @@ class TestLinearizer(unittest.TestCase):
       [*[Opt(OptOps.UPCAST, 0, 2) for _ in range(L-1)], Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8), Opt(OptOps.LOCAL, 0, 2)],
       [Opt(OptOps.LOCAL, 0, 2), *[Opt(OptOps.UPCAST, 0, 2) for _ in range(L-1)], Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)]
     ]
-    helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=safe_opts, rtol=0.01, atol=0.01)
+    helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=safe_opts)
 
     # this should always raise an error
     # num bytes stored in temp buffers = 2 ^ (1+floor(log2(max_smem / 4 / (8 + 8)))) * 4 * (8 + 8) > max_smem
@@ -347,7 +347,7 @@ class TestLinearizer(unittest.TestCase):
     ]
     for opts in unsafe_opts:
       with self.assertRaises(KernelOptError):
-        helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts, rtol=0.01, atol=0.01)
+        helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
