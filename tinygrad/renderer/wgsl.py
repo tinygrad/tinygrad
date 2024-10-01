@@ -2,13 +2,13 @@ from typing import List, Tuple
 import math
 from tinygrad.dtype import DType, PtrDType, dtypes, ConstType
 from tinygrad.ops import UOp, UOps, UnaryOps, TernaryOps, BinaryOps, PatternMatcher, UPat
-from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, _render_index
 
 def fixup_binops(c,a,b):
   if c.arg == BinaryOps.CMPLT and a.dtype == dtypes.bool: return UOp(c.op, c.dtype, (a.cast(dtypes.int), b.cast(dtypes.int)), c.arg)
   if c.arg in (BinaryOps.MAX, BinaryOps.XOR) and c.dtype == dtypes.bool:
     return UOp(c.op, dtypes.int, (a.cast(dtypes.int), b.cast(dtypes.int)), c.arg).cast(dtypes.bool)
-  # wgpu int mod is buggy (hw specific?). test_uops::test_mod_int32 is broken on Vulkan without this
+  # test_uops::test_mod_int32 is broken, at least on Vulkan backend, without this
   if c.arg == BinaryOps.MOD and c.dtype == dtypes.int:
     return UOp(c.op, dtypes.float, (a.cast(dtypes.float), b.cast(dtypes.float)), c.arg).cast(dtypes.int)
 
@@ -20,8 +20,6 @@ wgsl_matcher = PatternMatcher([
     lambda root: UOp(root.op, dtypes.int, root.src, root.arg).cast(dtypes.bool)),
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, src=(UPat(),UPat())), lambda root: UOp(root.op, dtypes.int, root.src, root.arg).cast(dtypes.bool)),
   (UPat(UOps.ALU, src=(UPat(name="a"), UPat(name="b")), name="c"), fixup_binops),
-  (UPat(UOps.ALU, dtype=dtypes.float, arg=BinaryOps.ADD, src=[UPat.var("non_muls"), UPat(UOps.ALU, arg=BinaryOps.MUL, name="muls")], name="root"),
-    lambda root, muls, non_muls: UOp(UOps.ALU, root.dtype, muls.src + (non_muls,), TernaryOps.MULACC)),
   *[(UPat(UOps.ALU, src=(UPat(name="b", dtype=(dtypes.uint, dtypes.int, dtypes.bool))), arg=a, name="a"),
      lambda a,b: UOp(a.op, dtypes.float, (b.cast(dtypes.float),), a.arg).cast(b.dtype))
     for a in (UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2, UnaryOps.SQRT)],
@@ -29,6 +27,8 @@ wgsl_matcher = PatternMatcher([
    lambda buf,idx,val,gate: UOp.store(buf, idx, val.cast(dtypes.int), gate)),
   (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("val", dtype=dtypes.bool)), lambda buf,idx,val: UOp.store(buf, idx, val.cast(dtypes.int))),
 ])
+
+type_map = {dtypes.float: "f32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
 
 class WGSLRenderer(CStyleLanguage):
   device = "WEBGPU"
@@ -39,23 +39,21 @@ class WGSLRenderer(CStyleLanguage):
   external_local_bufs = True
   supports_float4 = False
   barrier = "workgroupBarrier();"
-  type_map = {dtypes.float: "f32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
-  code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a})",
-                 TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})"}
+  code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a})"}
+  infinity = "inf(1.0)"
+  nan = "nan()"
+  type_map = type_map
 
-  def render_const(self, x:ConstType, dtype: DType) -> str:
-    assert dtype.count == 1, f"consts should be scalar, got {dtype}"
-    if math.isinf(x): return ("-" if x < 0 else "") + "inf(1.0)"
-    if math.isnan(x): return "nan()"
-    if dtype == dtypes.bool: return "true" if x else "false"
-    if dtypes.is_unsigned(dtype): return f"bitcast<u32>({x}i)" if x < 0 else f"{x}u" # cstyle initialization
-    return f"{x}" + ("" if dtypes.is_int(dtype) else "f")
-
-  def render_local(self, name: str, dtype:DType, size: int): return f"var<workgroup> {name}: array<{self.type_map[dtype]},{size}>;"
-
-  def render_cast(self, x:str, var_dtype:DType, bitcast=False) -> str:
-    if self.type_map[var_dtype]: return f"bitcast<{self.type_map[var_dtype]}>({x})" if bitcast else f"{self.type_map[var_dtype]}({x})"
-    raise NotImplementedError(f"no cast for {var_dtype}")
+  string_rewrite = PatternMatcher([
+    (UPat(UOps.CONST, dtype=dtypes.bool, name="x"), lambda r,x: "true" if x.arg else "false"),
+    # cstyle uint initialization
+    (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda r,x: f"bitcast<u32>({x.arg}i)" if x.arg < 0 else f"{x.arg}u"),
+    (UPat(UOps.DEFINE_LOCAL, name="x"), lambda r,x: f"var<workgroup> {r[x]}: array<{type_map[x.dtype.base]}, {x.arg[1]}>;"),
+    (UPat(UOps.CAST, name="x"), lambda r,x: f"{type_map[x.dtype]}({r[x.src[0]]})"),
+    (UPat(UOps.BITCAST, name="x"), lambda r,x: f"bitcast<{type_map[x.dtype]}>({r[x.src[0]]})"),
+    (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var"), UPat.var("gate")), name="load"),
+     lambda r,buf,idx,load,var,gate: f"select({r[var]}, {_render_index(r, buf, idx, load.dtype)},{r[gate]})"),
+  ]) + base_rewrite
 
   def render_dtype(self, var_dtype): return "var"
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:

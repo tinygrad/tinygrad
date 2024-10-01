@@ -3,10 +3,9 @@ import numpy as np
 import torch
 from typing import Any, List
 from tinygrad.helpers import getenv, DEBUG, CI
-from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype
+from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.ops import truncate_fp16
 from hypothesis import given, settings, strategies as strat
 from test.helpers import is_dtype_supported, rand_for_dtype
 
@@ -587,7 +586,7 @@ class TestAutoCastType(unittest.TestCase):
   def tearDown(self):
     dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
 
-  @given(strat.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_int(d) and is_dtype_supported(d)]))
+  @given(strat.sampled_from([d for d in core_dtypes if dtypes.is_int(d) and is_dtype_supported(d)]))
   def test_int_to_float_unary_func(self, dtype):
     for func in [
       lambda t: t.exp(),

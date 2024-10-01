@@ -2,14 +2,13 @@
 from __future__ import annotations
 import functools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, Iterable, Any
+from typing import Tuple, List, Optional, Dict, Set, Any
 from tinygrad.helpers import merge_dicts, getenv
-from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, DivNode, ModNode, LtNode, AndNode, sint
+from tinygrad.shape.symbolic import Variable, MulNode, SumNode, NumNode, DivNode, ModNode, LtNode, AndNode, sint
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, UOps, BinaryOps
-from tinygrad.ops import graph_rewrite
-from tinygrad.codegen.uopgraph import constant_folder, _get_chain
+from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite
+from tinygrad.codegen.uopgraph import sym, _get_chain
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
 def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.pyint, x) if isinstance(x, int) else x.render(render_ops, ctx)
@@ -18,8 +17,7 @@ render_ops: Any = { NumNode: lambda self, ops, ctx: UOp.const(dtypes.pyint, self
                     DivNode: lambda self, ops, ctx: self.a.render(ops, ctx)//variable_to_uop(self.b, ctx),
                     ModNode: lambda self, ops, ctx: self.a.render(ops, ctx)%variable_to_uop(self.b, ctx),
                     LtNode: lambda self, ops, ctx: self.a.render(ops, ctx).lt(variable_to_uop(self.b, ctx)),
-  Variable: lambda self,ops,ctx: ctx[self] if ctx is not None and self in ctx else \
-    UOp(UOps.DEFINE_VAR, dtypes.int, arg=(self.expr, UOp.const(dtypes.int, self.min), UOp.const(dtypes.int, self.max))),
+  Variable: lambda self,ops,ctx: ctx[self] if ctx is not None and self in ctx else UOp.define_var(self.expr, dtypes.int, self.min, self.max),
   SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a+b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)),
   AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a*b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
@@ -103,38 +101,23 @@ class ShapeTracker:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     ret: List[Optional[sint]] = [None] * len(self.shape)
     idx, valid = self.to_indexed_uops()
-    idx = graph_rewrite(idx, pm=constant_folder)
+    idx = graph_rewrite(idx, pm=sym)
     for c in _get_chain(idx, BinaryOps.ADD):
       if c.op is UOps.RANGE: ret[c.arg] = 1
       if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[0].op is UOps.RANGE and c.src[1].op is UOps.CONST: ret[c.src[0].arg] = c.src[1].arg
       if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[1].op is UOps.RANGE and c.src[0].op is UOps.CONST: ret[c.src[1].arg] = c.src[0].arg
-    used_ranges = [x.arg for x in graph_rewrite(idx, pm=constant_folder).sparents if x.op is UOps.RANGE]
+    used_ranges = [x.arg for x in graph_rewrite(idx, pm=sym).sparents if x.op is UOps.RANGE]
     ret = [x if i in used_ranges else 0 for i,x in enumerate(ret)]
     if not ignore_valid:
-      masked_axis = [x.arg for x in graph_rewrite(valid, pm=constant_folder).sparents if x.op is UOps.RANGE]
+      masked_axis = [x.arg for x in graph_rewrite(valid, pm=sym).sparents if x.op is UOps.RANGE]
       ret = [None if i in masked_axis else x for i,x in enumerate(ret)]
     return tuple(ret)
 
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
-  def expr_idxs(self, idxs:Optional[Iterable[Node]]=None) -> Tuple[Node, Node]:
-    idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)] if idxs is None else list(idxs)
-    idx, valid = self.views[-1].expr(idxs)
-    for view in reversed(self.views[0:-1]):
-      if valid.max == 0: return NumNode(-1), valid
-      view = view.minify()
-      acc, idxs = 1, []
-      for d in reversed(view.shape):
-        idxs.append((idx//acc)%d)
-        acc *= d
-      idx, valid = view.expr(idxs[::-1], valid)
-    assert not isinstance(idx.min, int) or idx.min >= -2**31, f"idx.min too small. {idx=}, {idx.min=}"
-    assert not isinstance(idx.max, int) or idx.max < 2**31, f"idx.max too big. {idx=}, {idx.max=}"
-    return idx, valid
-
   def axis_is_masked(self, axis:int) -> bool:
     _, valid = self.to_indexed_uops()
-    return axis in [x.arg for x in graph_rewrite(valid, constant_folder).sparents if x.op is UOps.RANGE]
+    return axis in [x.arg for x in graph_rewrite(valid, sym).sparents if x.op is UOps.RANGE]
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:

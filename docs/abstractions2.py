@@ -89,7 +89,7 @@ del a.srcs
 del b.srcs
 
 # describe the computation
-out = a.e(BinaryOps.ADD, b)
+out = a.alu(BinaryOps.ADD, b)
 
 # schedule the computation as a list of kernels
 sched = create_schedule([out])

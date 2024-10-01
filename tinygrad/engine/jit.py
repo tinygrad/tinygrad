@@ -3,7 +3,7 @@ from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, O
 import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, colored, JIT, dedup
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, colored, JIT, dedup, partition
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -15,10 +15,9 @@ from weakref import WeakKeyDictionary
 
 class GraphException(Exception): pass
 
-def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]) -> List[ExecItem]:
+def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], max_batch_size=0) -> List[ExecItem]:
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
-  max_batch_size = getenv("JIT_BATCH_SIZE", 32)
   graphed_jit_cache: List[ExecItem] = []
   current_batch: List[ExecItem] = []
   current_device: Optional[Compiled] = None
@@ -50,7 +49,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
     can_be_graphed = ji_graph_dev and ji_graph_dev.graph
     can_share_graph = (ji_graph_dev == current_device or (isinstance(graph_class, type) and issubclass(graph_class, MultiGraphRunner)) and
                        type(ji_graph_dev) is type(current_device))
-    can_extend_graph_batch = can_be_graphed and len(current_batch) < max_batch_size and can_share_graph
+    can_extend_graph_batch = can_be_graphed and (max_batch_size == 0 or len(current_batch) < max_batch_size) and can_share_graph
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
 
     if can_be_graphed: current_batch.append(ji)
@@ -80,9 +79,11 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     mem_estimate: sint = 0
     lds_estimate: sint = 0
 
+    def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
+
     self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
-    self.symbolic_dims = dedup([tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.local_size) and not all_int(d)] +
-                               [tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.global_size) and not all_int(d)])
+    self.symbolic_dims = dedup([tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.local_size) and is_sym_dim(d)] +
+                               [tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.global_size) and is_sym_dim(d)])
     def find_symbolic_dim(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
 
     for j,ji in enumerate(jit_cache):
@@ -159,7 +160,7 @@ class CapturedJit(Generic[ReturnType]):
 
     # Condense the items into a graph executor.
     if JIT < 2 and not self._graphed:
-      self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals)
+      self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
       self._input_replace = get_input_replace(self._jit_cache, input_buffers)
       self._graphed = True
 
@@ -183,11 +184,12 @@ def _prepare_jit_inputs(args, kwargs):
   return input_buffers, var_vals, names, st_vars_dtype_device
 
 class TinyJit(Generic[ReturnType]):
-  def __init__(self, fxn:Optional[Callable[..., ReturnType]], captured:Optional[CapturedJit]=None):
+  def __init__(self, fxn:Optional[Callable[..., ReturnType]], captured:Optional[CapturedJit]=None, prune=False):
     assert fxn or captured, "need either a function or a CapturedJit"
     self.fxn = fxn
     self.captured: Optional[CapturedJit] = captured
     self.cnt: int = 2 if self.fxn is None else 0
+    self.prune = prune
 
   def add_buffer(self, b:Buffer) -> Buffer:
     if found:=self._buffer_replace.get(b, None): return found
@@ -232,7 +234,8 @@ class TinyJit(Generic[ReturnType]):
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._jit_cache: List[ExecItem] = []
       self._buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
-      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value)):
+      # TODO: should we always disable the memory planner here? it must be off for prune
+      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=int(self.prune)):
         capturing.append(self)
         try:
           ret = self.fxn(*args, **kwargs)
@@ -252,6 +255,22 @@ class TinyJit(Generic[ReturnType]):
           if b is not None and b._base is not None and b._base in input_buffers:
             input_buffers.append(b)
             extra_view_inputs.append((input_buffers.index(b.base), b.offset, b.device, b.size, b.dtype))
+
+      # prune independent kernels (optional)
+      if self.prune:
+        depends = set(input_buffers)
+        for ei in jit_cache:
+          if any(b in depends for b in ei.bufs):
+            if isinstance(ei.prg, CompiledRunner):
+              for out in ei.prg.p.outs: depends.add(cast(Buffer, ei.bufs[out]))
+        pruned, onetime = partition(jit_cache,
+                                    lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
+        if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
+        # run the onetime kernels here
+        for ei in onetime:
+          for b in ei.bufs: cast(Buffer, b).ensure_allocated()
+          ei.run(var_vals, jit=True)
+        jit_cache = pruned
 
       # memory planning (optional)
       # Exclude buffers involved in transfer ops to preserve parallelism.

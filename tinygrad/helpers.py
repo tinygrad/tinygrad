@@ -32,7 +32,14 @@ def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
-def fully_flatten(l): return [item for sublist in l for item in (fully_flatten(sublist) if isinstance(sublist, (tuple, list)) else [sublist])]
+def fully_flatten(l):
+  if hasattr(l, "__len__") and hasattr(l, "__getitem__") and not isinstance(l, str):
+    flattened = []
+    if hasattr(l, "shape") and l.shape == (): flattened.append(l[()])
+    else:
+      for i in range(len(l)): flattened.extend(fully_flatten(l[i]))
+    return flattened
+  return [l]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def round_up(num, amt:int): return (num+amt-1)//amt * amt
@@ -62,10 +69,12 @@ def get_child(obj, key):
   return obj
 
 def get_shape(x) -> Tuple[int, ...]:
-  if not isinstance(x, (list, tuple)): return ()
+  if not hasattr(x, "__len__") or not hasattr(x, "__getitem__") or isinstance(x, str): return ()
+  if (aapi := (hasattr(x, "shape") and x.shape == ())): return ()
   subs = [get_shape(xi) for xi in x]
   if not all_same(subs): raise ValueError(f"inhomogeneous shape from {x}")
-  return (len(subs),) + (subs[0] if subs else ())
+  slen = 1 if aapi else len(subs)
+  return (slen,) + (subs[0] if subs else ())
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> Optional[List[List[int]]]:
@@ -105,12 +114,12 @@ class ContextVar:
   def __lt__(self, x): return self.value < x
 
 DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0), ContextVar("JIT", 1)
-WINO, THREEFRY, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("THREEFRY", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
+WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 GRAPH, GRAPHPATH, SAVE_SCHEDULE, RING = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net"), ContextVar("SAVE_SCHEDULE", 0), ContextVar("RING", 1)
 MULTIOUTPUT, PROFILE, PROFILEPATH = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
 USE_TC, TC_OPT, AMX, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0), ContextVar("TRANSCENDENTAL", 1)
 FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
-SPLIT_REDUCEOP, AST_REWRITE = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("AST_REWRITE", 1)
+SPLIT_REDUCEOP, AST_REWRITE, NO_MEMORY_PLANNER = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("AST_REWRITE", 1), ContextVar("NO_MEMORY_PLANNER", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -121,6 +130,8 @@ class Metadata:
   def __repr__(self): return str(self) + (f" - {self.caller}" if self.caller else "")
   def __str__(self): return self.name + (" bw" if self.backward else "")
 _METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
+
+_CURRENT_KERNEL: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_CURRENT_KERNEL", default=None)
 
 # **************** global state Counters ****************
 
@@ -262,12 +273,23 @@ def diskcache(func):
 
 # *** http support ***
 
+def _ensure_downloads_dir() -> pathlib.Path:
+  # if we are on a tinybox, use the raid array
+  if pathlib.Path("/etc/tinybox-release").is_file():
+    # try creating dir with sudo
+    if not (downloads_dir := pathlib.Path("/raid/downloads")).exists():
+      subprocess.run(["sudo", "mkdir", "-p", downloads_dir], check=True)
+      subprocess.run(["sudo", "chown", "tiny:root", downloads_dir], check=True)
+      subprocess.run(["sudo", "chmod", "775", downloads_dir], check=True)
+    return downloads_dir
+  return pathlib.Path(_cache_dir) / "tinygrad" / "downloads"
+
 def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional[str]=None, gunzip:bool=False,
           allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
   else:
-    fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (subdir or "") / \
+    fp = _ensure_downloads_dir() / (subdir or "") / \
       ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + (".gunzip" if gunzip else ""))
   if not fp.is_file() or not allow_caching:
     with urllib.request.urlopen(url, timeout=10) as r:
