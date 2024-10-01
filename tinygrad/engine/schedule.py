@@ -352,6 +352,7 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   buf_uops: Dict[Buffer, UOp] = {}
   for buf in realizes:
+    # TODO: const can be in buf_uops too, SWIZZLE on VALID pushes through!
     if buf.op is MetaOps.CONST: continue
     if buf.buffer not in buf_uops: buf_uops[buf.buffer] = UOp(UOps.BUFFER, buf.dtype, (), len(buf_uops))
     if buf.is_realized(): continue
