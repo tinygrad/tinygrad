@@ -4,7 +4,7 @@ import functools, itertools, heapq, math, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType, DType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
-from tinygrad.ops import UPat, PatternMatcher, graph_rewrite, TernaryOps
+from tinygrad.ops import UPat, PatternMatcher, graph_rewrite, TernaryOps, simple_pm
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
@@ -370,7 +370,7 @@ def no_vectorized_wmma(wmma:UOp):
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 # this is symbolic 2.0
-sym = PatternMatcher([
+sym = simple_pm+PatternMatcher([
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y'), lambda x,y: x|y),
@@ -446,12 +446,6 @@ sym = PatternMatcher([
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   (UPat(UOps.REDUCE, src=(UPat.var("x"),)), lambda x: x),  # a REDUCE without ranges is a NOOP
-  (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
-  (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
-  (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
-  (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
-  (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
-  (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
   ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
   (UPat.var("x", dtype=dtypes.bool) & UPat.cvar("c", vec=False), lambda x,c: x if c.arg else c),
   (UPat.var("x", dtype=dtypes.bool) | UPat.cvar("c", vec=False), lambda x,c: c if c.arg else x),

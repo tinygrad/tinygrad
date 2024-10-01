@@ -173,8 +173,9 @@ class UOp(MathTrait):
   # *** uop evaluation ***
   def _eval(self, dtype, expected_type) -> ConstType:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
-    vmin, vmax = self._min_max
-    if vmin != vmax: raise ValueError(f"eval failed to be a single number, range is {vmin} to {vmax}")
+    simple_self = graph_rewrite(self, simple_pm)
+    vmin, vmax = simple_self._min_max
+    if vmin != vmax: raise ValueError(f"eval failed to be a single number, range is {vmin} to {vmax} in {simple_self}")
     assert type(vmin) is expected_type, f"vmin is wrong dtype {vmin} != {expected_type}"
     return vmin
   def __bool__(self): return self._eval((dtypes.bool,), bool)
@@ -685,3 +686,13 @@ def type_verify(uops:List[UOp]):
   for u in uops:
     chk = cast(bool, spec.rewrite(u))
     assert chk is True, f"UOp verification failed on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
+
+simple_pm = PatternMatcher([
+  (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
+  (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
+  (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
+  (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
+  (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
+  (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
+  (UPat.var("x") < UPat.var("x"), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)) # x < x -> False
+])
