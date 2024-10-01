@@ -56,7 +56,9 @@ class MathTrait:
   def __mul__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x))
   def __rmul__(self, x): return self.ufix(x).alu(BinaryOps.MUL, self)
   def __floordiv__(self, x): return self.alu(BinaryOps.IDIV, self.ufix(x))
+  def __rfloordiv__(self, x): return self.ufix(x).alu(BinaryOps.IDIV, self)
   def __truediv__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x).alu(UnaryOps.RECIP))
+  def __rtruediv__(self, x): return self.ufix(x).alu(BinaryOps.MUL, self.alu(UnaryOps.RECIP))
   def __mod__(self, x): return self.alu(BinaryOps.MOD, self.ufix(x))
   def __xor__(self, x): return self.alu(BinaryOps.XOR, self.ufix(x))
   def __and__(self, x): return self.alu(BinaryOps.AND, self.ufix(x))
@@ -67,7 +69,8 @@ class MathTrait:
   def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
   def ge(self, x): return self.lt(x).ne(True)
   def le(self, x): return self.gt(x).ne(True)
-  # NOTE: __eq__/__ne__ can't be overridden, and means the same thing as is and is not
+  # NOTE: __eq__ can't be overridden, and means the same thing as is
+  def __ne__(self, x): return self.ne(x)
   def __lt__(self, x): return self.lt(x)
   def __gt__(self, x): return self.gt(x)
   def __ge__(self, x): return self.ge(x)

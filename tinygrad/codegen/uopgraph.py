@@ -157,7 +157,7 @@ def fold_unrolled_divs(divs:UOp):
       s0 = s0.src[0]
     else: seen_const.append(0)
     if ans is None: ans = s0
-    if ans != s0: return None
+    if ans is not s0: return None
   return ans if ans is not None and sorted(seen_const)==list(range(len(add_chain))) else None
 
 # ***** image load valid simplification *****
