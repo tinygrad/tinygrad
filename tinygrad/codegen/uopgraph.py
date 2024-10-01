@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Dict, List, Set, cast, TYPE_CHECKING, Any, DefaultDict, Callable
 import functools, itertools, heapq, math, operator
 from collections import defaultdict
-from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType, DType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
 from tinygrad.ops import UPat, PatternMatcher, graph_rewrite, TernaryOps
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition, all_same
@@ -802,8 +802,17 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     for x in u.src: fix_priority(x, priorities[u])
   fix_priority(sink, 0)
 
-  queue:List[Tuple[int, UOp]] = []
-  def push(u:UOp): heapq.heappush(queue, (priorities[u], u))
+  @functools.lru_cache(None)
+  def tuplize(u:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
+    # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
+    if u.op is UOps.DEFINE_VAR: arg = u.arg[0]
+    elif u.op is UOps.ALU: arg = u.arg.value
+    else: arg = u.arg
+    return (u.op.value, arg, u.dtype, tuple(tuplize(x) for x in u.src))
+
+  # NOTE: the compare should never make it all the way to u
+  queue:List[Tuple[int, Tuple, UOp]] = []
+  def push(u:UOp): heapq.heappush(queue, (priorities[u], tuplize(u), u))
 
   for u in children:
     if in_degree[u] == 0: push(u)
@@ -811,7 +820,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   scope_end: Dict[UOp, UOp] = {}
   _uops: List[UOp] = []
   while queue:
-    p,x = heapq.heappop(queue)
+    p,_,x = heapq.heappop(queue)
     if DEBUG >= 7: print(f"{p:5d}", x.op, x.dtype, x.arg)
     if x in scope_children: scope_end[x] = x
     if x.op is UOps.DEFINE_ACC:
