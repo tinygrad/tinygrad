@@ -349,6 +349,7 @@ class TestAssembly(unittest.TestCase):
     self.assertEqual(uops[-2].arg, BinaryOps.IDIV)
 
 class TestUOpMethod(unittest.TestCase):
+  @unittest.skip("uops lt no longer ordered")
   def test_compare_alu_same_src_different_arg(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0)
     b = UOp(UOps.CONST, dtypes.float, (), 3.0)
@@ -397,6 +398,7 @@ class TestUOpStr(unittest.TestCase):
     vec = UOp(UOps.VECTORIZE, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
     assert str(eval(str(vec))) == str(vec)
 
+@unittest.skip("uop no longer has order like this")
 class TestIndexingOrdering(unittest.TestCase):
   # NOTE: these tests skip type_verify since they add dtype to STORE
   @unittest.expectedFailure
