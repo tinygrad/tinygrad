@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar
 from types import FrameType
-import sys, time, functools, itertools, math, operator, hashlib, os
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
@@ -473,6 +473,14 @@ class UPatAny(UPat):
       if (match:=x.match(uop, store.copy())): return match
     return []
 
+def deconstruct_function(fxn:Callable) -> Tuple:
+  new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
+  for co in fxn.__code__.co_consts:
+    if isinstance(co, types.CodeType): new_globals.update({k:v for k,v in fxn.__globals__.items() if k in co.co_names})
+  new_code_obj = pickle.loads(pickle.dumps(fxn.__code__)) if getenv("TEST_PICKLE") else fxn.__code__  # NOTE: optional round trip through pickle!
+  assert fxn.__closure__ is None, "closures are not supported in pattern matchers"
+  return new_code_obj, new_globals, fxn.__name__, fxn.__defaults__
+
 class PatternMatcher:
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     self.patterns = patterns
@@ -481,7 +489,12 @@ class PatternMatcher:
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      for uop in p.op: self.pdict.setdefault((uop, p.arg), []).append((p, fxn, p.early_reject))
+      tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
+      tuple_fxn[1]['__builtins__'] = __builtins__  # NOTE: Python 3.8 requires this for "all" and "len" and friends
+      real_fxn = types.FunctionType(*tuple_fxn)
+      for uop in p.op: self.pdict.setdefault((uop, p.arg), []).append((p, real_fxn, p.early_reject))
+
+  def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
@@ -531,7 +544,7 @@ class TrackedPatternMatcher(PatternMatcher):
 
 if TRACK_MATCH_STATS:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
-  import atexit, pickle
+  import atexit
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
