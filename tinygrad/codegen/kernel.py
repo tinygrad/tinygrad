@@ -5,13 +5,12 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict
 from enum import Enum, auto
 
-from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify, \
-  graph_rewrite, PatternMatcher
+from tinygrad.ops import BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify, graph_rewrite, PatternMatcher
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, get_contraction, to_function_name, diskcache_put
-from tinygrad.helpers import _CURRENT_KERNEL, DEBUG, TC_OPT, USE_TC, AMX
+from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.view import strides_for_shape
@@ -386,7 +385,8 @@ class Kernel:
       if opt.op is not OptOps.PADTO: check(self.full_shape[axis] % amt == 0, "no longer valid shift")
     else: amt = -1
 
-    if self.reduceop and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
+    if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP} or \
+                                      (self.group_for_reduces and opt.op not in {OptOps.NOLOCALS, OptOps.PADTO})):
       acc_sz = self.reduceop.dtype.itemsize
       upcast_sz = prod([a for a,b in zip(self.full_shape[self.first_upcast:], self.sts[0].shape[self.first_upcast:]) if a == b])
       local_sz = prod(self.full_shape[self.first_reduce-self.local_dims:self.first_reduce])
@@ -415,7 +415,7 @@ class Kernel:
       check(self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem")
       check(self.first_reduce + self.group_for_reduces <= axis < self.first_upcast, "must be reduce axis to group")
       check(not self.tensor_core, "can't group with tensor cores")
-      check(len(reduce_axes:=[i for r in self.reduceops for i in r.arg[1]]) == len(set(reduce_axes)), "can't group with parallel reduces")
+      check(len(reduce_axes:=[i for r in self.reduceops for i in r.axis_arg]) == len(set(reduce_axes)), "can't group with parallel reduces")
       self.shift_to(axis, amt, top=(opt.op is OptOps.GROUPTOP), insert_before=self.first_reduce + self.group_for_reduces)
       self.group_for_reduces += 1
     elif opt.op is OptOps.UNROLL:                     # purple
@@ -612,7 +612,7 @@ class Kernel:
   @functools.cached_property
   def name(self) -> str:
     # kernel name (before late upcast)
-    name = ("r" if self.reduceop else ("C" if all(x.op in BUFFER_UOPS for x in self.ast.parents) else "E")) + \
+    name = ("r" if self.reduceop is not None else ("C" if all(x.op in BUFFER_UOPS for x in self.ast.parents) else "E")) + \
                  (f"{len(self.ast.src)}_" if len(self.ast.src) > 1 else "_") + \
                  colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
 
@@ -717,7 +717,6 @@ class Kernel:
   # **** this is the lowerer ****
 
   def linearize(self) -> Kernel:
-    if TRACK_MATCH_STATS >= 2: _CURRENT_KERNEL.set(self.name)
     modified_ast = self.get_optimized_ast()
 
     if DEBUG >= 3:
@@ -728,7 +727,6 @@ class Kernel:
     verify_ast(modified_ast)
 
     self.uops:List[UOp] = linearize_uop(full_graph_rewrite(ast_to_uop(modified_ast, self.opts), self.opts))
-    if TRACK_MATCH_STATS >= 2: _CURRENT_KERNEL.set(None)
     if DEBUG >= 5: print_uops(self.uops)
     if getenv("GRAPHUOPS"):
       from tinygrad.engine.graph import graph_uops
@@ -762,7 +760,7 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
     return
   for x in uop.src: _assert_valid_uop(x, st, sts)
   # only reduceuop is allowed to change shape, limited to turning n to 1
-  if uop.op in {UOps.REDUCE_AXIS, UOps.WMMA}: st = ShapeTracker.from_shape(sts[uop.src[0]].reduce(uop.arg[-1]))
+  if uop.op in {UOps.REDUCE_AXIS, UOps.WMMA}: st = ShapeTracker.from_shape(sts[uop.src[0]].reduce(uop.axis_arg))
   # movementops are pushed to SHAPETRACKER and SWIZZLE
   elif uop.op in {UOps.SHAPETRACKER, UOps.SWIZZLE}: st = uop.arg
   # everything else inherits shape

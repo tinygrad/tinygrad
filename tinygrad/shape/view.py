@@ -20,7 +20,7 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
   # merge contiguous sub-parts or zero strided dims. ret = Tuple[(merged_size, stride, merged size w/o zero stride), ...]
   if not shape: return ()
   assert len(shape) == len(strides) and (mask is None or len(shape) == len(mask))
-  ret = [(shape[0], strides[0], shape[0] if strides[0] else 0)]
+  ret = [(shape[0], strides[0], shape[0] if strides[0] != 0 else 0)]
   # merge this dim to next dim if size is 1
   merging = (mask[0][1] - mask[0][0] == 1) if mask is not None else shape[0] == 1
   for i, (s, st) in enumerate(zip(shape[1:], strides[1:]), start=1):
@@ -29,7 +29,7 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
     if s == 1: continue
     # merge last dim with this dim if merging or strides matched
     if merging or last_st == s * st: ret[-1] = (last_s * s, st, (s if merging else last_pre_expand_s * s) if st else 0)
-    else: ret.append((s, st, s if st else 0))
+    else: ret.append((s, st, s if st != 0 else 0))
     # merge this dim to next dim if size is 1
     merging = (mask[i][1] - mask[i][0] == 1) if mask is not None else s == 1
   return tuple(ret)
@@ -76,7 +76,7 @@ def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
   strides = strides_for_shape(shape)
   result = []
   for stride in strides:
-    here = offs // stride if stride else 0
+    here = offs // stride if stride != 0 else 0
     result.append(here)
     offs -= here * stride
   return result
@@ -165,7 +165,7 @@ class View:
       if not (merged_term >= merged_size) and not (merged_term < 0):
         extents.append((merged_size, merged_term))
         merged_size, merged_term = 1, NumNode(0)
-    if merged_term: return None
+    if merged_term != 0: return None
     if (vm2_shape := tuple(s for s,_ in reversed(extents))) != vm2.shape:
       return (reshaped_vm2 := vm2.reshape(vm2_shape)) and reshaped_vm2 + vm1
 
@@ -224,7 +224,7 @@ class View:
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape), f"{self.shape=}, {arg=}"
-    if any(b or e for b, e in arg):
+    if any(b>0 or e>0 for b, e in arg):
       zvarg = tuple([(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
       mask = tuple([(b,s+b) for s,(b,_) in zip(self.shape, arg)])
       return self.__unsafe_resize(zvarg, mask=mask)
