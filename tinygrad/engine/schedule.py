@@ -354,21 +354,21 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
   for buf in realizes:
     # TODO: const can be in buf_uops too, SWIZZLE on VALID pushes through!
     if buf.op is MetaOps.CONST: continue
-    if buf.buffer not in buf_uops: buf_uops[buf.buffer] = UOp(UOps.BUFFER, buf.dtype, (), len(buf_uops))
-    if buf.is_realized(): continue
+    if buf.realized is None:
+      output_groups[reduce_for_op[buf] if buf in reduce_for_op and MULTIOUTPUT else buf].append(buf)
 
-    output_groups[reduce_for_op[buf] if buf in reduce_for_op and MULTIOUTPUT else buf].append(buf)
-
-    # make things that can't be images not images
-    if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
-                                              not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
-      if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
-      buf.dtype = dtypes.float32
-      # hack the underlying buffer too
-      if buf.base is buf:
-        assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
-        buf.buffer.dtype = dtypes.float32
-        buf.buffer.options = None
+      # make things that can't be images not images
+      if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
+                                                not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
+        if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
+        buf.dtype = dtypes.float32
+        # hack the underlying buffer too
+        if buf.base is buf:
+          assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
+          buf.buffer.dtype = dtypes.float32
+          buf.buffer.options = None
+    # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
+    buf_uops.setdefault(buf.buffer, UOp(UOps.BUFFER, buf.buffer.dtype, (), len(buf_uops)))
   return output_groups, buf_uops, assign_targets
 
 SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
