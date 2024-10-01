@@ -1,6 +1,5 @@
 from typing import List, Tuple
-import math
-from tinygrad.dtype import DType, PtrDType, dtypes, ConstType
+from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import UOp, UOps, UnaryOps, TernaryOps, BinaryOps, PatternMatcher, UPat
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, _render_index
 
