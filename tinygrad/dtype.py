@@ -65,6 +65,7 @@ class dtypes:
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
     # TODO: should truncate here
+    if math.isinf(val) and not dtypes.is_float(dtype): return dtypes.min(dtype) if val < 0 else dtypes.max(dtype)
     return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   @functools.lru_cache(None)
