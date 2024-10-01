@@ -61,12 +61,16 @@ class MathTrait:
   def __xor__(self, x): return self.alu(BinaryOps.XOR, self.ufix(x))
   def __and__(self, x): return self.alu(BinaryOps.AND, self.ufix(x))
   def __or__(self, x): return self.alu(BinaryOps.OR, self.ufix(x))
-  def __ne__(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
-  def __eq__(self, x): return (self != x) != True
-  def __lt__(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
-  def __gt__(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
-  def __ge__(self, x): return self.lt(x).ne(True)
-  def __le__(self, x): return self.gt(x).ne(True)
+  def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
+  def eq(self, x): return self.ne(x).ne(True)
+  def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
+  def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
+  def ge(self, x): return self.lt(x).ne(True)
+  def le(self, x): return self.gt(x).ne(True)
+  def __lt__(self, x): return self.lt(x)
+  def __gt__(self, x): return self.gt(x)
+  def __ge__(self, x): return self.ge(x)
+  def __le__(self, x): return self.le(x)
   def max(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
@@ -165,6 +169,12 @@ class UOp(MathTrait):
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
+  # *** uop evaluation ***
+  def __int__(self):
+    if self.op is UOps.CONST: return self.arg
+    elif self.op is UOps.DEFINE_VAR and len(self.arg) == 4: return self.arg[-1]
+    elif self.op is UOps.ALU: return exec_alu(self.arg, self.dtype, [int(x) for x in self.src])
+    else: raise Exception(f"can't make int from {self}")
   # *** uop syntactic sugar
   @property
   def st_arg(self) -> ShapeTracker:
@@ -216,10 +226,17 @@ class UOp(MathTrait):
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
+  @functools.lru_cache(None)
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   def bind(self, val:ConstType):
     assert self.op is UOps.DEFINE_VAR and len(self.arg) == 3
-    return self.replace(src=self.arg + (val,))
+    return self.replace(arg=self.arg + (val,))
+  def unbind(self) -> Tuple[UOp, int]:
+    assert self.op is UOps.DEFINE_VAR and len(self.arg) == 4
+    return self.define_var(self.arg[0], self.dtype, self.arg[1], self.arg[2]), self.arg[3]
+  def substitute(self, vars):
+    if self in vars: return vars[self]
+    return self.replace(src=tuple(x.substitute(vars) for x in self.src))
   @staticmethod
   def define_global(dtype:DType, arg): return UOp(UOps.DEFINE_GLOBAL, dtype if isinstance(dtype, ImageDType) else PtrDType(dtype), (), arg)
   @staticmethod
@@ -236,7 +253,7 @@ class UOp(MathTrait):
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
-    return sorted(set.union(*st_vars, [Variable(x.arg[0], x.arg[1], x.arg[2]) for x in self.vars()]), key=lambda v: v.expr)
+    return sorted(set.union(*st_vars, [Variable(x.arg[0], x.arg[1], x.arg[2]) for x in self.vars()]), key=lambda v: v.arg)
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg

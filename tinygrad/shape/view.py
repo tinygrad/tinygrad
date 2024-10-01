@@ -3,6 +3,7 @@ import functools, operator, itertools, math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast
 from tinygrad.helpers import prod, all_int, argsort
+from tinygrad.ops import UOp
 from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, sym_infer
 
 @functools.lru_cache(maxsize=None)
@@ -92,7 +93,7 @@ class View:
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def size(self) -> int:
     # NOTE: Variable and the Node derived from it in symbolic shapes can only have int as max.
-    ret = prod([x.max if isinstance(x, Node) else x for x in self.shape])
+    ret = prod([x.vmax if isinstance(x, UOp) else x for x in self.shape])
     assert isinstance(ret, int), f"{ret=} is not int"
     return ret
 
@@ -160,7 +161,7 @@ class View:
     merged_size, merged_term = 1, NumNode(0)
     extents: List[Tuple[sint, Node]] = []
     for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
-      merged_term += Variable.sum([idxs[d1] * (s1 * merged_size) for d1, s1 in term]) + o * merged_size
+      merged_term += sum([idxs[d1] * (s1 * merged_size) for d1, s1 in term]) + o * merged_size
       merged_size *= s
       if not (merged_term >= merged_size) and not (merged_term < 0):
         extents.append((merged_size, merged_term))
@@ -273,8 +274,8 @@ class View:
       return View.create(new_shape)
     # check for the same size
     if (self_all_int := all_int(self.shape)):
-      assert all(isinstance(s, (int, Variable)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
-      if prod(self.shape) != prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]):
+      assert all(isinstance(s, (int, UOp)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
+      if int(prod(self.shape)) != int(prod(new_shape)):
         raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
 
     if new_shape == () and self.mask and any(mx==my for (mx,my) in self.mask): return None

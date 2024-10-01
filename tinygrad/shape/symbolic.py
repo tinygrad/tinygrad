@@ -22,8 +22,7 @@ def sym_infer(uop: Union[UOp, int], var_vals: Optional[Dict[UOp, int]]) -> int:
   if uop.op == UOps.CONST:
     return uop.arg
   elif uop.op == UOps.DEFINE_VAR:
-    var_name = uop.arg[0]
-    return var_vals[var_name]
+    return var_vals[uop]
   elif uop.op == UOps.ALU:
     src_values = [sym_infer(src, var_vals) for src in uop.src]
     return exec_alu(uop.arg, uop.dtype, src_values)

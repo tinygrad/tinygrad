@@ -140,7 +140,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   if buf.op is MetaOps.CONST:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
-    if isinstance(val:=buf.arg, Variable):
+    if isinstance(val:=buf.arg, UOp):
       val, var_val = val.unbind()
       var_vals[val] = var_val
     else: assert isinstance(val, get_args(ConstType)), f"cannot create ConstBuffer with value {val}"
