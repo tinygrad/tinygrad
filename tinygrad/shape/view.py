@@ -21,7 +21,7 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
   # merge contiguous sub-parts or zero strided dims. ret = Tuple[(merged_size, stride, merged size w/o zero stride), ...]
   if not shape: return ()
   assert len(shape) == len(strides) and (mask is None or len(shape) == len(mask))
-  ret = [(shape[0], strides[0], shape[0] if strides[0] else 0)]
+  ret = [(shape[0], strides[0], shape[0] if strides[0] > 0 else 0)]
   # merge this dim to next dim if size is 1
   merging = (mask[0][1] - mask[0][0] == 1) if mask is not None else shape[0] == 1
   for i, (s, st) in enumerate(zip(shape[1:], strides[1:]), start=1):
@@ -77,7 +77,7 @@ def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
   strides = strides_for_shape(shape)
   result = []
   for stride in strides:
-    here = offs // stride if stride else 0
+    here = offs // stride if stride > 0 else 0
     result.append(here)
     offs -= here * stride
   return result
@@ -225,7 +225,7 @@ class View:
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
     assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape), f"{self.shape=}, {arg=}"
-    if any(b or e for b, e in arg):
+    if any(b > 0 or e > 0 for b, e in arg):
       zvarg = tuple([(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
       mask = tuple([(b,s+b) for s,(b,_) in zip(self.shape, arg)])
       return self.__unsafe_resize(zvarg, mask=mask)
@@ -242,7 +242,8 @@ class View:
     if 0 in self.shape:
       assert all((s == x == 0) or (s > 0 and (x % s) == 0) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
       return View.create(new_shape)
-    assert all((s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
+    assert all((int(s) == int(x) or (int(s) == 1 and int(st) == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), \
+      f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.mask, self.shape, new_shape)]) if self.mask else None
     return View.create(new_shape, self.strides, self.offset, mask)
@@ -299,7 +300,7 @@ class View:
     for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
       acc = 1
       # TODO: this <= and != is for symbolic!?
-      while acc <= merged_dim and acc != merged_dim and (new_dim := next(r_new_shape, None)):
+      while acc <= merged_dim and acc != merged_dim and (new_dim := next(r_new_shape, None)) > 0:
         strides.append(new_stride)
         if new_dim != 1: new_stride *= (new_dim if (acc :=  acc * new_dim) < real_dim else 0)
       if acc != merged_dim: break

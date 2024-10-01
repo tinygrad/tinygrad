@@ -56,6 +56,7 @@ class MathTrait:
   def __mul__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x))
   def __rmul__(self, x): return self.ufix(x).alu(BinaryOps.MUL, self)
   def __floordiv__(self, x): return self.alu(BinaryOps.IDIV, self.ufix(x))
+  def __rfloordiv__(self, x): return self.ufix(x).alu(BinaryOps.IDIV, self)
   def __truediv__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x).alu(UnaryOps.RECIP))
   def __mod__(self, x): return self.alu(BinaryOps.MOD, self.ufix(x))
   def __xor__(self, x): return self.alu(BinaryOps.XOR, self.ufix(x))
@@ -306,9 +307,11 @@ class UOp(MathTrait):
           Rmin, Rmax = (s1.vmin, s1.vmax) if s0.vmin >= 0 else (s1.vmax, s1.vmin)
           return Lmin*Rmin, Lmax*Rmax
       if self.arg is BinaryOps.MOD and s1.vmin > 0: return 0, s1.vmax-1
-      if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
-        if s1.arg > 0: return s0.vmin//s1.arg, s0.vmax//s1.arg
-        if s1.arg < 0: return -(s0.vmax//-s1.arg), -(s0.vmin//-s1.arg)
+      if self.arg is BinaryOps.IDIV:
+        val = s1.arg if s1.op is UOps.CONST else (s1.vmin if s1.vmin == s1.vmax else None)
+        if val is not None:
+          if s1.arg > 0: return s0.vmin//val, s0.vmax//val
+          if s1.arg < 0: return -(s0.vmax//-val), -(s0.vmin//-val)
       if self.arg is BinaryOps.MAX: return max(s0.vmin, s1.vmin), max(s0.vmax, s1.vmax)
       if self.arg is BinaryOps.CMPLT: return (s0.vmax<s1.vmin, s0.vmin<s1.vmax)
       if self.arg is BinaryOps.CMPNE:
