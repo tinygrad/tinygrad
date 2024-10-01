@@ -440,7 +440,7 @@ class TestIndexingOrdering(unittest.TestCase):
 
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
-    self.assertEqual(sym.patterns[0][0].location[0].split("/")[-1], "uopgraph.py")
+    self.assertEqual(sym.patterns[-1][0].location[0].split("/")[-1], "uopgraph.py")
     self.assertEqual(reduceop_fusor.patterns[0][0].location[0].split("/")[-1], "schedule.py")
     self.assertEqual(spec.patterns[0][0].location[0].split("/")[-1], "ops.py")
     with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?
