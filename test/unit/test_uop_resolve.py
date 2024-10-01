@@ -15,6 +15,18 @@ class TestUOpResolve(unittest.TestCase):
     u = UOp.const(dtypes.int, 4) < 7
     self.assertTrue(u)
 
+  def test_leq(self):
+    u = UOp.const(dtypes.int, 4) <= 4
+    self.assertTrue(u)
+
+  def test_ne(self):
+    u = UOp.const(dtypes.int, 4).ne(7)
+    self.assertTrue(u)
+
+  def test_ne_f(self):
+    u = UOp.const(dtypes.int, 4).ne(4)
+    self.assertFalse(u)
+
   def test_ngt(self):
     u = UOp.const(dtypes.int, 4) > 7
     self.assertFalse(u)
@@ -33,6 +45,10 @@ class TestUOpResolve(unittest.TestCase):
 
   def test_var_cmp_f(self):
     u = UOp.define_var("i", dtypes.pyint, 1, 10) < 1
+    self.assertFalse(u)
+
+  def test_var_cmp_f2(self):
+    u = UOp.define_var("i", dtypes.pyint, 1, 10) > 11
     self.assertFalse(u)
 
   def test_or_true(self):

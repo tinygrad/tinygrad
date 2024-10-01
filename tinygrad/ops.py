@@ -67,6 +67,7 @@ class MathTrait:
   def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
   def ge(self, x): return self.lt(x).ne(True)
   def le(self, x): return self.gt(x).ne(True)
+  # NOTE: __eq__/__ne__ can't be overridden, and means the same thing as is and is not
   def __lt__(self, x): return self.lt(x)
   def __gt__(self, x): return self.gt(x)
   def __ge__(self, x): return self.ge(x)
@@ -283,7 +284,6 @@ class UOp(MathTrait):
     if self.op is UOps.ALU and self.dtype.count == 1:
       s0,s1,s2 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(3)]
       if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
-      if self.arg is BinaryOps.OR and self.dtype is dtypes.bool: return s0.vmin or s1.vmin, s0.vmax or s1.vmax
       if self.arg is BinaryOps.MUL:
         # both are non-positive
         if (s0.vmax <= 0 and s1.vmax <= 0): return s0.vmax*s1.vmax, s0.vmin*s1.vmin
@@ -298,8 +298,14 @@ class UOp(MathTrait):
         if s1.arg < 0: return -(s0.vmax//-s1.arg), -(s0.vmin//-s1.arg)
       if self.arg is BinaryOps.MAX: return max(s0.vmin, s1.vmin), max(s0.vmax, s1.vmax)
       if self.arg is BinaryOps.CMPLT: return (s0.vmax<s1.vmin, s0.vmin<s1.vmax)
+      if self.arg is BinaryOps.CMPNE:
+        always_ne = (s0.vmax < s1.vmin) or (s1.vmin > s0.vmax)
+        sometimes_ne = not (s0.vmin == s0.vmax == s1.vmin == s1.vmax)
+        return (always_ne, sometimes_ne)
       # float has NAN issue and we use explicit NAN in transcendental
       if self.arg is TernaryOps.WHERE and dtypes.is_int(s1.dtype): return min(s1.vmin, s2.vmin), max(s1.vmax, s2.vmax)
+      if self.dtype is dtypes.bool:
+        if self.arg is BinaryOps.OR: return s0.vmin or s1.vmin, s0.vmax or s1.vmax
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
 @dataclass(frozen=True)

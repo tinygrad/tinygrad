@@ -16,7 +16,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DTypeLike, op:Optional[
   if op is MetaOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype) if not isinstance(arg, Variable) else arg, True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
-  if enable_cache and (rret := lazycache.get(cache_key, None)): return rret
+  if enable_cache and (rret := lazycache.get(cache_key, None)) is not None: return rret
 
   ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, metadata=_METADATA.get())
   if enable_cache: lazycache[cache_key] = ret
