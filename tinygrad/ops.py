@@ -174,7 +174,7 @@ class UOp(MathTrait):
   def _eval(self, dtype, expected_type) -> ConstType:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
     vmin, vmax = self._min_max
-    if vmin != vmax: raise ValueError(f"eval failed to be a single number, range is {vmin} to {vmax}")
+    if vmin != vmax: raise ValueError(f"eval failed to be a single number, range is {vmin} to {vmax} in {self}")
     assert type(vmin) is expected_type, f"vmin is wrong dtype {vmin} != {expected_type}"
     return vmin
   def __bool__(self): return self._eval((dtypes.bool,), bool)
@@ -284,13 +284,16 @@ class UOp(MathTrait):
   @functools.cached_property
   def _min_max(self) -> Tuple[ConstType, ConstType]:
     # NOTE: returned UOp is assumed to be CONST
-    if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
+    if self.op is UOps.DEFINE_VAR and self.arg:
+      if len(self.arg) == 4: return self.arg[3], self.arg[3]  # "bound" DEFINE_VAR
+      return self.arg[1], self.arg[2]
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     if self.op is UOps.EXPAND: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is UOps.CONST: return self.arg, self.arg
     if self.op is UOps.VCONST: return (min(self.arg), max(self.arg))
+    if self.op is UOps.CAST: return (max(self.src[0].vmin, dtypes.min(self.dtype)), min(self.src[0].vmax, dtypes.max(self.dtype)))
     if self.op is UOps.ALU and self.dtype.count == 1:
       s0,s1,s2 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(3)]
       if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax

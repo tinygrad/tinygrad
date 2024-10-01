@@ -166,7 +166,7 @@ class View:
       if not (merged_term >= merged_size) and not (merged_term < 0):
         extents.append((merged_size, merged_term))
         merged_size, merged_term = 1, NumNode(0)
-    if merged_term: return None
+    if merged_term > 0: return None
     if (vm2_shape := tuple(s for s,_ in reversed(extents))) != vm2.shape:
       return (reshaped_vm2 := vm2.reshape(vm2_shape)) and reshaped_vm2 + vm1
 
@@ -174,7 +174,7 @@ class View:
       # Try to project vm2's mask on to vm1.
       newb, newe, bad = [0] * len(vm1.shape), list(vm1.shape), False
       for d2, ((b, e), o, (_, t)) in enumerate(zip(vm2.mask, origin, reversed(extents))):
-        if not (t.min < b or t.max >= e): continue
+        if not (t.vmin < b or t.vmax >= e): continue
         if not isinstance(o, int) or not isinstance(b, int) or not isinstance(e, int):
           bad = True
           continue
@@ -220,7 +220,7 @@ class View:
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     shape = [y-x for x,y in arg]
     if mask is not None and all(m[0] == 0 and m[1] == s for m,s in zip(mask, shape)): mask = None
-    return View.create(tuple(s.b if isinstance(s, NumNode) else s for s in shape), self.strides, self.offset+offset, mask)
+    return View.create(tuple(shape), self.strides, self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:

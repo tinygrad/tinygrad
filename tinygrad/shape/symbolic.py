@@ -2,8 +2,8 @@ from typing import Union, Dict, Optional
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, UOps, exec_alu
 
-def Variable(expr:str, nmin:int, nmax:int):
-  return UOp.define_var(expr, dtypes.pyint, nmin, nmax)
+def Variable(expr:str, nmin:int, nmax:int): return UOp.define_var(expr, dtypes.pyint, nmin, nmax)
+def NumNode(val:int): return UOp.const(dtypes.pyint, val)
 
 # broken
 Node = UOp
@@ -13,7 +13,6 @@ DivNode = UOp
 ModNode = UOp
 LtNode = UOp
 AndNode = UOp
-NumNode = UOp
 
 sint = Union[int, UOp]
 
