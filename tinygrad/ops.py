@@ -69,7 +69,8 @@ class MathTrait:
   def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
   def ge(self, x): return self.lt(x).ne(True)
   def le(self, x): return self.gt(x).ne(True)
-  # NOTE: __eq__/__ne__ can't be overridden, and means the same thing as is and is not
+  # NOTE: __eq__ can't be overridden, and means the same thing as is
+  def __ne__(self, x): return self.ne(x)
   def __lt__(self, x): return self.lt(x)
   def __gt__(self, x): return self.gt(x)
   def __ge__(self, x): return self.ge(x)

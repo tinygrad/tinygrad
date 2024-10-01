@@ -19,7 +19,6 @@ class TestUOpResolve(unittest.TestCase):
     u = 8 // UOp.const(dtypes.int, 4)
     self.assertEqual(int(u), 2)
 
-  @unittest.expectedFailure
   def test_rtruediv(self):
     u = 9 / UOp.const(dtypes.float, 4)
     self.assertEqual(float(u), 2.25)
@@ -29,11 +28,11 @@ class TestUOpResolve(unittest.TestCase):
     self.assertTrue(u)
 
   def test_ne(self):
-    u = UOp.const(dtypes.int, 4).ne(7)
+    u = UOp.const(dtypes.int, 4) != 7
     self.assertTrue(u)
 
   def test_ne_f(self):
-    u = UOp.const(dtypes.int, 4).ne(4)
+    u = UOp.const(dtypes.int, 4) != 4
     self.assertFalse(u)
 
   def test_ngt(self):
