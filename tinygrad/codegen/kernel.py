@@ -2,18 +2,18 @@ from __future__ import annotations
 import itertools, functools
 from dataclasses import dataclass
 from collections import defaultdict
-from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict
+from typing import Callable, Optional, List, Tuple, cast, Dict, Final, DefaultDict
 from enum import Enum, auto
-
-from tinygrad.ops import BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify, graph_rewrite, PatternMatcher
+from tinygrad.ops import BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, UPat, print_uops, type_verify, graph_rewrite, PatternMatcher
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
-from tinygrad.dtype import ImageDType, PtrDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, get_contraction, to_function_name, diskcache_put
+from tinygrad.dtype import ImageDType, PtrDType, dtypes
+from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, get_contraction, to_function_name, diskcache_put, \
+    unwrap
 from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
-from tinygrad.shape.view import strides_for_shape
+from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
 from tinygrad.codegen.lowerer import ast_to_uop
 
@@ -51,10 +51,81 @@ class TensorCoreOptions:
       elif removed_axis == axes[tc_dim]: axes_exist[tc_dim] = False
     self.axes, self.axes_exist = tuple(axes), tuple(axes_exist)
 
+# *** UOp with SWIZZLE (movementops) rewriting to UOp we can index ***
+
+# ** helpers for doing movementops on uops
+
+def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], cache:Dict[UOp, UOp]) -> UOp:
+  if (n:=cache.get(u)): return n
+  if u.op is UOps.SHAPETRACKER:
+    new_st = apply_to_st(u.arg)
+    return u if u.arg == new_st else UOp(UOps.SHAPETRACKER, dtypes.void, (), new_st)
+  if len(u.src) == 0 or (u.st is not None and u.st == apply_to_st(u.st)): return u
+  new_srcs = tuple(st_fixup(x, apply_to_st, cache) for x in u.src)
+  cache[u] = ret = u if new_srcs == u.src else UOp(u.op, u.dtype, new_srcs, u.arg)
+  return ret
+
+def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:
+  permute_axis = tuple(i for i in range(len(input_st.shape)) if i not in axis)+axis
+  tmp = input_st.permute(permute_axis)
+  return tmp, tmp.shape[-len(axis):]
+
+# ** reduceop fusor
+
+def push_swizzle_up_through_reduce(swizzle:UOp, reduceop:UOp) -> Optional[UOp]:
+  if (swizzle_st:=unwrap(swizzle.st)).contiguous: return None
+  rsrc = reduceop.src[0]
+  tmp, rshape = permute_reduce(ShapeTracker.from_shape(unwrap(rsrc.st).shape), reduceop.axis_arg)
+  prshape = prod(rshape)
+  strides = strides_for_shape(rshape)
+  nv: List[View] = []
+  for v in swizzle_st.views:
+    nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
+                          v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
+  # update input_st and axis
+  new_input_st = tmp + ShapeTracker(tuple(nv))
+  _, new_rshape = permute_reduce(new_input_st, reduceop.axis_arg)
+  new_axis = tuple(range(len(new_input_st.shape)-len(new_rshape), len(new_input_st.shape)))
+  return UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda st:st+new_input_st, {}),),
+             (reduceop.arg[0], new_axis)).swizzle(ShapeTracker.from_shape(swizzle_st.shape))
+
+def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:
+  swizzle_st, src_st = unwrap(swizzle.st), unwrap(swizzle.src[0].st)
+  assert swizzle_st.contiguous, "can't push a non contiguous SWIZZLE down to STORE"
+  assert prod(swizzle_st.shape) == prod(src_st.shape), "can't push expands down to STORE"
+  output_shape = swizzle_st.reduce(root.axis_arg)
+  new_axis = tuple(i for i,(s,u) in enumerate(zip(src_st.shape, output_shape)) if s != u)
+  return UOp(UOps.REDUCE_AXIS, root.dtype, swizzle.src, (root.arg[0], new_axis)).swizzle(ShapeTracker.from_shape(output_shape))
+
+def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
+  swizzles = [x for x in root.src if x.op is UOps.SWIZZLE]
+  if len(swizzles) == 0: return None
+  swizzle_shapes = [(unwrap(x.st).shape, unwrap(x.src[0].st).shape) for x in swizzles]
+  assert all_same([(x, prod(x), prod(y)) for x,y in swizzle_shapes]), f"swizzles must have the same size {swizzle_shapes}"
+  new_shape, new_input_shape = swizzle_shapes[0]
+  fixup_cache: Dict[UOp, UOp] = {}
+  new_srcs = [x.src[0] if x.op is UOps.SWIZZLE else st_fixup(x, lambda st:st.reshape(new_input_shape), fixup_cache) for x in root.src]
+  ret = UOp(root.op, root.dtype, tuple(new_srcs), root.arg)
+  return ret if ret.op is UOps.STORE else ret.swizzle(ShapeTracker.from_shape(new_shape))
+
+def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
+  assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
+  assert not any(x.op is UOps.REDUCE_AXIS for x in first_reduce.parents), "can't merge more than two reduceops at a time"
+  return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
+
+reduceop_fusor = PatternMatcher([
+  # push a SWIZZLE up to LOAD, through a reduce (eg. expands)
+  (UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
+  # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
+  (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.SWIZZLE, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
+  # push SWIZZLE(s) down to STORE, through an elementwise op (ONLY reshapes)
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.STORE), name="root"), push_swizzle_down_through_elementwise),
+  (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
+])
+
 class Kernel:
   def __init__(self, ast:UOp, opts:Optional[Renderer]=None):
-    if ast.op is UOps.SINK: self.ast = ast
-
+    self.ast = graph_rewrite(ast, reduceop_fusor)
     self.opts = opts if opts is not None else Device[Device.DEFAULT].renderer
     try: uop_sts_map = verify_ast(self.ast)
     except AssertionError as e:
