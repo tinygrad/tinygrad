@@ -64,6 +64,13 @@ class TestUOpResolve(unittest.TestCase):
     u = UOp.define_var("b", dtypes.bool, False, True) & False
     self.assertFalse(u)
 
+  def test_max(self):
+    x = UOp.define_var("x", dtypes.pyint, 1, 10)
+    y = UOp.define_var("y", dtypes.pyint, 5, 10)
+    u = x.max(y)
+    self.assertTrue(u < 20)
+    self.assertFalse(u < 3)
+
   def test_x_lt_x(self):
     x = UOp.define_var("i", dtypes.pyint, 1, 10)
     self.assertFalse(x < x)
