@@ -1,7 +1,7 @@
 from typing import List
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor, Device
-from tinygrad.helpers import Profiling, Timing, getenv, BEAM, NOOPT, DEBUG, Context, ansilen, _CURRENT_KERNEL
+from tinygrad.helpers import Profiling, Timing, getenv, BEAM, NOOPT, DEBUG, Context, ansilen
 from tinygrad.ops import UOps
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.lowerer import ast_to_uop
@@ -43,7 +43,6 @@ if __name__ == "__main__":
             rewritten_uops = []
             for i,(k,u) in enumerate(zip(kernels, uops)):
               with Timing(f"rewrite {i:2d} {k.name}{' '*(50-ansilen(k.name))}", enabled=getenv("VERBOSE", 0)):
-                if getenv("VIZ"): _CURRENT_KERNEL.set(k.name)
                 rewritten_uops.append(full_graph_rewrite(u, k.opts))
             uops = rewritten_uops
         if getenv("LINEARIZE", 1):

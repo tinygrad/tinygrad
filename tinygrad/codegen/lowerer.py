@@ -91,7 +91,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
 
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
   # NOTE: always using ridxs is fine here
-  reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.arg[1]], lambda y: y.op is UOps.RANGE)
+  reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is UOps.RANGE)
   alu_op: BinaryOps = x.arg[0]
   ret = x.src[0]
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
@@ -114,7 +114,7 @@ def lower_load_store(ctx: IndexContext, x: UOp):
   if store_back: idx, _ = x.st_arg.to_indexed_uops([u.const_like(0) if u in x.src[2].src else u for u in ctx.idxs])
   if x.src[0].op is UOps.DEFINE_GLOBAL or store_back:
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
-      if oidx != ridx: valid = valid * oidx.eq(0)
+      if oidx is not ridx: valid = valid * oidx.eq(0)
     has_valid = valid.op is not UOps.CONST or valid.arg is not True
   return UOp(UOps.STORE, dtypes.void, (buf, idx, x.src[2]) + ((valid,) if has_valid else ()))
 
