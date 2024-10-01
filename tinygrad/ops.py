@@ -724,7 +724,7 @@ simple_pm = PatternMatcher([
   (UPat.var("x", dtype=dtypes.bool) | UPat.cvar("c", vec=False), lambda x,c: c if c.arg else x),
   ((UPat.var("x") & UPat.var("x")), lambda x: x),
   ((UPat.var("x") | UPat.var("x")), lambda x: x),
-  (UPat.var("x").logical_not().logical_not(), lambda x: x),
+  (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
   # ** zero folding **
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
