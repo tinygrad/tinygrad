@@ -672,13 +672,22 @@ def train_bert():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
-  model = get_mlperf_bert_model(init_ckpt if not INITMLPERF else None)
+  assert 10000 <= (EVAL_BS * max_eval_steps), "Evaluation batchsize * max_eval_steps must greater or equal 10000 to iterate over full eval dataset"
+
+  # ** init wandb **
+  WANDB = getenv("WANDB")
+  if WANDB:
+    import wandb
+    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb.init(config=config, **wandb_args, project="MLPerf-BERT")
+
+  # ** init model **
+
+  model = get_mlperf_bert_model(init_ckpt if RUNMLPERF else None)
   
   for _, x in get_state_dict(model).items():
     x.realize().to_(GPUS)
   parameters = get_parameters(model)
-
-  assert 10000 <= (EVAL_BS * max_eval_steps), "Evaluation batchsize * max_eval_steps must greater or equal 10000 to iterate over full eval dataset"
 
   # ** Log run config **
   for key, value in config.items(): print(f'HParam: "{key}": {value}')
@@ -727,14 +736,8 @@ def train_bert():
     start_step = int(scheduler_wd.epoch_counter.numpy().item())
     print(f"resuming from {ckpt} at step {start_step}")
 
-  # ** init wandb **
-  WANDB = getenv("WANDB")
-  if WANDB:
-    import wandb
-    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
-    wandb.init(config=config, **wandb_args, project="MLPerf-BERT")
-
-  if not INITMLPERF:
+  if RUNMLPERF:
+    # only load real data with RUNMLPERF
     eval_it = iter(batch_load_val_bert(EVAL_BS))
     train_it = iter(tqdm(batch_load_train_bert(BS), total=train_steps, disable=BENCHMARK))
     for _ in range(start_step): next(train_it) # Fast forward
@@ -743,10 +746,12 @@ def train_bert():
   step_times = []
   # ** train loop **
   wc_start = time.perf_counter()
-  if INITMLPERF:
-    i, train_data = start_step, get_fake_data_bert(GPUS, BS)
-  else:
+  if RUNMLPERF:
+    # only load real data with RUNMLPERF
     i, train_data = start_step, get_data_bert(GPUS, train_it)
+  else:
+    i, train_data = start_step, get_fake_data_bert(GPUS, BS)
+
   while train_data is not None and i < train_steps and not achieved:
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
@@ -759,10 +764,10 @@ def train_bert():
     pt = time.perf_counter()
 
     try:
-      if INITMLPERF:
-        next_data = get_fake_data_bert(GPUS, BS)
-      else:
+      if RUNMLPERF:
         next_data = get_data_bert(GPUS, train_it)
+      else:
+        next_data = get_fake_data_bert(GPUS, BS)
     except StopIteration:
       next_data = None
 
@@ -797,7 +802,7 @@ def train_bert():
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": 1, "epoch_count": 1, "step_num": i})
-      train_step_bert.reset()
+      if getenv("RESET_STEP", 1): train_step_bert.reset()
       eval_lm_losses = []
       eval_clsf_losses = []
       eval_lm_accs = []
@@ -807,10 +812,10 @@ def train_bert():
       BEAM.value = EVAL_BEAM
 
       for j in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps, disable=BENCHMARK):
-        if INITMLPERF:
-          eval_data = get_fake_data_bert(GPUS, EVAL_BS)
-        else:
+        if RUNMLPERF:
           eval_data = get_data_bert(GPUS, eval_it)
+        else:
+          eval_data = get_fake_data_bert(GPUS, EVAL_BS)
         GlobalCounters.reset()
         st = time.time()
 
@@ -835,7 +840,8 @@ def train_bert():
             MLLOGGER.event(key=mllog_constants.INIT_STOP, value=None)
           return
 
-      eval_step_bert.reset()
+      if getenv("RESET_STEP", 1): eval_step_bert.reset()
+      del eval_data, eval_result
       avg_lm_loss = sum(eval_lm_losses) / len(eval_lm_losses)
       avg_clsf_loss = sum(eval_clsf_losses) / len(eval_clsf_losses)
       avg_lm_acc = sum(eval_lm_accs) / len(eval_lm_accs)

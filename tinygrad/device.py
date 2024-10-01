@@ -1,8 +1,8 @@
 from __future__ import annotations
 import multiprocessing, decimal, statistics, random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type
+from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type, Iterator
 import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib, array
 from tinygrad.helpers import SAVE_SCHEDULE, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
 from tinygrad.dtype import DType, ImageDType
@@ -27,16 +27,17 @@ class _Device:
     return ret
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
+  def get_available_devices(self) -> Iterator[str]:
+    for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM"]:
+      with contextlib.suppress(Exception): yield self[device].dname
   @functools.cached_property
   def DEFAULT(self) -> str:
     if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
-    for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM"]:
-      try:
-        if self[device]:
-          os.environ[device] = "1"   # we set this in environment for spawned children
-          return device
-      except Exception: pass
-    raise RuntimeError("no usable devices")
+    try:
+      device = next(self.get_available_devices())
+      os.environ[device] = "1"   # we set this in environment for spawned children
+      return device
+    except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device = _Device()
 
 # **************** Buffer + Allocators ****************
@@ -48,6 +49,7 @@ class BufferOptions:
   cpu_access: bool = False
   host: bool = False
   nolru: bool = False
+  external_ptr: Optional[int] = None
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None,
@@ -75,9 +77,11 @@ class Buffer:
   def ref(self, cnt): self.base._lb_refcount += cnt
   def is_allocated(self) -> bool: return hasattr(self, '_buf')
   def ensure_allocated(self) -> Buffer: return self.allocate() if not hasattr(self, '_buf') else self
-  def allocate(self, opaque=None) -> Buffer:
+  def allocate(self, opaque=None, external_ptr=None) -> Buffer:
     assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
     self.allocator = Device[self.device].allocator
+    if external_ptr is not None:
+      self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferOptions(external_ptr=external_ptr)
     if self._base is not None:
       self._base.ensure_allocated()
       assert hasattr(self.allocator, "offset"), "offset function required for view"
@@ -99,7 +103,7 @@ class Buffer:
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
     if not hasattr(self, '_buf'): return
-    if self._base is None:
+    if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self):
@@ -162,7 +166,8 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
     else: super().free(opaque, size, options)
 
 class _MallocAllocator(LRUAllocator):
-  def _alloc(self, size:int, options:BufferOptions): return (ctypes.c_uint8 * size)()
+  def _alloc(self, size:int, options:BufferOptions):
+    return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else (ctypes.c_uint8 * size)()
   def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
@@ -516,7 +521,7 @@ class HCQCompiled(Compiled):
     self.devices.append(self)
 
   def synchronize(self):
-    self.timeline_signal.wait(self.timeline_value - 1)
+    self.timeline_signal.wait(self.timeline_value - 1) if not hasattr(self, '_syncdev') else self._syncdev()
 
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE:

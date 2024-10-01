@@ -9,6 +9,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+HK:wght@100..900&display=swap" rel="stylesheet">
   <script src="https://d3js.org/d3.v5.min.js" charset="utf-8"></script>
   <script src="https://dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/default.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cpp.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/1.0.3/purify.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
   <style>
   * {
     box-sizing: border-box;
@@ -16,8 +22,8 @@
     margin-block-end: initial;
   }
   html, body {
-    background-color: #191919;
-    color: #EEEEEE;
+    background-color: #08090e;
+    color: #f0f0f5;
     margin: 0;
     padding: 0;
     width: 100%;
@@ -31,15 +37,16 @@
     overflow: hidden;
   }
   a {
-    color: #0090FF;
+    color: #4a90e2;
   }
   ul {
     padding: 0;
-    color: #7B7B7B;
+    color: #7c7d85;
+    white-space: nowrap;
     cursor: pointer;
   }
   ul.active {
-    color: #EEEEEE;
+    color: #f0f0f5;
   }
   svg {
     width: 100%;
@@ -50,16 +57,17 @@
     user-select: none;
   }
   .node rect {
-    stroke: #313131;
+    stroke: #4a4b57;
     stroke-width: 1.5px;
   }
   .label text {
-    color: black;
+    color: #08090e;
     font-weight: 350;
   }
   .edgePath path {
-    stroke: #606060;
-    stroke-width: 1.5px;
+    stroke: #4a4b57;
+    fill: #4a4b57;
+    stroke-width: 1.4px;
   }
   .graph {
     width: 70%;
@@ -70,11 +78,10 @@
     padding: 12px;
     width: 100%;
     height: 100%;
-    background-color: #191919;
   }
   .container {
+    background-color: #0f1018;
     height: 100%;
-    background-color: #111111;
     border-radius: 8px;
     padding: 8px;
     position: relative;
@@ -82,13 +89,14 @@
   .container > * + * {
     margin-top: 12px;
   }
+  .rewrite-container > * + * {
+    margin-top: 12px;
+  }
   .main-container > * + * {
     margin-left: 8px;
   }
   .kernel-list {
     width: 10%;
-    display: flex;
-    flex-direction: column;
     overflow-y: auto;
   }
   .kernel-list > ul > ul {
@@ -99,6 +107,7 @@
   }
   .metadata {
     width: 20%;
+    padding-left: 20px;
     overflow-y: auto;
   }
   #resize-handle {
@@ -107,7 +116,8 @@
     top: 0;
     bottom: 0;
     width: 20px;
-    cursor: w-resize;
+    height: 100%;
+    cursor: col-resize;
     background-color: transparent;
   }
   .rewrite-list {
@@ -124,7 +134,6 @@
   .code-block {
     max-height: 30%;
     overflow-y: auto;
-    background-color: #191919;
     border-radius: 8px;
     padding: 8px;
   }
@@ -166,9 +175,26 @@
     <div class="container metadata"></div>
   </div>
   <script>
+  // extra definitions for UOps
+  hljs.registerLanguage("python", (hljs) => ({
+    ...hljs.getLanguage("python"),
+    case_insensitive: false,
+    contains: [
+      { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-]*(\\.[a-zA-Z_][a-zA-Z0-9_-]*)*' + '(?=[.\\s\\n[:,(])', className: "type" },
+      { begin: 'dtypes\\.[a-zA-Z_][a-zA-Z0-9_-].vec*' + '(?=[.\\s\\n[:,(])', className: "type" },
+      { begin: '[a-zA-Z_][a-zA-Z0-9_-]*\\.[a-zA-Z_][a-zA-Z0-9_-]*' + '(?=[.\\s\\n[:,()])',  className: "operator" },
+      { begin: '[A-Z][a-zA-Z0-9_]*(?=\\()', className: "section", ignoreEnd: true },
+      ...hljs.getLanguage("python").contains,
+    ]
+  }));
+  // extra definitions for float4
+  hljs.registerLanguage("cpp", (hljs) => ({
+    ...hljs.getLanguage('cpp'),
+    contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
+  }));
   function renderGraph(graph, additions) {
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: #242424" : "display: none;"});
+    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5); rx: 8; ry: 8;" : "display: none;"});
     for ([k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
       for (src of u[2]) {
@@ -205,10 +231,10 @@
   var currentUOp = 0;
   var currentKernel = 0;
   var currentRewrite = 0;
-  var expandKernel = false;
+  var expandKernel = true;
   async function main() {
     checkStatus();
-    // ** kernel list
+    // ***** LHS kernels list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
       currentKernel = 0;
@@ -216,11 +242,11 @@
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
     kernels.forEach((k, i) => {
-      kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "" });
-      const p = Object.assign(document.createElement("p"), {id: `kernel-${k.name}`, innerText: k.name})
+      kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "", style: "overflow-x: auto; cursor: initial;" });
+      const p = Object.assign(document.createElement("p"), {id: `kernel-${k.name}`, innerText: k.name, style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       k.ctxs.forEach((u, j) => {
-        const rwUl = Object.assign(document.createElement("ul"), { innerText: u, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
+        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${u.filename} - ${u.match_count} - ${u.matcher_name}`, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
         rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
           e.stopPropagation();
@@ -245,7 +271,7 @@
       }
       kernelList.appendChild(kernelUl);
     });
-    // ** uop graph
+    // ***** UOp graph
     cacheKey = `${currentKernel}-${currentUOp}`;
     if (cacheKey in cache) {
       ret = cache[cacheKey];
@@ -255,18 +281,23 @@
       cache[cacheKey] = ret;
     }
     renderGraph(ret[0].graphs[currentRewrite], ret[0].additions[currentRewrite]);
+    // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
+    metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc.filename }));
+    const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(ret[0].loc.code)}</code>`, className: "wrap code-block language-python" });
+    metadata.appendChild(pre);
+    hljs.highlightElement(pre);
+    // ** resizer
     metadata.appendChild(Object.assign(document.createElement("div"), { id: "resize-handle" }));
-    metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc }));
     const resizeHandle = document.getElementById("resize-handle");
-
     let startX;
     let containerWidth;
     let metadataWidth;
     resizeHandle.addEventListener("mousedown", (e) => {
       e.preventDefault();
       metadata.style.userSelect = "none";
+      document.documentElement.style.cursor = "col-resize";
       startX = e.clientX;
       containerWidth = document.querySelector(".main-container").getBoundingClientRect().width;
       metadataWidth = metadata.getBoundingClientRect().width;
@@ -284,16 +315,20 @@
     function stopResize(e) {
       document.documentElement.removeEventListener("mousemove", resize, false);
       document.documentElement.removeEventListener("mouseup", stopResize, false);
+      document.documentElement.style.cursor = "initial";
       metadata.style.userSelect = "initial";
     }
-
+    // ** code blocks
     ret[0].extra[currentRewrite].forEach((e, i) => {
       if (e.length == 0) return;
-      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${e}</code>`, className: "code-block" });
+      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(e)}</code>`, className: "code-block language-python" });
+      hljs.highlightElement(pre);
       metadata.appendChild(pre);
     })
     if (kernels[currentKernel].code !== "") {
-      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${kernels[currentKernel].code}</code>`, className: "code-block" });
+      const code = kernels[currentKernel].code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(code)}</code>`, className: "code-block language-cpp" });
+      hljs.highlightElement(pre);
       metadata.appendChild(pre);
     }
     // ** rewrite list
@@ -307,13 +342,17 @@
           gUl.classList.add("active");
           if (i !== 0) {
             const [pattern, loc, diff] = ret[0].diffs[i-1];
-            const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
             const parts = loc.join(":").split("/");
-            pre.appendChild(Object.assign(document.createElement("a"), { innerText: parts[parts.length-1]+"\n\n", href: "vscode://file"+parts.join("/") }));
-            pre.appendChild(Object.assign(document.createElement("code"), { innerText: pattern }));
-            metadata.appendChild(pre);
+            const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
+            link = Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n", href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" })
+            div.appendChild(link);
+            const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
+            pre.appendChild(Object.assign(document.createElement("code"), { textContent: DOMPurify.sanitize(pattern), className: "language-python" }));
+            div.appendChild(pre);
+            hljs.highlightElement(pre);
+            metadata.appendChild(div);
             const diffHtml = diff.map((line) => {
-              const color = line.startsWith("+") ? "#30A46C" : line.startsWith("-") ? "#E5484D" : "#EEEEEE";
+              const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
               return `<span style="color: ${color};">${line}</span>`;
             }).join("<br>");
             metadata.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${diffHtml}</code>`, className: "wrap" }));
@@ -325,7 +364,7 @@
         });
       })
     } else {
-      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: "No rewrites" }));
+      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${ret[0].loc.filename}.` }));
     }
   }
   document.addEventListener("keydown", async function(event) {
@@ -379,7 +418,6 @@
       main()
     }
   })
-  setInterval(checkStatus, 5000);
   main()
   </script>
   </body>

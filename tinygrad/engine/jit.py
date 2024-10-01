@@ -3,7 +3,7 @@ from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, O
 import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, all_int, colored, JIT, dedup, partition
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, colored, JIT, dedup, partition
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -15,10 +15,9 @@ from weakref import WeakKeyDictionary
 
 class GraphException(Exception): pass
 
-def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]) -> List[ExecItem]:
+def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], max_batch_size=0) -> List[ExecItem]:
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
-  max_batch_size = getenv("JIT_BATCH_SIZE", 32)
   graphed_jit_cache: List[ExecItem] = []
   current_batch: List[ExecItem] = []
   current_device: Optional[Compiled] = None
@@ -50,7 +49,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
     can_be_graphed = ji_graph_dev and ji_graph_dev.graph
     can_share_graph = (ji_graph_dev == current_device or (isinstance(graph_class, type) and issubclass(graph_class, MultiGraphRunner)) and
                        type(ji_graph_dev) is type(current_device))
-    can_extend_graph_batch = can_be_graphed and len(current_batch) < max_batch_size and can_share_graph
+    can_extend_graph_batch = can_be_graphed and (max_batch_size == 0 or len(current_batch) < max_batch_size) and can_share_graph
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
 
     if can_be_graphed: current_batch.append(ji)
@@ -80,9 +79,11 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     mem_estimate: sint = 0
     lds_estimate: sint = 0
 
+    def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
+
     self.vars = sorted(var_vals.keys(), key=lambda v: v.expr)
-    self.symbolic_dims = dedup([tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.local_size) and not all_int(d)] +
-                               [tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.global_size) and not all_int(d)])
+    self.symbolic_dims = dedup([tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.local_size) and is_sym_dim(d)] +
+                               [tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.global_size) and is_sym_dim(d)])
     def find_symbolic_dim(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
 
     for j,ji in enumerate(jit_cache):
@@ -159,7 +160,7 @@ class CapturedJit(Generic[ReturnType]):
 
     # Condense the items into a graph executor.
     if JIT < 2 and not self._graphed:
-      self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals)
+      self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
       self._input_replace = get_input_replace(self._jit_cache, input_buffers)
       self._graphed = True
 

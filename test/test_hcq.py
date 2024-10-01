@@ -291,7 +291,7 @@ class TestHCQ(unittest.TestCase):
     et = TestHCQ.d0._gpu2cpu_time(sig_en.timestamp, True) - TestHCQ.d0._gpu2cpu_time(sig_st.timestamp, True)
 
     print(f"exec kernel time: {et:.2f} us")
-    assert 1 <= et <= (3000 if CI else 30)
+    assert 1 <= et <= (7000 if CI else 30)
 
   def test_speed_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")

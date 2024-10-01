@@ -8,7 +8,7 @@ from tinygrad.ops import UOps
 from tinygrad.device import Compiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
-from tinygrad.helpers import DEBUG, ansilen, getenv, colored
+from tinygrad.helpers import DEBUG, ansilen, getenv, colored, TRACEMETA
 from tinygrad.shape.symbolic import sym_infer
 
 def get_sched_resnet():
@@ -33,7 +33,7 @@ def get_sched_bert():
   optim = nn.optim.LAMB(nn.state.get_parameters(mdl))
 
   # fake data
-  BS = getenv("BS", 2)
+  BS = getenv("BS", 9)
   input_ids = Tensor.empty((BS, 512), dtype=dtypes.float32)
   segment_ids = Tensor.empty((BS, 512), dtype=dtypes.float32)
   attention_mask = Tensor.empty((BS, 512), dtype=dtypes.default_float)
@@ -53,7 +53,7 @@ def get_sched_bert():
       # ignore grad norm and loss scaler for now
       loss.backward()
       targets += [x.lazydata for x in optim.schedule_step()]
-    sched = create_schedule(targets, seen)
+    sched = create_schedule(targets)
     print(f"schedule length {len(sched)}")
   return sched
 
@@ -128,7 +128,7 @@ if __name__ == "__main__":
     running_gflops += gflops * tm
     if (key := str([str(m) for m in si.metadata] if si.metadata is not None else None)) not in usage: usage[key] = (0, 0)
     usage[key] = (usage[key][0] + tm, usage[key][1] + 1)
-    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(prg.global_size):18s} {str(prg.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS {[str(m) for m in si.metadata] if si.metadata is not None else ''}")
+    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(prg.global_size):18s} {str(prg.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS {[repr(m) if TRACEMETA >= 2 else str(m) for m in si.metadata] if si.metadata is not None else ''}")
   print(f"******* total {total_tm*1000:.2f} ms, {running_gflops/total_tm:6.0f} GFLOPS")
   print("usage:")
   for k in sorted(usage, key=lambda x: -usage[x][0])[:10]:

@@ -6,12 +6,12 @@ from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import Variable, NumNode
 from tinygrad.ops import UOp, UOps, graph_rewrite
-from tinygrad.codegen.uopgraph import constant_folder
+from tinygrad.codegen.uopgraph import sym
 from itertools import product
 
 def shapetracker_getitem(st:ShapeTracker, val:int):
   idx, valid = st.reshape((st.size,)).to_indexed_uops([UOp.const(dtypes.pyint, val)])
-  idx, valid = graph_rewrite(idx, constant_folder), graph_rewrite(valid, constant_folder)
+  idx, valid = graph_rewrite(idx, sym), graph_rewrite(valid, sym)
   assert idx.op is UOps.CONST and valid.op is UOps.CONST
   return idx.arg, valid.arg
 

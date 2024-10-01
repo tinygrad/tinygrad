@@ -4,7 +4,7 @@ import functools, itertools, heapq, math, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType
 from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
-from tinygrad.ops import UPat, PatternMatcher, graph_rewrite
+from tinygrad.ops import UPat, PatternMatcher, graph_rewrite, TernaryOps
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
@@ -186,7 +186,7 @@ def is_increasing(f:UOp):
 
 def replace_uop(uop:UOp, old:UOp, new:UOp):
   # replace all `old` in `uop` to `new`
-  return new if uop.key == old.key else UOp(uop.op, uop.dtype, tuple(replace_uop(s, old, new) for s in uop.src), uop.arg)
+  return new if uop.key == old.key else uop.replace(src=tuple(replace_uop(s, old, new) for s in uop.src))
 
 def parse_valid(valid:UOp) -> Tuple[UOp, bool, int]:
   # if it's X <= c, returns X, True, c
@@ -199,10 +199,8 @@ def parse_valid(valid:UOp) -> Tuple[UOp, bool, int]:
   if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPLT and valid.src[1].op is UOps.CONST: return valid.src[0], True, valid.src[1].arg-1
   raise ValueError(f"not able to parse {valid=}")
 
-def simplify_valid_image_load(load:UOp, buf:UOp):
-  if not isinstance(buf_dtype:=buf.dtype, ImageDType) or len(load.src) < 4: return None
-  buf, idx, invalid_val, valid = load.src
-  start_idx = idx
+def idx_given_valid(valid:UOp, idx:UOp) -> Optional[UOp]:
+  # return None if valid is always False, otherwise the simplified idx (might be the same as input)
 
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:DefaultDict[UOp, List[Optional[ConstType]]] = defaultdict(lambda: [None, None])
@@ -212,26 +210,33 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
 
   # simplify idx given that valid is True
   for uop,v in bounds.items():
-    # some expr has lower bound > upper bound -> valid is an empty set
-    if v[0] is not None and v[1] is not None and v[0] > v[1]:
-      return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, valid.const_like(False)))
+    # some expr has lower bound > upper bound -> valid is an empty set and we return None
+    if v[0] is not None and v[1] is not None and v[0] > v[1]: return None
 
+    # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the idx into a same output, we rewrite idx
+    candidates = []
     if uop.op is UOps.ALU and uop.arg is BinaryOps.ADD and all(is_irreducible(u) and u.vmin == 0 for u in _get_chain(uop, BinaryOps.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      newidxs: List[List[UOp]] = [[], []]
-      for variable in _get_chain(uop, BinaryOps.ADD):
-        new = UOp(UOps.DEFINE_VAR, variable.dtype, (), ("fake", 1, variable.vmax))
-        newidx = replace_uop(graph_rewrite(replace_uop(idx, variable, new), constant_folder), new, variable)
+      candidates.append([(Xi, UOp.define_var("fake", Xi.dtype, 1, Xi.vmax)) for Xi in _get_chain(uop, BinaryOps.ADD)])
+    # try checking the whole clause
+    candidates.append([(uop, UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1]))])
+
+    for candidate in candidates:
+      newidxs:List[List[UOp]] = [[], []]
+      for X,newX in candidate:
+        newidx = replace_uop(graph_rewrite(replace_uop(idx, X, newX), sym), newX, X)
         newidxs[0].append(newidx.src[0])
         newidxs[1].append(newidx.src[1])
 
+      # if every branch in candidate gives the same simplified output, we can rewrite the idx
       if len(newidxs[0])==1 or (len(newidxs[0]) > 1 and all_same([i.key for i in newidxs[0]])): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
       if len(newidxs[1])==1 or (len(newidxs[1]) > 1 and all_same([i.key for i in newidxs[1]])): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
+  return idx
 
-    else:
-      new = UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1])
-      newidx = replace_uop(graph_rewrite(replace_uop(idx, uop, new), constant_folder), new, uop)
-      if newidx.key != idx.key: idx = newidx
+def simplify_valid_image_load(load:UOp, buf:UOp):
+  if not isinstance(buf_dtype:=buf.dtype, ImageDType) or len(load.src) < 4: return None
+  buf, start_idx, invalid_val, valid = load.src
+  if (idx:=idx_given_valid(valid, start_idx)) is None: return load.replace(src=(buf, start_idx, invalid_val, valid.const_like(False)))
 
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
@@ -242,7 +247,7 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
     if not is_upper_bound and c == 1 and X.op is UOps.ALU and X.arg is BinaryOps.ADD and \
       all(is_irreducible(u) and u.vmin == 0 for u in _get_chain(X, BinaryOps.ADD)):
       testidx = functools.reduce(lambda nowidx,u: replace_uop(nowidx, u, u.const_like(0)), _get_chain(X, BinaryOps.ADD), idx)
-      testidx = graph_rewrite(testidx, constant_folder)
+      testidx = graph_rewrite(testidx, sym)
       if testidx.src[0].vmax < 0 or testidx.src[1].vmax < 0:
         drop_stmt.append(stmt)
         continue
@@ -252,29 +257,54 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
     test_value = c + 1 if is_upper_bound else c - 1
     for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
       if is_increasing(i):
-        rw = graph_rewrite(replace_uop(i, X, X.const_like(test_value)), constant_folder)
-        if rw.vmin >= b or rw.vmax < 0: drop_stmt.append(stmt)
+        rw = graph_rewrite(replace_uop(i, X, X.const_like(test_value)), sym)
+        if rw.vmin >= b or rw.vmax < 0:
+          drop_stmt.append(stmt)
+          break
 
-  if drop_stmt or idx.key != start_idx.key:
-    new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
-    return UOp(UOps.LOAD, load.dtype, (buf, idx, invalid_val, new_valid)) if new_valid else UOp(UOps.LOAD, load.dtype, (buf, idx))
-  return None
+  if not drop_stmt and idx.key == start_idx.key: return None
+  new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
+  return load.replace(src=((buf, idx, invalid_val, new_valid) if new_valid else (buf, idx)))
 
-# ***** transcendental *****
+# ***** optional patterns *****
 
+transcendental_patterns = [
+  (UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),), arg=UnaryOps.EXP2), xexp2),
+  (UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),), arg=UnaryOps.LOG2), xlog2),
+  (UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),), arg=UnaryOps.SIN), xsin),
+]
+
+powers_of_two = {2**i:i for i in range(64)}
 @functools.lru_cache(None)
-def transcendental_folding(ops):
-  return PatternMatcher([(UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),), arg=k), cast(Callable, v))
-                         for k,v in ((UnaryOps.EXP2, xexp2), (UnaryOps.LOG2, xlog2), (UnaryOps.SIN, xsin)) if k not in ops])
+def get_extra_patterns(ops, force_transcendental=False):
+  pat = [(p[0], cast(Callable, p[1])) for p in transcendental_patterns if p[0].arg not in ops or force_transcendental]
+  # rewrite MOD to AND (which should always be supported, but not for generic in tests)
+  if BinaryOps.AND in ops:
+    pat += [(UPat(UOps.ALU, arg=BinaryOps.MOD, src=(UPat.var('base'), UPat.cvar("const"))),
+            lambda base,const: base & (const.arg-1) if const.arg in powers_of_two else None)]
+  # rewrite MUL/IDIV to SHL+SHR
+  if BinaryOps.SHL in ops and BinaryOps.SHR in ops:
+    pat += [
+    (UPat(UOps.ALU, arg=BinaryOps.MUL, dtype=dtypes.ints, src=[UPat.cvar("const"), UPat.var("mul")]), lambda mul, const:
+      UOp(UOps.ALU, mul.dtype, (mul, UOp.const(dtypes.int, powers_of_two[const.arg])), BinaryOps.SHL) if const.arg in powers_of_two else None),
+    (UPat(UOps.ALU, arg=BinaryOps.IDIV, src=(UPat.var("div"), UPat.cvar("const"))), lambda div, const:
+      UOp(UOps.ALU, div.dtype, (div, UOp.const(dtypes.int, powers_of_two[const.arg])), BinaryOps.SHR) if const.arg in powers_of_two else None)]
+  if UnaryOps.NEG in ops:
+    pat += [(UPat.var('x')*-1, lambda x: x.alu(UnaryOps.NEG))]
+    if BinaryOps.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(UnaryOps.NEG), lambda x,y: x.alu(BinaryOps.SUB, y))]
+  if TernaryOps.MULACC in ops:
+    pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(TernaryOps.MULACC, b, c))]
+  return PatternMatcher(pat)
 
 # ***** threefry *****
 
-def threefry2x32(x: UOp, seed: UOp):
+def threefry2x32(x: UOp, key: UOp):
   # split x into two uint32, since x in a uint64
   x0, x1 = (x & 0xffffffff).cast(dtypes.uint32), ((x // 2**32) & 0xffffffff).cast(dtypes.uint32)
 
   rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
-  ks = [0x0, (seed := seed.cast(dtypes.uint32)) ^ 0x1BD11BDA, seed]
+  key0, key1 = (key & 0xffffffff).cast(dtypes.uint32), ((key // 2**32) & 0xffffffff).cast(dtypes.uint32)
+  ks = [key1, key0 ^ key1 ^ 0x1BD11BDA, key0]
   xr = [x0 + ks[-1], x1 + ks[0]]
   for i in range(5):
     for r in rotations[i % 2]: xr[0], xr[1] = (x0 := xr[0] + xr[1]), x0 ^ ((xr[1] * 2**r) + (xr[1] // 2**(32 - r)))
@@ -340,10 +370,11 @@ def no_vectorized_wmma(wmma:UOp):
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 # this is symbolic 2.0
-constant_folder = PatternMatcher([
-  # bool ADD is OR, MUL is AND. prevents other rules to rewrite bool ADD/MUL incorrectly
-  (UPat(UOps.ALU, dtypes.bool, arg=BinaryOps.ADD, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.OR)),
-  (UPat(UOps.ALU, dtypes.bool, arg=BinaryOps.MUL, name="x"), lambda x: UOp(x.op, x.dtype, x.src, BinaryOps.AND)),
+sym = PatternMatcher([
+  # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
+  (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
+  (UPat.var('x', dtype=dtypes.bool) + UPat.var('y'), lambda x,y: x|y),
+  (UPat.var('x', dtype=dtypes.bool).max(UPat.var('y')), lambda x,y: x|y),
   # self ASSIGN is just self
   (UPat(UOps.ASSIGN, src=(UPat.var('x'), UPat.var('x'))), lambda x: x),
   # ASSIGN to global is just self
@@ -378,7 +409,7 @@ constant_folder = PatternMatcher([
   (UPat.var("add") + UPat(UOps.WMMA, name="wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry
-  (UPat(UOps.ALU, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("seed")), arg=BinaryOps.THREEFRY), threefry2x32),
+  (UPat(UOps.ALU, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key")), arg=BinaryOps.THREEFRY), threefry2x32),
   # arange loop folding
   (UPat(UOps.REDUCE, src=(UPat.any(m2:=UPat.any(
     m1:=(UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, name="rng")),
@@ -429,8 +460,8 @@ constant_folder = PatternMatcher([
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
   (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
-  # min==max -> CONST (slow!)
-  (UPat((UOps.ALU, UOps.DEFINE_VAR), name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
+  # ALU min==max -> CONST (slow!)
+  (UPat(UOps.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # ** load/store folding **
   (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.load(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
   # ** two stage add/mul folding **
@@ -708,11 +739,10 @@ linearize_cnt = 0
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   global linearize_cnt, acc_number
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
-  folder = constant_folder + transcendental_folding(tuple() if TRANSCENDENTAL >= 2 or opts is None else tuple(opts.code_for_op.keys()))
 
   # do graph rewrite
   acc_number = 0
-  sink = graph_rewrite(sink, folder)
+  sink = graph_rewrite(sink, sym)
 
   # rewrite pyint to int32
   sink = graph_rewrite(sink, no_pyint)
@@ -720,14 +750,14 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # expand
   linearize_cnt += 1
   if linearize_cnt != (de:=getenv("DEBUG_EXPAND", 0)) and de != -1:
-    sink = graph_rewrite(sink, folder+expander)
+    sink = graph_rewrite(sink, sym+expander)
     if getenv("DO_REDUCE", 1):
-      sink = graph_rewrite(sink, folder+just_reduce)
-      sink = graph_rewrite(sink, folder+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
-      sink = graph_rewrite(sink, folder+reducer)
+      sink = graph_rewrite(sink, sym+just_reduce)
+      sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
+      sink = graph_rewrite(sink, sym+reducer)
+      sink = graph_rewrite(sink, sym+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
 
-  # for PTX only
-  if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, folder+opts.extra_matcher)
+  if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, opts.extra_matcher)
   return sink
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
@@ -759,6 +789,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     # prefer uops that are loop children
     else:
       priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
+    if u.op is UOps.IF and len(u.src) == 1: priority += 10000000 # if penalty
     return priority
   priorities:Dict[UOp, int] = {u:get_priority(u) for u in children}
 
