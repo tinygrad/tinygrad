@@ -308,10 +308,10 @@ class FidInceptionV3:
     return x
 
   def compute_score(self, inception_activations:Tensor, val_stats_path:str) -> float:
-    if self.m1 is None or self.s1 is None:
+    if self.m1 is None and self.s1 is None:
       with np.load(val_stats_path) as f:
         self.m1, self.s1 = f['mu'][:], f['sigma'][:]
-      assert self.m1 is not None and self.s1 is not None
+    assert self.m1 is not None and self.s1 is not None
 
     m2 = inception_activations.mean(axis=0).numpy()
     s2 = np.cov(inception_activations.numpy(), rowvar=False)
