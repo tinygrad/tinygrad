@@ -109,8 +109,8 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
 
 reduceop_fusor = PatternMatcher([
   # SWIZZLE on VALID merges the views
-  (UPat(UOps.SWIZZLE, src=(UPat(UOps.ALU, src=(UPat(UOps.VALID, name="valid"), UPat.var(), UPat.var()), arg=TernaryOps.WHERE),), name="swizzle"),
-   lambda swizzle,valid: UOp(UOps.VALID, dtypes.bool, ((valid.st_arg+unwrap(swizzle.st)).to_uop(),)).where(*swizzle.src[0].src[1:])),
+  (UPat(UOps.SWIZZLE, src=(UPat(UOps.ALU, src=(UPat(UOps.VALID), UPat.var(), UPat.var()), name="alu", arg=TernaryOps.WHERE),), name="root"),
+   lambda root,alu: UOp(UOps.VALID, dtypes.bool, (root.st.to_uop(),)).where(*alu.src[1:]) if root.st != alu.st else alu),
   # push a SWIZZLE up to LOAD, through a reduce (eg. expands)
   (UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
   # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
