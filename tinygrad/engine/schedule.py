@@ -109,7 +109,7 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
 
 reduceop_fusor = PatternMatcher([
   # SWIZZLE on VALID is a new VALID
-  (UPat(UOps.SWIZZLE, src=(UPat(UOps.ALU, src=(UPat(UOps.VALID, name="valid"), UPat.cvar(), UPat.cvar()), arg=TernaryOps.WHERE),), name="swizzle"),
+  (UPat(UOps.SWIZZLE, src=(UPat(UOps.ALU, src=(UPat(UOps.VALID, name="valid"), UPat.var(), UPat.var()), arg=TernaryOps.WHERE),), name="swizzle"),
    lambda swizzle,valid: UOp(UOps.VALID, dtypes.bool, ((valid.st_arg+unwrap(swizzle.st)).to_uop(),)).where(*swizzle.src[0].src[1:])),
   # push a SWIZZLE up to LOAD, through a reduce (eg. expands)
   (UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
@@ -143,7 +143,9 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   if (ubuf:=buf_uops.get(buf.buffer)) and buf not in outputs:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
-    if buf.op is MetaOps.CONST: return ubuf.swizzle(unbound_st)
+    if buf.op is MetaOps.CONST:
+      if isinstance(val:=buf.arg, Variable): var_vals.update([val.unbind()])
+      return ubuf.swizzle(unbound_st)
     if buf in assign_targets and not (unbound_st.contiguous or (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and \
         ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask))):
       # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
