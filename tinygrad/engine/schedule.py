@@ -1,12 +1,12 @@
 import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast, get_args
-from tinygrad.ops import REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, UnaryOps, UOp, UOps, PatternMatcher, UPat, graph_rewrite
+from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
+from tinygrad.ops import REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, TernaryOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, graph_rewrite
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
                              GlobalCounters, all_same, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
 from tinygrad.shape.symbolic import Variable, sint
-from tinygrad.dtype import ConstType, ImageDType, dtypes
+from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer, Device
@@ -108,6 +108,9 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
 
 reduceop_fusor = PatternMatcher([
+  # SWIZZLE on VALID merges the views
+  (UPat(UOps.SWIZZLE, src=(UPat(UOps.ALU, src=(UPat(UOps.VALID), UPat.var(), UPat.var()), name="alu", arg=TernaryOps.WHERE),), name="root"),
+   lambda root,alu: UOp(UOps.VALID, dtypes.bool, (root.st.to_uop(),)).where(*alu.src[1:]) if root.st != alu.st else alu),
   # push a SWIZZLE up to LOAD, through a reduce (eg. expands)
   (UPat(UOps.SWIZZLE, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
   # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
@@ -136,19 +139,13 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
 
   # buffer ops define ShapeTracker
-  # if it's a const, we generate it
-  if buf.op is MetaOps.CONST:
-    unbound_st, st_var_vals = st.simplify().unbind()
-    var_vals.update(st_var_vals)
-    if isinstance(val:=buf.arg, Variable):
-      val, var_val = val.unbind()
-      var_vals[val] = var_val
-    else: assert isinstance(val, get_args(ConstType)), f"cannot create ConstBuffer with value {val}"
-    return UOp(UOps.VALID, dtypes.bool, (unbound_st.to_uop(),)).where(UOp.const(dtype, val), UOp.const(dtype, 0))
   # if it's realized, it's a load and we add it to the inputs
   if (ubuf:=buf_uops.get(buf.buffer)) and buf not in outputs:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
+    if buf.op is MetaOps.CONST:
+      if isinstance(val:=buf.arg, Variable): var_vals.update([val.unbind()])
+      return ubuf.swizzle(unbound_st)
     if buf in assign_targets and not (unbound_st.contiguous or (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and \
         ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask))):
       # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
@@ -352,9 +349,7 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   buf_uops: Dict[Buffer, UOp] = {}
   for buf in realizes:
-    # TODO: const can be in buf_uops too, SWIZZLE on VALID pushes through!
-    if buf.op is MetaOps.CONST: continue
-    if buf.realized is None:
+    if buf.realized is None and buf.op is not MetaOps.CONST:
       output_groups[reduce_for_op[buf] if buf in reduce_for_op and MULTIOUTPUT else buf].append(buf)
 
       # make things that can't be images not images
@@ -367,8 +362,11 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
           assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
           buf.buffer.dtype = dtypes.float32
           buf.buffer.options = None
+    if buf.op is MetaOps.CONST:
+      uop = UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(buf.dtype.scalar(), buf.arg), v.const_like(0))
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
-    buf_uops.setdefault(buf.buffer, UOp(UOps.BUFFER, buf.buffer.dtype, (), len(buf_uops)))
+    else: uop = UOp(UOps.BUFFER, buf.buffer.dtype, (), len(buf_uops))
+    buf_uops.setdefault(buf.buffer, uop)
   return output_groups, buf_uops, assign_targets
 
 SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
