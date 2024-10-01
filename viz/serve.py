@@ -74,7 +74,7 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   return graph
 
 def replace_uop(base:UOp, replaces:Dict[bytes, UOp]) -> UOp:
-  if (found:=replaces.get(base.key)): return found
+  if (found:=replaces.get(base.key)) is not None: return found
   new_srcs = tuple(replace_uop(x, replaces) for x in base.src)
   replaces[base.key] = ret = UOp(base.op, base.dtype, new_srcs, base.arg) if new_srcs != base.src else base
   return ret

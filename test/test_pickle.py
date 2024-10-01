@@ -20,6 +20,10 @@ class TestPickle(unittest.TestCase):
     pm2 = pickle.loads(pm_str)
     self.assertEqual(pm2.rewrite(sink).key, tt.key)
 
+  def test_pickle_main_pattern_matcher(self):
+    from tinygrad.codegen.uopgraph import sym
+    pickle.dumps(sym)
+
   def test_pickle_realized_tensor(self):
     t = Tensor.rand(10, 10).realize()
     st = pickle.dumps(t)
