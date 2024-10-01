@@ -13,7 +13,7 @@ from tinygrad.engine.graph import uops_colors, word_wrap
 
 # NOTE: UPats in ops.py are spec
 def graph_rewrites(ctx:TrackedRewriteContext):
-  return [x for x in ctx.rewrites if x[2].location[0].split("/")[-1] != "ops.py"]
+  return [x for x in ctx.rewrites if isinstance(x[1], UOp)]
 
 @dataclass(frozen=True)
 class RewriteLocation:
