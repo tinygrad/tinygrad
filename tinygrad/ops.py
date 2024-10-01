@@ -61,13 +61,12 @@ class MathTrait:
   def __xor__(self, x): return self.alu(BinaryOps.XOR, self.ufix(x))
   def __and__(self, x): return self.alu(BinaryOps.AND, self.ufix(x))
   def __or__(self, x): return self.alu(BinaryOps.OR, self.ufix(x))
-  def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
-  def eq(self, x): return self.ne(x).ne(True)
-  def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
-  def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
-  # TODO: use this one instead
-  def ge(self, x): return self.lt(x).ne(True)
-  #def ge(self, x): return (-self).lt(-x+1)
+  def __ne__(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
+  def __eq__(self, x): return (self != x) != True
+  def __lt__(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
+  def __gt__(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
+  def __ge__(self, x): return self.lt(x).ne(True)
+  def __le__(self, x): return self.gt(x).ne(True)
   def max(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
@@ -168,7 +167,7 @@ class UOp(MathTrait):
     elif self.op is UOps.ALU: arg = self.arg.value
     else: arg = self.arg
     return (self.op.value, arg, self.dtype, self.src)
-  def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
+  #def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   @functools.cached_property
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
@@ -189,7 +188,7 @@ class UOp(MathTrait):
     return ret
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
-  def const_like(self, b:ConstType|Variable|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)
+  def const_like(self, b:ConstType|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
