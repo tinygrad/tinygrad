@@ -96,7 +96,7 @@ class TestUOpResolve(unittest.TestCase):
   @unittest.expectedFailure
   def test_var_cmp_range(self):
     v = UOp.define_var("i", dtypes.pyint, 1, 10)
-    u = v > 4 or v < 6
+    u = (v > 4) | (v < 6)
     self.assertTrue(u)
 
   def test_var_cmp_assert(self):
