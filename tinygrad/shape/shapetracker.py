@@ -7,25 +7,17 @@ from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, SumNode, NumNode, DivNode, ModNode, LtNode, AndNode, sint
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite
+from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite, resolve
 from tinygrad.codegen.uopgraph import sym, _get_chain
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
-def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.pyint, x) if isinstance(x, int) else x.render(render_ops, ctx)
-render_ops: Any = { NumNode: lambda self, ops, ctx: UOp.const(dtypes.pyint, self.b),
-                    MulNode: lambda self, ops, ctx: self.a.render(ops, ctx)*variable_to_uop(self.b, ctx),
-                    DivNode: lambda self, ops, ctx: self.a.render(ops, ctx)//variable_to_uop(self.b, ctx),
-                    ModNode: lambda self, ops, ctx: self.a.render(ops, ctx)%variable_to_uop(self.b, ctx),
-                    LtNode: lambda self, ops, ctx: self.a.render(ops, ctx).lt(variable_to_uop(self.b, ctx)),
-  Variable: lambda self,ops,ctx: ctx[self] if ctx is not None and self in ctx else UOp.define_var(self.expr, dtypes.int, self.min, self.max),
-  SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a+b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)),
-  AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: a*b.render(ops, ctx), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
+def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.pyint, x) if isinstance(x, int) else x
 
 def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
   # TODO: dtypes.realint
   iexpr = variable_to_uop(view.offset)
   for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
-    if sh != 1 and st != 0: iexpr = iexpr + idx*variable_to_uop(st)
+    if resolve((sh != 1) & (st != 0)): iexpr = iexpr + idx*variable_to_uop(st)
     if m is not None:
       if m[0] != 0: vexpr = vexpr * idx.ge(variable_to_uop(m[0]))
       if m[1] != sh: vexpr = vexpr * idx.lt(variable_to_uop(m[1]))

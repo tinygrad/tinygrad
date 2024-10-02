@@ -10,7 +10,7 @@ from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
-from tinygrad.ops import MetaOps, truncate
+from tinygrad.ops import MetaOps, truncate, UOps
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
 from tinygrad.engine.realize import run_schedule, memory_planner
@@ -367,12 +367,7 @@ class Tensor:
     return self
 
   @staticmethod
-  def from_node(y:Node, **kwargs) -> Tensor:
-    if isinstance(y, NumNode): return Tensor(y.b, **kwargs, requires_grad=False)
-    if isinstance(y, Variable): return Tensor(y, **kwargs, requires_grad=False)
-    if isinstance(y, MulNode): return Tensor.from_node(y.a, **kwargs) * y.b
-    if isinstance(y, SumNode): return Tensor.from_node(y.nodes[0], **kwargs) + sum(y.nodes[1:])
-    raise RuntimeError(f"unhandled Node {y}")
+  def from_node(y:Node, **kwargs) -> Tensor: return Tensor(y.ssimplify(), **kwargs, requires_grad=False)
 
   # ***** creation entrypoint *****
 

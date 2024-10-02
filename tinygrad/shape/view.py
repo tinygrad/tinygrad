@@ -2,6 +2,7 @@ from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast
+from tinygrad.ops import UOp, resolve
 from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, sym_infer
 
@@ -92,7 +93,7 @@ class View:
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def size(self) -> int:
     # NOTE: Variable and the Node derived from it in symbolic shapes can only have int as max.
-    ret = prod([x.max if isinstance(x, Node) else x for x in self.shape])
+    ret = prod([x.vmax if isinstance(x, Node) else x for x in self.shape])
     assert isinstance(ret, int), f"{ret=} is not int"
     return ret
 
@@ -162,7 +163,7 @@ class View:
     for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
       merged_term += Variable.sum([idxs[d1] * (s1 * merged_size) for d1, s1 in term]) + o * merged_size
       merged_size *= s
-      if not (merged_term >= merged_size) and not (merged_term < 0):
+      if not resolve(merged_term >= merged_size) and not resolve(merged_term < 0):
         extents.append((merged_size, merged_term))
         merged_size, merged_term = 1, NumNode(0)
     if merged_term != 0: return None
@@ -173,7 +174,7 @@ class View:
       # Try to project vm2's mask on to vm1.
       newb, newe, bad = [0] * len(vm1.shape), list(vm1.shape), False
       for d2, ((b, e), o, (_, t)) in enumerate(zip(vm2.mask, origin, reversed(extents))):
-        if not (t.min < b or t.max >= e): continue
+        if not (t.vmin < b or t.vmax >= e): continue
         if not isinstance(o, int) or not isinstance(b, int) or not isinstance(e, int):
           bad = True
           continue
@@ -219,7 +220,7 @@ class View:
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     shape = [y-x for x,y in arg]
     if mask is not None and all(m[0] == 0 and m[1] == s for m,s in zip(mask, shape)): mask = None
-    return View.create(tuple(s.b if isinstance(s, NumNode) else s for s in shape), self.strides, self.offset+offset, mask)
+    return View.create(tuple(s.ssimplify() if isinstance(s, UOp) else s for s in shape), self.strides, self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
@@ -298,9 +299,9 @@ class View:
     for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
       acc = 1
       # TODO: this <= and != is for symbolic!?
-      while acc <= merged_dim and acc != merged_dim and (new_dim := next(r_new_shape, 0)) > 0:
+      while resolve((acc <= merged_dim) & (acc != merged_dim)) and (new_dim := next(r_new_shape, 0)) > 0:
         strides.append(new_stride)
-        if new_dim != 1: new_stride *= (new_dim if (acc := acc * new_dim) < real_dim else 0)
+        if resolve(new_dim != 1): new_stride *= (new_dim if (acc := acc * new_dim) < real_dim else 0)
       if acc != merged_dim: break
     else:
       strides += [0,] * (len(new_shape) - len(strides))
