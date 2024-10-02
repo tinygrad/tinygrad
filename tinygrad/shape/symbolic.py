@@ -24,6 +24,7 @@ class Variable(UOp):
   def __init__(self, expr:str, nmin:int, nmax:int, bound:Optional[ConstType]=None):
     if bound is None: vcache[(expr, nmin, nmax)] = self
     super().__init__(UOps.DEFINE_VAR, dtypes.pyint, arg=(expr, nmin, nmax, bound) if bound is not None else (expr, nmin, nmax))
+  def __str__(self): return f"<{self.arg[0]}[{self.arg[1]}-{self.arg[2]}]" + (f"={self.arg[3]}" if len(self.arg) > 3 else "") + ">"
   def bind(self, val:ConstType):
     assert self.op is UOps.DEFINE_VAR and len(self.arg) == 3
     return Variable(self.arg[0], self.arg[1], self.arg[2], val)

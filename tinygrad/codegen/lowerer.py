@@ -6,7 +6,7 @@ from typing import List, Tuple, cast, Optional
 from tinygrad.shape.shapetracker import ShapeTracker, variable_to_uop
 from tinygrad.shape.symbolic import sint
 from tinygrad.dtype import dtypes
-from tinygrad.ops import KernelInfo, BinaryOps, UOp, UOps, graph_rewrite, PatternMatcher, UPat
+from tinygrad.ops import KernelInfo, BinaryOps, UOp, UOps, graph_rewrite, PatternMatcher, UPat, resolve
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, get_contraction, prod, partition, flatten
 
@@ -26,7 +26,7 @@ def _limit_dims(dims:Tuple[sint, ...], max_sizes:Tuple[int, ...]):
 def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int, ...]], reverse=False) -> List[UOp]:
   if reverse: dims = dims[::-1]
   limited = _limit_dims(dims, max_sizes) if max_sizes is not None else dims
-  ret = raw_idxs = [UOp(UOps.SPECIAL, dtypes.pyint, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
+  ret = raw_idxs = [UOp(UOps.SPECIAL, dtypes.pyint, (), (f"{prefix}{i}", s if isinstance(s, int) else s.ssimplify())) for i,s in enumerate(limited)]
   if limited != dims:
     ret = []
     # cast for mypy, get_contraction won't be None
@@ -50,7 +50,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   first_upcasted = len(full_shape)-ki.upcasted
   first_output_st: ShapeTracker = ast.src[0].st_arg
   # if there's no reduce, this is first_upcasted
-  first_reduce = [x!=y for x,y in zip(first_output_st.shape[:first_upcasted]+(0,), full_shape[:first_upcasted]+(1,))].index(True)
+  first_reduce = [resolve(x!=y) for x,y in zip(first_output_st.shape[:first_upcasted]+(0,), full_shape[:first_upcasted]+(1,))].index(True)
   local_loads = [x for x in ast.parents if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL]
   # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
   group_for_reduces = sum([any(j!=y for j in x) for x,y in zip(
@@ -92,6 +92,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
   # NOTE: always using ridxs is fine here
   reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is UOps.RANGE)
+  assert all(y.op is UOps.EXPAND for y in reduce_expand), f"{reduce_expand} is not expands in axis:{x.axis_arg}"
   alu_op: BinaryOps = x.arg[0]
   ret = x.src[0]
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):

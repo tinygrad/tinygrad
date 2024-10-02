@@ -247,9 +247,6 @@ class UOp(MathTrait):
     if isinstance(b, UOp): return b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
-  @staticmethod
-  @functools.lru_cache(None)
-  def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   # TODO: this is context rewrite
   def substitute(self, dvars:Dict[UOp, UOp]):
     if self in dvars: return dvars[self]
