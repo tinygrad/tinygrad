@@ -220,7 +220,7 @@ class View:
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     shape = [y-x for x,y in arg]
     if mask is not None and all(m[0] == 0 and m[1] == s for m,s in zip(mask, shape)): mask = None
-    return View.create(tuple(s.ssimplify() if isinstance(s, UOp) else s for s in shape), self.strides, self.offset+offset, mask)
+    return View.create(tuple(shape), self.strides, self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
@@ -243,7 +243,7 @@ class View:
       assert all((int(s) == int(x) == 0) or (s > 0 and int(x % s) == 0) for s,x in zip(self.shape, new_shape)), \
         f"can't expand {self.shape} into {new_shape}"
       return View.create(new_shape)
-    assert all((int(s) == int(x) or (int(s) == 1 and int(st) == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), \
+    assert all((not resolve(s != x) or (int(s) == 1 and int(st) == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), \
       f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.mask, self.shape, new_shape)]) if self.mask else None
@@ -277,7 +277,7 @@ class View:
     # check for the same size
     if (self_all_int := all_int(self.shape)):
       assert all(isinstance(s, (int, UOp)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
-      if resolve(prod(self.shape) != prod(new_shape)):
+      if resolve(prod(self.shape) != prod(new_shape), False):
         raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
 
     if new_shape == () and self.mask and any(mx==my for (mx,my) in self.mask): return None
