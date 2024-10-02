@@ -878,7 +878,7 @@ def train_bert():
         # stop once hitting the target
         break
 
-    if getenv("CKPT", 1) and i % save_ckpt_freq == 0:
+    if getenv("CKPT") and i % save_ckpt_freq == 0:
       if MLLOGGER and RUNMLPERF:
         if previous_step:
           MLLOGGER.end(key=mllog_constants.BLOCK_STOP, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "first_step_num": i, "step_num": i, "step_count": i - previous_step})
