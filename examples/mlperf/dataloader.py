@@ -354,6 +354,97 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
       # happens with BENCHMARK set
       pass
 
+### RetinaNet
+
+def load_retinanet_data(base_dir:Path, queue_in:Queue, queue_out:Queue, X:Tensor):
+  from extra.datasets.openimages import image_load
+  while (data:=queue_in.get()) is not None:
+    idx, fn = data
+    img, _ = image_load(base_dir, "train", fn)
+
+    X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+
+    queue_out.put(idx)
+  queue_out.put(None)
+
+def batch_load_retinanet(dataset, base_dir:Path, batch_size:int=32, seed:int=None):
+  image_ids = sorted(dataset.imgs.keys())
+  batch_count = min(32, len(image_ids) // batch_size)
+
+  queue_in, queue_out = Queue(), Queue()
+  procs, data_out_count = [], [0] * batch_count
+  shm_name_x = "retinanet_x"
+  # shm_name_x, shm_name_y = "retinanet_x", "retinanet_y"
+  sz = (batch_size * batch_count, 800, 800, 3)
+  if os.path.exists(f"/dev/shm/{shm_name_x}"): os.unlink(f"/dev/shm/{shm_name_x}")
+  # if os.path.exists(f"/dev/shm/{shm_name_y}"): os.unlink(f"/dev/shm/{shm_name_y}")
+  shm_x = shared_memory.SharedMemory(name=shm_name_x, create=True, size=prod(sz))
+  # shm_y = shared_memory.SharedMemory(name=shm_name_y, create=True, size=prod(sz))
+
+  shutdown = False
+  class Cookie:
+    def __init__(self, bc):
+      self.bc = bc
+    def __del__(self):
+      if not shutdown:
+        try: enqueue_batch(self.bc)
+        except StopIteration: pass
+
+  def enqueue_batch(bc):
+    for idx in range(bc * batch_size, (bc+1) * batch_size):
+      fn = dataset.loadImgs(next(dataset_iter))[0]["file_name"]
+      queue_in.put((idx, fn))
+
+  # def shuffle_indices(file_indices, seed=None):
+  #   rng = random.Random(seed)
+  #   rng.shuffle(file_indices)
+
+  # if shuffle: shuffle_indices(file_indices, seed=seed)
+  dataset_iter = iter(image_ids)
+
+  try:
+    X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/{shm_name_x}")
+  #   Y = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/{shm_name_y}")
+
+    for _ in range(cpu_count()):
+      proc = Process(target=load_retinanet_data, args=(base_dir, queue_in, queue_out, X))
+      proc.daemon = True
+      proc.start()
+      procs.append(proc)
+
+    for bc in range(batch_count):
+      enqueue_batch(bc)
+
+    for _ in range(len(image_ids) // batch_size):
+      while True:
+        bc = queue_out.get() // batch_size
+        data_out_count[bc] += 1
+        if data_out_count[bc] == batch_size: break
+
+      data_out_count[bc] = 0
+      yield X[bc * batch_size:(bc + 1) * batch_size], Cookie(bc)
+  finally:
+    shutdown = True
+
+    for _ in procs: queue_in.put(None)
+    queue_in.close()
+
+    for _ in procs:
+      while queue_out.get() is not None: pass
+    queue_out.close()
+
+    # shutdown processes
+    for proc in procs: proc.join()
+
+    shm_x.close()
+    # shm_y.close()
+    try:
+      shm_x.unlink()
+      # shm_y.unlink()
+    except FileNotFoundError:
+      # happens with BENCHMARK set
+      pass
+
 if __name__ == "__main__":
   def load_unet3d(val):
     assert not val, "validation set is not supported due to different sizes on inputs"

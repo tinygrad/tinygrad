@@ -1,4 +1,4 @@
-import os, time, math, functools
+import os, time, math, functools, random
 from pathlib import Path
 from tqdm import tqdm
 import multiprocessing
@@ -6,7 +6,7 @@ import multiprocessing
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
-from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup
+from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam
 
 from extra.lr_scheduler import LRSchedulerGroup
 from examples.mlperf.helpers import get_training_state, load_training_state
@@ -342,14 +342,16 @@ def train_resnet():
         safe_save(get_training_state(model, optimizer_group, scheduler_group), fn)
 
 def train_retinanet():
+  from examples.mlperf.dataloader import batch_load_retinanet
   from examples.mlperf.initializers import FrozenBatchNorm2d
-  from extra.datasets.openimages import MLPERF_CLASSES
+  from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset
   from extra.models.retinanet import RetinaNet
   from extra.models import resnet
+  from pycocotools.coco import COCO
   from tinygrad.helpers import get_child
-  from tinygrad.nn.optim import Adam
 
   NUM_CLASSES = len(MLPERF_CLASSES)
+  BASE_DIR = getenv("BASE_DIR", BASEDIR)
 
   def _freeze_backbone_layers(backbone, trainable_layers, loaded_keys):
     model_layers = ["layer4", "layer3", "layer2", "layer1", "conv1"][:trainable_layers]
@@ -361,6 +363,7 @@ def train_retinanet():
 
   # ** hyperparameters **
   LR = 1e-4
+  SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
 
   # ** model initializers **
   resnet.BatchNorm = FrozenBatchNorm2d
@@ -375,6 +378,17 @@ def train_retinanet():
   # ** optimizer **
   params = get_parameters(model)
   optim = Adam(params, lr=LR)
+
+  # ** dataset **
+  train_dataset = COCO(download_dataset(BASE_DIR, "train"))
+  val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
+
+  train_dataloader = batch_load_retinanet(train_dataset, Path(BASE_DIR), batch_size=256)
+
+  # ** training loop **
+  with tqdm(total=len(train_dataset.imgs.keys())) as pbar:
+    for x, _ in train_dataloader:
+      pbar.update(x.shape[0])
 
 def train_unet3d():
   """
