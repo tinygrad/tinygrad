@@ -184,9 +184,7 @@ class UOp(MathTrait):
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
   # *** uop evaluation ***
   def simplify(self): return graph_rewrite(self, simple_pm)
-  def ssimplify(self) -> Union[UOp, ConstType]:
-    ret = graph_rewrite(self, simple_pm)
-    return ret.arg if ret.op is UOps.CONST else ret
+  def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is UOps.CONST else ret
   def _eval(self, dtype, expected_type) -> ConstType:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
     simple_self = self.simplify()

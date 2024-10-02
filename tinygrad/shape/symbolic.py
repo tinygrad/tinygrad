@@ -25,10 +25,7 @@ class Node:
   def __repr__(self): return self.render(ctx="REPR")
   def __str__(self): return "<"+self.key+">"
   def __hash__(self): return hash(self.key)
-  def __bool__(self):
-    if self.max == self.min: return self.min == 1
-    return True
-    #raise ValueError(f"symbolic couldn't resolve {self}")
+  def __bool__(self): return not (self.max == self.min == 0)
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
