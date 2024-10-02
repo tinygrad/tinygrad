@@ -5,7 +5,7 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same
+from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same, partition
 if TYPE_CHECKING:
   from tinygrad.shape.symbolic import Variable, sint
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -254,6 +254,8 @@ class UOp(MathTrait):
   def unbind(self) -> Tuple[UOp, int]:
     assert self.op is UOps.ASSIGN and self.src[0].op is UOps.DEFINE_VAR and self.src[1].op is UOps.CONST, f"can't unbind {self}"
     return self.src[0], self.src[1].arg
+  @property
+  def val(self) -> int: return self.unbind()[1]
   # TODO: this is context rewrite
   def substitute(self, dvars:Dict[UOp, UOp]):
     if self in dvars: return dvars[self]
@@ -266,9 +268,15 @@ class UOp(MathTrait):
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents}}
   @property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
+  @staticmethod
+  def smax(lst):
+    uops, non_uops = partition(lst, lambda x: isinstance(x, UOp))
+    if len(uops) == 0: return max(non_uops)
+    if len(non_uops) == 0: return functools.reduce(UOp.max, uops)
+    return functools.reduce(UOp.max, uops).max(max(non_uops))
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
-    return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
+    return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(UOp.smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
   def vars(self) -> Set[UOp]:
     if self.op is UOps.ASSIGN and self.src[0].op is UOps.DEFINE_VAR: return {self}
     if self.op is UOps.DEFINE_VAR: return {self}
@@ -369,7 +377,7 @@ def exec_alu(op:Op, dtype:DType, operands):
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.CONST: return u.arg
-  if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1], u.arg[2])
+  if u.op is UOps.DEFINE_VAR: return u
   if u.op is UOps.ALU: return exec_alu(u.arg, u.dtype, tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 

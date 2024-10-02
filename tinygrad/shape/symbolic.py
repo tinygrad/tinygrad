@@ -14,8 +14,8 @@ ModNode = UOp
 LtNode = UOp
 AndNode = UOp
 
-def NumNode(val:int): return UOp.const(dtypes.pyint, val)
-def Variable(expr:str, nmin:int, nmax:int): return UOp.define_var(expr, dtypes.pyint, nmin, nmax)
+def NumNode(val:int): return UOp.const(dtypes.int, val)
+def Variable(expr:str, nmin:int, nmax:int): return UOp.define_var(expr, dtypes.int, nmin, nmax)
 
 def sym_infer(uop: Union[UOp, int], var_vals: Optional[Dict[UOp, int]]) -> int:
   if isinstance(uop, int): return uop
