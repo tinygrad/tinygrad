@@ -45,10 +45,11 @@ class MathTrait:
 
   # great functions you get!
   def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
+  def logical_not(self): return self.ne(True)
   def __neg__(self):
     dtype = getattr(self, 'dtype', None)
     assert dtype is not None, "MathTraits __neg__ requires a dtype"
-    return self.ne(True) if dtype.scalar() == dtypes.bool else self*(-1)
+    return self.logical_not() if dtype.scalar() == dtypes.bool else self*(-1)
   def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
   def __radd__(self, x): return self.ufix(x).alu(BinaryOps.ADD, self)
   def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))
@@ -64,11 +65,11 @@ class MathTrait:
   def __and__(self, x): return self.alu(BinaryOps.AND, self.ufix(x))
   def __or__(self, x): return self.alu(BinaryOps.OR, self.ufix(x))
   def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
-  def eq(self, x): return self.ne(x).ne(True)
+  def eq(self, x): return self.ne(x).logical_not()
   def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
   def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
-  def ge(self, x): return self.lt(x).ne(True)
-  def le(self, x): return self.gt(x).ne(True)
+  def ge(self, x): return self.lt(x).logical_not()
+  def le(self, x): return self.gt(x).logical_not()
   # NOTE: __eq__ can't be overridden, and means the same thing as is
   def __ne__(self, x): return self.ne(x)
   def __lt__(self, x): return self.lt(x)
@@ -708,6 +709,7 @@ simple_pm = PatternMatcher([
   (UPat.var("x", dtype=dtypes.bool) | UPat.cvar("c", vec=False), lambda x,c: c if c.arg else x),
   ((UPat.var("x") & UPat.var("x")), lambda x: x),
   ((UPat.var("x") | UPat.var("x")), lambda x: x),
+  (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
   # ** zero folding **
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
