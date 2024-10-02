@@ -69,19 +69,18 @@ def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTr
 # ** reduceop fusor
 
 def push_swizzle_up_through_reduce(swizzle:UOp, reduceop:UOp) -> Optional[UOp]:
-  if (swizzle_st:=unwrap(swizzle.st)).contiguous: return None
+  if all(x == y for x,y in zip(unwrap(swizzle.st).shape, unwrap(reduceop.st).shape)): return None
   rsrc = reduceop.src[0]
   tmp, rshape = permute_reduce(ShapeTracker.from_shape(unwrap(rsrc.st).shape), reduceop.axis_arg)
   prshape = prod(rshape)
   strides = strides_for_shape(rshape)
   nv: List[View] = []
-  for v in swizzle_st.views:
+  for v in (swizzle_st:=unwrap(swizzle.st)).views:
     nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
                           v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
   # update input_st and axis
   new_input_st = tmp + ShapeTracker(tuple(nv))
-  _, new_rshape = permute_reduce(new_input_st, reduceop.axis_arg)
-  new_axis = tuple(range(len(new_input_st.shape)-len(new_rshape), len(new_input_st.shape)))
+  new_axis = tuple(i for i,s in enumerate(new_input_st.shape) if i>len(swizzle_st.shape)-1 or swizzle_st.shape[i] != s)
   return UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda st:st+new_input_st, {}),),
              (reduceop.arg[0], new_axis)).swizzle(ShapeTracker.from_shape(swizzle_st.shape))
 
