@@ -89,7 +89,8 @@ def _pad_left(*shapes:Tuple[sint, ...]) -> Tuple[Tuple[sint, ...], ...]:
   max_dim = max(len(shape) for shape in shapes)
   return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 def _broadcast_shape(*shapes:Tuple[sint, ...]) -> Tuple[sint, ...]:
-  return tuple(0 if 0 in nth_dim_sizes else max(nth_dim_sizes) for nth_dim_sizes in zip(*_pad_left(*shapes)))
+  return tuple(0 if 0 in nth_dim_sizes else max(nth_dim_sizes, key=lambda x: x if isinstance(x, int) else x.max) \
+               for nth_dim_sizes in zip(*_pad_left(*shapes)))
 
 ReductionStr = Literal["mean", "sum", "none"]
 
@@ -1618,7 +1619,7 @@ class Tensor:
     """
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
     n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if si != so])
-    return squares.sum(axis=axis, keepdim=keepdim).div(max(0, n-correction))
+    return squares.sum(axis=axis, keepdim=keepdim).div(max(0, n-correction, key=lambda x:x if isinstance(x, int) else x.max))
 
   def std(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
     """

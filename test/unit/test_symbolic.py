@@ -409,8 +409,8 @@ class TestSymbolicVars(unittest.TestCase):
 class TestSymbolicMinMax(unittest.TestCase):
   def test_min_max_known(self):
     a = Variable("a", 1, 8)
-    assert max(1, a) == max(a, 1) == a
-    assert min(1, a) == min(a, 1) == 1
+    assert max(1, a, key=lambda x:x if isinstance(x, int) else x.max) == max(a, 1, key=lambda x:x if isinstance(x, int) else x.max) == a
+    assert min(1, a, key=lambda x:x if isinstance(x, int) else x.max) == min(a, 1, key=lambda x:x if isinstance(x, int) else x.max) == 1
 
 class TestSymRender(unittest.TestCase):
   def test_sym_render(self):
@@ -518,13 +518,12 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     assert create_lt_node(d, a) == NumNode(0)
     assert create_lt_node(a, a) == NumNode(0)
     assert create_lt_node(a, a) == NumNode(0)
-    # if it remains as a LtNode, bool is always true and (min, max) == (0, 1)
+    # if it remains as a LtNode, (min, max) == (0, 1)
     a_lt_c = create_lt_node(a, c)
     assert isinstance(a_lt_c, LtNode) and a_lt_c.min == 0 and a_lt_c.max == 1
-    assert a_lt_c
     # same when comparing with a constant
     a_lt_3 = create_lt_node(a, 3)
-    assert a_lt_3 and a_lt_3.min == 0 and a_lt_3.max == 1
+    assert a_lt_3.min == 0 and a_lt_3.max == 1
 
   def test_sumnode_mulnode_lt(self):
     a = Variable("a", 1, 2)
