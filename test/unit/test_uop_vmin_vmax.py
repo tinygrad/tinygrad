@@ -8,6 +8,15 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmin, 42)
     self.assertEqual(uop.vmax, 42)
 
+  def test_vmin_vmax_cmpne(self):
+    uop = UOp.const(dtypes.int32, 42)
+    def test_bool(u, x):
+      self.assertEqual(u.vmin, x)
+      self.assertEqual(u.vmax, x)
+    test_bool(uop != 42, False)
+    test_bool(uop != 43, True)
+    test_bool(uop != 41, True)
+
   def test_vmin_vmax_addition_with_variable(self):
     # vmin and vmax for addition with a variable
     x = UOp.define_var('x', dtypes.int32, 10, 20)

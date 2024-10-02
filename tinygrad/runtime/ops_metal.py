@@ -135,7 +135,8 @@ class MetalAllocator(LRUAllocator):
     dest_dev.synchronize()
     src_command_buffer = msg(src_dev.mtl_queue, "commandBuffer", restype=objc_instance)
     encoder = msg(src_command_buffer, "blitCommandEncoder", restype=objc_instance)
-    msg(encoder, "copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:", src.buf, src.offset, dest.buf, dest.offset, sz)
+    msg(encoder, "copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:", src.buf, ctypes.c_ulong(src.offset),
+        dest.buf, ctypes.c_ulong(dest.offset), ctypes.c_ulong(sz))
     msg(encoder, "endEncoding")
     if src_dev != dest_dev:
       msg(src_command_buffer, "encodeSignalEvent:value:", src_dev.timeline_signal, src_dev.timeline_value)

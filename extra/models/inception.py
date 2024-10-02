@@ -4,6 +4,8 @@ from tinygrad.nn.state import load_state_dict, torch_load
 from tinygrad.helpers import fetch
 
 from typing import Optional, Dict
+import numpy as np
+from scipy import linalg
 
 # Base Inception Model
 
@@ -237,6 +239,9 @@ class FidInceptionE2(InceptionE):
     return Tensor.cat(*outputs, dim=1)
 
 class FidInceptionV3:
+  m1: Optional[np.ndarray] = None
+  s1: Optional[np.ndarray] = None
+
   def __init__(self):
     inception = Inception3(cls_map={
       "A":  FidInceptionA,
@@ -301,3 +306,37 @@ class FidInceptionV3:
       lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8)),
     ])
     return x
+
+  def compute_score(self, inception_activations:Tensor, val_stats_path:str) -> float:
+    if self.m1 is None and self.s1 is None:
+      with np.load(val_stats_path) as f:
+        self.m1, self.s1 = f['mu'][:], f['sigma'][:]
+    assert self.m1 is not None and self.s1 is not None
+
+    m2 = inception_activations.mean(axis=0).numpy()
+    s2 = np.cov(inception_activations.numpy(), rowvar=False)
+
+    return calculate_frechet_distance(self.m1, self.s1, m2, s2)
+
+def calculate_frechet_distance(mu1:np.ndarray, sigma1:np.ndarray, mu2:np.ndarray, sigma2:np.ndarray, eps:float=1e-6) -> float:
+  mu1 = np.atleast_1d(mu1)
+  mu2 = np.atleast_1d(mu2)
+  sigma1 = np.atleast_2d(sigma1)
+  sigma2 = np.atleast_2d(sigma2)
+  assert mu1.shape == mu2.shape and sigma1.shape == sigma2.shape
+
+  diff = mu1 - mu2
+  covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
+  if not np.isfinite(covmean).all():
+    offset = np.eye(sigma1.shape[0]) * eps
+    covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
+
+  if np.iscomplexobj(covmean):
+    if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
+      m = np.max(np.abs(covmean.imag))
+      raise ValueError(f"Imaginary component {m}")
+    covmean = covmean.real
+
+  tr_covmean = np.trace(covmean)
+
+  return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2*tr_covmean
