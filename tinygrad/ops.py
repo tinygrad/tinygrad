@@ -304,7 +304,7 @@ class UOp(MathTrait):
       if self.arg is BinaryOps.MAX: return max(s0.vmin, s1.vmin), max(s0.vmax, s1.vmax)
       if self.arg is BinaryOps.CMPLT: return (s0.vmax<s1.vmin, s0.vmin<s1.vmax)
       if self.arg is BinaryOps.CMPNE:
-        always_ne = (s0.vmax < s1.vmin) or (s1.vmin > s0.vmax)
+        always_ne = (s0.vmax < s1.vmin) or (s1.vmax < s0.vmin)
         sometimes_ne = not (s0.vmin == s0.vmax == s1.vmin == s1.vmax)
         return (always_ne, sometimes_ne)
       # float has NAN issue and we use explicit NAN in transcendental
