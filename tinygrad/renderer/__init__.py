@@ -52,7 +52,7 @@ class Program:
           special_size = self.local_size if u.arg[0][0] == 'l' else self.global_size
           assert special_size is not None
           special_size[int(u.arg[0][-1])] = u.arg[1]
-      self.vars = sorted(self.vars, key=lambda v: v.expr)
+      self.vars = sorted(self.vars, key=lambda v: v.arg)
       self.outs = sorted(dedup(self.outs))
       self._ran_post_init = True
 
