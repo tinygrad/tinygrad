@@ -266,7 +266,7 @@ class UOp(MathTrait):
   @property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
   @staticmethod
-  def umax(lst) -> Union[ConstType, UOp]:
+  def umax(lst) -> Union[int, UOp]:
     ret = lst[0]
     for x in lst[1:]:
       if isinstance(ret, UOp): ret = ret.max(x)
@@ -277,7 +277,7 @@ class UOp(MathTrait):
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(UOp.umax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
-  def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
+  def vars(self) -> Set: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
     return sorted(set.union(*st_vars, self.vars()), key=lambda v: v.expr)
@@ -375,7 +375,7 @@ def exec_alu(op:Op, dtype:DType, operands):
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.CONST: return u.arg
-  if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1], u.arg[2])
+  if u.op is UOps.DEFINE_VAR: return u
   if u.op is UOps.ALU: return exec_alu(u.arg, u.dtype, tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 
