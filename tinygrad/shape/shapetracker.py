@@ -7,7 +7,7 @@ from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, SumNode, NumNode, DivNode, ModNode, LtNode, AndNode, sint
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite
+from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite, resolve
 from tinygrad.codegen.uopgraph import sym, _get_chain
 
 # TODO: this needs to be replaced, there shouldn't be variables in the shapetracker, only ints and UOps
@@ -25,10 +25,10 @@ def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
   # TODO: dtypes.realint
   iexpr = variable_to_uop(view.offset)
   for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
-    if sh != 1 and st != 0: iexpr = iexpr + idx*variable_to_uop(st)
+    if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*variable_to_uop(st)
     if m is not None:
-      if m[0] != 0: vexpr = vexpr * idx.ge(variable_to_uop(m[0]))
-      if m[1] != sh: vexpr = vexpr * idx.lt(variable_to_uop(m[1]))
+      if resolve(m[0] != 0): vexpr = vexpr * idx.ge(variable_to_uop(m[0]))
+      if resolve(m[1] != sh): vexpr = vexpr * idx.lt(variable_to_uop(m[1]))
   return iexpr, vexpr
 
 @dataclass(frozen=True)
