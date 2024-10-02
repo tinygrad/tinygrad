@@ -110,7 +110,7 @@ class View:
     # then its stride can also be set to 0, albeit with a corresponding adjustment required to the offset
     # TODO: assert comparison with LtNode to avoid mis-using symbolic
     if mask and any(elim := [not resolve(b+1 < e) for b,e in mask]):
-      if any(not (b < e) for b,e in mask):
+      if any(not resolve(b < e) for b,e in mask):
         strides, offset, mask = (0,) * len(shape), 0, ((0,0),) * len(shape)
       offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
       strides = tuple(0 if e else st for st,e in zip(strides, elim))
