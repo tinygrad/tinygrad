@@ -76,6 +76,7 @@ class ShapeTracker:
     if 0 in self.shape: return 0
     idx, valid = self.to_indexed_uops()
     if not valid.vmax: return 0
+    idx = idx.simplify()
     assert idx.vmax < 1e12, f"real_size broken for {self}"
     return int(idx.vmax+1)
 
