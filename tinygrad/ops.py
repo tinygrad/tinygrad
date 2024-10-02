@@ -236,6 +236,7 @@ class UOp(MathTrait):
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
+  @functools.lru_cache(None)
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   @staticmethod
   def define_global(dtype:DType, arg): return UOp(UOps.DEFINE_GLOBAL, dtype if isinstance(dtype, ImageDType) else PtrDType(dtype), (), arg)
@@ -304,7 +305,7 @@ class UOp(MathTrait):
       if self.arg is BinaryOps.MAX: return max(s0.vmin, s1.vmin), max(s0.vmax, s1.vmax)
       if self.arg is BinaryOps.CMPLT: return (s0.vmax<s1.vmin, s0.vmin<s1.vmax)
       if self.arg is BinaryOps.CMPNE:
-        always_ne = (s0.vmax < s1.vmin) or (s1.vmin > s0.vmax)
+        always_ne = (s0.vmax < s1.vmin) or (s1.vmax < s0.vmin)
         sometimes_ne = not (s0.vmin == s0.vmax == s1.vmin == s1.vmax)
         return (always_ne, sometimes_ne)
       # float has NAN issue and we use explicit NAN in transcendental
@@ -687,9 +688,9 @@ spec = PatternMatcher([
 ])
 
 def type_verify(uops:List[UOp]):
-  for u in uops:
+  for i,u in enumerate(uops):
     chk = cast(bool, spec.rewrite(u))
-    assert chk is True, f"UOp verification failed on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
+    assert chk is True, f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
 
 simple_pm = PatternMatcher([
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
