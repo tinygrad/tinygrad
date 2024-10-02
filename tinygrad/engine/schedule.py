@@ -122,7 +122,7 @@ reduceop_fusor = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
-enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype.ptr(), (), ctx.bufs.index(x.arg)))])
+enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx.bufs.index(x.arg[0])))])
 
 def full_ast_rewrite(sink:UOp, ctx:ScheduleItemContext) -> UOp:
   if not AST_REWRITE: return sink
@@ -189,7 +189,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp]) -> Tupl
     output_st, vv = output_st.simplify().unbind()
     var_vals.update(vv)
     ast.append(UOp(UOps.STORE, dtypes.void, (buf_uops[out.buffer], output_st.to_uop(), src)))
-  sink = full_ast_rewrite(ast[0].sink(*ast[1:]), ScheduleItemContext(bufs=tuple(buf_uops[x.buffer].arg for x in outs+inputs)))
+  sink = full_ast_rewrite(ast[0].sink(*ast[1:]), ScheduleItemContext(bufs=tuple(buf_uops[x.buffer].arg[0] for x in outs+inputs)))
   return LBScheduleItem(sink, tuple(outs+inputs), tuple(dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))), var_vals
 
 # *** DAG creation: decide which LazyBuffers should realize ***
@@ -367,7 +367,7 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
     if buf.op is MetaOps.CONST:
       uop = UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(buf.dtype.scalar(), buf.arg), v.const_like(0))
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
-    else: uop = UOp(UOps.BUFFER, buf.buffer.dtype, (), len(buf_uops))
+    else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
     buf_uops.setdefault(buf.buffer, uop)
   return output_groups, buf_uops, assign_targets
 
