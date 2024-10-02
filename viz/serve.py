@@ -99,8 +99,9 @@ if __name__ == "__main__":
   multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
   print("*** viz is starting")
   with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
-  kernels = load_kernels(contexts)
   print("*** unpickled saved rewrites")
+  kernels = load_kernels(contexts)
+  print("*** loaded kernels")
   server = HTTPServer(('', 8000), Handler)
   st = time.perf_counter()
   reloader_thread = threading.Thread(target=reloader)
