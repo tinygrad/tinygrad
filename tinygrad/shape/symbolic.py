@@ -15,8 +15,13 @@ AndNode = UOp
 
 def NumNode(val:int): return UOp.const(dtypes.pyint, val)
 
+vcache = {}
 class Variable(UOp):
+  def __new__(cls, expr:str, nmin:int, nmax:int, bound:Optional[int]=None):
+    if expr in vcache and bound is None: return vcache[expr]
+    return super().__new__(cls)
   def __init__(self, expr:str, nmin:int, nmax:int, bound:Optional[int]=None):
+    if bound is None: vcache[expr] = self
     super().__init__(UOps.DEFINE_VAR, dtypes.pyint, arg=(expr, nmin, nmax, bound) if bound else (expr, nmin, nmax))
   def bind(self, val:ConstType):
     assert self.op is UOps.DEFINE_VAR and len(self.arg) == 3
@@ -24,6 +29,8 @@ class Variable(UOp):
   def unbind(self) -> Tuple[UOp, int]:
     assert self.op is UOps.DEFINE_VAR and len(self.arg) == 4
     return Variable(self.arg[0], self.arg[1], self.arg[2]), self.arg[3]
+  @property
+  def expr(self): return self.arg[0]
   @property
   def val(self):
     assert self.op is UOps.DEFINE_VAR and len(self.arg) == 4, f"no val for {self}"

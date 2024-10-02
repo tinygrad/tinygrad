@@ -15,13 +15,13 @@ def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.pyint, x) if is
 
 def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
   # TODO: dtypes.realint
-  iexpr = variable_to_uop(view.offset)
+  iexpr = view.offset
   for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
-    if sh != 1 and st != 0: iexpr = iexpr + idx*variable_to_uop(st)
+    if (not isinstance(sh, int) or sh != 1) and (not isinstance(st, int) or st != 0): iexpr = iexpr + idx*variable_to_uop(st)
     if m is not None:
       if m[0] != 0: vexpr = vexpr * idx.ge(variable_to_uop(m[0]))
       if m[1] != sh: vexpr = vexpr * idx.lt(variable_to_uop(m[1]))
-  return iexpr, vexpr
+  return variable_to_uop(iexpr), variable_to_uop(vexpr)
 
 @dataclass(frozen=True)
 class ShapeTracker:
@@ -112,8 +112,8 @@ class ShapeTracker:
     return axis in [x.arg for x in graph_rewrite(valid, sym).sparents if x.op is UOps.RANGE]
 
   def simplify(self) -> ShapeTracker:
-    if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
-      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
+    #if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
+    #  return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
     return self
 
   # *** under this line are the movement ops ***
