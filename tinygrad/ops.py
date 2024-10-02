@@ -264,9 +264,18 @@ class UOp(MathTrait):
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents}}
   @property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
+  @staticmethod
+  def umax(lst) -> Union[ConstType, UOp]:
+    ret = lst[0]
+    for x in lst[1:]:
+      if isinstance(ret, UOp): ret = ret.max(x)
+      else:
+        if isinstance(x, UOp): ret = x.max(ret)
+        else: ret = max(ret, x)
+    return ret
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
-    return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
+    return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(UOp.umax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]

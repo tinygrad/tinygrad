@@ -303,7 +303,7 @@ class View:
       # TODO: this <= and != is for symbolic!?
       while resolve((acc <= merged_dim) & (acc != merged_dim)) and (new_dim := next(r_new_shape, 0)) > 0:
         strides.append(new_stride)
-        if resolve(new_dim != 1): new_stride *= (new_dim if (acc := acc * new_dim) < real_dim else 0)
+        if resolve(new_dim != 1): new_stride *= (new_dim if resolve((acc := acc * new_dim) < real_dim) else 0)
       if resolve(acc != merged_dim): break
     else:
       strides += [0,] * (len(new_shape) - len(strides))
