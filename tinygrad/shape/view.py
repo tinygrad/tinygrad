@@ -163,7 +163,7 @@ class View:
     for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
       merged_term += sum([idxs[d1] * (s1 * merged_size) for d1, s1 in term]) + o * merged_size
       merged_size *= s
-      if (merged_term >= merged_size).logical_not() & (merged_term < 0).logical_not():
+      if (merged_term >= 0) & (merged_term < merged_size):
         extents.append((merged_size, merged_term))
         merged_size, merged_term = 1, NumNode(0)
     if merged_term != 0: return None

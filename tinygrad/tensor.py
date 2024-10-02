@@ -2693,7 +2693,7 @@ class Tensor:
       assert isinstance(y, (*get_args(ConstType), Node)), f"{type(y)=}, {y=}"
       if isinstance(x.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       elif not isinstance(y, UOp): y_dtype = dtypes.from_py(y)
-      if isinstance(y, UOp): y = Tensor(y.cast(dtypes.int), device=x.device)
+      if isinstance(y, UOp): y = Tensor(y, device=x.device)
       else: y = Tensor(dtypes.as_const(y, y_dtype), x.device, y_dtype, requires_grad=False)
 
     if match_dtype and x.dtype != y.dtype:

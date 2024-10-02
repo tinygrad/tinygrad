@@ -298,7 +298,6 @@ class UOp(MathTrait):
     if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is UOps.CONST: return self.arg, self.arg
     if self.op is UOps.VCONST: return (min(self.arg), max(self.arg))
-    if self.op is UOps.CAST: return (max(self.src[0].vmin, dtypes.min(self.dtype)), min(self.src[0].vmax, dtypes.max(self.dtype)))
     if self.op is UOps.ALU and self.dtype.count == 1:
       s0,s1,s2 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(3)]
       if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
@@ -311,11 +310,9 @@ class UOp(MathTrait):
           Rmin, Rmax = (s1.vmin, s1.vmax) if s0.vmin >= 0 else (s1.vmax, s1.vmin)
           return Lmin*Rmin, Lmax*Rmax
       if self.arg is BinaryOps.MOD and s1.vmin > 0: return 0, s1.vmax-1
-      if self.arg is BinaryOps.IDIV:
-        val = s1.arg if s1.op is UOps.CONST else (s1.vmin if s1.vmin == s1.vmax else None)
-        if val is not None:
-          if s1.arg > 0: return s0.vmin//val, s0.vmax//val
-          if s1.arg < 0: return -(s0.vmax//-val), -(s0.vmin//-val)
+      if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
+        if s1.arg > 0: return s0.vmin//s1.arg, s0.vmax//s1.arg
+        if s1.arg < 0: return -(s0.vmax//-s1.arg), -(s0.vmin//-s1.arg)
       if self.arg is BinaryOps.MAX: return max(s0.vmin, s1.vmin), max(s0.vmax, s1.vmax)
       if self.arg is BinaryOps.CMPLT: return (s0.vmax<s1.vmin, s0.vmin<s1.vmax)
       if self.arg is BinaryOps.CMPNE:
