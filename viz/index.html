@@ -157,17 +157,12 @@
       transform: rotate(360deg);
     }
   }
-  .status {
-    color: #EC5D5E;
-    font-weight: bold;
-  }
   </style>
 </head>
 <body>
   <div class="main-container">
     <div class="container kernel-list"></div>
     <div class="container graph">
-      <div class="status"></div>
       <svg>
         <g id="render"></g>
       </svg>
@@ -216,15 +211,6 @@
     const render = new dagreD3.render();
     render(inner, g);
   }
-  async function checkStatus() {
-    active = true;
-    try {
-      active = (await fetch("/")).ok;
-    } catch {
-      active = false;
-    }
-    document.querySelector('.status').textContent = active ? `` : `Connection to localhost:8000 failed, is VIZ=1 running?`;
-  }
   function toPath(loc) {
     const [fp, lineno] = loc;
     return `${fp.split("/").pop()}:${lineno}`
@@ -237,7 +223,6 @@
   var currentRewrite = 0;
   var expandKernel = true;
   async function main() {
-    checkStatus();
     // ***** LHS kernels list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
