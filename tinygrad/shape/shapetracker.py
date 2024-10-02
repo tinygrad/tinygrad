@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, Any
-from tinygrad.helpers import merge_dicts, getenv
+from tinygrad.helpers import merge_dicts, getenv, rt
 from tinygrad.shape.symbolic import Variable, MulNode, SumNode, NumNode, DivNode, ModNode, LtNode, AndNode, sint
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
@@ -17,10 +17,10 @@ def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
   # TODO: dtypes.realint
   iexpr = view.offset
   for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
-    if (not isinstance(sh, int) or sh != 1) and (not isinstance(st, int) or st != 0): iexpr = iexpr + idx*variable_to_uop(st)
+    if rt(sh != 1) and rt(st != 0): iexpr = iexpr + idx*variable_to_uop(st)
     if m is not None:
-      if m[0] != 0: vexpr = vexpr * idx.ge(variable_to_uop(m[0]))
-      if m[1] != sh: vexpr = vexpr * idx.lt(variable_to_uop(m[1]))
+      if rt(m[0] != 0): vexpr = vexpr * idx.ge(variable_to_uop(m[0]))
+      if rt(m[1] != sh): vexpr = vexpr * idx.lt(variable_to_uop(m[1]))
   return variable_to_uop(iexpr), variable_to_uop(vexpr)
 
 @dataclass(frozen=True)

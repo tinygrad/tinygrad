@@ -10,7 +10,7 @@ from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, get_contraction, to_function_name, diskcache_put
-from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
+from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX, rt, rf
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.view import strides_for_shape
@@ -85,7 +85,7 @@ class Kernel:
 
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
-    permute = tuple([i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n])
+    permute = tuple([i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if rt(s != n)])
     self.reshape_and_permute(None, permute)
 
     # parameters for optimization
@@ -137,7 +137,7 @@ class Kernel:
 
   @property
   def first_reduce(self) -> int:
-    return [x!=y for x,y in zip(self.sts[0].shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
+    return [rt(x!=y) for x,y in zip(self.sts[0].shape[:self.first_upcast]+(0,), self.full_shape[:self.first_upcast]+(1,))].index(True)
 
   @property
   def first_upcast(self) -> int: return self.shape_len-self.upcasted
@@ -476,7 +476,7 @@ class Kernel:
         (mulop:=self.reduceop.src[0]).arg is BinaryOps.MUL and mulop.src[0].op is UOps.LOAD and mulop.src[1].op is UOps.LOAD:
       st0, st1 = self.sts[self.bufs.index(mulop.src[0])], self.sts[self.bufs.index(mulop.src[1])]
       strides0, strides1 = st0.real_strides(), st1.real_strides()
-      def has_expanded_axis(shape, strides): return any(s > 1 and st == 0 for s,st in zip(shape,strides))
+      def has_expanded_axis(shape, strides): return any(rt(s > 1 & (not (st != 0))) for s,st in zip(shape,strides))
       if strides0[self.first_reduce] == 1 and not (has_expanded_axis(st0.shape, strides0) and has_expanded_axis(st1.shape, strides1)):
         for global_idx in range(self.global_dims):
           if self.full_shape[self.first_reduce]%MV_THREADS_PER_ROW == 0 and self.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
@@ -625,7 +625,7 @@ class Kernel:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
         alu_op: BinaryOps = op.arg[0]
         axis = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
-                    if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i])
+                    if rt(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
           rsrc = op.src[0]
           if rsrc.op is UOps.CAST: rsrc = rsrc.src[0]

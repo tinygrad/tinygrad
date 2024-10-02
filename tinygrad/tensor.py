@@ -368,11 +368,7 @@ class Tensor:
 
   @staticmethod
   def from_node(y:Node, **kwargs) -> Tensor:
-    if isinstance(y, NumNode): return Tensor(y.b, **kwargs, requires_grad=False)
-    if isinstance(y, Variable): return Tensor(y, **kwargs, requires_grad=False)
-    if isinstance(y, MulNode): return Tensor.from_node(y.a, **kwargs) * y.b
-    if isinstance(y, SumNode): return Tensor.from_node(y.nodes[0], **kwargs) + sum(y.nodes[1:])
-    raise RuntimeError(f"unhandled Node {y}")
+    return Tensor(y.simplify(), **kwargs, requires_grad=False)
 
   # ***** creation entrypoint *****
 

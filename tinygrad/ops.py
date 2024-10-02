@@ -175,9 +175,10 @@ class UOp(MathTrait):
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
   # *** uop evaluation ***
+  def simplify(self): return graph_rewrite(self, simple_pm)
   def _eval(self, dtype, expected_type) -> ConstType:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
-    simple_self = graph_rewrite(self, simple_pm)
+    simple_self = self.simplify()
     vmin, vmax = simple_self._min_max
     if vmin != vmax: raise ValueError(f"eval failed to be a single number, range is {vmin} to {vmax} in {simple_self}")
     assert type(vmin) is expected_type, f"vmin is wrong dtype {vmin} != {expected_type}"
@@ -252,9 +253,18 @@ class UOp(MathTrait):
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents}}
   @property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
+  @staticmethod
+  def umax(lst) -> Union[ConstType, UOp]:
+    ret = lst[0]
+    for x in lst[1:]:
+      if isinstance(ret, UOp): ret = ret.max(x)
+      else:
+        if isinstance(x, UOp): ret = x.max(ret)
+        else: ret = max(ret, x)
+    return ret
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
-    return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
+    return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(UOp.umax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
@@ -718,6 +728,9 @@ simple_pm = PatternMatcher([
   ((UPat.var("x") & UPat.var("x")), lambda x: x),
   ((UPat.var("x") | UPat.var("x")), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
+  # ** combine terms **
+  (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
+  (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
   # ** zero folding **
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
@@ -752,4 +765,7 @@ simple_pm = PatternMatcher([
   # mul add lt
   (((UPat.cvar("c0", vec=False)*UPat.var("x"))+UPat.var("x2")).lt(UPat.cvar("c1", vec=False)),
    lambda x,x2,c0,c1: x.lt(c1//c0) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax and x2.vmin >= 0 else None),
+  # ** move add consts to end (NOTE: this is still happening before constant folding) **
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
 ])
