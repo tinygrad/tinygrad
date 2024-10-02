@@ -166,6 +166,21 @@ off_t = ctypes.c_int64
 mode_t = ctypes.c_uint32
 size_t = ctypes.c_uint64
 __off_t = ctypes.c_int64
+
+try:
+    pthread_jit_write_protect_np = _libraries["libc"].pthread_jit_write_protect_np
+    pthread_jit_write_protect_np.restype = None
+    pthread_jit_write_protect_np.argtypes = [ctypes.c_int32]
+except AttributeError:
+    pthread_jit_write_protect_np = lambda _: None
+
+try:
+    sys_icache_invalidate = _libraries["libc"].sys_icache_invalidate
+    sys_icache_invalidate.restype = None
+    sys_icache_invalidate.argtypes = [ctypes.POINTER(None), size_t]
+except AttributeError:
+    sys_icache_invalidate = lambda a, b: None
+
 try:
     mmap = _libraries['libc'].mmap
     mmap.restype = ctypes.POINTER(None)
