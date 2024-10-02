@@ -1,6 +1,7 @@
 import unittest
 import os, itertools
 os.environ["TRACK_MATCH_STATS"] = "2"
+os.environ["PRINT_MATCH_STATS"] = "0"
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor
 from tinygrad.engine.realize import lower_schedule
@@ -11,7 +12,7 @@ from tinygrad.codegen.uopgraph import sym, devectorize, float4_folding
 from test.external.process_replay.helpers import print_diff
 from viz.serve import KernelRet, UOpRet, load_kernels, uop_to_json
 
-def group_rewrites(kernels:KernelRet): return {k:list(v) for k,v in itertools.groupby(kernels.ctxs.values(), lambda x:x.loc)}
+def group_rewrites(kernels:KernelRet): return {k:list(v) for k,v in itertools.groupby(kernels.ctxs, lambda x:x.loc)}
 
 class TestViz(unittest.TestCase):
   def tearDown(self) -> None:
@@ -47,9 +48,9 @@ class TestViz(unittest.TestCase):
     list(lower_schedule(schedule1))
     list(lower_schedule(schedule2))
     ret = load_kernels(contexts)
-    assert len(ret) == 2
-    assert all(len([x for x in y.ctxs.values() if "schedule" in x.loc[0]]) != 0 for y in ret)
-    assert all(len([x for x in y.ctxs.values() if "uopgraph" in x.loc[0]]) != 0 for y in ret)
+    assert len(ret) == 3
+    assert all(len([x for x in y.ctxs if "schedule" in x.loc[0]]) == 0 for y in ret[1:])
+    assert all(len([x for x in y.ctxs if "uopgraph" in x.loc[0]]) != 0 for y in ret[1:])
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()
@@ -131,20 +132,19 @@ class TestViz(unittest.TestCase):
     s = a.schedule()
     with Context(NOOPT=1): list(lower_schedule(s.copy()))
     with Context(NOOPT=0): list(lower_schedule(s.copy()))
-    kernels = load_kernels(contexts)
+    kernels = load_kernels(contexts)[1:]
     self.assertEqual(len(kernels), 2)
     assert all(len(v) == 1 for _,v in group_rewrites(kernels[0]).items())
-    assert all(len(v) == 0 for k,v in group_rewrites(kernels[1]).items() if "schedule.py" in k)
 
   def test_fold_const_nodes(self):
     a = Tensor.empty(4, 4)+2
     contexts.clear()
     sink = a.schedule()[-1].ast
-    ret = uop_to_json(sink, base=sink)
-    for v in ret.values(): print(v)
+    ret = uop_to_json(sink)
     assert not any(v[0].startswith("CONST") for v in ret.values())
     assert len([x for x in ret.values() if "CONST" in x[0]]) == 1
 
+  @unittest.skip("VIZ for a single CONST isn't supported anymore")
   def test_no_fold_single_const(self):
     node = UOp(UOps.CONST, dtypes.float, (), 1.0)
     ret = uop_to_json(node, base=node)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip
-import itertools, urllib.request, subprocess, shutil, math, json, contextvars
+import itertools, urllib.request, subprocess, shutil, math, json, contextvars, types, copyreg, inspect, importlib
 from dataclasses import dataclass
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -103,11 +103,10 @@ class ContextVar:
   _cache: ClassVar[Dict[str, ContextVar]] = {}
   value: int
   key: str
-  def __new__(cls, key, default_value):
-    if key in ContextVar._cache: return ContextVar._cache[key]
-    instance = ContextVar._cache[key] = super().__new__(cls)
-    instance.value, instance.key = getenv(key, default_value), key
-    return instance
+  def __init__(self, key, default_value):
+    assert key not in ContextVar._cache, f"attempt to recreate ContextVar {key}"
+    ContextVar._cache[key] = self
+    self.value, self.key = getenv(key, default_value), key
   def __bool__(self): return bool(self.value)
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
@@ -130,8 +129,6 @@ class Metadata:
   def __repr__(self): return str(self) + (f" - {self.caller}" if self.caller else "")
   def __str__(self): return self.name + (" bw" if self.backward else "")
 _METADATA: contextvars.ContextVar[Optional[Metadata]] = contextvars.ContextVar("_METADATA", default=None)
-
-_CURRENT_KERNEL: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_CURRENT_KERNEL", default=None)
 
 # **************** global state Counters ****************
 
@@ -375,3 +372,17 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d} x{cx[0]}"
   cx[2], srcs = True, ('None' if srcfn(x) is None else ''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
+
+# *** universal support for code object pickling
+
+def _reconstruct_code(*args): return types.CodeType(*args)
+def _serialize_code(code:types.CodeType):
+  # NOTE: this works in Python 3.8 and up
+  if sys.version_info >= (3, 10): args = inspect.signature(types.CodeType).parameters
+  else: args = ['argcount', 'posonlyargcount', 'kwonlyargcount', 'nlocals', 'stacksize', 'flags', 'codestring',
+                'constants', 'names', 'varnames', 'filename', 'name', 'firstlineno', 'lnotab', 'freevars', 'cellvars']
+  return _reconstruct_code, tuple(code.__getattribute__('co_'+x.replace('codestring', 'code').replace('constants', 'consts')) for x in args)
+copyreg.pickle(types.CodeType, _serialize_code)
+
+def _serialize_module(module:types.ModuleType): return importlib.import_module, (module.__name__,)
+copyreg.pickle(types.ModuleType, _serialize_module)

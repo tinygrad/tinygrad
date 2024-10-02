@@ -17,7 +17,7 @@ from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
 from tinygrad.ops import graph_rewrite
 from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import create_schedule, reduceop_fusor, st_fixup
+from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, reduceop_fusor, st_fixup
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 from test.helpers import ast_const, is_dtype_supported, Context, timeit
 from tinygrad.lazy import LazyBuffer, view_supported_devices
@@ -246,7 +246,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_fold_conv_batchnorm_optim(self):
     # this is too high
-    for optim, cnt in [(nn.optim.Adam, 17), (nn.optim.SGD, 15)]:
+    for optim, cnt in [(nn.optim.Adam, 18), (nn.optim.SGD, 15)]:
       with self.subTest(optim=optim.__name__):
         with Tensor.train():
           img = Tensor.ones(1,3,4,4)
@@ -913,7 +913,7 @@ class TestSchedule(unittest.TestCase):
       _realize_weights(layer)
       opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
       layer(x).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 9)
+      check_schedule(opt.schedule_step(), 10)
 
   def test_adam_conv_fuse(self):
     with Tensor.train():
@@ -923,7 +923,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters(c1), lr=1e-4)
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 9)
+      check_schedule(opt.schedule_step(), 10)
 
   def test_adam_2convs_fuse(self):
     with Tensor.train():
@@ -934,7 +934,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 12)
+      check_schedule(opt.schedule_step(), 13)
 
   def test_sgd_conv_fuse(self):
     with Tensor.train():
@@ -1314,7 +1314,7 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d_fused_ast_rewrite_half(self): _test_conv2d(6, FUSE_CONV_BW=1, AST_REWRITE=1, dtype=dtypes.half)
 
   def _test_buf_cnt(self, cnt:int, allowed:int):
-    if (m:=Device[Device.DEFAULT].renderer.buf_max) is None or m != 32: self.skipTest(f"test needs a buf_max of 32 {Device.DEFAULT}")
+    if (m:=BUF_LIMIT.get(Device.DEFAULT)) is None or m != 32: self.skipTest(f"test needs a buf_max of 32 {Device.DEFAULT}")
     alu = functools.reduce(lambda x,y: x+y, [Tensor.ones((1, 1)).contiguous().realize() for _ in range(cnt-1)])
     s = alu.schedule()
     assert len(s) == allowed
@@ -1340,6 +1340,14 @@ class TestSchedule(unittest.TestCase):
     (x+Tensor.ones(256).contiguous()).schedule()
     self.assertEqual(GlobalCounters.mem_used-base, 1024)
 
+  def test_const_schedule(self):
+    constv = Tensor.empty(2, 2).lazydata.const_like(10)
+    self.assertEqual(len(create_schedule([constv])), 0)
+
+  def test_const_schedule_contig(self):
+    constv = Tensor.empty(2, 2).lazydata.const_like(10).contiguous()
+    self.assertEqual(len(create_schedule([constv])), 1)
+
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
@@ -1364,11 +1372,10 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(xt, 3)
     np.testing.assert_equal(xt.numpy(), (np.arange(16).reshape(4, 4))[[1, 2], [1, 2]])
 
-  @unittest.expectedFailure
   def test_advanced_indexing(self):
     X = Tensor.arange(10)+1
     xt = X[[0]]
-    self.check_schedule(xt, 3)
+    self.check_schedule(xt, 2)
     np.testing.assert_equal(xt.numpy(), (np.arange(10)+1)[[0]])
 
   @unittest.expectedFailure

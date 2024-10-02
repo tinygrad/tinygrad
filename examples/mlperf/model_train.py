@@ -664,13 +664,6 @@ def train_bert():
   else:
     MLLOGGER = None
 
-  # ** init wandb **
-  WANDB = getenv("WANDB")
-  if WANDB:
-    import wandb
-    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
-    wandb.init(config=config, **wandb_args, project="MLPerf-BERT")
-
   # ** hyperparameters **
   BS                 = config["GLOBAL_BATCH_SIZE"]      = getenv("BS", 11 * len(GPUS) if dtypes.default_float in (dtypes.float16, dtypes.bfloat16) else 8 * len(GPUS))
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
@@ -699,13 +692,22 @@ def train_bert():
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
+  assert 10000 <= (EVAL_BS * max_eval_steps), "Evaluation batchsize * max_eval_steps must greater or equal 10000 to iterate over full eval dataset"
+
+  # ** init wandb **
+  WANDB = getenv("WANDB")
+  if WANDB:
+    import wandb
+    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb.init(config=config, **wandb_args, project="MLPerf-BERT")
+
+  # ** init model **
+
   model = get_mlperf_bert_model(init_ckpt if RUNMLPERF else None)
   
   for _, x in get_state_dict(model).items():
     x.realize().to_(GPUS)
   parameters = get_parameters(model)
-
-  assert 10000 <= (EVAL_BS * max_eval_steps), "Evaluation batchsize * max_eval_steps must greater or equal 10000 to iterate over full eval dataset"
 
   # ** Log run config **
   for key, value in config.items(): print(f'HParam: "{key}": {value}')
@@ -820,7 +822,7 @@ def train_bert():
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": 1, "epoch_count": 1, "step_num": i})
-      train_step_bert.reset()
+      if getenv("RESET_STEP", 1): train_step_bert.reset()
       eval_lm_losses = []
       eval_clsf_losses = []
       eval_lm_accs = []
@@ -858,7 +860,8 @@ def train_bert():
             MLLOGGER.event(key=mllog_constants.INIT_STOP, value=None)
           return
 
-      eval_step_bert.reset()
+      if getenv("RESET_STEP", 1): eval_step_bert.reset()
+      del eval_data, eval_result
       avg_lm_loss = sum(eval_lm_losses) / len(eval_lm_losses)
       avg_clsf_loss = sum(eval_clsf_losses) / len(eval_clsf_losses)
       avg_lm_acc = sum(eval_lm_accs) / len(eval_lm_accs)
@@ -895,7 +898,7 @@ def train_bert():
         # stop once hitting the target
         break
 
-    if getenv("CKPT", 1) and i % save_ckpt_freq == 0:
+    if getenv("CKPT") and i % save_ckpt_freq == 0:
       if MLLOGGER and RUNMLPERF:
         if previous_step:
           MLLOGGER.end(key=mllog_constants.BLOCK_STOP, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "first_step_num": i, "step_num": i, "step_count": i - previous_step})

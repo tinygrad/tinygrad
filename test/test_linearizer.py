@@ -12,7 +12,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 # from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.engine.schedule import create_schedule
+from tinygrad.engine.schedule import BUF_LIMIT, create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner
 from tinygrad.helpers import prod, Context, getenv, CI, flatten, dedup, AMX
 from tinygrad.dtype import DType, PtrDType, dtypes
@@ -1153,7 +1153,7 @@ class TestLinearizer(unittest.TestCase):
   def test_grouped_dims(self):
     def _assert_grouped_dims(prefix, dims, max_sizes, reverse_dims, expected_sizes):
       idxs = get_grouped_dims(prefix, dims, max_sizes, reverse_dims)
-      loop_idxs = dedup(flatten([[y for y in sorted(list(x.sparents)) if y.op is UOps.SPECIAL] for x in idxs]))
+      loop_idxs = dedup(flatten([[y for y in x.sparents if y.op is UOps.SPECIAL] for x in idxs]))
       loop_idxs = sorted(loop_idxs, key=lambda uop: uop.arg[0])
       sizes = [x.arg[1] for x in loop_idxs]
       assert len(idxs) == len(dims), f"expected idxs to have same length as dims {len(dims)}, got {len(idxs)}"
@@ -1694,7 +1694,7 @@ class TestHandCodedOpts(unittest.TestCase):
     # float4/other hcopt shouldn't upcast last axis, since we already have 7 upcast, and the last axis is not very contiguous
     assert k.upcasted == 1 and k.full_shape[-1] == 7
 
-  @unittest.skipIf((buf_max:=Device[Device.DEFAULT].renderer.buf_max) is not None and buf_max <= 37, "this test uses too many bufs")
+  @unittest.skipIf((buf_max:=BUF_LIMIT.get(Device.DEFAULT)) is not None and buf_max <= 37, "this test uses too many bufs")
   def test_masked_upcast_wino(self):
     monster = Tensor.stack(*[Tensor.stack(*[Tensor.rand(16) for _ in range(6)]) for _ in range(6)])
 
@@ -1768,10 +1768,20 @@ def helper_linearizer_opt(r:Union[Tensor, List[Tensor]], *args, **kwargs):
   realized_ast, real_bufs = helper_realized_ast(r)
   return _helper_linearizer_opt_ast(realized_ast, real_bufs, *args, **kwargs)
 
+def copyout_outputs(lin:Kernel, outbufs:List[Buffer]) -> List[np.ndarray]:
+  ret = []
+  for i,x in enumerate(outbufs):
+    shape: Tuple[int, ...] = lin.ast.src[i].st_arg.shape
+    ret.append(np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)).reshape(shape))
+  return ret
+
+def reset_bufs(bufs:List[Buffer]):
+  for buf in bufs: buf.copyin(np.zeros((buf.size, ), dtype=_to_np_dtype(buf.dtype)).data) # Zero to check that all values are filled
+
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:List[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> List[Kernel]:
   lins: List[Kernel] = []
-  outbufs = [(real_bufs[i], lop.st_arg.shape) for i,lop in enumerate(realized_ast.src)]
+  outbufs = real_bufs[:len(realized_ast.src)]
 
   def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
 
@@ -1787,32 +1797,29 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:List[Buffer], opts=[]
       cs = list(zip(k.colors(), k.full_shape))
       assert cs == expected_color_size, f"expected={expected_color_size} got={cs}"
     prg = get_prg(k)
-    for buf,_ in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=_to_np_dtype(buf.dtype)).data) # Zero to check that all values are filled
+    reset_bufs(outbufs)
     prg.exec(real_bufs)
 
-    for i, (buf,shape) in enumerate(outbufs):
-      np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), _to_np_dtype(buf.dtype)).reshape(shape), wanna_output[i], atol=atol, rtol=rtol)
+    for x,want in zip(copyout_outputs(k, outbufs), wanna_output): np.testing.assert_allclose(x, want, atol=atol, rtol=rtol)
 
   # Get baseline if it is not provided, which is not optimized at all.
   k = Kernel(realized_ast)
   lins.append(k)
   prg = get_prg(k)
   prg.exec(real_bufs)
-  if len(wanna_output) == 0: wanna_output = [np.frombuffer(buf.as_buffer(), _to_np_dtype(buf.dtype)).reshape(shape).copy() for buf,shape in outbufs]
+  if len(wanna_output) == 0: wanna_output = copyout_outputs(k, outbufs)
   else:
-    for i, (buf,shape) in enumerate(outbufs):
-      np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), _to_np_dtype(buf.dtype)).reshape(shape), wanna_output[i], atol=atol, rtol=rtol)
+    for buf,want in zip(copyout_outputs(k, outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
 
   # Check correctness of handcoded optimiztions.
   k = Kernel(realized_ast)
   lins.append(k)
   k.hand_coded_optimizations()
   prg = get_prg(k)
-  for buf,_ in outbufs: buf.copyin(np.zeros((buf.size, ), dtype=_to_np_dtype(buf.dtype)).data) # Zero to check that all values are filled
+  reset_bufs(outbufs)
   prg.exec(real_bufs)
-  for i, (buf,shape) in enumerate(outbufs):
-    np.testing.assert_allclose(np.frombuffer(buf.as_buffer(), _to_np_dtype(buf.dtype)).reshape(shape), wanna_output[i], atol=atol, rtol=rtol)
-  for i, x in enumerate(opts): # Check custom transformations if any.
+  for buf,want in zip(copyout_outputs(k, outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
+  for i,x in enumerate(opts): # Check custom transformations if any.
     check_opt(x, lambda: Kernel(realized_ast), color_sizes[i] if i < len(color_sizes) else None)
   return lins
 
