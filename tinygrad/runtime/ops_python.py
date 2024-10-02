@@ -171,7 +171,7 @@ class PythonProgram:
             # (i, j), C, D (4 elements on 32 threads)
             def c_map(lane, elem): return ((elem%2)+(lane%4)*2, (lane//4)+(elem//2)*8)
             sza, szb, szc = (prod(sz for _, sz in upc) for upc in ([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)]))
-            ul[i] = wmma_helper(32, arg[1][2], sza, szb, szc, a_elem, b_elem, c_map)
+            ul[i] = wmma_helper(32, 16, sza, szb, szc, a_elem, b_elem, c_map)
           elif arg[4] == "INTEL":
             # A (16 elements on 8 threads)
             def a_elem(x, i, j, goff): return x[i%2+j*2][goff+i//2]
