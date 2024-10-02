@@ -247,6 +247,10 @@ class UOp(MathTrait):
   def substitute(self, vars):
     if self in vars: return vars[self]
     return self.replace(src=tuple(x.substitute(vars) for x in self.src))
+  @property
+  def val(self):
+    assert self.op is UOps.DEFINE_VAR and len(self.arg) == 4
+    return self.arg[3]
   @staticmethod
   def define_global(dtype:DType, arg): return UOp(UOps.DEFINE_GLOBAL, dtype if isinstance(dtype, ImageDType) else PtrDType(dtype), (), arg)
   @staticmethod
@@ -699,9 +703,9 @@ spec = PatternMatcher([
 ])
 
 def type_verify(uops:List[UOp]):
-  for u in uops:
+  for i,u in enumerate(uops):
     chk = cast(bool, spec.rewrite(u))
-    assert chk is True, f"UOp verification failed on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
+    assert chk is True, f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
 
 simple_pm = PatternMatcher([
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
