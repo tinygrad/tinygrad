@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, Union, Optional, Dict, cast
+from typing import Tuple, Union, Optional, Dict
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, ConstType, UOps, exec_alu
 
@@ -43,7 +43,8 @@ class Variable(UOp):
 def sym_infer(uop: Union[UOp, int], var_vals: Optional[Dict[Variable, int]]) -> int:
   if isinstance(uop, int): return uop
   if uop.op == UOps.CONST: return uop.arg
-  if uop.op == UOps.DEFINE_VAR and var_vals is not None: return var_vals[cast(Variable, uop)]
+  if uop.op == UOps.DEFINE_VAR and var_vals is not None:
+    return {k.arg[0]:v for k,v in var_vals.items()}[uop.arg[0]]
   if uop.op == UOps.ALU:
     src_values = [sym_infer(src, var_vals) for src in uop.src]
     return exec_alu(uop.arg, uop.dtype, src_values)
