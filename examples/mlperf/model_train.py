@@ -347,8 +347,12 @@ def train_retinanet():
   from extra.models.retinanet import RetinaNet
   from extra.models import resnet
   from tinygrad.helpers import get_child
+  from tinygrad.nn.optim import Adam
 
   NUM_CLASSES = len(MLPERF_CLASSES)
+
+  # ** hyperparameters **
+  LR = 1e-4
 
   def _freeze_backbone_layers(backbone, trainable_layers, loaded_keys):
     model_layers = ["layer4", "layer3", "layer2", "layer1", "conv1"][:trainable_layers]
@@ -367,6 +371,10 @@ def train_retinanet():
   _freeze_backbone_layers(backbone, 3, loaded_keys)
 
   model = RetinaNet(backbone, num_classes=NUM_CLASSES)
+
+  # ** optimizer **
+  params = get_parameters(model)
+  optim = Adam(params, lr=LR)
 
 def train_unet3d():
   """
