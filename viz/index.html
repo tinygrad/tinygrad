@@ -250,7 +250,7 @@
       const p = Object.assign(document.createElement("p"), {id: `kernel-${k[0].kernel_name}`, innerText: k[0].kernel_name, style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       k.forEach((u, j) => {
-        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)}`, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
+        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.upats.length}`, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
         rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
           e.stopPropagation();
