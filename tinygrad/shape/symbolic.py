@@ -22,7 +22,7 @@ class Variable(UOp):
     return super().__new__(cls)
   def __init__(self, expr:str, nmin:int, nmax:int, bound:Optional[int]=None):
     if bound is None: vcache[expr] = self
-    super().__init__(UOps.DEFINE_VAR, dtypes.pyint, arg=(expr, nmin, nmax, bound) if bound else (expr, nmin, nmax))
+    super().__init__(UOps.DEFINE_VAR, dtypes.pyint, arg=(expr, nmin, nmax, bound) if bound is not None else (expr, nmin, nmax))
   def bind(self, val:ConstType):
     assert self.op is UOps.DEFINE_VAR and len(self.arg) == 3
     return Variable(self.arg[0], self.arg[1], self.arg[2], val)
