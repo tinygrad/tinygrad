@@ -16,13 +16,13 @@ AndNode = UOp
 
 def NumNode(val:int): return UOp.const(dtypes.pyint, val)
 
-vcache: Dict[str, UOp] = {}
+vcache: Dict[Tuple, UOp] = {}
 class Variable(UOp):
   def __new__(cls, expr:str, nmin:int, nmax:int, bound:Optional[ConstType]=None):
-    if expr in vcache and bound is None: return vcache[expr]
+    if (expr, nmin, nmax) in vcache and bound is None: return vcache[(expr, nmin, nmax)]
     return super().__new__(cls)
   def __init__(self, expr:str, nmin:int, nmax:int, bound:Optional[ConstType]=None):
-    if bound is None: vcache[expr] = self
+    if bound is None: vcache[(expr, nmin, nmax)] = self
     super().__init__(UOps.DEFINE_VAR, dtypes.pyint, arg=(expr, nmin, nmax, bound) if bound is not None else (expr, nmin, nmax))
   def bind(self, val:ConstType):
     assert self.op is UOps.DEFINE_VAR and len(self.arg) == 3
