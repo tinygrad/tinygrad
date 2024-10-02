@@ -346,22 +346,25 @@ def train_retinanet():
   from extra.datasets.openimages import MLPERF_CLASSES
   from extra.models.retinanet import RetinaNet
   from extra.models import resnet
+  from tinygrad.helpers import get_child
 
   NUM_CLASSES = len(MLPERF_CLASSES)
 
-  def _freeze_backbone_layers(backbone, trainable_layers):
+  def _freeze_backbone_layers(backbone, trainable_layers, loaded_keys):
     model_layers = ["layer4", "layer3", "layer2", "layer1", "conv1"][:trainable_layers]
     for model_layer in model_layers:
-      if hasattr(backbone, model_layer):
-        getattr(backbone, model_layer).requires_grad = False
+      for loaded_key in loaded_keys:
+        if model_layer in loaded_key:
+          layer:Tensor = get_child(backbone, loaded_key)
+          layer.requires_grad = False
 
   # ** model initializers **
   resnet.BatchNorm = FrozenBatchNorm2d
 
   # ** model setup **
   backbone = resnet.ResNeXt50_32X4D(num_classes=NUM_CLASSES)
-  backbone.load_from_pretrained()
-  _freeze_backbone_layers(backbone, 3)
+  loaded_keys = backbone.load_from_pretrained()
+  _freeze_backbone_layers(backbone, 3, loaded_keys)
 
   model = RetinaNet(backbone, num_classes=NUM_CLASSES)
 
