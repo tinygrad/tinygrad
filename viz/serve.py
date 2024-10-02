@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 from collections import defaultdict
-import functools
 from typing import DefaultDict, Dict, List, Optional, Tuple
-import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, multiprocessing
+import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, multiprocessing, functools
 from dataclasses import asdict
 from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from tinygrad.helpers import Context, getenv, to_function_name
+from tinygrad.helpers import getenv, to_function_name
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, UPat, lines
 from tinygrad.engine.graph import uops_colors, word_wrap
 from viz.spec import GraphRewriteDetails, GraphRewriteMetadata
@@ -82,7 +81,7 @@ class Handler(BaseHTTPRequestHandler):
         metadata, ctx = list(kernels.values())[int(qkernel[0])][int(query["idx"][0])]
         graphs, diffs, changed_nodes = reconstruct_graph(ctx.sink, ctx.rewrites)
         ret = json.dumps(asdict(GraphRewriteDetails(**asdict(metadata), graphs=list(map(uop_to_json, graphs)),
-                                                    diffs=diffs, changed_nodes=changed_nodes, kernel_code=get_src(ctx.kernel)))).encode()
+                                                    diffs=diffs, changed_nodes=changed_nodes, kernel_code=get_src(ctx)))).encode()
       else: ret = json.dumps([list(map(lambda x:asdict(x[0]), v)) for v in kernels.values()]).encode()
     else:
       self.send_response(404)
