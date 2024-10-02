@@ -1,6 +1,6 @@
 import unittest
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp
+from tinygrad.ops import UOp, resolve
 
 class TestUOpResolve(unittest.TestCase):
   def test_simple_int(self):
@@ -38,6 +38,14 @@ class TestUOpResolve(unittest.TestCase):
   def test_ngt(self):
     u = UOp.const(dtypes.int, 4) > 7
     self.assertFalse(u)
+
+  def test_ambiguous_less_than(self):
+    u = UOp.define_var("i", dtypes.pyint, 1, 10)
+    self.assertTrue(resolve(u < 4))
+    self.assertFalse(resolve(u < 4, False))
+    self.assertTrue(resolve(u < 11, False))
+    self.assertFalse(resolve(u < -1, False))
+    self.assertFalse(resolve(u < -1, True))
 
   def test_float_direct(self):
     u = UOp.const(dtypes.float, 4.5) + 7
