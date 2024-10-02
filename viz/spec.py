@@ -13,7 +13,7 @@ class GraphRewriteMetadata:
   kernel_code: Optional[str]
   """The program after all rewrites"""
   upats: List[Tuple[Tuple[str, int], str]]
-  """List of all the applied UPats."""
+  """List of all the applied UPats"""
 
 @dataclass(frozen=True)
 class GraphRewriteDetails(GraphRewriteMetadata):
