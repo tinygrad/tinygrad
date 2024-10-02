@@ -15,12 +15,12 @@ AndNode = UOp
 
 def NumNode(val:int): return UOp.const(dtypes.pyint, val)
 
-vcache = {}
+vcache: Dict[str, UOp] = {}
 class Variable(UOp):
-  def __new__(cls, expr:str, nmin:int, nmax:int, bound:Optional[int]=None):
+  def __new__(cls, expr:str, nmin:int, nmax:int, bound:Optional[ConstType]=None):
     if expr in vcache and bound is None: return vcache[expr]
     return super().__new__(cls)
-  def __init__(self, expr:str, nmin:int, nmax:int, bound:Optional[int]=None):
+  def __init__(self, expr:str, nmin:int, nmax:int, bound:Optional[ConstType]=None):
     if bound is None: vcache[expr] = self
     super().__init__(UOps.DEFINE_VAR, dtypes.pyint, arg=(expr, nmin, nmax, bound) if bound is not None else (expr, nmin, nmax))
   def bind(self, val:ConstType):
@@ -42,7 +42,7 @@ def sym_infer(uop: Union[UOp, int], var_vals: Optional[Dict[UOp, int]]) -> int:
   if isinstance(uop, int): return uop
   if uop.op == UOps.CONST:
     return uop.arg
-  elif uop.op == UOps.DEFINE_VAR:
+  elif uop.op == UOps.DEFINE_VAR and var_vals is not None:
     return var_vals[uop]
   elif uop.op == UOps.ALU:
     src_values = [sym_infer(src, var_vals) for src in uop.src]

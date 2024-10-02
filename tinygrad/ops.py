@@ -61,6 +61,7 @@ class MathTrait:
   def __truediv__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x).alu(UnaryOps.RECIP))
   def __rtruediv__(self, x): return self.ufix(x).alu(BinaryOps.MUL, self.alu(UnaryOps.RECIP))
   def __mod__(self, x): return self.alu(BinaryOps.MOD, self.ufix(x))
+  def __rmod__(self, x): return self.ufix(x).alu(BinaryOps.MOD, self)
   def __xor__(self, x): return self.alu(BinaryOps.XOR, self.ufix(x))
   def __and__(self, x): return self.alu(BinaryOps.AND, self.ufix(x))
   def __rand__(self, x): return self.ufix(x).alu(BinaryOps.AND, self)
@@ -244,16 +245,16 @@ class UOp(MathTrait):
   @staticmethod
   def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    #if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
+    if isinstance(b, UOp): return b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
   @functools.lru_cache(None)
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   # TODO: this is context rewrite
-  def substitute(self, vars:Dict[UOp, UOp]):
-    if self in vars: return vars[self]
-    return self.replace(src=tuple(x.substitute(vars) for x in self.src))
+  def substitute(self, dvars:Dict[UOp, UOp]):
+    if self in dvars: return dvars[self]
+    return self.replace(src=tuple(x.substitute(dvars) for x in self.src))
   @staticmethod
   def define_global(dtype:DType, arg): return UOp(UOps.DEFINE_GLOBAL, dtype if isinstance(dtype, ImageDType) else PtrDType(dtype), (), arg)
   @staticmethod
@@ -279,7 +280,7 @@ class UOp(MathTrait):
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
-    return sorted(set.union(*st_vars, [Variable(x.arg[0], x.arg[1], x.arg[2]) for x in self.vars()]), key=lambda v: v.expr)
+    return sorted(set.union(*st_vars, self.vars()), key=lambda v: v.expr)
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg

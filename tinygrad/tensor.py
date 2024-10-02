@@ -10,9 +10,9 @@ from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
-from tinygrad.ops import MetaOps, truncate, UOps
+from tinygrad.ops import MetaOps, truncate
 from tinygrad.device import Device, Buffer, BufferOptions
-from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
+from tinygrad.shape.symbolic import sint, Variable, Node
 from tinygrad.engine.realize import run_schedule, memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 

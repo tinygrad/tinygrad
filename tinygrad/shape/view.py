@@ -166,7 +166,7 @@ class View:
       if not resolve(merged_term >= merged_size) and not resolve(merged_term < 0):
         extents.append((merged_size, merged_term))
         merged_size, merged_term = 1, NumNode(0)
-    if merged_term != 0: return None
+    if resolve(merged_term != 0): return None
     if (vm2_shape := tuple(s for s,_ in reversed(extents))) != vm2.shape:
       return (reshaped_vm2 := vm2.reshape(vm2_shape)) and reshaped_vm2 + vm1
 
@@ -277,7 +277,7 @@ class View:
     # check for the same size
     if (self_all_int := all_int(self.shape)):
       assert all(isinstance(s, (int, Variable)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
-      if prod(self.shape) != prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]):
+      if resolve(prod(self.shape) != prod(new_shape)):
         raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
 
     if new_shape == () and self.mask and any(mx==my for (mx,my) in self.mask): return None
