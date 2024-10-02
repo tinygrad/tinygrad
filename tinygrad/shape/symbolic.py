@@ -27,7 +27,8 @@ class Node:
   def __hash__(self): return hash(self.key)
   def __bool__(self):
     if self.max == self.min: return self.min == 1
-    raise ValueError(f"symbolic couldn't resolve {self}")
+    return True
+    #raise ValueError(f"symbolic couldn't resolve {self}")
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key

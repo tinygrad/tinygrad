@@ -163,10 +163,10 @@ class View:
     for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
       merged_term += Variable.sum([idxs[d1] * (s1 * merged_size) for d1, s1 in term]) + o * merged_size
       merged_size *= s
-      if not (merged_term >= merged_size) and not (merged_term < 0):
+      if not resolve(merged_term >= merged_size) and not resolve(merged_term < 0):
         extents.append((merged_size, merged_term))
         merged_size, merged_term = 1, NumNode(0)
-    if merged_term != 0: return None
+    if resolve(merged_term != 0): return None
     if (vm2_shape := tuple(s for s,_ in reversed(extents))) != vm2.shape:
       return (reshaped_vm2 := vm2.reshape(vm2_shape)) and reshaped_vm2 + vm1
 
