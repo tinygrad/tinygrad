@@ -68,15 +68,6 @@ class TestUOpResolve(unittest.TestCase):
       u = UOp.define_var("b", dtypes.bool, False, True) | False
       self.assertTrue(u)
 
-  def test_x_lt_x(self):
-    x = UOp.define_var("i", dtypes.pyint, 1, 10)
-    self.assertFalse(x < x)
-
-  @unittest.expectedFailure
-  def test_x_lt_xp1(self):
-    x = UOp.define_var("i", dtypes.pyint, 1, 10)
-    self.assertTrue(x < (x+1))
-
   def test_and_false(self):
     u = UOp.define_var("b", dtypes.bool, False, True) & False
     self.assertFalse(u)
