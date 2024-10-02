@@ -19,8 +19,8 @@ def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
   for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
     if resolve((sh != 1) & (st != 0)): iexpr = iexpr + idx*variable_to_uop(st)
     if m is not None:
-      if m[0] != 0: vexpr = vexpr * idx.ge(variable_to_uop(m[0]))
-      if m[1] != sh: vexpr = vexpr * idx.lt(variable_to_uop(m[1]))
+      if resolve(m[0] != 0): vexpr = vexpr * idx.ge(variable_to_uop(m[0]))
+      if resolve(m[1] != sh): vexpr = vexpr * idx.lt(variable_to_uop(m[1]))
   return iexpr, vexpr
 
 @dataclass(frozen=True)
