@@ -92,7 +92,7 @@ class View:
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def size(self) -> int:
     # NOTE: Variable and the Node derived from it in symbolic shapes can only have int as max.
-    ret = prod([x.max if isinstance(x, Node) else x for x in self.shape])
+    ret = prod([x.vmax if isinstance(x, Node) else x for x in self.shape])
     assert isinstance(ret, int), f"{ret=} is not int"
     return ret
 
@@ -173,7 +173,7 @@ class View:
       # Try to project vm2's mask on to vm1.
       newb, newe, bad = [0] * len(vm1.shape), list(vm1.shape), False
       for d2, ((b, e), o, (_, t)) in enumerate(zip(vm2.mask, origin, reversed(extents))):
-        if not (t.min < b or t.max >= e): continue
+        if not (t.vmin < b or t.vmax >= e): continue
         if not isinstance(o, int) or not isinstance(b, int) or not isinstance(e, int):
           bad = True
           continue
@@ -219,7 +219,7 @@ class View:
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     shape = [y-x for x,y in arg]
     if mask is not None and all(m[0] == 0 and m[1] == s for m,s in zip(mask, shape)): mask = None
-    return View.create(tuple(s.b if isinstance(s, NumNode) else s for s in shape), self.strides, self.offset+offset, mask)
+    return View.create(tuple(shape), self.strides, self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
