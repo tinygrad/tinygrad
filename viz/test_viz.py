@@ -1,32 +1,35 @@
+from typing import List
 import unittest
 import os, itertools
+
+from viz.spec import GraphRewriteMetadata
 os.environ["TRACK_MATCH_STATS"] = "2"
 os.environ["PRINT_MATCH_STATS"] = "0"
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor
 from tinygrad.engine.realize import lower_schedule
-from tinygrad.ops import UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps
+from tinygrad.ops import TrackedRewriteContext, UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import CI, Context, all_same, DEBUG, colored, getenv
 from tinygrad.codegen.uopgraph import sym, devectorize, float4_folding
 from test.external.process_replay.helpers import print_diff
-from viz.serve import KernelRet, UOpRet, load_kernels, uop_to_json
+from viz.serve import reconstruct_graph, uop_to_json, load_kernels
 
-def group_rewrites(kernels:KernelRet): return {k:list(v) for k,v in itertools.groupby(kernels.ctxs, lambda x:x.loc)}
+def group_rewrites(kernels:List[GraphRewriteMetadata]): return {k:list(v) for k,v in itertools.groupby(kernels, lambda x:x.loc)}
 
 class TestViz(unittest.TestCase):
   def tearDown(self) -> None:
     from tinygrad.ops import contexts
     if not getenv("VIZ"): contexts.clear()
 
-  def assert_valid_ctx(self, contexts):
+  def assert_valid_ctx(self, contexts:List[TrackedRewriteContext]):
     assert len(contexts) != 0
     for i,ctx in enumerate(contexts):
-      try: ret = UOpRet.from_ctx(ctx)
+      try: graphs,_,_ = reconstruct_graph(ctx.sink, ctx.rewrites)
       except Exception as e:
         print(colored(f"failed to create graph for ctx {i}", "red"))
         raise e
-      for j,(x,y) in enumerate(zip(ret.graphs, ret.graphs[1:])):
+      for j,(x,y) in enumerate(zip(graphs, graphs[1:])):
         if x.key == y.key:
           raise AssertionError(f"failed to generate the correct diff at rewrite {j} ctx {i}")
 
@@ -47,10 +50,10 @@ class TestViz(unittest.TestCase):
     schedule2 = Tensor.zeros(4, 1).contiguous().exp().schedule()
     list(lower_schedule(schedule1))
     list(lower_schedule(schedule2))
-    ret = load_kernels(contexts)
+    with Context(TRACK_MATCH_STATS=0): ret = list(load_kernels(contexts).values())
     assert len(ret) == 3
-    assert all(len([x for x in y.ctxs if "schedule" in x.loc[0]]) == 0 for y in ret[1:])
-    assert all(len([x for x in y.ctxs if "uopgraph" in x.loc[0]]) != 0 for y in ret[1:])
+    assert all(len([x for x,_,_ in y if "schedule" in x.loc[0]]) == 0 for y in ret[1:])
+    assert all(len([x for x,_,_ in y if "uopgraph" in x.loc[0]]) != 0 for y in ret[1:])
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()
@@ -69,8 +72,8 @@ class TestViz(unittest.TestCase):
     ])
     ret = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, ret)
-    g = UOpRet.from_ctx(contexts[0])
-    assert g.graphs[-1].key == ret.key
+    graphs,_,_ = reconstruct_graph(contexts[0].sink, contexts[0].rewrites)
+    assert graphs[-1].key == ret.key
     self.assert_valid_ctx(contexts)
 
   def test_devectorize_viz(self):
@@ -122,9 +125,10 @@ class TestViz(unittest.TestCase):
     a = Tensor.empty(4, 4).contiguous().realize()+2
     b = Tensor.empty(4, 4).contiguous().realize()+2
     Tensor.schedule(a, b)
-    kernels = load_kernels(contexts)
+    with Context(TRACK_MATCH_STATS=0): kernels = load_kernels(contexts)
     self.assertEqual(len(kernels), 1)
-    assert all(len(v) == 1 for k,v in group_rewrites(kernels[0]).items() if "schedule.py" in k)
+    rewrites = [x[0] for x in list(kernels.values())[0]]
+    assert all(len(v) == 1 for k,v in group_rewrites(rewrites).items() if "schedule.py" in k)
 
   def test_no_dedup_different_opts(self):
     contexts.clear()
@@ -132,9 +136,10 @@ class TestViz(unittest.TestCase):
     s = a.schedule()
     with Context(NOOPT=1): list(lower_schedule(s.copy()))
     with Context(NOOPT=0): list(lower_schedule(s.copy()))
-    kernels = load_kernels(contexts)[1:]
+    with Context(TRACK_MATCH_STATS=0): kernels = list(load_kernels(contexts).values())[1:]
     self.assertEqual(len(kernels), 2)
-    assert all(len(v) == 1 for _,v in group_rewrites(kernels[0]).items())
+    rewrites = [x[0] for x in kernels[0]]
+    assert all(len(v) == 1 for _,v in group_rewrites(rewrites).items())
 
   def test_fold_const_nodes(self):
     a = Tensor.empty(4, 4)+2

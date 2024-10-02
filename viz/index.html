@@ -225,6 +225,10 @@
     }
     document.querySelector('.status').textContent = active ? `` : `Connection to localhost:8000 failed, is VIZ=1 running?`;
   }
+  function toPath(loc) {
+    const [fp, lineno] = loc;
+    return `${fp.split("/").pop()}:${lineno}`
+  }
   var ret = {};
   var cache = {};
   var kernels = null;
@@ -243,10 +247,10 @@
     kernelList.innerHTML = "";
     kernels.forEach((k, i) => {
       kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "", style: "overflow-x: auto; cursor: initial;" });
-      const p = Object.assign(document.createElement("p"), {id: `kernel-${k.name}`, innerText: k.name, style: "cursor: pointer;"});
+      const p = Object.assign(document.createElement("p"), {id: `kernel-${k[0].kernel_name}`, innerText: k[0].kernel_name, style: "cursor: pointer;"});
       kernelUl.appendChild(p)
-      k.ctxs.forEach((u, j) => {
-        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${u.filename} - ${u.match_count} - ${u.matcher_name}`, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
+      k.forEach((u, j) => {
+        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.upats.length}`, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
         rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
           e.stopPropagation();
@@ -277,15 +281,15 @@
       ret = cache[cacheKey];
     }
     else {
-      ret = await (await fetch(`/graph?kernel_idx=${currentKernel}&uop_idx=${currentUOp}`)).json();
+      ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`)).json();
       cache[cacheKey] = ret;
     }
-    renderGraph(ret[0].graphs[currentRewrite], ret[0].additions[currentRewrite]);
+    renderGraph(ret.graphs[currentRewrite], ret.changed_nodes[currentRewrite]);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
-    metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: ret[0].loc.filename }));
-    const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(ret[0].loc.code)}</code>`, className: "wrap code-block language-python" });
+    metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: toPath(ret.loc) }));
+    const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(ret.code_line)}</code>`, className: "wrap code-block language-python" });
     metadata.appendChild(pre);
     hljs.highlightElement(pre);
     // ** resizer
@@ -319,29 +323,24 @@
       metadata.style.userSelect = "initial";
     }
     // ** code blocks
-    ret[0].extra[currentRewrite].forEach((e, i) => {
-      if (e.length == 0) return;
-      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(e)}</code>`, className: "code-block language-python" });
-      hljs.highlightElement(pre);
-      metadata.appendChild(pre);
-    })
-    if (kernels[currentKernel].code !== "") {
-      const code = kernels[currentKernel].code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    if (ret.kernel_code !== "") {
+      const code = kernels[currentKernel][0].kernel_code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
       const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(code)}</code>`, className: "code-block language-cpp" });
       hljs.highlightElement(pre);
       metadata.appendChild(pre);
     }
     // ** rewrite list
-    if (ret[0].graphs.length > 1) {
+    if (ret.graphs.length > 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
       metadata.appendChild(rewriteList);
-      ret[0].graphs.forEach((rw, i) => {
+      ret.graphs.forEach((rw, i) => {
         gUl = Object.assign(document.createElement("ul"), { innerText: i, key: `rewrite-${i}` });
         rewriteList.appendChild(gUl);
         if (i === currentRewrite) {
           gUl.classList.add("active");
           if (i !== 0) {
-            const [pattern, loc, diff] = ret[0].diffs[i-1];
+            const diff = ret.diffs[i-1];
+            const [loc, pattern] = ret.upats[i-1];
             const parts = loc.join(":").split("/");
             const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
             link = Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n", href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" })
@@ -364,7 +363,7 @@
         });
       })
     } else {
-      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${ret[0].loc.filename}.` }));
+      metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(ret.loc)}.` }));
     }
   }
   document.addEventListener("keydown", async function(event) {
@@ -401,7 +400,7 @@
     if (event.key == "ArrowDown") {
       event.preventDefault()
       currentRewrite = 0;
-      const totalUOps = kernels[currentKernel].ctxs.length-1;
+      const totalUOps = kernels[currentKernel].length-1;
       currentUOp = Math.min(totalUOps, currentUOp+1)
       main()
     }
@@ -413,7 +412,7 @@
     }
     if (event.key == "ArrowRight") {
       event.preventDefault()
-      const totalRewrites = ret[0].graphs.length-1;
+      const totalRewrites = ret.graphs.length-1;
       currentRewrite = Math.min(totalRewrites, currentRewrite+1)
       main()
     }
