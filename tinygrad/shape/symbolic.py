@@ -11,6 +11,13 @@ class Node:
   b: Union[Node, int]
   min: int
   max: sint
+
+  # helpers for the migration
+  @property
+  def vmin(self): return self.min
+  @property
+  def vmax(self): return self.max
+
   def render(self, ops=None, ctx=None) -> Any:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
@@ -119,6 +126,8 @@ class Variable(Node):
     return super().__new__(cls)
 
   def __getnewargs__(self): return (self.expr, self.min, self.max)  # args passed to __new__ when unpickling
+  @property
+  def arg(self): return self.expr
 
   def __init__(self, expr:str, nmin:int, nmax:sint):
     self.expr, self.min, self.max = expr, nmin, nmax
