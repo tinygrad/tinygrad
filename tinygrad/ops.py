@@ -160,8 +160,7 @@ ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
 class UOp(MathTrait):
   def __reduce__(self): return UOp, (self.op, self.dtype, self.src, self.arg)
   def __new__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
-    key = (op, dtype, src, arg)
-    if (ret:=ucache.get(key, None)) is not None: return ret
+    if (ret:=ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
     ucache[key] = ret = super().__new__(cls)
     return ret
 
@@ -604,16 +603,14 @@ class RewriteContext:
   def __init__(self, pm, ctx):
     self.pm: PatternMatcher = pm
     self.ctx = ctx
-    self.nodes: Dict[Tuple, UOp] = {}
     self.replace: Dict[UOp, UOp] = {}
   def rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
-    replace_source = (n.op, n.dtype, new_src:=tuple(map(self.rewrite, n.src)), n.arg)
-    if (found := self.nodes.get(replace_source)) is not None: self.replace[n] = found
-    else:
-      x = UOp(*replace_source) if new_src != n.src else n
-      self.nodes[replace_source] = self.replace[n] = found = self.rewrite(new_x) if (new_x := self.pm.rewrite(x, self.ctx)) is not None else x
-    return found
+    new_src = tuple(map(self.rewrite, n.src))
+    x = UOp(n.op, n.dtype, new_src, n.arg) if new_src != n.src else n
+    self.replace[n] = ret = self.rewrite(new_x) if (new_x := self.pm.rewrite(x, self.ctx)) is not None else x
+    return ret
+
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
   if TRACK_MATCH_STATS >= 2:
     from tinygrad.codegen.kernel import Kernel
