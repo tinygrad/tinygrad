@@ -3,7 +3,7 @@ import math
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
-from tinygrad.ops import ReduceOps
+from tinygrad.ops import ReduceOps, resolve
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.symbolic import sint
@@ -170,7 +170,7 @@ class Max(Function):
 # NOTE: this is sum in reverse
 class Expand(Function):
   def forward(self, x:LazyBuffer, shape:Tuple[int, ...]) -> LazyBuffer:
-    self.expanded_axis = tuple(i for i, (si, so) in enumerate(zip(x.shape, shape)) if si != so)
+    self.expanded_axis = tuple(i for i, (si, so) in enumerate(zip(x.shape, shape)) if resolve(si != so))
     return x.expand(shape)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
