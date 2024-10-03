@@ -52,7 +52,7 @@ class Program:
           special_size = self.local_size if u.arg[0][0] == 'l' else self.global_size
           assert special_size is not None
           special_size[int(u.arg[0][-1])] = u.arg[1]
-      self.vars = sorted(self.vars, key=lambda v: v.expr)
+      self.vars = sorted(self.vars, key=lambda v: v.arg)
       self.outs = sorted(dedup(self.outs))
       self._ran_post_init = True
 
@@ -85,7 +85,6 @@ class Renderer:
   global_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   local_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   shared_max: int = 32768
-  buf_max: Optional[int] = None
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
   code_for_op: Dict[Op, Callable] = {}
