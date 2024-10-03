@@ -17,12 +17,6 @@ AndNode = UOp
 def NumNode(val:int): return UOp.const(dtypes.int, val)
 
 class Variable(UOp):
-  vcache: Dict[Tuple[str, ConstType, ConstType], Variable] = {}
-  # NOTE: Variables should never be rewritten since they don't have sources
-  def __new__(cls, expr:str, nmin:ConstType, nmax:ConstType):
-    if (ret:=Variable.vcache.get((expr, nmin, nmax), None)) is not None: return ret
-    Variable.vcache[(expr, nmin, nmax)] = ret = super().__new__(cls)
-    return ret
   def __init__(self, expr:str, nmin:ConstType, nmax:ConstType): super().__init__(UOps.DEFINE_VAR, dtypes.int, arg=(expr, nmin, nmax))
   def bind(self, val:int):
     assert self.op is UOps.DEFINE_VAR
