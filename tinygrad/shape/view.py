@@ -2,6 +2,7 @@ from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast
+from tinygrad.ops import resolve
 from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, sym_infer
 
@@ -108,8 +109,8 @@ class View:
     # if any dimension has size >1, but is masked such that only one index in the dimension is unmasked
     # then its stride can also be set to 0, albeit with a corresponding adjustment required to the offset
     # TODO: assert comparison with LtNode to avoid mis-using symbolic
-    if mask and any(elim := [not (b+1 < e) for b,e in mask]):
-      if any(not (b < e) for b,e in mask):
+    if mask and any(elim := [not resolve(b+1 < e) for b,e in mask]):
+      if any(not resolve(b < e) for b,e in mask):
         strides, offset, mask = (0,) * len(shape), 0, ((0,0),) * len(shape)
       offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
       strides = tuple(0 if e else st for st,e in zip(strides, elim))
@@ -162,10 +163,10 @@ class View:
     for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
       merged_term += Variable.sum([idxs[d1] * (s1 * merged_size) for d1, s1 in term]) + o * merged_size
       merged_size *= s
-      if not (merged_term >= merged_size) and not (merged_term < 0):
+      if not resolve(merged_term >= merged_size) and not resolve(merged_term < 0):
         extents.append((merged_size, merged_term))
         merged_size, merged_term = 1, NumNode(0)
-    if merged_term != 0: return None
+    if resolve(merged_term != 0): return None
     if (vm2_shape := tuple(s for s,_ in reversed(extents))) != vm2.shape:
       return (reshaped_vm2 := vm2.reshape(vm2_shape)) and reshaped_vm2 + vm1
 
@@ -223,8 +224,10 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
-    assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape), f"{self.shape=}, {arg=}"
-    if any(b>0 or e>0 for b, e in arg):
+    assert len(arg) == len(self.shape), f"invalid pad {arg} for {self.shape}"
+    # NOTE: not checking for symbolic arg
+    for b,e in arg: assert not all_int([b,e]) or b>=0 and e>=0, f"invalid pad {arg} for {self.shape}"
+    if any(b!=0 or e!=0 for b, e in arg):
       zvarg = tuple([(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
       mask = tuple([(b,s+b) for s,(b,_) in zip(self.shape, arg)])
       return self.__unsafe_resize(zvarg, mask=mask)
@@ -232,7 +235,9 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def shrink(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
-    assert all((0<=b<=e<=s) for s,(b,e) in zip(self.shape,arg)) and len(arg) == len(self.shape), f"invalid shrink {arg} for {self.shape}"
+    assert len(arg) == len(self.shape), f"invalid shrink {arg} for {self.shape}"
+    # NOTE: not checking for symbolic arg
+    for s,(b,e) in zip(self.shape,arg): assert not all_int([s,b,e]) or (0<=b<=e<=s), f"invalid shrink {arg} for {self.shape}"
     return self.__unsafe_resize(arg)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
@@ -298,10 +303,10 @@ class View:
     for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
       acc = 1
       # TODO: this <= and != is for symbolic!?
-      while acc <= merged_dim and acc != merged_dim and (new_dim := next(r_new_shape, 0)) > 0:
+      while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and (new_dim := next(r_new_shape, 0)) > 0:
         strides.append(new_stride)
-        if new_dim != 1: new_stride *= (new_dim if (acc := acc * new_dim) < real_dim else 0)
-      if acc != merged_dim: break
+        if resolve(new_dim != 1): new_stride *= (new_dim if resolve((acc := acc * new_dim) < real_dim) else 0)
+      if resolve(acc != merged_dim): break
     else:
       strides += [0,] * (len(new_shape) - len(strides))
       new_mask = _reshape_mask(self.mask, self.shape, new_shape)

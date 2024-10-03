@@ -1378,7 +1378,7 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(xt, 2)
     np.testing.assert_equal(xt.numpy(), (np.arange(10)+1)[[0]])
 
-  @unittest.skip("TODO: support pads in graph_rewrite")
+  @unittest.expectedFailure
   def test_advanced_indexing_alt(self):
     X = Tensor.arange(6).reshape(3, 2)+1
     xt = X[[Tensor([2]), Tensor([1])]]

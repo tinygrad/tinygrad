@@ -61,8 +61,10 @@ class MathTrait:
   def __truediv__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x).alu(UnaryOps.RECIP))
   def __rtruediv__(self, x): return self.ufix(x).alu(BinaryOps.MUL, self.alu(UnaryOps.RECIP))
   def __mod__(self, x): return self.alu(BinaryOps.MOD, self.ufix(x))
+  def __rmod__(self, x): return self.ufix(x).alu(BinaryOps.MOD, self)
   def __xor__(self, x): return self.alu(BinaryOps.XOR, self.ufix(x))
   def __and__(self, x): return self.alu(BinaryOps.AND, self.ufix(x))
+  def __rand__(self, x): return self.ufix(x).alu(BinaryOps.AND, self)
   def __or__(self, x): return self.alu(BinaryOps.OR, self.ufix(x))
   def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
   def eq(self, x): return self.ne(x).logical_not()
@@ -151,6 +153,7 @@ END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.E
 def resolve(x, default:bool=True):
   try: return bool(x)
   except ValueError: return default
+def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.max)
 
 class UOp(MathTrait):
   __slots__ = ["op", "dtype", "src", "arg"]
@@ -182,6 +185,7 @@ class UOp(MathTrait):
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
   # *** uop evaluation ***
   def simplify(self): return graph_rewrite(self, simple_pm)
+  def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is UOps.CONST else ret
   def _eval(self, dtype, expected_type) -> ConstType:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
     simple_self = self.simplify()
@@ -255,7 +259,7 @@ class UOp(MathTrait):
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
-    return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
+    return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
   def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]

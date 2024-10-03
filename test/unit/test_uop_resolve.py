@@ -39,6 +39,10 @@ class TestUOpResolve(unittest.TestCase):
     u = UOp.const(dtypes.int, 4) > 7
     self.assertFalse(u)
 
+  def test_ssimplify(self):
+    self.assertEqual((8 % UOp.const(dtypes.int, 4)).ssimplify(), 0)
+    self.assertEqual((8 * UOp.const(dtypes.int, 4)).ssimplify(), 32)
+
   def test_ambiguous_less_than(self):
     u = UOp.define_var("i", dtypes.pyint, 1, 10)
     self.assertTrue(resolve(u < 4))
