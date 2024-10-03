@@ -15,7 +15,7 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
 from tinygrad.ops import graph_rewrite
-from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod
+from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, GlobalCounters, dedup, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, reduceop_fusor, st_fixup
 from tinygrad.engine.realize import CompiledRunner, run_schedule
@@ -1327,6 +1327,19 @@ class TestSchedule(unittest.TestCase):
   def test_buf_cnt_over_limit(self): self._test_buf_cnt(32, allowed=2)
   @unittest.expectedFailure
   def test_buf_cnt_over_limit_alt(self): self._test_buf_cnt(63, allowed=3)
+
+  @unittest.expectedFailure
+  def test_identical_schedule(self):
+    img1 = Tensor.empty(1, 3, 8, 8)
+    c1 = nn.Conv2d(3, 32, 3)
+    sched1 = c1(img1).schedule()
+    img2 = Tensor.empty(1, 3, 8, 8)
+    c2 = nn.Conv2d(3, 32, 3)
+    sched2 = c2(img2).schedule()
+    self.assertEqual(len(sched1), len(sched2))
+    for x,y in zip(sched1, sched2):
+      if not (x.ast == y.ast):
+        raise AssertionError(f"ASTs aren't equal:{'\n'+str(x.ast)+'\n'}{y.ast} {x.metadata} {y.metadata}")
 
   def test_schedule_mem_used(self):
     base = GlobalCounters.mem_used
