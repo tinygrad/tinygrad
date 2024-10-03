@@ -155,7 +155,14 @@ def resolve(x, default:bool=True):
   except ValueError: return default
 def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.max)
 
+ucache:Dict[Tuple, UOp] = {}
 class UOp(MathTrait):
+  def __new__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
+    key = (op, dtype, src, arg)
+    if (ret:=ucache.get(key, None)) is not None: return ret
+    ucache[key] = ret = super().__new__(cls)
+    return ret
+
   __slots__ = ["op", "dtype", "src", "arg"]
   def __init__(self, op: UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
     # TODO: instant check rules here make debugging easier
