@@ -4,6 +4,7 @@ from types import FrameType
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
+from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same
 from tinygrad.shape.symbolic import Variable, sint
@@ -155,7 +156,14 @@ def resolve(x, default:bool=True):
   except ValueError: return default
 def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.max)
 
+ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
 class UOp(MathTrait):
+  def __reduce__(self): return UOp, (self.op, self.dtype, self.src, self.arg)
+  def __new__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
+    if (ret:=ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
+    ucache[key] = ret = super().__new__(cls)
+    return ret
+
   __slots__ = ["op", "dtype", "src", "arg"]
   def __init__(self, op: UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
     # TODO: instant check rules here make debugging easier
@@ -238,7 +246,6 @@ class UOp(MathTrait):
       out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(UOps.ALU, out_dtype, (self,)+src, arg)
   @staticmethod
-  @functools.lru_cache(None)
   def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return UOp._const(dtype, b)
   @staticmethod
   def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
@@ -247,7 +254,6 @@ class UOp(MathTrait):
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
-  @functools.lru_cache(None)
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   @staticmethod
   def range(dtype:DType, start:ConstType, end:ConstType, idx:int):
@@ -597,16 +603,14 @@ class RewriteContext:
   def __init__(self, pm, ctx):
     self.pm: PatternMatcher = pm
     self.ctx = ctx
-    self.nodes: Dict[Tuple, UOp] = {}
     self.replace: Dict[UOp, UOp] = {}
   def rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
-    replace_source = (n.op, n.dtype, new_src:=tuple(map(self.rewrite, n.src)), n.arg)
-    if (found := self.nodes.get(replace_source)) is not None: self.replace[n] = found
-    else:
-      x = UOp(*replace_source) if new_src != n.src else n
-      self.nodes[replace_source] = self.replace[n] = found = self.rewrite(new_x) if (new_x := self.pm.rewrite(x, self.ctx)) is not None else x
-    return found
+    new_src = tuple(map(self.rewrite, n.src))
+    x = UOp(n.op, n.dtype, new_src, n.arg) if new_src != n.src else n
+    self.replace[n] = ret = self.rewrite(new_x) if (new_x := self.pm.rewrite(x, self.ctx)) is not None else x
+    return ret
+
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
   if TRACK_MATCH_STATS >= 2:
     from tinygrad.codegen.kernel import Kernel
