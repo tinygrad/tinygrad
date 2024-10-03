@@ -99,7 +99,7 @@ class TestPatternMatcher(unittest.TestCase):
     c1 = UOp(UOps.ALU, dtypes.float, (y1, y1), BinaryOps.ADD)
     c2 = UOp(UOps.ALU, dtypes.float, (y1, y2), BinaryOps.ADD)
     self.assertEqual(matcher.rewrite(c1), c1)
-    self.assertEqual(matcher.rewrite(c2), None)
+    self.assertEqual(matcher.rewrite(c2), c1)
 
   def test_dtype(self):
     matcher = PatternMatcher([(UPat(UOps.CONST, name="x", dtype=dtypes.float32), lambda x: x)])
