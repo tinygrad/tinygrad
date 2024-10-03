@@ -247,12 +247,11 @@ class UOp(MathTrait):
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
-  @functools.lru_cache(None)
-  def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
-  def bind(self, val:int):
-    assert self.op is UOps.DEFINE_VAR
-    return UOp(UOps.ASSIGN, self.dtype, (self, self.const_like(val)))
-  def unbind(self) -> Tuple[UOp, int]:
+  def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType):
+    from tinygrad.shape.symbolic import Variable
+    # TODO: dtype is broken
+    return Variable(name, min_val, max_val)
+  def unbind(self) -> Tuple[Variable, int]:
     assert self.op is UOps.ASSIGN and self.src[0].op is UOps.DEFINE_VAR and self.src[1].op is UOps.CONST, f"can't unbind {self}"
     return self.src[0], self.src[1].arg
   @property
@@ -272,13 +271,13 @@ class UOp(MathTrait):
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
-  def vars(self, bound=True) -> Set[UOp]:
-    if self.op is UOps.ASSIGN and self.src[0].op is UOps.DEFINE_VAR: return {self} if bound else {self.src[0]}
+  def vars(self) -> Set[UOp]:
+    if self.op is UOps.ASSIGN and self.src[0].op is UOps.DEFINE_VAR: return {self}
     if self.op is UOps.DEFINE_VAR: return {self}
     return set.union(*[x.vars() for x in self.src]) if len(self.src) else set()
   def variables(self) -> List[Variable]:
-    st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
-    return sorted(set.union(*st_vars, self.vars(bound=False)), key=lambda v: v.arg)
+    st_vars: List[Set[UOp]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
+    return sorted(set.union(*st_vars, self.vars()), key=lambda v: v.arg)
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
@@ -372,7 +371,7 @@ def exec_alu(op:Op, dtype:DType, operands):
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.CONST: return u.arg
-  if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1], u.arg[2])
+  if u.op is UOps.DEFINE_VAR: return u
   if u.op is UOps.ALU: return exec_alu(u.arg, u.dtype, tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 

@@ -1,10 +1,9 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
-import functools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, Any
+from typing import Tuple, List, Optional, Dict, Set
 from tinygrad.helpers import merge_dicts, getenv
-from tinygrad.shape.symbolic import Variable, MulNode, SumNode, NumNode, DivNode, ModNode, LtNode, AndNode, sint
+from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite, resolve

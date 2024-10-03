@@ -739,6 +739,7 @@ class Kernel:
 
 # the living definition of intermediate UOps
 
+def all_same_ne(items): return not all(x != items[0] for x in items)
 def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> None:
   if not uop.has_st or uop in sts: return
   # restore globals from the two stage reduce
