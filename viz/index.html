@@ -157,17 +157,12 @@
       transform: rotate(360deg);
     }
   }
-  .status {
-    color: #EC5D5E;
-    font-weight: bold;
-  }
   </style>
 </head>
 <body>
   <div class="main-container">
     <div class="container kernel-list"></div>
     <div class="container graph">
-      <div class="status"></div>
       <svg>
         <g id="render"></g>
       </svg>
@@ -216,15 +211,6 @@
     const render = new dagreD3.render();
     render(inner, g);
   }
-  async function checkStatus() {
-    active = true;
-    try {
-      active = (await fetch("/")).ok;
-    } catch {
-      active = false;
-    }
-    document.querySelector('.status').textContent = active ? `` : `Connection to localhost:8000 failed, is VIZ=1 running?`;
-  }
   function toPath(loc) {
     const [fp, lineno] = loc;
     return `${fp.split("/").pop()}:${lineno}`
@@ -237,7 +223,6 @@
   var currentRewrite = 0;
   var expandKernel = true;
   async function main() {
-    checkStatus();
     // ***** LHS kernels list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
@@ -247,7 +232,7 @@
     kernelList.innerHTML = "";
     kernels.forEach((k, i) => {
       kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "", style: "overflow-x: auto; cursor: initial;" });
-      const p = Object.assign(document.createElement("p"), {id: `kernel-${k[0].kernel_name}`, innerText: k[0].kernel_name, style: "cursor: pointer;"});
+      const p = Object.assign(document.createElement("p"), {id: `kernel-${k[0].kernel_name}`, innerText: k[0].kernel_name ?? "UNPARENTED", style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       k.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.upats.length}`, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
@@ -323,8 +308,8 @@
       metadata.style.userSelect = "initial";
     }
     // ** code blocks
-    if (ret.kernel_code !== "") {
-      const code = kernels[currentKernel][0].kernel_code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    if (ret.kernel_code != null) {
+      const code = ret.kernel_code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
       const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(code)}</code>`, className: "code-block language-cpp" });
       hljs.highlightElement(pre);
       metadata.appendChild(pre);

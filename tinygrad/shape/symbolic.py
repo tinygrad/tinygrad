@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools
 from math import gcd
-from tinygrad.helpers import partition
+from tinygrad.helpers import partition, all_int
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Set, Mapping
 
 # NOTE: Python has different behavior for negative mod and floor div than c
@@ -25,7 +25,9 @@ class Node:
   def __repr__(self): return self.render(ctx="REPR")
   def __str__(self): return "<"+self.key+">"
   def __hash__(self): return hash(self.key)
-  def __bool__(self): return not (self.max == self.min == 0)
+  def __bool__(self):
+    if self.max == self.min: return self.max == 1
+    raise ValueError(f"couldn't resolve boolean expression {self}")
   def __eq__(self, other:object) -> bool:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
@@ -52,7 +54,8 @@ class Node:
     if isinstance(b, Node):
       if b.__class__ is NumNode: return self.__floordiv__(b.b, factoring_allowed)
       if self == b: return NumNode(1)
-      if (b - self).min > 0 and self.min >= 0: return NumNode(0) # b - self simplifies the node
+      # if isinstance(m:=(b-self).min, int) and m > 0 and self.min >= 0: return NumNode(0) # b - self simplifies the node
+      if isinstance(m:=(b-self.max).min, int) and m > 0 and self.min >= 0: return NumNode(0) # b - self simplifies the node
       raise RuntimeError(f"not supported: {self} // {b}")
     assert b != 0
     if b < 0: return (self*-1).__floordiv__(-b, factoring_allowed)
@@ -70,7 +73,8 @@ class Node:
     if isinstance(b, Node):
       if b.__class__ is NumNode: return self % b.b
       if self == b: return NumNode(0)
-      if (b - self).min > 0 and self.min >= 0: return self # b - self simplifies the node
+      # if isinstance(m:=(b-self).min, int) and m > 0 and self.min >= 0: return self # b - self simplifies the node
+      if isinstance(m:=(b-self.max).min, int) and m > 0 and self.min >= 0: return self # b - self simplifies the node
       raise RuntimeError(f"not supported: {self} % {b}")
     assert b > 0
     if b == 1: return NumNode(0)
@@ -81,7 +85,7 @@ class Node:
 
   @staticmethod
   def sum(nodes:List[Node]) -> Node:
-    nodes = [x for x in nodes if x.max or x.min]
+    nodes = [x for x in nodes if not (x.max==x.min==0)]
     if not nodes: return NumNode(0)
     if len(nodes) == 1: return nodes[0]
 
@@ -99,7 +103,7 @@ class Node:
   def ands(nodes:List[Node]) -> Node:
     if not nodes: return NumNode(1)
     if len(nodes) == 1: return nodes[0]
-    if any(not x for x in nodes): return NumNode(0)
+    if any(x.max==0 for x in nodes): return NumNode(0)
 
     # filter 1s
     nodes = [x for x in nodes if x.min != x.max]
@@ -190,7 +194,9 @@ class LtNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
     if self.a == self.b: return (0, 0)
     if isinstance(self.b, int): return (1, 1) if self.a.max < self.b else (0, 0) if self.a.min >= self.b else (0, 1)
-    return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min >= self.b.max else (0, 1)
+    if all_int([self.a.max, self.b.min]) and self.a.max < self.b.min: return (1, 1)
+    if all_int([self.a.min, self.b.max]) and self.a.min >= self.b.max: return (0, 0)
+    return (0, 1)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     return create_lt_node(self.a.substitute(var_vals), (self.b if isinstance(self.b, int) else self.b.substitute(var_vals)))
 
@@ -223,7 +229,8 @@ class ModNode(OpNode):
     return (self.a//b) % (self.b//b) if self.b % b == 0 else Node.__floordiv__(self, b, factoring_allowed)
   def get_bounds(self) -> Tuple[int, sint]:
     assert self.a.min >= 0 and isinstance(self.b, int)
-    if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b): return (0, self.b-1)
+    if all_int([self.a.max, self.a.min, self.b]):
+      if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b): return (0, self.b-1)
     return (self.a.min%self.b, self.a.max%self.b)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self.a.substitute(var_vals) % self.b
 
