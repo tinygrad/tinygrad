@@ -342,15 +342,16 @@ class CUDARenderer(CStyleLanguage):
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       upcast_axes_szs = tuple(prod(sz for _,sz in upc) for upc in upcast_axes)
       dts = tuple(self.render_dtype(dt.vec(upc)) for dt,upc in zip([dtype_in,dtype_in,dtype_out], upcast_axes_szs))
-      n_args = tuple(upc*dt.itemsize//4 for dt,upc in zip([dtype_in,dtype_in,dtype_out], upcast_axes_szs))
-      args = [f"%{i}" for i in range(sum(n_args))]
-      args_slices = [args[:n_args[2]], args[n_args[2]:n_args[2]+n_args[0]], args[-n_args[1]:], args[:n_args[2]]]
+      n_operands = tuple(upc*dt.itemsize//4 for dt,upc in zip([dtype_in,dtype_in,dtype_out], upcast_axes_szs))
+      operands = [f"%{i}" for i in range(sum(n_operands))]
+      opreands_slices = [operands[:n_operands[2]],operands[n_operands[2]:-n_operands[1]],operands[-n_operands[1]:],operands[:n_operands[2]]]
 
       prefix.append(f"""__device__ {dts[2]} __{name}({dts[0]} a, {dts[1]} b, {dts[2]} c){{
   int *a_pk = (int *)(&a), *b_pk = (int *)(&b);\n  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_map[dtype_in]}.{dt_map[dtype_in]}.f32"
-      "{", ".join(f'{{{", ".join(args_slice)}}}' for args_slice in args_slices)};"
-    : {", ".join([f'"+f"(c.{_nms[i]})' for i in range(n_args[2])])}
-    : {", ".join([f'"r"(a_pk[{i}])' for i in range(n_args[0])])}, {", ".join([f'"r"(b_pk[{i}])' for i in range(n_args[1])])});\n  return c;\n}}""")
+      "{", ".join(f'{{{", ".join(opreands_slice)}}}' for opreands_slice in opreands_slices)};"
+    : {", ".join([f'"+f"(c.{_nms[i]})' for i in range(n_operands[2])])}
+    : {", ".join([f'"r"(a_pk[{i}])' for i in range(n_operands[0])])}, {", ".join([f'"r"(b_pk[{i}])' for i in range(n_operands[1])])});
+  return c;\n}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
