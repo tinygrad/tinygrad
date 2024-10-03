@@ -58,7 +58,7 @@ def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], cache:Di
     return u if u.arg == new_st else UOp(UOps.SHAPETRACKER, dtypes.void, (), new_st)
   if len(u.src) == 0 or (u.st is not None and u.st == apply_to_st(u.st)): return u
   new_srcs = tuple(st_fixup(x, apply_to_st, cache) for x in u.src)
-  cache[u] = ret = u if new_srcs == u.src else UOp(u.op, u.dtype, new_srcs, u.arg)
+  cache[u] = ret = u if all(x is y for x,y in zip(new_srcs,u.src)) else UOp(u.op, u.dtype, new_srcs, u.arg)
   return ret
 
 def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:

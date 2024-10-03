@@ -69,10 +69,11 @@ class Kernel:
 
     self.vars: List[Variable] = self.ast.variables()
     self.bufs: List[UOp] = [x for x in self.ast.parents if x.op in BUFFER_UOPS]
+    self.bufs_index: Dict[UOp, int] = {x:i for i,x in enumerate(self.bufs)}
 
     # get earlybufs, before any reduceops
     earlybufs: List[UOp] = [x for reduceop in self.reduceops for x in reduceop.parents if x.op in BUFFER_UOPS]
-    self.full_buf_index: int = self.bufs.index(earlybufs[0]) if earlybufs else 0
+    self.full_buf_index: int = self.bufs_index[earlybufs[0]] if earlybufs else 0
     # NOTE: full_shape can be wrong if there's a tree of reduces
 
     # create new shapetrackers inside this kernel, we will permute them
@@ -475,7 +476,7 @@ class Kernel:
     if self.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
         self.reduceop is not None and self.reduceop.arg[0] is BinaryOps.ADD and len(self.full_shape) >= 2 and self.opts.has_shared and \
         (mulop:=self.reduceop.src[0]).arg is BinaryOps.MUL and mulop.src[0].op is UOps.LOAD and mulop.src[1].op is UOps.LOAD:
-      st0, st1 = self.sts[self.bufs.index(mulop.src[0])], self.sts[self.bufs.index(mulop.src[1])]
+      st0, st1 = self.sts[self.bufs_index[mulop.src[0]]], self.sts[self.bufs_index[mulop.src[1]]]
       strides0, strides1 = st0.real_strides(), st1.real_strides()
       def has_expanded_axis(shape, strides): return any(resolve(s > 1) and not resolve(st != 0) for s,st in zip(shape,strides))
       if strides0[self.first_reduce] == 1 and not (has_expanded_axis(st0.shape, strides0) and has_expanded_axis(st1.shape, strides1)):
@@ -617,7 +618,7 @@ class Kernel:
       arg = op.arg
       if op.op in BUFFER_UOPS:
         # for locals, we use the ShapeTracker that's in the srcs
-        st = op.st_arg if op.src[0].op is UOps.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
+        st = op.st_arg if op.src[0].op is UOps.DEFINE_LOCAL else self.sts[self.bufs_index[op]]
         st_uop = (st if apply_to_st is None else apply_to_st(st)).to_uop()
         if op.op is UOps.VALID: return op.replace(src=(st_uop,))
         if op.op is UOps.STORE: return op.replace(src=(op.src[0], st_uop, fixup_ast(op.src[2], apply_to_st)))

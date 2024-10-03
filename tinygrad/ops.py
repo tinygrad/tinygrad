@@ -156,6 +156,9 @@ def resolve(x, default:bool=True):
 def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.max)
 
 class UOp(MathTrait):
+  def __hash__(self): return id(self)
+  def __eq__(self, x): return self.eq(x)
+
   __slots__ = ["op", "dtype", "src", "arg"]
   def __init__(self, op: UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
     # TODO: instant check rules here make debugging easier
@@ -604,7 +607,7 @@ class RewriteContext:
     replace_source = (n.op, n.dtype, new_src:=tuple(map(self.rewrite, n.src)), n.arg)
     if (found := self.nodes.get(replace_source)) is not None: self.replace[n] = found
     else:
-      x = UOp(*replace_source) if new_src != n.src else n
+      x = UOp(*replace_source) if any(x is not y for x,y in zip(new_src, n.src)) else n
       self.nodes[replace_source] = self.replace[n] = found = self.rewrite(new_x) if (new_x := self.pm.rewrite(x, self.ctx)) is not None else x
     return found
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:

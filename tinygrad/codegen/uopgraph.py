@@ -315,7 +315,7 @@ def threefry2x32(x: UOp, key: UOp):
 # ***** main rewriter *****
 
 def loop_collapse(compval, idx, multconst, rng:UOp, reduce, idx2=None, idx3=None, extra=None, vec=None, ne=None, mval:UOp=UOp.const(dtypes.int32, 1)):
-  if getenv("DISABLE_LOOP_COLLAPSE") or rng not in reduce.src: return None  # must be the right REDUCE
+  if getenv("DISABLE_LOOP_COLLAPSE") or all(x is not rng for x in reduce.src): return None  # must be the right REDUCE
   loop_start, loop_end = rng.src
   mval_arg = mval.arg
   if loop_start.arg != 0:
@@ -588,7 +588,7 @@ def create_gate(root:UOp) -> Optional[UOp]:
     if u.op is UOps.BARRIER: return u
     if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
       return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, dtypes.void, (gate, u.src[-1])),), u.arg)
-    return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
+    return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) is u.src else UOp(u.op, u.dtype, replace_source, u.arg)
   return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
 
 expander = PatternMatcher([
