@@ -226,7 +226,7 @@ class PTXRenderer(Renderer):
           kk(*self.render_load(nm, ssa('dat', u, self.types[dt]), dt, ss=".param"))
         elif uop is UOps.WMMA:
           _, (N, M, K), dtype_in, _, _, _, upcast_axes, _ = args
-          wmma, n_operands = [], tuple(prod(sz for _,sz in upc)*dtype_in.itemsize//4 for upc in upcast_axes[:2])
+          wmma, n_operands = [], tuple(prod(sz for _, sz in upc)*dtype_in.itemsize//4 for upc in upcast_axes[:2])
           dt_map = { dtypes.half: "f16" }
           for vv in src[:2]:
             for i in range(0, len(r[vv]), 2):
