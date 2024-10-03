@@ -4,6 +4,7 @@ from types import FrameType
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
+from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same
 from tinygrad.shape.symbolic import Variable, sint
@@ -155,8 +156,9 @@ def resolve(x, default:bool=True):
   except ValueError: return default
 def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.max)
 
-ucache:Dict[Tuple, UOp] = {}
+ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
 class UOp(MathTrait):
+  def __reduce__(self): return UOp, (self.op, self.dtype, self.src, self.arg)
   def __new__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
     key = (op, dtype, src, arg)
     if (ret:=ucache.get(key, None)) is not None: return ret
