@@ -347,7 +347,7 @@ class CUDARenderer(CStyleLanguage):
 
       prefix.append(f"""__device__ {dts[2]} __{name}({dts[0]} a, {dts[1]} b, {dts[2]} c){{
   int *a_pk = (int *)(&a), *b_pk = (int *)(&b);\n  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_map[dtype_in]}.{dt_map[dtype_in]}.f32"
-      "{", ".join(f'{{{", ".join(a)}}}' for a in [args[:n_args[2]], args[n_args[2]:-n_args[1]], args[-n_args[1]:], args[:n_args[2]]])};"
+      "{", ".join(f'{{{", ".join(a)}}}' for a in [args[:n_args[2]], args[n_args[2]:n_args[2]+n_args[0]], args[-n_args[1]:], args[:n_args[2]]])};"
     : {", ".join([f'"+f"(c.{_nms[i]})' for i in range(n_args[2])])}
     : {", ".join([f'"r"({x}_pk[{i}])' for x,n in zip(['a','b'], n_args) for i in range(n)])});\n  return c;\n}}""")
 
