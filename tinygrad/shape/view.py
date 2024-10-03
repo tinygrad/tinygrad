@@ -100,7 +100,8 @@ class View:
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
-    if not all(s >= 0 for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
+    # TODO: shouldn't need a resolve here
+    if not all(resolve(s >= 0) for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
     # canonicalize 0 in shape
     if 0 in shape: return View(shape, (0,) * len(shape), offset=0, mask=None, contiguous=True)
@@ -227,7 +228,7 @@ class View:
     assert len(arg) == len(self.shape), f"invalid pad {arg} for {self.shape}"
     # NOTE: not checking for symbolic arg
     for b,e in arg: assert not all_int([b,e]) or b>=0 and e>=0, f"invalid pad {arg} for {self.shape}"
-    if any(b!=0 or e!=0 for b, e in arg):
+    if any(resolve(b!=0) or resolve(e!=0) for b, e in arg):
       zvarg = tuple([(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
       mask = tuple([(b,s+b) for s,(b,_) in zip(self.shape, arg)])
       return self.__unsafe_resize(zvarg, mask=mask)

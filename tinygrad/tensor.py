@@ -2683,7 +2683,7 @@ class Tensor:
     # first pad left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
     padded, _ = _pad_left(self.shape, shape)
     # for each dimension, check either from_ is 1, or it does not change
-    if any(resolve(from_ != 1) and resolve(from_ != to) for from_,to in zip(padded, shape)):
+    if any(resolve(from_ != 1, False) and resolve(from_ != to, False) for from_,to in zip(padded, shape)):
       raise ValueError(f"cannot broadcast from shape={self.shape} to {shape=}")
     return F.Expand.apply(self.reshape(padded), shape=shape)
 
