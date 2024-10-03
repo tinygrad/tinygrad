@@ -341,8 +341,8 @@ class CUDARenderer(CStyleLanguage):
     dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       upcast_axes_szs = tuple(prod(sz for _, sz in upc) for upc in upcast_axes)
-      dts = tuple(self.render_dtype(dt.vec(upc)) for dt, upc in zip([dtype_in, dtype_in, dtype_out], upcast_axes_szs))
-      n_operands = tuple(upc*dt.itemsize//4 for dt, upc in zip([dtype_in, dtype_in, dtype_out], upcast_axes_szs))
+      dts = tuple(self.render_dtype(dt.vec(sz)) for dt, sz in zip([dtype_in, dtype_in, dtype_out], upcast_axes_szs))
+      n_operands = tuple(sz*dt.itemsize//4 for dt, sz in zip([dtype_in, dtype_in, dtype_out], upcast_axes_szs))
       operands = [f"%{i}" for i in range(sum(n_operands))]
       opreands_slices = [operands[:n_operands[2]], operands[n_operands[2]:-n_operands[1]], operands[-n_operands[1]:], operands[:n_operands[2]]]
 
