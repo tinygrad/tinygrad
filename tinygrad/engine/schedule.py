@@ -416,7 +416,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   if getenv("SV2", 1):
     from tinygrad.engine.schedule2 import create_schedule
     uops, bufs = create_schedule(outs)
-    return [ScheduleItem(u, b) for u,b in zip(uops, bufs)], {}
+    return [ScheduleItem(u, b, ()) for u,b in zip(uops, bufs)], {}
   graph, in_degree, var_vals = _graph_schedule(outs)
   if getenv("RUN_PROCESS_REPLAY") and getenv("COMPARE_SCHEDULE", 1):
     # NOTE: process relpay needs PYTHONPATH=., remove this once it just pickles LazyBuffers

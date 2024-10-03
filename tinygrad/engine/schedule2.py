@@ -37,7 +37,7 @@ def _lazy_to_uop(outs:List[LazyBuffer]) -> Tuple[UOp, List[Buffer], Dict[Buffer,
     lbuf = lb.base.buffer
     if lb.base not in buf_to_lbs.setdefault(lbuf, []): buf_to_lbs[lbuf].append(lb.base)
     if lbuf not in buf_uops:
-      buf_uops[lbuf] = ubuf = UOp(UOps.BUFFER, lb.dtype, (), (len(buf_uops), (lbuf.device, lbuf.size, lbuf.dtype)))
+      buf_uops[lbuf] = ubuf = UOp(UOps.BUFFER, lb.dtype.ptr(), (), (len(buf_uops), (lbuf.device, lbuf.size, lbuf.dtype)))
       bufs_by_number.append(lbuf)
     else: ubuf = buf_uops[lbuf]
     if lb.is_realized(): return ubuf
@@ -71,7 +71,7 @@ def _lazy_to_uop(outs:List[LazyBuffer]) -> Tuple[UOp, List[Buffer], Dict[Buffer,
      return __lazy_to_uop(lb.base) # NOOP for a view
   return UOp.sink(*[__lazy_to_uop(x) for x in outs]), bufs_by_number, buf_to_lbs
 
-number_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp.define_global(x.dtype, ctx.index(x.arg[0])))])
+number_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx.index(x.arg[0])))])
 
 def create_schedule(outs:List[LazyBuffer]) -> Tuple[List[UOp], List[Tuple[Buffer, ...]]]:
   # rewrite LazyBuffers into the big graph!
