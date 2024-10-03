@@ -272,7 +272,7 @@ class UOp(MathTrait):
   def full_shape(self) -> Tuple[sint, ...]:
     return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
   def vars(self) -> Set[UOp]:
-    if self.op is UOps.ASSIGN and self.src[0].op is UOps.DEFINE_VAR: return {self}
+    if self.op is UOps.ASSIGN and self.src[0].op is UOps.DEFINE_VAR: return {self}  # do you want bound variables?
     if self.op is UOps.DEFINE_VAR: return {self}
     return set.union(*[x.vars() for x in self.src]) if len(self.src) else set()
   def variables(self) -> List[Variable]:
