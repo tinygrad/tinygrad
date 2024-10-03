@@ -5,7 +5,7 @@
 from typing import Tuple, List, Optional, Any, Dict
 import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
-from tinygrad.helpers import all_same, getenv, flatten, prod
+from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, truncate, UOps, UOp
 from tinygrad.renderer import Renderer
