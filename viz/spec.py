@@ -10,8 +10,6 @@ class GraphRewriteMetadata:
   """The Python line calling graph_rewrite"""
   kernel_name: Optional[str]
   """The kernel calling graph_rewrite"""
-  kernel_code: Optional[str]
-  """The program after all rewrites"""
   upats: List[Tuple[Tuple[str, int], str]]
   """List of all the applied UPats"""
 
@@ -24,3 +22,5 @@ class GraphRewriteDetails(GraphRewriteMetadata):
   """.diff style before and after of the rewritten UOp child"""
   changed_nodes: List[List[int]]
   """Nodes that changed at every step of graph_rewrite"""
+  kernel_code: Optional[str]
+  """The program after all rewrites"""
