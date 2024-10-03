@@ -186,7 +186,7 @@ def is_increasing(f:UOp):
 
 def replace_uop(uop:UOp, old:UOp, new:UOp):
   # replace all `old` in `uop` to `new`
-  return new if uop.key == old.key else uop.replace(src=tuple(replace_uop(s, old, new) for s in uop.src))
+  return new if uop is old else uop.replace(src=tuple(replace_uop(s, old, new) for s in uop.src))
 
 def parse_valid(valid:UOp) -> Tuple[UOp, bool, int]:
   # if it's X <= c, returns X, True, c
@@ -229,8 +229,8 @@ def idx_given_valid(valid:UOp, idx:UOp) -> Optional[UOp]:
         newidxs[1].append(newidx.src[1])
 
       # if every branch in candidate gives the same simplified output, we can rewrite the idx
-      if len(newidxs[0])==1 or (len(newidxs[0]) > 1 and all_same([i.key for i in newidxs[0]])): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
-      if len(newidxs[1])==1 or (len(newidxs[1]) > 1 and all_same([i.key for i in newidxs[1]])): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
+      if len(newidxs[0])==1 or (len(newidxs[0]) > 1 and all_same(newidxs[0])): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
+      if len(newidxs[1])==1 or (len(newidxs[1]) > 1 and all_same(newidxs[1])): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
   return idx
 
 def simplify_valid_image_load(load:UOp, buf:UOp):
@@ -262,7 +262,7 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
           drop_stmt.append(stmt)
           break
 
-  if not drop_stmt and idx.key == start_idx.key: return None
+  if not drop_stmt and idx == start_idx: return None
   new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
   return load.replace(src=((buf, idx, invalid_val, new_valid) if new_valid is not None else (buf, idx)))
 
