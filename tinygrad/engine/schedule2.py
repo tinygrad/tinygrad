@@ -19,7 +19,10 @@ new_sched = PatternMatcher([
     lambda buf,st1,st2,c: UOp.where(UOp(UOps.VALID, dtypes.bool, (st1,)), c, c.const_like(0)) if any(x.mask for x in st1.arg.views) else c),
 ])
 
-def append_kernel(k:List[UOp], base:UOp): k.append(base.sink() if base.op is UOps.STORE else base)
+def append_kernel(k:List[UOp], base:UOp):
+  # rewrite store of size 0 to nothing
+  if base.op is UOps.STORE and base.st_arg.size == 0: return None
+  k.append(base.sink() if base.op is UOps.STORE else base)
 break_sched = PatternMatcher([
   (UPat((UOps.EXT, UOps.STORE), name="base"), append_kernel),
   (UPat(UOps.LOAD, src=(UPat(), UPat(), UPat()), name="ld"), lambda k,ld: UOp.load(ld.src[0], ld.src[1], dtype=ld.dtype)),
