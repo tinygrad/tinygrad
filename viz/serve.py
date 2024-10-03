@@ -81,7 +81,7 @@ class Handler(BaseHTTPRequestHandler):
         metadata, ctx = list(kernels.values())[int(qkernel[0])][int(query["idx"][0])]
         graphs, diffs, changed_nodes = reconstruct_graph(ctx.sink, ctx.rewrites)
         ret = json.dumps(asdict(GraphRewriteDetails(**asdict(metadata), graphs=list(map(uop_to_json, graphs)),
-                                                    diffs=diffs, changed_nodes=changed_nodes, kernel_code=get_src(ctx)))).encode()
+                                                    diffs=diffs, changed_nodes=changed_nodes, kernel_code=get_src(ctx.kernel)))).encode()
       else: ret = json.dumps([list(map(lambda x:asdict(x[0]), v)) for v in kernels.values()]).encode()
     else:
       self.send_response(404)
