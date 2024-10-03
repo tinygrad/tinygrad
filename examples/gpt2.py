@@ -133,6 +133,7 @@ class GPT2:
         weights[k] = weights[k].T
     # lm head and wte are tied
     weights['lm_head.weight'] = weights['wte.weight']
+    model.lm_head.weight.realize()
 
     load_state_dict(model, weights)
 
