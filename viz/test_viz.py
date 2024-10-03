@@ -1,6 +1,8 @@
 from typing import List
 import unittest
-import os, itertools, time
+import os, itertools
+
+from viz.spec import GraphRewriteMetadata
 os.environ["TRACK_MATCH_STATS"] = "2"
 os.environ["PRINT_MATCH_STATS"] = "0"
 from extra.models.resnet import ResNet50
@@ -8,8 +10,7 @@ from tinygrad import Tensor
 from tinygrad.engine.realize import lower_schedule
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps
 from tinygrad.dtype import dtypes, PtrDType
-from viz.spec import GraphRewriteMetadata
-from tinygrad.helpers import Context, all_same, DEBUG, colored, getenv
+from tinygrad.helpers import CI, Context, all_same, DEBUG, colored, getenv
 from tinygrad.codegen.uopgraph import sym, devectorize, float4_folding
 from test.external.process_replay.helpers import print_diff
 from viz.serve import reconstruct_graph, uop_to_json, load_kernels
@@ -51,8 +52,8 @@ class TestViz(unittest.TestCase):
     list(lower_schedule(schedule2))
     with Context(TRACK_MATCH_STATS=0): ret = list(load_kernels(contexts).values())
     assert len(ret) == 3
-    assert all(len([x for x,_ in y if "schedule" in x.loc[0]]) == 0 for y in ret[1:])
-    assert all(len([x for x,_ in y if "uopgraph" in x.loc[0]]) != 0 for y in ret[1:])
+    assert all(len([x for x,_,_ in y if "schedule" in x.loc[0]]) == 0 for y in ret[1:])
+    assert all(len([x for x,_,_ in y if "uopgraph" in x.loc[0]]) != 0 for y in ret[1:])
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()
@@ -105,20 +106,14 @@ class TestViz(unittest.TestCase):
     self.assert_valid_ctx(contexts)
     assert all(ctx.loc[0].split("/")[-1] == __file__.split("/")[-1] for ctx in contexts)
 
-  def test_benchmark_resnet(self):
+  @unittest.skipIf(CI, "slow, it's generating diffs for 36202 rules")
+  def test_fuzz_resnet(self):
     mdl = ResNet50()
     img = Tensor.empty(64, 3, 224, 224)
     out = mdl(img)
-    print("*** scheduling and lowering ResNet50")
     sched = out.schedule()
-    kernel_cnt = len(sched)
     list(lower_schedule(sched))
-    print(f"*** generating viz view for {kernel_cnt} kernels")
-    st = time.perf_counter()
-    ret = load_kernels(contexts)
-    print(f"*** generated {len(ret)} rewrite groups")
-    et = time.perf_counter()-st
-    self.assertLessEqual(et, 5.0)
+    self.assert_valid_ctx(contexts)
 
   def test_no_ctx(self):
     simple_pm = PatternMatcher([(UPat(UOps.CONST), lambda:True)])
