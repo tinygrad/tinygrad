@@ -1,10 +1,10 @@
 from __future__ import annotations
-import multiprocessing, decimal, statistics, random
+import multiprocessing, decimal, statistics, random, json
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type, Iterator
+from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type, Iterator, Union
 import importlib, inspect, functools, pathlib, os, ctypes, atexit, time, contextlib, array
-from tinygrad.helpers import SAVE_SCHEDULE, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, ProfileLogger, PROFILE
+from tinygrad.helpers import SAVE_SCHEDULE, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILEPATH, PROFILE
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.renderer import Renderer
 
@@ -494,6 +494,44 @@ class HCQProgram:
 
     if wait: self.device.timeline_signal.wait(self.device.timeline_value - 1)
     return (float(sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
+
+class ProfileLogger:
+  writers: int = 0
+  mjson: List[Dict] = []
+  actors: Dict[Union[str, Tuple[str, str]], int] = {}
+
+  def __init__(self): self.events, self.deps, ProfileLogger.writers = [], [], ProfileLogger.writers + 1
+
+  def add_event(self, ev_name, ev_start, ev_end, actor, subactor=None, args=None): self.events += [(ev_name, ev_start, ev_end, actor, subactor, args)]
+
+  def _ensure_actor(self, actor_name, subactor_name):
+    if actor_name not in self.actors:
+      self.actors[actor_name] = (pid:=len(self.actors))
+      self.mjson.append({"name": "process_name", "ph": "M", "pid": pid, "args": {"name": actor_name}})
+
+    if (subactor_key:=(actor_name,subactor_name)) not in self.actors:
+      self.actors[subactor_key] = (tid:=len(self.actors))
+      self.mjson.append({"name": "thread_name", "ph": "M", "pid": self.actors[actor_name], "tid":tid, "args": {"name": subactor_name}})
+
+    return self.actors[actor_name], self.actors.get(subactor_key, -1)
+
+  def __del__(self):
+    # perfetto json docs: https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
+    for name, st, et, actor_name, subactor_name, args in self.events:
+      pid, tid = self._ensure_actor(actor_name,subactor_name)
+      args = {k: (v if v.__class__ is str else v(et-st)) for k, v in args.items()} if args is not None else None
+      self.mjson.append({"name": name, "ph": "X", "pid": pid, "tid": tid, "ts": st, "dur": et-st, "args": args})
+
+    for en,st,dep_actor_name,dep_subactor_name,actor_name,subactor_name in self.deps:
+      dep_pid, dep_tid = self._ensure_actor(dep_actor_name,dep_subactor_name)
+      pid, tid = self._ensure_actor(actor_name,subactor_name)
+      self.mjson.append({"ph": "s", "pid": dep_pid, "tid": dep_tid, "id": len(self.mjson), "ts": en, "bp": "e"})
+      self.mjson.append({"ph": "f", "pid": pid, "tid": tid, "id": len(self.mjson)-1, "ts": st, "bp": "e"})
+
+    ProfileLogger.writers -= 1
+    if ProfileLogger.writers == 0 and len(self.mjson) > 0:
+      with open(PROFILEPATH.value, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
+      print(f"Saved profile to {PROFILEPATH.value}. Use https://ui.perfetto.dev/ to open it.")
 
 class HCQCompiled(Compiled):
   """
