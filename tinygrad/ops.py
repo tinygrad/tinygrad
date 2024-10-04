@@ -6,7 +6,7 @@ from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same, flatten, dedup
+from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same
 if TYPE_CHECKING:
   from tinygrad.shape.symbolic import Variable, sint
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -282,13 +282,14 @@ class UOp(MathTrait):
   def full_shape(self) -> Tuple[sint, ...]:
     return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
   def vars(self) -> Set[UOp]:
-    if self.op is UOps.ASSIGN and self.src[0].op is UOps.DEFINE_VAR: return {self}  # do you want bound variables?
-    if self.op is UOps.DEFINE_VAR: return {self}
-    return set.union(*[x.vars() for x in self.src]) if len(self.src) else set()
+    bound_vars = set([x for x in self.sparents if x.op is UOps.ASSIGN and x.src[0].op is UOps.DEFINE_VAR])
+    bound_var_base = set(x.src[0] for x in bound_vars)
+    all_vars = set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
+    return bound_vars.union(set([x for x in all_vars if x not in bound_var_base]))
   def variables(self) -> List[Variable]:
-    st_vars: List[Variable] = flatten([list(x.st_arg.vars()) for x in self.sparents if x.op in BUFFER_UOPS])
+    st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
     from tinygrad.shape.symbolic import Variable
-    return dedup(sorted(st_vars + [x.unbind()[0] if not isinstance(x, Variable) else x for x in self.vars()], key=lambda v: v.arg))
+    return sorted(set.union(*st_vars, [x.unbind()[0] if not isinstance(x, Variable) else x for x in self.vars()]), key=lambda v: v.arg)
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
