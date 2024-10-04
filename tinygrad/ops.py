@@ -6,7 +6,7 @@ from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same
+from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same, flatten, dedup
 if TYPE_CHECKING:
   from tinygrad.shape.symbolic import Variable, sint
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -174,7 +174,9 @@ class UOp(MathTrait):
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
   def replace(self, **kwargs) -> UOp:
     for k in kwargs: assert k in self.__slots__, f"unkown replace arg, expected one of {self.__slots__}, got {k}"
-    return UOp(kwargs.get("op", self.op), kwargs.get("dtype", self.dtype), kwargs.get("src", self.src), kwargs.get("arg", self.arg))
+    new_args = (kwargs.get("op", self.op), kwargs.get("dtype", self.dtype), kwargs.get("src", self.src), kwargs.get("arg", self.arg))
+    if (self.op, self.dtype, self.src, self.arg) == new_args: return self
+    return UOp(*new_args)
   @property
   def has_st(self) -> bool: return self.op not in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL, UOps.BUFFER, UOps.CONST, UOps.DEFINE_VAR}
   @functools.cached_property
@@ -258,7 +260,10 @@ class UOp(MathTrait):
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   def unbind(self) -> Tuple[Variable, int]:
     assert self.op is UOps.ASSIGN and self.src[0].op is UOps.DEFINE_VAR and self.src[1].op is UOps.CONST, f"can't unbind {self}"
-    return self.src[0], self.src[1].arg
+    from tinygrad.shape.symbolic import Variable
+    return cast(Variable, self.src[0]), self.src[1].arg
+  @property
+  def val(self) -> int: return self.unbind()[1]
   # TODO: this is context rewrite
   def substitute(self, dvars:Dict[UOp, UOp]):
     if self in dvars: return dvars[self]
@@ -279,8 +284,9 @@ class UOp(MathTrait):
     if self.op is UOps.DEFINE_VAR: return {self}
     return set.union(*[x.vars() for x in self.src]) if len(self.src) else set()
   def variables(self) -> List[Variable]:
-    st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
-    return sorted(set.union(*st_vars, self.vars()), key=lambda v: v.arg)
+    st_vars: List[Variable] = flatten([list(x.st_arg.vars()) for x in self.sparents if x.op in BUFFER_UOPS])
+    from tinygrad.shape.symbolic import Variable
+    return dedup(sorted(st_vars + [x.unbind()[0] if not isinstance(x, Variable) else x for x in self.vars()], key=lambda v: v.arg))
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
@@ -374,7 +380,8 @@ def exec_alu(op:Op, dtype:DType, operands):
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.CONST: return u.arg
-  if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1], u.arg[2])
+  if u.op is UOps.DEFINE_VAR: return u
+  #if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1], u.arg[2])
   if u.op is UOps.ALU: return exec_alu(u.arg, u.dtype, tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 
@@ -775,4 +782,7 @@ simple_pm = PatternMatcher([
   # mul add lt
   (((UPat.cvar("c0", vec=False)*UPat.var("x"))+UPat.var("x2")).lt(UPat.cvar("c1", vec=False)),
    lambda x,x2,c0,c1: x.lt(c1//c0) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax and x2.vmin >= 0 else None),
+  # ** move add consts to end (NOTE: this is still happening before constant folding) **
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
 ])

@@ -12,7 +12,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import MetaOps, truncate, smax, resolve, UOp, UOps, BinaryOps
 from tinygrad.device import Device, Buffer, BufferOptions
-from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
+from tinygrad.shape.symbolic import sint, Variable, Node
 from tinygrad.engine.realize import run_schedule, memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
@@ -2683,7 +2683,8 @@ class Tensor:
     # first pad left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
     padded, _ = _pad_left(self.shape, shape)
     # for each dimension, check either from_ is 1, or it does not change
-    if any(from_ != 1 and from_ != to for from_,to in zip(padded, shape)): raise ValueError(f"cannot broadcast from shape={self.shape} to {shape=}")
+    if any(resolve(from_ != 1, False) and resolve(from_ != to, False) for from_,to in zip(padded, shape)):
+      raise ValueError(f"cannot broadcast from shape={self.shape} to {shape=}")
     return F.Expand.apply(self.reshape(padded), shape=shape)
 
   def _broadcasted(self, y:Union[Tensor, Node, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:

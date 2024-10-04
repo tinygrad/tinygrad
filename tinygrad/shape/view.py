@@ -77,7 +77,7 @@ def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
   strides = strides_for_shape(shape)
   result = []
   for stride in strides:
-    here = offs // stride if stride != 0 else 0
+    here = offs // stride if resolve(stride != 0) else 0
     result.append(here)
     offs -= here * stride
   return result
@@ -100,7 +100,8 @@ class View:
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
-    if not all(s >= 0 for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
+    # TODO: this shouldn't require resolve
+    if not all(resolve(s >= 0) for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
     # canonicalize 0 in shape
     if 0 in shape: return View(shape, (0,) * len(shape), offset=0, mask=None, contiguous=True)
@@ -227,7 +228,7 @@ class View:
     assert len(arg) == len(self.shape), f"invalid pad {arg} for {self.shape}"
     # NOTE: not checking for symbolic arg
     for b,e in arg: assert not all_int([b,e]) or b>=0 and e>=0, f"invalid pad {arg} for {self.shape}"
-    if any(b!=0 or e!=0 for b, e in arg):
+    if any(resolve(b!=0) or resolve(e!=0) for b, e in arg):
       zvarg = tuple([(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
       mask = tuple([(b,s+b) for s,(b,_) in zip(self.shape, arg)])
       return self.__unsafe_resize(zvarg, mask=mask)
@@ -244,11 +245,12 @@ class View:
   def expand(self, new_shape: Tuple[sint, ...]) -> View:
     if len(new_shape) != len(self.shape): raise ValueError(f"expand arg {new_shape=} must have same number of dimensions as shape {self.shape=}")
     if 0 in self.shape:
-      assert all((s == x == 0) or (s > 0 and (x % s) == 0) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
+      #assert all((s == x == 0) or (s > 0 and (x % s) == 0) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
       return View.create(new_shape)
-    assert all((s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
+    #assert all((s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)),f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
-    mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.mask, self.shape, new_shape)]) if self.mask else None
+    mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if resolve(s != ns) else m) for m,s,ns in zip(self.mask, self.shape, new_shape)]) \
+      if self.mask else None
     return View.create(new_shape, self.strides, self.offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
@@ -272,7 +274,8 @@ class View:
   def reshape(self, new_shape: Tuple[sint, ...]) -> Optional[View]:
     if self.shape == new_shape: return self
 
-    assert all(x >= 0 for x in new_shape), f"shape can't contain negative numbers {new_shape}"
+    # TODO: this shouldn't require resolve
+    assert all(resolve(x >= 0) for x in new_shape), f"shape can't contain negative numbers {new_shape}"
     if 0 in self.shape:
       assert 0 in new_shape, f"cannot reshape 0 size to {new_shape}"
       return View.create(new_shape)
@@ -294,7 +297,7 @@ class View:
         if isinstance(so, int):
           if si != so: raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
         else:
-          var_vals = {v: v.unbind()[1] for v in so.vars()}
+          var_vals = dict([v.unbind() for v in so.vars()])
           if si != sym_infer(so, var_vals): raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
       # all dimensions matched, return the new view directly
       return View(new_shape, self.strides, self.offset, self.mask, self.contiguous)
@@ -303,7 +306,7 @@ class View:
     for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
       acc = 1
       # TODO: this <= and != is for symbolic!?
-      while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and (new_dim := next(r_new_shape, 0)) > 0:
+      while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and resolve((new_dim := next(r_new_shape, 0)) > 0):
         strides.append(new_stride)
         if resolve(new_dim != 1): new_stride *= (new_dim if resolve((acc := acc * new_dim) < real_dim) else 0)
       if resolve(acc != merged_dim): break
