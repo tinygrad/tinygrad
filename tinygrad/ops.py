@@ -174,7 +174,9 @@ class UOp(MathTrait):
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
   def replace(self, **kwargs) -> UOp:
     for k in kwargs: assert k in self.__slots__, f"unkown replace arg, expected one of {self.__slots__}, got {k}"
-    return UOp(kwargs.get("op", self.op), kwargs.get("dtype", self.dtype), kwargs.get("src", self.src), kwargs.get("arg", self.arg))
+    new_args = (kwargs.get("op", self.op), kwargs.get("dtype", self.dtype), kwargs.get("src", self.src), kwargs.get("arg", self.arg))
+    if (self.op, self.dtype, self.src, self.arg) == new_args: return self
+    return UOp(*new_args)
   @property
   def has_st(self) -> bool: return self.op not in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL, UOps.BUFFER, UOps.CONST, UOps.DEFINE_VAR}
   @functools.cached_property
@@ -297,6 +299,7 @@ class UOp(MathTrait):
     # NOTE: returned UOp is assumed to be CONST
     if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
+    if self.op is UOps.ASSIGN: return self.src[0].vmin, self.src[0].vmax  # ignore the assigned value
     if self.op is UOps.EXPAND: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)

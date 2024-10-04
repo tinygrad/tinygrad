@@ -145,9 +145,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
-    if buf.op is MetaOps.CONST:
-      if isinstance(val:=buf.arg, Variable): var_vals.update([val.unbind()])
-      return ubuf.swizzle(unbound_st)
+    if buf.op is MetaOps.CONST: return ubuf.swizzle(unbound_st)
     if buf in assign_targets and not (unbound_st.contiguous or (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and \
         ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask))):
       # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine

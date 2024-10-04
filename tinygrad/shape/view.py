@@ -227,7 +227,7 @@ class View:
     assert len(arg) == len(self.shape), f"invalid pad {arg} for {self.shape}"
     # NOTE: not checking for symbolic arg
     for b,e in arg: assert not all_int([b,e]) or b>=0 and e>=0, f"invalid pad {arg} for {self.shape}"
-    if any(b!=0 or e!=0 for b, e in arg):
+    if any(resolve(b!=0) or resolve(e!=0) for b, e in arg):
       zvarg = tuple([(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
       mask = tuple([(b,s+b) for s,(b,_) in zip(self.shape, arg)])
       return self.__unsafe_resize(zvarg, mask=mask)
@@ -294,7 +294,7 @@ class View:
         if isinstance(so, int):
           if si != so: raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
         else:
-          var_vals = {v: v.unbind()[1] for v in so.vars()}
+          var_vals = dict([v.unbind() for v in so.vars()])
           if si != sym_infer(so, var_vals): raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
       # all dimensions matched, return the new view directly
       return View(new_shape, self.strides, self.offset, self.mask, self.contiguous)
