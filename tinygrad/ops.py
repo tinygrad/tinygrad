@@ -316,7 +316,6 @@ class UOp(MathTrait):
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     if self.op is UOps.ASSIGN: return self.src[0].vmin, self.src[0].vmax  # ignore the assigned value
     if self.op is UOps.EXPAND: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
-    if self.op is UOps.ASSIGN: return self.src[0].vmin, self.src[0].vmax  # ignore the bound value
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is UOps.CONST: return self.arg, self.arg
@@ -348,7 +347,7 @@ class UOp(MathTrait):
         if self.arg is BinaryOps.OR: return s0.vmin or s1.vmin, s0.vmax or s1.vmax
         if self.arg is BinaryOps.AND: return s0.vmin and s1.vmin, s0.vmax and s1.vmax
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
-  def render(self) -> str: return graph_rewrite(self, renderer)
+  def render(self) -> UOp: return graph_rewrite(self, renderer)
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -807,7 +806,7 @@ simple_pm = PatternMatcher([
 renderer = PatternMatcher([
   (UPat(UOps.DEFINE_VAR, name="x"), lambda x: UOp(UOps.NOOP, arg=x.arg[0])),
   (UPat(UOps.CONST, name="x"), lambda x: UOp(UOps.NOOP, arg=str(x.arg))),
-  (UPat(UOps.ASSIGN, name="x"), lambda x: x.src[0]),
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}+{x.src[1].arg})")),
-  (UPat(UOps.ALU, arg=BinaryOps.MUL, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}*{x.src[1].arg})")),
+  (UPat(UOps.ASSIGN, src=UPat(UOps.NOOP), name="x"), lambda x: x.src[0]),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.ADD, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}+{x.src[1].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.MUL, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}*{x.src[1].arg})")),
 ])

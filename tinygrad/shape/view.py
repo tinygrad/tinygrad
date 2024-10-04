@@ -255,7 +255,8 @@ class View:
       return View.create(new_shape)
     #assert all((s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)),f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
-    mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if resolve(s != ns) else m) for m,s,ns in zip(self.mask, self.shape, new_shape)]) \
+    # TODO: this resolve may not be needed, but it's hard because vars need to be sorted
+    mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if resolve(s != ns, False) else m) for m,s,ns in zip(self.mask, self.shape, new_shape)]) \
       if self.mask else None
     return View.create(new_shape, self.strides, self.offset, mask)
 
