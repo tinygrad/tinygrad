@@ -350,8 +350,8 @@ class UOp(MathTrait):
         if self.arg is BinaryOps.OR: return s0.vmin or s1.vmin, s0.vmax or s1.vmax
         if self.arg is BinaryOps.AND: return s0.vmin and s1.vmin, s0.vmax and s1.vmax
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
-  def render(self) -> str:
-    ret = graph_rewrite(self.simplify(), renderer)
+  def render(self, simplify=True) -> str:
+    ret = graph_rewrite(self.simplify() if simplify else self, renderer)
     return ret.arg if ret.op is UOps.NOOP else str(ret)
 
 @dataclass(frozen=True)
