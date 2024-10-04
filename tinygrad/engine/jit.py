@@ -6,7 +6,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, colored, JIT, dedup, partition
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
-from tinygrad.ops import UOp
+from tinygrad.ops import UOp, ssimplify
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint, sym_infer
 from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer, CompiledRunner, Runner, _internal_memory_planner
@@ -98,7 +98,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
         if global_dim_idx is not None or local_dim_idx is not None: self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
 
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
-                     op_estimate, mem_estimate, lds_estimate)
+                     ssimplify(op_estimate), ssimplify(mem_estimate), ssimplify(lds_estimate))
 
   def updated_vars(self, var_vals):
     vals = [var_vals[v] for v in self.vars]

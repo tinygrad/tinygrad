@@ -157,6 +157,7 @@ def resolve(x, default:bool=True):
   # NOTE: generating the text for the exception is expensive, so we do this
   return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
 def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.vmax)
+def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
 
 ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
 class UOp(MathTrait):
