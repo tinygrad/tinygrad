@@ -6,6 +6,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, colored, JIT, dedup, partition
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
+from tinygrad.ops import UOp, ssimplify
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint, sym_infer
 from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer, CompiledRunner, Runner, _internal_memory_planner
@@ -97,7 +98,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
         if global_dim_idx is not None or local_dim_idx is not None: self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
 
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
-                     op_estimate, mem_estimate, lds_estimate)
+                     ssimplify(op_estimate), ssimplify(mem_estimate), ssimplify(lds_estimate))
 
   def updated_vars(self, var_vals):
     vals = [var_vals[v] for v in self.vars]
@@ -179,7 +180,7 @@ def _prepare_jit_inputs(args, kwargs):
   input_buffers: List[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
   assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
   var_vals: Dict[Variable, int] = merge_dicts([varvals for _,varvals,_,_ in st_varvals_dtype_device] + \
-                                              [dict(v.unbind() for v in itertools.chain(args, kwargs.values()) if isinstance(v, Variable))])
+                                              [dict(v.unbind() for v in itertools.chain(args, kwargs.values()) if isinstance(v, UOp))])
   st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varvals_dtype_device]
   return input_buffers, var_vals, names, st_vars_dtype_device
 

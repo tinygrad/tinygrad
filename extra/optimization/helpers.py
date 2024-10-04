@@ -41,7 +41,6 @@ def assert_same_lin(l1, l2):
 
 # get features
 import math
-from tinygrad.shape.symbolic import Node
 
 MAX_DIMS = 16
 MAX_BUFS = 9
@@ -58,7 +57,7 @@ def lin_to_feats(lin:Kernel, use_sts=True):
 
   # first, the full shape, including the colors
   for s,os,c in zip(lin.full_shape,lin.output_shape,lc):
-    if isinstance(s, Node):
+    if isinstance(s, UOp):
       ret.append(False)
       ret += [0]*9
     else:
