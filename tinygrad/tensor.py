@@ -3480,9 +3480,6 @@ class Tensor:
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
-# register functions to move between devices
-for device in Device._devices: setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device))
-
 if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)
   setattr(Tensor, "conv2d", Tensor.image_conv2d)
