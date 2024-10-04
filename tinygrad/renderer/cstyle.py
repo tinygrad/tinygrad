@@ -176,7 +176,7 @@ class ClangRenderer(CStyleLanguage):
   # language options
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  code_for_op = {**({k:v for k,v in CStyleLanguage().code_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
+  code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2]}),
                  UnaryOps.SQRT: lambda x,dtype: f"__builtin_sqrtl({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
                  BinaryOps.MAX: lambda a,b,dtype: f"(({a}>{b})?{a}:{b})"}
 
@@ -272,7 +272,7 @@ class MetalRenderer(CStyleLanguage):
   type_map = {dtypes.bfloat16: "bfloat"}
 
   # precise::sin
-  code_for_op = {**CStyleLanguage().code_for_op, UnaryOps.SIN: lambda x,dtype: f"precise::sin({x})"}
+  code_for_op = {**CStyleLanguage.code_for_op, UnaryOps.SIN: lambda x,dtype: f"precise::sin({x})"}
 
   # upcast to float32 all the ops that don't support bfloat16
   extra_matcher = PatternMatcher([
@@ -323,7 +323,7 @@ class CUDARenderer(CStyleLanguage):
   float4 = "make_float4"
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
-  code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
+  code_for_op = {**CStyleLanguage.code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 
   def render_vector_prefix(self, dt:DType) -> str:
@@ -369,7 +369,7 @@ def _make_hip_code_for_op():
         return f"(hip_bfloat16)({func(*(((args[0],) if key is TernaryOps.WHERE else ()) + operands), dtypes.float)})"
       return func(*args)
     return cast_bf16
-  return { k:wrapper(k,v) for k,v in {**CStyleLanguage().code_for_op, **code_for_op_hip}.items() }
+  return { k:wrapper(k,v) for k,v in {**CStyleLanguage.code_for_op, **code_for_op_hip}.items() }
 
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
@@ -444,8 +444,8 @@ class DSPRenderer(ClangRenderer):
   supports_float4 = False
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_prefix = "__attribute__((noinline)) "
-  type_map = { **ClangRenderer().type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
-  code_for_op = {**ClangRenderer().code_for_op, UnaryOps.SIN: lambda x,dtype: f"__builtin_sin({x})",
+  type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
+  code_for_op = {**ClangRenderer.code_for_op, UnaryOps.SIN: lambda x,dtype: f"__builtin_sin({x})",
                  UnaryOps.LOG2: lambda x,dtype: f"__builtin_log2l({x})" if dtype == dtypes.float64 else f"__builtin_log2f({x})",
                  UnaryOps.EXP2: lambda x,dtype: f"__builtin_exp2l({x})" if dtype == dtypes.float64 else f"__builtin_exp2f({x})"}
 
