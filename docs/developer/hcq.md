@@ -6,7 +6,7 @@ The main aspect of HCQ-compatible runtimes is how they interact with devices. In
 
 ### Command Queues
 
-To interact with devices, there are 2 types of queues: `HWComputeQueue` and `HWCopyQueue`. Commands which are defined in a base `HWCommandQueue` class should be supported by both queues. These methods are timestamp and synchronization methods like [signal](#tinygrad.device.HWCommandQueue.signal) and [wait](#tinygrad.device.HWCommandQueue.wait).
+To interact with devices, there are 2 types of queues: `HWComputeQueue` and `HWCopyQueue`. Commands which are defined in a base `HWCommandQueue` class should be supported by both queues. These methods are timestamp and synchronization methods like [signal](#tinygrad.runtime.support.hcq.HWCommandQueue.signal) and [wait](#tinygrad.runtime.support.hcq.HWCommandQueue.wait).
 
 For example, the following Python code enqueues a wait, execute, and signal command on the HCQ-compatible device:
 ```python
@@ -18,7 +18,7 @@ HWComputeQueue().wait(signal_to_wait, value_to_wait) \
 
 Each runtime should implement the required functions that are defined in the `HWCommandQueue`, `HWComputeQueue`, and `HWCopyQueue` classes.
 
-::: tinygrad.device.HWCommandQueue
+::: tinygrad.runtime.support.hcq.HWCommandQueue
     options:
         members: [
             "signal",
@@ -31,7 +31,7 @@ Each runtime should implement the required functions that are defined in the `HW
         ]
         show_source: false
 
-::: tinygrad.device.HWComputeQueue
+::: tinygrad.runtime.support.hcq.HWComputeQueue
     options:
         members: [
             "memory_barrier",
@@ -40,7 +40,7 @@ Each runtime should implement the required functions that are defined in the `HW
         ]
         show_source: false
 
-::: tinygrad.device.HWCopyQueue
+::: tinygrad.runtime.support.hcq.HWCopyQueue
     options:
         members: [
             "copy",
@@ -52,7 +52,7 @@ Each runtime should implement the required functions that are defined in the `HW
 
 To implement custom commands in the queue, use the @hcq_command decorator for your command implementations.
 
-::: tinygrad.device.hcq_command
+::: tinygrad.runtime.support.hcq.hcq_command
     options:
         members: [
             "copy",
@@ -64,7 +64,7 @@ To implement custom commands in the queue, use the @hcq_command decorator for yo
 
 The `HCQCompiled` class defines the API for HCQ-compatible devices. This class serves as an abstract base class that device-specific implementations should inherit from and implement.
 
-::: tinygrad.device.HCQCompiled
+::: tinygrad.runtime.support.hcq.HCQCompiled
     options:
         show_source: false
 
@@ -72,7 +72,7 @@ The `HCQCompiled` class defines the API for HCQ-compatible devices. This class s
 
 Signals are device-dependent structures used for synchronization and timing in HCQ-compatible devices. They should be designed to record both a `value` and a `timestamp` within the same signal. HCQ-compatible backend implementations should use `HCQSignal` as a base class.
 
-::: tinygrad.device.HCQSignal
+::: tinygrad.runtime.support.hcq.HCQSignal
     options:
         members: [value, timestamp, wait]
         show_source: false
@@ -99,7 +99,7 @@ Each HCQ-compatible device must allocate two signals for global synchronization 
 
 The `HCQAllocator` base class simplifies allocator logic by leveraging [command queues](#command-queues) abstractions. This class efficiently handles copy and transfer operations, leaving only the alloc and free functions to be implemented by individual backends.
 
-::: tinygrad.device.HCQAllocator
+::: tinygrad.runtime.support.hcq.HCQAllocator
     options:
         members: [
             "_alloc",
@@ -111,7 +111,7 @@ The `HCQAllocator` base class simplifies allocator logic by leveraging [command 
 
 Backends must adhere to the `HCQBuffer` protocol when returning allocation results.
 
-::: tinygrad.device.HCQBuffer
+::: tinygrad.runtime.support.hcq.HCQBuffer
     options:
         members: true
         show_source: false
@@ -120,7 +120,7 @@ Backends must adhere to the `HCQBuffer` protocol when returning allocation resul
 
 `HCQProgram` is a base class for defining programs compatible with HCQ-enabled devices. It provides a flexible framework for handling different argument layouts (see `HCQArgsState`).
 
-::: tinygrad.device.HCQProgram
+::: tinygrad.runtime.support.hcq.HCQProgram
     options:
         members: true
         show_source: false
@@ -129,7 +129,7 @@ Backends must adhere to the `HCQBuffer` protocol when returning allocation resul
 
 `HCQArgsState` is a base class for managing the argument state for HCQ programs. Backend implementations should create a subclass of `HCQArgsState` to manage arguments for the given program.
 
-::: tinygrad.device.HCQArgsState
+::: tinygrad.runtime.support.hcq.HCQArgsState
     options:
         members: true
         show_source: false
