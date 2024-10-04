@@ -202,6 +202,10 @@ class ClangRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, macros + prefix)
 
 class OpenCLRenderer(CStyleLanguage):
+  def __init__(self, *args, device_exts:str="", **kwargs):
+    super().__init__(*args, **kwargs)
+    self.device_exts = device_exts 
+
   device = "GPU"
 
   # language options
@@ -213,10 +217,6 @@ class OpenCLRenderer(CStyleLanguage):
   float4 = "(float4)"
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong", dtypes.bfloat16: "ushort" }
-
-  def __init__(self, device_exts=[], *args, **kwargs):
-    super().__init__(*args, **kwargs)
-    self.device_exts = device_exts
 
   string_rewrite = PatternMatcher([
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_{r.render_dtype(x.dtype)}({r[x.src[0]]})"),
@@ -231,12 +231,8 @@ class OpenCLRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops):
-      if 'cl_khr_fp16' in self.device_exts:
-        print("testing1: cl_khr_fp16 enabled")
-        prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or [])
-      else:
-        print("testing2: cl_khr_fp16 is not supported on this device")
-        raise RuntimeError("cl_khr_fp16 is not supported on this device")
+      if 'cl_khr_fp16' not in self.device_exts: raise RuntimeError("cl_khr_fp16 is not supported on this device")
+      prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or [])
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class IntelRenderer(OpenCLRenderer):
