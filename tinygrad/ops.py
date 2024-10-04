@@ -729,6 +729,8 @@ def type_verify(uops:List[UOp]):
     chk = cast(bool, spec.rewrite(u))
     assert chk is True, f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
 
+# *** most of symbolic lives here now ***
+
 simple_pm = PatternMatcher([
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
@@ -809,4 +811,5 @@ renderer = PatternMatcher([
   (UPat(UOps.ASSIGN, src=UPat(UOps.NOOP), name="x"), lambda x: x.src[0]),
   (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.ADD, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}+{x.src[1].arg})")),
   (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.MUL, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}*{x.src[1].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.IDIV, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}//{x.src[1].arg})")),
 ])
