@@ -1,7 +1,8 @@
 import unittest, struct, contextlib, tempfile, pathlib, json, time, atexit, random
 from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import CI, getenv, Context
-from tinygrad.device import Buffer, BufferOptions, ProfileLogger, HCQCompiled
+from tinygrad.device import Buffer, BufferOptions
+from tinygrad.runtime.support.hcq import ProfileLogger, HCQCompiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_runner
 
