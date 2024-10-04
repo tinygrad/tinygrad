@@ -10,7 +10,7 @@ from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA
 from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
-from tinygrad.ops import MetaOps, truncate, smax, resolve, UOp, UOps, BinaryOps
+from tinygrad.ops import MetaOps, truncate, smax, smin, sceildiv, resolve, UOp, UOps, BinaryOps
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.engine.realize import run_schedule, memory_planner
@@ -383,7 +383,8 @@ class Tensor:
     if y.op is UOps.ALU:
       if y.arg is BinaryOps.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
       if y.arg is BinaryOps.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
-    raise RuntimeError(f"unhandled Node {y}")
+      if y.arg is BinaryOps.MAX: return Tensor.from_uop(y.src[0]).maximum(Tensor.from_uop(y.src[1]))
+    raise RuntimeError(f"unhandled UOp {y}")
 
   # ***** creation entrypoint *****
 
@@ -588,11 +589,11 @@ class Tensor:
     ```
     """
     if stop is None: stop, start = start, 0
-    assert all(isinstance(s, (int, float)) for s in (start, stop, step)), f"symbolic arange not supported {start=}, {stop=}, {step=}"
+    #assert all(isinstance(s, (int, float)) for s in (start, stop, step)), f"symbolic arange not supported {start=}, {stop=}, {step=}"
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (stop-start)/step <= 0: return Tensor([], dtype=dtype, **kwargs)
-    return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
+    return (Tensor.full((sceildiv(stop-start, step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
   def eye(n:int, m:Optional[int]=None, **kwargs) -> Tensor:
@@ -1346,9 +1347,9 @@ class Tensor:
     print(t.pad2d((1, 1, 2, 0), value=-float("inf")).numpy())
     ```
     """
-    pads = tuple((max(p0, 0), max(p1, 0)) for p0, p1 in zip(padding[::2], padding[1::2]))[::-1]
+    pads = tuple((smax(p0, 0), smax(p1, 0)) for p0, p1 in zip(padding[::2], padding[1::2]))[::-1]
     padded = self.pad((None,) * (self.ndim - len(padding) // 2) + tuple(pads), value=value)
-    shrink = tuple((-min(p0, 0), min(p1 + s, s)) for p0, p1, s in zip(padding[::2], padding[1::2], padded.shape[::-1]))[::-1]
+    shrink = tuple((-smin(p0, 0), smin(p1 + s, s)) for p0, p1, s in zip(padding[::2], padding[1::2], padded.shape[::-1]))[::-1]
     return padded.shrink((None,) * (self.ndim - len(padding) // 2) + shrink)
 
   @property
@@ -1890,14 +1891,14 @@ class Tensor:
 
   def _pool(self, k_:Tuple[sint, ...], stride:Union[Tuple[int, ...], int]=1, dilation:Union[Tuple[int, ...], int]=1) -> Tensor:
     assert len(self.shape) >= len(k_), f"can't pool {self.shape} with {k_}"
-    assert all_int(self.shape) and all_int(k_), f"does not support symbolic {self.shape=}, {k_=}"
+    #assert all_int(self.shape) and all_int(k_), f"does not support symbolic {self.shape=}, {k_=}"
     s_, d_ = make_pair(stride, len(k_)), make_pair(dilation, len(k_))
     assert len(k_) == len(s_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
     noop_, i_ = [None] * len(self.shape[:-len(k_)]), self.shape[-len(k_):]
-    o_ = [math.ceil((i - d * (k-1))/s) for i,d,k,s in zip(i_, d_, k_, s_)]
-    if any(k > s for k,s in zip(k_, s_)) or any(d != 1 for d in d_):
+    o_ = [sceildiv(i - d * (k-1), s) for i,d,k,s in zip(i_, d_, k_, s_)]
+    if any(resolve(k > s) for k,s in zip(k_, s_)) or any(resolve(d != 1) for d in d_):
       # repeats such that we don't need padding
-      xup = self.repeat([1]*len(noop_) + [math.ceil(k*(i+d) / i) for k,i,d in zip(k_, i_, d_)])
+      xup = self.repeat([1]*len(noop_) + [sceildiv(k*(i+d), i) for k,i,d in zip(k_, i_, d_)])
       # handle dilation
       xup = xup.shrink(tuple(noop_ + [(0,k*(i+d)) for k,i,d in zip(k_, i_, d_)])).reshape(noop_ + flatten((k,i+d) for k,i,d in zip(k_, i_, d_)))
       # handle stride

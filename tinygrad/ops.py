@@ -6,7 +6,7 @@ from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, prod, getenv, all_same
+from tinygrad.helpers import ContextVar, prod, getenv, all_same, partition
 if TYPE_CHECKING:
   from tinygrad.shape.symbolic import Variable, sint
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -156,7 +156,25 @@ def resolve(x, default:bool=True):
   assert x.dtype is dtypes.bool, "UOp in resolve must be bool"
   # NOTE: generating the text for the exception is expensive, so we do this
   return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
-def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.vmax)
+def _suop(lst, uop_fxn, python_fxn):
+  max_uop, max_num = partition(lst, lambda x: isinstance(x, UOp))
+  if len(max_uop):
+    ret = functools.reduce(uop_fxn, max_uop)
+    return uop_fxn(ret, python_fxn(max_num)) if len(max_num) else ret
+  return python_fxn(max_num)
+def smax(*lst): return _suop(lst[0] if isinstance(lst[0], (tuple, list)) else lst, UOp.max, max)
+def smin(*lst): return _suop(lst[0] if isinstance(lst[0], (tuple, list)) else lst, UOp.min, min)
+def sceildiv(x:Union[ConstType, UOp], y:Union[ConstType, UOp]):
+  if isinstance(x, ConstType) and isinstance(y, ConstType): return int(math.ceil(x/y))
+  if isinstance(x, UOp):
+    assert dtypes.is_int(x.dtype)
+    x = x.ssimplify()
+  if isinstance(y, UOp):
+    assert dtypes.is_int(y.dtype)
+    y = y.ssimplify()
+  ret = (x + (y-1)) // y
+  return ret.ssimplify()
+
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
 
 # used for UOp and UPat
