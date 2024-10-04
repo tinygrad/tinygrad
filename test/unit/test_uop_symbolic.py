@@ -11,6 +11,7 @@ from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes, PtrDType, ConstType
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
 from tinygrad.ops import BinaryOps, UOp, UOps, print_uops
+from tinygrad.shape.symbolic import Variable
 import functools
 
 def render(self) -> Tuple[str, ConstType, ConstType]:
@@ -26,8 +27,6 @@ def render(self) -> Tuple[str, ConstType, ConstType]:
   return fxn.split("data0[0] = ")[1].split(";")[0], rewritten_uop.vmin, rewritten_uop.vmax
 
 def NumNode(val): return UOp.const(dtypes.int, val)
-def Variable(expr, nmin, nmax):
-  return UOp.define_var(expr, dtypes.int, nmin, nmax if isinstance(nmax, int) else nmax.arg)
 class Node:
   @staticmethod
   def sum(ops): return functools.reduce(lambda x,y: x+y, ops)

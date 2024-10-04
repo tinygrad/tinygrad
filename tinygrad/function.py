@@ -5,7 +5,7 @@ from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
 from tinygrad.ops import ReduceOps, resolve
 from tinygrad.tensor import Function
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.symbolic import sint
 
 class Contiguous(Function):

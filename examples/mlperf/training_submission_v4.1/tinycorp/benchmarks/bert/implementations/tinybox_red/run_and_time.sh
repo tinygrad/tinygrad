@@ -20,4 +20,4 @@ LOGFILE="bert_green_${DATETIME}_${SEED}.log"
 BENCHMARK=10 INITMLPERF=1 python3 examples/mlperf/model_train.py | tee $LOGFILE
 
 # run
-RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a $LOGFILE
+PARALLEL=0 RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a $LOGFILE
