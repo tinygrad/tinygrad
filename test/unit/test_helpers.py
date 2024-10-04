@@ -138,7 +138,7 @@ class TestProd(unittest.TestCase):
   def test_ints(self): self.assertEqual(30, prod((2, 3, 5)))
   def test_variable(self): self.assertEqual("(a*12)", prod((Variable("a", 1, 5), 3, 4)).render())
   def test_variable_order(self): self.assertEqual("(a*12)", prod((3, 4, Variable("a", 1, 5))).render())
-  def test_num_nodes(self): self.assertEqual(NumNode(6), prod((NumNode(2), NumNode(3))))
+  def test_num_nodes(self): self.assertEqual(NumNode(6).render(), prod((NumNode(2), NumNode(3))).render())
 
 class TestRoundUp(unittest.TestCase):
   def test_round_up(self):
