@@ -255,7 +255,7 @@ class UOp(MathTrait):
   def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
     #if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
-    if isinstance(b, UOp): return b
+    if isinstance(b, UOp): return b.unbind()[0] if b.op is UOps.ASSIGN else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod

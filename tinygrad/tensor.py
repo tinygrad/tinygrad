@@ -109,7 +109,7 @@ class Tensor:
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
-  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, 'np.ndarray', bytes, MultiLazyBuffer, Variable, pathlib.Path],  # type: ignore [name-defined] # noqa: F821
+  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, 'np.ndarray', bytes, MultiLazyBuffer, UOp, pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
@@ -129,7 +129,7 @@ class Tensor:
     # create a LazyBuffer from the different types of inputs
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, get_args(ConstType)): data = _metaop(MetaOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
-    elif isinstance(data, Variable): data = _metaop(MetaOps.CONST, tuple(), dtype or data.dtype, device, data)
+    elif isinstance(data, UOp): data = _metaop(MetaOps.CONST, tuple(), dtype or data.dtype, device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
     elif isinstance(data, (list, tuple)):
       if dtype is None:
@@ -370,8 +370,9 @@ class Tensor:
   def from_node(y:UOp, **kwargs) -> Tensor:
     # NOTE: we only support Tensors from DEFINE_VAR or CONST
     if y.op is UOps.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
-    if y.op is UOps.DEFINE_VAR: return Tensor(y, **kwargs, requires_grad=False)
-    if y.op is UOps.ASSIGN: return Tensor.from_node(y.src[0])
+    if y.op is UOps.ASSIGN:
+      assert y.src[0].op is UOps.DEFINE_VAR
+      return Tensor(y, **kwargs, requires_grad=False)
     if y.op is UOps.ALU:
       if y.arg is BinaryOps.MUL: return Tensor.from_node(y.src[0]) * Tensor.from_node(y.src[1])
       if y.arg is BinaryOps.ADD: return Tensor.from_node(y.src[0]) + Tensor.from_node(y.src[1])

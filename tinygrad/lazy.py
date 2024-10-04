@@ -3,8 +3,8 @@ from typing import Union, Optional, Any, Tuple, List, get_args
 from tinygrad.dtype import dtypes, DType, DTypeLike, ConstType, to_dtype
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, SPLIT_REDUCEOP
 from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu, REDUCE_ALU
-from tinygrad.ops import identity_element, MathTrait, resolve
-from tinygrad.shape.symbolic import sint, Variable
+from tinygrad.ops import identity_element, MathTrait, resolve, UOp
+from tinygrad.shape.symbolic import sint
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
@@ -14,7 +14,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DTypeLike, op:Optional[
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0: op, arg, srcs, base = MetaOps.CONST, 0, (), None
   dtype = to_dtype(dtype)
-  if op is MetaOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype) if not isinstance(arg, Variable) else arg, True
+  if op is MetaOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype) if not isinstance(arg, UOp) else arg, True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
   if enable_cache and (rret := lazycache.get(cache_key, None)) is not None: return rret
@@ -111,7 +111,7 @@ class LazyBuffer(MathTrait):
     cast_op: Union[MetaOps, UnaryOps] = (MetaOps.VIEW if self.can_view() and allow_buffer_view else UnaryOps.BITCAST) if bitcast else UnaryOps.CAST
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, dtype, (self,))
 
-  def is_unrealized_const(self): return self.base.realized is None and self.base.op is MetaOps.CONST and not isinstance(self.base.arg, Variable)
+  def is_unrealized_const(self): return self.base.realized is None and self.base.op is MetaOps.CONST and not isinstance(self.base.arg, UOp)
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
 
   def _copy(self, device:str) -> LazyBuffer:
