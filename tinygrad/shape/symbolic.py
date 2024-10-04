@@ -144,7 +144,9 @@ class Variable(Node):
     assert self.val is not None, f"cannot unbind {self}"
     return Variable(self.expr, self.min, self.max), self.val
   def vars(self): return {self}
-  def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return var_vals.get(self, self)
+  def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
+    # try both the bound and unbound Variable
+    return var_vals.get(self, var_vals.get(Variable(self.expr, self.min, self.max), self))
 
 class NumNode(Node):
   def __init__(self, num:int):
