@@ -4,25 +4,21 @@ from tinygrad import Tensor, Variable
 
 class TestTensorVariable(unittest.TestCase):
   def test_add_tvar(self):
-    vv = Variable("a", 0, 10)
-    vv.bind(1)
+    vv = Variable("a", 0, 10).bind(1)
     ret = (Tensor(vv) + 3).item()
     assert ret == 4
 
   def test_inner_tvar_node(self):
-    vv = Variable("w", 0, 10)
-    vv.bind(2)
+    vv = Variable("w", 0, 10).bind(2)
     ret = Tensor.from_node(vv * 4).item()
     assert ret == 8
 
   def test_inner_tvar_mul(self):
-    vv = Variable("w", 0, 10)
-    vv.bind(2)
+    vv = Variable("w", 0, 10).bind(2)
     assert (Tensor(3) * vv).item() == 6
 
   def test_inner_tvar_mul_node(self):
-    vv = Variable("w", 0, 10)
-    vv.bind(2)
+    vv = Variable("w", 0, 10).bind(2)
     assert (Tensor(3) * (vv * 4)).item() == 24
 
   def test_symbolic_mean(self):
@@ -45,14 +41,10 @@ class TestTensorVariable(unittest.TestCase):
     ret = t.mean(axis=1).reshape(2, 1).numpy()
     assert np.all(ret == 1)
 
-  @unittest.expectedFailure
   def test_symbolic_mean_2d_add(self):
-    add_term = Variable("c", 0, 10)
-    add_term.bind(1)
-    vv = Variable("a", 1, 10)
-    vv.bind(1)
-    vv2 = Variable("b", 1, 10)
-    vv2.bind(1)
+    add_term = Variable("c", 0, 10).bind(1)
+    vv = Variable("a", 1, 10).bind(1)
+    vv2 = Variable("b", 1, 10).bind(1)
     t = Tensor.ones(2, 2).contiguous().reshape(vv2+add_term, vv+add_term)
     ret = t.mean().item()
     assert ret == 1
@@ -65,8 +57,7 @@ class TestTensorVariable(unittest.TestCase):
 
   @unittest.skip("symbolic arange isn't supported")
   def test_symbolic_arange(self):
-    vv = Variable("a", 1, 10)
-    vv.bind(2)
+    vv = Variable("a", 1, 10).bind(2)
     ret = Tensor.arange(0, vv)
     ret.realize()
 

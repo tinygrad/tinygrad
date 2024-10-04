@@ -40,6 +40,11 @@ def gt(expr, rng=None):
   if rng is None: rng = random.randint(-4,4)
   return expr > rng, rng
 
+# NOTE: you have to replace these for this test to pass
+from tinygrad.ops import python_alu, BinaryOps
+python_alu[BinaryOps.MOD] = lambda x,y: x%y
+python_alu[BinaryOps.IDIV] = lambda x,y: x//y
+
 if __name__ == "__main__":
   ops = [add_v, div, mul, add_num, mod]
   for _ in range(1000):
@@ -65,5 +70,8 @@ if __name__ == "__main__":
       rn = 0
       for t,r in zip(tape, rngs): rn, _ = t(rn, r)
       num = eval(expr.render())
-      assert num == rn, f"mismatched {expr.render()} at {v1=} {v2=} {v3=} = {num} != {rn}"
+      if num != rn:
+        unsimplified_num = eval(expr.render(simplify=False))
+        assert unsimplified_num == rn, "UNSIMPLIFIED MISMATCH!"
+        assert num == rn, f"mismatched {expr.render()} at {v1=} {v2=} {v3=} = {num} != {rn}\n{expr.render(simplify=False)}"
       if DEBUG >= 1: print(f"matched {expr.render()} at {v1=} {v2=} {v3=} = {num} == {rn}")

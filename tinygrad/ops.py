@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same
-from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
+  from tinygrad.shape.symbolic import Variable, sint
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.codegen.kernel import Kernel
 
@@ -152,9 +152,12 @@ END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.E
 # With True as the default, this matches the old symbolic behavior
 # python3 -c 'from tinygrad.shape.symbolic import Variable; print(bool(Variable("a", 1, 10) < 4))' -> True
 def resolve(x, default:bool=True):
-  try: return bool(x)
-  except ValueError: return default
+  if not isinstance(x, UOp): return bool(x)
+  assert x.dtype is dtypes.bool, "UOp in resolve must be bool"
+  # NOTE: generating the text for the exception is expensive, so we do this
+  return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
 def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.vmax)
+def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
 
 ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
 class UOp(MathTrait):
@@ -200,7 +203,7 @@ class UOp(MathTrait):
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
     simple_self = self.simplify()
     vmin, vmax = simple_self._min_max
-    if vmin != vmax: raise ValueError(f"eval failed to be a single number, range is {vmin} to {vmax} in {simple_self}")
+    if vmin != vmax: raise ValueError(f"eval failed to be a single number, range is {vmin} to {vmax} in {simple_self.render()}")
     assert type(vmin) is expected_type, f"vmin is wrong dtype {vmin} != {expected_type}"
     return vmin
   def __bool__(self): return self._eval((dtypes.bool,), bool)
@@ -252,11 +255,22 @@ class UOp(MathTrait):
   @staticmethod
   def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
+    #if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
+    if isinstance(b, UOp): return b.unbind()[0] if b.op is UOps.ASSIGN else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
+  def unbind(self) -> Tuple[Variable, int]:
+    assert self.op is UOps.ASSIGN and self.src[0].op is UOps.DEFINE_VAR and self.src[1].op is UOps.CONST, f"can't unbind {self}"
+    from tinygrad.shape.symbolic import Variable
+    return cast(Variable, self.src[0]), self.src[1].arg
+  @property
+  def val(self) -> int: return self.unbind()[1]
+  # TODO: this is context rewrite
+  def substitute(self, dvars:Dict[UOp, UOp]):
+    if self in dvars: return dvars[self]
+    return self.replace(src=tuple(x.substitute(dvars) for x in self.src))
   @staticmethod
   def range(dtype:DType, start:ConstType, end:ConstType, idx:int):
     return UOp(UOps.RANGE, dtype=dtype, src=(UOp.const(dtype, start), UOp.const(dtype, end)), arg=(idx,))
@@ -268,10 +282,15 @@ class UOp(MathTrait):
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
-  def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
+  def vars(self) -> Set[UOp]:
+    bound_vars = set([x for x in self.sparents if x.op is UOps.ASSIGN and x.src[0].op is UOps.DEFINE_VAR])
+    bound_var_base = set(x.src[0] for x in bound_vars)
+    all_vars = set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
+    return bound_vars.union(set([x for x in all_vars if x not in bound_var_base]))
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
-    return sorted(set.union(*st_vars, [Variable(x.arg[0], x.arg[1], x.arg[2]) for x in self.vars()]), key=lambda v: v.arg)
+    from tinygrad.shape.symbolic import Variable
+    return sorted(set.union(*st_vars, [x.unbind()[0] if not isinstance(x, Variable) else x for x in self.vars()]), key=lambda v: v.arg)
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
@@ -332,6 +351,9 @@ class UOp(MathTrait):
         if self.arg is BinaryOps.OR: return s0.vmin or s1.vmin, s0.vmax or s1.vmax
         if self.arg is BinaryOps.AND: return s0.vmin and s1.vmin, s0.vmax and s1.vmax
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
+  def render(self, simplify=True) -> str:
+    ret = graph_rewrite(self.simplify() if simplify else self, renderer)
+    return ret.arg if ret.op is UOps.NOOP else str(ret)
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -365,7 +387,8 @@ def exec_alu(op:Op, dtype:DType, operands):
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.CONST: return u.arg
-  if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1], u.arg[2])
+  if u.op is UOps.DEFINE_VAR: return u
+  #if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1], u.arg[2])
   if u.op is UOps.ALU: return exec_alu(u.arg, u.dtype, tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 
@@ -708,6 +731,8 @@ def type_verify(uops:List[UOp]):
     chk = cast(bool, spec.rewrite(u))
     assert chk is True, f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
 
+# *** most of symbolic lives here now ***
+
 simple_pm = PatternMatcher([
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
@@ -779,4 +804,17 @@ simple_pm = PatternMatcher([
   # ** move mul consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x*c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
   (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
+])
+
+# for debug
+renderer = PatternMatcher([
+  (UPat(UOps.DEFINE_VAR, name="x"), lambda x: UOp(UOps.NOOP, arg=x.arg[0])),
+  (UPat(UOps.CONST, name="x"), lambda x: UOp(UOps.NOOP, arg=str(x.arg))),
+  (UPat(UOps.ASSIGN, src=UPat(UOps.NOOP), name="x"), lambda x: x.src[0]),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.ADD, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}+{x.src[1].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.MUL, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}*{x.src[1].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.IDIV, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}//{x.src[1].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.MOD, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}%{x.src[1].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.CMPLT, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}<{x.src[1].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.CMPNE, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}!={x.src[1].arg})")),
 ])

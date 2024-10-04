@@ -1,8 +1,8 @@
 from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast
-from tinygrad.ops import resolve
+from typing import Tuple, List, Optional, Dict, Set, cast, Union
+from tinygrad.ops import resolve, UOp
 from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, sint, sym_infer
 
@@ -114,6 +114,13 @@ class View:
         strides, offset, mask = (0,) * len(shape), 0, ((0,0),) * len(shape)
       offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
       strides = tuple(0 if e else st for st,e in zip(strides, elim))
+    # simplify as we go
+    if isinstance(offset, UOp): offset = cast(Union[UOp, int], offset.ssimplify())
+    """
+    shape = tuple(x.ssimplify() if isinstance(x, UOp) else x for x in shape)
+    strides = tuple(x.ssimplify() if isinstance(x, UOp) else x for x in strides)
+    if mask: mask = tuple((s.ssimplify() if isinstance(s, UOp) else s, e.ssimplify() if isinstance(e, UOp) else e) for s,e in mask)
+    """
     contiguous = offset == 0 and mask is None and strides == strides_for_shape(shape)
     return View(shape, strides, offset, mask, contiguous)
 
@@ -161,7 +168,7 @@ class View:
     merged_size, merged_term = 1, NumNode(0)
     extents: List[Tuple[sint, Node]] = []
     for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
-      merged_term += Variable.sum([idxs[d1] * (s1 * merged_size) for d1, s1 in term]) + o * merged_size
+      merged_term += sum([idxs[d1] * (s1 * merged_size) for d1, s1 in term]) + o * merged_size
       merged_size *= s
       if not resolve(merged_term >= merged_size) and not resolve(merged_term < 0):
         extents.append((merged_size, merged_term))
@@ -220,7 +227,7 @@ class View:
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     shape = [y-x for x,y in arg]
     if mask is not None and all(m[0] == 0 and m[1] == s for m,s in zip(mask, shape)): mask = None
-    return View.create(tuple(s.b if isinstance(s, NumNode) else s for s in shape), self.strides, self.offset+offset, mask)
+    return View.create(tuple(s.ssimplify() if isinstance(s, UOp) else s for s in shape), self.strides, self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> View:
@@ -246,9 +253,12 @@ class View:
     if 0 in self.shape:
       assert all((s == x == 0) or (s > 0 and (x % s) == 0) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
       return View.create(new_shape)
-    assert all((s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
+    # TODO: this resolve might be wrong
+    assert all((not resolve(s != x, False) or s == 1) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
-    mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.mask, self.shape, new_shape)]) if self.mask else None
+    # TODO: this resolve may not be needed, but it's hard because vars need to be sorted
+    mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if resolve(s != ns, False) else m) \
+                  for m,s,ns in zip(self.mask, self.shape, new_shape)]) if self.mask else None
     return View.create(new_shape, self.strides, self.offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
@@ -278,8 +288,8 @@ class View:
       return View.create(new_shape)
     # check for the same size
     if (self_all_int := all_int(self.shape)):
-      assert all(isinstance(s, (int, Variable)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
-      if prod(self.shape) != prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]):
+      assert all(isinstance(s, (int, UOp)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
+      if resolve(prod(self.shape) != prod(new_shape), False):
         raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
 
     if new_shape == () and self.mask and any(mx==my for (mx,my) in self.mask): return None
