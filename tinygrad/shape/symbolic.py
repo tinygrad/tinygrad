@@ -16,6 +16,7 @@ AndNode = UOp
 def NumNode(val:int): return UOp.const(dtypes.int, val)
 
 class Variable(UOp):
+  def __reduce__(self): return Variable, self.arg
   def __new__(cls, expr:str, nmin:ConstType, nmax:ConstType):  # pylint: disable=signature-differs
     return super().__new__(cls, UOps.DEFINE_VAR, dtypes.int, arg=(expr, nmin, nmax))
   def __init__(self, expr:str, nmin:ConstType, nmax:ConstType):
