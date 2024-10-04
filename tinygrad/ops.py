@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same
-from tinygrad.shape.symbolic import Variable, sint
 if TYPE_CHECKING:
+  from tinygrad.shape.symbolic import Variable, sint
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.codegen.kernel import Kernel
 
@@ -250,11 +250,19 @@ class UOp(MathTrait):
   @staticmethod
   def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
+    #if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
+    if isinstance(b, UOp): return b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
+  def unbind(self) -> Tuple[Variable, int]:
+    assert self.op is UOps.ASSIGN and self.src[0].op is UOps.DEFINE_VAR and self.src[1].op is UOps.CONST, f"can't unbind {self}"
+    return self.src[0], self.src[1].arg
+  # TODO: this is context rewrite
+  def substitute(self, dvars:Dict[UOp, UOp]):
+    if self in dvars: return dvars[self]
+    return self.replace(src=tuple(x.substitute(dvars) for x in self.src))
   @staticmethod
   def range(dtype:DType, start:ConstType, end:ConstType, idx:int):
     return UOp(UOps.RANGE, dtype=dtype, src=(UOp.const(dtype, start), UOp.const(dtype, end)), arg=(idx,))
@@ -266,10 +274,13 @@ class UOp(MathTrait):
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
-  def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
+  def vars(self) -> Set[UOp]:
+    if self.op is UOps.ASSIGN and self.src[0].op is UOps.DEFINE_VAR: return {self}  # do you want bound variables?
+    if self.op is UOps.DEFINE_VAR: return {self}
+    return set.union(*[x.vars() for x in self.src]) if len(self.src) else set()
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
-    return sorted(set.union(*st_vars, [Variable(x.arg[0], x.arg[1], x.arg[2]) for x in self.vars()]), key=lambda v: v.arg)
+    return sorted(set.union(*st_vars, self.vars()), key=lambda v: v.arg)
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
@@ -298,6 +309,7 @@ class UOp(MathTrait):
     if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     if self.op is UOps.EXPAND: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
+    if self.op is UOps.ASSIGN: return self.src[0].vmin, self.src[0].vmax  # ignore the bound value
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is UOps.CONST: return self.arg, self.arg
