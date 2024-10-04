@@ -845,18 +845,13 @@ def fold_unrolled_divs(divs:UOp):
   return ans if ans is not None and sorted(seen_const)==list(range(len(add_chain))) else None
 
 def group_add_like(add_chain:UOp):
-  ret = tuple(_get_chain(add_chain, BinaryOps.ADD))
-  mm: DefaultDict[UOp, int] = defaultdict(int)
-  for r in ret:
-    if r.op is UOps.ALU and r.arg is BinaryOps.MUL:
-      if r.src[1].op is UOps.CONST:
-        mm[r.src[0]] += r.src[1].arg
-        continue
-      if r.src[0].op is UOps.CONST:
-        mm[r.src[1]] += r.src[0].arg
-        continue
-    mm[r] += 1
-  if len(mm) == len(ret): return None
+  mm: DefaultDict[UOp, ConstType] = defaultdict(int)
+  chain_length = 0
+  for r in _get_chain(add_chain, BinaryOps.ADD):
+    chain_length += 1
+    if r.op is UOps.ALU and r.arg is BinaryOps.MUL and r.src[1].op is UOps.CONST: mm[r.src[0]] += r.src[1].arg
+    else: mm[r] += 1
+  if len(mm) == chain_length: return None
   return sum(k*v if v != 1 else k for k,v in mm.items())
 
 sym = PatternMatcher([
