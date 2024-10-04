@@ -6,13 +6,13 @@ from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Seque
 from collections import defaultdict
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten, dedup
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA
-from tinygrad.lazy import LazyBuffer
 from tinygrad.multi import MultiLazyBuffer
-from tinygrad.ops import MetaOps, truncate
+from tinygrad.ops import MetaOps, truncate, smax, resolve, UOp, UOps, BinaryOps
 from tinygrad.device import Device, Buffer, BufferOptions
-from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
+from tinygrad.shape.symbolic import sint, Variable
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule, memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
@@ -57,6 +57,14 @@ def _fromnp(x: 'np.ndarray') -> LazyBuffer:  # type: ignore [name-defined] # noq
   del ret.srcs
   return ret
 
+def get_shape(x) -> Tuple[int, ...]:
+  if not hasattr(x, "__len__") or not hasattr(x, "__getitem__") or isinstance(x, str): return ()
+  if (aapi := (hasattr(x, "shape") and x.shape == ())): return ()
+  subs = [get_shape(xi) for xi in x]
+  if not all_same(subs): raise ValueError(f"inhomogeneous shape from {x}")
+  slen = 1 if aapi else len(subs)
+  return (slen,) + (subs[0] if subs else ())
+
 def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> LazyBuffer:
   if isinstance(x, bytes): ret, data = LazyBuffer.metaop(MetaOps.EMPTY, (len(x)//dtype.itemsize,), dtype, "PYTHON"), x
   else:
@@ -89,7 +97,7 @@ def _pad_left(*shapes:Tuple[sint, ...]) -> Tuple[Tuple[sint, ...], ...]:
   max_dim = max(len(shape) for shape in shapes)
   return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 def _broadcast_shape(*shapes:Tuple[sint, ...]) -> Tuple[sint, ...]:
-  return tuple(0 if 0 in nth_dim_sizes else max(nth_dim_sizes) for nth_dim_sizes in zip(*_pad_left(*shapes)))
+  return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_pad_left(*shapes)))
 
 ReductionStr = Literal["mean", "sum", "none"]
 
@@ -109,7 +117,7 @@ class Tensor:
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
-  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, 'np.ndarray', bytes, MultiLazyBuffer, Variable, pathlib.Path],  # type: ignore [name-defined] # noqa: F821
+  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, 'np.ndarray', bytes, MultiLazyBuffer, UOp, pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
@@ -129,7 +137,9 @@ class Tensor:
     # create a LazyBuffer from the different types of inputs
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, get_args(ConstType)): data = _metaop(MetaOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
-    elif isinstance(data, Variable): data = _metaop(MetaOps.CONST, tuple(), dtype or dtypes.from_py(data.unbind()[1]), device, data)
+    elif isinstance(data, UOp):
+      assert data.op is UOps.BIND and data.src[0].op is UOps.DEFINE_VAR and data.src[1].op is UOps.CONST, f"can't create tensor from UOp {data}"
+      data = _metaop(MetaOps.CONST, tuple(), dtype or data.dtype, device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
     elif isinstance(data, (list, tuple)):
       if dtype is None:
@@ -367,12 +377,13 @@ class Tensor:
     return self
 
   @staticmethod
-  def from_node(y:Node, **kwargs) -> Tensor:
-    if isinstance(y, NumNode): return Tensor(y.b, **kwargs, requires_grad=False)
-    if isinstance(y, Variable): return Tensor(y, **kwargs, requires_grad=False)
-    if isinstance(y, MulNode): return Tensor.from_node(y.a, **kwargs) * y.b
-    if isinstance(y, SumNode): return Tensor.from_node(y.nodes[0], **kwargs) + sum(y.nodes[1:])
-    raise RuntimeError(f"unhandled Node {y}")
+  def from_uop(y:UOp, **kwargs) -> Tensor:
+    if y.op is UOps.BIND: return Tensor(y, **kwargs, requires_grad=False)   # this is the only UOp allowed in Tensor
+    if y.op is UOps.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
+    if y.op is UOps.ALU:
+      if y.arg is BinaryOps.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
+      if y.arg is BinaryOps.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
+    raise RuntimeError(f"unhandled UOp {y}")
 
   # ***** creation entrypoint *****
 
@@ -1592,7 +1603,7 @@ class Tensor:
     """
     output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
     numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
-    return numerator.div(prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if si != so])).cast(output_dtype)
+    return numerator.div(prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])).cast(output_dtype)
 
   def var(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
     """
@@ -1617,8 +1628,8 @@ class Tensor:
     ```
     """
     squares = (self - self.mean(axis=axis, keepdim=True)).square()
-    n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if si != so])
-    return squares.sum(axis=axis, keepdim=keepdim).div(max(0, n-correction))
+    n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
+    return squares.sum(axis=axis, keepdim=keepdim).div(smax([0, n-correction]))
 
   def std(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False, correction=1):
     """
@@ -2680,17 +2691,18 @@ class Tensor:
     # first pad left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
     padded, _ = _pad_left(self.shape, shape)
     # for each dimension, check either from_ is 1, or it does not change
-    if any(from_ != 1 and from_ != to for from_,to in zip(padded, shape)): raise ValueError(f"cannot broadcast from shape={self.shape} to {shape=}")
+    if any(resolve(from_ != 1, False) and resolve(from_ != to, False) for from_,to in zip(padded, shape)):
+      raise ValueError(f"cannot broadcast from shape={self.shape} to {shape=}")
     return F.Expand.apply(self.reshape(padded), shape=shape)
 
-  def _broadcasted(self, y:Union[Tensor, Node, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
+  def _broadcasted(self, y:Union[Tensor, UOp, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
-      assert isinstance(y, (*get_args(ConstType), Node)), f"{type(y)=}, {y=}"
+      assert isinstance(y, (*get_args(ConstType), UOp)), f"{type(y)=}, {y=}"
       if isinstance(x.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
-      elif not isinstance(y, Node): y_dtype = dtypes.from_py(y)
-      if isinstance(y, Node): y = Tensor.from_node(y, device=x.device)
+      elif not isinstance(y, UOp): y_dtype = dtypes.from_py(y)
+      if isinstance(y, UOp): y = Tensor.from_uop(y, device=x.device)
       else: y = Tensor(dtypes.as_const(y, y_dtype), x.device, y_dtype, requires_grad=False)
 
     if match_dtype and x.dtype != y.dtype:
@@ -3030,7 +3042,7 @@ class Tensor:
     """
     return functools.reduce(lambda x,f: f(x), ll, self)
 
-  def layernorm(self, axis=-1, eps:float=1e-5) -> Tensor:
+  def layernorm(self, axis:Union[int,Tuple[int,...]]=-1, eps:float=1e-5) -> Tensor:
     """
     Applies Layer Normalization over a mini-batch of inputs.
 
@@ -3467,9 +3479,6 @@ class Tensor:
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
-
-# register functions to move between devices
-for device in Device._devices: setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device))
 
 if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)

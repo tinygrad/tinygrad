@@ -52,8 +52,8 @@ class TestViz(unittest.TestCase):
     list(lower_schedule(schedule2))
     with Context(TRACK_MATCH_STATS=0): ret = list(load_kernels(contexts).values())
     assert len(ret) == 3
-    assert all(len([x for x,_,_ in y if "schedule" in x.loc[0]]) == 0 for y in ret[1:])
-    assert all(len([x for x,_,_ in y if "uopgraph" in x.loc[0]]) != 0 for y in ret[1:])
+    assert all(len([x for x,_ in y if "schedule" in x.loc[0]]) == 0 for y in ret[1:])
+    assert all(len([x for x,_ in y if "uopgraph" in x.loc[0]]) != 0 for y in ret[1:])
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()

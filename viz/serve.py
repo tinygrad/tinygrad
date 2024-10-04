@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 from collections import defaultdict
-from typing import DefaultDict, Dict, List, Tuple
-import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, multiprocessing
+from typing import DefaultDict, Dict, List, Optional, Tuple
+import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, multiprocessing, functools
 from dataclasses import asdict
 from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, to_function_name
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, UPat, lines
 from tinygrad.engine.graph import uops_colors, word_wrap
 from viz.spec import GraphRewriteDetails, GraphRewriteMetadata
@@ -47,13 +47,16 @@ def replace_uop(base:UOp, replaces:Dict[bytes, UOp]) -> UOp:
   replaces[base.key] = ret = UOp(base.op, base.dtype, new_srcs, base.arg) if new_srcs != base.src else base
   return ret
 
-def load_kernels(contexts) -> DefaultDict[str, List[Tuple[GraphRewriteMetadata, List[Tuple[UOp, UOp, UPat]], UOp]]]:
+def load_kernels(contexts) -> DefaultDict[str, List[Tuple[GraphRewriteMetadata, TrackedRewriteContext]]]:
   kernels = defaultdict(list)
   for ctx in contexts:
-    name, code = ((p:=ctx.kernel.to_program()).function_name, p.src) if ctx.kernel is not None else ("UNPARENTED", "")
+    name = to_function_name(ctx.kernel.name) if ctx.kernel is not None else None
     upats = [(upat.location, upat.printable()) for _,_,upat in ctx.rewrites]
-    kernels[name].append((GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, code, upats), ctx.rewrites, ctx.sink))
+    kernels[name].append((GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats), ctx))
   return kernels
+
+@functools.lru_cache(None)
+def get_src(k) -> Optional[str]: return k.to_program().src if k else None
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
@@ -75,10 +78,10 @@ class Handler(BaseHTTPRequestHandler):
       self.end_headers()
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
-        metadata, rewrites, sink = list(kernels.values())[int(qkernel[0])][int(query["idx"][0])]
-        graphs, diffs, changed_nodes = reconstruct_graph(sink, rewrites)
+        metadata, ctx = list(kernels.values())[int(qkernel[0])][int(query["idx"][0])]
+        graphs, diffs, changed_nodes = reconstruct_graph(ctx.sink, ctx.rewrites)
         ret = json.dumps(asdict(GraphRewriteDetails(**asdict(metadata), graphs=list(map(uop_to_json, graphs)),
-                                                    diffs=diffs, changed_nodes=changed_nodes))).encode()
+                                                    diffs=diffs, changed_nodes=changed_nodes, kernel_code=get_src(ctx.kernel)))).encode()
       else: ret = json.dumps([list(map(lambda x:asdict(x[0]), v)) for v in kernels.values()]).encode()
     else:
       self.send_response(404)

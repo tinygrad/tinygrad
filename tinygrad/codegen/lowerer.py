@@ -1,14 +1,21 @@
 # the job of the lowerer is to do indexing
 from __future__ import annotations
-import functools
+import functools, itertools, operator
 from dataclasses import dataclass
 from typing import List, Tuple, cast, Optional
 from tinygrad.shape.shapetracker import ShapeTracker, variable_to_uop
 from tinygrad.shape.symbolic import sint
 from tinygrad.dtype import dtypes
-from tinygrad.ops import KernelInfo, BinaryOps, UOp, UOps, graph_rewrite, PatternMatcher, UPat
+from tinygrad.ops import KernelInfo, BinaryOps, UOp, UOps, graph_rewrite, PatternMatcher, UPat, resolve
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import all_int, get_contraction, prod, partition, flatten
+from tinygrad.helpers import all_int, prod, partition, flatten
+
+# returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
+def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> Optional[List[List[int]]]:
+  acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
+  try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
+  except ValueError: return None
+  return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
 
 # ***** indexing *****
 
@@ -50,7 +57,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   first_upcasted = len(full_shape)-ki.upcasted
   first_output_st: ShapeTracker = ast.src[0].st_arg
   # if there's no reduce, this is first_upcasted
-  first_reduce = [x!=y for x,y in zip(first_output_st.shape[:first_upcasted]+(0,), full_shape[:first_upcasted]+(1,))].index(True)
+  first_reduce = [resolve(x!=y) for x,y in zip(first_output_st.shape[:first_upcasted]+(0,), full_shape[:first_upcasted]+(1,))].index(True)
   local_loads = [x for x in ast.parents if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL]
   # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
   group_for_reduces = sum([any(j!=y for j in x) for x,y in zip(
