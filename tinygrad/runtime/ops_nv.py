@@ -2,8 +2,9 @@ from __future__ import annotations
 import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal
 from typing import Tuple, List, Any, cast, Union, Dict, Type
 from dataclasses import dataclass
-from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
-                            HCQArgsState, HCQProgram, HCQSignal, BufferOptions
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command
+from tinygrad.runtime.support.hcq import HCQArgsState, HCQProgram, HCQSignal
+from tinygrad.device import BufferOptions
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod
 from tinygrad.renderer.assembly import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
