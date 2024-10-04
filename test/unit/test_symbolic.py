@@ -1,6 +1,12 @@
 #!/usr/bin/env python
 import unittest, pickle
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, Node, sym_render, sym_infer, create_lt_node, create_ge_node
+from tinygrad.ops import UOp
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, Node, sym_infer
+
+# old functionality
+def sym_render(x:UOp) -> str: return x.render()
+def create_lt_node(x: UOp, y:int) -> UOp: return x<y
+def create_ge_node(x: UOp, y:int) -> UOp: return x>=y
 
 class TestSymbolicPickle(unittest.TestCase):
   def _test_pickle_unpickle(self, x): self.assertEqual(x, pickle.loads(pickle.dumps(x)))
