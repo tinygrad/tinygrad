@@ -5,16 +5,7 @@ from tinygrad.ops import UOp, UOps, exec_alu, ConstType
 
 sint = Union[int, UOp]
 
-# broken
-Node = UOp
-MulNode = UOp
-SumNode = UOp
-DivNode = UOp
-ModNode = UOp
-LtNode = UOp
-AndNode = UOp
 def NumNode(val:int): return UOp.const(dtypes.int, val)
-
 class Variable(UOp):
   def __reduce__(self): return Variable, self.arg
   def __new__(cls, expr:str, nmin:ConstType, nmax:ConstType):  # pylint: disable=signature-differs
