@@ -10,7 +10,7 @@ class TestTensorVariable(unittest.TestCase):
 
   def test_inner_tvar_node(self):
     vv = Variable("w", 0, 10).bind(2)
-    ret = Tensor.from_node(vv * 4).item()
+    ret = Tensor.from_uop(vv * 4).item()
     assert ret == 8
 
   def test_inner_tvar_mul(self):
