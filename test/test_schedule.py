@@ -20,7 +20,7 @@ from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, reduceop_fusor, st_fixup
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 from test.helpers import ast_const, is_dtype_supported, Context, timeit
-from tinygrad.lazy import LazyBuffer, view_supported_devices
+from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
 from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
