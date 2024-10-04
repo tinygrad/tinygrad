@@ -154,7 +154,7 @@ class EfficientNet:
       #print(k, v.shape)
       mv:Tensor = get_child(self, k)
       vnp = v #.astype(np.float32)
-      vnp = vnp if k != '_fc' else vnp.clang().T
+      vnp = vnp if k != '_fc' else vnp.T
       #vnp = vnp if vnp.shape != () else np.array([vnp])
 
       if mv.shape == vnp.shape:
