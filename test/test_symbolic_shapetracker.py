@@ -76,7 +76,7 @@ class TestSymbolicVarVals(unittest.TestCase):
     y = Variable("y", 1, 100).bind(4)
     z = Variable("z", 1, 100).bind(5)
     st = ShapeTracker.from_shape((x, 5, y)).shrink(((0, x), (z, z+1), (0, 3)))
-    assert st.views[-1].offset == y * z
+    self.assert_equal(st.views[-1].offset, y * z)
     assert st.var_vals == {Variable("x", 1, 100): 3, Variable("y", 1, 100):4, Variable("z", 1, 100): 5}
 
   def test_shrink_reshape(self):
