@@ -182,8 +182,8 @@ class TestIndexExpressions2d(unittest.TestCase):
     return [Variable(f"idx{i}", 0, d-1) for i,d in enumerate(shape)]
 
   def check_bounds(self, expr, offset, numel):
-    assert expr.min >= offset
-    assert expr.max <= offset + numel - 1
+    assert expr.vmin >= offset
+    assert expr.vmax <= offset + numel - 1
 
   def test_noop(self):
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):

@@ -58,7 +58,7 @@ if __name__ == "__main__":
       if DEBUG >= 1: print(t.__name__, rng)
       rngs.append(rng)
     if DEBUG >=1: print(expr)
-    space = list(itertools.product(range(u1.min, u1.max+1), range(u2.min, u2.max+1), range(u3.min, u3.max+1)))
+    space = list(itertools.product(range(u1.vmin, u1.vmax+1), range(u2.vmin, u2.vmax+1), range(u3.vmin, u3.vmax+1)))
     volume = len(space)
     for (v1, v2, v3) in random.sample(space, min(100, volume)):
       v = [v1,v2,v3]
