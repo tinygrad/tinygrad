@@ -651,11 +651,11 @@ class RewriteContext:
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
   if TRACK_MATCH_STATS >= 2:
-    from tinygrad.codegen.kernel import Kernel
     frm = sys._getframe(1)
     # get Kernel we are rewriting in the context of
     frm_walk: Optional[FrameType] = frm
-    while frm_walk is not None and not isinstance(kernel:=frm_walk.f_locals.get("self", None), Kernel): kernel, frm_walk = None, frm_walk.f_back
+    while frm_walk is not None and not ((kernel:=frm_walk.f_locals.get("self", None)) is not None and kernel.__module__ == "tinygrad.codegen.kernel"):
+      kernel, frm_walk = None, frm_walk.f_back
     contexts.append(TrackedRewriteContext((frm.f_code.co_filename, frm.f_lineno), sink, kernel))
   return RewriteContext(pm, ctx).rewrite(sink)
 
