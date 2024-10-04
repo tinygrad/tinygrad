@@ -25,7 +25,7 @@ def render(uop:UOp) -> str:
   uops = linearize_uop(full_graph_rewrite(uop.sink()))
   from tinygrad.renderer.cstyle import OpenCLRenderer
   class TestRenderer(OpenCLRenderer):
-    code_for_op = {**OpenCLRenderer().code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
+    code_for_op = {**OpenCLRenderer.code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
   fxn = TestRenderer().render("", uops)
   # print(fxn)
   return fxn.split("val0 = ")[1].split(";")[0]

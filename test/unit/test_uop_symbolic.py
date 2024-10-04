@@ -21,7 +21,7 @@ def render(self) -> Tuple[str, ConstType, ConstType]:
   if DEBUG>=5: print_uops(uops)
   from tinygrad.renderer.cstyle import CStyleLanguage
   class TestRenderer(CStyleLanguage):
-    code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
+    code_for_op = {**CStyleLanguage.code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
   rewritten_uop = [uop for uop in uops if uop.op is UOps.STORE][0].src[-1]
   fxn = TestRenderer().render("", uops)
   return fxn.split("data0[0] = ")[1].split(";")[0], rewritten_uop.vmin, rewritten_uop.vmax
