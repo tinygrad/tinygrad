@@ -1,6 +1,6 @@
 import time
 from tinygrad import Tensor, Device, GlobalCounters, TinyJit
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.ops import ReduceOps
 from tinygrad.multi import MultiLazyBuffer, all_reduce
 from tinygrad.engine.schedule import create_schedule

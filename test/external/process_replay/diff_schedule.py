@@ -5,7 +5,7 @@ from typing import DefaultDict, List, Set, Tuple
 from test.external.process_replay.helpers import print_diff
 from tinygrad.engine.schedule import LBScheduleItem, ScheduleItem
 from tinygrad.helpers import CI, DEBUG, Context, ContextVar, colored, diskcache_put, fetch, getenv
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item
 
 CAPTURING_PROCESS_REPLAY = ContextVar("CAPTURING_PROCESS_REPLAY", getenv("RUN_PROCESS_REPLAY"))

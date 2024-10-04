@@ -76,7 +76,7 @@ assert out.as_buffer().cast('I')[0] == 5
 
 print("******** third, the LazyBuffer ***********")
 
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule
 
