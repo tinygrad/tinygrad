@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Union, Optional, Any, Tuple, List, get_args
-from tinygrad.dtype import dtypes, DType, DTypeLike, ConstType, to_dtype
+from tinygrad.dtype import dtypes, DType, ConstType, to_dtype
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, SPLIT_REDUCEOP
 from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu, REDUCE_ALU
 from tinygrad.ops import identity_element, MathTrait, resolve, UOp
@@ -10,7 +10,7 @@ from tinygrad.device import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
 
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
-def create_lazybuffer(device:str, st:ShapeTracker, dtype:DTypeLike, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
+def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0: op, arg, srcs, base = MetaOps.CONST, 0, (), None
   dtype = to_dtype(dtype)
@@ -25,7 +25,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DTypeLike, op:Optional[
 
 view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "DSP", "DISK"}
 class LazyBuffer(MathTrait):
-  def __init__(self, device:str, st:ShapeTracker, dtype:DTypeLike,
+  def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None, metadata:Optional[Metadata]=None):
     self.device, self.st, self.dtype, self.shape, self.size, self.metadata = device, st, to_dtype(dtype), st.shape, st.size, metadata
@@ -68,7 +68,7 @@ class LazyBuffer(MathTrait):
   def lbs(self) -> List[LazyBuffer]: return [self]
 
   @staticmethod
-  def metaop(op, shape:Tuple[sint,...], dtype:DTypeLike, device:str, arg=None, src:Tuple[LazyBuffer, ...]=(), enable_cache=False) -> LazyBuffer:
+  def metaop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Tuple[LazyBuffer, ...]=(), enable_cache=False) -> LazyBuffer:
     assert isinstance(src, tuple)
     return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, src, enable_cache=enable_cache)
 
