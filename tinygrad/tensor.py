@@ -7,7 +7,7 @@ from collections import defaultdict
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA
+from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import MetaOps, truncate, smax, resolve, UOp, UOps, BinaryOps
 from tinygrad.device import Device, Buffer, BufferOptions
@@ -484,14 +484,14 @@ class Tensor:
     else: had_counter = True
 
     # if shape has 0, return zero tensor
-    if (num := math.ceil(((num_ := prod(shape)) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
+    if (num := ceildiv(((num_ := prod(shape)) * dtype.itemsize), 4)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
 
     # increment rng counter for devices
     if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
 
     # threefry random bits
-    counts0 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
-    counts1 = counts0 + math.ceil(num / 2)
+    counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
+    counts1 = counts0 + ceildiv(num, 2)
     bits = Tensor._threefry_random_bits(Tensor._seed, Tensor._device_seeds[device], counts0, counts1)[:num]
 
     # bitcast to uint with same number of bits
@@ -592,8 +592,8 @@ class Tensor:
     assert all(isinstance(s, (int, float)) for s in (start, stop, step)), f"symbolic arange not supported {start=}, {stop=}, {step=}"
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
-    if (stop-start)/step <= 0: return Tensor([], dtype=dtype, **kwargs)
-    return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
+    if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
+    return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
   def eye(n:int, m:Optional[int]=None, **kwargs) -> Tensor:
@@ -1298,7 +1298,7 @@ class Tensor:
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     assert chunks > 0, f"expect chunks to be greater than 0, got: {chunks}"
     dim = self._resolve_dim(dim)
-    return list(self.split(math.ceil(self.shape[dim]/chunks) if self.shape[dim] else [0]*chunks, dim=dim))
+    return list(self.split(ceildiv(self.shape[dim], chunks) if self.shape[dim] else [0]*chunks, dim=dim))
 
   def squeeze(self, dim:Optional[int]=None) -> Tensor:
     """
@@ -1896,10 +1896,10 @@ class Tensor:
     s_, d_ = make_pair(stride, len(k_)), make_pair(dilation, len(k_))
     assert len(k_) == len(s_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
     noop_, i_ = [None] * len(self.shape[:-len(k_)]), self.shape[-len(k_):]
-    o_ = [math.ceil((i - d * (k-1))/s) for i,d,k,s in zip(i_, d_, k_, s_)]
+    o_ = [ceildiv(i - d * (k-1), s) for i,d,k,s in zip(i_, d_, k_, s_)]
     if any(k > s for k,s in zip(k_, s_)) or any(d != 1 for d in d_):
       # repeats such that we don't need padding
-      xup = self.repeat([1]*len(noop_) + [math.ceil(k*(i+d) / i) for k,i,d in zip(k_, i_, d_)])
+      xup = self.repeat([1]*len(noop_) + [ceildiv(k*(i+d), i) for k,i,d in zip(k_, i_, d_)])
       # handle dilation
       xup = xup.shrink(tuple(noop_ + [(0,k*(i+d)) for k,i,d in zip(k_, i_, d_)])).reshape(noop_ + flatten((k,i+d) for k,i,d in zip(k_, i_, d_)))
       # handle stride
