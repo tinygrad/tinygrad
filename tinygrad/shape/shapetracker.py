@@ -6,8 +6,8 @@ from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite, resolve
-from tinygrad.codegen.uopgraph import sym, _get_chain
+from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite, resolve, _get_chain
+from tinygrad.codegen.uopgraph import sym
 
 def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.pyint, x) if isinstance(x, int) else x
 def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
