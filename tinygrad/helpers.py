@@ -41,7 +41,7 @@ def fully_flatten(l):
   return [l]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
-def round_up(num, amt:int): return (num+amt-1)//amt * amt
+def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
 def data64(data: int) -> Tuple[int, int]: return (data >> 32, data & 0xFFFFFFFF)
 def data64_le(data: int) -> Tuple[int, int]: return (data & 0xFFFFFFFF, data >> 32)
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
