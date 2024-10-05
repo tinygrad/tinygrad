@@ -28,7 +28,7 @@ def train_resnet():
   if getenv("LOGMLPERF"):
     from mlperf_logging import mllog
     import mlperf_logging.mllog.constants as mllog_constants
-    mllog.config(filename=f"result_{seed}.txt")
+    mllog.config(filename=f"result_resnet_{seed}.txt")
     mllog.config(root_dir=Path(__file__).parents[3].as_posix())  # truncate to log this. "file": "tinygrad/examples/mlperf/model_train.py"
     MLLOGGER = mllog.get_mllogger()
     if INITMLPERF:
@@ -621,7 +621,7 @@ def train_bert():
     from mlperf_logging import mllog
     import mlperf_logging.mllog.constants as mllog_constants
 
-    mllog.config(filename="bert.log")
+    mllog.config(filename=f"result_bert_{seed}.log")
     mllog.config(root_dir=Path(__file__).parents[3].as_posix())
     MLLOGGER = mllog.get_mllogger()
     MLLOGGER.logger.propagate = False
