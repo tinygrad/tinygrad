@@ -4,7 +4,7 @@ from test.external.process_replay.diff_schedule import CAPTURING_PROCESS_REPLAY,
 from tinygrad import Tensor, nn
 from tinygrad.helpers import Context
 from tinygrad.engine.schedule import _graph_schedule
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 
 class TestDiffSchedule(unittest.TestCase):
   def setUp(self):

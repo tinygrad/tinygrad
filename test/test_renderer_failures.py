@@ -10,7 +10,7 @@ from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.ops import BinaryOps, UOp, UOps
 from tinygrad.renderer import Program
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 
 def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
   for x in inputs: x.realize()

@@ -4,10 +4,11 @@ from types import FrameType
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
+from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, pretty_print, prod, getenv, all_same
-from tinygrad.shape.symbolic import Variable, sint
+from tinygrad.helpers import ContextVar, prod, getenv, all_same
 if TYPE_CHECKING:
+  from tinygrad.shape.symbolic import Variable, sint
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.codegen.kernel import Kernel
 
@@ -134,6 +135,7 @@ class UOps(FastEnum):
   # assignment ops
   STORE = auto()
   ASSIGN = auto()
+  BIND = auto()
 
   # control flow ops
   BARRIER = auto()
@@ -151,10 +153,32 @@ END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.E
 # With True as the default, this matches the old symbolic behavior
 # python3 -c 'from tinygrad.shape.symbolic import Variable; print(bool(Variable("a", 1, 10) < 4))' -> True
 def resolve(x, default:bool=True):
-  try: return bool(x)
-  except ValueError: return default
+  if not isinstance(x, UOp): return bool(x)
+  assert x.dtype is dtypes.bool, "UOp in resolve must be bool"
+  # NOTE: generating the text for the exception is expensive, so we do this
+  return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
+def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.vmax)
+def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
 
+# used for UOp and UPat
+def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
+  def dfs(x:Any, cache:dict):
+    for s in srcfn(x) or []:
+      cache.setdefault(s, [len(cache), 0, False])[1] += 1
+      if cache[s][1] == 1: dfs(s, cache)
+  if cache is None: dfs(x, cache:={})
+  if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d} x{cx[0]}"
+  cx[2], srcs = True, ('None' if srcfn(x) is None else ''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
+  return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
+
+ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
 class UOp(MathTrait):
+  def __reduce__(self): return UOp, (self.op, self.dtype, self.src, self.arg)
+  def __new__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
+    if (ret:=ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
+    ucache[key] = ret = super().__new__(cls)
+    return ret
+
   __slots__ = ["op", "dtype", "src", "arg"]
   def __init__(self, op: UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
     # TODO: instant check rules here make debugging easier
@@ -165,7 +189,9 @@ class UOp(MathTrait):
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
   def replace(self, **kwargs) -> UOp:
     for k in kwargs: assert k in self.__slots__, f"unkown replace arg, expected one of {self.__slots__}, got {k}"
-    return UOp(kwargs.get("op", self.op), kwargs.get("dtype", self.dtype), kwargs.get("src", self.src), kwargs.get("arg", self.arg))
+    new_args = (kwargs.get("op", self.op), kwargs.get("dtype", self.dtype), kwargs.get("src", self.src), kwargs.get("arg", self.arg))
+    if (self.op, self.dtype, self.src, self.arg) == new_args: return self
+    return UOp(*new_args)
   @property
   def has_st(self) -> bool: return self.op not in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL, UOps.BUFFER, UOps.CONST, UOps.DEFINE_VAR}
   @functools.cached_property
@@ -183,13 +209,13 @@ class UOp(MathTrait):
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
   # *** uop evaluation ***
-  def simplify(self): return graph_rewrite(self, simple_pm)
+  def simplify(self): return graph_rewrite(self, symbolic)
   def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is UOps.CONST else ret
   def _eval(self, dtype, expected_type) -> ConstType:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
     simple_self = self.simplify()
     vmin, vmax = simple_self._min_max
-    if vmin != vmax: raise ValueError(f"eval failed to be a single number, range is {vmin} to {vmax} in {simple_self}")
+    if vmin != vmax: raise ValueError(f"eval failed to be a single number, range is {vmin} to {vmax} in {simple_self.render()}")
     assert type(vmin) is expected_type, f"vmin is wrong dtype {vmin} != {expected_type}"
     return vmin
   def __bool__(self): return self._eval((dtypes.bool,), bool)
@@ -237,17 +263,26 @@ class UOp(MathTrait):
       out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(UOps.ALU, out_dtype, (self,)+src, arg)
   @staticmethod
-  @functools.lru_cache(None)
   def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return UOp._const(dtype, b)
   @staticmethod
   def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
+    #if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
+    if isinstance(b, UOp): return b.unbind()[0] if b.op is UOps.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
-  @functools.lru_cache(None)
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
+  def unbind(self) -> Tuple[Variable, int]:
+    assert self.op is UOps.BIND and self.src[0].op is UOps.DEFINE_VAR and self.src[1].op is UOps.CONST, f"can't unbind {self}"
+    from tinygrad.shape.symbolic import Variable
+    return cast(Variable, self.src[0]), self.src[1].arg
+  @property
+  def val(self) -> int: return self.unbind()[1]
+  # TODO: this is context rewrite
+  def substitute(self, dvars:Dict[UOp, UOp]):
+    if self in dvars: return dvars[self]
+    return self.replace(src=tuple(x.substitute(dvars) for x in self.src))
   @staticmethod
   def range(dtype:DType, start:ConstType, end:ConstType, idx:int):
     return UOp(UOps.RANGE, dtype=dtype, src=(UOp.const(dtype, start), UOp.const(dtype, end)), arg=(idx,))
@@ -258,11 +293,16 @@ class UOp(MathTrait):
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
-    return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(max(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
-  def vars(self) -> Set[UOp]: return set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
+    return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
+  def vars(self) -> Set[UOp]:
+    bound_vars = set([x for x in self.sparents if x.op is UOps.BIND and x.src[0].op is UOps.DEFINE_VAR])
+    bound_var_base = set(x.src[0] for x in bound_vars)
+    all_vars = set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
+    return bound_vars.union(set([x for x in all_vars if x not in bound_var_base]))
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
-    return sorted(set.union(*st_vars, [Variable(x.arg[0], x.arg[1], x.arg[2]) for x in self.vars()]), key=lambda v: v.expr)
+    from tinygrad.shape.symbolic import Variable
+    return sorted(set.union(*st_vars, [x.unbind()[0] if not isinstance(x, Variable) else x for x in self.vars()]), key=lambda v: v.arg)
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
@@ -290,6 +330,7 @@ class UOp(MathTrait):
     # NOTE: returned UOp is assumed to be CONST
     if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
+    if self.op is UOps.BIND: return self.src[0].vmin, self.src[0].vmax  # ignore the bound value
     if self.op is UOps.EXPAND: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
@@ -322,6 +363,9 @@ class UOp(MathTrait):
         if self.arg is BinaryOps.OR: return s0.vmin or s1.vmin, s0.vmax or s1.vmax
         if self.arg is BinaryOps.AND: return s0.vmin and s1.vmin, s0.vmax and s1.vmax
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
+  def render(self, simplify=True) -> str:
+    ret = graph_rewrite(self.simplify() if simplify else self, renderer)
+    return ret.arg if ret.op is UOps.NOOP else str(ret)
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -355,7 +399,8 @@ def exec_alu(op:Op, dtype:DType, operands):
 
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.CONST: return u.arg
-  if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1], u.arg[2])
+  if u.op is UOps.DEFINE_VAR: return u
+  #if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1], u.arg[2])
   if u.op is UOps.ALU: return exec_alu(u.arg, u.dtype, tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 
@@ -596,16 +641,14 @@ class RewriteContext:
   def __init__(self, pm, ctx):
     self.pm: PatternMatcher = pm
     self.ctx = ctx
-    self.nodes: Dict[Tuple, UOp] = {}
     self.replace: Dict[UOp, UOp] = {}
   def rewrite(self, n:UOp) -> UOp:
     if (rn := self.replace.get(n)) is not None: return rn
-    replace_source = (n.op, n.dtype, new_src:=tuple(map(self.rewrite, n.src)), n.arg)
-    if (found := self.nodes.get(replace_source)) is not None: self.replace[n] = found
-    else:
-      x = UOp(*replace_source) if new_src != n.src else n
-      self.nodes[replace_source] = self.replace[n] = found = self.rewrite(new_x) if (new_x := self.pm.rewrite(x, self.ctx)) is not None else x
-    return found
+    new_src = tuple(map(self.rewrite, n.src))
+    new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
+    self.replace[n] = ret = n if new_n is None else self.rewrite(new_n)
+    return ret
+
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
   if TRACK_MATCH_STATS >= 2:
     from tinygrad.codegen.kernel import Kernel
@@ -700,7 +743,107 @@ def type_verify(uops:List[UOp]):
     chk = cast(bool, spec.rewrite(u))
     assert chk is True, f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
 
-simple_pm = PatternMatcher([
+# *** most of symbolic lives here now ***
+
+def _get_chain(x:UOp, sep:BinaryOps):
+  if x.op is UOps.ALU and x.arg is sep:
+    for s in x.src: yield from _get_chain(s, sep)
+  else: yield x
+
+def mod_folding(x:UOp, c:int) -> Optional[UOp]:
+  # simplify x % c, None means no change
+
+  # simple cancel mod case
+  if 0 < c and 0 <= x.vmin and (quotient:=x.vmin//c) == x.vmax//c: return x-quotient*c
+
+  remainder, something_changed = [], False
+  for u in _get_chain(x, BinaryOps.ADD):
+    if (factor:=u.const_factor())%c != factor:
+      divides = u.divides(factor)*(factor%c)
+      assert divides is not None
+      remainder.append(divides)
+      something_changed = True
+    elif u.op is UOps.ALU and u.arg is BinaryOps.MOD and (s1:=u.src[1]).op is UOps.CONST and s1.arg%c == 0:
+      remainder.append(u.src[0])
+      something_changed = True
+    else: remainder.append(u)
+  if not something_changed: return None
+  return functools.reduce(operator.add, remainder)%c if remainder else x.const_like(0)
+
+def div_folding(x:UOp, c:int) -> Optional[UOp]:
+  # simplify x // c, None means no change
+
+  # simple cancel div case
+  if 0 <= x.vmin and x.vmax < c: return x.const_like(0)
+
+  quotient, remainder, rem_const, something_changed, gcd, divisor = [], [], 0, False, c, 1
+  for u in _get_chain(x, BinaryOps.ADD):
+    if u.op is UOps.CONST:
+      # add all const together first
+      if rem_const != 0: something_changed = True
+      rem_const += u.arg
+    elif (factor:=u.const_factor())%c == 0:
+      if factor:
+        divides = u.divides(c)
+        assert divides is not None
+        quotient.append(divides)
+      something_changed = True
+    else:
+      # divisor is the smallest common divisor of all MULs
+      if u.op is UOps.ALU and u.arg is BinaryOps.MUL and factor > 1 and c % factor == 0 and (divisor == 1 or divisor > factor): divisor = factor
+      remainder.append(u)
+      gcd = math.gcd(gcd, factor)
+
+  # handle the const
+  if rem_const%c != rem_const:
+    something_changed = True
+    quotient.append(x.const_like(rem_const//c))
+    rem_const = rem_const%c
+  if rem_const != 0: remainder.append(x.const_like(rem_const))
+
+  # x // c -> quotient + (remainder // div) // (c // div)
+  div = gcd if gcd > 1 else divisor
+
+  if not something_changed: return newx//(c//div) if 1 < div < c and (newx:=div_folding(x, div)) is not None else None
+  rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
+  quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
+  if quo is None: return x.const_like(0) if rem is None else cast(UOp, div_folding(rem, div))//(c//div)
+  return quo if rem is None else cast(UOp, div_folding(rem, div))//(c//div)+quo
+
+def lt_folding(x:UOp, c:int) -> Optional[UOp]:
+  return cast(UOp, x.divides(g)).lt(c//g) if ((g:=math.gcd(x.const_factor(), c)) > 1) else None
+
+def fold_unrolled_divs(divs:UOp):
+  # div pattern in unrolled arange
+  # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
+  add_chain, seen_const, ans = list(_get_chain(divs, BinaryOps.ADD)), [], None
+  for u in add_chain:
+    if not (u.op is UOps.ALU and u.arg is BinaryOps.IDIV and u.src[1].op is UOps.CONST and u.src[1].arg==len(add_chain)): return None
+    # assumed CONST is the last of an ADD
+    if (s0:=u.src[0]).op is UOps.ALU and s0.arg is BinaryOps.ADD and s0.src[1].op is UOps.CONST and s0.src[1].op is UOps.CONST:
+      seen_const.append(s0.src[1].arg)
+      s0 = s0.src[0]
+    else: seen_const.append(0)
+    if ans is None: ans = s0
+    if ans is not s0: return None
+  return ans if ans is not None and sorted(seen_const)==list(range(len(add_chain))) else None
+
+def is_irreducible(u:UOp): return u.op in (UOps.DEFINE_VAR, UOps.SPECIAL, UOps.RANGE)
+
+def canonicalize_simplex(X:UOp) -> Optional[UOp]:
+  # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
+  # returns x0 + x1 + ... in such case, or None if not
+  changed, ret = False, []
+  for u in _get_chain(X, BinaryOps.ADD):
+    # assumed the const is the last src of MUL
+    if u.op is UOps.ALU and u.arg is BinaryOps.MUL and u.src[1].op is UOps.CONST and u.src[1].arg > 0:
+      changed = True
+      u = u.src[0]
+    if not (is_irreducible(u) and u.vmin >= 0): return None
+    ret.append(u)
+  return functools.reduce(operator.add, ret) if changed else None
+
+symbolic = PatternMatcher([
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y'), lambda x,y: x|y),
@@ -719,9 +862,13 @@ simple_pm = PatternMatcher([
   ((UPat.var("x") & UPat.var("x")), lambda x: x),
   ((UPat.var("x") | UPat.var("x")), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
+  # group like
+  ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
   # ** combine terms **
   (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
+  (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
+  ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
   # ** zero folding **
   (UPat.var("x") < UPat.var("x"), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x < x -> False
   (UPat.var("x", dtype=dtypes.ints) != UPat.var("x"), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x != x -> False (only ints)
@@ -729,6 +876,9 @@ simple_pm = PatternMatcher([
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
   (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
+  # a conditional with the same results either way is a noop, also fold const conditionals
+  (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
+  (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat((UOps.VCONST, UOps.CONST))),
    lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
@@ -758,4 +908,44 @@ simple_pm = PatternMatcher([
   # mul add lt
   (((UPat.cvar("c0", vec=False)*UPat.var("x"))+UPat.var("x2")).lt(UPat.cvar("c1", vec=False)),
    lambda x,x2,c0,c1: x.lt(c1//c0) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax and x2.vmin >= 0 else None),
+  # ** move add consts to end (NOTE: this is still happening before constant folding) **
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
+  # ** move mul consts to end (NOTE: this is still happening before constant folding) **
+  (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x*c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
+  (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
+  # *** rules from symbolic ***
+  # unrolled arange div folding
+  (UPat(UOps.ALU, name="divs", src=[UPat(), UPat(UOps.ALU, arg=BinaryOps.IDIV)], arg=BinaryOps.ADD), fold_unrolled_divs),
+  # generic lt folding
+  (UPat.var("x", dtypes.sints).lt(UPat.cvar("c", vec=False)), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
+  # canonicalize a simplex with positive coefficients > 0
+  # not x < 1 -> X > 0
+  (UPat.var("x", dtypes.ints).lt(1).ne(True), lambda x: newx.lt(1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
+  # ** div **
+  # # div folding
+  (UPat.var("x", dtypes.sints) // UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=div_folding(x,c.arg)) is not None else None),
+  # ** mod **
+  # mod folding
+  (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+])
+
+symbolic_flat = symbolic+PatternMatcher([
+  # ** combine terms (opinionated) **
+  (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
+  # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
+  ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
+])
+
+# for debug
+renderer = PatternMatcher([
+  (UPat(UOps.DEFINE_VAR, name="x"), lambda x: UOp(UOps.NOOP, arg=x.arg[0])),
+  (UPat(UOps.CONST, name="x"), lambda x: UOp(UOps.NOOP, arg=str(x.arg))),
+  (UPat(UOps.BIND, src=UPat(UOps.NOOP), name="x"), lambda x: x.src[0]),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.ADD, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}+{x.src[1].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.MUL, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}*{x.src[1].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.IDIV, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}//{x.src[1].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.MOD, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}%{x.src[1].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.CMPLT, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}<{x.src[1].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.CMPNE, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}!={x.src[1].arg})")),
 ])

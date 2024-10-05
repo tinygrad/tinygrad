@@ -5,7 +5,7 @@ export MODEL="bert"
 export SUBMISSION_PLATFORM="tinybox_red"
 export DEFAULT_FLOAT="HALF" GPUS=6 BS=54 EVAL_BS=6
 
-export BEAM=4
+export BEAM=3
 export IGNORE_JIT_FIRST_BEAM=1
 export BASEDIR="/raid/datasets/wiki"
 
@@ -20,4 +20,4 @@ LOGFILE="bert_green_${DATETIME}_${SEED}.log"
 BENCHMARK=10 INITMLPERF=1 python3 examples/mlperf/model_train.py | tee $LOGFILE
 
 # run
-RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a $LOGFILE
+PARALLEL=0 RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a $LOGFILE
