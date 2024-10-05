@@ -357,7 +357,7 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
 
       # make things that can't be images not images
       if isinstance(buf.dtype, ImageDType) and (resolve(prod(buf.shape) != prod(buf.dtype.shape)) or
-                                                not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
+                                                all(buf.shape[x]%4!=0 for x in buf.st.unit_stride_axes())):
         if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
         buf.dtype = dtypes.float32
         # hack the underlying buffer too
