@@ -292,17 +292,21 @@ class UOp(MathTrait):
   @property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
   @functools.cached_property
-  def add_components(self) -> Tuple[Dict[UOp, ConstType], bool]:
+  def add_components(self) -> Tuple[Dict[UOp, ConstType], Optional[UOp]]:
     if self.op is UOps.ALU:
-      if self.arg is BinaryOps.MUL and self.src[1].op is UOps.CONST: return {self.src[0]:self.src[1].arg}, False
+      if self.arg is BinaryOps.MUL and self.src[1].op is UOps.CONST: return {self.src[0]:self.src[1].arg}, None
       if self.arg is BinaryOps.ADD:
-        (lhs,lt), (rhs,rt) = self.src[0].add_components, self.src[1].add_components
-        nd: Dict[UOp, ConstType] = {**lhs, **rhs}
-        if len(intersection:=(lhs.keys() & rhs.keys())):
-          for k in intersection: nd[k] = lhs[k] + rhs[k]
-          return nd, True
-        return nd, lt or rt
-    return {self:1}, False
+        (lhs,lop), (rhs,rop) = self.src[0].add_components, self.src[1].add_components
+        intersection = lhs.keys() & rhs.keys()
+        nd = {**lhs, **rhs}
+        if len(intersection):
+          for k in intersection: nd[k] = lhs[k]+rhs[k]
+          return nd, sum(k*v if v != 1 else k for k,v in nd.items())
+        if lop is not None and rop is not None: return nd, lop+rop
+        if lop is not None: return nd, lop+self.src[1]
+        if rop is not None: return nd, self.src[0]+rop
+        return nd, None
+    return {self:1}, None
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
@@ -831,7 +835,7 @@ simple_pm = PatternMatcher([
   (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x*c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
   (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
   # group like (can replace a bunch of other rules)
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, name="x"), lambda x: sum(k*v if v != 1 else k for k,v in ac[0].items()) if (ac:=x.add_components)[1] else None),
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, name="x"), lambda x: x.add_components[1]),
 ])
 
 # for debug
