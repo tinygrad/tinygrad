@@ -1,6 +1,5 @@
 from __future__ import annotations
-from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar, DefaultDict
-from collections import defaultdict
+from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar
 from types import FrameType
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle
 from enum import auto, IntEnum, Enum
@@ -292,6 +291,18 @@ class UOp(MathTrait):
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents}}
   @property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
+  @functools.cached_property
+  def add_components(self) -> Tuple[Dict[UOp, ConstType], bool]:
+    if self.op is UOps.ALU:
+      if self.arg is BinaryOps.MUL and self.src[1].op is UOps.CONST: return {self.src[0]:self.src[1].arg}, False
+      if self.arg is BinaryOps.ADD:
+        (lhs,lt), (rhs,rt) = self.src[0].add_components, self.src[1].add_components
+        nd: Dict[UOp, ConstType] = {**lhs, **rhs}
+        if len(intersection:=(lhs.keys() & rhs.keys())):
+          for k in intersection: nd[k] = lhs[k] + rhs[k]
+          return nd, True
+        return nd, lt or rt
+    return {self:1}, False
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
@@ -746,22 +757,6 @@ def type_verify(uops:List[UOp]):
 
 # *** most of symbolic lives here now ***
 
-def _get_chain(x:UOp, sep:BinaryOps):
-  if x.op is UOps.ALU and x.arg is sep:
-    for s in x.src: yield from _get_chain(s, sep)
-  else: yield x
-
-def group_add_like(add_chain:UOp):
-  mm: DefaultDict[UOp, ConstType] = defaultdict(int)
-  chain_length = 0
-  for r in _get_chain(add_chain, BinaryOps.ADD):
-    chain_length += 1
-    # NOTE: we only have to check the right arg for const since it's rewritten this way
-    if r.op is UOps.ALU and r.arg is BinaryOps.MUL and r.src[1].op is UOps.CONST: mm[r.src[0]] += r.src[1].arg
-    else: mm[r] += 1
-  if len(mm) == chain_length: return None
-  return sum(k*v if v != 1 else k for k,v in mm.items())
-
 simple_pm = PatternMatcher([
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
@@ -781,8 +776,6 @@ simple_pm = PatternMatcher([
   ((UPat.var("x") & UPat.var("x")), lambda x: x),
   ((UPat.var("x") | UPat.var("x")), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
-  # group like
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, name="add_chain"), group_add_like),
   # ** combine terms **
   (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
@@ -837,6 +830,8 @@ simple_pm = PatternMatcher([
   # ** move mul consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x*c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
   (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
+  # group like (can replace a bunch of other rules)
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, name="x"), lambda x: sum(k*v if v != 1 else k for k,v in ac[0].items()) if (ac:=x.add_components)[1] else None),
 ])
 
 # for debug
