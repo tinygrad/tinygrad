@@ -364,7 +364,7 @@ class Tensor:
         if not isinstance(total:=self.shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {self.shape=}, {axis=}")
         sz = round_up(total, len(devices)) // len(devices)
         splits = tuple([max(0, min(sz, total - sz*i)) for i in range(len(devices))])
-      assert sum(splits) == total, "specified splits do not sum up to axis shape"
+      assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
       boundaries = tuple(itertools.accumulate(splits))
       bounds = tuple(zip((0,) + boundaries, boundaries))
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis, bounds), device=devices, requires_grad=self.requires_grad)
