@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar
+from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar, DefaultDict
+from collections import defaultdict
 from types import FrameType
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle
 from enum import auto, IntEnum, Enum
@@ -745,6 +746,22 @@ def type_verify(uops:List[UOp]):
 
 # *** most of symbolic lives here now ***
 
+def _get_chain(x:UOp, sep:BinaryOps):
+  if x.op is UOps.ALU and x.arg is sep:
+    for s in x.src: yield from _get_chain(s, sep)
+  else: yield x
+
+def group_add_like(add_chain:UOp):
+  mm: DefaultDict[UOp, ConstType] = defaultdict(int)
+  chain_length = 0
+  for r in _get_chain(add_chain, BinaryOps.ADD):
+    chain_length += 1
+    # NOTE: we only have to check the right arg for const since it's rewritten this way
+    if r.op is UOps.ALU and r.arg is BinaryOps.MUL and r.src[1].op is UOps.CONST: mm[r.src[0]] += r.src[1].arg
+    else: mm[r] += 1
+  if len(mm) == chain_length: return None
+  return sum(k*v if v != 1 else k for k,v in mm.items())
+
 simple_pm = PatternMatcher([
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
@@ -765,12 +782,16 @@ simple_pm = PatternMatcher([
   ((UPat.var("x") | UPat.var("x")), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
   # group like
-  ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, name="add_chain"), group_add_like),
   # ** combine terms **
   (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
   (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
+  # ** combine terms (opinionated) **
+  (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
+  # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
+  ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
   # ** zero folding **
   (UPat.var("x") < UPat.var("x"), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x < x -> False
   (UPat.var("x", dtype=dtypes.ints) != UPat.var("x"), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x != x -> False (only ints)
