@@ -487,7 +487,7 @@ class Tensor:
     if (num := math.ceil(((num_ := prod(shape)) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
 
     # increment rng counter for devices
-    if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
+    if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num).contiguous()
 
     # threefry random bits
     counts0 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
