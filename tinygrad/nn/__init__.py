@@ -75,7 +75,15 @@ def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation
   print(t.numpy())
   ```
   """
-  return Conv2d(in_channels, out_channels, (kernel_size,), stride, padding, dilation, groups, bias)
+  if isinstance(kernel_size, int): kernel_size = (kernel_size,)
+  if isinstance(padding, str) and padding == 'same':
+    if isinstance(stride, int): stride = (stride,)
+    if isinstance(dilation, int): dilation = (dilation,)
+    padding = []
+    for k, s, d in zip(kernel_size, stride, dilation):
+      total_padding = (s - 1) + d * (k - 1)
+      padding.append(total_padding // 2)  
+  return Conv2d(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
 
 class Conv2d:
   """
