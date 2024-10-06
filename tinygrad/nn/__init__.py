@@ -291,11 +291,11 @@ class RMSNorm:
   print(norm(t).numpy())
   ```
   """
-  def __init__(self, dim, eps=1e-6): self.eps, self.weight = eps, Tensor.ones(dim)
+  def __init__(self, dim, eps=1e-6, bias=False): self.eps, self.weight, self.bias = eps, Tensor.ones(dim), Tensor.zeros(dim) if bias else 0
 
   def _norm(self, x:Tensor): return x * (x.square().mean(-1, keepdim=True) + self.eps).rsqrt()
 
-  def __call__(self, x:Tensor) -> Tensor: return self._norm(x.float()).cast(x.dtype) * self.weight
+  def __call__(self, x:Tensor) -> Tensor: return self._norm(x.float()).cast(x.dtype) * self.weight + self.bias
 
 class Embedding:
   """
