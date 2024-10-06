@@ -752,7 +752,12 @@ def train_bert():
   else:
     i, train_data = start_step, get_fake_data_bert(GPUS, BS)
 
+  epoch_started = False
   while train_data is not None and i < train_steps and not achieved:
+    if not epoch_started and MLLOGGER and RUNMLPERF:
+      MLLOGGER.start(key=mllog_constants.EPOCH_START, value=i+1, metadata=dict(epoch_num=i+1))
+      epoch_started = True
+
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
     st = time.perf_counter()
@@ -801,6 +806,8 @@ def train_bert():
     # ** eval loop **
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
       if MLLOGGER and RUNMLPERF:
+        epoch_started = False
+        MLLOGGER.event(key=mllog_constants.EPOCH_STOP, value=i+1, metadata=dict(epoch_num=i+1))
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": 1, "epoch_count": 1, "step_num": i})
       if getenv("RESET_STEP", 1): train_step_bert.reset()
       eval_lm_losses = []
