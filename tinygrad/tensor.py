@@ -426,7 +426,7 @@ class Tensor:
     return r
 
   _seed: int = int(time.time())
-  _device_seeds: Dict[str, int] = {}
+  _device_seeds: Dict[str, Tensor] = {}
   _device_rng_counters: Dict[str, Tensor] = {}
   @staticmethod
   def manual_seed(seed=0):
@@ -447,9 +447,8 @@ class Tensor:
     Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
 
   @staticmethod
-  def _threefry_random_bits(key0, key1, counts0, counts1):
+  def _threefry_random_bits(key, counts0, counts1):
     x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
-    key = (Tensor([key0], device=x.device, dtype=dtypes.uint64, requires_grad=False) << 32) | key1
     x = F.Threefry.apply(*x._broadcasted(key))
     counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
     return counts0.cat(counts1)
@@ -478,7 +477,9 @@ class Tensor:
 
     # generate per device seeds and rng counter if we haven't seen this device yet
     if device not in Tensor._device_seeds:
-      Tensor._device_seeds[device] = int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big") & 0xffffffff
+      Tensor._device_seeds[device] = Tensor([((Tensor._seed & 0xffffffff) << 32) \
+        | int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big") & 0xffffffff],
+                                            device=device, dtype=dtypes.uint64, requires_grad=False)
       Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint32, requires_grad=False)
       had_counter = False
     else: had_counter = True
@@ -487,12 +488,12 @@ class Tensor:
     if (num := ceildiv(((num_ := prod(shape)) * dtype.itemsize), 4)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
 
     # increment rng counter for devices
-    if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
+    if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num).contiguous()
 
     # threefry random bits
     counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
     counts1 = counts0 + ceildiv(num, 2)
-    bits = Tensor._threefry_random_bits(Tensor._seed, Tensor._device_seeds[device], counts0, counts1)[:num]
+    bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts0, counts1)[:num]
 
     # bitcast to uint with same number of bits
     _, nmant = dtypes.finfo(dtype)
