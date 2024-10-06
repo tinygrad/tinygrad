@@ -98,6 +98,14 @@ timeit.repeat(step, repeat=5, number=1)
 
 So around 75 ms on T4 colab.
 
+If you want to see a breakdown of the time by kernel:
+
+```python
+from tinygrad import GlobalCounters, Context
+GlobalCounters.reset()
+with Context(DEBUG=2): step()
+```
+
 ### Why so slow?
 
 Unlike PyTorch, tinygrad isn't designed to be fast like that. While 75 ms for one step is plenty fast for debugging, it's not great for training. Here, we introduce the first quintessentially tinygrad concept, the `TinyJit`.
