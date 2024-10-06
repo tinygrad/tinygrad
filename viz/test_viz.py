@@ -7,7 +7,7 @@ from tinygrad import Tensor
 from tinygrad.engine.realize import lower_schedule
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.helpers import CI, Context, all_same, DEBUG, colored, getenv
+from tinygrad.helpers import Context, all_same, DEBUG, colored, getenv
 from tinygrad.codegen.uopgraph import sym, devectorize, float4_folding
 from test.external.process_replay.helpers import print_diff
 from viz.serve import reconstruct_graph, uop_to_json, load_kernels
@@ -23,7 +23,7 @@ class TestViz(unittest.TestCase):
   def assert_valid_ctx(self, contexts:List[TrackedRewriteContext]):
     assert len(contexts) != 0
     for i,ctx in enumerate(contexts):
-      try: graphs,_,_ = reconstruct_graph(ctx.sink, ctx.rewrites)
+      try: graphs,_,_ = reconstruct_graph(ctx)
       except Exception as e:
         print(colored(f"failed to create graph for ctx {i}", "red"))
         raise e
@@ -70,7 +70,7 @@ class TestViz(unittest.TestCase):
     ])
     ret = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, ret)
-    graphs,_,_ = reconstruct_graph(contexts[0].sink, contexts[0].rewrites)
+    graphs,_,_ = reconstruct_graph(contexts[0])
     assert graphs[-1].key == ret.key
     self.assert_valid_ctx(contexts)
 

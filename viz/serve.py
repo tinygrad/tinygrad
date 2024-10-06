@@ -21,7 +21,7 @@ def reconstruct_graph(ctx:TrackedRewriteContext) -> Tuple[List[UOp], List[List[s
     new_sink = replace_uop(uops[-1], {**seen_replaces})
     # sanity check
     if new_sink is uops[-1]:
-      raise AssertionError(f"rewritten sink wasn't rewritten!")
+      raise AssertionError(f"rewritten sink wasn't rewritten! {i} {upat.location}")
     # update ret data
     changed_nodes.append([id(x) for x in rewritten.sparents if x.op is not UOps.CONST])
     diffs.append(list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines())))
