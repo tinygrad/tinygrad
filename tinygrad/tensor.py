@@ -1753,7 +1753,7 @@ class Tensor:
     m = self.max(axis=axis, keepdim=True)
     return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + m.squeeze(axis)
 
-  def logcumsumexp(self, axis=None):
+  def logcumsumexp(self, axis=0):
     """
     Computes the log-cumsum-exp of the tensor along the specified axis or axes.
 
