@@ -307,6 +307,14 @@ class TestJit(unittest.TestCase):
     assert len(res3) == 10, "All values should be different, rand works in jit."
     assert res3 != res2, "Jit rand is diff with diff seeds"
 
+  def test_jit_random_after_unrealized_random(self):
+    @TinyJit
+    def f(): return Tensor.rand()
+    Tensor.manual_seed(1234)
+    Tensor.rand()
+    res = [f().numpy() for _ in range(3)]
+    assert res[1] != res[2]
+
   def test_jit_realization_and_sampling(self):
     w = Tensor.eye(5)
 

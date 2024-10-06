@@ -21,24 +21,26 @@ class TestGC(unittest.TestCase):
     (a*b).mean().backward()
     assert (tensors_allocated() > 0)
     del a,b
-    assert (tensors_allocated() == 1) # one for Tensor._device_rng_counters
+    assert (tensors_allocated() == 2) # one for Tensor._device_rng_counters, and one for Tensor._device_seeds
+    Tensor.manual_seed(0)
 
   def test_gc_complex(self):
     Tensor.manual_seed(0)
     a = Tensor(np.zeros((4, 4), dtype=np.float32), requires_grad=True)
     b = Tensor.rand(4, 4, requires_grad=True)
-    assert (tensors_allocated() == 4)
-    (a*b).mean().backward()
     assert (tensors_allocated() == 5)
+    (a*b).mean().backward()
+    assert (tensors_allocated() == 6)
     del b
-    assert (tensors_allocated() == 3)
+    assert (tensors_allocated() == 4)
     b = Tensor(np.zeros((4, 4), dtype=np.float32), requires_grad=True)
     print(tensors_allocated())
     (a*b).mean().backward()
     print(tensors_allocated())
-    assert (tensors_allocated() == 5)
+    assert (tensors_allocated() == 6)
     del b
-    assert (tensors_allocated() == 3)
+    assert (tensors_allocated() == 4)
+    Tensor.manual_seed(0)
 
   def test_schedule_gc(self):
     init = bufs_allocated()
