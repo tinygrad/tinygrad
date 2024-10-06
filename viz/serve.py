@@ -111,7 +111,7 @@ if __name__ == "__main__":
   kernels = load_kernels(contexts)
   if getenv("FUZZ_VIZ"):
     for v in tqdm(kernels.values()):
-      for _,ctx in v: reconstruct_graph(ctx)
+      for _,ctx,_ in v: reconstruct_graph(ctx)
   print("*** loaded kernels")
   server = HTTPServer(('', 8000), Handler)
   st = time.perf_counter()
