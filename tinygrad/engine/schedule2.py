@@ -3,7 +3,7 @@ from typing import Dict, List, Tuple, cast
 import functools
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.ops import REDUCE_ALU, MetaOps, PatternMatcher, ReduceOps, UOp, UOps, UPat, UnaryOps, graph_rewrite
 from tinygrad.shape.shapetracker import ShapeTracker
 

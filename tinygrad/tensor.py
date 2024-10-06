@@ -6,13 +6,13 @@ from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Seque
 from collections import defaultdict
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype
-from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, get_shape, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA
-from tinygrad.lazy import LazyBuffer
+from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
+from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv
 from tinygrad.multi import MultiLazyBuffer
-from tinygrad.ops import MetaOps, truncate, smax, resolve
+from tinygrad.ops import MetaOps, truncate, smax, resolve, UOp, UOps, BinaryOps
 from tinygrad.device import Device, Buffer, BufferOptions
-from tinygrad.shape.symbolic import sint, Variable, MulNode, SumNode, NumNode, Node
+from tinygrad.shape.symbolic import sint, Variable
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule, memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
@@ -56,6 +56,14 @@ def _fromnp(x: 'np.ndarray') -> LazyBuffer:  # type: ignore [name-defined] # noq
   ret.buffer.allocate(x)
   del ret.srcs
   return ret
+
+def get_shape(x) -> Tuple[int, ...]:
+  if not hasattr(x, "__len__") or not hasattr(x, "__getitem__") or isinstance(x, str): return ()
+  if (aapi := (hasattr(x, "shape") and x.shape == ())): return ()
+  subs = [get_shape(xi) for xi in x]
+  if not all_same(subs): raise ValueError(f"inhomogeneous shape from {x}")
+  slen = 1 if aapi else len(subs)
+  return (slen,) + (subs[0] if subs else ())
 
 def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> LazyBuffer:
   if isinstance(x, bytes): ret, data = LazyBuffer.metaop(MetaOps.EMPTY, (len(x)//dtype.itemsize,), dtype, "PYTHON"), x
@@ -109,7 +117,7 @@ class Tensor:
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
-  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, 'np.ndarray', bytes, MultiLazyBuffer, Variable, pathlib.Path],  # type: ignore [name-defined] # noqa: F821
+  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, 'np.ndarray', bytes, MultiLazyBuffer, UOp, pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
@@ -129,7 +137,9 @@ class Tensor:
     # create a LazyBuffer from the different types of inputs
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, get_args(ConstType)): data = _metaop(MetaOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
-    elif isinstance(data, Variable): data = _metaop(MetaOps.CONST, tuple(), dtype or dtypes.from_py(data.unbind()[1]), device, data)
+    elif isinstance(data, UOp):
+      assert data.op is UOps.BIND and data.src[0].op is UOps.DEFINE_VAR and data.src[1].op is UOps.CONST, f"can't create tensor from UOp {data}"
+      data = _metaop(MetaOps.CONST, tuple(), dtype or data.dtype, device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
     elif isinstance(data, (list, tuple)):
       if dtype is None:
@@ -347,17 +357,17 @@ class Tensor:
 
     """
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
-    canonical_devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
+    devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
     if axis is not None:
       if axis < 0: axis += len(self.shape)
       if splits is None:
-        sz = round_up(self.shape[axis], len(devices)) // len(devices)
-        splits = tuple([max(0, min(sz, self.shape[axis] - sz*i)) for i in range(len(devices))])
+        if not isinstance(total:=self.shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {self.shape=}, {axis=}")
+        sz = round_up(total, len(devices)) // len(devices)
+        splits = tuple([max(0, min(sz, total - sz*i)) for i in range(len(devices))])
       assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
       boundaries = tuple(itertools.accumulate(splits))
       bounds = tuple(zip((0,) + boundaries, boundaries))
-    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis, bounds),
-                  device=canonical_devices, requires_grad=self.requires_grad)
+    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis, bounds), device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None, splits:Optional[Tuple[int, ...]]=None):
     """
@@ -367,21 +377,23 @@ class Tensor:
     return self
 
   @staticmethod
-  def from_node(y:Node, **kwargs) -> Tensor:
-    if isinstance(y, NumNode): return Tensor(y.b, **kwargs, requires_grad=False)
-    if isinstance(y, Variable): return Tensor(y, **kwargs, requires_grad=False)
-    if isinstance(y, MulNode): return Tensor.from_node(y.a, **kwargs) * y.b
-    if isinstance(y, SumNode): return Tensor.from_node(y.nodes[0], **kwargs) + sum(y.nodes[1:])
-    raise RuntimeError(f"unhandled Node {y}")
+  def from_uop(y:UOp, **kwargs) -> Tensor:
+    if y.op is UOps.BIND: return Tensor(y, **kwargs, requires_grad=False)   # this is the only UOp allowed in Tensor
+    if y.op is UOps.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
+    if y.op is UOps.ALU:
+      if y.arg is BinaryOps.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
+      if y.arg is BinaryOps.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
+    raise RuntimeError(f"unhandled UOp {y}")
 
   # ***** creation entrypoint *****
 
   @staticmethod
   def _metaop(op, shape, device:Optional[Union[Tuple[str, ...], str]]=None, dtype:Optional[DTypeLike]=None, arg=None, **kwargs):
+    dtype = to_dtype(dtype) if dtype is not None else dtypes.default_float
     if isinstance(device, tuple):
-      return Tensor(MultiLazyBuffer([LazyBuffer.metaop(op, shape, dtype or dtypes.default_float, Device.canonicalize(d), arg) \
-                                      for d in device], None), device, dtype, **kwargs)
-    return Tensor(LazyBuffer.metaop(op, shape, dtype or dtypes.default_float, Device.canonicalize(device), arg), device, dtype, **kwargs)
+      return Tensor(MultiLazyBuffer([LazyBuffer.metaop(op, shape, dtype, Device.canonicalize(d), arg) for d in device], None),
+                    device, dtype, **kwargs)
+    return Tensor(LazyBuffer.metaop(op, shape, dtype, Device.canonicalize(device), arg), device, dtype, **kwargs)
 
   @staticmethod
   def empty(*shape, **kwargs):
@@ -472,14 +484,14 @@ class Tensor:
     else: had_counter = True
 
     # if shape has 0, return zero tensor
-    if (num := math.ceil(((num_ := prod(shape)) * dtype.itemsize) / 4)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
+    if (num := ceildiv(((num_ := prod(shape)) * dtype.itemsize), 4)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
 
     # increment rng counter for devices
     if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
 
     # threefry random bits
-    counts0 = (Tensor.arange(math.ceil(num / 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
-    counts1 = counts0 + math.ceil(num / 2)
+    counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
+    counts1 = counts0 + ceildiv(num, 2)
     bits = Tensor._threefry_random_bits(Tensor._seed, Tensor._device_seeds[device], counts0, counts1)[:num]
 
     # bitcast to uint with same number of bits
@@ -580,8 +592,8 @@ class Tensor:
     assert all(isinstance(s, (int, float)) for s in (start, stop, step)), f"symbolic arange not supported {start=}, {stop=}, {step=}"
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
-    if (stop-start)/step <= 0: return Tensor([], dtype=dtype, **kwargs)
-    return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
+    if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
+    return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
   def eye(n:int, m:Optional[int]=None, **kwargs) -> Tensor:
@@ -1063,6 +1075,7 @@ class Tensor:
     if any(abs(st) != 1 for st in strides):
       strides = tuple(abs(s) for s in strides)
       # pad shape to multiple of stride
+      if not all_int(ret.shape): raise RuntimeError("symbolic shape not supprted")
       ret = ret.pad(tuple((0, round_up(s, st) - s) for s, st in zip(ret.shape, strides)))
       ret = ret.reshape(tuple(flatten((s // st, st) for s, st in zip(ret.shape, strides))))
       ret = ret.shrink(tuple(flatten(((0, s), (0, 1)) for s in ret.shape[::2]))).reshape(ret.shape[::2])
@@ -1285,7 +1298,7 @@ class Tensor:
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     assert chunks > 0, f"expect chunks to be greater than 0, got: {chunks}"
     dim = self._resolve_dim(dim)
-    return list(self.split(math.ceil(self.shape[dim]/chunks) if self.shape[dim] else [0]*chunks, dim=dim))
+    return list(self.split(ceildiv(self.shape[dim], chunks) if self.shape[dim] else [0]*chunks, dim=dim))
 
   def squeeze(self, dim:Optional[int]=None) -> Tensor:
     """
@@ -1661,12 +1674,13 @@ class Tensor:
     """
     return self.std(axis, keepdim, correction), self.mean(axis, keepdim)
 
-  def _softmax(self, axis):
-    m = self - self.max(axis=axis, keepdim=True)
+  def _softmax(self, axis, dtype:Optional[DTypeLike]=None):
+    x = self.cast(dtype) if dtype is not None else self
+    m = x - x.max(axis=axis, keepdim=True)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self, axis=-1):
+  def softmax(self, axis=-1, dtype:Optional[DTypeLike]=None):
     """
     Applies the softmax function to the tensor along the specified axis.
 
@@ -1686,10 +1700,10 @@ class Tensor:
     print(t.softmax(axis=0).numpy())
     ```
     """
-    _, e, ss = self._softmax(axis)
+    _, e, ss = self._softmax(axis, dtype)
     return e.div(ss)
 
-  def log_softmax(self, axis=-1):
+  def log_softmax(self, axis=-1, dtype:Optional[DTypeLike]=None):
     """
     Applies the log-softmax function to the tensor along the specified axis.
 
@@ -1709,7 +1723,7 @@ class Tensor:
     print(t.log_softmax(axis=0).numpy())
     ```
     """
-    m, _, ss = self._softmax(axis)
+    m, _, ss = self._softmax(axis, dtype)
     return m - ss.log()
 
   def logsumexp(self, axis=None, keepdim=False):
@@ -1883,10 +1897,10 @@ class Tensor:
     s_, d_ = make_pair(stride, len(k_)), make_pair(dilation, len(k_))
     assert len(k_) == len(s_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
     noop_, i_ = [None] * len(self.shape[:-len(k_)]), self.shape[-len(k_):]
-    o_ = [math.ceil((i - d * (k-1))/s) for i,d,k,s in zip(i_, d_, k_, s_)]
+    o_ = [ceildiv(i - d * (k-1), s) for i,d,k,s in zip(i_, d_, k_, s_)]
     if any(k > s for k,s in zip(k_, s_)) or any(d != 1 for d in d_):
       # repeats such that we don't need padding
-      xup = self.repeat([1]*len(noop_) + [math.ceil(k*(i+d) / i) for k,i,d in zip(k_, i_, d_)])
+      xup = self.repeat([1]*len(noop_) + [ceildiv(k*(i+d), i) for k,i,d in zip(k_, i_, d_)])
       # handle dilation
       xup = xup.shrink(tuple(noop_ + [(0,k*(i+d)) for k,i,d in zip(k_, i_, d_)])).reshape(noop_ + flatten((k,i+d) for k,i,d in zip(k_, i_, d_)))
       # handle stride
@@ -2088,12 +2102,11 @@ class Tensor:
     # TODO: someday the optimizer will find this on it's own
     # for now this is a two stage cumsum
     SPLIT = 256
-    if self.shape[axis] <= SPLIT*2: return self._cumsum(axis)
-    ret = self.transpose(axis,-1).pad2d((round_up(self.shape[axis], SPLIT)-self.shape[axis], 0))
-    ret = ret.unflatten(-1, (-1, SPLIT))._cumsum(-1)
+    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumsum(axis)
+    ret = self.transpose(axis,-1).pad2d((round_up(s, SPLIT)-s, 0)).unflatten(-1, (-1, SPLIT))._cumsum(-1)
     base_add = ret[..., -1]._cumsum(-1, _first_zero=True)
     base_add = base_add.unsqueeze(-1).expand(*base_add.shape, ret.shape[-1])
-    def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -self.shape[axis]:].transpose(axis,-1)
+    def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
     return fix(ret) + fix(base_add)
 
   @staticmethod
@@ -2680,17 +2693,18 @@ class Tensor:
     # first pad left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
     padded, _ = _pad_left(self.shape, shape)
     # for each dimension, check either from_ is 1, or it does not change
-    if any(from_ != 1 and from_ != to for from_,to in zip(padded, shape)): raise ValueError(f"cannot broadcast from shape={self.shape} to {shape=}")
+    if any(resolve(from_ != 1, False) and resolve(from_ != to, False) for from_,to in zip(padded, shape)):
+      raise ValueError(f"cannot broadcast from shape={self.shape} to {shape=}")
     return F.Expand.apply(self.reshape(padded), shape=shape)
 
-  def _broadcasted(self, y:Union[Tensor, Node, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
+  def _broadcasted(self, y:Union[Tensor, UOp, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
-      assert isinstance(y, (*get_args(ConstType), Node)), f"{type(y)=}, {y=}"
+      assert isinstance(y, (*get_args(ConstType), UOp)), f"{type(y)=}, {y=}"
       if isinstance(x.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
-      elif not isinstance(y, Node): y_dtype = dtypes.from_py(y)
-      if isinstance(y, Node): y = Tensor.from_node(y, device=x.device)
+      elif not isinstance(y, UOp): y_dtype = dtypes.from_py(y)
+      if isinstance(y, UOp): y = Tensor.from_uop(y, device=x.device)
       else: y = Tensor(dtypes.as_const(y, y_dtype), x.device, y_dtype, requires_grad=False)
 
     if match_dtype and x.dtype != y.dtype:
@@ -3030,7 +3044,7 @@ class Tensor:
     """
     return functools.reduce(lambda x,f: f(x), ll, self)
 
-  def layernorm(self, axis=-1, eps:float=1e-5) -> Tensor:
+  def layernorm(self, axis:Union[int,Tuple[int,...]]=-1, eps:float=1e-5) -> Tensor:
     """
     Applies Layer Normalization over a mini-batch of inputs.
 
@@ -3467,9 +3481,6 @@ class Tensor:
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
-
-# register functions to move between devices
-for device in Device._devices: setattr(Tensor, f"{device.lower()}", functools.partialmethod(Tensor.to, device))
 
 if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)

@@ -7,7 +7,7 @@ from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV
                              GlobalCounters, all_same, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ImageDType, dtypes
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from tinygrad.shape.view import View, strides_for_shape
@@ -146,7 +146,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
     if buf.op is MetaOps.CONST:
-      if isinstance(val:=buf.arg, Variable): var_vals.update([val.unbind()])
+      if isinstance(val:=buf.arg, UOp): var_vals.update([val.unbind()])
       return ubuf.swizzle(unbound_st)
     if buf in assign_targets and not (unbound_st.contiguous or (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and \
         ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask))):

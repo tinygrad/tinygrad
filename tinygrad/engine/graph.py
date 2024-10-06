@@ -4,7 +4,7 @@ from typing import List, Any, DefaultDict
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps, UOps, UOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, GlobalCounters
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 
 with contextlib.suppress(ImportError): import networkx as nx
 
