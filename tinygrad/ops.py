@@ -590,6 +590,7 @@ class TrackedRewriteContext:
   kernel: Optional[Kernel] = None                                         # the kernel being rewritten
   rewrites: List[Tuple[UOp, UOp, UPat]] = field(default_factory=list)     # all rewrites of sparents. (before, after, UPat)
 contexts: List[TrackedRewriteContext] = []
+rewrite_stack: List[TrackedRewriteContext] = []
 class TrackedPatternMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     super().__init__(patterns)
@@ -610,7 +611,7 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += (et:=time.perf_counter()-st)
         match_stats[p][3] += et
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2 and contexts and isinstance(ret, UOp): contexts[-1].rewrites.append((uop, ret, p))
+        if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0 and isinstance(ret, UOp): rewrite_stack[-1].rewrites.append((uop, ret, p))
         return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -656,8 +657,10 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
     # get Kernel we are rewriting in the context of
     frm_walk: Optional[FrameType] = frm
     while frm_walk is not None and not isinstance(kernel:=frm_walk.f_locals.get("self", None), Kernel): kernel, frm_walk = None, frm_walk.f_back
-    contexts.append(TrackedRewriteContext((frm.f_code.co_filename, frm.f_lineno), sink, kernel))
-  return RewriteContext(pm, ctx).rewrite(sink)
+    rewrite_stack.append(TrackedRewriteContext((frm.f_code.co_filename, frm.f_lineno), sink, kernel))
+  ret = RewriteContext(pm, ctx).rewrite(sink)
+  if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
+  return ret
 
 # ***** uop type spec *****
 
