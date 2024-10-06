@@ -1045,7 +1045,7 @@ class Tensor:
     def to_mop_args(self) -> Tuple[int, int, int]: # Tuple[start, end, step] for movement ops
       assert isinstance(self.index, (int, slice, Tensor)), "bro."
       if isinstance(self.index, Tensor): return (0, self.size, 1)
-      if isinstance(i := self.index, int): return (i, i+1, 1) if i >= 0 else (i+self.size, i+self.size+1, 1)
+      if isinstance(self.index, int): return (self.index, self.index+1, 1) if self.index >= 0 else (self.size+self.index, self.size+self.index+1, 1)
       # do deeper validation of contents in slice index
       if isinstance(self.index, slice):
         # TODO also this if check isn't comprehensive enough i think
