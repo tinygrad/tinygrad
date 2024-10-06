@@ -1,4 +1,4 @@
-from typing import List
+from typing import Any, List, Tuple
 import unittest
 import os, itertools
 os.environ["TRACK_MATCH_STATS"] = "2"
@@ -7,7 +7,7 @@ from tinygrad import Tensor
 from tinygrad.engine.realize import lower_schedule
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.helpers import Context, all_same, DEBUG, colored, getenv
+from tinygrad.helpers import Context, all_same, DEBUG, getenv
 from tinygrad.codegen.uopgraph import sym, devectorize, float4_folding
 from test.external.process_replay.helpers import print_diff
 from viz.serve import reconstruct_graph, uop_to_json, load_kernels
@@ -20,16 +20,9 @@ class TestViz(unittest.TestCase):
     from tinygrad.ops import contexts
     if not getenv("VIZ"): contexts.clear()
 
-  def assert_valid_ctx(self, contexts:List[TrackedRewriteContext]):
+  def assert_valid_ctx(self, contexts:List[Tuple[Any,List[TrackedRewriteContext]]]):
     assert len(contexts) != 0
-    for i,ctx in enumerate(contexts):
-      try: graphs,_,_ = reconstruct_graph(ctx)
-      except Exception as e:
-        print(colored(f"failed to create graph for ctx {i}", "red"))
-        raise e
-      for j,(x,y) in enumerate(zip(graphs, graphs[1:])):
-        if x.key == y.key:
-          raise AssertionError(f"failed to generate the correct diff at rewrite {j} ctx {i}")
+    load_kernels(contexts)
 
   def assert_valid_graph(self, t):
     contexts.clear()
@@ -50,8 +43,8 @@ class TestViz(unittest.TestCase):
     list(lower_schedule(schedule2))
     with Context(TRACK_MATCH_STATS=0): ret = list(load_kernels(contexts).values())
     assert len(ret) == 3
-    assert all(len([x for x,_ in y if "schedule" in x.loc[0]]) == 0 for y in ret[1:])
-    assert all(len([x for x,_ in y if "uopgraph" in x.loc[0]]) != 0 for y in ret[1:])
+    assert all(len([x for x,_,_ in y if "schedule" in x.loc[0]]) == 0 for y in ret[1:])
+    assert all(len([x for x,_,_ in y if "uopgraph" in x.loc[0]]) != 0 for y in ret[1:])
 
   def test_gemm_diff(self):
     x = Tensor.empty(64, 64).realize()
@@ -70,7 +63,7 @@ class TestViz(unittest.TestCase):
     ])
     ret = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, ret)
-    graphs,_,_ = reconstruct_graph(contexts[0])
+    graphs,_,_ = reconstruct_graph(contexts[0][1][0])
     assert graphs[-1].key == ret.key
     self.assert_valid_ctx(contexts)
 
@@ -102,7 +95,7 @@ class TestViz(unittest.TestCase):
     new_sink = graph_rewrite(sink, pm)
     if DEBUG >= 4: print_diff(sink, new_sink, unified=0)
     self.assert_valid_ctx(contexts)
-    assert all(ctx.loc[0].split("/")[-1] == __file__.split("/")[-1] for ctx in contexts)
+    assert all(ctx.loc[0].split("/")[-1] == __file__.split("/")[-1] for _,ctxs in contexts for ctx in ctxs)
 
   def test_no_ctx(self):
     simple_pm = PatternMatcher([(UPat(UOps.CONST), lambda:True)])

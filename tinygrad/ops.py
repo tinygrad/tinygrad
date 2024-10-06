@@ -10,7 +10,6 @@ from tinygrad.helpers import ContextVar, prod, getenv, all_same
 if TYPE_CHECKING:
   from tinygrad.shape.symbolic import Variable, sint
   from tinygrad.shape.shapetracker import ShapeTracker
-  from tinygrad.codegen.kernel import Kernel
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
@@ -587,10 +586,9 @@ match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 class TrackedRewriteContext:
   loc: Tuple[str, int]                                                    # location that called graph_rewrite
   sink: UOp                                                               # the sink passed into the rewrite
-  kernel: Optional[Kernel] = None                                         # the kernel being rewritten
   rewrites: List[Tuple[UOp, UOp, UPat]] = field(default_factory=list)     # all rewrites of sparents. (before, after, UPat)
-contexts: List[TrackedRewriteContext] = []
-rewrite_stack: List[TrackedRewriteContext] = []
+rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
+contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
 class TrackedPatternMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     super().__init__(patterns)
@@ -611,7 +609,7 @@ class TrackedPatternMatcher(PatternMatcher):
         match_stats[p][2] += (et:=time.perf_counter()-st)
         match_stats[p][3] += et
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", p.printable())
-        if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0 and isinstance(ret, UOp): rewrite_stack[-1].rewrites.append((uop, ret, p))
+        if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0 and isinstance(ret, UOp): rewrite_stack[-1][1][-1].rewrites.append((uop, ret, p))
         return ret # NOTE: if it returns None, we keep trying to match
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -623,7 +621,7 @@ if TRACK_MATCH_STATS:
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
       with open("/tmp/rewrites.pkl", "wb") as f:
-        print(f"rewrote {len(contexts)} graphs and applied {sum(len(x.rewrites) for x in contexts)} rules, saved to /tmp/rewrites.pkl")
+        print(f"rewrote {len(contexts)} graphs and applied {sum(len(r.rewrites) for _,x in contexts for r in x)} rules, saved to /tmp/rewrites.pkl")
         pickle.dump(contexts, f)
     if getenv("VIZ"):
       os.environ["VIZ"] = "0"
@@ -657,7 +655,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
     # get Kernel we are rewriting in the context of
     frm_walk: Optional[FrameType] = frm
     while frm_walk is not None and not isinstance(kernel:=frm_walk.f_locals.get("self", None), Kernel): kernel, frm_walk = None, frm_walk.f_back
-    rewrite_stack.append(TrackedRewriteContext((frm.f_code.co_filename, frm.f_lineno), sink, kernel))
+    rewrite_stack.append((kernel, [TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink)]))
   ret = RewriteContext(pm, ctx).rewrite(sink)
   if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
   return ret
