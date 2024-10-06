@@ -1018,31 +1018,30 @@ class Tensor:
   #   2. Bool indexing is not supported
   #   3. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
+
   class IndexDimension:
     def __init__(self, index: Union[int, slice, Tensor, None, List, Tuple], size: int, device: Union[str, Tuple[str, ...]],
-                 previous: Union['Tensor.IndexDimension', None], dim: Optional[int] = None):
-      # NOTE: the `dim: int` value is not canonical and is only used for coherent basic validation errors
-      # we instead use an inferred dim value based on previous and next
+                 previous: Union['Tensor.IndexDimension', None]):
       self.size = size  # the canonical size of the dimension that is mapped (pinned) to the index
-      self.previous, self.next, = previous, None
+      # we use an inferred dim value based on previous and next
+      self.previous, self.next = previous, None
       if previous is not None: previous.next = self
       # basic validation of index value
       # TODO: check this first err msg
-      if not isinstance(index, (int, slice, Tensor, type(None), list, tuple)): raise IndexError(f"{type(index).__name__} on {dim=} is not supported")
+      if not isinstance(index, (int, slice, Tensor, type(None), list, tuple)): raise IndexError(f"{type(index).__name__} is not supported")
       if isinstance(index, (list, tuple)): index = Tensor(index, device, requires_grad=False) # Tensor creation validates the contents of index
-      if isinstance(index, Tensor) and not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} on {dim=} is not supported")
-      if isinstance(index, int) and (index >= size or index < -size): raise IndexError(f"{index=} is out of bounds on {dim=} with {size=}")
-      if isinstance(index, slice) and index.step == 0: raise ValueError(f"{index=} on {dim=} cannot have 0 as step")
+      if isinstance(index, Tensor) and not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
+      if isinstance(index, int) and (index >= size or index < -size): raise IndexError(f"{index=} is out of bounds with {size=}")
+      if isinstance(index, slice) and index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
       self.index = index
 
-    # HACK iterator to not do while loops, but is this a hack idk, whats a hack even, am I a hack?
-    def traverse(self, skip_cond: Optional[Callable] = None):
+    def traverse(self, skip_cond: Callable = lambda _: True):
       current: Optional['Tensor.IndexDimension'] = self
       while current:
-        if not (skip_cond and skip_cond(current)): yield current
+        if not skip_cond(current): yield current
         current = current.next
 
-    def to_mop_args(self) -> Tuple[int, int, int]: # Tuple[start, end, step] for movement ops
+    def to_mop_args(self) -> Tuple[int, int, int]: # Tuple[start, end, step]
       assert isinstance(self.index, (int, slice, Tensor)), "bro."
       if isinstance(self.index, Tensor): return (0, self.size, 1)
       if isinstance(self.index, int): return (self.index, self.index+1, 1) if self.index >= 0 else (self.size+self.index, self.size+self.index+1, 1)
@@ -1076,17 +1075,13 @@ class Tensor:
     num_indices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
     if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
     indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_indices)
-    # x[...] case
     if not indices: return self
 
     # CREATE DIMENSION GRAPH WOOOWEEE
     node, none_counter = None, 0
     for dim, index in enumerate(indices):
-      # dim injection
-      if index is None:
-        none_counter += 1
-        node = Tensor.IndexDimension(index, 1, self.device, node)
-      else: node = Tensor.IndexDimension(index, cast(int, self.shape[dim - none_counter]), self.device, node, dim)  # TODO: cast hack mypy
+      none_counter += int(is_none := index is None)
+      node = Tensor.IndexDimension(index, 1 if is_none else cast(int, self.shape[dim - none_counter]), self.device, node)
       # we use root as the access point
       # TODO: dim==0 not ideal
       if dim == 0: root = node
