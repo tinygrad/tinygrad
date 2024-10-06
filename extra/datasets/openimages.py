@@ -4,6 +4,7 @@ import numpy as np
 from PIL import Image
 from pathlib import Path
 import boto3, botocore
+from tinygrad import Tensor
 from tinygrad.helpers import fetch, tqdm, getenv
 import pandas as pd
 import concurrent.futures
@@ -139,11 +140,7 @@ def fetch_openimages(output_fn:str, base_dir:Path, subset:str):
 
 def image_load(base_dir, subset, fn):
   img_folder = base_dir / f"{subset}/data"
-  img = Image.open(img_folder / fn).convert('RGB')
-  import torchvision.transforms.functional as F
-  ret = F.resize(img, size=(800, 800))
-  ret = np.array(ret)
-  return ret, img.size[::-1]
+  return Image.open(img_folder / fn).convert('RGB')
 
 def prepare_target(annotations, img_id, img_size):
   boxes = [annot["bbox"] for annot in annotations]
@@ -164,7 +161,7 @@ def iterate(coco, base_dir, bs=8):
     X, targets  = [], []
     for img_id in image_ids[i:i+bs]:
       img_dict = coco.loadImgs(img_id)[0]
-      x, original_size = image_load(base_dir, img_dict['subset'], img_dict["file_name"])
+      x, original_size = resize(image_load(base_dir, img_dict['subset'], img_dict["file_name"]))
       X.append(x)
       annotations = coco.loadAnns(coco.getAnnIds(img_id))
       targets.append(prepare_target(annotations, img_id, original_size))
@@ -179,6 +176,29 @@ def download_dataset(base_dir:Path, subset:str) -> Path:
 
   return ann_file
 
+def random_horizontal_flip(img, tgt, prob=0.5):
+  import torch
+  import torchvision.transforms.functional as F
+  if torch.rand(1) < prob:
+    w = img.size[::-1]
+    img = F.hflip(img)
+    tgt["boxes"][:, [0, 2]] = w - tgt["boxes"][:, [2, 0]]
+  return img, tgt
+
+def resize(img, size=(800, 800)):
+  import torchvision.transforms.functional as F
+  img_size = img.size[::-1]
+  img = F.resize(img, size=size)
+  img = np.array(img)
+  return img, img_size
+
+def normalize(img):
+  mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
+  std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
+  img = img.permute([0,3,1,2]) / 255.0
+  img -= mean
+  img /= std
+  return img
 
 if __name__ == "__main__":
   download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), "train")

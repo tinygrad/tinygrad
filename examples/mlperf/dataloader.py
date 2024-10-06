@@ -357,12 +357,14 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
 ### RetinaNet
 
 def load_retinanet_data(base_dir:Path, queue_in:Queue, queue_out:Queue, X:Tensor):
-  from extra.datasets.openimages import image_load, prepare_target
+  from extra.datasets.openimages import image_load, prepare_target, random_horizontal_flip, resize
   while (data:=queue_in.get()) is not None:
     idx, img, ann = data
     img_id = img["id"]
-    img, img_size = image_load(base_dir, "train", img["file_name"]) # TODO: resize this with the target!
-    tgt = prepare_target(ann, img_id, img_size)
+    img = image_load(base_dir, "train", img["file_name"])
+    tgt = prepare_target(ann, img_id, img.size[::-1])
+    img, tgt = random_horizontal_flip(img, tgt)
+    img, _ = resize(img)
 
     X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
 
