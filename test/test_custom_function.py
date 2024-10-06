@@ -9,7 +9,7 @@ from tinygrad.dtype import dtypes
 
 # *** first, we implement the atan2 op at the lowest level ***
 # `atan2_gpu` for GPUBuffers and `atan2_cpu` for CPUBuffers
-from tinygrad.lazy import Buffer, create_lazybuffer
+from tinygrad.engine.lazy import Buffer, create_lazybuffer
 from tinygrad.device import Device
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.engine.realize import CompiledRunner
@@ -32,7 +32,7 @@ def atan2_cpu(ret:Buffer, a:Buffer, b:Buffer): ret.copyin(np.require(np.arctan2(
 # In general, it is also optional to write a backward function, just your backward pass won't work without it
 
 from tinygrad.ops import MetaOps
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.tensor import Function
 
 class ATan2(Function):

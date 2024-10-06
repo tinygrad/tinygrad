@@ -6,7 +6,7 @@ from tinygrad import Tensor
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import Context, getenv, to_function_name
 from tinygrad.engine.schedule import _get_output_groups, _lower_lazybuffer
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.ops import UOp, UOps
 
 if __name__ == "__main__":
