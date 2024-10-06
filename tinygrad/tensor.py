@@ -1753,6 +1753,33 @@ class Tensor:
     m = self.max(axis=axis, keepdim=True)
     return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + m.squeeze(axis)
 
+  def logcumsumexp(self, axis=0):
+    """
+    Computes the log-cumsum-exp of the tensor along the specified axis or axes.
+
+    The log-cumsum-exp function is a numerically stable way to compute the logarithm of the cumulative sum of exponentials.
+
+    You can pass in the `axis` keyword argument to control the axis along which
+    the log-cum-sum-exp is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.logcumsumexp().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.logcumsumexp(axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.logcumsumexp(axis=1).numpy())
+    ```
+    """
+    m = self.max(axis=axis, keepdim=True)
+    return (self - m).exp().cumsum(axis=axis).log() + m
+
   def argmax(self, axis=None, keepdim=False):
     """
     Returns the indices of the maximum value of the tensor along the specified axis.
