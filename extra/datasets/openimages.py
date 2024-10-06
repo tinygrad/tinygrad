@@ -179,6 +179,24 @@ def download_dataset(base_dir:Path, subset:str) -> Path:
 
   return ann_file
 
+def transform_coco_polys_to_mask(img, img_id, img_size, ann, filter_is_crowd:bool=True):
+  w, h = img_size
+  if filter_is_crowd: ann = [obj for obj in ann if obj["iscrowd"] == 0]
+
+  boxes = np.array([obj["bbox"] for obj in ann])
+  boxes = boxes.reshape(-1, 4)
+  boxes[:, 2:] += boxes[:, :2]
+  boxes[:, 0::2].clip(0, w)
+  boxes[:, 1::2].clip(0, h)
+
+  classes = np.array([obj["category_id"] for obj in ann])
+  keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
+  boxes, classes = boxes[keep], classes[keep]
+
+  area, is_crowd = [obj["area"] for obj in ann], [obj["iscrowd"] for obj in ann]
+  target = {"boxes": boxes, "labels": classes, "image_id": img_id, "area": area, "iscrowd": is_crowd}
+  return img, target
+
 
 if __name__ == "__main__":
   download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), "train")

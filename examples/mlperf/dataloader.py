@@ -357,10 +357,12 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
 ### RetinaNet
 
 def load_retinanet_data(base_dir:Path, queue_in:Queue, queue_out:Queue, X:Tensor):
-  from extra.datasets.openimages import image_load
+  from extra.datasets.openimages import image_load, transform_coco_polys_to_mask
   while (data:=queue_in.get()) is not None:
-    idx, fn = data
-    img, _ = image_load(base_dir, "train", fn)
+    idx, img, ann = data
+    img_id = img["id"]
+    img, img_size = image_load(base_dir, "train", img["file_name"]) # TODO: resize this with the target!
+    img, tgt = transform_coco_polys_to_mask(img, img_id, img_size, ann)
 
     X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
 
@@ -392,8 +394,9 @@ def batch_load_retinanet(dataset, base_dir:Path, batch_size:int=32, seed:int=Non
 
   def enqueue_batch(bc):
     for idx in range(bc * batch_size, (bc+1) * batch_size):
-      fn = dataset.loadImgs(next(dataset_iter))[0]["file_name"]
-      queue_in.put((idx, fn))
+      img = dataset.loadImgs(next(dataset_iter))[0]
+      ann = dataset.loadAnns(dataset.getAnnIds(img["id"]))
+      queue_in.put((idx, img, ann))
 
   # def shuffle_indices(file_indices, seed=None):
   #   rng = random.Random(seed)
@@ -463,6 +466,14 @@ if __name__ == "__main__":
     files = get_val_files() if val else get_train_files()
     with tqdm(total=len(files)) as pbar:
       for x,y,c in batch_load_resnet(val=val):
+        pbar.update(x.shape[0])
+
+  def load_retinanet(val):
+    from extra.datasets.openimages import BASEDIR, download_dataset
+    from pycocotools.coco import COCO
+    dataset = COCO(download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), "validation" if val else "train"))
+    with tqdm(total=len(dataset.imgs.keys())) as pbar:
+      for x, _ in batch_load_retinanet(dataset, base_dir):
         pbar.update(x.shape[0])
 
   load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
