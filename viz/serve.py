@@ -5,17 +5,17 @@ import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, 
 from dataclasses import asdict
 from urllib.parse import parse_qs, urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from tinygrad.helpers import getenv, to_function_name
-from tinygrad.ops import TrackedRewriteContext, UOp, UOps, UPat, lines
+from tinygrad.helpers import getenv, to_function_name, tqdm
+from tinygrad.ops import TrackedRewriteContext, UOp, UOps, lines
 from tinygrad.engine.graph import uops_colors, word_wrap
 from viz.spec import GraphRewriteDetails, GraphRewriteMetadata
 
-def reconstruct_graph(sink:UOp, rewrites:List[Tuple[UOp, UOp, UPat]]) -> Tuple[List[UOp], List[List[str]], List[List[int]]]:
-  uops: List[UOp] = [sink]
+def reconstruct_graph(ctx:TrackedRewriteContext) -> Tuple[List[UOp], List[List[str]], List[List[int]]]:
+  uops: List[UOp] = [ctx.sink]
   diffs: List[List[str]] = []
   changed_nodes: List[List[int]] = []
   seen_replaces: Dict[UOp, UOp] = {}
-  for i, (first, rewritten, _) in enumerate(rewrites):
+  for i, (first, rewritten, _) in enumerate(ctx.rewrites):
     # first, rewrite this UOp with the current rewrite + all the seen rewrites before this
     seen_replaces[first] = rewritten
     new_sink = replace_uop(uops[-1], {**seen_replaces})
@@ -79,7 +79,7 @@ class Handler(BaseHTTPRequestHandler):
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
         metadata, ctx = list(kernels.values())[int(qkernel[0])][int(query["idx"][0])]
-        graphs, diffs, changed_nodes = reconstruct_graph(ctx.sink, ctx.rewrites)
+        graphs, diffs, changed_nodes = reconstruct_graph(ctx)
         ret = json.dumps(asdict(GraphRewriteDetails(**asdict(metadata), graphs=list(map(uop_to_json, graphs)),
                                                     diffs=diffs, changed_nodes=changed_nodes, kernel_code=get_src(ctx.kernel)))).encode()
       else: ret = json.dumps([list(map(lambda x:asdict(x[0]), v)) for v in kernels.values()]).encode()
@@ -104,6 +104,9 @@ if __name__ == "__main__":
   with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[TrackedRewriteContext] = pickle.load(f)
   print("*** unpickled saved rewrites")
   kernels = load_kernels(contexts)
+  if getenv("FUZZ_VIZ"):
+    for v in tqdm(kernels.values()):
+      for _,ctx in v: reconstruct_graph(ctx)
   print("*** loaded kernels")
   server = HTTPServer(('', 8000), Handler)
   st = time.perf_counter()
