@@ -3481,6 +3481,63 @@ class Tensor:
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
+  def clone(self) -> Tensor:
+    return Tensor(self.numpy().copy(), requires_grad=self.requires_grad, device=self.device)
+
+  def logcumsumexp(self, axis: Optional[Union[int, Tuple[int, ...]]] = None, keepdim: bool = False) -> Tensor:
+    """
+    Computes the log-sum-exp of the tensor along the specified axis or axes in a cumulative manner.
+
+    Parameters:
+      axis (int or tuple of ints, optional): Axis or axes along which the cumulative log-sum-exp is computed.
+        By default, it operates on all elements of the input tensor.
+      keepdim (bool, optional): Whether the output tensor has `dim` retained or not.
+        Default: False
+
+    Returns:
+      Tensor: A tensor with the cumulative log-sum-exp computed along the specified axis.
+    """
+    # Handle multiple axes
+    if isinstance(axis, int):
+      axes = (axis,)
+    elif isinstance(axis, tuple):
+      axes = axis
+    elif axis is None:
+      axes = tuple(range(self.ndim))
+    else:
+      raise ValueError(f"Invalid axis type: {type(axis)}")
+
+    # Normalize negative axes
+    axes = tuple(a if a >= 0 else a + self.ndim for a in axes)
+
+    # Handle empty tensor
+    if self.size == 0:
+      return self.clone()
+
+    # Start with the original tensor
+    result = self
+
+    for ax in sorted(axes):
+      # Compute the maximum along the axis for numerical stability
+      m = result.max(axis=ax, keepdim=True)
+
+      # Subtract the max, exponentiate, compute cumulative sum, take log, and add the max back
+      # Handle cases where m is -inf or +inf
+      # If all elements are -inf along the axis, m will be -inf, and result should be -inf
+      # If any element is +inf, the cumulative sum should be +inf from that point onwards
+      exp_shifted = (result - m).exp()
+
+      # Handle NaNs: any NaN in exp_shifted should propagate
+      cumsum_exp = exp_shifted.cumsum(axis=ax)
+
+      log_cumsum_exp = cumsum_exp.log() + m
+      if not keepdim:
+        log_cumsum_exp = log_cumsum_exp.squeeze(axis)
+
+      result = log_cumsum_exp
+
+    return result
+
 if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)
   setattr(Tensor, "conv2d", Tensor.image_conv2d)
