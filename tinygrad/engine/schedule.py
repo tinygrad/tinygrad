@@ -2,7 +2,7 @@ import sys, pickle, atexit, importlib, contextlib
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
-from tinygrad.ops import REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, TernaryOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, graph_rewrite, resolve
+from tinygrad.ops import REDUCE_ALU, MetaOps, Op, ReduceOps, UNSAFE_PAD_OPS, TernaryOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, graph_rewrite, resolve
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
                              GlobalCounters, all_same, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
 from tinygrad.shape.symbolic import Variable, sint
@@ -372,12 +372,27 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
     buf_uops.setdefault(buf.buffer, uop)
   return output_groups, buf_uops, assign_targets
 
+def to_uop(x:LazyBuffer, buf_uops:Dict[Buffer,UOp]) -> UOp:
+  if (u:=buf_uops.get(b:=x.base.buffer)) is not None: return u
+  buf_uops[b] = ret = UOp(UOps.BUFFER, b.dtype.ptr(), (), (len(buf_uops), (b.device, b.size, b.dtype)))
+  if x.is_realized(): return ret
+  if x._base is not None: return to_uop(x._base, buf_uops).swizzle(x.st)
+  src = tuple(to_uop(y, buf_uops) for y in x.srcs)
+  if x.op in MetaOps: return UOp(UOps.EXT, x.dtype, src, (x.op, x.arg))
+  return UOp(UOps.ALU, x.dtype, src, x.op)
+
+def graph2(outs:List[LazyBuffer]):
+  buf_uops: Dict[Buffer, UOp] = {}
+  sink = UOp(UOps.SINK, dtypes.void, tuple(to_uop(x.base, buf_uops) for x in outs))
+  raise Exception(sink)
+
 SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
 def _graph_schedule(outs:List[LazyBuffer]) -> \
   Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
         DefaultDict[LBScheduleItem, int], # this is the in-degree of the graph
         Dict[Variable, int]]: # this has all the var values of the schedule
   """create a graph for realizing the outputs"""
+  graph2(outs)
   output_groups, buf_uops, assign_targets = _get_output_groups(outs)
   # preschedule all buffers in realizes
   prescheduled: List[LBScheduleItem] = []
