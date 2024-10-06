@@ -340,15 +340,16 @@ class CUDARenderer(CStyleLanguage):
 
     dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      upcast_axes_szs = tuple(prod(sz for _, sz in upc) for upc in upcast_axes)
-      dts = tuple(self.render_dtype(dt.vec(sz)) for dt, sz in zip([dtype_in, dtype_in, dtype_out], upcast_axes_szs))
-      n_operands = tuple(sz*dt.itemsize//4 for dt, sz in zip([dtype_in, dtype_in, dtype_out], upcast_axes_szs)) # 4 => CUDA reg size in bytes
+      upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
+      wmma_dtypes = [self.render_dtype(dtype.vec(size)) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
+      n_operands = [size*dtype.itemsize//4 for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)] # 4 => CUDA reg size in bytes
       operands = [f"%{i}" for i in range(sum(n_operands))]
-      opreands_slices = [operands[:n_operands[2]], operands[n_operands[2]:-n_operands[1]], operands[-n_operands[1]:], operands[:n_operands[2]]]
 
-      prefix.append(f"""__device__ {dts[2]} __{name}({dts[0]} a, {dts[1]} b, {dts[2]} c){{
+      # mma operands => {c}, {a}, {b}, {c}
+      prefix.append(f"""__device__ {wmma_dtypes[2]} __{name}({wmma_dtypes[0]} a, {wmma_dtypes[1]} b, {wmma_dtypes[2]} c){{
   int *a_pk = (int *)(&a), *b_pk = (int *)(&b);\n  asm("mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_map[dtype_in]}.{dt_map[dtype_in]}.f32"
-      "{", ".join(f'{{{", ".join(opreands_slice)}}}' for opreands_slice in opreands_slices)};"
+      "{{{", ".join(operands[:n_operands[2]])}}}, {{{", ".join(operands[n_operands[2]:n_operands[2]+n_operands[0]])}}},"
+      "{{{", ".join(operands[-n_operands[1]:])}}}, {{{", ".join(operands[:n_operands[2]])}}};"
     : {", ".join([f'"+f"(c.{_nms[i]})' for i in range(n_operands[2])])}
     : {", ".join([f'"r"(a_pk[{i}])' for i in range(n_operands[0])])}, {", ".join([f'"r"(b_pk[{i}])' for i in range(n_operands[1])])});
   return c;\n}}""")
