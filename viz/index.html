@@ -269,7 +269,7 @@
       ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`)).json();
       cache[cacheKey] = ret;
     }
-    renderGraph(ret.graphs[currentRewrite], ret.changed_nodes[currentRewrite]);
+    renderGraph(ret.graphs[currentRewrite], currentRewrite == 0 ? [] : ret.changed_nodes[currentRewrite-1]);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
