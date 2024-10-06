@@ -13,7 +13,7 @@ from viz.spec import GraphRewriteDetails, GraphRewriteMetadata
 def reconstruct_graph(sink:UOp, rewrites:List[Tuple[UOp, UOp, UPat]]) -> Tuple[List[UOp], List[List[str]], List[List[int]]]:
   uops: List[UOp] = [sink]
   diffs: List[List[str]] = []
-  changed_nodes: List[List[int]] = [[]]
+  changed_nodes: List[List[int]] = []
   seen_replaces: Dict[UOp, UOp] = {}
   for i, (first, rewritten, _) in enumerate(rewrites):
     # first, rewrite this UOp with the current rewrite + all the seen rewrites before this
