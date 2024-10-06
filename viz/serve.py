@@ -49,6 +49,7 @@ def replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
 def load_kernels(contexts) -> DefaultDict[str, List[Tuple[GraphRewriteMetadata, TrackedRewriteContext]]]:
   kernels = defaultdict(list)
   for ctx in contexts:
+    if ctx.sink.op is UOps.CONST: continue
     name = to_function_name(ctx.kernel.name) if ctx.kernel is not None else None
     upats = [(upat.location, upat.printable()) for _,_,upat in ctx.rewrites]
     kernels[name].append((GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats), ctx))
