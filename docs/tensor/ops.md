@@ -13,6 +13,7 @@
 ::: tinygrad.Tensor.softmax
 ::: tinygrad.Tensor.log_softmax
 ::: tinygrad.Tensor.logsumexp
+::: tinygrad.Tensor.logcumsumexp
 ::: tinygrad.Tensor.argmax
 ::: tinygrad.Tensor.argmin
 
