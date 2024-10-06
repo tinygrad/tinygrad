@@ -1027,38 +1027,18 @@ class Tensor:
       self.previous, self.next = previous, None
       if previous is not None: previous.next = self
       # basic validation of index value
-      # TODO: check this first err msg
-      if not isinstance(index, (int, slice, Tensor, type(None), list, tuple)): raise IndexError(f"{type(index).__name__} is not supported")
+      if not isinstance(index, (int, slice, Tensor, type(None), list, tuple)): raise IndexError(f"{type(index).__name__} indexing is not supported")
       if isinstance(index, (list, tuple)): index = Tensor(index, device, requires_grad=False) # Tensor creation validates the contents of index
       if isinstance(index, Tensor) and not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
       if isinstance(index, int) and (index >= size or index < -size): raise IndexError(f"{index=} is out of bounds with {size=}")
       if isinstance(index, slice) and index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
       self.index = index
 
-    def traverse(self, skip_cond: Callable = lambda _: True):
-      current: Optional['Tensor.IndexDimension'] = self
+    def traverse(self, skip_cond = lambda _: False):
+      current = self
       while current:
         if not skip_cond(current): yield current
         current = current.next
-
-    def to_mop_args(self) -> Tuple[int, int, int]: # Tuple[start, end, step]
-      assert isinstance(self.index, (int, slice, Tensor)), "bro."
-      if isinstance(self.index, Tensor): return (0, self.size, 1)
-      if isinstance(self.index, int): return (self.index, self.index+1, 1) if self.index >= 0 else (self.size+self.index, self.size+self.index+1, 1)
-      # do deeper validation of contents in slice index
-      if isinstance(self.index, slice):
-        # TODO also this if check isn't comprehensive enough i think
-        if not all(isinstance(s,int) or s is None for s in (self.index.start, self.index.stop, self.index.step)): # TODO add bytes?
-          raise TypeError("only int slicing is supported")
-        # handle int slicing
-        start, stop, step = self.index.indices(self.size)
-        if step * (stop - start) < 0: return (0, 0, step)
-        return (start, stop, step) if step > 0 else (stop+1, start+1, step)  # basic validation already rules out the step == 0 case
-
-    def new_size(self) -> int:
-      if self.index is None: return 1
-      start, end, step = self.to_mop_args()
-      return math.ceil((end - start) / abs(step))
 
   # cute _getitem OwO
   def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
@@ -1077,19 +1057,38 @@ class Tensor:
     indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_indices)
     if not indices: return self
 
-    # CREATE DIMENSION GRAPH WOOOWEEE
+    # CREATE DIMENSION GRAPH
     node, none_counter = None, 0
     for dim, index in enumerate(indices):
-      none_counter += int(is_none := index is None)
-      node = Tensor.IndexDimension(index, 1 if is_none else cast(int, self.shape[dim - none_counter]), self.device, node)
+      none_counter += int(index is None)
+      node = Tensor.IndexDimension(index, 1 if index is None else cast(int, self.shape[dim - none_counter]), self.device, node)
       # we use root as the access point
       # TODO: dim==0 not ideal
       if dim == 0: root = node
 
-    # get movement op args
-    mop_args = [node.to_mop_args() for node in root.traverse(lambda x: x.index is None)]
+    # traverse
+    # TODO: man I think I went to hard on the isinstance usage...
+    pre_expansion_collapse_args = []
+    for node in root.traverse():
+      # determine normalized start, stop, step
+      if isinstance(i := node.index, Tensor): start, stop, step = 0, node.size, 1
+      if isinstance(i, int): start, stop, step = (i, i+1, 1) if i >= 0 else (i+node.size, i+node.size+1,1)
+      if isinstance(i, slice):
+        # do deeper validation of contents in slice index
+        # TODO add bytes and Tensor?
+        # TODO also is this if check isn't comprehensive?
+        if not all(isinstance(s,int) or s is None for s in (i.start, i.stop, i.step)): raise TypeError("only int slicing is supported")
+        # handle int slicing
+        start, stop, step = i.indices(node.size)
+        if step * (stop - start) < 0: start, stop = 0, 0
+        elif step < 0: start, stop, step = stop + 1, start + 1, step
+        # update resized size
+        node.size = math.ceil((stop - start) / abs(step))
+      if i is not None: pre_expansion_collapse_args.append((start, stop, step))
 
-    new_slice, strides = ((), ()) if not mop_args else zip(*(((s,e),st) for s,e,st in mop_args))
+    new_slice, strides = ((), ()) if not pre_expansion_collapse_args else zip(*(((s,e),st) for s,e,st in pre_expansion_collapse_args))
+
+    # MOVEMENT OPS
     # flip negative strides
     ret = self.shrink(new_slice).flip(tuple(i for i, st in enumerate(strides) if st < 0))
     # handle stride != 1 or -1
@@ -1101,16 +1100,16 @@ class Tensor:
       ret = ret.reshape(tuple(flatten((s // st, st) for s, st in zip(ret.shape, strides))))
       ret = ret.shrink(tuple(flatten(((0, s), (0, 1)) for s in ret.shape[::2]))).reshape(ret.shape[::2])
 
-    # get new shape
-    ret = ret.reshape([node.new_size() for node in root.traverse(lambda x: isinstance(x.index, int))]) # dim collapse for int
+    # dim expand and collapse
+    ret = ret.reshape(tuple(node.size for node in root.traverse(lambda x: isinstance(x.index, int))))
 
     if tensors := {dim:node for dim, node in enumerate(root.traverse(lambda x: isinstance(x.index, int))) if isinstance(node.index, Tensor)}:
-      idx: Dict[int, Tensor] = {dim: (node.index < 0).where(node.size, 0) + node.index for dim,node in tensors.items()}
-      masks, first_dim, last_dim = [], min(idx.keys()), max(idx.keys())
-      pre_reduce_shape = ret.shape[:first_dim] + (big_shape := _broadcast_shape(*(t.shape for t in idx.values()))) + ret.shape[first_dim:]
+      masks, first_dim, last_dim = [], min(tensors.keys()), max(tensors.keys())
+      pre_reduce_shape = ret.shape[:first_dim] + (big_shape := _broadcast_shape(*(t.index.shape for t in tensors.values()))) + ret.shape[first_dim:]
 
-      # create masks
-      for dim, i in idx.items():
+      # create index masks
+      for dim, node in tensors.items():
+        i = (node.index < 0).where(node.size, 0) # treat negative index values
         try: i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
         except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
         a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
@@ -1122,10 +1121,10 @@ class Tensor:
       # inject 1's for the extra dims added in create masks
       reshape_arg = ret.shape[:first_dim] + (1,) * len(big_shape) + ret.shape[first_dim:]
       # sum reduce the extra dims introduced in create masks
-      ret = (ret.reshape(reshape_arg) * mask).sum(sum_axis:=tuple(i + len(big_shape) for i in idx.keys()), acc_dtype=ret.dtype)
+      ret = (ret.reshape(reshape_arg) * mask).sum(sum_axis:=tuple(i + len(big_shape) for i in tensors.keys()), acc_dtype=ret.dtype)
 
       # special permute case
-      if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
+      if first_dim != 0 and len(tensors) != 1 and tuple(tensors.keys()) != tuple(range(first_dim, last_dim+1)):
         ret = ret.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), ret.ndim))
 
       # for advanced setitem, returns whole tensor with indices replaced
