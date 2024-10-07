@@ -1023,13 +1023,12 @@ class Tensor:
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
 
   class IndexDimension:
-    def __init__(self, index, size: int, device: Union[str, Tuple[str, ...]],
-                 previous: Union['Tensor.IndexDimension', None]):
+    def __init__(self, index, size: int, device: Union[str, Tuple[str, ...]], previous: Union['Tensor.IndexDimension', None]):
       # we use an inferred dim value based on previous and next
       self.previous, self.next, boundary, stride = previous, None, [0, size], 1
       if previous is not None: previous.next = self
 
-      # Tensor creation validates the contents of index
+      # Tensor creation validates the contents of list or tuple index
       if isinstance(index, (list, tuple)): index = Tensor(index, device, requires_grad=False)
       # type specific validation
       if isinstance(index, Tensor):
@@ -1039,7 +1038,6 @@ class Tensor:
         if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
         boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
       elif isinstance(index, slice):
-        print(index, 'slice')
         # TODO add bytes and Tensor?
         # TODO also is this if check isn't comprehensive?
         if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
@@ -1053,7 +1051,7 @@ class Tensor:
       elif index is None: pass # do nothing
       else: raise IndexError(f"{type(index).__name__} indexing is not supported")
 
-      self.size, self.index, self.boundary, self.stride = size, index, (boundary[0], boundary[1]), stride # TODO ffs mypy
+      self.size, self.index, self.boundary, self.stride = size, index, (boundary[0], boundary[1]), stride
 
     def traverse(self, skip_cond: Callable[[Tensor.IndexDimension], bool] = lambda n: False) -> Iterator[Tensor.IndexDimension]:
       current: Optional[Tensor.IndexDimension] = self
