@@ -929,8 +929,7 @@ symbolic = PatternMatcher([
   (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
 ])
 
-
-substitutor = PatternMatcher([(UPat(tuple(UOps), name="root"), lambda dvars,root: r if (r:=dvars.get(root)) is not None else None)])
+substitutor = PatternMatcher([(UPat(tuple(UOps), name="root"), lambda ctx,root: r if (r:=ctx.get(root)) is not None else None)])
 
 symbolic_flat = symbolic+PatternMatcher([
   # ** combine terms (opinionated) **
