@@ -172,6 +172,25 @@ class TestNN(unittest.TestCase):
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
+  def test_conv2d_padding_same(self):
+    BS, C1, H, W = 1, 3, 32, 32
+    C2, K = 6, 3
+
+    # create in tinygrad
+    layer = Conv2d(C1, C2, kernel_size=K, padding='same', bias=False)
+
+    # create in torch
+    with torch.no_grad():
+      torch_layer = torch.nn.Conv2d(C1, C2, kernel_size=K, padding='same', bias=False).eval()
+      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
+
+    # test
+    x = Tensor.uniform(BS, C1, H, W)
+    z = layer(x)
+    torch_x = torch.tensor(x.numpy())
+    torch_z = torch_layer(torch_x)
+    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+
   @unittest.skip("Takes too long to compile for Compiled backends")
   def test_conv2d_winograd(self):
     BS, C1, H, W = 2, 8, 16, 16
