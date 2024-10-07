@@ -135,6 +135,16 @@ if __name__ == "__main__":
         'local_size': [16, 2, 4], # 16,2 are warp, 4 workgroups upcasted to axis=1
         'wait': True,
       }
+    elif GEMM_VARIATION == "max" and (M%64)== 0 and (N%128)==0 and (K%64)==0 and DTYPE_IN == dtypes.half and DTYPE_OUT == dtypes.half and DTYPE_ACC == dtypes.half:
+      print("Using CUDA and un-optimized 2 stage, swizzled SMEM inputs and direct acc to output kernel")
+      prog = CUDAProgram(device, "wmma_example", compiler.compile(open(os.path.join(script_dir, 'max_kernels/nv.max_acc_fp16.cu')).read()))
+      args = (c, a, b)
+      kwargs = {
+        'global_size': [M//64, N//128, 1],
+        'local_size': [128, 1, 1], # 4 warpgroups == (T_M:=2) * (T_N:=2)
+        'wait': True,
+        'vals': (N, K),
+      }
     else:
       raise RuntimeError(f"invalid gemm variation: {GEMM_VARIATION=} {M=} {N=} {K=} {DTYPE_IN=} {DTYPE_OUT=} {DTYPE_ACC=}")
 
