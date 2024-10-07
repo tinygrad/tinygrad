@@ -2,6 +2,7 @@
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib
 from typing import Callable, List, Tuple, Union, cast
+from tinygrad.engine.schedule import full_ast_rewrite
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 from tinygrad.codegen.kernel import Kernel
 from test.external.process_replay.helpers import print_diff
@@ -30,15 +31,30 @@ if REF == "master": SKIP_PROCESS_REPLAY = True
 def diff_schedule(offset:int) -> bool:
   conn = db_connection()
   cur = conn.cursor()
-  cur.execute(f"SELECT val FROM 'schedule_diff_{VERSION}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
+  cur.execute(f"SELECT val FROM 'schedule_{TABLE_NAME}' LIMIT ? OFFSET ?", (PAGE_SIZE, offset))
   changed = 0
   for row in cur.fetchall():
-    changed += 1
-    buf, asts = pickle.loads(row[0])
-    if len(asts) == 1:
-      logging.info(f"{buf} was folded")
-      logging.info(asts[0])
-    else: print_diff(asts[0], asts[1])
+    # try unpickle
+    try: raw_ast, ctx, compare_ast = pickle.loads(row[0])
+    except Exception as e:
+      logging.warning(f"FAILED TO UNPICKLE OBJECTS {e}")
+      if ASSERT_DIFF: return True
+      continue
+    # try full_ast_rewrite
+    try: good_ast = full_ast_rewrite(raw_ast, ctx)
+    except Exception as e:
+      logging.warning(f"FAILED TO DO AST REWRITE {e}")
+      logging.info(raw_ast)
+      logging.info(ctx)
+      if ASSERT_DIFF: return True
+      continue
+    # diff asts
+    try: assert compare_ast == good_ast
+    except AssertionError:
+      logging.info("PROCESS REPLAY DETECTED CHANGE")
+      logging.info(raw_ast)
+      logging.info(ctx)
+      print_diff(good_ast, compare_ast)
   return bool(changed)
 
 def diff_kernel(offset:int) -> Union[Tuple[int, int], bool]:
