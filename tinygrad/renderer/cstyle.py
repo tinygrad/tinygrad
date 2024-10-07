@@ -165,15 +165,6 @@ class CStyleLanguage(Renderer):
     # NOTE: this relies on bufs dict preserving order
     return self.render_kernel(name, kernel, list(bufs.values()), uops)
 
-no_bfloat16 = PatternMatcher([
-    (UPat({UOps.DEFINE_GLOBAL}, dtype=PtrDType(dtypes.bfloat16), name="x"),
-     lambda x: UOp(x.op, PtrDType(dtypes.float32), x.src, x.arg)),
-    (UPat({UOps.CONST}, dtype=dtypes.bfloat16, name="x"),
-     lambda x: UOp(x.op, dtypes.float32, x.src, x.arg)),
-    (UPat({UOps.LOAD, UOps.STORE}, dtype=dtypes.bfloat16, name="x"),
-     lambda x: UOp(x.op, dtypes.float32, x.src, x.arg)),
-    ]
-)
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
@@ -182,7 +173,14 @@ class ClangRenderer(CStyleLanguage):
   global_max = None
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
-  extra_matcher = no_bfloat16
+  extra_matcher = PatternMatcher([
+    (UPat({UOps.DEFINE_GLOBAL}, dtype=PtrDType(dtypes.bfloat16), name="x"),
+     lambda x: UOp(x.op, PtrDType(dtypes.float32), x.src, x.arg)),
+    (UPat({UOps.CONST}, dtype=dtypes.bfloat16, name="x"),
+     lambda x: UOp(x.op, dtypes.float32, x.src, x.arg)),
+    (UPat({UOps.LOAD, UOps.STORE}, dtype=dtypes.bfloat16, name="x"),
+     lambda x: UOp(x.op, dtypes.float32, x.src, x.arg)),
+  ])
 
   # language options
   buffer_suffix = " restrict"
