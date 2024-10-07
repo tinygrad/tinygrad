@@ -8,12 +8,12 @@ import numpy as np
 
 exact_tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
                   "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-                  "Elu", "Celu", "Xor", "Round"}
+                  "Elu", "Celu", "Xor", "Round",}
 
 # "Softmax_13": "softmax"
 # NOTE: equivalent_tensor_methods turns opts all into positional args in case of arg name mismatch
 equivalent_tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual": "__le__", "GreaterOrEqual": "__ge__",
-                      "Equal": "__eq__", "LogSoftmax": "log_softmax", "Not": "logical_not", "LeakyRelu": "leakyrelu"}
+                      "Equal": "__eq__", "LogSoftmax": "log_softmax", "Not": "logical_not", "LeakyRelu": "leakyrelu", "Selu": "selu"}
 
 # **************** Free Ops ****************
 
@@ -44,7 +44,6 @@ def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, v
 
 def HardSigmoid(x: Tensor, alpha=0.2, beta=0.5): return x.hardsigmoid(alpha, beta)
 def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + Erf(x/math.sqrt(2)))
-# def Selu(X: Tensor, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
 def PRelu(X:Tensor, slope:Tensor):
   slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope # HACK OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
   return (X > 0).where(X, X * slope)

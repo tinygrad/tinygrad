@@ -631,6 +631,10 @@ class TestOps(unittest.TestCase):
   def test_softsign_exact(self):
     helper_test_op(None, torch.nn.functional.softsign, Tensor.softsign, vals=[[-1.,0,1]])
 
+  def test_selu(self):
+    helper_test_op([(45,65)], torch.nn.functional.selu, Tensor.selu)
+    helper_test_op([()], torch.nn.functional.selu, Tensor.selu)
+
   def test_sigmoid(self):
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid)
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=300, high=400)
