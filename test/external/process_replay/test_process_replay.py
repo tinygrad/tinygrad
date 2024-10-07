@@ -1,7 +1,7 @@
 import unittest
 import contextlib, sqlite3
 from test.external.process_replay.helpers import ProcessReplayContext
-from test.external.process_replay.process_replay import TABLE_NAME, diff_kernel
+from test.external.process_replay.process_replay import TABLE_NAME
 
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import to_function_name, db_connection, diskcache_put, VERSION
@@ -24,6 +24,7 @@ class TestProcessReplay(unittest.TestCase):
     conn.commit()
     cur.close()
 
+  @unittest.skip("diff_kernel is removed")
   def test_simple_diff(self):
     out = Tensor([1, 2, 3])+1
     ast = out.schedule()[-1].ast
@@ -38,6 +39,7 @@ void test(int* restrict a, const int* restrict b) {
     offset = helper_append_replay(ast, "test", test_src)
     assert diff_kernel(offset-1) == (5, 4)
 
+  @unittest.skip("diff_kernel is removed")
   def test_identical_run(self):
     out = Tensor([1, 2, 3])+1
     ast = out.schedule()[-1].ast
