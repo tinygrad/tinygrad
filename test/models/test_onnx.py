@@ -4,7 +4,7 @@ import time
 import unittest
 import numpy as np
 import onnx
-from extra.onnx import get_run_onnx
+from tinygrad.runtime.onnx.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI, fetch, temp
 

@@ -10,7 +10,7 @@ from test.helpers import is_dtype_supported
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
 
-from extra.onnx import get_run_onnx
+from tinygrad.runtime.onnx.onnx import get_run_onnx
 
 class TinygradModel(BackendRep):
   def __init__(self, run_onnx, input_names):

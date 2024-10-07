@@ -3,12 +3,17 @@ from typing import Union, Tuple, Optional, List, Any
 from tinygrad.tensor import Tensor, _broadcast_shape
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten
-from extra.onnx import DTYPE_MAP, to_python_const
+from .onnx import DTYPE_MAP, to_python_const
 import numpy as np
 
-tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
+exact_tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
                   "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-                  "Elu", "Celu", "Xor", "Round"}
+                  "Elu", "Celu", "Xor", "Round", }
+
+# "Softmax_13": "softmax"
+# NOTE: equivalent_tensor_methods turns opts all into positional args in case of arg name mismatch
+equivalent_tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual": "__le__", "GreaterOrEqual": "__ge__",
+                      "Equal": "__eq__", "LogSoftmax": "log_softmax", "Not": "logical_not", "LeakyRelu": "leakyrelu"}
 
 # **************** Free Ops ****************
 
@@ -16,11 +21,6 @@ def Identity(x: Tensor): return x
 # TODO: fix buffer_parse
 def Add(x: Tensor, other: Tensor, broadcast=None, axis=None): return x + other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else (x + other).cast(x.dtype)
 def Sub(x: Union[Tensor, Any], other: Tensor): return x - other # some test has input as int
-def Less(x:Tensor,y:Tensor): return x < y
-def LessOrEqual(x:Tensor,y:Tensor): return x <= y
-def Greater(x:Tensor,y:Tensor): return x > y
-def GreaterOrEqual(x:Tensor,y:Tensor): return x >= y
-def Equal(x:Tensor,y:Tensor): return x == y
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
@@ -48,12 +48,10 @@ def Selu(X: Tensor, alpha=1.67326319217681884765625, gamma=1.0507010221481323242
 def PRelu(X:Tensor, slope:Tensor):
   slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope # HACK OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
   return (X > 0).where(X, X * slope)
-def LeakyRelu(X: Tensor, alpha=0.01): return X.leakyrelu(alpha)
 def ThresholdedRelu(X: Tensor, alpha=1.0): return (X > alpha).where(X, 0)
 def Softmax_1(x: Tensor, axis=1): return x.softmax(axis)
 def Softmax_13(x: Tensor, axis=-1): return x.softmax(axis)
 Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
-def LogSoftmax(x: Tensor, axis=-1): return x.log_softmax(axis)
 def Clip(x: Tensor, min=None, max=None): return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max).cast(x.dtype)
 
 def _axes(axes, noop_with_empty_axes):
@@ -86,7 +84,6 @@ def Expand(x: Tensor, shape:Tensor): return x.expand(_broadcast_shape(x.shape, t
 def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
 def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
-def Not(x:Tensor): return x.logical_not()
 
 def Asin(x): return Atan(x / (1 - x * x).sqrt())
 def Acos(x: Tensor):
@@ -373,118 +370,76 @@ def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore
   return loss, y
 
 def ArrayFeatureExtractor(x: Tensor, indices: Tensor): return x[..., indices]
-
-def Gather(x: Tensor, indices: Tensor, axis=0):
-  if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
-    x_sh = list(x.shape)
-    ret_shape = x_sh[:axis] + list(indices.shape) + x_sh[axis+1:]
-    if indices.ndim > 1: indices = indices.flatten()
-    indices = [to_python_const(indices)] if indices.shape == () else [x_sh[axis]+x if x<0 else x for x in to_python_const(indices)]
-    args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x_sh)] for i in indices]
-    return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
-  # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
-  return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
-
+def Gather(x: Tensor, indices: Tensor, axis=0): return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
 def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
   return x.gather(axis, indices)
 
-# TODO clean this up, it's taking the longest in CI
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel',
            cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch',
            mode='nearest', nearest_mode='round_prefer_floor'):
-  def _nearest_gather(X: Tensor, x_out, y_out): return X[:,:,y_out,:][:,:,:,x_out]
-  def _nearest_mode(x_resized: Tensor, nearest_mode: str, x_len):
-    if nearest_mode == "round_prefer_floor": ret = (x_resized - 0.5).ceil()
-    elif nearest_mode == "round_prefer_ceil": ret = (x_resized + 0.5).floor()
-    elif nearest_mode == "floor": ret = x_resized.floor()
-    elif nearest_mode == "ceil": ret = x_resized.ceil()
-    return ret.cast(dtypes.int32).clip(0, x_len-1)
-  def _coordinate_transformation(x_out, y_out, output_shape, scales_, roi=None):
-    if coordinate_transformation_mode == "half_pixel":
-      x_out = (x_out + 0.5) / scales_[-1] - 0.5
-      y_out = (y_out + 0.5) / scales_[-2] - 0.5
-    elif coordinate_transformation_mode == "align_corners":
-      x_out = x_out * (X.shape[-1] - 1) / (output_shape[-1] - 1)
-      y_out = y_out * (X.shape[-2] - 1) / (output_shape[-2] - 1)
-    elif coordinate_transformation_mode == "asymmetric":
-      x_out = x_out / scales_[-1]
-      y_out = y_out / scales_[-2]
-    elif coordinate_transformation_mode == "half_pixel_symmetric":
-      x_out = X.shape[-1] / 2 * (1 - int(output_shape[-1]) / output_shape[-1]) + (x_out + 0.5) / scales_[-1] - 0.5
-      y_out = X.shape[-2] / 2 * (1 - int(output_shape[-2]) / output_shape[-2]) + (y_out + 0.5) / scales_[-2] - 0.5
-    elif coordinate_transformation_mode == "pytorch_half_pixel":
-      x_out = (x_out + 0.5) / scales_[-1] - 0.5 if output_shape[-1] > 1 else Tensor([0])
-      y_out = (y_out + 0.5) / scales_[-2] - 0.5 if output_shape[-2] > 1 else Tensor([0])
-    elif coordinate_transformation_mode == "tf_crop_and_resize":
-      x_out = roi[-1][0] * (X.shape[-1] - 1) + x_out * ((roi[-1][1] - roi[-1][0]) * (X.shape[-1] - 1) / (output_shape[-1] - 1)) if output_shape[-1] > 1 else Tensor([0.5 * (roi[-1][0] + roi[-1][1]) * (X.shape[-1] - 1)])
-      y_out = roi[-2][0] * (X.shape[-2] - 1) + y_out * ((roi[-2][1] - roi[-2][0]) * (X.shape[-2] - 1) / (output_shape[-2] - 1)) if output_shape[-2] > 1 else Tensor([0.5 * (roi[-2][0] + roi[-2][1]) * (X.shape[-2] - 1)])
-    return x_out.clip(0, X.shape[-1]-1), y_out.clip(0, X.shape[-2]-1)
-  if roi is not None:
-    roi = to_python_const(roi)
-    roi = [(st,ed) for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])]
-    roi_ = [(1,1)] * 4
-    if axes is not None:
-      for a,r in zip(axes, roi):
-        roi_[a] = r
-      roi = roi_
-  if scales is not None:
-    scales = to_python_const(scales)
-    if axes is not None:
-      scales_ = [1]*X.ndim
-      for a,s in zip(axes, scales):
-        scales_[a] = s
-      scales = scales_
-  elif sizes is not None:
-    sizes = to_python_const(sizes)
-    scales = []
-    if axes is not None:
-      sizes_ = [1]*X.ndim
-      for a,s in zip(axes, sizes):
-        sizes_[a] = s
-        scales.append(s/X.shape[a])
-      sizes = sizes_
-    else: scales = [si/xs for xs, si in zip(X.shape, sizes)]
-    if keep_aspect_ratio_policy == "not_larger":
-      scale = min(scales)
-      sizes = list(X.shape[:-2]) + [math.ceil(sh*scale) for sh in X.shape[-2:]]
-    elif keep_aspect_ratio_policy == "not_smaller":
-      scale = max(scales)
-      sizes = list(X.shape[:-2]) + [math.ceil(sh*scale) for sh in X.shape[-2:]]
-  output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
-  output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
-  scales_ = [os/xs for xs, os in zip(X.shape, output_shape)]
-  x_out = Tensor.arange(output_shape[-1], dtype=dtypes.default_float)
-  y_out = Tensor.arange(output_shape[-2], dtype=dtypes.default_float)
-  if mode == "nearest":
-    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_, roi)
-    x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
-    y_out = _nearest_mode(y_out, nearest_mode, X.shape[-1])
-    return _nearest_gather(X, x_out, y_out)
-  if mode == "linear":
-    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape_, scales, roi)
-    ret = []
-    for y in to_python_const(y_out):
-      for x in to_python_const(x_out):
-        x_floor, y_floor = int(x), int(y)
-        y_shrink = (y_floor, math.ceil(y)+1)
-        x_shrink = (x_floor, math.ceil(x)+1)
-        corners = to_python_const(X.shrink((None, None, y_shrink, x_shrink)))[0][0]
+  def _apply_nearest_mode(index: Tensor, input_dim, mode: str):
+    if mode == "round_prefer_floor": index = (index - 0.5).ceil()
+    elif mode == "round_prefer_ceil": index = (index + 0.5).floor()
+    elif mode == "floor": index = index.floor()
+    elif mode == "ceil": index = index.ceil()
+    else: raise ValueError(f"invalid {nearest_mode=}")
+    return index.cast(dtypes.int32).clip(0, input_dim-1)
+  def _apply_coordinate_transformation(index: Tensor, input_dim: int, scale_dim, roi_dim, sizes_frac, mode: str):
+    # TODO: needs more testing, not confident in this
+    # NOTE: their reference implementation differ from the implementation in their reference docs
+    # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#Resize
+    output_dim = scale_dim * input_dim
+    if mode == "half_pixel": index = (index + 0.5) / scale_dim - 0.5
+    elif mode == "align_corners": index = index * (input_dim - 1) / (output_dim - 1) if output_dim != 1 else Tensor([0])
+    elif mode == "asymmetric": index = index / scale_dim
+    elif mode == "pytorch_half_pixel": index = (index + 0.5) / scale_dim - 0.5 if output_dim != 1 else Tensor([-0.5])
+    elif mode == "half_pixel_symmetric":
+      index = input_dim / 2 * (1 - int(output_dim) / sizes_frac) + (index + 0.5) / scale_dim - 0.5
+    elif mode == "tf_crop_and_resize":
+      index = roi_dim[0] * (input_dim - 1) + index * ((roi_dim[1] - roi_dim[0]) * (input_dim - 1) / (output_dim - 1))
+    else: raise ValueError(f"invalid {coordinate_transformation_mode=}")
+    return index.clip(0, input_dim-1)
 
-        wx, wy = math.ceil(x) - x, math.ceil(y) - y
-        if x == x_floor and y == y_floor:
-          weighted = corners[0][0]
-        elif x == x_floor:
-          weighted = corners[0][0] * wy + corners[1][0] * (1-wy)
-        elif y == y_floor:
-          weighted = corners[0][0] * wx + corners[0][1] * (1-wx)
-        else:
-          weighted = (corners[0][0] * wx + corners[0][1] * (1-wx)) * wy + \
-                     (corners[1][0] * (wx) + corners[1][1] * (1-wx)) * (1-wy)
-        ret.append(weighted)
-    return Tensor(ret).reshape(output_shape)
+  if axes is not None:
+    perm = [a for a in range(len(X.shape)) if a not in axes] + list(axes)
+    inverse_perm = [perm.index(i) for i in range(len(perm))]
+    X = X.permute(*perm)
+  else: axes, inverse_perm = list(range(X.ndim)), []
+  if roi is not None: roi = to_python_const(roi)
+  if sizes is not None:
+    sizes = [1]*(X.ndim - sizes.shape[0]) + to_python_const(sizes)
+    scales = [sizes[i] / X.shape[i] for i in range(X.ndim)]
+    if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
+      scale_fxn = min if keep_aspect_ratio_policy == "not_larger" else max
+      scale = scale_fxn(scale for i, scale in enumerate(scales) if i in axes)
+      scales = [scale if i in axes else 1 for i in range(X.ndim)]
+      sizes = [int((scale * X.shape[i]) + 0.5) if i in axes else X.shape[i] for i in range(X.ndim)]
+    elif keep_aspect_ratio_policy != "stretch": raise ValueError(f"invalid {keep_aspect_ratio_policy=}")
+  else:
+    scales = [1]*(X.ndim - scales.shape[0]) + to_python_const(scales)
+    sizes = [int(sc*sh) for sc, sh in zip(scales, X.shape)]
+
+  sizes_frac = [sc*sh for sc, sh in zip(scales, X.shape)][2:]
+  sizes, axes, scales, input_shape = (val[2:] if isinstance(val, list) else [None] * (X.ndim-2) for val in (sizes, axes, scales, list(X.shape)))
+  roi = [[st, ed] for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])] if isinstance(roi, list) else [None] * (X.ndim-2)
+  indexes = [Tensor.arange(shape, dtype=dtypes.default_float, device=X.device) for shape in sizes]
+  indexes = [_apply_coordinate_transformation(*args, coordinate_transformation_mode) for args in zip(indexes, input_shape, scales, roi, sizes_frac)]
+  if mode == "nearest":
+    indexes = [_apply_nearest_mode(*args, nearest_mode) for args in zip(indexes, input_shape)]
+    indexes = [idx.reshape(*(-1 if i == dim else 1 for i in range(len(sizes)))).expand(sizes) for dim, idx in enumerate(indexes)]
+    X = X[(..., *indexes)]
+  if mode == "linear":
+    expand = list(X.shape)
+    for i in range(-len(sizes), 0):
+      reshape, index = [1] * X.ndim, indexes[i]
+      reshape[i] = expand[i] = sizes[i]
+      low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+      X = X.gather(i, low).lerp(X.gather(i, high), perc)
   if mode == "cubic":
     raise NotImplementedError("cubic interpolation is not implemented")
+  return X.permute(*inverse_perm) if inverse_perm else X
 
 def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
   if not axes: axes = list(range(t.ndim))

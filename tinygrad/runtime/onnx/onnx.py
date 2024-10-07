@@ -2,18 +2,12 @@ from __future__ import annotations
 from typing import List, Dict, Union
 import importlib
 from functools import lru_cache
-import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import getenv, DEBUG, CI, OSX
 from tinygrad.dtype import ConstType, DType
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
-try:
-  from onnx.helper import tensor_dtype_to_np_dtype
-except ImportError:
-  # for onnx < 1.13
-  from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
-  def tensor_dtype_to_np_dtype(tensor_dtype:int) -> np.dtype: return TENSOR_TYPE_TO_NP_TYPE[tensor_dtype]
+# for onnx < 1.13
+from onnx.helper import tensor_dtype_to_np_dtype
 
 cache_misses = 0
 @lru_cache(None)
@@ -32,9 +26,9 @@ def to_python_const(t, tobytes=False) -> Union[List[ConstType], List[bytes], Uni
 # copied from helpers.py
 def is_dtype_supported(dtype, device: str = Device.DEFAULT):
   if dtype == dtypes.bfloat16: return False
-  if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
   if dtype == dtypes.half: return not (CI and device in {"GPU", "LLVM", "CUDA"})
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
+  # if device in ["WEBGPU"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
   return True
 
 # src: onnx/mapping.py  https://onnx.ai/onnx/api/mapping.html#l-mod-onnx-mapping
@@ -48,7 +42,7 @@ DTYPE_MAP: Dict[TensorProto.DataType, DType] = {
   TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float
 }
 
-onnx_ops = importlib.import_module('extra.onnx_ops')
+onnx_ops = importlib.import_module('tinygrad.runtime.onnx.onnx_ops')
 
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
@@ -80,8 +74,9 @@ def get_run_onnx(onnx_model: ModelProto):
     if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
       return Tensor(dat, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims))
     if len(inp.raw_data) > 0:
-      data = np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).astype(_to_np_dtype(dtype)).copy()
-      return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
+      return Tensor(inp.raw_data, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims)) # TODO INTRODUCES REGRESSION AGAIN
+      # data = np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).astype(_to_np_dtype(dtype)).copy()
+      # return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
     return Tensor(None, requires_grad=False)
 
   def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:
@@ -156,8 +151,10 @@ def get_run_onnx(onnx_model: ModelProto):
 
       # NOTE some ops live here because they require access to some local variables
       # have to use n.output for cases when num_outputs is absent
-      if n.op_type in onnx_ops.tensor_methods:
+      if n.op_type in onnx_ops.exact_tensor_methods:
         ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
+      elif n.op_type in onnx_ops.equivalent_tensor_methods:
+        ret = getattr(Tensor, onnx_ops.equivalent_tensor_methods[n.op_type])(*inp, *opt.values())
       elif n.op_type == "Split":
         axis = opt.get("axis", 0)
         split = None if len(inp) == 1 else to_python_const(inp[1])

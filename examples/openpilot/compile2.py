@@ -11,7 +11,8 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/mod
 
 import onnx
 from typing import Tuple, List, Optional, Dict, cast
-from extra.onnx import get_run_onnx
+# from extra.onnx import get_run_onnx
+from tinygrad.runtime.onnx.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.device import Buffer

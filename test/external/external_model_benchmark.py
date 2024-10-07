@@ -6,7 +6,7 @@ import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
 import onnxruntime as ort
 from onnx2torch import convert
-from extra.onnx import get_run_onnx
+from tinygrad.runtime.onnx.onnx import get_run_onnx
 from tinygrad.helpers import OSX, DEBUG, fetch
 from tinygrad import Tensor, Device
 

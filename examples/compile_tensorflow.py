@@ -8,7 +8,7 @@ import numpy as np
 import subprocess
 import tensorflow as tf
 import tf2onnx
-from extra.onnx import get_run_onnx
+from tinygrad.runtime.onnx.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 from extra.export_model import export_model_clang, compile_net, jit_model
 
