@@ -425,7 +425,7 @@ class Tensor:
     return r
 
   _seed: int = int(time.time())
-  _device_seeds: Dict[str, int] = {}
+  _device_seeds: Dict[str, Tensor] = {}
   _device_rng_counters: Dict[str, Tensor] = {}
   @staticmethod
   def manual_seed(seed=0):
@@ -446,15 +446,14 @@ class Tensor:
     Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
 
   @staticmethod
-  def _threefry_random_bits(key0, key1, counts0, counts1):
+  def _threefry_random_bits(key, counts0, counts1):
     x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
-    key = (Tensor([key0], device=x.device, dtype=dtypes.uint64, requires_grad=False) << 32) | key1
     x = F.Threefry.apply(*x._broadcasted(key))
     counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
     return counts0.cat(counts1)
 
   @staticmethod
-  def rand(*shape, device:Optional[str]=None, dtype:Optional[DTypeLike]=None, **kwargs) -> Tensor:
+  def rand(*shape, device:Optional[str]=None, dtype:Optional[DTypeLike]=None, contiguous:bool=True, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
 
@@ -477,7 +476,9 @@ class Tensor:
 
     # generate per device seeds and rng counter if we haven't seen this device yet
     if device not in Tensor._device_seeds:
-      Tensor._device_seeds[device] = int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big") & 0xffffffff
+      Tensor._device_seeds[device] = Tensor([((Tensor._seed & 0xffffffff) << 32) \
+        | int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big") & 0xffffffff],
+                                            device=device, dtype=dtypes.uint64, requires_grad=False)
       Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint32, requires_grad=False)
       had_counter = False
     else: had_counter = True
@@ -486,12 +487,12 @@ class Tensor:
     if (num := ceildiv(((num_ := prod(shape)) * dtype.itemsize), 4)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
 
     # increment rng counter for devices
-    if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num)
+    if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num).contiguous()
 
     # threefry random bits
     counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])
     counts1 = counts0 + ceildiv(num, 2)
-    bits = Tensor._threefry_random_bits(Tensor._seed, Tensor._device_seeds[device], counts0, counts1)[:num]
+    bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts0, counts1)[:num]
 
     # bitcast to uint with same number of bits
     _, nmant = dtypes.finfo(dtype)
@@ -507,7 +508,7 @@ class Tensor:
     if getenv("MOCKGPU") and _device: out = out.to(_device)
 
     out.requires_grad = kwargs.get("requires_grad")
-    return out.contiguous()
+    return out.contiguous() if contiguous else out
 
   # ***** creation helper functions *****
 
@@ -671,13 +672,15 @@ class Tensor:
     """
     dtype = kwargs.pop("dtype", self.dtype)
     device = kwargs.pop("device", self.device)
+    contiguous = kwargs.pop("contiguous", True)
     if isinstance(self.device, tuple):
       assert isinstance(self.lazydata, MultiLazyBuffer)
       if self.lazydata.axis is not None:
-        rands = [cast(LazyBuffer, Tensor.rand(*lb.shape, device=lb.device, dtype=dtype).lazydata) for lb in self.lazydata.lbs]
+        rands = [cast(LazyBuffer, Tensor.rand(*lb.shape, device=lb.device, dtype=dtype, contiguous=contiguous, **kwargs).lazydata) \
+                 for lb in self.lazydata.lbs]
         return Tensor(MultiLazyBuffer(rands, self.lazydata.axis), device=self.device, dtype=dtype, **kwargs)
-      return Tensor.rand(*self.shape, dtype=dtype, **kwargs).shard(self.device)
-    return Tensor.rand(*self.shape, device=device, dtype=dtype, **kwargs)
+      return Tensor.rand(*self.shape, dtype=dtype, contiguous=contiguous, **kwargs).shard(self.device)
+    return Tensor.rand(*self.shape, device=device, dtype=dtype, contiguous=contiguous, **kwargs)
 
   # ***** rng hlops *****
 
@@ -3131,7 +3134,7 @@ class Tensor:
     ```
     """
     if not Tensor.training or p == 0: return self
-    return (Tensor.rand_like(self, requires_grad=False, dtype=dtypes.default_float) >= p).where(self, 0) * (1/(1.0 - p))
+    return (Tensor.rand_like(self, requires_grad=False, dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
 
   def one_hot(self, num_classes:int=-1) -> Tensor:
     """

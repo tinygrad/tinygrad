@@ -76,7 +76,7 @@ class TestRandomness(unittest.TestCase):
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "gpuocelot doesn't support certain ops needed for threefry")
-  def test_threefly_against_reference(self):
+  def test_threefry_against_reference(self):
     Tensor.manual_seed(1337)
 
     # reference generated using
@@ -92,11 +92,11 @@ class TestRandomness(unittest.TestCase):
 
     counts = Tensor.arange(20, dtype=dtypes.uint32)
     counts0, counts1 = counts.chunk(2)
-    r = Tensor._threefry_random_bits(1337, 0, counts0, counts1).numpy()
+    r = Tensor._threefry_random_bits(1337 << 32, counts0, counts1).numpy()
 
     np.testing.assert_allclose(jr, r)
 
-  def test_threefly_against_reference_full(self):
+  def test_threefry_against_reference_full(self):
     Tensor.manual_seed(1337)
 
     # reference generated using
@@ -118,7 +118,7 @@ class TestRandomness(unittest.TestCase):
     np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
 
   @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL", "NV"), "no GPU CI")
-  def test_threefly_tensors_cnt(self):
+  def test_threefry_tensors_cnt(self):
     Tensor.manual_seed(1337)
 
     Tensor.rand(20).realize()
@@ -135,6 +135,31 @@ class TestRandomness(unittest.TestCase):
 
     assert len(Tensor._device_rng_counters) == 0
     assert len(Tensor._device_seeds) == 0
+
+  @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL", "NV"), "no GPU CI")
+  def test_threefry_same_kernels(self):
+    Tensor.manual_seed(0)
+
+    Tensor.rand(1).realize()
+
+    s = Tensor.rand(20).schedule()
+    s2 = Tensor.rand(20).schedule()
+
+    assert len(s) == len(s2), f"{len(s)} != {len(s2)}"
+    for x,y in zip(s, s2):
+      if not (x.ast == y.ast):
+        print(f"{x.ast} != {y.ast}")
+
+    Tensor.rand(1, device=f"{Device.DEFAULT}:1").realize()
+
+    s3 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule()
+    s4 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule()
+
+    assert len(s3) == len(s4), f"{len(s3)} != {len(s4)}"
+    assert len(s2) == len(s4), f"{len(s)} != {len(s3)}"
+    for x,y in zip(s3, s4):
+      if not (x.ast == y.ast):
+        print(f"{x.ast} != {y.ast}")
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "need bfloat16 support")
   def test_rand_bfloat16(self):
