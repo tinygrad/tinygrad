@@ -1,5 +1,5 @@
 # sorted in order of increasing complexity
-from typing import List
+from typing import List, Optional
 from tinygrad.helpers import dedup, flatten, getenv
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, least_upper_dtype
@@ -107,14 +107,14 @@ def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, weight_dec
   - Paper: https://arxiv.org/abs/1711.05101v3
   """
   return LAMB(params, lr, b1, b2, eps, weight_decay, adam=True)
-def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8):
+def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, shard_axis: Optional[int] = None):
   """
   Adam optimizer.
 
   - Described: https://paperswithcode.com/method/adam
   - Paper: https://arxiv.org/abs/1412.6980
   """
-  return LAMB(params, lr, b1, b2, eps, 0.0, adam=True)
+  return LAMB(params, lr, b1, b2, eps, 0.0, adam=True, shard_axis=shard_axis)
 
 class LAMB(Optimizer):
   """
@@ -123,12 +123,12 @@ class LAMB(Optimizer):
   - Described: https://paperswithcode.com/method/lamb
   - Paper: https://arxiv.org/abs/1904.00962
   """
-  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, adam=False):
+  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, adam=False, shard_axis: Optional[int] = None):
     super().__init__(params, lr)
     self.b1, self.b2, self.eps, self.wd, self.adam = b1, b2, eps, weight_decay, adam
     self.b1_t, self.b2_t = (Tensor.ones((1,), dtype=dtypes.float32, device=self.device, requires_grad=False).contiguous() for _ in [b1, b2])
-    self.m = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
-    self.v = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
+    self.m = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False, shard_axis=shard_axis).contiguous() for t in self.params]
+    self.v = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False, shard_axis=shard_axis).contiguous() for t in self.params]
 
   def _step(self) -> List[Tensor]:
     self.b1_t *= self.b1

@@ -118,7 +118,8 @@ class Tensor:
   no_grad: ClassVar[bool] = False
 
   def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, 'np.ndarray', bytes, MultiLazyBuffer, UOp, pathlib.Path],  # type: ignore [name-defined] # noqa: F821
-               device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
+               device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None,
+               shard_axis: Optional[int] = None):
     if dtype is not None: dtype = to_dtype(dtype)
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
@@ -168,7 +169,7 @@ class Tensor:
         assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
         self.lazydata: Union[LazyBuffer, MultiLazyBuffer] = data
       else:
-        self.lazydata = MultiLazyBuffer.from_sharded(data, device, None, None)
+        self.lazydata = MultiLazyBuffer.from_sharded(data, device, shard_axis, None)
     else:
       self.lazydata = data if data.device == device else data.copy_to_device(device)
 
