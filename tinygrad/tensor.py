@@ -1036,7 +1036,7 @@ class Tensor:
 
     def traverse(self, skip_cond = lambda _: False):
       current = self
-      while current:
+      while current is not None:
         if not skip_cond(current): yield current
         current = current.next
 
@@ -1082,7 +1082,7 @@ class Tensor:
         start, stop, step = i.indices(node.size)
         if step * (stop - start) < 0: start, stop = 0, 0
         elif step < 0: start, stop, step = stop + 1, start + 1, step
-        # update resized size
+        # update size for slice
         node.size = math.ceil((stop - start) / abs(step))
       if i is not None: pre_expansion_collapse_args.append((start, stop, step))
 
@@ -1109,7 +1109,7 @@ class Tensor:
 
       # create index masks
       for dim, node in tensors.items():
-        i = (node.index < 0).where(node.size, 0) # treat negative index values
+        i = (node.index < 0).where(node.size, 0) + node.index # treat negative index values
         try: i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
         except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
         a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
