@@ -1080,6 +1080,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], lambda x: torch.logcumsumexp(x, dim=-1), lambda x: x.logcumsumexp(-1), atol=1e-7, grad_atol=1e-7)
 
+  @unittest.expectedFailure  # TODO: fix numerical instability
+  def test_logcumsumexp_numerical(self):
+    helper_test_op(None, lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), atol=1e-7, grad_atol=1e-7, vals=[[0.0, 100.0]])
+
   def test_sinh(self):
     helper_test_op([(45,65)], lambda x: x.sinh(), grad_atol=1e-6)
     # TODO: backward nan instead of inf
