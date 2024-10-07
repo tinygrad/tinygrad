@@ -2,10 +2,10 @@ import sys, pickle, atexit, uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
-from tinygrad.ops import REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, TernaryOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, \
-    graph_rewrite, resolve, track_rewrites
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
-                             GlobalCounters, all_same, colored, diskcache_put, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
+from tinygrad.ops import REDUCE_ALU, UNSAFE_PAD_OPS, MetaOps, ReduceOps, TernaryOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, resolve, \
+    graph_rewrite, track_rewrites
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, GlobalCounters, all_same, \
+    colored, diskcache_put, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.engine.lazy import LazyBuffer
