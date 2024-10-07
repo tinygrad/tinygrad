@@ -1,10 +1,10 @@
-import sys, pickle, atexit, importlib, contextlib
+import sys, pickle, atexit, uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
 from tinygrad.ops import REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, TernaryOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, graph_rewrite, resolve
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
-                             GlobalCounters, all_same, colored, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
+                             GlobalCounters, all_same, colored, diskcache_put, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.engine.lazy import LazyBuffer
@@ -124,10 +124,12 @@ reduceop_fusor = PatternMatcher([
 
 enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx.bufs.index(x.arg[0])))])
 
-def full_ast_rewrite(sink:UOp, ctx:ScheduleItemContext) -> UOp:
-  if not AST_REWRITE: return sink
-  sink = graph_rewrite(sink, reduceop_fusor)
-  return graph_rewrite(sink, enumerate_bufs, ctx)
+def full_ast_rewrite(base_sink:UOp, ctx:ScheduleItemContext) -> UOp:
+  if not AST_REWRITE: return base_sink
+  sink = graph_rewrite(base_sink, reduceop_fusor)
+  ret = graph_rewrite(sink, enumerate_bufs, ctx)
+  if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_process_replay", str(uuid.uuid4()), (base_sink, ctx, ret))
+  return ret
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
 
@@ -414,10 +416,6 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
 
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   graph, in_degree, var_vals = _graph_schedule(outs)
-  if getenv("RUN_PROCESS_REPLAY") and getenv("COMPARE_SCHEDULE", 1):
-    # NOTE: process relpay needs PYTHONPATH=., remove this once it just pickles LazyBuffers
-    with contextlib.suppress(Exception): importlib.import_module("test.external.process_replay.diff_schedule").process_replay(outs, graph, in_degree)
-
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
   kernel_number = GlobalCounters.kernel_count
