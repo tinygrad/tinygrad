@@ -200,8 +200,10 @@ def time_linearizer(lin:Kernel, rawbufs:List[Buffer], allow_test_size=True, max_
   rawbufs = _ensure_buffer_alloc(rawbufs)
   var_vals: Dict[Variable, int] = {k:int(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
   p = lin.to_program()
-  tms = _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
-                      max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))
+  try:
+    tms = _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
+                        max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))
+  except RuntimeError: return float("inf")
 
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
   return min(tms)
