@@ -165,7 +165,6 @@ class CStyleLanguage(Renderer):
     # NOTE: this relies on bufs dict preserving order
     return self.render_kernel(name, kernel, list(bufs.values()), uops)
 
-
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
   float4 = "(float4)"
