@@ -749,15 +749,12 @@ def train_bert():
   if RUNMLPERF:
     # only load real data with RUNMLPERF
     i, train_data = start_step, get_data_bert(GPUS, train_it)
+    if MLLOGGER:
+      MLLOGGER.start(key=mllog_constants.EPOCH_START, value=i*BS, metadata={"epoch_num": i*BS})
   else:
     i, train_data = start_step, get_fake_data_bert(GPUS, BS)
 
-  epoch_started = False
   while train_data is not None and i < train_steps and not achieved:
-    if not epoch_started and MLLOGGER and RUNMLPERF:
-      MLLOGGER.start(key=mllog_constants.EPOCH_START, value=i+1, metadata=dict(epoch_num=i+1))
-      epoch_started = True
-
     Tensor.training = True
     BEAM.value = TRAIN_BEAM
     st = time.perf_counter()
@@ -791,7 +788,7 @@ def train_bert():
     if WANDB:
       wandb.log({"lr": optimizer_wd.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
                   "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
-                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st)})
+                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": (i+1)*BS})
 
     train_data, next_data = next_data, None
     i += 1
@@ -806,8 +803,6 @@ def train_bert():
     # ** eval loop **
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
       if MLLOGGER and RUNMLPERF:
-        epoch_started = False
-        MLLOGGER.event(key=mllog_constants.EPOCH_STOP, value=i+1, metadata=dict(epoch_num=i+1))
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": 1, "epoch_count": 1, "step_num": i})
       if getenv("RESET_STEP", 1): train_step_bert.reset()
       eval_lm_losses = []
@@ -881,6 +876,7 @@ def train_bert():
         print(f"Reference Convergence point reached after {i * BS} datasamples and {hours}h{minutes}m{seconds:.2f}s.")
         achieved = True
         if MLLOGGER and RUNMLPERF:
+          MLLOGGER.event(key=mllog_constants.EPOCH_STOP, value=i*BS, metadata={"epoch_num": i*BS})
           MLLOGGER.end(key=mllog_constants.RUN_STOP, metadata=dict(status=mllog_constants.SUCCESS))
         # stop once hitting the target
         break
