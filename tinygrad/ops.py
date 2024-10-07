@@ -1,6 +1,5 @@
 from __future__ import annotations
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar
-from types import FrameType
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -587,8 +586,17 @@ class TrackedRewriteContext:
   loc: Tuple[str, int]                                                    # location that called graph_rewrite
   sink: UOp                                                               # the sink passed into the rewrite
   rewrites: List[Tuple[UOp, UOp, UPat]] = field(default_factory=list)     # all rewrites of sparents. (before, after, UPat)
+
 rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
 contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
+def track_rewrites(func):
+  def __wrapper(self, *args, **kwargs):
+    if TRACK_MATCH_STATS >= 2: rewrite_stack.append((self, []))
+    ret = func(self, *args, **kwargs)
+    if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
+    return ret
+  return __wrapper
+
 class TrackedPatternMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     super().__init__(patterns)
@@ -649,16 +657,9 @@ class RewriteContext:
     return ret
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
-  if TRACK_MATCH_STATS >= 2:
-    from tinygrad.codegen.kernel import Kernel
-    frm = sys._getframe(1)
-    # get Kernel we are rewriting in the context of
-    frm_walk: Optional[FrameType] = frm
-    while frm_walk is not None and not isinstance(kernel:=frm_walk.f_locals.get("self", None), Kernel): kernel, frm_walk = None, frm_walk.f_back
-    rewrite_stack.append((kernel, [TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink)]))
-  ret = RewriteContext(pm, ctx).rewrite(sink)
-  if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
-  return ret
+  if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0:
+    rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
+  return RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
 

@@ -5,8 +5,8 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict
 from enum import Enum, auto
 
-from tinygrad.ops import BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify, graph_rewrite, PatternMatcher
-from tinygrad.ops import resolve
+from tinygrad.ops import UNSAFE_PAD_OPS, BUFFER_UOPS, BinaryOps, KernelInfo, UOp, UOps, PatternMatcher, print_uops, type_verify, resolve, \
+    graph_rewrite, track_rewrites
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType, PtrDType
@@ -704,6 +704,7 @@ class Kernel:
 
   # **** this is the lowerer ****
 
+  @track_rewrites
   def linearize(self) -> Kernel:
     modified_ast = self.get_optimized_ast()
 

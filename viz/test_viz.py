@@ -5,7 +5,7 @@ os.environ["TRACK_MATCH_STATS"] = "2"
 os.environ["PRINT_MATCH_STATS"] = "0"
 from tinygrad import Tensor
 from tinygrad.engine.realize import lower_schedule
-from tinygrad.ops import TrackedRewriteContext, UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps
+from tinygrad.ops import TrackedRewriteContext, UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps, track_rewrites
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import Context, all_same, DEBUG, getenv
 from tinygrad.codegen.uopgraph import sym, devectorize, float4_folding
@@ -61,7 +61,9 @@ class TestViz(unittest.TestCase):
        lambda root,const: UOp.const_like(root, const.arg) if all_same(root.src) else None),
       (UPat(UOps.GEP, name="root", src=(UPat(UOps.CONST, name="x"),), location="test"), lambda root,x: root.const_like(x.arg))
     ])
-    ret = graph_rewrite(sink, pm)
+    @track_rewrites
+    def f(k): return graph_rewrite(sink, pm)
+    ret = f("test_rewrite")
     if DEBUG >= 4: print_diff(sink, ret)
     graphs,_,_ = reconstruct_graph(contexts[0][1][0])
     assert graphs[-1].key == ret.key
@@ -92,7 +94,9 @@ class TestViz(unittest.TestCase):
              x11,
              x7,)),)),)),))
     pm = sym+(devectorize+float4_folding)
-    new_sink = graph_rewrite(sink, pm)
+    @track_rewrites
+    def f(k): return graph_rewrite(sink, pm)
+    new_sink = f("test_rewrite")
     if DEBUG >= 4: print_diff(sink, new_sink, unified=0)
     self.assert_valid_ctx(contexts)
     assert all(ctx.loc[0].split("/")[-1] == __file__.split("/")[-1] for _,ctxs in contexts for ctx in ctxs)
