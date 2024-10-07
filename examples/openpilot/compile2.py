@@ -11,8 +11,6 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/mod
 
 import onnx
 from typing import Tuple, List, Optional, Dict, cast
-# from extra.onnx import get_run_onnx
-from tinygrad.runtime.onnx.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.device import Buffer
@@ -21,6 +19,7 @@ from tinygrad.engine.realize import run_schedule, lower_schedule, ExecItem, Comp
 from tinygrad.engine.schedule import ScheduleItem, create_schedule
 from tinygrad.ops import UOps
 from tinygrad.tensor import _to_np_dtype
+from tinygrad.runtime.onnx.onnx import get_run_onnx
 Device.DEFAULT = "GPU"
 
 def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:

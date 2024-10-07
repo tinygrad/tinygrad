@@ -2,12 +2,18 @@ from __future__ import annotations
 from typing import List, Dict, Union
 import importlib
 from functools import lru_cache
+import numpy as np
 from tinygrad import Tensor, dtypes, Device
+from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import getenv, DEBUG, CI, OSX
 from tinygrad.dtype import ConstType, DType
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
-# for onnx < 1.13
-from onnx.helper import tensor_dtype_to_np_dtype
+try:
+  from onnx.helper import tensor_dtype_to_np_dtype
+except ImportError:
+  # for onnx < 1.13
+  from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
+  def tensor_dtype_to_np_dtype(tensor_dtype:int) -> np.dtype: return TENSOR_TYPE_TO_NP_TYPE[tensor_dtype]
 
 cache_misses = 0
 @lru_cache(None)
@@ -28,7 +34,7 @@ def is_dtype_supported(dtype, device: str = Device.DEFAULT):
   if dtype == dtypes.bfloat16: return False
   if dtype == dtypes.half: return not (CI and device in {"GPU", "LLVM", "CUDA"})
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
-  # if device in ["WEBGPU"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
+  # if device in ["WEBGPU"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32] # lol
   return True
 
 # src: onnx/mapping.py  https://onnx.ai/onnx/api/mapping.html#l-mod-onnx-mapping
@@ -74,9 +80,9 @@ def get_run_onnx(onnx_model: ModelProto):
     if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
       return Tensor(dat, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims))
     if len(inp.raw_data) > 0:
-      return Tensor(inp.raw_data, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims)) # TODO INTRODUCES REGRESSION AGAIN
-      # data = np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).astype(_to_np_dtype(dtype)).copy()
-      # return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
+      # return Tensor(inp.raw_data, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims)) # TODO REINTRODUCES REGRESSION AGAIN
+      data = np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).astype(_to_np_dtype(dtype)).copy()
+      return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
     return Tensor(None, requires_grad=False)
 
   def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:
