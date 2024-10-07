@@ -1,7 +1,6 @@
 name: Benchmarks
 env:
   # TODO: this rescheduling makes gpt2, mixtral and llama unjitted slower
-  COMPARE_SCHEDULE: "0"
   RUN_PROCESS_REPLAY: "1"
   ASSERT_PROCESS_REPLAY: "0"
   PYTHONPATH: .
