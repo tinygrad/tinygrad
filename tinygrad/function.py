@@ -19,9 +19,10 @@ class ContiguousBackward(Function):
 class Cast(Function):
   def forward(self, x:LazyBuffer, dtype:DType, bitcast:bool=False) -> LazyBuffer:
     self.input_dtype, self.bitcast = x.dtype, bitcast
-    return x.cast(dtype, bitcast)
+    return x.bitcast(dtype) if self.bitcast else x.cast(dtype)
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.cast(self.input_dtype, self.bitcast)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return grad_output.bitcast(self.input_dtype) if self.bitcast else grad_output.cast(self.input_dtype)
 
 # ************* unary ops *************
 
