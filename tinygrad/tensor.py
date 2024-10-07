@@ -1793,8 +1793,8 @@ class Tensor:
     print(t.logcumsumexp(axis=1).numpy())
     ```
     """
-    m = self.max(axis=axis, keepdim=True)
-    return (self - m).exp().cumsum(axis=axis).log() + m
+    cm = self.cumsum(axis=axis).maximum(self)
+    return (self - cm).exp().cumsum(axis=axis).log() + cm
 
   def argmax(self, axis=None, keepdim=False):
     """
