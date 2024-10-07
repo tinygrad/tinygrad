@@ -3,13 +3,12 @@ import unittest
 import os, itertools
 os.environ["TRACK_MATCH_STATS"] = "2"
 os.environ["PRINT_MATCH_STATS"] = "0"
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
 from tinygrad.engine.realize import lower_schedule
+from tinygrad.dtype import PtrDType
+from tinygrad.helpers import Context, all_same, getenv
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps, track_rewrites
-from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.helpers import Context, all_same, DEBUG, getenv
 from tinygrad.codegen.uopgraph import sym, devectorize, float4_folding
-from test.external.process_replay.helpers import print_diff
 from viz.serve import GraphRewriteMetadata, get_metadata, get_details, _uop_to_json
 
 def group_rewrites(kernels:List[GraphRewriteMetadata]): return {k:list(v) for k,v in itertools.groupby(kernels, lambda x:x.loc)}
@@ -63,7 +62,6 @@ class TestViz(unittest.TestCase):
     @track_rewrites
     def f(k): return graph_rewrite(sink, pm)
     ret = f("test_rewrite")
-    if DEBUG >= 4: print_diff(sink, ret)
     self.assert_valid_ctx(contexts)
     args = get_metadata(contexts)[0][0]
     g = get_details(*args)
@@ -96,8 +94,7 @@ class TestViz(unittest.TestCase):
     pm = sym+(devectorize+float4_folding)
     @track_rewrites
     def f(k): return graph_rewrite(sink, pm)
-    new_sink = f("test_rewrite")
-    if DEBUG >= 4: print_diff(sink, new_sink, unified=0)
+    f("test_rewrite")
     self.assert_valid_ctx(contexts)
     assert all(ctx.loc[0].split("/")[-1] == __file__.split("/")[-1] for _,ctxs in contexts for ctx in ctxs)
 

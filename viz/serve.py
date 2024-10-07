@@ -4,11 +4,10 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Tuple, Optional
-from tinygrad.engine.graph import word_wrap
 from tinygrad.helpers import getenv, to_function_name, tqdm
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, lines
+from tinygrad.engine.graph import word_wrap, uops_colors
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.engine.graph import uops_colors
 
 # ** API spec
 
@@ -113,7 +112,6 @@ class Handler(BaseHTTPRequestHandler):
 
 # ** main loop
 
-BROWSER = getenv("BROWSER", 1)
 stop_reloader = threading.Event()
 def reloader():
   mtime = os.stat(__file__).st_mtime
@@ -137,7 +135,7 @@ if __name__ == "__main__":
   st = time.perf_counter()
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
-  if BROWSER: webbrowser.open("http://localhost:8000")
+  if getenv("BROWSER", 1): webbrowser.open("http://localhost:8000")
   try: server.serve_forever()
   except KeyboardInterrupt:
     print("*** viz is shutting down...")
