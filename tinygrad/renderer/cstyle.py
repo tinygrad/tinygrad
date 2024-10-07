@@ -165,11 +165,6 @@ class CStyleLanguage(Renderer):
     # NOTE: this relies on bufs dict preserving order
     return self.render_kernel(name, kernel, list(bufs.values()), uops)
 
-<<<<<<< HEAD
-=======
-def _make_clang_dtype(self, dtype):
-  return f"typedef {self.render_dtype(dtype.scalar())} {self.render_dtype(dtype)} __attribute__((aligned({(sz:=dtype.itemsize)}),vector_size({sz})));"
-
 no_bfloat16 = PatternMatcher([
     (UPat({UOps.DEFINE_GLOBAL}, dtype=PtrDType(dtypes.bfloat16), name="x"),
      lambda x: UOp(x.op, PtrDType(dtypes.float32), x.src, x.arg)),
@@ -180,7 +175,6 @@ no_bfloat16 = PatternMatcher([
     ]
 )
 
->>>>>>> f8d5e9a8 (get llama to build with clang)
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
   float4 = "(float4)"
