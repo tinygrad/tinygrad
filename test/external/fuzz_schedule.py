@@ -4,7 +4,7 @@ from typing import DefaultDict, Dict, List, Set, Tuple, TypeVar, Union
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import CustomOp, capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, MULTIOUTPUT, colored, getenv
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.schedule import LBScheduleItem, _graph_schedule, ScheduleItem
 from tinygrad.ops import MetaOps
 from tinygrad.tensor import Tensor, _to_np_dtype

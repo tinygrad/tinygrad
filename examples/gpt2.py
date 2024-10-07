@@ -4,6 +4,7 @@ import argparse
 import numpy as np
 import tiktoken
 from tinygrad import Tensor, TinyJit, Device, GlobalCounters, Variable
+from tinygrad.ops import UOp
 from tinygrad.helpers import Timing, DEBUG, JIT, getenv, fetch, colored, trange
 from tinygrad.nn import Embedding, Linear, LayerNorm
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
@@ -75,9 +76,9 @@ class Transformer:
     self.lm_head = Linear(dim, vocab_size, bias=False)
     self.forward_jit = TinyJit(self.forward)
 
-  def forward(self, tokens:Union[Tensor,Variable], start_pos:Variable, temperature:float=0.0):
+  def forward(self, tokens:Union[Tensor,UOp], start_pos:Variable, temperature:float=0.0):
     if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
-    if isinstance(tokens, Variable):
+    if isinstance(tokens, UOp):
       seqlen = 1
       tok_emb = self.wte.weight.shrink(((tokens, tokens+1), None))
     else:
@@ -107,8 +108,8 @@ class Transformer:
       ret = (logits / temperature).softmax().multinomial()
     return ret.flatten().realize()
 
-  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
-    forward = (self.forward_jit if JIT and (isinstance(tokens, Variable) or tokens.shape[1] == 1) else self.forward)
+  def __call__(self, tokens:Union[Tensor,UOp], start_pos:Variable, temperature:float=0.0) -> Tensor:
+    forward = (self.forward_jit if JIT and (isinstance(tokens, UOp) or tokens.shape[1] == 1) else self.forward)
     return forward(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
