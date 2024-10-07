@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib
 from contextlib import ContextDecorator
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, cast, get_args, Literal
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, cast, get_args, Literal, Iterator
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -1020,29 +1020,46 @@ class Tensor:
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
 
   class IndexDimension:
-    def __init__(self, index: Union[int, slice, Tensor, None, List, Tuple], size: int, device: Union[str, Tuple[str, ...]],
+    def __init__(self, index, size: int, device: Union[str, Tuple[str, ...]],
                  previous: Union['Tensor.IndexDimension', None]):
-      self.size = size  # the canonical size of the dimension that is mapped (pinned) to the index
       # we use an inferred dim value based on previous and next
-      self.previous, self.next = previous, None
+      self.previous, self.next, boundary, stride = previous, None, [0, size], 1
       if previous is not None: previous.next = self
-      # basic validation of index value
-      if not isinstance(index, (int, slice, Tensor, type(None), list, tuple)): raise IndexError(f"{type(index).__name__} indexing is not supported")
-      if isinstance(index, (list, tuple)): index = Tensor(index, device, requires_grad=False) # Tensor creation validates the contents of index
-      if isinstance(index, Tensor) and not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-      if isinstance(index, int) and (index >= size or index < -size): raise IndexError(f"{index=} is out of bounds with {size=}")
-      if isinstance(index, slice) and index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
-      self.index = index
 
-    def traverse(self, skip_cond = lambda _: False):
-      current = self
+      # Tensor creation validates the contents of index
+      if isinstance(index, (list, tuple)): index = Tensor(index, device, requires_grad=False)
+      # type specific validation
+      if isinstance(index, Tensor):
+        if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
+        index = (index < 0).where(size, 0) + index # treat negative index values
+      elif isinstance(index, int):
+        if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
+        boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
+      elif isinstance(index, slice):
+        print(index, 'slice')
+        # TODO add bytes and Tensor?
+        # TODO also is this if check isn't comprehensive?
+        if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
+        if not all(isinstance(s,int) or s is None for s in (index.start, index.stop, index.step)): raise TypeError("only int slicing is supported")
+        # handle int slicing
+        *boundary, stride = index.indices(size)
+        if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
+        elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
+        # update size for slice
+        size = math.ceil((boundary[1] - boundary[0]) / abs(stride))
+      elif index is None: pass # do nothing
+      else: raise IndexError(f"{type(index).__name__} indexing is not supported")
+
+      self.size, self.index, self.boundary, self.stride = size, index, (boundary[0], boundary[1]), stride # TODO ffs mypy
+
+    def traverse(self, skip_cond: Callable[[Tensor.IndexDimension], bool] = lambda n: False) -> Iterator[Tensor.IndexDimension]:
+      current: Optional[Tensor.IndexDimension] = self
       while current is not None:
         if not skip_cond(current): yield current
         current = current.next
 
-  # cute _getitem OwO
   def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
-    # treat special case of single index
+    # treat special case of single item index
     if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
     elif not isinstance(indices, (tuple, list)): indices = [indices]
     # turn scalar Tensors into const val for int indexing if possible
@@ -1057,7 +1074,7 @@ class Tensor:
     indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_indices)
     if not indices: return self
 
-    # CREATE DIMENSION GRAPH
+    # create IndexDimension chain
     node, none_counter = None, 0
     for dim, index in enumerate(indices):
       none_counter += int(index is None)
@@ -1066,31 +1083,10 @@ class Tensor:
       # TODO: dim==0 not ideal
       if dim == 0: root = node
 
-    # traverse
-    # TODO: man I think I went to hard on the isinstance usage...
-    pre_expansion_collapse_args = []
-    for node in root.traverse():
-      # determine normalized start, stop, step
-      if isinstance(i := node.index, Tensor): start, stop, step = 0, node.size, 1
-      if isinstance(i, int): start, stop, step = (i, i+1, 1) if i >= 0 else (i+node.size, i+node.size+1,1)
-      if isinstance(i, slice):
-        # do deeper validation of contents in slice index
-        # TODO add bytes and Tensor?
-        # TODO also is this if check isn't comprehensive?
-        if not all(isinstance(s,int) or s is None for s in (i.start, i.stop, i.step)): raise TypeError("only int slicing is supported")
-        # handle int slicing
-        start, stop, step = i.indices(node.size)
-        if step * (stop - start) < 0: start, stop = 0, 0
-        elif step < 0: start, stop, step = stop + 1, start + 1, step
-        # update size for slice
-        node.size = math.ceil((stop - start) / abs(step))
-      if i is not None: pre_expansion_collapse_args.append((start, stop, step))
-
-    new_slice, strides = ((), ()) if not pre_expansion_collapse_args else zip(*(((s,e),st) for s,e,st in pre_expansion_collapse_args))
-
-    # MOVEMENT OPS
+    # movement ops
+    strides = tuple(node.stride for node in root.traverse(lambda n: n.index is None)) # skip None since we haven't injected dims yet
     # flip negative strides
-    ret = self.shrink(new_slice).flip(tuple(i for i, st in enumerate(strides) if st < 0))
+    ret = self.shrink(tuple(node.boundary for node in root.traverse(lambda n: n.index is None))).flip(tuple(i for i,st in enumerate(strides) if st<0))
     # handle stride != 1 or -1
     if any(abs(st) != 1 for st in strides):
       strides = tuple(abs(s) for s in strides)
@@ -1100,17 +1096,17 @@ class Tensor:
       ret = ret.reshape(tuple(flatten((s // st, st) for s, st in zip(ret.shape, strides))))
       ret = ret.shrink(tuple(flatten(((0, s), (0, 1)) for s in ret.shape[::2]))).reshape(ret.shape[::2])
 
-    # dim expand and collapse
-    ret = ret.reshape(tuple(node.size for node in root.traverse(lambda x: isinstance(x.index, int))))
+    # dim injection and collapse
+    ret = ret.reshape(tuple(node.size for node in root.traverse(lambda n: isinstance(n.index, int)))) # skip int indexes because int collapses dim
 
-    if tensors := {dim:node for dim, node in enumerate(root.traverse(lambda x: isinstance(x.index, int))) if isinstance(node.index, Tensor)}:
+    # tensor indexing
+    if tensors := {dim:node for dim, node in enumerate(root.traverse(lambda n: isinstance(n.index, int))) if isinstance(node.index, Tensor)}:
       masks, first_dim, last_dim = [], min(tensors.keys()), max(tensors.keys())
       pre_reduce_shape = ret.shape[:first_dim] + (big_shape := _broadcast_shape(*(t.index.shape for t in tensors.values()))) + ret.shape[first_dim:]
 
       # create index masks
       for dim, node in tensors.items():
-        i = (node.index < 0).where(node.size, 0) + node.index # treat negative index values
-        try: i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
+        try: i = node.index.reshape(node.index.shape + (1,)*(ret.ndim - first_dim)).expand(pre_reduce_shape)
         except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
         a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape((ret.shape[dim],) + (1,)*(ret.ndim - dim - 1))
         masks.append(i == a)
