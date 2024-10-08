@@ -1780,6 +1780,7 @@ class Tensor:
     print(t.logcumsumexp(axis=1).numpy())
     ```
     """
+    # need to compute [x1,...xi] - cm[i]
     m = self.max(axis=axis, keepdim=True)
     return (self - m).exp().cumsum(axis=axis).log() + m
 
