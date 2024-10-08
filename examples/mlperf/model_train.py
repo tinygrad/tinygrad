@@ -803,7 +803,7 @@ def train_bert():
     # ** eval loop **
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
       if MLLOGGER and RUNMLPERF:
-        MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": 1, "epoch_count": 1, "step_num": i})
+        MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*BS, "step_num": i})
       if getenv("RESET_STEP", 1): train_step_bert.reset()
       eval_lm_losses = []
       eval_clsf_losses = []
@@ -858,16 +858,17 @@ def train_bert():
                     "eval/clsf_accuracy": avg_clsf_acc, "eval/forward_time": avg_fw_time})
 
       if MLLOGGER and RUNMLPERF:
-        MLLOGGER.end(key=mllog_constants.EVAL_STOP, value=i, metadata={"epoch_count": 1, "step_num": i, "samples_count": config["EVAL_BS"] * config["MAX_EVAL_STEPS"]})
-        MLLOGGER.event(key=mllog_constants.EVAL_ACCURACY, value=avg_lm_acc, metadata={"epoch_num": 1, "masked_lm_accuracy": avg_lm_acc})
+        MLLOGGER.end(key=mllog_constants.EVAL_STOP, value=i*BS, metadata={"epoch_count": i*BS, "step_num": i, "samples_count": config["EVAL_BS"] * config["MAX_EVAL_STEPS"]})
+        MLLOGGER.event(key=mllog_constants.EVAL_ACCURACY, value=avg_lm_acc, metadata={"epoch_num": i*BS, "masked_lm_accuracy": avg_lm_acc})
 
       # save model if achieved target
       if not achieved and avg_lm_acc >= target:
         wc_end = time.perf_counter()
-        if not os.path.exists(ckpt_dir := save_ckpt_dir): os.mkdir(ckpt_dir)
-        fn = f"{ckpt_dir}/bert-large.safe"
-        safe_save(get_state_dict(model), fn)
-        print(f" *** Model saved to {fn} ***")
+        if getenv("CKPT"):
+          if not os.path.exists(ckpt_dir := save_ckpt_dir): os.mkdir(ckpt_dir)
+          fn = f"{ckpt_dir}/bert-large.safe"
+          safe_save(get_state_dict(model), fn)
+          print(f" *** Model saved to {fn} ***")
 
         total_seconds = wc_end - wc_start
         hours = int(total_seconds // 3600)
