@@ -468,6 +468,15 @@ class TestNN(unittest.TestCase):
     self.assertEqual(1, len([item for item in schedule if item.ast.op is UOps.SINK]), "second run realizes embedding only")
     run_schedule(schedule)
 
+  def test_embedding_shape(self):
+    vocab_size, embed_size = 10, 16
+    layer = Embedding(vocab_size, embed_size)
+    for rank in range(5):
+      shp = (1,) * rank
+      a = Tensor([3]).reshape(shp)
+      result = layer(a)
+      self.assertEqual(result.shape, shp + (embed_size,))
+
   def test_load_state_dict(self):
     layer = Conv2d(3, 5, kernel_size=3)
 
