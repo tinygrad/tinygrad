@@ -1,10 +1,11 @@
-import sys, pickle, atexit, uuid
+import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
-from tinygrad.ops import REDUCE_ALU, MetaOps, ReduceOps, UNSAFE_PAD_OPS, TernaryOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, graph_rewrite, resolve
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, \
-                             GlobalCounters, all_same, colored, diskcache_put, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
+from tinygrad.ops import REDUCE_ALU, UNSAFE_PAD_OPS, MetaOps, ReduceOps, TernaryOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, resolve, \
+    graph_rewrite, track_rewrites
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, GlobalCounters, all_same, \
+    colored, diskcache_put, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.engine.lazy import LazyBuffer
@@ -16,6 +17,7 @@ from tinygrad.shape.view import View, strides_for_shape
 sys.setrecursionlimit(10000)
 
 BUF_LIMIT = {"METAL": 32}
+METAOPS = {MetaOps.CUSTOM:UOps.CUSTOM, MetaOps.COPY:UOps.COPY, MetaOps.EMPTY:UOps.EMPTY, MetaOps.VIEW:UOps.BUFFER_VIEW}
 
 # *** ScheduleItem return type ***
 
@@ -124,11 +126,12 @@ reduceop_fusor = PatternMatcher([
 
 enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx.bufs.index(x.arg[0])))])
 
+@track_rewrites
 def full_ast_rewrite(base_sink:UOp, ctx:ScheduleItemContext) -> UOp:
   if not AST_REWRITE: return base_sink
   sink = graph_rewrite(base_sink, reduceop_fusor)
   ret = graph_rewrite(sink, enumerate_bufs, ctx)
-  if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_process_replay", str(uuid.uuid4()), (base_sink, ctx, ret))
+  if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
   return ret
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
@@ -175,9 +178,9 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
 
 def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp]) -> Tuple[LBScheduleItem, Dict[Variable, int]]:
   """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
-  if (out:=outs[0]).op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}:
-    metadata = (out.metadata,) if out.metadata is not None else None
-    return LBScheduleItem(UOp(UOps.EXT, out.dtype, (), (out.op, out.arg)), (out,)+tuple(x.base for x in out.srcs), metadata), {}
+  if (out:=outs[0]).op in METAOPS:
+    return LBScheduleItem(UOp(METAOPS[cast(MetaOps, out.op)], out.dtype, (), out.arg), (out,)+tuple(x.base for x in out.srcs),
+                          (out.metadata,) if out.metadata is not None else None), {}
   # create the stores
   var_vals = merge_dicts([out.st.var_vals.copy() for out in outs])
   assign_targets = {x.srcs[1]:x for x in outs if x.op is MetaOps.ASSIGN}

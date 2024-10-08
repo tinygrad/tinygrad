@@ -93,6 +93,7 @@ class LazyBuffer(MathTrait):
     self.base.forced_realize = True
     return self
 
+  def bitcast(self, dtype:DType) -> LazyBuffer: return self.cast(dtype, bitcast=True)
   def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True) -> LazyBuffer:
     if self.dtype == dtype: return self
     if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")

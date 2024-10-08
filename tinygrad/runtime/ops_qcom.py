@@ -32,7 +32,7 @@ class QCOMCompiler(CLCompiler):
   def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
 
 class QCOMSignal(HCQSignal):
-  def __init__(self, value=0, **kwargs):
+  def __init__(self, value=0, is_timeline=False):
     self._signal = QCOMDevice.signals_pool.pop()
     super().__init__(value)
   def __del__(self): QCOMDevice.signals_pool.append(self._signal)
@@ -351,7 +351,7 @@ class QCOMDevice(HCQCompiled):
     if QCOMDevice.gpu_id >= 700: raise RuntimeError(f"Unsupported GPU: {QCOMDevice.gpu_id}")
 
     super().__init__(device, QCOMAllocator(self), QCOMRenderer(), QCOMCompiler(device), functools.partial(QCOMProgram, self),
-                     QCOMSignal, QCOMComputeQueue, None, timeline_signals=(QCOMSignal(), QCOMSignal()))
+                     QCOMSignal, QCOMComputeQueue, None)
 
   def _ctx_create(self):
     cr = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=(kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT |
