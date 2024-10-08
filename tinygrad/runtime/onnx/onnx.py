@@ -103,11 +103,17 @@ def get_run_onnx(onnx_model: ModelProto):
   for inp in onnx_model.graph.initializer:
     tensors[inp.name] = buffer_parse(inp)
 
+  # inps uses positional
+  to_python_const_inps = {"Tile": (1,), "Range": (0,1,2), }
+  # opts uses name
+  to_python_const_opts = {}
+
   # preparse the attributes
   attribute_dict = {}
   domain = ""
   for num,n in enumerate(onnx_model.graph.node):
-    attribute_dict[num] = {x.name:attribute_parse(x) for x in n.attribute}
+    attribute_dict[num] = {x.name: to_python_const(attribute_parse(x)) if x.name in to_python_const_opts.get(n.op_type, ()) else attribute_parse(x)
+                           for x in n.attribute}
     if n.domain: domain = n.domain
 
   onnx_model_version = onnx_model.opset_import[0].version
@@ -148,8 +154,9 @@ def get_run_onnx(onnx_model: ModelProto):
     for num,n in enumerate(onnx_model.graph.node):
       inp: List[Tensor] = []
       if debug >= 3: print("inputs:")
-      for x in n.input:
-        t = fetch_tensor(x)
+      for i,x in enumerate(n.input):
+        print(i,x)
+        t = to_python_const(fetch_tensor(x)) if i in to_python_const_inps.get(n.op_type, ()) else fetch_tensor(x)
         if debug >= 3: print(f"\t{x} - {t}")
         inp.append(t)
       opt: Dict = attribute_dict[num]
@@ -199,7 +206,6 @@ def get_run_onnx(onnx_model: ModelProto):
 
       # need to call backward on intermediate_tensors
       elif n.op_type == "Gradient":
-        assert len(opt["xs"]) == len(inp), f"len(opt['xs']):{len(opt['xs'])}, len(inp):{len(inp)} output and input has to match"
         y = opt["y"]
         intermediate_tensors[y].backward()
         ret = tuple([t.grad for t in inp])

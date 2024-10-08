@@ -13,7 +13,8 @@ exact_tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp"
 # "Softmax_13": "softmax"
 # NOTE: equivalent_tensor_methods turns opts all into positional args in case of arg name mismatch
 equivalent_tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual": "__le__", "GreaterOrEqual": "__ge__",
-                      "Equal": "__eq__", "LogSoftmax": "log_softmax", "Not": "logical_not", "LeakyRelu": "leakyrelu", "Selu": "selu"}
+                      "Equal": "__eq__", "LogSoftmax": "log_softmax", "Not": "logical_not", "LeakyRelu": "leakyrelu", "Selu": "selu", "Tile":"repeat",
+                      "Range": "arange", "Concat": "cat"}
 
 # **************** Free Ops ****************
 
@@ -72,8 +73,6 @@ def GlobalMaxPool(X: Tensor): return X.max(axis=tuple(range(2, X.ndim)), keepdim
 def OptionalHasElement(x: Optional[Tensor]=None): return Tensor(x is not None and x.numel() > 0)
 def OptionalGetElement(x: Optional[Tensor]=None): return x if x is not None else Tensor([])
 
-def Tile(x: Tensor, repeats): return x.repeat(to_python_const(repeats))
-def Range(start: Tensor, limit, delta): return Tensor.arange(start=to_python_const(start), stop=to_python_const(limit), step=to_python_const(delta))
 def Shape(data: Tensor, end=None, start=0): return Tensor(data.shape[start:end], dtype=dtypes.int64)
 def Size(data: Tensor): return prod(data if isinstance(data, list) else data.shape)
 def Flatten(x: Tensor, axis=1): return x.reshape(prod(x.shape[0:axis]), -1)
@@ -121,7 +120,6 @@ def ArgMax(x: Tensor, axis=0, keepdims=1, select_last_index=0):
   return x.argmax(axis, keepdim=keepdims).cast(dtypes.int64)
 def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
 
-def Concat(*xs: List[Tensor], axis): return Tensor.cat(*xs, dim=axis)
 def Transpose(x: Tensor, perm=None): return x.permute(order=list(range(x.ndim)[::-1]) if perm is None else perm)
 
 def ConstantOfShape(x, value:Tensor=None):
@@ -439,12 +437,17 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   if mode == "cubic":
     raise NotImplementedError("cubic interpolation is not implemented")
   return X.permute(*inverse_perm) if inverse_perm else X
+def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 
+# TODO
 def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
+  shape = to_python_const(shape)
   if not axes: axes = list(range(t.ndim))
+  # for i in
+  # t = t.shrink(tuple((t.shape[x]//2 - (s+1)//2, t.shape[x]//2 + s//2) for s,x in zip(shape, axes) if s < t.shape[x]))
+  # return t.pad(tuple(((s-t.shape[x])//2, (s-t.shape[x]+1)//2) for s,x in zip(shape, axes) if s > t.shape[x]))
   shrink_arg = [None] * t.ndim
   pad_arg = [None] * t.ndim
-  shape = to_python_const(shape)
   for s, x in zip(shape, axes):
     tx = t.shape[x]
     if s < tx: shrink_arg[x] = (tx//2 - (s+1)//2, tx//2 + s//2)
@@ -490,7 +493,6 @@ def EyeLike(x: Tensor, dtype=None, k=0):
   padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)
   return Tensor.eye(dim, dtype=dtype).pad(padarg)
 
-def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 
 def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
   return (x == float("inf")) * bool(detect_positive) + (x == float("-inf")) * bool(detect_negative)
