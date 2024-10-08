@@ -1,3 +1,4 @@
+from os import walk
 import sys, pickle, atexit, uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from tinygrad.shape.view import View, strides_for_shape
 sys.setrecursionlimit(10000)
 
 BUF_LIMIT = {"METAL": 32}
+METAOPS = {MetaOps.CUSTOM:UOps.CUSTOM, MetaOps.COPY:UOps.COPY, MetaOps.EMPTY:UOps.EMPTY, MetaOps.VIEW:UOps.VIEW, MetaOps.CONST:UOps.CONST}
 
 # *** ScheduleItem return type ***
 
@@ -110,7 +112,7 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert not any(x.op is UOps.REDUCE_AXIS for x in first_reduce.parents), "can't merge more than two reduceops at a time"
   return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
 
-reduceop_fusor = PatternMatcher([
+deswizzle = PatternMatcher([
   # SWIZZLE on VALID merges the views
   (UPat(UOps.SWIZZLE, src=(UPat(UOps.ALU, src=(UPat(UOps.VALID), UPat.var(), UPat.var()), name="alu", arg=TernaryOps.WHERE),), name="root"),
    lambda root,alu: UOp(UOps.VALID, dtypes.bool, (root.st.to_uop(),)).where(*alu.src[1:]) if root.st != alu.st else alu),
@@ -123,14 +125,14 @@ reduceop_fusor = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
-enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx.bufs.index(x.arg[0])))])
+enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx.index(x.arg[0])))])
 
 @track_rewrites
-def full_ast_rewrite(base_sink:UOp, ctx:ScheduleItemContext) -> UOp:
+def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...]) -> UOp:
   if not AST_REWRITE: return base_sink
-  sink = graph_rewrite(base_sink, reduceop_fusor)
-  ret = graph_rewrite(sink, enumerate_bufs, ctx)
-  if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_process_replay", str(uuid.uuid4()), (base_sink, ctx, ret))
+  sink = graph_rewrite(base_sink, deswizzle)
+  ret = graph_rewrite(sink, enumerate_bufs, bufs)
+  if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_process_replay", str(uuid.uuid4()), (base_sink, bufs, ret))
   return ret
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
@@ -195,7 +197,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp]) -> Tupl
     output_st, vv = output_st.simplify().unbind()
     var_vals.update(vv)
     ast.append(UOp(UOps.STORE, dtypes.void, (buf_uops[out.buffer], output_st.to_uop(), src)))
-  sink = full_ast_rewrite(ast[0].sink(*ast[1:]), ScheduleItemContext(bufs=tuple(buf_uops[x.buffer].arg[0] for x in outs+inputs)))
+  sink = full_ast_rewrite(ast[0].sink(*ast[1:]), tuple(buf_uops[x.buffer].arg[0] for x in outs+inputs))
   return LBScheduleItem(sink, tuple(outs+inputs), tuple(dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))), var_vals
 
 # *** DAG creation: decide which LazyBuffers should realize ***
@@ -415,29 +417,56 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
     SCHEDULES.append((graph, in_degree))
   return graph, in_degree, var_vals
 
-def to_uop(x:LazyBuffer, buf_uops:Dict[Buffer, UOp]) -> UOp:
-  if x is not x.base: return to_uop(x.base, buf_uops).swizzle(x.st)
-  buf_uops[x.buffer] = ubuf = UOp(UOps.BUFFER, x.buffer.dtype.ptr(), (), (len(buf_uops), (x.buffer.device, x.buffer.size, x.buffer.dtype)))
+def to_uop(x:LazyBuffer, buf_uops:Dict[Buffer, UOp], lbufs:DefaultDict[Buffer, List[LazyBuffer]]) -> UOp:
+  assert x.op is not None, f"must be base {x}"
+  if (b:=x.buffer) not in buf_uops: buf_uops[b] = ubuf = UOp(UOps.BUFFER, b.dtype.ptr(), (), (len(buf_uops), (b.device, b.size, b.dtype)))
+  else: ubuf = buf_uops[b]
+  if x not in lbufs.setdefault(b, []): lbufs[b].append(x)
   if x.realized is not None: return ubuf
-  src = tuple(to_uop(y, buf_uops) for y in x.srcs)
-  #return UOp(UOps.ALU, x.dtype, src)
-  return ubuf
+  src: List[UOp] = []
+  for y in x.srcs:
+    yv = to_uop(y.base, buf_uops, lbufs)
+    src.append(UOp(UOps.LOAD, y.dtype, (buf_uops[y.base.buffer], y.base.st.to_uop(), yv)))
+    if y is not y.base: src[-1] = src[-1].swizzle(y.st)
+  if x.op in MetaOps: return UOp(METAOPS[cast(MetaOps, x.op)], x.dtype, (ubuf, *src), x.arg).sink()
+  else: v = UOp(UOps.ALU, x.dtype, tuple(src), x.op)
+  return UOp(UOps.STORE, dtypes.void, (ubuf, x.st.to_uop(), v))
 
 realize = PatternMatcher([
+  (UPat(UOps.SINK, src=(UPat(UOps.SINK, name="x"),)), lambda x:x),
+  (UPat(UOps.LOAD, src=(UPat(), UPat.var("st"), UPat(UOps.SINK, src=(UPat.cvar("x"),)))),
+   lambda st,x:UOp(UOps.VALID, dtypes.bool, (st,)).where((x:=x.replace(src=())), x.const_like(0))),
+  #(UPat(UOps.LOAD, src=(UPat(), UPat(), UPat(UOps.STORE, name="x"))), lambda x:x.src[2])
 ])
 
-def _graph(outs:List[LazyBuffer]) -> List[ScheduleItem]:
+break_sched = PatternMatcher([
+  (UPat(UOps.SINK, name="x"), lambda ctx,x:ctx.append(x)),
+  (UPat(UOps.LOAD, src=(UPat(), UPat(), UPat()), name="ld"), lambda _,ld:ld.replace(src=ld.src[:2]))
+])
+
+@track_rewrites
+def _graph(k, outs:List[LazyBuffer]) -> List[ScheduleItem]:
+  _buf_uops: Dict[Buffer, UOp] = {}
+  _lbufs: DefaultDict[Buffer, List[LazyBuffer]] = defaultdict(list)
+  sink = UOp.sink(*tuple(to_uop(x, _buf_uops, _lbufs) for x in outs))
+  sink = graph_rewrite(graph_rewrite(sink, realize), deswizzle)
+  kernels: List[UOp] = []
+  graph_rewrite(sink, break_sched, kernels)
   ret: List[ScheduleItem] = []
-  buf_uops: Dict[Buffer, UOp] = {}
-  sink = UOp.sink(*tuple(to_uop(x, buf_uops) for x in outs))
-  sink = graph_rewrite(sink, realize)
+  bufs = tuple(_buf_uops)
+  for k in kernels:
+    buf_idxs = [u.arg[0] for u in k.sparents if u.op is UOps.BUFFER]
+    ast = k.src[0] if k.src[0].op in METAOPS.values() else graph_rewrite(k, enumerate_bufs, buf_idxs)
+    ret.append(si:=ScheduleItem(ast, tuple(bufs[i] for i in buf_idxs), ()))
+    for out in si.outputs:
+      for x in _lbufs[out]: del x.srcs
   return ret
 
 # *** DAG ordering: breadth first search ***
 
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  if getenv("SVG2", 1):
-    return _graph(outs), {}
+  if getenv("SV2", 1):
+    return _graph("schedule", outs), {}
   graph, in_degree, var_vals = _graph_schedule(outs)
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
