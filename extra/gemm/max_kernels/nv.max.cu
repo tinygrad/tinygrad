@@ -63,7 +63,7 @@ extern "C" __global__ void __launch_bounds__(128) wmma_example(float* data0, con
     // here's a link to a description of the triton: https://github.com/triton-lang/triton/discussions/2026#discussioncomment-6746579
     // see also the thunderkittens impl: https://github.com/HazyResearch/ThunderKittens/blob/main/include/types/shared/st.cuh
     size_t store_smem_a_off  = ((threads /  8) *  64) + (((threads * 8) ^ threads) & 56);               // r15
-    size_t store_smem_b_off  = ((threads / 16) * 128) + (((threads / 16) * 8) ^ ((threads % 16) * 8));  // r19\
+    size_t store_smem_b_off  = ((threads / 16) * 128) + (((threads / 16) * 8) ^ ((threads % 16) * 8));  // r19
 
     // ldmatrix indices
     // threads 0-7 are row starts for A, 8-15 for B, 16-23 for C, 24-31 for D
