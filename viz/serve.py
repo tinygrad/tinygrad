@@ -35,23 +35,24 @@ class GraphRewriteDetails(GraphRewriteMetadata):
   kernel_code: Optional[str]
   """The program after all rewrites"""
 
-def reconstruct_graph(ctx:TrackedRewriteContext) -> Tuple[List[UOp], List[List[str]], List[List[int]]]:
+def get_details(k, ctx:TrackedRewriteContext, metadata) -> GraphRewriteDetails:
   uops: List[UOp] = [ctx.sink]
   diffs: List[List[str]] = []
   changed_nodes: List[List[int]] = []
-  seen_replaces: Dict[UOp, UOp] = {}
-  for i, (first, rewritten, upat) in enumerate(ctx.rewrites):
+  replaces: Dict[UOp, UOp] = {}
+  sink = ctx.sink
+  for i, (u0, u1, upat) in enumerate(ctx.rewrites):
     # first, rewrite this UOp with the current rewrite + all the seen rewrites before this
-    seen_replaces[first] = rewritten
-    new_sink = replace_uop(uops[-1], {**seen_replaces})
+    replaces[u0] = u1
+    new_sink = replace_uop(sink, {**replaces})
     # sanity check
-    if new_sink is uops[-1]:
+    if new_sink is sink:
       raise AssertionError(f"rewritten sink wasn't rewritten! {i} {upat.location}")
     # update ret data
-    changed_nodes.append([id(x) for x in rewritten.sparents if x.op is not UOps.CONST])
-    diffs.append(list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines())))
-    uops.append(new_sink)
-  return uops, diffs, changed_nodes
+    changed_nodes.append([id(x) for x in u1.sparents if x.op is not UOps.CONST])
+    diffs.append(list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())))
+    uops.append(sink:=new_sink)
+  return GraphRewriteDetails(**asdict(metadata), graphs=list(map(uop_to_json, uops)), diffs=diffs, changed_nodes=changed_nodes, kernel_code=get_src(k))
 
 def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
@@ -107,9 +108,7 @@ class Handler(BaseHTTPRequestHandler):
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
         k, ctx, metadata = kernels[int(qkernel[0])][int(query["idx"][0])]
-        graphs, diffs, changed_nodes = reconstruct_graph(ctx)
-        ret = json.dumps(asdict(GraphRewriteDetails(**asdict(metadata), graphs=list(map(uop_to_json, graphs)),
-                                                    diffs=diffs, changed_nodes=changed_nodes, kernel_code=get_src(k)))).encode()
+        ret = json.dumps(asdict(get_details(k, ctx, metadata))).encode()
       else: ret = json.dumps([list(map(lambda x:asdict(x[2]), v)) for v in kernels]).encode()
     else:
       self.send_response(404)
@@ -134,7 +133,7 @@ if __name__ == "__main__":
   kernels = get_metadata(contexts)
   if getenv("FUZZ_VIZ"):
     for v in tqdm(kernels):
-      for _,ctx,_ in v: reconstruct_graph(ctx)
+      for _,ctx,_ in v: get_details(ctx)
   print("*** loaded kernels")
   server = HTTPServer(('', 8000), Handler)
   st = time.perf_counter()
