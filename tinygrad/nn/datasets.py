@@ -6,11 +6,13 @@ def _mnist(file): return Tensor(fetch("https://storage.googleapis.com/cvdf-datas
 def mnist(device=None):
   return _mnist("train-images-idx3-ubyte.gz")[0x10:].reshape(-1,1,28,28).to(device), _mnist("train-labels-idx1-ubyte.gz")[8:].to(device), \
          _mnist("t10k-images-idx3-ubyte.gz")[0x10:].reshape(-1,1,28,28).to(device), _mnist("t10k-labels-idx1-ubyte.gz")[8:].to(device)
-         
+
 def _fashion_mnist(file): return Tensor(fetch("http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/"+file, gunzip=True))
 def fashion_mnist(device=None):
-  return _fashion_mnist("train-images-idx3-ubyte.gz")[0x10:].reshape(-1,1,28,28).to(device), _fashion_mnist("train-labels-idx1-ubyte.gz")[8:].to(device), \
-         _fashion_mnist("t10k-images-idx3-ubyte.gz")[0x10:].reshape(-1,1,28,28).to(device), _fashion_mnist("t10k-labels-idx1-ubyte.gz")[8:].to(device)
+  return _fashion_mnist("train-images-idx3-ubyte.gz")[0x10:].reshape(-1,1,28,28).to(device), \
+         _fashion_mnist("train-labels-idx1-ubyte.gz")[8:].to(device), \
+         _fashion_mnist("t10k-images-idx3-ubyte.gz")[0x10:].reshape(-1,1,28,28).to(device), \
+         _fashion_mnist("t10k-labels-idx1-ubyte.gz")[8:].to(device)
 
 def cifar(device=None):
   tt = tar_extract(fetch('https://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz', gunzip=True))
