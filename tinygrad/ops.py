@@ -282,7 +282,7 @@ class UOp(MathTrait):
     return cast(Variable, self.src[0]), self.src[1].arg
   @property
   def val(self) -> int: return self.unbind()[1]
-  def substitute(self, dvars:Dict[UOp, UOp]) -> UOp: return graph_rewrite(self, substitutor, dvars)
+  def substitute(self, dvars:Dict[UOp, UOp]) -> UOp: return graph_rewrite(self, substitute, dvars)
   @staticmethod
   def range(dtype:DType, start:ConstType, end:ConstType, idx:int):
     return UOp(UOps.RANGE, dtype=dtype, src=(UOp.const(dtype, start), UOp.const(dtype, end)), arg=(idx,))
@@ -934,7 +934,7 @@ symbolic = PatternMatcher([
   (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
 ])
 
-substitutor = PatternMatcher([(UPat(tuple(UOps), name="root"), lambda ctx,root: r if (r:=ctx.get(root)) is not None else None)])
+substitute = PatternMatcher([(UPat(tuple(UOps), name="x"), lambda ctx,x:ctx.get(x))])
 
 symbolic_flat = symbolic+PatternMatcher([
   # ** combine terms (opinionated) **
