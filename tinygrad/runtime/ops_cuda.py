@@ -45,6 +45,7 @@ class CUDAProgram:
       raise RuntimeError(f"module load failed with status code {status}: {cuda.cudaError_enum__enumvalues[status]}")
     check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
     self.prg = prg #type: ignore
+    if self.smem > 0: check(cuda.cuFuncSetAttribute(self.prg, cuda.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, self.smem))
 
   def __del__(self):
     if hasattr(self, 'module'): check(cuda.cuModuleUnload(self.module))
@@ -56,7 +57,6 @@ class CUDAProgram:
     else:
       for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
       for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
-    if self.smem > 0: check(cuda.cuFuncSetAttribute(self.prg, cuda.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, self.smem))
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, self.smem, None, None, self.vargs)), enable=wait)
 
 class CUDAAllocator(LRUAllocator):
