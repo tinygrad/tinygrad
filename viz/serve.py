@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser
+import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, signal
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
@@ -110,6 +110,20 @@ class Handler(BaseHTTPRequestHandler):
       ret = b""
     return self.wfile.write(ret)
 
+# ** fuzzer
+
+def fuzz_test():
+  for v in tqdm(kernels):
+    for args in v: call_with_timeout(get_details, args)
+  print(f"finished fuzzing {len(kernels)} kernels!")
+def timeout_handler(signum, frm): raise Exception("fxn took too long!")
+def call_with_timeout(fxn, args=(), timeout=5):
+  with open("/tmp/fuzz_args", "wb") as f: pickle.dump(args, f)
+  signal.signal(signal.SIGALRM, timeout_handler)
+  signal.alarm(timeout)
+  try: return fxn(*args)
+  finally: signal.alarm(0)
+
 # ** main loop
 
 stop_reloader = threading.Event()
@@ -127,16 +141,15 @@ if __name__ == "__main__":
   with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = pickle.load(f)
   print("*** unpickled saved rewrites")
   kernels = get_metadata(contexts)
-  if getenv("FUZZ_VIZ"):
-    ret = [get_details(*args) for v in tqdm(kernels) for args in v]
-    print(f"fuzzed {len(ret)} rewrite details")
+  if getenv("FUZZ_VIZ"): fuzz_test()
   print("*** loaded kernels")
-  server = HTTPServer(('', 8000), Handler)
-  st = time.perf_counter()
-  reloader_thread = threading.Thread(target=reloader)
-  reloader_thread.start()
-  if getenv("BROWSER", 1): webbrowser.open("http://localhost:8000")
-  try: server.serve_forever()
-  except KeyboardInterrupt:
-    print("*** viz is shutting down...")
-    stop_reloader.set()
+  if getenv("SERVER", 1):
+    server = HTTPServer(('', 8000), Handler)
+    st = time.perf_counter()
+    reloader_thread = threading.Thread(target=reloader)
+    reloader_thread.start()
+    if getenv("BROWSER", 1): webbrowser.open("http://localhost:8000")
+    try: server.serve_forever()
+    except KeyboardInterrupt:
+      print("*** viz is shutting down...")
+      stop_reloader.set()
