@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import parse_qs, urlparse
+from typing import Any, Dict, List, Optional, Tuple
+import pickle, os, sys, time, threading, webbrowser, json, difflib, contextlib, multiprocessing, functools
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Tuple, Optional
+from urllib.parse import parse_qs, urlparse
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import getenv, to_function_name, tqdm
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, lines
-from tinygrad.engine.graph import word_wrap, uops_colors
-from tinygrad.codegen.kernel import Kernel
+from tinygrad.engine.graph import uops_colors, word_wrap
 
 # ** API spec
 
@@ -35,7 +35,42 @@ class GraphRewriteDetails(GraphRewriteMetadata):
   kernel_code: Optional[str]
   """The program after all rewrites"""
 
-# ** API functions
+def reconstruct_graph(ctx:TrackedRewriteContext) -> Tuple[List[UOp], List[List[str]], List[List[int]]]:
+  uops: List[UOp] = [ctx.sink]
+  diffs: List[List[str]] = []
+  changed_nodes: List[List[int]] = []
+  seen_replaces: Dict[UOp, UOp] = {}
+  for i, (first, rewritten, upat) in enumerate(ctx.rewrites):
+    # first, rewrite this UOp with the current rewrite + all the seen rewrites before this
+    seen_replaces[first] = rewritten
+    new_sink = replace_uop(uops[-1], {**seen_replaces})
+    # sanity check
+    if new_sink is uops[-1]:
+      raise AssertionError(f"rewritten sink wasn't rewritten! {i} {upat.location}")
+    # update ret data
+    changed_nodes.append([id(x) for x in rewritten.sparents if x.op is not UOps.CONST])
+    diffs.append(list(difflib.unified_diff(str(first).splitlines(), str(rewritten).splitlines())))
+    uops.append(new_sink)
+  return uops, diffs, changed_nodes
+
+def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
+  assert isinstance(x, UOp)
+  graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
+  for u in x.sparents:
+    if u.op is UOps.CONST: continue
+    label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
+    for idx,x in enumerate(u.src):
+      if x.op is UOps.CONST: label += f"\nCONST{idx} {x.arg:g}"
+    if getenv("WITH_SHAPE"):
+      with contextlib.suppress(Exception): # if the UOp is indexed already it's fine
+        if u.st is not None: label += f"\n{u.st.shape}"
+    graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x.op is not UOps.CONST], str(u.arg), uops_colors.get(u.op, "#ffffff"))
+  return graph
+
+def replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
+  if (found:=replaces.get(base)) is not None: return found
+  replaces[base] = ret = base.replace(src=tuple(replace_uop(x, replaces) for x in base.src))
+  return ret
 
 def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List[List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]]:
   kernels: Dict[Optional[str], List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]] = {}
@@ -48,40 +83,8 @@ def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List
       kernels[name].append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
 
-def _uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
-  assert isinstance(x, UOp)
-  graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
-  for u in x.sparents:
-    if u.op is UOps.CONST: continue
-    label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
-    for idx,x in enumerate(u.src):
-      if x.op is UOps.CONST: label += f"\nCONST{idx} {x.arg:g}"
-    graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x.op is not UOps.CONST], str(u.arg), uops_colors.get(u.op, "#ffffff"))
-  return graph
-def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
-  if (found:=replaces.get(base)) is not None: return found
-  replaces[base] = ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
-  return ret
 @functools.lru_cache(None)
-def _prg(k:Optional[Kernel]) -> Optional[str]: return k.to_program().src if isinstance(k, Kernel) else None
-def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
-  g = GraphRewriteDetails(**asdict(metadata), graphs=[_uop_to_json(ctx.sink)], diffs=[], changed_nodes=[], kernel_code=_prg(k))
-  replaces: Dict[UOp, UOp] = {}
-  sink = ctx.sink
-  for i,(u0,u1,upat) in enumerate(ctx.rewrites):
-    # first, rewrite this UOp with the current rewrite + all the seen rewrites before this
-    replaces[u0] = u1
-    new_sink = _replace_uop(sink, {**replaces})
-    # sanity check
-    if new_sink is sink:
-      raise AssertionError(f"rewritten sink wasn't rewritten! {i} {upat.location}")
-    # update ret data
-    g.changed_nodes.append([id(x) for x in u1.sparents if x.op is not UOps.CONST])
-    g.diffs.append(list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())))
-    g.graphs.append(_uop_to_json(sink:=new_sink))
-  return g
-
-# ** HTTP server
+def get_src(k) -> Optional[str]: return k.to_program().src if isinstance(k, Kernel) else None
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
@@ -103,15 +106,17 @@ class Handler(BaseHTTPRequestHandler):
       self.end_headers()
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
-        ret = json.dumps(asdict(get_details(*kernels[int(qkernel[0])][int(query["idx"][0])]))).encode()
+        k, ctx, metadata = kernels[int(qkernel[0])][int(query["idx"][0])]
+        graphs, diffs, changed_nodes = reconstruct_graph(ctx)
+        ret = json.dumps(asdict(GraphRewriteDetails(**asdict(metadata), graphs=list(map(uop_to_json, graphs)),
+                                                    diffs=diffs, changed_nodes=changed_nodes, kernel_code=get_src(k)))).encode()
       else: ret = json.dumps([list(map(lambda x:asdict(x[2]), v)) for v in kernels]).encode()
     else:
       self.send_response(404)
       ret = b""
     return self.wfile.write(ret)
 
-# ** main loop
-
+BROWSER = getenv("BROWSER", 1)
 stop_reloader = threading.Event()
 def reloader():
   mtime = os.stat(__file__).st_mtime
@@ -128,15 +133,16 @@ if __name__ == "__main__":
   print("*** unpickled saved rewrites")
   kernels = get_metadata(contexts)
   if getenv("FUZZ_VIZ"):
-    ret = [get_details(*args) for v in tqdm(kernels) for args in v]
-    print(f"fuzzed {len(ret)} rewrite details")
+    for v in tqdm(kernels):
+      for _,ctx,_ in v: reconstruct_graph(ctx)
   print("*** loaded kernels")
   server = HTTPServer(('', 8000), Handler)
   st = time.perf_counter()
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
-  if getenv("BROWSER", 1): webbrowser.open("http://localhost:8000")
-  try: server.serve_forever()
+  if BROWSER: webbrowser.open("http://localhost:8000")
+  try:
+    server.serve_forever()
   except KeyboardInterrupt:
     print("*** viz is shutting down...")
     stop_reloader.set()
