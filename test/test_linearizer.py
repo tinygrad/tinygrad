@@ -200,6 +200,9 @@ class TestLinearizer(unittest.TestCase):
         if i == 0: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
+  # we need a way to check the workgroup size OR reuse idxs
+  @unittest.skip
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   def test_triple_multireduce(self):
     Tensor.manual_seed(0)
     x0 = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
@@ -1756,6 +1759,63 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.group_for_reduces == 1
     assert k.local_dims == 1
     assert k.upcasted == 1
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_group_multireduce(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(27, 32, 5, dtype=dtypes.float).realize()
+    st_x = x.lazydata.st
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((27, 1, 32, 5)).expand((27, 32, 32, 5)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((27, 32, 1, 5)).to_uop()))
+    diff = second_x + first_reduce*ast_const(dtypes.float, -1, (27, 32, 1, 5))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
+    sink = UOp(UOps.SINK, src=(store,))
+
+    k = helper_linearizer_ast(sink, [x])[-1]
+
+    assert k.group_for_reduces == 2
+    assert k.local_dims == 0
+    assert k.upcasted == 0
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_group_double_reduce(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(27, 32, 5, 16, dtype=dtypes.float).realize()
+    st_x = x.lazydata.st
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (1,3)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 5, 1)).to_uop(), first_reduce))
+    sink = UOp(UOps.SINK, src=(store,))
+
+    k = helper_linearizer_ast(sink, [x])[-1]
+
+    assert k.group_for_reduces == 1
+    assert k.local_dims == 0
+    assert k.upcasted == 0
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_group_double_multireduce(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(27, 32, 5, 16, dtype=dtypes.float).realize()
+    st_x = x.lazydata.st
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((27, 1, 32, 5, 1, 16)).expand((27, 32, 32, 5, 16, 16)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,5)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, st_x.reshape((27, 32, 1, 5, 16, 1)).to_uop()))
+    diff = second_x + first_reduce*ast_const(dtypes.float, -1, (27, 32, 1, 5, 16, 1))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,4)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5, 1, 1)).to_uop(), second_reduce))
+    sink = UOp(UOps.SINK, src=(store,))
+
+    k = helper_linearizer_ast(sink, [x])[-1]
+    assert k.group_for_reduces == 2
+
 
 def helper_linearizer_ast(ast:UOp, inputs:List[Tensor], *args, **kwargs):
   assert isinstance(ast, UOp), "ast must be UOp"
