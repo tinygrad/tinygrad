@@ -156,8 +156,6 @@ def get_run_onnx(onnx_model: ModelProto):
     {"Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
      "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
      "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4)}
-    # opts uses name
-    to_python_const_opts: Dict[str, Tuple[str, ...]] = {}
 
     for num,n in enumerate(onnx_model.graph.node):
       inp = []
@@ -171,7 +169,6 @@ def get_run_onnx(onnx_model: ModelProto):
 
       # to_python_consts
       inp = [to_python_const(x) if i in to_python_const_inps.get(n.op_type, ()) else x for i,x in enumerate(inp)]
-      opt = {name:to_python_const(x) if name in to_python_const_opts.get(n.op_type, ()) else x for name,x in opt.items()}
 
       # NOTE some ops live here because they require access to some local variables
       if n.op_type in onnx_ops.exact_tensor_methods:
@@ -183,20 +180,14 @@ def get_run_onnx(onnx_model: ModelProto):
         rewrite = onnx_ops.equivalent_tensor_methods_exceptions[n.op_type]
         ret = getattr(Tensor, rewrite[0])(*inp, **{rewrite[1].get(k, k):v for k,v in opt.items()})
       # have to use n.output for cases when num_outputs is absent
-      # TODO yeah this can be improved
       elif n.op_type == "Split":
-        axis = opt.get("axis", 0)
-        if axis < 0: axis = axis + inp[0].ndim
-        split = None if len(inp) == 1 else inp[1]
-        if split is None:
-          split = [inp[0].shape[axis] // len(n.output)] * len(n.output)
-          for i in range(inp[0].shape[axis] % len(n.output)):
-            split[i] += 1
-        i, ret = 0, []
-        for s in split:
-          ret.append(inp[0].shrink(tuple((i,i+s) if dim == axis else None for dim in range(inp[0].ndim))))
-          i = i+s
-        ret = tuple(ret)
+        axis, outputs, split = opt.get("axis", 0), opt.get("num_outputs") or len(n.output), opt.get("split")
+        # split is provided
+        if len(inp) == 2: ret = inp[0].split(inp[1], axis)
+        if len(inp) == 1 and split is not None: ret = inp[0].split(split, axis)
+        # split has to be inferred
+        size = inp[0].shape[axis]
+        if len(inp) == 1 and split is None: ret = inp[0].split([size // outputs + (1 if i < size % outputs else 0) for i in range(outputs)], axis)
 
       # need to check onnx_model_version
       # TODO yeah this can be improved
@@ -222,10 +213,8 @@ def get_run_onnx(onnx_model: ModelProto):
 
       # need to call backward on intermediate_tensors
       elif n.op_type == "Gradient":
-        y = opt["y"]
-        intermediate_tensors[y].backward()
+        intermediate_tensors[opt["y"]].backward()
         ret = tuple([t.grad for t in inp])
-
       # onnx_ops.py
       elif hasattr(onnx_ops, n.op_type):
         fxn = getattr(onnx_ops, n.op_type)

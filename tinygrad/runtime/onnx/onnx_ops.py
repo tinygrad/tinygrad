@@ -43,6 +43,7 @@ def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_t
 # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_div.py
 def Div(x: Tensor, other: Tensor): return (x/other).cast(x.dtype)
 
+# TODO: change if to dict match dtype
 def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None,value_strings=None):
   if value is not None: return value
   if value_float is not None: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False)
@@ -169,6 +170,8 @@ def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_typ
 def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
   return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
 
+# TODO: rewrite all this padding crap
+# Tensor._padding2d()
 # onnx: [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
 # numpy.pad: ((x1_begin, x1_end), (x2_begin, x2_end), ...)
 def _format_padding(onnx_pads, ndims=None, axes=None) -> List[Tuple[int, int]]:
@@ -450,9 +453,6 @@ def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 # TODO
 def CenterCropPad(t: Tensor, shape, axes=None):
   if not axes: axes = list(range(t.ndim))
-  # for i in
-  # t = t.shrink(tuple((t.shape[x]//2 - (s+1)//2, t.shape[x]//2 + s//2) for s,x in zip(shape, axes) if s < t.shape[x]))
-  # return t.pad(tuple(((s-t.shape[x])//2, (s-t.shape[x]+1)//2) for s,x in zip(shape, axes) if s > t.shape[x]))
   shrink_arg = [None] * t.ndim
   pad_arg = [None] * t.ndim
   for s, x in zip(shape, axes):
@@ -519,18 +519,12 @@ def IsNaN(x: Tensor): return x != x
 # without importing PIL we'll have to manually decode a bunch of image formats like PNG, JPEG, WebP, etc
 # TODO maybe uint8 stuff may work?
 def ImageDecoder(encoded_stream: bytes, pixel_format="RGB"):
-  try:
-    import PIL.Image
-  except ImportError as e:
-    raise ImportError("Pillow must be installed to use the reference implementation of the ImageDecoder operator") from e
+  try: import PIL.Image
+  except ImportError as e: raise ImportError("Pillow must be installed to use the reference implementation of the ImageDecoder operator") from e
   img = PIL.Image.open(io.BytesIO(encoded_stream))
-  if pixel_format == "BGR":
-    return Tensor(np.array(img))[:, :, ::-1]
-  if pixel_format == "RGB":
-    return Tensor(np.array(img))
-  if pixel_format == "Grayscale":
-    decoded = Tensor(np.array(img.convert("L")))
-    return decoded.unsqueeze(-1) # (H, W) to (H, W, 1)
+  if pixel_format == "BGR": return Tensor(np.array(img))[:, :, ::-1]
+  if pixel_format == "RGB": return Tensor(np.array(img))
+  if pixel_format == "Grayscale": return Tensor(np.array(img.convert("L"))).unsqueeze(-1) # (H, W) to (H, W, 1)
   raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
 def AffineGrid(theta: Tensor, size, align_corners=0):
