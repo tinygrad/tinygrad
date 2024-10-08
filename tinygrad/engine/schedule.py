@@ -1,4 +1,4 @@
-import sys, pickle, atexit, uuid
+import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
@@ -131,7 +131,7 @@ def full_ast_rewrite(base_sink:UOp, ctx:ScheduleItemContext) -> UOp:
   if not AST_REWRITE: return base_sink
   sink = graph_rewrite(base_sink, reduceop_fusor)
   ret = graph_rewrite(sink, enumerate_bufs, ctx)
-  if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_process_replay", str(uuid.uuid4()), (base_sink, ctx, ret))
+  if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
   return ret
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
