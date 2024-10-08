@@ -17,15 +17,15 @@ except ImportError:
 
 cache_misses = 0
 @lru_cache(None)
-def _cached_to_python_const(t:Tensor, tobytes): return t.data().tobytes() if tobytes else t.tolist()
+def _cached_to_python_const(t:Tensor): return t.data().tobytes() if t.dtype is dtypes.uint8 else t.tolist()
 
 # Tensor -> python value cache for parameters
-def to_python_const(t, tobytes=False) -> Union[List[ConstType], List[bytes], Union[ConstType, bytes]]:
+def to_python_const(t) -> Union[List[ConstType], List[bytes], Union[ConstType, bytes]]:
   if not isinstance(t, Tensor): return t
   global cache_misses
-  ret = _cached_to_python_const(t, tobytes)
+  ret = _cached_to_python_const(t)
   if (info := _cached_to_python_const.cache_info()).misses > cache_misses and DEBUG >= 3:
-    print(f"Cache miss for {t}, {tobytes=}")
+    print(f"Cache miss for {t}")
     cache_misses = info.misses
   return ret
 
@@ -103,17 +103,11 @@ def get_run_onnx(onnx_model: ModelProto):
   for inp in onnx_model.graph.initializer:
     tensors[inp.name] = buffer_parse(inp)
 
-  # inps uses positional
-  to_python_const_inps = {"Tile": (1,), "Range": (0,1,2), }
-  # opts uses name
-  to_python_const_opts = {}
-
   # preparse the attributes
   attribute_dict = {}
   domain = ""
   for num,n in enumerate(onnx_model.graph.node):
-    attribute_dict[num] = {x.name: to_python_const(attribute_parse(x)) if x.name in to_python_const_opts.get(n.op_type, ()) else attribute_parse(x)
-                           for x in n.attribute}
+    attribute_dict[num] = {x.name:attribute_parse(x) for x in n.attribute}
     if n.domain: domain = n.domain
 
   onnx_model_version = onnx_model.opset_import[0].version
@@ -151,23 +145,38 @@ def get_run_onnx(onnx_model: ModelProto):
       if x != "": return input_tensors[x]
       return None
 
+    # TODO what if we just don't buffer parse some inps or attributes so no need to python const
+    # inps uses index
+    to_python_const_inps = {"Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,),
+                            "ConstantOfShape": (0,), "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,),
+                            "OneHot": (1,), "Compress": (1,), "ImageDecoder": (0,), "AffineGrid": (1,)}
+    # opts uses name
+    to_python_const_opts = {}
+
     for num,n in enumerate(onnx_model.graph.node):
       inp: List[Tensor] = []
       if debug >= 3: print("inputs:")
       for i,x in enumerate(n.input):
-        print(i,x)
-        t = to_python_const(fetch_tensor(x)) if i in to_python_const_inps.get(n.op_type, ()) else fetch_tensor(x)
+        t = fetch_tensor(x)
         if debug >= 3: print(f"\t{x} - {t}")
         inp.append(t)
       opt: Dict = attribute_dict[num]
       if debug >= 1: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
 
+      # to_python_consts
+      inp = [to_python_const(x) if i in to_python_const_inps.get(n.op_type, ()) else x for i,x in enumerate(inp)]
+      opt = {name:to_python_const(x) if name in to_python_const_opts.get(n.op_type, ()) else x for name,x in opt.items()}
+
       # NOTE some ops live here because they require access to some local variables
-      # have to use n.output for cases when num_outputs is absent
       if n.op_type in onnx_ops.exact_tensor_methods:
         ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
       elif n.op_type in onnx_ops.equivalent_tensor_methods:
         ret = getattr(Tensor, onnx_ops.equivalent_tensor_methods[n.op_type])(*inp, *opt.values())
+      elif n.op_type in onnx_ops.equivalent_tensor_methods_exceptions:
+        # TODO: kinda ugly
+        rewrite = onnx_ops.equivalent_tensor_methods_exceptions[n.op_type]
+        ret = getattr(Tensor, rewrite[0])(*inp, **{rewrite[1].get(k, k):v for k,v in opt.items()})
+      # have to use n.output for cases when num_outputs is absent
       elif n.op_type == "Split":
         axis = opt.get("axis", 0)
         split = None if len(inp) == 1 else to_python_const(inp[1])
