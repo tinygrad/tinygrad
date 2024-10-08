@@ -99,7 +99,13 @@ def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.
 class UOps(FastEnum):
   # uops that aren't rendered
   SINK = auto()
-  EXT = auto()
+
+  # metaops
+  CUSTOM = auto()
+  COPY = auto()
+  EMPTY = auto()
+  VIEW = auto()
+
   EXPAND = auto()
   CONTRACT = auto()
   SHAPETRACKER = auto()

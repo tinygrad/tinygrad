@@ -179,7 +179,8 @@ def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp]) -> Tupl
   """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
   if (out:=outs[0]).op in {MetaOps.CUSTOM, MetaOps.COPY, MetaOps.EMPTY, MetaOps.VIEW}:
     metadata = (out.metadata,) if out.metadata is not None else None
-    return LBScheduleItem(UOp(UOps.EXT, out.dtype, (), (out.op, out.arg)), (out,)+tuple(x.base for x in out.srcs), metadata), {}
+    uop = {MetaOps.CUSTOM: UOps.CUSTOM, MetaOps.COPY: UOps.COPY, MetaOps.EMPTY: UOps.EMPTY, MetaOps.VIEW: UOps.VIEW}[cast(MetaOps, out.op)]
+    return LBScheduleItem(UOp(uop, out.dtype, (), out.arg), (out,)+tuple(x.base for x in out.srcs), metadata), {}
   # create the stores
   var_vals = merge_dicts([out.st.var_vals.copy() for out in outs])
   assign_targets = {x.srcs[1]:x for x in outs if x.op is MetaOps.ASSIGN}
