@@ -201,7 +201,7 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
     return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
   if si.ast.op is UOps.CUSTOM: return ExecItem(CustomOp(arg), list(si.bufs))
   if si.ast.op is UOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
-  if si.ast.op is UOps.VIEW: return ExecItem(ViewOp(out), list(si.bufs))
+  if si.ast.op is UOps.BUFFER_VIEW: return ExecItem(ViewOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {si.ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:

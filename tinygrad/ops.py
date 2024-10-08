@@ -104,7 +104,7 @@ class UOps(FastEnum):
   CUSTOM = auto()
   COPY = auto()
   EMPTY = auto()
-  VIEW = auto()
+  BUFFER_VIEW = auto()
 
   EXPAND = auto()
   CONTRACT = auto()
