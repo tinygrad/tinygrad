@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Tuple, cast
 import importlib
 from functools import lru_cache
 import numpy as np
@@ -40,7 +40,7 @@ def is_dtype_supported(dtype, device: str = Device.DEFAULT):
 # src: onnx/mapping.py  https://onnx.ai/onnx/api/mapping.html#l-mod-onnx-mapping
 # not supported: STRING = 8 COMPLEX64 = 14, COMPLEX128 = 15, UINT4 = 21, INT4 = 22
 # TODO: use dtypes.float16 for FLOAT16
-DTYPE_MAP: Dict[TensorProto.DataType, DType] = {
+DTYPE_MAP: Dict[int, DType] = {
   TensorProto.FLOAT:dtypes.float, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8, TensorProto.UINT16:dtypes.uint16,
   TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64, TensorProto.BOOL:dtypes.bool,
   TensorProto.FLOAT16:dtypes.float, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32, TensorProto.UINT64:dtypes.uint64,
@@ -54,18 +54,18 @@ ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
   def type_parse(type_proto: TypeProto):
-    ret = []
+    ret: Union[List[int], List[Union[int, Tuple[int]]]] = []
     while True:
       attr = type_proto.WhichOneof('value')
       if attr == 'tensor_type':
-        if "dim_value" not in type_proto.tensor_type.shape.dim.__dir__(): return () # variable type, unable to determine shape
-        elif not ret:
+        if not hasattr(type_proto.tensor_type.shape.dim, 'dim_value'): return () # variable type, unable to determine shape
+        elif not ret: # tensor
           return tuple([x.dim_value for x in type_proto.tensor_type.shape.dim])
-        else:
-          ret.extend([(x.dim_value,) for x in type_proto.tensor_type.shape.dim])
+        else: # list of tensors
+          ret += [(x.dim_value,) for x in type_proto.tensor_type.shape.dim]
           return tuple(ret)
       elif attr == 'sequence_type':
-        type_proto = getattr(type_proto, attr).elem_type
+        type_proto = getattr(type_proto, 'sequence_type').elem_type
         ret.append(1)
       elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
       elif attr == 'map_type': raise NotImplementedError(f"map_type is not implemented: {type_proto}")
@@ -85,7 +85,7 @@ def get_run_onnx(onnx_model: ModelProto):
       return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
     return Tensor(None, requires_grad=False)
 
-  def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:
+  def attribute_parse(a: AttributeProto):
     # TODO: this is not complete, see onnx/onnx_ml_pb2.pyi for a complete list
     if a.type == AttributeProto.FLOAT: return float(a.f)
     elif a.type == AttributeProto.INT: return int(a.i)
@@ -114,7 +114,7 @@ def get_run_onnx(onnx_model: ModelProto):
 
   def run_onnx(inputs={}, debug=0):
     debug = getenv("DEBUGONNX") or debug
-    input_tensors: Dict[str,Tensor|List[Tensor]] = {}
+    input_tensors: Dict[str,Union[Tensor, List[Tensor]]] = {}
     intermediate_tensors: Dict[str,Tensor] = {}
     output_tensor_names = [x.name for x in onnx_model.graph.output]
 
@@ -134,8 +134,12 @@ def get_run_onnx(onnx_model: ModelProto):
         else:
           input_tensors[name] = Tensor(inputs[name], requires_grad=False)
         if shape: # if only input_tensor is not variable type
-          ts = input_tensors[name]
-          input_shape = ts.shape if isinstance(ts, Tensor) else (1, *[i.shape for i in ts])
+          ts: Union[Tensor, List[Tensor]] = input_tensors[name]
+          if isinstance(ts, Tensor):
+            input_shape: Union[Tuple[int, ...], Tuple[Union[int, Tuple[int, ...],]]] = cast(Tuple[int, ...], ts.shape)
+          # sequence type of list of tensors
+          elif isinstance(ts, list): input_shape = (1,) + tuple(i.shape for i in ts)  # type: ignore
+          else: assert False
           assert input_shape == shape, f"wrong shape for input {name}, {input_shape} isn't {shape}"
       else:
         raise RuntimeError(f"no data for {name} with shape {shape}")
@@ -146,16 +150,17 @@ def get_run_onnx(onnx_model: ModelProto):
       if x != "": return input_tensors[x]
       return None
 
-    # TODO what if we just don't buffer parse some inps or attributes so no need to python const
+    # TODO what if we just don't buffer parse some inps or attributes so no need waste time to python const
     # inps uses index
-    to_python_const_inps = {"Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,),
-                            "ConstantOfShape": (0,), "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,),
-                            "OneHot": (1,), "Compress": (1,), "ImageDecoder": (0,), "AffineGrid": (1,)}
+    to_python_const_inps: Dict[str, Tuple[int, ...]] = \
+    {"Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
+     "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
+     "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4)}
     # opts uses name
-    to_python_const_opts = {}
+    to_python_const_opts: Dict[str, Tuple[str, ...]] = {}
 
     for num,n in enumerate(onnx_model.graph.node):
-      inp: List[Tensor] = []
+      inp = []
       if debug >= 3: print("inputs:")
       for x in n.input:
         t = fetch_tensor(x)
@@ -178,30 +183,31 @@ def get_run_onnx(onnx_model: ModelProto):
         rewrite = onnx_ops.equivalent_tensor_methods_exceptions[n.op_type]
         ret = getattr(Tensor, rewrite[0])(*inp, **{rewrite[1].get(k, k):v for k,v in opt.items()})
       # have to use n.output for cases when num_outputs is absent
+      # TODO yeah this can be improved
       elif n.op_type == "Split":
         axis = opt.get("axis", 0)
-        split = None if len(inp) == 1 else to_python_const(inp[1])
+        if axis < 0: axis = axis + inp[0].ndim
+        split = None if len(inp) == 1 else inp[1]
         if split is None:
           split = [inp[0].shape[axis] // len(n.output)] * len(n.output)
           for i in range(inp[0].shape[axis] % len(n.output)):
             split[i] += 1
         i, ret = 0, []
-        arg = [None] * inp[0].ndim
         for s in split:
-          arg[axis] = (i,i+s)
-          ret.append(inp[0].shrink(arg=tuple(arg)))
+          ret.append(inp[0].shrink(tuple((i,i+s) if dim == axis else None for dim in range(inp[0].ndim))))
           i = i+s
         ret = tuple(ret)
 
       # need to check onnx_model_version
+      # TODO yeah this can be improved
       elif n.op_type == "Slice":
         if onnx_model_version < 10:
           axes, ends, starts, steps = list(opt.get("axes", range(inp[0].ndim))), list(opt["ends"]), list(opt["starts"]), [1]*inp[0].ndim
         else:
           starts, ends = inp[1:3]
-          axes = list(range(inp[0].ndim)) if len(inp) <= 3 else to_python_const(inp[3].cast(dtypes.int32))
-          steps = inp[4].cast(dtypes.int32).tolist() if len(inp) > 4 else [1]*inp[0].ndim
-          starts, ends = to_python_const(starts), to_python_const(ends)
+          axes = list(range(inp[0].ndim)) if len(inp) <= 3 else inp[3]
+          steps = inp[4] if len(inp) > 4 else [1]*inp[0].ndim
+          starts, ends = starts, ends
         arg = [(0,x,1) for x in inp[0].shape]
         for i, axis in enumerate(axes):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)

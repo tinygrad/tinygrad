@@ -1,10 +1,13 @@
 import functools, io, math
-from typing import Union, Tuple, Optional, List, Any
+from typing import Union, Tuple, Optional, List, Any, cast
 from tinygrad.tensor import Tensor, _broadcast_shape, ConstType
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten
 from .onnx import DTYPE_MAP, to_python_const
 import numpy as np
+
+# TODO maybe don't cast hack things and instead raise exceptions
+# TODO maybe write helper for stuff like tuple((1,0) if i == axis else None for i in range(X.ndim)), easier to read
 
 exact_tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
                   "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
@@ -59,7 +62,8 @@ def ThresholdedRelu(X: Tensor, alpha=1.0): return (X > alpha).where(X, 0)
 def Softmax_1(x: Tensor, axis=1): return x.softmax(axis)
 def Softmax_13(x: Tensor, axis=-1): return x.softmax(axis)
 Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
-def Clip(x: Tensor, min=None, max=None): return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max).cast(x.dtype)
+def Clip(x: Tensor, min=None, max=None): # noqa: A002  cuz onnx just uses min and max as attribute names
+  return x.clip(float('-inf') if min is None else min,float('inf') if max is None else max).cast(x.dtype)
 
 def _axes(axes, noop_with_empty_axes):
   if axes is not None and not (isinstance(axes, Tensor) and axes.shape == (0,)): return to_python_const(axes)
@@ -81,10 +85,10 @@ def OptionalHasElement(x: Optional[Tensor]=None): return Tensor(x is not None an
 def OptionalGetElement(x: Optional[Tensor]=None): return x if x is not None else Tensor([])
 
 def Shape(data: Tensor, end=None, start=0): return Tensor(data.shape[start:end], dtype=dtypes.int64)
-def Size(data: Tensor): return prod(data if isinstance(data, list) else data.shape)
+def Size(data: Union[Tensor, List]): return prod(data if isinstance(data, list) else data.shape)
 def Flatten(x: Tensor, axis=1): return x.reshape(prod(x.shape[0:axis]), -1)
 def Reshape(data: Tensor, shape, allowzero=0): return data.reshape([int(x) or (0 if allowzero else data.shape[i]) for i, x in enumerate(shape)])
-def Expand(x: Tensor, shape:List[ConstType]): return x.expand(_broadcast_shape(x.shape, tuple(shape)))
+def Expand(x: Tensor, shape:List): return x.expand(_broadcast_shape(x.shape, tuple(shape)))
 def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
 def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
@@ -105,7 +109,7 @@ def Atan(y: Tensor):
   t3 = (t1 > 1).where(1.570796327 - t3, t3)
   return y.sign() * t3
 
-def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1): return x.triu(k) if upper else x.tril(k)
+def Trilu(x: Tensor, k:int=0, upper=1): return x.triu(k) if upper else x.tril(k)
 
 def Binarizer(x, threshold=0.0): return (x > threshold).float()
 
@@ -118,21 +122,18 @@ def Transpose(x: Tensor, perm=None): return x.permute(order=list(range(x.ndim)[:
 
 # **************** Complex Ops ****************
 
-def Gemm(A: Tensor, B: Tensor, C: Tensor=None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=0):
+def Gemm(A: Tensor, B: Tensor, C: Optional[Tensor] = None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=0):
   ret = alpha * (A.transpose(transA) @ B.transpose(transB))
   if C is not None: ret = ret + beta * (C if broadcast == 0 else C.reshape([-1 if i <  len(C.shape) else 1 for i in range(ret.ndim)][::-1]))
   return ret
 
 def Einsum(*Inputs: List[Tensor], equation): return Tensor.einsum(equation, Inputs)
 
-def CumSum(X:Tensor, axis:ConstType, exclusive=0, reverse=0):
+def CumSum(X:Tensor, axis:int, exclusive=0, reverse=0):
   if axis < 0: axis += X.ndim
   if reverse: X = X.flip(axis)
-  if exclusive:
-    pad_arg, shrink_arg = [None] * X.ndim, [None] * X.ndim
-    pad_arg[axis] = (1, 0)
-    shrink_arg[axis] = (0, X.shape[axis])
-    X = X.pad(tuple(pad_arg)).shrink(tuple(shrink_arg))
+  if exclusive: X = X.pad(tuple((1,0) if i == axis else None for i in range(X.ndim)))\
+                     .shrink(tuple((0,X.shape[axis]) if i == axis else None for i in range(X.ndim)))
   if reverse: return X.cumsum(axis).flip(axis)
   return X.cumsum(axis)
 
@@ -170,7 +171,7 @@ def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsil
 
 # onnx: [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
 # numpy.pad: ((x1_begin, x1_end), (x2_begin, x2_end), ...)
-def _format_padding(onnx_pads, ndims=None, axes=None):
+def _format_padding(onnx_pads, ndims=None, axes=None) -> List[Tuple[int, int]]:
   if ndims and len(onnx_pads)//2 != ndims:  onnx_pads = onnx_pads * ndims # for OnnxBackendPyTorchConvertedModelTest the len(onnx_pads) == 2
   if ndims is None: ndims = len(onnx_pads) // 2
   if axes is None: axes = list(range(ndims))
@@ -183,7 +184,7 @@ def _format_padding(onnx_pads, ndims=None, axes=None):
 def _padded(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
   if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
   elif ceil_mode:
-    if strides is not None: strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
+    if strides is not None: strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides or [1]*len(kernel_shape)
     if dilations is not None: dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
     out_spatial_shape = [math.ceil((sh - dil * (ker-1)-1)/st + 1) if ceil_mode else math.floor((sh - dil * (ker-1)-1)/st + 1)
                          for sh, st, ker, dil in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
@@ -201,7 +202,7 @@ def _padded(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0
   return X.pad(tuple(pads), value=constant_value)
 
 def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations):
-  strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
+  strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides or [1]*len(kernel_shape)
   dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
   if auto_pad == "SAME_UPPER" or auto_pad == "SAME_LOWER":
     pad_shape = [(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
@@ -209,30 +210,32 @@ def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations):
     return pad_shape[::2] + pad_shape[1::2] if auto_pad == "SAME_UPPER" else pad_shape[1::2] + pad_shape[::2]
   raise NotImplementedError(f"auto_pad={auto_pad} not implemented")
 
-def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
+def Pad(x:Tensor, pads:List[ConstType], constant_value:Optional[ConstType]=None, axes:Optional[List[ConstType]]=None, mode="constant",
+        value:float=0.):
   constant_value = value if constant_value is None else float(constant_value)
   seq_pads = [math.ceil(i) for i in pads]
   base_shape = x.shape
-  pads = _format_padding(seq_pads, ndims=len(x.shape), axes=axes)
+  formatted_pads = _format_padding(seq_pads, ndims=len(x.shape), axes=axes)
   if mode == "wrap":
-    repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(pads, base_shape)]
+    repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(formatted_pads, base_shape)]
     new_shape = [s*r for s,r in zip(base_shape, repeat_args)]
     shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh if dim[1]%sh != 0 else 0))
-                   for dim, sh, nsh in zip(pads, base_shape, new_shape)]
+                   for dim, sh, nsh in zip(formatted_pads, base_shape, new_shape)]
     return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
   if mode == "reflect":
     for i,s in enumerate(x.shape):
-      if pads[i] != (0,0):
-        xL = x.flip(i).shrink(tuple((s-pads[i][0]-1, s_-1) if i_ == i else None for i_,s_ in enumerate(x.shape)))
-        xR = x.flip(i).shrink(tuple((1, pads[i][1]+1) if i_ == i else None for i_ in range(x.ndim)))
+      if formatted_pads[i] != (0,0):
+        xL = x.flip(i).shrink(tuple((s-formatted_pads[i][0]-1, s_-1) if i_ == i else None for i_,s_ in enumerate(x.shape)))
+        xR = x.flip(i).shrink(tuple((1, formatted_pads[i][1]+1) if i_ == i else None for i_ in range(x.ndim)))
         x = xL.cat(x, xR, dim=i)
     return x
   if mode == "edge":
     for i,s in enumerate(x.shape):
-      if pads[i] != (0,0):
-        xL = x.shrink(tuple((0,1) if i_ == i else None for i_ in range(x.ndim))).expand([pads[i][0] if i_ == i else None for i_ in range(x.ndim)])
-        xR = x.shrink(tuple((s_-1, s_) if i_ == i else None for i_,s_ in enumerate(x.shape))).expand([pads[i][1] if i_ == i else None for i_ in
-                                                                                                      range(x.ndim)])
+      if formatted_pads[i] != (0,0):
+        xL = x.shrink(tuple((0,1) if i_ == i else None for i_ in range(x.ndim))).expand([formatted_pads[i][0] if i_ == i else None for i_ in
+                                                                                         range(x.ndim)])
+        xR = x.shrink(tuple((s_-1, s_) if i_ == i else None for i_,s_ in enumerate(x.shape))).expand([formatted_pads[i][1] if i_ == i else None
+                                                                                                      for i_ in range(x.ndim)])
         x = xL.cat(x, xR, dim=i)
     return x
   if mode == "constant":
@@ -319,7 +322,7 @@ def SpaceToDepth(X:Tensor, blocksize:int):
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
 def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
   if not training_mode: return data, Tensor.ones(data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
-  mask = Tensor(np.random.RandomState(seed).random(data.shape) >= ratio, requires_grad=False, device=data.device)
+  mask = Tensor(np.random.RandomState(seed).random(cast(Tuple[int,...], data.shape)) >= ratio, requires_grad=False, device=data.device)
   return data * mask * (1/(1.0 - ratio)), mask
 
 def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
@@ -361,7 +364,19 @@ def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore
   return loss, y
 
 def ArrayFeatureExtractor(x: Tensor, indices: Tensor): return x[..., indices]
-def Gather(x: Tensor, indices: Tensor, axis=0): return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
+# TODO: is fuse_arange stuff working for this?
+def Gather(x: Tensor, indices: Tensor, axis=0):
+  if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
+    x_sh = list(x.shape)
+    ret_shape = x_sh[:axis] + list(indices.shape) + x_sh[axis+1:]
+    if indices.ndim > 1: indices = indices.flatten()
+    python_indices = cast(Union[List[int], int], to_python_const(indices))
+    normalized_python_indices = [python_indices] if not isinstance(python_indices, list) else [x_sh[axis]+x if x<0 else x for x in python_indices]
+    args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x_sh)] for i in normalized_python_indices]
+    return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
+  # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
+  return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
+  # return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
 def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
   return x.gather(axis, indices)
@@ -398,9 +413,8 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     inverse_perm = [perm.index(i) for i in range(len(perm))]
     X = X.permute(*perm)
   else: axes, inverse_perm = list(range(X.ndim)), []
-  if roi is not None: roi = to_python_const(roi)
   if sizes is not None:
-    sizes = [1]*(X.ndim - sizes.shape[0]) + to_python_const(sizes)
+    sizes = [1]*(X.ndim - len(sizes)) + sizes
     scales = [sizes[i] / X.shape[i] for i in range(X.ndim)]
     if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
       scale_fxn = min if keep_aspect_ratio_policy == "not_larger" else max
@@ -409,7 +423,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       sizes = [int((scale * X.shape[i]) + 0.5) if i in axes else X.shape[i] for i in range(X.ndim)]
     elif keep_aspect_ratio_policy != "stretch": raise ValueError(f"invalid {keep_aspect_ratio_policy=}")
   else:
-    scales = [1]*(X.ndim - scales.shape[0]) + to_python_const(scales)
+    scales = [1]*(X.ndim - len(scales)) + scales
     sizes = [int(sc*sh) for sc, sh in zip(scales, X.shape)]
 
   sizes_frac = [sc*sh for sc, sh in zip(scales, X.shape)][2:]
@@ -434,7 +448,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 
 # TODO
-def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
+def CenterCropPad(t: Tensor, shape, axes=None):
   if not axes: axes = list(range(t.ndim))
   # for i in
   # t = t.shrink(tuple((t.shape[x]//2 - (s+1)//2, t.shape[x]//2 + s//2) for s,x in zip(shape, axes) if s < t.shape[x]))
@@ -447,7 +461,7 @@ def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
     elif s > tx: pad_arg[x] = ((s-tx)//2, (s-tx+1)//2)
   return t.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
-def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
+def OneHot(indices: Tensor, depth, values, axis=-1):
   indices, rank = (indices < 0).where(indices+depth, indices), indices.ndim
   if axis < 0: axis += rank + 1
   ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
@@ -465,7 +479,7 @@ def Erf(x: Tensor):
   z = 1.0 - y * (-x * x).exp()
   return (x > 0).where(z, -z)
 
-def Compress(inp: Tensor, condition: Tensor, axis=None):
+def Compress(inp: Tensor, condition, axis=None):
   if axis is None:
     inp = inp.flatten()
     axis = 0
@@ -475,14 +489,12 @@ def Compress(inp: Tensor, condition: Tensor, axis=None):
   con = Tensor(np.arange(len(condition))[condition]) # TODO no boolean indexing in Tensor, pretty sure it's possible now...
   return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
-def EyeLike(x: Tensor, dtype=None, k=0):
-  if dtype is None: dtype = x.dtype
-  else: dtype = DTYPE_MAP[int(dtype)]
-  dim = min(x.shape)
-  if x.shape[0] == x.shape[1]:
-    return Tensor.eye(dim, dtype=dtype)
+def EyeLike(x: Tensor, dtype: Optional[int]=None, k=0):
+  tiny_dtype = x.dtype if dtype is None else DTYPE_MAP[dtype]
+  dim = cast(int, min(x.shape))
+  if x.shape[0] == x.shape[1]: return Tensor.eye(dim, dtype=tiny_dtype)
   padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)
-  return Tensor.eye(dim, dtype=dtype).pad(padarg)
+  return Tensor.eye(dim, dtype=tiny_dtype).pad(padarg)
 
 
 def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
@@ -493,7 +505,8 @@ def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int
     t = t.reshape(tuple(-1 if i == axis-1 else 1 if i == axis else sh for i,sh in enumerate(t.shape)))
     return t.repeat([repeats if i == axis else 1 for i in range(t.ndim)]).reshape(out_shape)
   if axis < 0: axis += x.ndim
-  if block_size:
+  # TODO ugly af
+  if block_size and isinstance(x_zero_point, Tensor):
     x_zer, x_sc = numpy_repeat(x_zero_point, axis, block_size, x.shape), numpy_repeat(x_scale, axis, block_size, x.shape)
   else:
     x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
@@ -516,12 +529,11 @@ def ImageDecoder(encoded_stream: bytes, pixel_format="RGB"):
   if pixel_format == "RGB":
     return Tensor(np.array(img))
   if pixel_format == "Grayscale":
-    img = img.convert("L")
-    decoded = Tensor(np.array(img))
+    decoded = Tensor(np.array(img.convert("L")))
     return decoded.unsqueeze(-1) # (H, W) to (H, W, 1)
   raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
-def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
+def AffineGrid(theta: Tensor, size, align_corners=0):
   _, _, *data_sz = size
   size_zeros, original_grid = Tensor.zeros(data_sz), Tensor.ones(data_sz)
   stackable = [original_grid]
@@ -557,9 +569,9 @@ def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
   # this is tanh approximated
   return (x + bias).gelu()
 
-def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None,
-                            segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None,
-                            position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
+def EmbedLayerNormalization(input_ids: Tensor, segment_ids: Tensor, word_embedding:Tensor,
+                            position_embedding:Tensor, segment_embedding:Tensor, gamma=None, beta=None,
+                            mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
   assert (segment_ids is None) is (segment_embedding is None)
   assert (mask is None) is (mask_index_type is None)
@@ -586,13 +598,13 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   out = embedding_sum.layernorm(eps=epsilon) * gamma + beta
   return out, None, embedding_sum
 
-def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional[Tensor]=None, past:Optional[Tensor]=None,
+def Attention(x:Tensor, weights, bias:Tensor, mask_index:Optional[Tensor]=None, past:Optional[Tensor]=None,
               relative_position_bias:Optional[Tensor]=None, past_sequence_length:Optional[Tensor]=None, do_rotary=None, mask_filter_value=None,
               num_heads=None, past_present_share_buffer=None, qkv_hidden_sizes=None, scale=None, unidirectional=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.Attention
   assert num_heads is not None  # required
   assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None)
-  assert relative_position_bias==do_rotary==past_sequence_length==mask_filter_value==past_present_share_buffer==scale==None, \
+  assert relative_position_bias is do_rotary is past_sequence_length is mask_filter_value is past_present_share_buffer is scale is None, \
   "functionality not supported yet"  # TODO strange params
   hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.shape[1] // 3,)
 
