@@ -289,7 +289,7 @@ class AMDProgram(HCQProgram):
     assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
 
     # Set rsrc1.priv=1 on gfx11 to workaround cwsr.
-    self.rsrc1 = code.compute_pgm_rsrc1 | (1 << 20 if 110000 <= self.device.target < 120000 else 0)
+    self.rsrc1 = code.compute_pgm_rsrc1 | ((1 << 20) if 110000 <= self.device.target < 120000 else 0)
     self.rsrc2 = code.compute_pgm_rsrc2 | (lds_size << 15)
     self.prog_addr = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
 
