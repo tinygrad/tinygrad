@@ -415,9 +415,29 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
     SCHEDULES.append((graph, in_degree))
   return graph, in_degree, var_vals
 
+def to_uop(x:LazyBuffer, buf_uops:Dict[Buffer, UOp]) -> UOp:
+  if x is not x.base: return to_uop(x.base, buf_uops).swizzle(x.st)
+  buf_uops[x.buffer] = ubuf = UOp(UOps.BUFFER, x.buffer.dtype.ptr(), (), (len(buf_uops), (x.buffer.device, x.buffer.size, x.buffer.dtype)))
+  if x.realized is not None: return ubuf
+  src = tuple(to_uop(y, buf_uops) for y in x.srcs)
+  #return UOp(UOps.ALU, x.dtype, src)
+  return ubuf
+
+realize = PatternMatcher([
+])
+
+def _graph(outs:List[LazyBuffer]) -> List[ScheduleItem]:
+  ret: List[ScheduleItem] = []
+  buf_uops: Dict[Buffer, UOp] = {}
+  sink = UOp.sink(*tuple(to_uop(x, buf_uops) for x in outs))
+  sink = graph_rewrite(sink, realize)
+  return ret
+
 # *** DAG ordering: breadth first search ***
 
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  if getenv("SVG2", 1):
+    return _graph(outs), {}
   graph, in_degree, var_vals = _graph_schedule(outs)
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
