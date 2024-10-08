@@ -267,7 +267,7 @@ class NVProgram(HCQProgram):
       self.qmd.__setattr__(f'constant_buffer_valid_{i}', 1)
 
     # Registers allocation granularity per warp is 256, warp allocaiton granularity is 4. Register file size is 65536.
-    self.max_threads = ((65536 // round_up(max(1, self.registers_usage) * 32, 256)) // 4) * 4 * 32
+    self.max_threads = (((65536 // round_up(max(1, self.registers_usage) * 32, 256)) // 4) * 4 * 32) // 2
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
     super().__init__(NVArgsState, self.device, self.name, kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8))
@@ -517,6 +517,7 @@ class NVDevice(HCQCompiled):
     self.timeline_value += 2
 
   def _ensure_has_local_memory(self, required):
+    required = 0x2000
     if self.slm_per_thread >= required: return
 
     self.synchronize()
@@ -525,12 +526,14 @@ class NVDevice(HCQCompiled):
     self.slm_per_thread = round_up(required, 32)
     bytes_per_warp = round_up(self.slm_per_thread * 32, 0x200)
     bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
-    self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True)
+    self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 128, 0x20000), huge_page=True, contig=True)
 
     NVComputeQueue().wait(self.timeline_signal, self.timeline_value - 1) \
                     .setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
+
+    self.synchronize()
 
   def invalidate_caches(self):
     rmctrl.fb_flush_gpu_cache(self.fd_ctl, self.root, self.subdevice,
