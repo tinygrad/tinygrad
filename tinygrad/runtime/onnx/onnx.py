@@ -129,7 +129,8 @@ def get_run_onnx(onnx_model: ModelProto):
         elif isinstance(inputs[name], list):
           input_tensors[name] = [Tensor(i, requires_grad=False) for i in inputs[name]]
         elif domain == "ai.onnx.preview.training": # not sure if in real use the domain is "ai.onnx.preview.training"
-          input_tensors[name] = Tensor(inputs[name], requires_grad=True) # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
+          # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
+          input_tensors[name] = Tensor(inputs[name], requires_grad=True)
         else:
           input_tensors[name] = Tensor(inputs[name], requires_grad=False)
         if shape: # if only input_tensor is not variable type
@@ -156,7 +157,7 @@ def get_run_onnx(onnx_model: ModelProto):
     for num,n in enumerate(onnx_model.graph.node):
       inp: List[Tensor] = []
       if debug >= 3: print("inputs:")
-      for i,x in enumerate(n.input):
+      for x in n.input:
         t = fetch_tensor(x)
         if debug >= 3: print(f"\t{x} - {t}")
         inp.append(t)

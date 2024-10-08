@@ -22,7 +22,8 @@ equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"})}
 
 def Identity(x: Tensor): return x
 # TODO: fix buffer_parse
-def Add(x: Tensor, other: Tensor, broadcast=None, axis=None): return x + other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else (x + other).cast(x.dtype)
+def Add(x: Tensor, other: Tensor, broadcast=None, axis=None): return x + other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) \
+  else (x + other).cast(x.dtype)
 def Sub(x: Union[Tensor, Any], other: Tensor): return x - other # some test has input as int
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
@@ -39,7 +40,7 @@ def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_t
 # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_div.py
 def Div(x: Tensor, other: Tensor): return (x/other).cast(x.dtype)
 
-def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None, value_strings=None):
+def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None,value_strings=None):
   if value is not None: return value
   if value_float is not None: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False)
   if value_floats is not None: return Tensor(list(value_floats), dtype=dtypes.float32, requires_grad=False)
@@ -51,7 +52,8 @@ def ConstantOfShape(shape:List[ConstType], value:Tensor): return Tensor.ones(*sh
 def HardSigmoid(x: Tensor, alpha=0.2, beta=0.5): return x.hardsigmoid(alpha, beta)
 def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + Erf(x/math.sqrt(2)))
 def PRelu(X:Tensor, slope:Tensor):
-  slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope # HACK OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
+  # HACK OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
+  slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope
   return (X > 0).where(X, X * slope)
 def ThresholdedRelu(X: Tensor, alpha=1.0): return (X > alpha).where(X, 0)
 def Softmax_1(x: Tensor, axis=1): return x.softmax(axis)
@@ -66,12 +68,12 @@ def ReduceMax(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): retu
 def ReduceMin(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.min(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 def ReduceSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 def ReduceMean(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.mean(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
-def ReduceSumSquare(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return ReduceSum(data.square(), axes, keepdims, noop_with_empty_axes)
+def ReduceSumSquare(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return ReduceSum(data.square(), axes, keepdims,noop_with_empty_axes)
 def ReduceProd(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.prod(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 def ReduceL1(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return ReduceSum(data.abs(), axes, keepdims, noop_with_empty_axes)
 def ReduceL2(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return ReduceSumSquare(data, axes, keepdims, noop_with_empty_axes).sqrt()
 def ReduceLogSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return ReduceSum(data, axes, keepdims, noop_with_empty_axes).log()
-def ReduceLogSumExp(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return ReduceSum(data.exp(), axes, keepdims, noop_with_empty_axes).log()
+def ReduceLogSumExp(data: Tensor, axes=None,keepdims=1,noop_with_empty_axes=0): return ReduceSum(data.exp(),axes,keepdims,noop_with_empty_axes).log()
 
 def GlobalAveragePool(X: Tensor): return X.mean(axis=tuple(range(2, X.ndim)), keepdim=True)
 def GlobalMaxPool(X: Tensor): return X.max(axis=tuple(range(2, X.ndim)), keepdim=True)
@@ -183,8 +185,10 @@ def _padded(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0
   elif ceil_mode:
     if strides is not None: strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
     if dilations is not None: dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
-    out_spatial_shape = [math.ceil((sh - dil * (ker-1)-1)/st + 1) if ceil_mode else math.floor((sh - dil * (ker-1)-1)/st + 1) for sh, st, ker, dil in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
-    pad_shape = [(osh-1)*st+((ks-1)*dil+1)-ish for osh, st, ks, dil, ish in zip(out_spatial_shape, strides, kernel_shape, dilations, X.shape[-len(kernel_shape):])]
+    out_spatial_shape = [math.ceil((sh - dil * (ker-1)-1)/st + 1) if ceil_mode else math.floor((sh - dil * (ker-1)-1)/st + 1)
+                         for sh, st, ker, dil in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
+    pad_shape = [(osh-1)*st+((ks-1)*dil+1)-ish for osh, st, ks, dil, ish in
+                 zip(out_spatial_shape, strides, kernel_shape, dilations, X.shape[-len(kernel_shape):])]
     pad_shape = [[sh//2, sh-sh//2] for sh in pad_shape]
     # ceil_mode case follows NOTE in https://pytorch.org/docs/stable/generated/torch.nn.MaxPool2d.html#torch.nn.MaxPool2d
     # so if any kernels start in right padded region, we decrease right pads to omit that kernel. Only omitting 1 kernel now.
@@ -213,7 +217,8 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
   if mode == "wrap":
     repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(pads, base_shape)]
     new_shape = [s*r for s,r in zip(base_shape, repeat_args)]
-    shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh if dim[1]%sh != 0 else 0)) for dim, sh, nsh in zip(pads, base_shape, new_shape)]
+    shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh if dim[1]%sh != 0 else 0))
+                   for dim, sh, nsh in zip(pads, base_shape, new_shape)]
     return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
   if mode == "reflect":
     for i,s in enumerate(x.shape):
@@ -226,7 +231,8 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     for i,s in enumerate(x.shape):
       if pads[i] != (0,0):
         xL = x.shrink(tuple((0,1) if i_ == i else None for i_ in range(x.ndim))).expand([pads[i][0] if i_ == i else None for i_ in range(x.ndim)])
-        xR = x.shrink(tuple((s_-1, s_) if i_ == i else None for i_,s_ in enumerate(x.shape))).expand([pads[i][1] if i_ == i else None for i_ in range(x.ndim)])
+        xR = x.shrink(tuple((s_-1, s_) if i_ == i else None for i_,s_ in enumerate(x.shape))).expand([pads[i][1] if i_ == i else None for i_ in
+                                                                                                      range(x.ndim)])
         x = xL.cat(x, xR, dim=i)
     return x
   if mode == "constant":
@@ -237,12 +243,14 @@ def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_i
   ret = _padded(X, pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
   ret = ret.avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
   if count_include_pad: return ret
-  div = _padded(Tensor.ones(X.shape), pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode).avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
+  div = _padded(Tensor.ones(X.shape), pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations,
+                ceil_mode=ceil_mode).avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
   return ret / div
 
 def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
   pixel_axes = tuple(range(2, X.ndim))
-  ret = _padded(X, pads, auto_pad, constant_value=-math.inf, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
+  ret = _padded(X, pads, auto_pad, constant_value=-math.inf, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations,
+                ceil_mode=ceil_mode)
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations).cast(X.dtype)
   ret_len, X_len = ret.numel(), X.numel()
   indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().unsqueeze(0).expand(ret_len, X_len)) * \
@@ -271,34 +279,42 @@ def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilat
     padding = [p for ps in zip(pads[:len(pads)//2][::-1], pads[len(pads)//2:][::-1]) for p in ps] if pads is not None else 0
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=padding)
 
-def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, output_shape=None, output_padding=0, strides=1):
+def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None,
+                  output_shape=None, output_padding=0, strides=1):
   if kernel_shape is None: kernel_shape = W.shape[2:]
   if isinstance(strides, int): strides = [strides]*(W.ndim-2)
   if isinstance(dilations, int): dilations = [dilations]*(W.ndim-2)
   if isinstance(output_padding, int): output_padding = [output_padding]*(W.ndim-2)
-  out_sh = [st*(xs-1) + (ks-1)*di+1 if n < 2 else st*(xs-1) + (ks-1)*di+1 - pads[n-2] - pads[n-1] for n, (st, xs, ks, di) in enumerate(zip(strides, X.shape[2:], kernel_shape, dilations))] if output_shape is not None or auto_pad != "NOTSET" else []
+  out_sh = [st*(xs-1) + (ks-1)*di+1 if n < 2 else st*(xs-1) + (ks-1)*di+1 - pads[n-2] - pads[n-1] for n, (st, xs, ks, di) in
+            enumerate(zip(strides, X.shape[2:], kernel_shape, dilations))] if output_shape is not None or auto_pad != "NOTSET" else []
   if pads is None:
     if output_shape is None: output_shape = [xs*st for xs, st in zip(X.shape[2:], strides)]
     if auto_pad == "NOTSET": pads = [0,0] * (X.ndim - 2)
     else:
-      total_padding = [st*(ish-1) + pad + ((ks-1)*dil+1)-osh for st, ish, pad, ks, dil, osh in zip(strides, X.shape[2:], output_padding, kernel_shape, dilations, output_shape)]
+      total_padding = [st*(ish-1) + pad + ((ks-1)*dil+1)-osh for st, ish, pad, ks, dil, osh
+                       in zip(strides, X.shape[2:], output_padding, kernel_shape, dilations, output_shape)]
       pad_shape = flatten([[sh//2, sh-sh//2] for sh in total_padding])
       pads = pad_shape[::2] + pad_shape[1::2] if auto_pad == "SAME_UPPER" else pad_shape[1::2] + pad_shape[::2]
   else:
-    if output_shape is None: output_shape = [st*(xs-1) + (ks-1)*di+1 if n < 2 else st*(xs-1) + (ks-1)*di+1 - pads[n-2] - pads[n-1] for n, (st, xs, ks, di) in enumerate(zip(strides, X.shape[2:], kernel_shape, dilations))]
+    if output_shape is None: output_shape = [st*(xs-1) + (ks-1)*di+1 if n < 2 else st*(xs-1) + (ks-1)*di+1 - pads[n-2] - pads[n-1]
+                                             for n, (st, xs, ks, di) in enumerate(zip(strides, X.shape[2:], kernel_shape, dilations))]
   if out_sh: output_padding = [os - rs for os, rs in zip(output_shape, out_sh)]
-  return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding)
+  return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0,
+                            output_padding=output_padding)
 
 def DepthToSpace(X:Tensor, blocksize:int, mode:str="DCR"):
   b, c, h, w = X.shape
   if mode == "DCR":
-    return X.reshape(b, blocksize, blocksize, c // (blocksize**2), h, w).permute(0, 3, 4, 1, 5, 2).reshape(b, c // (blocksize**2), h * blocksize, w * blocksize)
+    return X.reshape(b, blocksize, blocksize, c // (blocksize**2), h, w).permute(0, 3, 4, 1, 5, 2).reshape(b, c // (blocksize**2), h * blocksize,
+                                                                                                           w * blocksize)
   elif mode == "CRD":
-    return X.reshape(b, c // (blocksize ** 2), blocksize, blocksize, h, w).permute(0, 1, 4, 2, 5, 3).reshape(b, c // (blocksize ** 2), h * blocksize, w * blocksize)
+    return X.reshape(b, c // (blocksize ** 2), blocksize, blocksize, h, w).permute(0, 1, 4, 2, 5, 3).reshape(b, c // (blocksize ** 2), h * blocksize,
+                                                                                                             w * blocksize)
 
 def SpaceToDepth(X:Tensor, blocksize:int):
   b, c, h, w = X.shape
-  return X.reshape(b, c, h // blocksize, blocksize, w // blocksize, blocksize).permute(0, 3, 5, 1, 2, 4).reshape(b, c * (blocksize**2), h // blocksize, w // blocksize)
+  return X.reshape(b, c, h // blocksize, blocksize, w // blocksize, blocksize).permute(0, 3, 5, 1, 2, 4).reshape(b, c * (blocksize**2),
+                                                                                                                 h // blocksize, w // blocksize)
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
 def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
@@ -308,7 +324,8 @@ def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
 
 def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
   bs, c, iy, ix = x.shape
-  return x / x.mul(x).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
+  ret = x/x.mul(x).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
+  return ret
 
 def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)): return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
 
@@ -540,7 +557,9 @@ def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
   # this is tanh approximated
   return (x + bias).gelu()
 
-def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None, segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
+def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None,
+                            segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None,
+                            position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
   assert (segment_ids is None) is (segment_embedding is None)
   assert (mask is None) is (mask_index_type is None)
@@ -548,7 +567,8 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   input_shape = input_ids.shape
   seq_length = input_shape[1]
   compute_seg_emb = (segment_embedding is not None and segment_ids is not None)
-  vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
+  vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0]
+                                                                                                                if compute_seg_emb else None)
 
   def embedding(x:Tensor, vocab_size, weight:Tensor) -> Tensor:  # TODO from nn.Embedding. Could probably upstream this to Tensor
     vocab_counter = Tensor.arange(vocab_size, dtype=x.dtype, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
@@ -566,11 +586,14 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   out = embedding_sum.layernorm(eps=epsilon) * gamma + beta
   return out, None, embedding_sum
 
-def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional[Tensor]=None, past:Optional[Tensor]=None, relative_position_bias:Optional[Tensor]=None, past_sequence_length:Optional[Tensor]=None, do_rotary=None, mask_filter_value=None, num_heads=None, past_present_share_buffer=None, qkv_hidden_sizes=None, scale=None, unidirectional=None):
+def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional[Tensor]=None, past:Optional[Tensor]=None,
+              relative_position_bias:Optional[Tensor]=None, past_sequence_length:Optional[Tensor]=None, do_rotary=None, mask_filter_value=None,
+              num_heads=None, past_present_share_buffer=None, qkv_hidden_sizes=None, scale=None, unidirectional=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.Attention
   assert num_heads is not None  # required
   assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None)
-  assert relative_position_bias==do_rotary==past_sequence_length==mask_filter_value==past_present_share_buffer==scale==None, "functionality not supported yet"  # TODO strange params
+  assert relative_position_bias==do_rotary==past_sequence_length==mask_filter_value==past_present_share_buffer==scale==None, \
+  "functionality not supported yet"  # TODO strange params
   hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.shape[1] // 3,)
 
   if unidirectional:  # gpt-style
@@ -612,7 +635,8 @@ def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
   ret = []
   for X, G, H in grouped_inputs:
     X.grad = norm_coefficient * X + G
-    X.grad.requires_grad, H.requires_grad = False, False # TODO manually turning off requires_grad, see TODO under (domain == "ai.onnx.preview.training") in onnx.py
+    # TODO manually turning off requires_grad, see TODO under (domain == "ai.onnx.preview.training") in onnx.py
+    X.grad.requires_grad, H.requires_grad = False, False
     H.assign(H.detach() + X.grad * X.grad).realize()
     H_adaptive = H.sqrt() + epsilon
     X.assign(X.detach() - r * X.grad / H_adaptive)
