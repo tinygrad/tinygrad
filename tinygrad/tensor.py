@@ -1027,7 +1027,8 @@ class Tensor:
       # convert slice scalar Tensor slice parameters to int
       def process_component(component):
         if isinstance(component, Tensor):
-          if component.numel() > 1 or not dtypes.is_int(component.dtype): raise TypeError("only integer tensors of single element can be converted to a slice index")
+          if component.numel() > 1 or not dtypes.is_int(component.dtype): 
+            raise TypeError("only integer tensors of single element can be converted to a slice index")
           return component.item()
         return component
 
@@ -1040,7 +1041,8 @@ class Tensor:
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
     elif isinstance(indices, (tuple, list)):
-      indices = [Tensor(i, self.device, requires_grad=False) if isinstance(i, (tuple, list)) else (_fix_slice(i) if isinstance(i,slice) else i) for i in indices]
+      indices = [Tensor(i, self.device, requires_grad=False) if isinstance(i, (tuple, list)) 
+                 else (_fix_slice(i) if isinstance(i,slice) else i) for i in indices]
     elif isinstance(indices, slice):
       indices = [_fix_slice(indices)]
     else: indices = [indices]
