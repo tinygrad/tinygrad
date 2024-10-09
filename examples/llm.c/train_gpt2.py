@@ -5,7 +5,7 @@ from tinygrad import Tensor, nn, fetch, Device, TinyJit, GlobalCounters
 from dataclasses import dataclass
 from typing import List
 import pathlib
-
+from tinygrad.multi import MultiLazyBuffer
 @dataclass
 class GPTConfig:
   block_size: int = 1024
@@ -125,16 +125,24 @@ if __name__ == "__main__":
   import tiktoken, argparse
 
   parser = argparse.ArgumentParser()
-  parser.add_argument("--num_iterations", type=int, default=10, help="number of iterations to run")
+  parser.add_argument("--num_iterations", type=int, default=3, help="number of iterations to run")
   parser.add_argument("--batch_size", type=int, default=4, help="batch size")
   parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
   parser.add_argument("--skip_test", action="store_true", help="skip test")
+  parser.add_argument("--shard_model", action="store_true", help="whether to shard the model")
   args = parser.parse_args()
   B, T = args.batch_size, args.sequence_length
   assert 1 <= T <= 1024
 
-  model = GPT(GPTConfig(n_layer=48, n_head=25, n_embd=1600))
+  model = GPT(GPTConfig(n_layer=12, n_head=12, n_embd=768))
   p_sz("model", *nn.state.get_parameters(model))
+  seen = set()
+  if args.shard_model:
+    GPUS = [f'{Device.DEFAULT}:{i}' for i in range(2)]
+    for p in nn.state.get_state_dict(model).values():
+      if p in seen: continue
+      seen.add(p)
+      p.shard_(GPUS, axis=0)
 
   # init the tokenizer
   enc = tiktoken.get_encoding("gpt2")
@@ -168,7 +176,7 @@ if __name__ == "__main__":
   # forward backward for a few iterations
   data_iter = iter(get_batch())
   x, y = next(data_iter) # we'll overfit this batch below
-  optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
+  optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0, shard_axis=0)
   p_sz("optimizer", *nn.state.get_parameters(optimizer))
   @TinyJit
   def step(x, y):
