@@ -58,7 +58,7 @@ def error_check(error: objc_instance, error_constructor: type[Exception] = Runti
   raise error_constructor(bytes(msg(msg(error, "localizedDescription", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode())
 
 class MetalCompiler(Compiler):
-  def __init__(self, device:Optional[MetalDevice]):
+  def __init__(self, device:Optional[MetalDevice]=None):
     self.device = device
     super().__init__("compile_metal")
   def compile(self, src:str) -> bytes:
