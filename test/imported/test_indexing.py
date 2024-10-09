@@ -97,7 +97,10 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(reference[0:2], consec((2, 3, 3)))
     numpy_testing_assert_equal_helper(reference[2, 2, 2], 27)
     numpy_testing_assert_equal_helper(reference[:], consec((3, 3, 3)))
-
+    
+    # indexing with single element integer tensor
+    numpy_testing_assert_equal_helper(reference[Tensor([0]):2], consec((2, 3, 3)))
+    numpy_testing_assert_equal_helper(reference[Tensor([0]):Tensor([2])], consec((2, 3, 3)))
     # indexing with Ellipsis
     numpy_testing_assert_equal_helper(reference[..., 2], np.array([[3., 6., 9.],[12., 15., 18.],[21., 24., 27.]]))
     numpy_testing_assert_equal_helper(reference[0, ..., 2], np.array([3., 6., 9.]))
@@ -173,6 +176,10 @@ class TestIndexing(unittest.TestCase):
     self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0:2.0])
     self.assertRaises(IndexError, lambda: reference[0.0, ..., 0.0:2.0])
     self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0])
+    
+    idx = Tensor.arange(2).int()
+    self.assertRaises(TypeError, lambda: reference[idx:idx+1])
+    self.assertRaises(TypeError, lambda: reference[idx[0]:idx[0].float()+1])
 
     # TODO: delitem
     # def delitem(): del reference[0]
