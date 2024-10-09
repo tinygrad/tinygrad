@@ -4,6 +4,7 @@ import numpy as np
 from tinygrad import Tensor, nn, fetch, Device, TinyJit, GlobalCounters
 from dataclasses import dataclass
 from typing import List
+import pathlib
 
 @dataclass
 class GPTConfig:
@@ -143,7 +144,7 @@ if __name__ == "__main__":
   # load the tokens
   # prefer to use tiny_shakespeare if it's available, otherwise use tiny_stories
   # we're using val instead of train split just because it is smaller/faster
-  tokens_bin = fetch("https://huggingface.co/datasets/karpathy/llmc-starter-pack/resolve/main/tiny_shakespeare_val.bin")
+  tokens_bin = pathlib.Path("/root/tinygrad/tmp/tiny_shakespeare_val.bin")
   assert os.path.isfile(tokens_bin)
   print(f"loading cached tokens in {tokens_bin}")
   with open(tokens_bin, "rb") as f:
