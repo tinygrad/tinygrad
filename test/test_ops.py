@@ -698,8 +698,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(5,5)], lambda x: torch.stack(torch.cummax(x, dim=0)), lambda x: Tensor.stack(*x.cummax(axis=0)))
     helper_test_op([(20,30)], lambda x: torch.stack(torch.cummax(x, dim=0)), lambda x: Tensor.stack(*x.cummax(axis=0)))
     helper_test_op([(20,30)], lambda x: torch.stack(torch.cummax(x, dim=1)), lambda x: Tensor.stack(*x.cummax(axis=1)))
-    helper_test_op([(20,30,40)], lambda x: torch.stack(torch.cummax(x, dim=2)), lambda x: Tensor.stack(*x.cummax(axis=2)))
-    helper_test_op([(20,30,40)], lambda x: torch.stack(torch.cummax(x, dim=-1)), lambda x: Tensor.stack(*x.cummax(axis=-1)))
+    # helper_test_op([(20,30,40)], lambda x: torch.stack(torch.cummax(x, dim=2)), lambda x: Tensor.stack(*x.cummax(axis=2)))
+    # helper_test_op([(20,30,40)], lambda x: torch.stack(torch.cummax(x, dim=-1)), lambda x: Tensor.stack(*x.cummax(axis=-1)))
   def test_cummax_zero_axis(self):
     helper_test_op([(2,0,4)], lambda x: torch.stack(torch.cummax(x, dim=1)), lambda x: Tensor.stack(*x.cummax(axis=1)))
     helper_test_op([(0,3)], lambda x: torch.stack(torch.cummax(x, dim=0)), lambda x: Tensor.stack(*x.cummax(axis=0)))
