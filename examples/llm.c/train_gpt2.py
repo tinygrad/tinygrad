@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from typing import List
 import pathlib
 from tinygrad.multi import MultiLazyBuffer
+import os
+
+os.environ["TRACEMETA"] = "0"
+
 @dataclass
 class GPTConfig:
   block_size: int = 1024
@@ -70,13 +74,13 @@ class Block:
 class GPT:
   def __init__(self, config:GPTConfig):
     self.config = config
-
-    self.wte = nn.Embedding(config.padded_vocab_size, config.n_embd)
-    self.wpe = nn.Embedding(config.block_size, config.n_embd)
-    self.h = [Block(config) for _ in range(config.n_layer)]
-    self.ln_f = nn.LayerNorm(config.n_embd)
-    self.lm_head = nn.Linear(config.n_embd, config.padded_vocab_size, bias=False)
-    self.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
+    self.linear = nn.Linear(768, 50257)
+    # self.wte = nn.Embedding(config.padded_vocab_size, config.n_embd)
+    # self.wpe = nn.Embedding(config.block_size, config.n_embd)
+    # self.h = [Block(config) for _ in range(config.n_layer)]
+    # self.ln_f = nn.LayerNorm(config.n_embd)
+    # self.lm_head = nn.Linear(config.n_embd, config.padded_vocab_size, bias=False)
+    # self.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
   def load_pretrained(self):
     weights = nn.state.torch_load(fetch(f'https://huggingface.co/gpt2/resolve/main/pytorch_model.bin'))
@@ -100,17 +104,31 @@ class GPT:
     return idx
 
   def __call__(self, idx:Tensor, targets=None):
+
+    x = idx.reshape((4, 64, 1))
+    x = x.expand((4, 64, 768))
+    x = self.linear(x)
+    loss = x.sparse_categorical_crossentropy(targets)
+    return x, loss
+    
+    print(f"{idx.shape=}")
     b, t = idx.shape
     pos = Tensor.arange(0, t)
 
     tok_emb = self.wte(idx) # token embeddings of shape (b, t, n_embd)
+    print("tok_emb.shape", tok_emb.shape)
     pos_emb = self.wpe(pos) # position embeddings of shape (t, n_embd)
+    print('pos embe shape', pos_emb.shape)
     x = tok_emb + pos_emb
-
+    print("x.shape after embedding", x.shape)
     x = self.ln_f(x.sequential(self.h))
+    print("x.shape after ln_f", x.shape)
 
     if targets is not None:
-      logits = self.lm_head(x)[:, :, :self.config.vocab_size]
+      logits = self.lm_head(x)
+      print("logits.shape", logits.shape)
+      logits = logits[:, :, :self.config.vocab_size]
+      print(f"{logits.shape=}")
       loss = logits.sparse_categorical_crossentropy(targets)
     else:
       logits = self.lm_head(x[:, [-1], :])[:, :, :self.config.vocab_size]
@@ -129,7 +147,7 @@ if __name__ == "__main__":
   parser.add_argument("--batch_size", type=int, default=4, help="batch size")
   parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
   parser.add_argument("--skip_test", action="store_true", help="skip test")
-  parser.add_argument("--shard_model", action="store_true", help="whether to shard the model")
+  parser.add_argument("--shard_model", action="store_true", help="whether to shard the model", default=True)
   args = parser.parse_args()
   B, T = args.batch_size, args.sequence_length
   assert 1 <= T <= 1024
@@ -159,6 +177,8 @@ if __name__ == "__main__":
     f.seek(0x400)
     tokens = np.frombuffer(f.read(), dtype=np.uint16).astype(np.int32)
   tokens = Tensor(tokens)
+  if args.shard_model:
+    tokens.shard_(GPUS)
 
   # lightweight dataloader
   def get_batch():
