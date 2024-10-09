@@ -74,8 +74,7 @@ def get_run_onnx(onnx_model: ModelProto):
       else: raise AttributeError(f"unknown attr: {attr}, {type_proto}")
 
   def buffer_parse(inp: TensorProto) -> Tensor:
-    if inp.data_type not in DTYPE_MAP:
-      raise NotImplementedError(f"data type not supported {inp.name} {inp.dims} {inp.data_type}")
+    if inp.data_type not in DTYPE_MAP: raise NotImplementedError(f"data type not supported {inp.name} {inp.dims} {inp.data_type}")
     dtype = DTYPE_MAP[inp.data_type] if is_dtype_supported(DTYPE_MAP[inp.data_type]) else dtypes.float32
     if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
       return Tensor(dat, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims))
@@ -100,8 +99,7 @@ def get_run_onnx(onnx_model: ModelProto):
   tensors: Dict[str, Tensor] = {}
 
   # get weights and biases
-  for inp in onnx_model.graph.initializer:
-    tensors[inp.name] = buffer_parse(inp)
+  for inp in onnx_model.graph.initializer: tensors[inp.name] = buffer_parse(inp)
 
   # preparse the attributes
   attribute_dict = {}
@@ -124,25 +122,20 @@ def get_run_onnx(onnx_model: ModelProto):
       if name in tensors: continue
       shape = type_parse(model_input.type)
       if name in inputs:
-        if isinstance(inputs[name], Tensor):
-          input_tensors[name] = inputs[name]
-        elif isinstance(inputs[name], list):
-          input_tensors[name] = [Tensor(i, requires_grad=False) for i in inputs[name]]
-        elif domain == "ai.onnx.preview.training": # not sure if in real use the domain is "ai.onnx.preview.training"
-          # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
-          input_tensors[name] = Tensor(inputs[name], requires_grad=True)
-        else:
-          input_tensors[name] = Tensor(inputs[name], requires_grad=False)
+        if isinstance(inputs[name], Tensor): input_tensors[name] = inputs[name]
+        elif isinstance(inputs[name], list): input_tensors[name] = [Tensor(i, requires_grad=False) for i in inputs[name]]
+        # not sure if in real use the domain is "ai.onnx.preview.training"
+        # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
+        elif domain == "ai.onnx.preview.training": input_tensors[name] = Tensor(inputs[name], requires_grad=True)
+        else: input_tensors[name] = Tensor(inputs[name], requires_grad=False)
         if shape: # if only input_tensor is not variable type
           ts: Union[Tensor, List[Tensor]] = input_tensors[name]
-          if isinstance(ts, Tensor):
-            input_shape: Union[Tuple[int, ...], Tuple[Union[int, Tuple[int, ...],]]] = cast(Tuple[int, ...], ts.shape)
+          if isinstance(ts, Tensor): input_shape: Union[Tuple[int, ...], Tuple[Union[int, Tuple[int, ...],]]] = cast(Tuple[int, ...], ts.shape)
           # sequence type of list of tensors
           elif isinstance(ts, list): input_shape = (1,) + tuple(i.shape for i in ts)  # type: ignore
           else: assert False
           assert input_shape == shape, f"wrong shape for input {name}, {input_shape} isn't {shape}"
-      else:
-        raise RuntimeError(f"no data for {name} with shape {shape}")
+      else: raise RuntimeError(f"no data for {name} with shape {shape}")
 
     def fetch_tensor(x: str):
       if x in tensors: return tensors[x]
@@ -222,8 +215,7 @@ def get_run_onnx(onnx_model: ModelProto):
           for k in sorted(fxn.keys()):
             if k <= onnx_model_version:
               real_fxn = fxn[k]
-        else:
-          real_fxn = fxn
+        else: real_fxn = fxn
         ret = real_fxn(*inp, **opt)
       else:
         print("UNSUPPORTED", n.op_type, n.input, n.output)

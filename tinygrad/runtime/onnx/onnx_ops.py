@@ -7,7 +7,7 @@ from .onnx import DTYPE_MAP, to_python_const
 import numpy as np
 
 # TODO maybe don't cast hack things and instead raise exceptions
-# TODO maybe write helper for stuff like tuple((1,0) if i == axis else None for i in range(X.ndim)), easier to read
+# TODO implement meshgrid
 
 exact_tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
                   "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
@@ -20,6 +20,12 @@ equivalent_tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual
                       "Range": "arange"}
 
 equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"})}
+
+
+# helper
+# TODO maybe write helper for stuff like tuple((1,0) if i == axis else None for i in range(X.ndim)), easier to read, see it everywhere
+# def dynamic_axis_value_tuple(main_value_fn: callable, default_value: Any, length: int, axis: int):
+    # return tuple(main_value_fn(i) if i == axis else default_value for i in range(length))
 
 # **************** Free Ops ****************
 
@@ -57,7 +63,7 @@ def HardSigmoid(x: Tensor, alpha=0.2, beta=0.5): return x.hardsigmoid(alpha, bet
 def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + Erf(x/math.sqrt(2)))
 def PRelu(X:Tensor, slope:Tensor):
   # HACK OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
-  slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope
+  slope = slope[0] if slope.size(-1) != X.size(-1) else slope
   return (X > 0).where(X, X * slope)
 def ThresholdedRelu(X: Tensor, alpha=1.0): return (X > alpha).where(X, 0)
 def Softmax_1(x: Tensor, axis=1): return x.softmax(axis)
@@ -88,7 +94,7 @@ def OptionalGetElement(x: Optional[Tensor]=None): return x if x is not None else
 def Shape(data: Tensor, end=None, start=0): return Tensor(data.shape[start:end], dtype=dtypes.int64)
 def Size(data: Union[Tensor, List]): return prod(data if isinstance(data, list) else data.shape)
 def Flatten(x: Tensor, axis=1): return x.reshape(prod(x.shape[0:axis]), -1)
-def Reshape(data: Tensor, shape, allowzero=0): return data.reshape([int(x) or (0 if allowzero else data.shape[i]) for i, x in enumerate(shape)])
+def Reshape(data: Tensor, shape, allowzero=0): return data.reshape([int(x) or (0 if allowzero else data.size(i)) for i, x in enumerate(shape)])
 def Expand(x: Tensor, shape:List): return x.expand(_broadcast_shape(x.shape, tuple(shape)))
 def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
 def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
@@ -125,7 +131,7 @@ def Transpose(x: Tensor, perm=None): return x.permute(order=list(range(x.ndim)[:
 
 def Gemm(A: Tensor, B: Tensor, C: Optional[Tensor] = None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=0):
   ret = alpha * (A.transpose(transA) @ B.transpose(transB))
-  if C is not None: ret = ret + beta * (C if broadcast == 0 else C.reshape([-1 if i <  len(C.shape) else 1 for i in range(ret.ndim)][::-1]))
+  if C is not None: ret = ret + beta * (C if broadcast == 0 else C.reshape([-1 if i < len(C.shape) else 1 for i in range(ret.ndim)][::-1]))
   return ret
 
 def Einsum(*Inputs: List[Tensor], equation): return Tensor.einsum(equation, Inputs)
@@ -168,14 +174,14 @@ def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_typ
   return x.layernorm(axis, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).square().mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
 
 def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
-  return x.reshape(x.shape[0], num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
+  return x.reshape(x.size(0), num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
 
 # TODO: rewrite all this padding crap
 # Tensor._padding2d()
 # onnx: [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
 # numpy.pad: ((x1_begin, x1_end), (x2_begin, x2_end), ...)
 def _format_padding(onnx_pads, ndims=None, axes=None) -> List[Tuple[int, int]]:
-  if ndims and len(onnx_pads)//2 != ndims:  onnx_pads = onnx_pads * ndims # for OnnxBackendPyTorchConvertedModelTest the len(onnx_pads) == 2
+  if ndims and len(onnx_pads)//2 != ndims: onnx_pads = onnx_pads * ndims # for OnnxBackendPyTorchConvertedModelTest the len(onnx_pads) == 2
   if ndims is None: ndims = len(onnx_pads) // 2
   if axes is None: axes = list(range(ndims))
   num_axes = len(axes)
@@ -216,9 +222,8 @@ def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations):
 def Pad(x:Tensor, pads:List[ConstType], constant_value:Optional[ConstType]=None, axes:Optional[List[ConstType]]=None, mode="constant",
         value:float=0.):
   constant_value = value if constant_value is None else float(constant_value)
-  seq_pads = [math.ceil(i) for i in pads]
   base_shape = x.shape
-  formatted_pads = _format_padding(seq_pads, ndims=len(x.shape), axes=axes)
+  formatted_pads = _format_padding(pads, ndims=len(x.shape), axes=axes)
   if mode == "wrap":
     repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(formatted_pads, base_shape)]
     new_shape = [s*r for s,r in zip(base_shape, repeat_args)]
@@ -241,8 +246,7 @@ def Pad(x:Tensor, pads:List[ConstType], constant_value:Optional[ConstType]=None,
                                                                                                       for i_ in range(x.ndim)])
         x = xL.cat(x, xR, dim=i)
     return x
-  if mode == "constant":
-    return _padded(x, seq_pads, axes=axes, constant_value=constant_value)
+  if mode == "constant": return _padded(x, pads, axes=axes, constant_value=constant_value)
 
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
   pixel_axes = tuple(range(2, X.ndim))
@@ -336,22 +340,14 @@ def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
 def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)): return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
 
 def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_index=None, reduction="mean"):
-  N, C, i_shape = x.shape[0], x.shape[1], x.shape
-  t_shape = target.shape
-  if len(x.shape) != 3:
-    x = x.reshape((N, C, -1))
-    target = target.reshape((N, -1))
-  if weight is not None:
-    mask = target.unsqueeze(-1) == Tensor.arange(C).repeat((N, 1, 1))
-    weight = (mask * weight).sum(axis=-1)
-  if ignore_index is not None:
-    cond = target == ignore_index
-    weight = cond.where(0, weight) if weight is not None else cond.where(0, 1)
-  mask = target[:, None, :] == Tensor.arange(C).reshape([1, C] + [1]*(x.ndim -2))
-  loss = -(mask * x).sum(axis=1) * (1 if weight is None else weight)
-  if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
-  if reduction == "sum": return loss.sum()
-  return loss.reshape(t_shape) if len(i_shape) != 3 else loss
+  target_shape, x, target = target.shape, x.reshape(x.size(0), x.size(1), -1), target.reshape(x.size(0), -1)
+  loss = -x.gather(1, target.unsqueeze(1)).squeeze(1)
+  mask = Tensor.ones_like(target) if ignore_index is None else (target != ignore_index)
+  weight = mask if weight is None else weight[target] * mask
+  loss = loss * mask * weight
+  if reduction == "mean": return loss.sum() / weight.sum() if weight is not None else loss.sum() / mask.sum()
+  elif reduction == "sum": return loss.sum()
+  else: return loss.reshape(target_shape)
 
 def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore_index=None, reduction="mean"):
   _N, C, *s_dimensions = scores.shape
@@ -418,12 +414,12 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   else: axes, inverse_perm = list(range(X.ndim)), []
   if sizes is not None:
     sizes = [1]*(X.ndim - len(sizes)) + sizes
-    scales = [sizes[i] / X.shape[i] for i in range(X.ndim)]
+    scales = [sizes[i] / X.size(i) for i in range(X.ndim)]
     if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
       scale_fxn = min if keep_aspect_ratio_policy == "not_larger" else max
       scale = scale_fxn(scale for i, scale in enumerate(scales) if i in axes)
       scales = [scale if i in axes else 1 for i in range(X.ndim)]
-      sizes = [int((scale * X.shape[i]) + 0.5) if i in axes else X.shape[i] for i in range(X.ndim)]
+      sizes = [int((scale * X.size(i)) + 0.5) if i in axes else X.size(i) for i in range(X.ndim)]
     elif keep_aspect_ratio_policy != "stretch": raise ValueError(f"invalid {keep_aspect_ratio_policy=}")
   else:
     scales = [1]*(X.ndim - len(scales)) + scales
@@ -450,12 +446,10 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   return X.permute(*inverse_perm) if inverse_perm else X
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 
-# TODO
 def CenterCropPad(t: Tensor, shape, axes=None):
-  if not axes: axes = list(range(t.ndim))
   shrink_arg = [None] * t.ndim
   pad_arg = [None] * t.ndim
-  for s, x in zip(shape, axes):
+  for s, x in zip(shape, axes or range(t.ndim)):
     tx = t.shape[x]
     if s < tx: shrink_arg[x] = (tx//2 - (s+1)//2, tx//2 + s//2)
     elif s > tx: pad_arg[x] = ((s-tx)//2, (s-tx+1)//2)
@@ -492,25 +486,20 @@ def Compress(inp: Tensor, condition, axis=None):
 def EyeLike(x: Tensor, dtype: Optional[int]=None, k=0):
   tiny_dtype = x.dtype if dtype is None else DTYPE_MAP[dtype]
   dim = cast(int, min(x.shape))
-  if x.shape[0] == x.shape[1]: return Tensor.eye(dim, dtype=tiny_dtype)
+  if x.size(0) == x.size(1): return Tensor.eye(dim, dtype=tiny_dtype)
   padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)
   return Tensor.eye(dim, dtype=tiny_dtype).pad(padarg)
-
 
 def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
   return (x == float("inf")) * bool(detect_positive) + (x == float("-inf")) * bool(detect_negative)
 
 def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1, block_size=0):
-  def numpy_repeat(t: Tensor, axis, repeats, out_shape):
-    t = t.reshape(tuple(-1 if i == axis-1 else 1 if i == axis else sh for i,sh in enumerate(t.shape)))
-    return t.repeat([repeats if i == axis else 1 for i in range(t.ndim)]).reshape(out_shape)
   if axis < 0: axis += x.ndim
-  # TODO ugly af
-  if block_size and isinstance(x_zero_point, Tensor):
-    x_zer, x_sc = numpy_repeat(x_zero_point, axis, block_size, x.shape), numpy_repeat(x_scale, axis, block_size, x.shape)
+  if not isinstance(x_zero_point, Tensor): x_zero_point = Tensor(x_zero_point)
+  if block_size: x_zer, x_sc = x_zero_point.repeat_interleave(block_size, axis), x_scale.repeat_interleave(block_size, axis)
   else:
-    x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
-    x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
+    shape = (*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
+    x_sc, x_zer = x_scale.reshape(shape), x_zero_point.reshape(shape)
   return ((x.float() - x_zer) * x_sc).cast(x_scale.dtype)
 
 def IsNaN(x: Tensor): return x != x
@@ -537,20 +526,8 @@ def AffineGrid(theta: Tensor, size, align_corners=0):
     elif dim == 1: stackable = [a.reshape(1, dim_sz, *[1]*(len(data_sz)-2)) + size_zeros, *stackable]
     else: stackable = [a.reshape(1, dim_sz) + size_zeros, *stackable]
   original_grid = Tensor.stack(*stackable, dim=len(data_sz))
-  if original_grid.ndim == 3:
-    N, dim_2d, dim_homo = theta.shape
-    assert dim_2d == 2 and dim_homo == 3
-    H, W, dim_homo = original_grid.shape
-    assert dim_homo == 3
-    original_grid = original_grid.reshape(H*W, dim_homo).transpose()
-    return theta.matmul(original_grid).permute(0,2,1).reshape(N, H, W, dim_2d)
-  assert original_grid.ndim == 4
-  N, dim_3d, dim_homo = theta.shape
-  assert dim_3d == 3 and dim_homo == 4
-  D, H, W, dim_homo = original_grid.shape
-  assert dim_homo == 4
-  original_grid = original_grid.reshape(D*H*W, dim_homo).transpose()
-  return theta.matmul(original_grid).permute(0,2,1).reshape(N, D, H, W, dim_3d)
+  transformed_grid = theta.matmul(original_grid.reshape(-1, len(data_sz)+1).transpose()).transpose(1, 2)
+  return transformed_grid.reshape(size[0], *data_sz, theta.size(1))
 
 # **************** com.microsoft Ops ****************
 
@@ -573,7 +550,7 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids: Tensor, word_embeddi
   input_shape = input_ids.shape
   seq_length = input_shape[1]
   compute_seg_emb = (segment_embedding is not None and segment_ids is not None)
-  vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0]
+  vocab_size, max_position_embeddings, type_vocab_size = word_embedding.size(0), position_embedding.size(0), (segment_embedding.size(0)
                                                                                                                 if compute_seg_emb else None)
 
   def embedding(x:Tensor, vocab_size, weight:Tensor) -> Tensor:  # TODO from nn.Embedding. Could probably upstream this to Tensor
@@ -600,7 +577,7 @@ def Attention(x:Tensor, weights, bias:Tensor, mask_index:Optional[Tensor]=None, 
   assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None)
   assert relative_position_bias is do_rotary is past_sequence_length is mask_filter_value is past_present_share_buffer is scale is None, \
   "functionality not supported yet"  # TODO strange params
-  hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.shape[1] // 3,)
+  hidden_size, v_hidden_size = qkv_hidden_sizes[1:] if qkv_hidden_sizes is not None else 2*(weights.size(1) // 3,)
 
   if unidirectional:  # gpt-style
     assert hidden_size == v_hidden_size
