@@ -7,7 +7,7 @@
 from __future__ import annotations
 from typing import Tuple, Optional, Dict, Any
 import multiprocessing, functools, urllib.request, hashlib, json, time
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, DEBUG
 from tinygrad.device import Compiled, Allocator
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -75,9 +75,9 @@ class CloudHandler(BaseHTTPRequestHandler):
     self.end_headers()
     return self.wfile.write(ret)
 
-def cloud_server():
-  print("start cloud server")
-  server = HTTPServer(('', 6667), CloudHandler)
+def cloud_server(port:int):
+  print(f"start cloud server on {port}")
+  server = HTTPServer(('', port), CloudHandler)
   server.serve_forever()
 
 # ***** frontend *****
@@ -117,7 +117,7 @@ class CloudDevice(Compiled):
     if (host:=getenv("HOST", "")) != "":
       self.host = f"http://{host}/"
     else:
-      p = multiprocessing.Process(target=cloud_server)
+      p = multiprocessing.Process(target=cloud_server, args=(6667,))
       p.daemon = True
       p.start()
       self.host = "http://127.0.0.1:6667/"
@@ -128,6 +128,8 @@ class CloudDevice(Compiled):
         except Exception as e:
           print(e)
           time.sleep(1)
-    print(f"cloud with host {self.host}")
+    if DEBUG >= 1: print(f"cloud with host {self.host}")
     # run the Renderer/Compiler on the frontend
     super().__init__(device, CloudAllocator(self), MetalRenderer(), MetalCompiler(), functools.partial(CloudProgram, self))
+
+if __name__ == "__main__": cloud_server(getenv("PORT", 6667))
