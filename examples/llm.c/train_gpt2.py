@@ -3,6 +3,7 @@ import os, math, time
 import numpy as np
 from tinygrad import Tensor, nn, fetch, Device, TinyJit, GlobalCounters
 from dataclasses import dataclass
+from typing import List
 
 @dataclass
 class GPTConfig:
@@ -116,6 +117,9 @@ class GPT:
 
     return logits, loss
 
+def g_sz(tensors: List[Tensor]): return sum([t.nbytes() if isinstance(t, Tensor) else t.size for t in tensors])
+def p_sz(name, *tensors: Tensor): print(f'{name} size: {g_sz(tensors) / 1e9:.2f} GB')
+
 if __name__ == "__main__":
   import tiktoken, argparse
 
@@ -128,8 +132,8 @@ if __name__ == "__main__":
   B, T = args.batch_size, args.sequence_length
   assert 1 <= T <= 1024
 
-  model = GPT(GPTConfig(n_layer=12, n_head=12, n_embd=768))
-  model.load_pretrained()
+  model = GPT(GPTConfig(n_layer=48, n_head=25, n_embd=1600))
+  p_sz("model", *nn.state.get_parameters(model))
 
   # init the tokenizer
   enc = tiktoken.get_encoding("gpt2")
@@ -164,7 +168,7 @@ if __name__ == "__main__":
   data_iter = iter(get_batch())
   x, y = next(data_iter) # we'll overfit this batch below
   optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
-
+  p_sz("optimizer", *nn.state.get_parameters(optimizer))
   @TinyJit
   def step(x, y):
     _, loss = model(x, y)
