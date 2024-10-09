@@ -2142,7 +2142,11 @@ class Tensor:
   def _cummax(self, axis:int=0, _first_zero=False) -> Tuple[Tensor, Tensor]:
     assert self.shape[axis] != 0
     pl_sz = self.shape[axis] - 1
-    values = self.transpose(axis,-1).pad2d((pl_sz, 0), float("-inf"))._pool((self.shape[axis],)).max(-1).transpose(axis,-1)
+    min_value = float('-inf')
+    # min_value = self.min().item()
+    # min_value = dtypes.min(self.dtype)
+    # min_value = 0
+    values = self.transpose(axis,-1).pad2d((pl_sz, 0), min_value)._pool((self.shape[axis],)).max(-1).transpose(axis,-1)
     idxs = Tensor.arange(self.shape[axis], dtype=dtypes.int64, device=self.device)
     idxs = idxs.reshape(*[1 if i != axis else -1 for i in range(self.ndim)]).expand(self.shape)
     idx_mask = (self == values) * idxs # index is turned on if values[i] = cummax[i]
