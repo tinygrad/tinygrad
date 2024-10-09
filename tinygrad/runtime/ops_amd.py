@@ -44,7 +44,7 @@ class AMDSignal(HCQSignal):
   def _get_value(self) -> int: return self._signal[0]
   def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(100)
   def _set_value(self, new_value:int): self._signal[0] = new_value
-  def wait(self, value:int, timeout:int=10000):
+  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
     start_time = time.time() * 1000
     while (time_spent:=time.time() * 1000 - start_time) < timeout:
       if self._signal[0] >= value: return
