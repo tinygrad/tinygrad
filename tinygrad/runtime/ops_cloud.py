@@ -20,7 +20,7 @@ class CloudHandler(BaseHTTPRequestHandler):
   # state
   dev = MetalDevice("")
 
-  buffers: Dict[int, Any] = {}
+  buffers: Dict[int, Tuple[Any, int]] = {}
   buffer_num = 0
   programs: Dict[Tuple[str,str], Any] = {}
 
@@ -35,10 +35,14 @@ class CloudHandler(BaseHTTPRequestHandler):
     ret = b""
     if self.path == "/alloc":
       CloudHandler.buffer_num += 1
-      CloudHandler.buffers[CloudHandler.buffer_num] = CloudHandler.dev.allocator.alloc(self.get_json()['size'])
+      size = self.get_json()['size']
+      CloudHandler.buffers[CloudHandler.buffer_num] = (CloudHandler.dev.allocator.alloc(size), size)
       ret = str(CloudHandler.buffer_num).encode()
+    elif self.path.startswith("/free"):
+      buf,sz = CloudHandler.buffers[int(self.path.split("/")[-1])]
+      CloudHandler.dev.allocator.free(buf,sz)
     elif self.path.startswith("/buffer"):
-      buf = CloudHandler.buffers[int(self.path.split("/")[-1])]
+      buf,_ = CloudHandler.buffers[int(self.path.split("/")[-1])]
       self.dev.allocator.copyin(buf, self.get_data())
     elif self.path.startswith("/program"):
       name, hsh = self.path.split("/")[-2:]
@@ -48,7 +52,7 @@ class CloudHandler(BaseHTTPRequestHandler):
     elif self.path.startswith("/exec"):
       name, hsh = self.path.split("/")[-2:]
       j = self.get_json()
-      bufs = [CloudHandler.buffers[x] for x in j['bufs']]
+      bufs = [CloudHandler.buffers[x][0] for x in j['bufs']]
       r = CloudHandler.programs[(name, hsh)](*bufs, global_size=j['global_size'], local_size=j['local_size'], vals=j['vals'], wait=j['wait'])
       if r is not None: ret = str(r).encode()
     else:
@@ -63,9 +67,9 @@ class CloudHandler(BaseHTTPRequestHandler):
     #print("get", self.path)
     ret = b""
     if self.path.startswith("/buffer"):
-      buf = CloudHandler.buffers[int(self.path.split("/")[-1])]
-      # TODO: all allocators should support as_buffer, and at least a way to get the size
-      ret = bytes(self.dev.allocator.as_buffer(buf)) # type: ignore
+      buf,sz = CloudHandler.buffers[int(self.path.split("/")[-1])]
+      ret = bytearray(sz)
+      self.dev.allocator.copyout(memoryview(ret), buf)
     elif self.path.startswith("/ping"):
       pass
     else:
@@ -85,6 +89,7 @@ def cloud_server(port:int):
 class CloudAllocator(Allocator):
   def __init__(self, device:CloudDevice): self.device = device
   def _alloc(self, size:int, options) -> int: return int(self.device.send("alloc", data=json.dumps({"size": size}).encode()))
+  def _free(self, opaque, options): self.device.send(f"free/{opaque}", data=b"")
   def copyin(self, dest:int, src:memoryview): self.device.send(f"buffer/{dest}", data=bytes(src))
   def copyout(self, dest:memoryview, src:int):
     resp = self.device.send(f"buffer/{src}")
