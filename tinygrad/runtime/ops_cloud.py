@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 from typing import Tuple, Optional, Dict, Any
-import multiprocessing, functools, urllib.request, hashlib, json, time
+import multiprocessing, functools, urllib.request, urllib.error, hashlib, json, time, contextlib
 from tinygrad.helpers import getenv, DEBUG
 from tinygrad.device import Compiled, Allocator, Compiler, Device
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -97,7 +97,8 @@ class CloudAllocator(Allocator):
     self.device = device
     super().__init__()
   def _alloc(self, size:int, options) -> int: return int(self.device.send("alloc", data=json.dumps({"size": size}).encode()))
-  def _free(self, opaque, options): self.device.send(f"free/{opaque}", data=b"")
+  def _free(self, opaque, options):
+    with contextlib.suppress(urllib.error.URLError): self.device.send(f"free/{opaque}", data=b"")
   def copyin(self, dest:int, src:memoryview): self.device.send(f"buffer/{dest}", data=bytes(src))
   def copyout(self, dest:memoryview, src:int):
     resp = self.device.send(f"buffer/{src}")
@@ -118,6 +119,28 @@ class CloudProgram:
     ret = self.device.send("exec/"+self.prgid, json.dumps(args).encode())
     if wait: return float(ret)
 
+# TODO: are these abstractions right? they are not!
+# CLOUD will get graph support after the JIT refactor. there's too much boilerplate now. refactor starts in toonygrad
+# __call__ signature should be the same as Program, rawbufs should be splat ._buf, var_vals should be List[int]
+# the /exec method should work for Graphs as well as Programs
+"""
+from tinygrad.device import Buffer
+from tinygrad.engine.realize import ExecItem, CompiledRunner
+from tinygrad.engine.jit import GraphRunner, GraphException
+from tinygrad.shape.symbolic import Variable
+class CloudGraph(GraphRunner):
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+    super().__init__(jit_cache, input_rawbuffers, var_vals)
+    if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
+
+    for ji in jit_cache:
+      prg: CompiledRunner = cast(CompiledRunner, ji.prg)
+      prgid = cast(CloudProgram, prg.clprg).prgid
+
+  def __call__(self, rawbufs: List[Buffer], var_vals: Dict[Variable, int], wait=False):
+    pass
+"""
+
 from tinygrad.renderer.cstyle import MetalRenderer, AMDRenderer, ClangRenderer
 
 # TODO: don't hardcode METAL in frontend
@@ -133,19 +156,20 @@ class CloudDevice(Compiled):
     if DEBUG >= 1: print(f"cloud with host {self.host}")
     while 1:
       try:
-        clouddev = self.send("dname").decode()
+        clouddev = self.send("dname", timeout=0.1).decode()
         break
       except Exception as e:
         print(e)
-        time.sleep(1)
+        time.sleep(0.1)
     if DEBUG >= 1: print(f"remote has device {clouddev}")
     # ugh, there needs to be a better way to do this
+    # TODO: how to we have BEAM be cached on the backend? this should just send a specification of the compute. rethink what goes in Renderer
     renderer = {"METAL": MetalRenderer, "AMD": AMDRenderer, "CLANG": ClangRenderer}[clouddev]()
     super().__init__(device, CloudAllocator(self), renderer, CloudCompiler(self), functools.partial(CloudProgram, self))
 
-  def send(self, path, data:Optional[bytes]=None) -> bytes:
+  def send(self, path, data:Optional[bytes]=None, timeout=60.0) -> bytes:
     # TODO: retry logic
-    with urllib.request.urlopen(self.host+path, data=data if data is not None else None, timeout=10.0) as r:
+    with urllib.request.urlopen(self.host+path, data=data if data is not None else None, timeout=timeout) as r:
       assert r.status == 200
       return r.read()
 
