@@ -8,18 +8,12 @@ from __future__ import annotations
 from typing import Tuple, Optional, Dict, Any
 import multiprocessing, functools, urllib.request, hashlib, json, time
 from tinygrad.helpers import getenv, DEBUG
-from tinygrad.device import Compiled, Allocator
+from tinygrad.device import Compiled, Allocator, Compiler, Device
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ***** backend *****
-
-# TODO: don't hardcode METAL in backend
-from tinygrad.runtime.ops_metal import MetalDevice
-
 class CloudHandler(BaseHTTPRequestHandler):
-  # state
-  dev = MetalDevice("")
-
+  dname: str
   buffers: Dict[int, Tuple[Any, int]] = {}
   buffer_num = 0
   programs: Dict[Tuple[str,str], Any] = {}
@@ -36,25 +30,29 @@ class CloudHandler(BaseHTTPRequestHandler):
     if self.path == "/alloc":
       CloudHandler.buffer_num += 1
       size = self.get_json()['size']
-      CloudHandler.buffers[CloudHandler.buffer_num] = (CloudHandler.dev.allocator.alloc(size), size)
+      CloudHandler.buffers[CloudHandler.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(size), size)
       ret = str(CloudHandler.buffer_num).encode()
     elif self.path.startswith("/free"):
       buf,sz = CloudHandler.buffers[int(self.path.split("/")[-1])]
-      CloudHandler.dev.allocator.free(buf,sz)
+      Device[CloudHandler.dname].allocator.free(buf,sz)
     elif self.path.startswith("/buffer"):
       buf,_ = CloudHandler.buffers[int(self.path.split("/")[-1])]
-      self.dev.allocator.copyin(buf, self.get_data())
+      # TODO: remove bytearray to make it writable, CLANG backend needs that
+      Device[CloudHandler.dname].allocator.copyin(buf, memoryview(bytearray(self.get_data())))
     elif self.path.startswith("/program"):
       name, hsh = self.path.split("/")[-2:]
       lib = self.get_data()
       assert hashlib.sha256(lib).hexdigest() == hsh
-      CloudHandler.programs[(name, hsh)] = CloudHandler.dev.runtime(name, lib)
+      CloudHandler.programs[(name, hsh)] = Device[CloudHandler.dname].runtime(name, lib)
     elif self.path.startswith("/exec"):
       name, hsh = self.path.split("/")[-2:]
       j = self.get_json()
       bufs = [CloudHandler.buffers[x][0] for x in j['bufs']]
-      r = CloudHandler.programs[(name, hsh)](*bufs, global_size=j['global_size'], local_size=j['local_size'], vals=j['vals'], wait=j['wait'])
+      del j['bufs']
+      r = CloudHandler.programs[(name, hsh)](*bufs, **j)
       if r is not None: ret = str(r).encode()
+    elif self.path.startswith("/compile"):
+      ret = Device[CloudHandler.dname].compiler.compile_cached(self.get_data().decode())
     else:
       self.send_response(404)
       self.end_headers()
@@ -69,9 +67,9 @@ class CloudHandler(BaseHTTPRequestHandler):
     if self.path.startswith("/buffer"):
       buf,sz = CloudHandler.buffers[int(self.path.split("/")[-1])]
       ret = bytearray(sz)
-      self.dev.allocator.copyout(memoryview(ret), buf)
-    elif self.path.startswith("/ping"):
-      pass
+      Device[CloudHandler.dname].allocator.copyout(memoryview(ret), buf)
+    elif self.path.startswith("/dname"):
+      ret = CloudHandler.dname.encode()
     else:
       self.send_response(404)
       self.end_headers()
@@ -80,14 +78,24 @@ class CloudHandler(BaseHTTPRequestHandler):
     return self.wfile.write(ret)
 
 def cloud_server(port:int):
-  print(f"start cloud server on {port}")
+  multiprocessing.current_process().name = "MainProcess"
+  CloudHandler.dname = getenv("CLOUDDEV", "METAL") if Device.DEFAULT == "CLOUD" else Device.DEFAULT
+  print(f"start cloud server on {port} with device {CloudHandler.dname}")
   server = HTTPServer(('', port), CloudHandler)
   server.serve_forever()
 
 # ***** frontend *****
 
+class CloudCompiler(Compiler):
+  def __init__(self, device:CloudDevice):
+    self.device = device
+    super().__init__()
+  def compile(self, src:str) -> bytes: return self.device.send("compile", src.encode())
+
 class CloudAllocator(Allocator):
-  def __init__(self, device:CloudDevice): self.device = device
+  def __init__(self, device:CloudDevice):
+    self.device = device
+    super().__init__()
   def _alloc(self, size:int, options) -> int: return int(self.device.send("alloc", data=json.dumps({"size": size}).encode()))
   def _free(self, opaque, options): self.device.send(f"free/{opaque}", data=b"")
   def copyin(self, dest:int, src:memoryview): self.device.send(f"buffer/{dest}", data=bytes(src))
@@ -101,23 +109,19 @@ class CloudProgram:
     self.device = device
     self.prgid = f"{name}/{hashlib.sha256(lib).hexdigest()}"
     self.device.send("program/"+self.prgid, lib)
+    super().__init__()
 
-  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    args = {"bufs": bufs, "global_size": global_size, "local_size": local_size, "vals": vals, "wait": wait}
+  def __call__(self, *bufs, global_size=None, local_size=None, vals:Tuple[int, ...]=(), wait=False):
+    args = {"bufs": bufs, "vals": vals, "wait": wait}
+    if global_size is not None: args["global_size"] = global_size
+    if local_size is not None: args["local_size"] = local_size
     ret = self.device.send("exec/"+self.prgid, json.dumps(args).encode())
     if wait: return float(ret)
 
-from tinygrad.renderer.cstyle import MetalRenderer
-from tinygrad.runtime.ops_metal import MetalCompiler
+from tinygrad.renderer.cstyle import MetalRenderer, AMDRenderer, ClangRenderer
 
 # TODO: don't hardcode METAL in frontend
 class CloudDevice(Compiled):
-  def send(self, path, data:Optional[bytes]=None) -> bytes:
-    # TODO: retry logic
-    with urllib.request.urlopen(self.host+path, data=data if data is not None else None, timeout=1.0) as r:
-      assert r.status == 200
-      return r.read()
-
   def __init__(self, device:str):
     if (host:=getenv("HOST", "")) != "":
       self.host = f"http://{host}/"
@@ -126,15 +130,23 @@ class CloudDevice(Compiled):
       p.daemon = True
       p.start()
       self.host = "http://127.0.0.1:6667/"
-      while 1:
-        try:
-          self.send("ping")
-          break
-        except Exception as e:
-          print(e)
-          time.sleep(1)
     if DEBUG >= 1: print(f"cloud with host {self.host}")
-    # run the Renderer/Compiler on the frontend
-    super().__init__(device, CloudAllocator(self), MetalRenderer(), MetalCompiler(), functools.partial(CloudProgram, self))
+    while 1:
+      try:
+        clouddev = self.send("dname").decode()
+        break
+      except Exception as e:
+        print(e)
+        time.sleep(1)
+    if DEBUG >= 1: print(f"remote has device {clouddev}")
+    # ugh, there needs to be a better way to do this
+    renderer = {"METAL": MetalRenderer, "AMD": AMDRenderer, "CLANG": ClangRenderer}[clouddev]()
+    super().__init__(device, CloudAllocator(self), renderer, CloudCompiler(self), functools.partial(CloudProgram, self))
+
+  def send(self, path, data:Optional[bytes]=None) -> bytes:
+    # TODO: retry logic
+    with urllib.request.urlopen(self.host+path, data=data if data is not None else None, timeout=1.0) as r:
+      assert r.status == 200
+      return r.read()
 
 if __name__ == "__main__": cloud_server(getenv("PORT", 6667))
