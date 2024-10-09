@@ -1,21 +1,23 @@
 from typing import Any, List, Tuple
 import unittest
-import os, itertools
-os.environ["TRACK_MATCH_STATS"] = "2"
-os.environ["PRINT_MATCH_STATS"] = "0"
+import itertools
 from tinygrad import Tensor, dtypes
 from tinygrad.engine.realize import lower_schedule
 from tinygrad.dtype import PtrDType
 from tinygrad.helpers import Context, all_same, getenv
-from tinygrad.ops import TrackedRewriteContext, UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps, track_rewrites
+from tinygrad.ops import TRACK_MATCH_STATS, TrackedRewriteContext, UOp, UOps, graph_rewrite, PatternMatcher, UPat, contexts, KernelInfo, BinaryOps, track_rewrites
 from tinygrad.codegen.uopgraph import sym, devectorize, float4_folding
 from tinygrad.viz.serve import GraphRewriteMetadata, get_metadata, get_details, _uop_to_json
 
 def group_rewrites(kernels:List[GraphRewriteMetadata]): return {k:list(v) for k,v in itertools.groupby(kernels, lambda x:x.loc)}
 
 class TestViz(unittest.TestCase):
+  def setUp(self) -> None:
+    self.prev_val = TRACK_MATCH_STATS.value
+    TRACK_MATCH_STATS.value = 2
   def tearDown(self) -> None:
     if not getenv("VIZ"): contexts.clear()
+    TRACK_MATCH_STATS.value = self.prev_val
 
   def assert_valid_ctx(self, contexts:List[Tuple[Any,List[TrackedRewriteContext]]]):
     assert len(contexts) != 0
