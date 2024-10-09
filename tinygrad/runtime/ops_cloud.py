@@ -145,7 +145,7 @@ class CloudDevice(Compiled):
 
   def send(self, path, data:Optional[bytes]=None) -> bytes:
     # TODO: retry logic
-    with urllib.request.urlopen(self.host+path, data=data if data is not None else None, timeout=1.0) as r:
+    with urllib.request.urlopen(self.host+path, data=data if data is not None else None, timeout=10.0) as r:
       assert r.status == 200
       return r.read()
 
