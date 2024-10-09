@@ -179,19 +179,15 @@ def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsil
 # TODO: rewrite all this padding crap
 # Tensor._padding2d()
 # onnx: [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
-# numpy.pad: ((x1_begin, x1_end), (x2_begin, x2_end), ...)
+# tinygrad: ((x1_begin, x1_end), (x2_begin, x2_end), ...)
 def _format_padding(onnx_pads, ndims=None, axes=None) -> List[Tuple[int, int]]:
-  if ndims and len(onnx_pads)//2 != ndims: onnx_pads = onnx_pads * ndims # for OnnxBackendPyTorchConvertedModelTest the len(onnx_pads) == 2
-  if ndims is None: ndims = len(onnx_pads) // 2
-  if axes is None: axes = list(range(ndims))
-  num_axes = len(axes)
+  axes = axes or list(range(ndims))
   np_pads = [(0,0)] * ndims
-  for i in range(num_axes):
-    np_pads[axes[i]] = (onnx_pads[i], onnx_pads[i + num_axes])
+  for i in range(len(axes)): np_pads[axes[i]] = (onnx_pads[i], onnx_pads[i + len(axes)])
   return np_pads
 
 def _padded(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
-  if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
+  if auto_pad != "NOTSET": pads = _auto_pad(X.shape[-len(kernel_shape):], auto_pad, strides, kernel_shape, dilations)
   elif ceil_mode:
     if strides is not None: strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides or [1]*len(kernel_shape)
     if dilations is not None: dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
@@ -210,11 +206,11 @@ def _padded(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0
   pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
   return X.pad(tuple(pads), value=constant_value)
 
-def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations):
+def _auto_pad(img_shape, auto_pad, strides, kernel_shape, dilations):
   strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides or [1]*len(kernel_shape)
   dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
   if auto_pad == "SAME_UPPER" or auto_pad == "SAME_LOWER":
-    pad_shape = [(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
+    pad_shape = [(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(img_shape, strides, kernel_shape, dilations)]
     pad_shape = flatten([[sh//2, sh-sh//2] for sh in pad_shape])
     return pad_shape[::2] + pad_shape[1::2] if auto_pad == "SAME_UPPER" else pad_shape[1::2] + pad_shape[::2]
   raise NotImplementedError(f"auto_pad={auto_pad} not implemented")
@@ -282,11 +278,9 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
   return ret
 
 def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
-  if auto_pad != "NOTSET":
-    padding = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
-  else:
-    # reorder padding
-    padding = [p for ps in zip(pads[:len(pads)//2][::-1], pads[len(pads)//2:][::-1]) for p in ps] if pads is not None else 0
+  if auto_pad != "NOTSET": padding = _auto_pad(X.shape[-len(kernel_shape):], auto_pad, strides, kernel_shape, dilations)
+  # reorder padding
+  else: padding = [p for ps in zip(pads[:len(pads)//2][::-1], pads[len(pads)//2:][::-1]) for p in ps] if pads is not None else 0
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=padding)
 
 def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None,
@@ -606,57 +600,3 @@ def Attention(x:Tensor, weights, bias:Tensor, mask_index:Optional[Tensor]=None, 
   bsz, _, seq_len, _ = xq.shape
   out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
   return out, present
-
-# **************** ai.onnx.preview.training Ops ****************
-
-# TODO not entirely sure these optimizers are correct
-# yeah wtf is this shit
-def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
-  groups = len(inputs) // 3
-  grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  r = to_python_const(R / (1 + T * decay_factor))
-  ret = []
-  for X, G, H in grouped_inputs:
-    X.grad = norm_coefficient * X + G
-    # TODO manually turning off requires_grad, see TODO under (domain == "ai.onnx.preview.training") in onnx.py
-    X.grad.requires_grad, H.requires_grad = False, False
-    H.assign(H.detach() + X.grad * X.grad).realize()
-    H_adaptive = H.sqrt() + epsilon
-    X.assign(X.detach() - r * X.grad / H_adaptive)
-    ret.extend([X, H])
-  ret = ret[::2] + ret[1::2]
-  return tuple(ret)
-
-def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
-  groups = len(inputs) // 3
-  grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R.requires_grad = to_python_const(T), False
-  beta_adjusted = beta if T > 0 else 1
-  ret = []
-  for X, G, V in grouped_inputs:
-    X.grad = (norm_coefficient * X + G).realize()
-    X.grad.requires_grad, V.requires_grad = False, False
-    V.assign(alpha * V + beta_adjusted * X.grad).realize()
-    if mode == "standard": X.assign(X.detach() - R * V).realize()
-    elif mode == "nesterov": X.assign(X.detach() - R * (X.grad + alpha + V)).realize()
-    ret.extend([X, V])
-  ret = ret[::2] + ret[1::2]
-  return tuple(ret)
-
-# copied from tinygrad/nn/optim.py: LAMB with some edits
-def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
-  groups = len(inputs) // 4
-  grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R.requires_grad = to_python_const(T), False
-  ret = []
-  for X, G, V, H in grouped_inputs:
-    X.grad = (norm_coefficient * X + G).realize()
-    V.requires_grad, H.requires_grad, X.grad.requires_grad = False, False, False
-    V.assign(alpha * V + (1.0 - alpha) * X.grad).realize()
-    H.assign(beta * H + (1.0 - beta) * (X.grad * X.grad)).realize()
-    up = (V / (1.0 - alpha**T)) / ((H / (1.0 - beta**T)).sqrt() + epsilon) if T > 0 else V / (H.sqrt() + epsilon)
-    X.assign(X.detach() - R * up).realize()
-    X = (1 - norm_coefficient_post) * X
-    ret.extend([X, V, H])
-  ret = ret[::3] + ret[1::3] + ret[2::3]
-  return tuple(ret)
