@@ -32,7 +32,7 @@ class TestGraphRewriteEfficiency(unittest.TestCase):
     sink = UOp(UOps.SINK, dtypes.void, arg=KernelInfo(local_dims=2, upcasted=4, dont_use_locals=False), src=(
       UOp(UOps.STORE, dtypes.void, arg=None, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
-        UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 4, 64, 8, 16, 1, 1, 3, 3, 4, 1),
+        UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 4, 64, 8, 16, 1, 1, 3, 3, 4, 1),
                                                                   strides=(1179648, 9216, 1, 147456, 576, 0, 0, 64, 192, 36864, 0),
                                                                   offset=0, mask=None, contiguous=False),)), src=()),
         UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (5, 6, 10)), src=(
@@ -40,14 +40,14 @@ class TestGraphRewriteEfficiency(unittest.TestCase):
             UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
               UOp(UOps.LOAD, dtypes.half, arg=None, src=(
                 UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=1, src=()),
-                UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(
+                UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(
                   View(shape=(1, 1024, 1, 64, 4, 17, 4, 17), strides=(0, 14400, 0, 225, 0, 15, 0, 1), offset=-16,
                        mask=((0, 1), (0, 1024), (0, 1), (0, 64), (0, 4), (1, 16), (0, 4), (1, 16)), contiguous=False),
                   View(shape=(2, 4, 64, 8, 16, 16, 15, 3, 3, 4, 15), strides=(0, 73984, 4734976, 0, 4624, 295936, 68, 18, 1224, 0, 1), offset=0,
                        mask=None, contiguous=False))), src=()),)),
               UOp(UOps.LOAD, dtypes.half, arg=None, src=(
                 UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2, src=()),
-                UOp(UOps.SHAPETRACKER, dtypes.void, arg=ShapeTracker(views=(
+                UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(
                   View(shape=(2, 4, 64, 8, 16, 16, 15, 3, 3, 4, 15), strides=(7200, 0, 230400, 900, 0, 14400, 15, 0, 0, 225, 1), offset=0,
                        mask=None, contiguous=False),)), src=()),)),)),)),)),)),))
     lower_sink = ast_to_uop(sink, Device[Device.DEFAULT].renderer)
