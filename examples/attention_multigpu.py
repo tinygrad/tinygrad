@@ -8,7 +8,7 @@ import pathlib
 from tinygrad.multi import MultiLazyBuffer
 import tiktoken, argparse
 
-SHARD = os.getenv("SHARD", False)
+SHARD = os.getenv("SHARD", True)
 
 
 class GPT:
@@ -43,8 +43,10 @@ def get_batch():
     x = tokens[i:i+B*T].view(B, T)
     y = tokens[i+1:i+B*T+1].view(B, T)
     if SHARD:
-      x.shard_(GPUS, axis=0)
-      y.shard_(GPUS, axis=0)
+      x = x.realize()
+      y = y.realize()
+      x.shard_(GPUS)
+      y.shard_(GPUS)
     yield x, y
     i += B*T
     if i + B*T + 1 >= len(tokens):
@@ -61,7 +63,7 @@ if SHARD:
     seen.add(p)
     p.shard_(GPUS, axis=0)
 
-optimizer = nn.optim.AdamW(nn.state.get_parameters(model), shard_axis=0)
+optimizer = nn.optim.Adam(nn.state.get_parameters(model), shard_axis=0)
 
 @TinyJit
 def step(x, y):
