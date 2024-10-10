@@ -2,7 +2,7 @@ import functools, io, math
 from typing import Union, Tuple, Optional, List, Any, cast
 from tinygrad.tensor import Tensor, _broadcast_shape, ConstType
 from tinygrad.dtype import ImageDType, dtypes
-from tinygrad.helpers import prod, flatten
+from tinygrad.helpers import prod, flatten, make_pair
 from .onnx import DTYPE_MAP, to_python_const
 import numpy as np
 
@@ -178,8 +178,11 @@ def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsil
 
 # TODO: rewrite all this padding crap
 # Tensor._padding2d()
+# there are 3 types of pads
+# pad per axis: [padx, pady]
 # onnx: [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
 # tinygrad: ((x1_begin, x1_end), (x2_begin, x2_end), ...)
+# pad per axis gets autopad split into onnx
 def _format_padding(onnx_pads, ndims=None, axes=None) -> List[Tuple[int, int]]:
   axes = axes or list(range(ndims))
   np_pads = [(0,0)] * ndims
@@ -214,6 +217,22 @@ def _auto_pad(img_shape, auto_pad, strides, kernel_shape, dilations):
     pad_shape = flatten([[sh//2, sh-sh//2] for sh in pad_shape])
     return pad_shape[::2] + pad_shape[1::2] if auto_pad == "SAME_UPPER" else pad_shape[1::2] + pad_shape[::2]
   raise NotImplementedError(f"auto_pad={auto_pad} not implemented")
+
+# [x1_begin, x2_begin, ..., x1_end, x2_end, ...] -> (padding_left, padding_right, ..., padding_top, padding_bottom, ...)
+# NOTE: also works with 1D, 3D, or 1337D
+def _onnx_pads_to_tiny_pads(pads): return flatten(reversed([(pb, pe) for pb, pe in zip(pads, pads[len(pads)//2:])]))
+
+def _auto_pad(pads, auto_pad):
+  return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
+         [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
+# def _auto_pad(img_shape, auto_pad, strides, kernel_shape, dilations):
+#   strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides or [1]*len(kernel_shape)
+#   dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
+#   if auto_pad == "SAME_UPPER" or auto_pad == "SAME_LOWER":
+#     pad_shape = [(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(img_shape, strides, kernel_shape, dilations)]
+#     pad_shape = flatten([[sh//2, sh-sh//2] for sh in pad_shape])
+#     return pad_shape[::2] + pad_shape[1::2] if auto_pad == "SAME_UPPER" else pad_shape[1::2] + pad_shape[::2]
+#   raise NotImplementedError(f"auto_pad={auto_pad} not implemented")
 
 def Pad(x:Tensor, pads:List[ConstType], constant_value:Optional[ConstType]=None, axes:Optional[List[ConstType]]=None, mode="constant",
         value:float=0.):
@@ -278,33 +297,33 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
   return ret
 
 def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
-  if auto_pad != "NOTSET": padding = _auto_pad(X.shape[-len(kernel_shape):], auto_pad, strides, kernel_shape, dilations)
-  # reorder padding
-  else: padding = [p for ps in zip(pads[:len(pads)//2][::-1], pads[len(pads)//2:][::-1]) for p in ps] if pads is not None else 0
-  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=padding)
+  input_shape, kernel_shape = X.shape[2:], (kernel_shape or W.shape[2:])
+  strides, dilations = (make_pair(x, len(input_shape)) for x in (strides, dilations))
+  if auto_pad != "NOTSET":
+    pads = _auto_pad([(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(input_shape, strides, kernel_shape, dilations)], auto_pad)
+  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=_onnx_pads_to_tiny_pads(pads) if pads is not None else 0)
 
+# TODO: their reference implementation and their documentation has different information
+# ref: https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_conv_transpose.py
+# doc: https://github.com/onnx/onnx/blob/main/docs/Operators.md#ConvTranspose
+# the current implementation makes sense to geohotstan and pass tests, but differs from both ref and doc
 def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None,
                   output_shape=None, output_padding=0, strides=1):
-  if kernel_shape is None: kernel_shape = W.shape[2:]
-  if isinstance(strides, int): strides = [strides]*(W.ndim-2)
-  if isinstance(dilations, int): dilations = [dilations]*(W.ndim-2)
-  if isinstance(output_padding, int): output_padding = [output_padding]*(W.ndim-2)
-  out_sh = [st*(xs-1) + (ks-1)*di+1 if n < 2 else st*(xs-1) + (ks-1)*di+1 - pads[n-2] - pads[n-1] for n, (st, xs, ks, di) in
-            enumerate(zip(strides, X.shape[2:], kernel_shape, dilations))] if output_shape is not None or auto_pad != "NOTSET" else []
-  if pads is None:
-    if output_shape is None: output_shape = [xs*st for xs, st in zip(X.shape[2:], strides)]
-    if auto_pad == "NOTSET": pads = [0,0] * (X.ndim - 2)
-    else:
-      total_padding = [st*(ish-1) + pad + ((ks-1)*dil+1)-osh for st, ish, pad, ks, dil, osh
-                       in zip(strides, X.shape[2:], output_padding, kernel_shape, dilations, output_shape)]
-      pad_shape = flatten([[sh//2, sh-sh//2] for sh in total_padding])
-      pads = pad_shape[::2] + pad_shape[1::2] if auto_pad == "SAME_UPPER" else pad_shape[1::2] + pad_shape[::2]
-  else:
-    if output_shape is None: output_shape = [st*(xs-1) + (ks-1)*di+1 if n < 2 else st*(xs-1) + (ks-1)*di+1 - pads[n-2] - pads[n-1]
-                                             for n, (st, xs, ks, di) in enumerate(zip(strides, X.shape[2:], kernel_shape, dilations))]
-  if out_sh: output_padding = [os - rs for os, rs in zip(output_shape, out_sh)]
-  return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0,
-                            output_padding=output_padding)
+  input_shape, kernel_shape = X.shape[2:], (kernel_shape or W.shape[2:])
+  strides, dilations, output_padding = (make_pair(x, len(input_shape)) for x in (strides, dilations, output_padding))
+  if output_shape is not None: # we pad according to output_shape
+    X = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=0, output_padding=0)
+    return X.pad((None, None, *((0, out-xs) for out, xs in zip(output_shape, X.shape[2:]))))  # TODO: unsure about this
+  # NOTE the pads either from args or auto_pad have the format [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
+  # this is asymmetrical padding and conv_transpose2d does not support it
+  # padding for conv_transpose2d effectively "shrinks" the padding that goes into conv2d, so we just shrink it after
+  if pads is None: # we generate asymmetrical pads
+    output_shape = [X.shape[i+2] * strides[i] for i in range(len(strides))]
+    pads = [strides[i]*(input_shape[i]-1) + output_padding[i] + ((kernel_shape[i]-1)*dilations[i]+1)-output_shape[i] for i in range(len(input_shape))]
+    pads = [0,0] * len(input_shape) if auto_pad == "NOTSET" else _auto_pad(pads, auto_pad)
+  X = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=0, output_padding=output_padding)
+  return X.pad2d(_onnx_pads_to_tiny_pads([-p for p in pads])) # neg it since we shrink
+  # return X if pads is None else X.shrink((None, None, *((pl, X.size(i+2)-pr) for i,(pl,pr) in enumerate(zip(pads, pads[len(pads)//2:])))))
 
 def DepthToSpace(X:Tensor, blocksize:int, mode:str="DCR"):
   b, c, h, w = X.shape
@@ -335,10 +354,9 @@ def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)): return (x - x.mean(axi
 
 def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_index=None, reduction="mean"):
   target_shape, x, target = target.shape, x.reshape(x.size(0), x.size(1), -1), target.reshape(x.size(0), -1)
-  loss = -x.gather(1, target.unsqueeze(1)).squeeze(1)
   mask = Tensor.ones_like(target) if ignore_index is None else (target != ignore_index)
   weight = mask if weight is None else weight[target] * mask
-  loss = loss * mask * weight
+  loss = -x.gather(1, target.unsqueeze(1)).squeeze(1) * mask * weight
   if reduction == "mean": return loss.sum() / weight.sum() if weight is not None else loss.sum() / mask.sum()
   elif reduction == "sum": return loss.sum()
   else: return loss.reshape(target_shape)
