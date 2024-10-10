@@ -1,7 +1,7 @@
 import math
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, make_pair
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm:
@@ -95,7 +95,20 @@ class Conv2d:
   """
   def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
-    self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
+    if isinstance(padding, str):
+      if padding.lower() != 'same': raise ValueError(f"Invalid padding string {padding!r}, only 'same' is supported")
+      if padding == 'same':
+        if stride != 1: raise ValueError("padding='same' is not supported for strided convolutions")
+        _kernel_size_length = len(self.kernel_size)
+        _calculate_padding = [0, 0] * _kernel_size_length
+        for d, k, i in zip(make_pair(dilation, _kernel_size_length), self.kernel_size, range(_kernel_size_length - 1, -1, -1)):
+          total_padding = d * (k - 1)
+          left_pad = total_padding // 2
+          _calculate_padding[2 * i] = left_pad
+          _calculate_padding[2 * i + 1] = (total_padding - left_pad)
+        self.padding = _calculate_padding
+    else: self.padding = padding
+    self.stride, self.dilation, self.groups = stride, dilation, groups
     scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
     self.weight = Tensor.uniform(out_channels, in_channels//groups, *self.kernel_size, low=-scale, high=scale)
     self.bias = Tensor.uniform(out_channels, low=-scale, high=scale) if bias else None
