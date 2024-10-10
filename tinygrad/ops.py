@@ -597,8 +597,9 @@ contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
 def track_rewrites(func):
   def __wrapper(self, *args, **kwargs):
     if TRACK_MATCH_STATS >= 2: rewrite_stack.append((self, []))
-    ret = func(self, *args, **kwargs)
-    if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
+    try: ret = func(self, *args, **kwargs)
+    finally: # NOTE: save everything in the stack
+      if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
     return ret
   return __wrapper
 
@@ -638,7 +639,7 @@ if TRACK_MATCH_STATS:
         pickle.dump(contexts, f)
     if getenv("VIZ"):
       os.environ["VIZ"] = "0"
-      os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), "..", "viz", "serve.py")])
+      os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py")])
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
@@ -823,9 +824,11 @@ def lt_folding(x:UOp, c:int) -> Optional[UOp]:
 def fold_unrolled_divs(divs:UOp):
   # div pattern in unrolled arange
   # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  add_chain, seen_const, ans = list(_get_chain(divs, BinaryOps.ADD)), [], None
+  add_chain, denominator, seen_const, ans = list(_get_chain(divs, BinaryOps.ADD)), None, [], None
   for u in add_chain:
-    if not (u.op is UOps.ALU and u.arg is BinaryOps.IDIV and u.src[1].op is UOps.CONST and u.src[1].arg==len(add_chain)): return None
+    if not (u.op is UOps.ALU and u.arg is BinaryOps.IDIV and u.src[1].op is UOps.CONST): return None
+    if denominator is None: denominator = u.src[1].arg
+    if denominator != u.src[1].arg: return None
     # assumed CONST is the last of an ADD
     if (s0:=u.src[0]).op is UOps.ALU and s0.arg is BinaryOps.ADD and s0.src[1].op is UOps.CONST and s0.src[1].op is UOps.CONST:
       seen_const.append(s0.src[1].arg)
@@ -833,7 +836,11 @@ def fold_unrolled_divs(divs:UOp):
     else: seen_const.append(0)
     if ans is None: ans = s0
     if ans is not s0: return None
-  return ans if ans is not None and sorted(seen_const)==list(range(len(add_chain))) else None
+  if denominator is None: return None
+  # the first (denominator-len(seen_const)) terms may have been folded to 0 already
+  for i in range(denominator-len(seen_const)):
+    if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
+  return ans if ans is not None and sorted(seen_const)==list(range(denominator)) else None
 
 def is_irreducible(u:UOp): return u.op in (UOps.DEFINE_VAR, UOps.SPECIAL, UOps.RANGE)
 
