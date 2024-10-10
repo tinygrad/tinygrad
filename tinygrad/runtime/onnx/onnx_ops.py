@@ -1,5 +1,5 @@
 import functools, io, math
-from typing import Union, Tuple, Optional, List, Any, cast
+from typing import Union, Tuple, Optional, List, Any, cast, Literal, Callable
 from tinygrad.tensor import Tensor, _broadcast_shape, ConstType
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten, make_pair
@@ -24,6 +24,18 @@ equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"})}
 
 # helper
 # TODO maybe write helper for stuff like tuple((1,0) if i == axis else None for i in range(X.ndim)), easier to read, see it everywhere
+# or in a format like:
+
+def axis_tuple_arg(default_value, ndims, axes, axis_value: Callable):
+  ...
+  # args = default_value * ndims
+  # for i in range(len(axes)):
+  #   lol = ...
+  #   args[axes[i]] = axis_value(lol)
+  # return args
+# np_pads = [(0,0)] * ndims
+# for i in range(len(axes)): np_pads[axes[i]] = (onnx_pads[i], onnx_pads[i + len(axes)])
+
 # def dynamic_axis_value_tuple(main_value_fn: callable, default_value: Any, length: int, axis: int):
     # return tuple(main_value_fn(i) if i == axis else default_value for i in range(length))
 
@@ -176,69 +188,43 @@ def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_typ
 def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
   return x.reshape(x.size(0), num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
 
-# TODO: rewrite all this padding crap
-# Tensor._padding2d()
-# there are 3 types of pads
-# pad per axis: [padx, pady]
-# onnx: [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
-# tinygrad: ((x1_begin, x1_end), (x2_begin, x2_end), ...)
-# pad per axis gets autopad split into onnx
-def _format_padding(onnx_pads, ndims=None, axes=None) -> List[Tuple[int, int]]:
+# NOTE: these also works with 1D, 3D, or 1337D
+# (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> (..., x2_start, x2_end, x1_start, x1_end)
+def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed([(pb, pe) for pb, pe in zip(pads, pads[len(pads)//2:])]))
+# (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> ((x1_begin, x1_end), (x2_begin, x2_end), ...)
+def _onnx_pads_to_pad(onnx_pads, ndims=None, axes=None):
   axes = axes or list(range(ndims))
   np_pads = [(0,0)] * ndims
   for i in range(len(axes)): np_pads[axes[i]] = (onnx_pads[i], onnx_pads[i + len(axes)])
   return np_pads
 
-def _padded(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
-  if auto_pad != "NOTSET": pads = _auto_pad(X.shape[-len(kernel_shape):], auto_pad, strides, kernel_shape, dilations)
-  elif ceil_mode:
-    if strides is not None: strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides or [1]*len(kernel_shape)
-    if dilations is not None: dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
-    out_spatial_shape = [math.ceil((sh - dil * (ker-1)-1)/st + 1) if ceil_mode else math.floor((sh - dil * (ker-1)-1)/st + 1)
-                         for sh, st, ker, dil in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
-    pad_shape = [(osh-1)*st+((ks-1)*dil+1)-ish for osh, st, ks, dil, ish in
-                 zip(out_spatial_shape, strides, kernel_shape, dilations, X.shape[-len(kernel_shape):])]
-    pad_shape = [[sh//2, sh-sh//2] for sh in pad_shape]
-    # ceil_mode case follows NOTE in https://pytorch.org/docs/stable/generated/torch.nn.MaxPool2d.html#torch.nn.MaxPool2d
-    # so if any kernels start in right padded region, we decrease right pads to omit that kernel. Only omitting 1 kernel now.
-    pad_shape = [[start,end-rpad] if (rpad := ks + st%(st-(((start+xs)%st)))) <= end else [start,end]
-                 for (start,end), ks, st, xs in zip(pad_shape, kernel_shape, strides, X.shape[-len(kernel_shape):])]
-    pad_shape = flatten(pad_shape)
-    pads = pad_shape[::2] + pad_shape[1::2]
-  if pads is None: return X
-  pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
-  return X.pad(tuple(pads), value=constant_value)
-
-def _auto_pad(img_shape, auto_pad, strides, kernel_shape, dilations):
-  strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides or [1]*len(kernel_shape)
-  dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
-  if auto_pad == "SAME_UPPER" or auto_pad == "SAME_LOWER":
-    pad_shape = [(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(img_shape, strides, kernel_shape, dilations)]
-    pad_shape = flatten([[sh//2, sh-sh//2] for sh in pad_shape])
-    return pad_shape[::2] + pad_shape[1::2] if auto_pad == "SAME_UPPER" else pad_shape[1::2] + pad_shape[::2]
-  raise NotImplementedError(f"auto_pad={auto_pad} not implemented")
-
-# [x1_begin, x2_begin, ..., x1_end, x2_end, ...] -> (padding_left, padding_right, ..., padding_top, padding_bottom, ...)
-# NOTE: also works with 1D, 3D, or 1337D
-def _onnx_pads_to_tiny_pads(pads): return flatten(reversed([(pb, pe) for pb, pe in zip(pads, pads[len(pads)//2:])]))
-
-def _auto_pad(pads, auto_pad):
+def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
   return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
          [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
-# def _auto_pad(img_shape, auto_pad, strides, kernel_shape, dilations):
-#   strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides or [1]*len(kernel_shape)
-#   dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
-#   if auto_pad == "SAME_UPPER" or auto_pad == "SAME_LOWER":
-#     pad_shape = [(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(img_shape, strides, kernel_shape, dilations)]
-#     pad_shape = flatten([[sh//2, sh-sh//2] for sh in pad_shape])
-#     return pad_shape[::2] + pad_shape[1::2] if auto_pad == "SAME_UPPER" else pad_shape[1::2] + pad_shape[::2]
-#   raise NotImplementedError(f"auto_pad={auto_pad} not implemented")
+
+def _padded(X: Tensor, pads=None, auto_pad="NOTSET", constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
+  input_shape = X.shape[2:]
+  strides, dilations = (make_pair(x, len(input_shape)) for x in (strides, dilations))
+  if auto_pad != "NOTSET":
+    pads = _auto_pad([(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(input_shape, strides, kernel_shape, dilations)], auto_pad)
+  elif ceil_mode:
+    out_spatial_shape = [math.ceil((sh - dil * (ker-1)-1)/st + 1) if ceil_mode else math.floor((sh - dil * (ker-1)-1)/st + 1)
+                         for sh, st, ker, dil in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
+    pads = [(osh-1)*st+((ks-1)*dil+1)-ish for osh, st, ks, dil, ish in zip(out_spatial_shape, strides, kernel_shape, dilations, input_shape)]
+    pads = _auto_pad(pads, "SAME_UPPER") # -> (x1_begin, x2_begin, ..., x1_end, x2_end, ...)
+    # ceil_mode case follows https://pytorch.org/docs/stable/generated/torch.nn.MaxPool2d.html#torch.nn.MaxPool2d
+    # so if any kernels start in right padded region, we decrease right pads to omit that kernel. Only omitting 1 kernel now.
+    for i, (ks, st, xs) in enumerate(zip(kernel_shape, strides, input_shape)):
+      # decrease right pads
+      if (rpad := ks + st%(st-(((pads[i]+xs)%st)))) <= pads[i+len(pads)//2]: pads[i+len(pads)//2] -= rpad
+  if pads is None: return X
+  return X.pad2d(_onnx_pads_to_pad2d_pads(pads), value=constant_value)
 
 def Pad(x:Tensor, pads:List[ConstType], constant_value:Optional[ConstType]=None, axes:Optional[List[ConstType]]=None, mode="constant",
         value:float=0.):
   constant_value = value if constant_value is None else float(constant_value)
   base_shape = x.shape
-  formatted_pads = _format_padding(pads, ndims=len(x.shape), axes=axes)
+  formatted_pads = _onnx_pads_to_pad(pads, ndims=len(x.shape), axes=axes)
   if mode == "wrap":
     repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(formatted_pads, base_shape)]
     new_shape = [s*r for s,r in zip(base_shape, repeat_args)]
@@ -261,47 +247,46 @@ def Pad(x:Tensor, pads:List[ConstType], constant_value:Optional[ConstType]=None,
                                                                                                       for i_ in range(x.ndim)])
         x = xL.cat(x, xR, dim=i)
     return x
-  if mode == "constant": return _padded(x, pads, axes=axes, constant_value=constant_value)
+  if mode == "constant": return x.pad(_onnx_pads_to_pad(pads, x.ndim, axes), constant_value)
 
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
-  pixel_axes = tuple(range(2, X.ndim))
-  ret = _padded(X, pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
+  ret = _padded(X, pads, auto_pad, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
   ret = ret.avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
   if count_include_pad: return ret
-  div = _padded(Tensor.ones(X.shape), pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations,
+  div = _padded(Tensor.ones(X.shape), pads, auto_pad, strides=strides, kernel_shape=kernel_shape, dilations=dilations,
                 ceil_mode=ceil_mode).avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
   return ret / div
 
 def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
-  pixel_axes = tuple(range(2, X.ndim))
-  ret = _padded(X, pads, auto_pad, constant_value=-math.inf, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations,
-                ceil_mode=ceil_mode)
+  ret = _padded(X, pads, auto_pad, constant_value=-math.inf, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations).cast(X.dtype)
-  ret_len, X_len = ret.numel(), X.numel()
-  indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().unsqueeze(0).expand(ret_len, X_len)) * \
-             Tensor.arange(X_len, dtype=dtypes.int64).unsqueeze(0).expand(ret_len, X_len)).sum(1).reshape(ret.shape)
+  indices = ((ret.reshape(-1, 1) == X.reshape(1, -1)) * Tensor.arange(X.numel(), dtype=dtypes.int64).unsqueeze(0)).sum(1).reshape(ret.shape)
   if storage_order: indices = indices.transpose(-2, -1)
   return ret, indices
 
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
-  outlength = prod(out_sh)
-  xI = xI.flatten().unsqueeze(1).expand(None, outlength)
-  arange = Tensor.arange(outlength, requires_grad=False).reshape(1, outlength).expand(xI.shape)
-  xT = xT.flatten().unsqueeze(1).expand(None, outlength)
-  ret = ((xI == arange) * xT).sum(0).reshape([1, 1] + out_sh)
+  ret = ((xI.reshape(-1, 1) == Tensor.arange(prod(out_sh))) * xT.reshape(-1, 1)).sum(0).reshape([1, 1] + out_sh)
   if outshape is not None and outshape != ret.shape:
-    diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
-    pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
-    ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
+    ret = ret.pad2d(_onnx_pads_to_pad2d_pads(_auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
   return ret
+# TODO: is setitem more preferred? it's more lines :D
+# def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
+#   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
+#   ret = Tensor.zeros(prod(out_sh)).contiguous()
+#   ret[xI.flatten()] = xT.flatten()
+#   ret = ret.reshape([1, 1] + out_sh)
+#   if outshape is not None and outshape != ret.shape:
+#     ret = ret.pad2d(_onnx_pads_to_pad2d_pads(_auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
+#   return ret
 
 def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
   input_shape, kernel_shape = X.shape[2:], (kernel_shape or W.shape[2:])
   strides, dilations = (make_pair(x, len(input_shape)) for x in (strides, dilations))
   if auto_pad != "NOTSET":
+    # zip to fit in 1 line lmao
     pads = _auto_pad([(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(input_shape, strides, kernel_shape, dilations)], auto_pad)
-  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=_onnx_pads_to_tiny_pads(pads) if pads is not None else 0)
+  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=_onnx_pads_to_pad2d_pads(pads) if pads is not None else 0)
 
 # TODO: their reference implementation and their documentation has different information
 # ref: https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_conv_transpose.py
@@ -322,7 +307,7 @@ def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSE
     pads = [strides[i]*(input_shape[i]-1) + output_padding[i] + ((kernel_shape[i]-1)*dilations[i]+1)-output_shape[i] for i in range(len(input_shape))]
     pads = [0,0] * len(input_shape) if auto_pad == "NOTSET" else _auto_pad(pads, auto_pad)
   X = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=0, output_padding=output_padding)
-  return X.pad2d(_onnx_pads_to_tiny_pads([-p for p in pads])) # neg it since we shrink
+  return X.pad2d(_onnx_pads_to_pad2d_pads([-p for p in pads])) # neg it since we shrink
   # return X if pads is None else X.shrink((None, None, *((pl, X.size(i+2)-pr) for i,(pl,pr) in enumerate(zip(pads, pads[len(pads)//2:])))))
 
 def DepthToSpace(X:Tensor, blocksize:int, mode:str="DCR"):
