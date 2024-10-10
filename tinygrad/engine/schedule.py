@@ -424,6 +424,10 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
 # *** DAG ordering: breadth first search ***
 
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  if getenv("SV2", 1):
+    from tinygrad.engine.schedule2 import create_schedule
+    uops, bufs = create_schedule(outs)
+    return [ScheduleItem(u, b, ()) for u,b in zip(uops, bufs)], {}
   graph, in_degree, var_vals = _graph_schedule(outs)
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
