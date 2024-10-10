@@ -12,7 +12,7 @@ from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from tinygrad.shape.view import View, strides_for_shape
-from tinygrad.engine.schedule2 import _graph, ScheduleItem, METAOPS
+from tinygrad.engine.schedule2 import _graph, ScheduleItem, METAOPS, to_ast
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
@@ -110,13 +110,11 @@ reduceop_fusor = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
-enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx.bufs.index(x.arg[0])))])
-
 @track_rewrites
 def full_ast_rewrite(base_sink:UOp, ctx:ScheduleItemContext) -> UOp:
   if not AST_REWRITE: return base_sink
   sink = graph_rewrite(base_sink, reduceop_fusor)
-  ret = graph_rewrite(sink, enumerate_bufs, ctx)
+  ret = graph_rewrite(sink, to_ast, ctx.bufs)
   if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
   return ret
 
@@ -417,6 +415,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     for out in lsi.outputs: del out.srcs  # can only schedule once
     schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.bufs if x.size != 0), lsi.metadata))
+    print(si.ast)
     if (m:=BUF_LIMIT.get(device:=si.outputs[0].device)) and len(si.bufs) >= m:
       if DEBUG >= 3: print(si)
       raise RuntimeError(f"Kernel for {si.metadata} exceeded the {m} buffer count limit for {device} with {len(si.bufs)} buffers.")
