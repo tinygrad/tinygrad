@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 import os, math, time
+os.environ["TRACEMETA"] = "0"
 import numpy as np
 from tinygrad import Tensor, nn, fetch, Device, TinyJit, GlobalCounters
 from dataclasses import dataclass
+from typing import List
+import pathlib
+from tinygrad.multi import MultiLazyBuffer
+import re
+
+SHARD_MODEL = False
+GPUS = [f'{Device.DEFAULT}:{i}' for i in range(2)]
 
 @dataclass
 class GPTConfig:
@@ -17,7 +25,9 @@ class CausalSelfAttention:
   def __init__(self, config:GPTConfig):
     assert config.n_embd % config.n_head == 0
     # key, query, value projections for all heads, but in a batch
-    self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
+    self.q = nn.Linear(config.n_embd, config.n_embd)
+    self.k = nn.Linear(config.n_embd, config.n_embd)
+    self.v = nn.Linear(config.n_embd, config.n_embd)
     # output projection
     self.c_proj = nn.Linear(config.n_embd, config.n_embd)
     # regularization
@@ -29,8 +39,9 @@ class CausalSelfAttention:
 
   def __call__(self, x:Tensor):
     B, T, C = x.shape
-    qkv = self.c_attn(x)
-    q, k, v = qkv.split(self.n_embd, dim=2)
+    q = self.q(x)
+    k = self.k(x)
+    v = self.v(x)
     k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -68,7 +79,6 @@ class Block:
 class GPT:
   def __init__(self, config:GPTConfig):
     self.config = config
-
     self.wte = nn.Embedding(config.padded_vocab_size, config.n_embd)
     self.wpe = nn.Embedding(config.block_size, config.n_embd)
     self.h = [Block(config) for _ in range(config.n_layer)]
@@ -92,29 +102,45 @@ class GPT:
     for _ in range(max_new_tokens):
       idx_cond = idx if idx.shape[1] <= self.config.block_size else idx[:, -self.config.block_size:]
       logits, _ = self(idx_cond)
+      if SHARD_MODEL:
+        logits = logits.to(Device.DEFAULT)
+        logits.shard_(GPUS)
       logits = logits[:, -1, :] / temperature
       idx_next = logits.softmax().multinomial()
       idx = Tensor.cat(idx, idx_next, dim=1)
     return idx
 
-  def __call__(self, idx:Tensor, targets=None):
+  def __call__(self, idx:Tensor, targets=None):    
     b, t = idx.shape
     pos = Tensor.arange(0, t)
+    
+    if SHARD_MODEL:
+      pos.shard_(GPUS, axis=0)
 
     tok_emb = self.wte(idx) # token embeddings of shape (b, t, n_embd)
     pos_emb = self.wpe(pos) # position embeddings of shape (t, n_embd)
     x = tok_emb + pos_emb
-
     x = self.ln_f(x.sequential(self.h))
 
     if targets is not None:
-      logits = self.lm_head(x)[:, :, :self.config.vocab_size]
+      logits = self.lm_head(x)
+      if SHARD_MODEL:
+        logits = logits.to(Device.DEFAULT)
+        logits.shard_(GPUS)
+      logits = logits[:, :, :self.config.vocab_size]
       loss = logits.sparse_categorical_crossentropy(targets)
     else:
-      logits = self.lm_head(x[:, [-1], :])[:, :, :self.config.vocab_size]
+      logits = self.lm_head(x[:, [-1], :])
+      if SHARD_MODEL:
+        logits = logits.to(Device.DEFAULT)
+        logits.shard_(GPUS)
+      logits = logits[:, :, :self.config.vocab_size]
       loss = None
 
     return logits, loss
+
+def g_sz(tensors: List[Tensor]): return sum([t.nbytes() if isinstance(t, Tensor) else t.size for t in tensors])
+def p_sz(name, *tensors: Tensor): print(f'{name} size: {g_sz(tensors) / 1e9:.2f} GB')
 
 if __name__ == "__main__":
   import tiktoken, argparse
@@ -125,11 +151,22 @@ if __name__ == "__main__":
   parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
   parser.add_argument("--skip_test", action="store_true", help="skip test")
   args = parser.parse_args()
+
   B, T = args.batch_size, args.sequence_length
   assert 1 <= T <= 1024
-
-  model = GPT(GPTConfig(n_layer=12, n_head=12, n_embd=768))
-  model.load_pretrained()
+  n_head = 26
+  model = GPT(GPTConfig(n_layer=48, n_head=n_head, n_embd=n_head * 64))
+  p_sz("model", *nn.state.get_parameters(model))
+  seen = set()
+  if SHARD_MODEL:
+    GPUS = [f'{Device.DEFAULT}:{i}' for i in range(2)]
+    for k, p in nn.state.get_state_dict(model).items():
+      if p in seen: continue
+      seen.add(p)
+      if re.match(r"h\.\d+\.attn\.bias", k):
+        p.shard_(GPUS)
+      else:
+        p.shard_(GPUS, axis=0)
 
   # init the tokenizer
   enc = tiktoken.get_encoding("gpt2")
@@ -139,7 +176,7 @@ if __name__ == "__main__":
   # load the tokens
   # prefer to use tiny_shakespeare if it's available, otherwise use tiny_stories
   # we're using val instead of train split just because it is smaller/faster
-  tokens_bin = fetch("https://huggingface.co/datasets/karpathy/llmc-starter-pack/resolve/main/tiny_shakespeare_val.bin")
+  tokens_bin = pathlib.Path("/root/tinygrad/tmp/tiny_shakespeare_val.bin")
   assert os.path.isfile(tokens_bin)
   print(f"loading cached tokens in {tokens_bin}")
   with open(tokens_bin, "rb") as f:
@@ -155,6 +192,9 @@ if __name__ == "__main__":
     while True:
       x = tokens[i:i+B*T].view(B, T)
       y = tokens[i+1:i+B*T+1].view(B, T)
+      if SHARD_MODEL:
+        x.shard_(GPUS)
+        y.shard_(GPUS)
       yield x, y
       i += B*T
       if i + B*T + 1 >= len(tokens):
@@ -163,8 +203,9 @@ if __name__ == "__main__":
   # forward backward for a few iterations
   data_iter = iter(get_batch())
   x, y = next(data_iter) # we'll overfit this batch below
-  optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
-
+  # optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0, shard_axis=0)
+  optimizer = nn.optim.Adam(nn.state.get_parameters(model), shard_axis=0)
+  p_sz("optimizer", *nn.state.get_parameters(optimizer))
   @TinyJit
   def step(x, y):
     _, loss = model(x, y)
@@ -181,13 +222,16 @@ if __name__ == "__main__":
       t1 = time.time()
       print(f"iteration {i}, loss: {loss.item():.6f}, time: {(t1-t0)*1000:.3f}ms, {int(B*T/(t1-t0))} tok/s")
 
-  if not args.skip_test:
+  if False: # Generate not working yet...
     start = "<|endoftext|>"
     start_ids = encode(start)
     x = (Tensor(start_ids)[None, ...])
+    if SHARD_MODEL:
+      x.shard_(GPUS)
     max_new_tokens = 16
     temperature = 1.0
     top_k = 40
     y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+    print(f"{y.shape=}")
     print(decode(y[0].tolist()))
 

@@ -1,5 +1,5 @@
 # sorted in order of increasing complexity
-from typing import List
+from typing import List, Optional
 from tinygrad.helpers import dedup, flatten, getenv
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, least_upper_dtype
@@ -54,7 +54,7 @@ class OptimizerGroup(Optimizer):
   def _step(self) -> List[Tensor]: return [x for o in self.optimizers for x in o._step()]
 
 # LARS is essentially just trust ratio to SGD so if we just set the trust coeff 0.0 its just standard SGD.
-def SGD(params: List[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov=False, classic=False):
+def SGD(params: List[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov=False, classic=False, shard_axis: Optional[int] = None):
   """
   Stochastic Gradient Descent (SGD) optimizer with optional momentum and weight decay.
 
@@ -62,7 +62,7 @@ def SGD(params: List[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov
 
   - Described: https://paperswithcode.com/method/sgd
   """
-  return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0)
+  return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0, shard_axis=shard_axis)
 
 class LARS(Optimizer):
   """
@@ -71,10 +71,10 @@ class LARS(Optimizer):
   - Described: https://paperswithcode.com/method/lars
   - Paper: https://arxiv.org/abs/1708.03888v3
   """
-  def __init__(self, params:List[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True, tcoef=0.001):
+  def __init__(self, params:List[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True, tcoef=0.001, shard_axis: Optional[int] = None):
     super().__init__(params, lr)
     self.momentum, self.wd, self.nesterov, self.classic, self.tcoef = momentum, weight_decay, nesterov, classic, tcoef
-    self.b = [Tensor.zeros(*t.shape, dtype=t.dtype, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
+    self.b = [Tensor.zeros(*t.shape, dtype=t.dtype, device=t.device, requires_grad=False, shard_axis=shard_axis) for t in self.params] if self.momentum else []
 
   def _step(self) -> List[Tensor]:
     for i, t in enumerate(self.params):
@@ -99,22 +99,22 @@ class LARS(Optimizer):
     return self.b
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
-def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, weight_decay=0.01):
+def AdamW(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, weight_decay=0.01, shard_axis: Optional[int] = None):
   """
   AdamW optimizer with optional weight decay.
 
   - Described: https://paperswithcode.com/method/adamw
   - Paper: https://arxiv.org/abs/1711.05101v3
   """
-  return LAMB(params, lr, b1, b2, eps, weight_decay, adam=True)
-def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8):
+  return LAMB(params, lr, b1, b2, eps, weight_decay, adam=True, shard_axis=shard_axis)
+def Adam(params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, shard_axis: Optional[int] = None):
   """
   Adam optimizer.
 
   - Described: https://paperswithcode.com/method/adam
   - Paper: https://arxiv.org/abs/1412.6980
   """
-  return LAMB(params, lr, b1, b2, eps, 0.0, adam=True)
+  return LAMB(params, lr, b1, b2, eps, 0.0, adam=True, shard_axis=shard_axis)
 
 class LAMB(Optimizer):
   """
@@ -123,19 +123,20 @@ class LAMB(Optimizer):
   - Described: https://paperswithcode.com/method/lamb
   - Paper: https://arxiv.org/abs/1904.00962
   """
-  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, adam=False):
+  def __init__(self, params: List[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, adam=False, shard_axis: Optional[int] = None):
     super().__init__(params, lr)
     self.b1, self.b2, self.eps, self.wd, self.adam = b1, b2, eps, weight_decay, adam
     self.b1_t, self.b2_t = (Tensor.ones((1,), dtype=dtypes.float32, device=self.device, requires_grad=False).contiguous() for _ in [b1, b2])
-    self.m = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
-    self.v = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
+    self.m = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False, shard_axis=shard_axis).contiguous() for t in self.params]
+    self.v = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False, shard_axis=shard_axis).contiguous() for t in self.params]
 
   def _step(self) -> List[Tensor]:
     self.b1_t *= self.b1
     self.b2_t *= self.b2
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
+      m_i = self.b1 * self.m[i] + (1.0 - self.b1) * t.grad
+      self.m[i].assign(m_i)
       self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
       m_hat = self.m[i] / (1.0 - self.b1_t)
       v_hat = self.v[i] / (1.0 - self.b2_t)
