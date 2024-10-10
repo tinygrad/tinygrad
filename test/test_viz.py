@@ -4,7 +4,7 @@ import itertools
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import Context, getenv
 from tinygrad.engine.realize import lower_schedule
-from viz.serve import GraphRewriteMetadata, get_metadata, _uop_to_json
+from tinygrad.viz.serve import GraphRewriteMetadata, get_metadata, _uop_to_json
 from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher, UPat, UOps, UOp, graph_rewrite, contexts, track_rewrites
 
 def group_rewrites(kernels:List[GraphRewriteMetadata]): return {k:list(v) for k,v in itertools.groupby(kernels, lambda x:x.loc)}
