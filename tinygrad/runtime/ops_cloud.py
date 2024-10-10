@@ -31,14 +31,11 @@ class CloudHandler(BaseHTTPRequestHandler):
 
   def _do(self, method):
     ret = b""
-    if self.path == "/dname":
-      if method != "GET": return self._fail()
+    if self.path == "/dname" and method == "GET":
       ret = CloudHandler.dname.encode()
-    elif self.path == "/alloc":
-      if method != "POST": return self._fail()
+    elif self.path == "/alloc" and method == "POST":
       CloudHandler.buffer_num += 1
-      size = self.get_json()['size']
-      CloudHandler.buffers[CloudHandler.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(size), size)
+      CloudHandler.buffers[CloudHandler.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(size:=self.get_json()['size']), size)
       ret = str(CloudHandler.buffer_num).encode()
     elif self.path.startswith("/buffer"):
       buf,sz = CloudHandler.buffers[key:=int(self.path.split("/")[-1])]
