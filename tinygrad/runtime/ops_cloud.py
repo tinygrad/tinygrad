@@ -41,10 +41,12 @@ class CloudHandler(BaseHTTPRequestHandler):
       CloudHandler.buffers[CloudHandler.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(size), size)
       ret = str(CloudHandler.buffer_num).encode()
     elif self.path.startswith("/buffer"):
-      buf,sz = CloudHandler.buffers[int(self.path.split("/")[-1])]
+      buf,sz = CloudHandler.buffers[key:=int(self.path.split("/")[-1])]
       if method == "GET": Device[CloudHandler.dname].allocator.copyout(memoryview(ret:=bytearray(sz)), buf)
       elif method == "PUT": Device[CloudHandler.dname].allocator.copyin(buf, memoryview(bytearray(self.get_data())))
-      elif method == "DELETE": Device[CloudHandler.dname].allocator.free(buf,sz)
+      elif method == "DELETE":
+        Device[CloudHandler.dname].allocator.free(buf,sz)
+        del CloudHandler.buffers[key]
       else: return self._fail()
     elif self.path.startswith("/program"):
       name, hsh = self.path.split("/")[-2:]
@@ -86,7 +88,7 @@ class CloudAllocator(Allocator):
     super().__init__()
   def _alloc(self, size:int, options) -> int: return int(self.device.send("POST", "alloc", data=json.dumps({"size": size}).encode()))
   def _free(self, opaque, options):
-    with contextlib.suppress(urllib.error.URLError): self.device.send("DELETE", f"free/{opaque}", data=b"")
+    with contextlib.suppress(urllib.error.URLError): self.device.send("DELETE", f"buffer/{opaque}", data=b"")
   def copyin(self, dest:int, src:memoryview): self.device.send("PUT", f"buffer/{dest}", data=bytes(src))
   def copyout(self, dest:memoryview, src:int):
     resp = self.device.send("GET", f"buffer/{src}")
