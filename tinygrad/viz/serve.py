@@ -136,7 +136,7 @@ if __name__ == "__main__":
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
   print(f"*** started viz on http://127.0.0.1:{PORT}")
-  print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:9.2f}ms", "green"))
+  print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"))
   if getenv("BROWSER", 0): webbrowser.open(f"http://127.0.0.1:{PORT}")
   try: server.serve_forever()
   except KeyboardInterrupt:
