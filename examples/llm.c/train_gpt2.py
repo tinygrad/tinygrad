@@ -79,7 +79,6 @@ class Block:
 class GPT:
   def __init__(self, config:GPTConfig):
     self.config = config
-    # self.linear = nn.Linear(768, 50257)
     self.wte = nn.Embedding(config.padded_vocab_size, config.n_embd)
     self.wpe = nn.Embedding(config.block_size, config.n_embd)
     self.h = [Block(config) for _ in range(config.n_layer)]
@@ -103,6 +102,9 @@ class GPT:
     for _ in range(max_new_tokens):
       idx_cond = idx if idx.shape[1] <= self.config.block_size else idx[:, -self.config.block_size:]
       logits, _ = self(idx_cond)
+      if SHARD_MODEL:
+        logits = logits.to(Device.DEFAULT)
+        logits.shard_(GPUS)
       logits = logits[:, -1, :] / temperature
       idx_next = logits.softmax().multinomial()
       idx = Tensor.cat(idx, idx_next, dim=1)
@@ -122,12 +124,17 @@ class GPT:
 
     if targets is not None:
       logits = self.lm_head(x)
-      logits = logits.to(Device.DEFAULT)
-      logits.shard_(GPUS)
+      if SHARD_MODEL:
+        logits = logits.to(Device.DEFAULT)
+        logits.shard_(GPUS)
       logits = logits[:, :, :self.config.vocab_size]
       loss = logits.sparse_categorical_crossentropy(targets)
     else:
-      logits = self.lm_head(x[:, [-1], :])[:, :, :self.config.vocab_size]
+      logits = self.lm_head(x[:, [-1], :])
+      if SHARD_MODEL:
+        logits = logits.to(Device.DEFAULT)
+        logits.shard_(GPUS)
+      logits = logits[:, :, :self.config.vocab_size]
       loss = None
 
     return logits, loss
@@ -139,20 +146,19 @@ if __name__ == "__main__":
   import tiktoken, argparse
 
   parser = argparse.ArgumentParser()
-  parser.add_argument("--num_iterations", type=int, default=3, help="number of iterations to run")
+  parser.add_argument("--num_iterations", type=int, default=10, help="number of iterations to run")
   parser.add_argument("--batch_size", type=int, default=4, help="batch size")
   parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
   parser.add_argument("--skip_test", action="store_true", help="skip test")
-  parser.add_argument("--shard_model", action="store_true", help="whether to shard the model", default=True)
   args = parser.parse_args()
-  SHARD_MODEL = args.shard_model
+
   B, T = args.batch_size, args.sequence_length
   assert 1 <= T <= 1024
-
-  model = GPT(GPTConfig(n_layer=12, n_head=12, n_embd=768))
+  n_head = 26
+  model = GPT(GPTConfig(n_layer=48, n_head=n_head, n_embd=n_head * 64))
   p_sz("model", *nn.state.get_parameters(model))
   seen = set()
-  if args.shard_model:
+  if SHARD_MODEL:
     GPUS = [f'{Device.DEFAULT}:{i}' for i in range(2)]
     for k, p in nn.state.get_state_dict(model).items():
       if p in seen: continue
@@ -186,7 +192,7 @@ if __name__ == "__main__":
     while True:
       x = tokens[i:i+B*T].view(B, T)
       y = tokens[i+1:i+B*T+1].view(B, T)
-      if args.shard_model:
+      if SHARD_MODEL:
         x.shard_(GPUS)
         y.shard_(GPUS)
       yield x, y
@@ -216,15 +222,16 @@ if __name__ == "__main__":
       t1 = time.time()
       print(f"iteration {i}, loss: {loss.item():.6f}, time: {(t1-t0)*1000:.3f}ms, {int(B*T/(t1-t0))} tok/s")
 
-  if not args.skip_test:
+  if False: # Generate not working yet...
     start = "<|endoftext|>"
     start_ids = encode(start)
     x = (Tensor(start_ids)[None, ...])
-    if args.shard_model:
-      x.shard_(GPUS, axis=0)
+    if SHARD_MODEL:
+      x.shard_(GPUS)
     max_new_tokens = 16
     temperature = 1.0
     top_k = 40
     y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+    print(f"{y.shape=}")
     print(decode(y[0].tolist()))
 
