@@ -1320,8 +1320,9 @@ class TestNumpy(unittest.TestCase):
     self.assertRaises(IndexError, lambda: a[0, 0, -1.4])
     self.assertRaises(IndexError, lambda: a[-1.4, 0, 0])
     self.assertRaises(IndexError, lambda: a[0, -1.4, 0])
-    self.assertRaises(IndexError, lambda: a[0.0:, 0.0])
-    self.assertRaises(IndexError, lambda: a[0.0:, 0.0,:])
+    # these two trigger slice internal type verification first
+    self.assertRaises(TypeError, lambda: a[0.0:, 0.0])
+    self.assertRaises(TypeError, lambda: a[0.0:, 0.0,:])
 
   def test_none_index(self):
     # `None` index adds newaxis
