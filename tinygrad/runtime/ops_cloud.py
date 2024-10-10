@@ -24,58 +24,60 @@ class CloudHandler(BaseHTTPRequestHandler):
     return self.rfile.read(int(content_len))
   def get_json(self): return json.loads(self.get_data())
 
-  def do_POST(self):
-    #print("post", self.path)
+  def _fail(self):
+    self.send_response(404)
+    self.end_headers()
+    return 0
+
+  def _do(self, method):
     ret = b""
-    if self.path == "/alloc":
+    if self.path == "/dname":
+      if method != "GET": return self._fail()
+      ret = CloudHandler.dname.encode()
+    elif self.path == "/alloc":
+      if method != "POST": return self._fail()
       CloudHandler.buffer_num += 1
       size = self.get_json()['size']
       CloudHandler.buffers[CloudHandler.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(size), size)
       ret = str(CloudHandler.buffer_num).encode()
-    elif self.path.startswith("/free"):
-      buf,sz = CloudHandler.buffers[int(self.path.split("/")[-1])]
-      Device[CloudHandler.dname].allocator.free(buf,sz)
     elif self.path.startswith("/buffer"):
-      buf,_ = CloudHandler.buffers[int(self.path.split("/")[-1])]
-      # TODO: remove bytearray to make it writable, CLANG backend needs that
-      Device[CloudHandler.dname].allocator.copyin(buf, memoryview(bytearray(self.get_data())))
+      buf,sz = CloudHandler.buffers[int(self.path.split("/")[-1])]
+      if method == "PUT":
+        Device[CloudHandler.dname].allocator.copyin(buf, memoryview(bytearray(self.get_data())))
+      elif method == "DELETE":
+        Device[CloudHandler.dname].allocator.free(buf,sz)
+      elif method == "GET":
+        ret = bytearray(sz)
+        Device[CloudHandler.dname].allocator.copyout(memoryview(ret), buf)
+      else:
+        return self._fail()
     elif self.path.startswith("/program"):
       name, hsh = self.path.split("/")[-2:]
-      lib = self.get_data()
-      assert hashlib.sha256(lib).hexdigest() == hsh
-      CloudHandler.programs[(name, hsh)] = Device[CloudHandler.dname].runtime(name, lib)
-    elif self.path.startswith("/exec"):
-      name, hsh = self.path.split("/")[-2:]
-      j = self.get_json()
-      bufs = [CloudHandler.buffers[x][0] for x in j['bufs']]
-      del j['bufs']
-      r = CloudHandler.programs[(name, hsh)](*bufs, **j)
-      if r is not None: ret = str(r).encode()
-    elif self.path.startswith("/compile"):
-      ret = Device[CloudHandler.dname].compiler.compile_cached(self.get_data().decode())
+      if method == "PUT":
+        src = self.get_data()
+        assert hashlib.sha256(src).hexdigest() == hsh
+        lib = Device[CloudHandler.dname].compiler.compile_cached(src.decode())
+        CloudHandler.programs[(name, hsh)] = Device[CloudHandler.dname].runtime(name, lib)
+      elif method == "DELETE":
+        del CloudHandler.programs[(name, hsh)]
+      elif method == "POST":
+        j = self.get_json()
+        bufs = [CloudHandler.buffers[x][0] for x in j['bufs']]
+        del j['bufs']
+        r = CloudHandler.programs[(name, hsh)](*bufs, **j)
+        if r is not None: ret = str(r).encode()
+      else:
+        return self._fail()
     else:
-      self.send_response(404)
-      self.end_headers()
-      return 0
+      return self._fail()
     self.send_response(200)
     self.end_headers()
     return self.wfile.write(ret)
 
-  def do_GET(self):
-    #print("get", self.path)
-    ret = b""
-    if self.path.startswith("/buffer"):
-      buf,sz = CloudHandler.buffers[int(self.path.split("/")[-1])]
-      ret = bytearray(sz)
-      Device[CloudHandler.dname].allocator.copyout(memoryview(ret), buf)
-    elif self.path.startswith("/dname"):
-      ret = CloudHandler.dname.encode()
-    else:
-      self.send_response(404)
-      self.end_headers()
-    self.send_response(200)
-    self.end_headers()
-    return self.wfile.write(ret)
+  def do_GET(self): return self._do("GET")
+  def do_POST(self): return self._do("POST")
+  def do_PUT(self): return self._do("PUT")
+  def do_DELETE(self): return self._do("DELETE")
 
 def cloud_server(port:int):
   multiprocessing.current_process().name = "MainProcess"
@@ -86,22 +88,16 @@ def cloud_server(port:int):
 
 # ***** frontend *****
 
-class CloudCompiler(Compiler):
-  def __init__(self, device:CloudDevice):
-    self.device = device
-    super().__init__()
-  def compile(self, src:str) -> bytes: return self.device.send("compile", src.encode())
-
 class CloudAllocator(Allocator):
   def __init__(self, device:CloudDevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size:int, options) -> int: return int(self.device.send("alloc", data=json.dumps({"size": size}).encode()))
+  def _alloc(self, size:int, options) -> int: return int(self.device.send("POST", "alloc", data=json.dumps({"size": size}).encode()))
   def _free(self, opaque, options):
-    with contextlib.suppress(urllib.error.URLError): self.device.send(f"free/{opaque}", data=b"")
-  def copyin(self, dest:int, src:memoryview): self.device.send(f"buffer/{dest}", data=bytes(src))
+    with contextlib.suppress(urllib.error.URLError): self.device.send("DELETE", f"free/{opaque}", data=b"")
+  def copyin(self, dest:int, src:memoryview): self.device.send("PUT", f"buffer/{dest}", data=bytes(src))
   def copyout(self, dest:memoryview, src:int):
-    resp = self.device.send(f"buffer/{src}")
+    resp = self.device.send("GET", f"buffer/{src}")
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
     dest[:] = resp
 
@@ -109,41 +105,19 @@ class CloudProgram:
   def __init__(self, device:CloudDevice, name:str, lib:bytes):
     self.device = device
     self.prgid = f"{name}/{hashlib.sha256(lib).hexdigest()}"
-    self.device.send("program/"+self.prgid, lib)
+    self.device.send("PUT", "program/"+self.prgid, lib)
     super().__init__()
+  def __del__(self): self.device.send("DELETE", "program/"+self.prgid)
 
   def __call__(self, *bufs, global_size=None, local_size=None, vals:Tuple[int, ...]=(), wait=False):
     args = {"bufs": bufs, "vals": vals, "wait": wait}
     if global_size is not None: args["global_size"] = global_size
     if local_size is not None: args["local_size"] = local_size
-    ret = self.device.send("exec/"+self.prgid, json.dumps(args).encode())
+    ret = self.device.send("POST", "program/"+self.prgid, json.dumps(args).encode())
     if wait: return float(ret)
 
-# TODO: are these abstractions right? they are not!
-# CLOUD will get graph support after the JIT refactor. there's too much boilerplate now. refactor starts in toonygrad
-# __call__ signature should be the same as Program, rawbufs should be splat ._buf, var_vals should be List[int]
-# the /exec method should work for Graphs as well as Programs
-"""
-from tinygrad.device import Buffer
-from tinygrad.engine.realize import ExecItem, CompiledRunner
-from tinygrad.engine.jit import GraphRunner, GraphException
-from tinygrad.shape.symbolic import Variable
-class CloudGraph(GraphRunner):
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
-    super().__init__(jit_cache, input_rawbuffers, var_vals)
-    if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
+from tinygrad.renderer.cstyle import MetalRenderer, AMDRenderer, ClangRenderer, OpenCLRenderer
 
-    for ji in jit_cache:
-      prg: CompiledRunner = cast(CompiledRunner, ji.prg)
-      prgid = cast(CloudProgram, prg.clprg).prgid
-
-  def __call__(self, rawbufs: List[Buffer], var_vals: Dict[Variable, int], wait=False):
-    pass
-"""
-
-from tinygrad.renderer.cstyle import MetalRenderer, AMDRenderer, ClangRenderer
-
-# TODO: don't hardcode METAL in frontend
 class CloudDevice(Compiled):
   def __init__(self, device:str):
     if (host:=getenv("HOST", "")) != "":
@@ -156,7 +130,7 @@ class CloudDevice(Compiled):
     if DEBUG >= 1: print(f"cloud with host {self.host}")
     while 1:
       try:
-        clouddev = self.send("dname", timeout=0.1).decode()
+        clouddev = self.send("GET", "dname", timeout=0.1).decode()
         break
       except Exception as e:
         print(e)
@@ -164,12 +138,12 @@ class CloudDevice(Compiled):
     if DEBUG >= 1: print(f"remote has device {clouddev}")
     # ugh, there needs to be a better way to do this
     # TODO: how to we have BEAM be cached on the backend? this should just send a specification of the compute. rethink what goes in Renderer
-    renderer = {"METAL": MetalRenderer, "AMD": AMDRenderer, "CLANG": ClangRenderer}[clouddev]()
-    super().__init__(device, CloudAllocator(self), renderer, CloudCompiler(self), functools.partial(CloudProgram, self))
+    renderer = {"METAL": MetalRenderer, "AMD": AMDRenderer, "CLANG": ClangRenderer, "GPU": OpenCLRenderer}[clouddev]()
+    super().__init__(device, CloudAllocator(self), renderer, Compiler(), functools.partial(CloudProgram, self))
 
-  def send(self, path, data:Optional[bytes]=None, timeout=60.0) -> bytes:
+  def send(self, method, path, data:Optional[bytes]=None, timeout=60.0) -> bytes:
     # TODO: retry logic
-    with urllib.request.urlopen(self.host+path, data=data if data is not None else None, timeout=timeout) as r:
+    with urllib.request.urlopen(urllib.request.Request(self.host+path, method=method), data=data, timeout=timeout) as r:
       assert r.status == 200
       return r.read()
 
