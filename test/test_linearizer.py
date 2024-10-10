@@ -131,6 +131,7 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = (x.numpy()-x.numpy().sum(-1, keepdims=True)).sum(-1).reshape(1,1)
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
     for l in lins:
+      assert sum(1 if u.op is UOps.SPECIAL else 0 for u in l.uops)-l.global_dims-l.local_dims <= 1, "shouldn't be more than 1 explicit local dim"
       ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
       for i,u in enumerate(ranges):
         if i == 0: continue
@@ -161,11 +162,11 @@ class TestLinearizer(unittest.TestCase):
       [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
       [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16)],
       [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.GROUPTOP, 0, 32)],
-      # # unroll
+      # unroll
       [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2)],
       [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)],
       [Opt(OptOps.UNROLL, 0, 8), Opt(OptOps.UNROLL, 1, 8)] if Device.DEFAULT not in {"NV", "METAL"} else [],
-      # # upcasting
+      # upcasting
       [Opt(OptOps.UPCAST, 0, 3)],
       [Opt(OptOps.UPCAST, 0, 9)],
       # locals with grouping
@@ -195,6 +196,7 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
     for l in lins:
+      assert sum(1 if u.op is UOps.SPECIAL else 0 for u in l.uops)-l.global_dims-l.local_dims <= 1, "shouldn't be more than 1 explicit local dim"
       ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
       for i,u in enumerate(ranges):
         if i == 0: continue
@@ -224,53 +226,111 @@ class TestLinearizer(unittest.TestCase):
         if i == 0: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
+  # precision issue with double reduce
+  @unittest.skip("fails on float32 but not float64")
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
-  @unittest.skip("this is not supported, it worked by luck")
-  def test_double_reduce_multireduce(self):
+  def test_double_reduce_multireduce_precision(self):
     Tensor.manual_seed(0)
-    x = Tensor.randn(8, 32, 8, 16, dtype=dtypes.float).realize()
+    N = 128
+    dtype = dtypes.float32
+    x = Tensor.randn(8, N, 8, N, dtype=dtype).realize()
     st = x.lazydata.st
-    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
-    first_x = UOp(UOps.LOAD, dtypes.float, (g1, st.reshape((8, 1, 32, 8, 1, 16)).expand((8, 32, 32, 8, 16, 16)).to_uop()))
-    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2, 5)))
-    second_x = UOp(UOps.LOAD, dtypes.float, (g1, st.reshape((8, 32, 1, 8, 16, 1)).to_uop()))
-    neg_first_reduce = first_reduce * ast_const(dtypes.float, -1, (8, 32, 1, 8, 16, 1))
-    squares = (second_x+neg_first_reduce)
-    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (1, 4)))
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtype), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtype, (g1, st.reshape((8, 1, N, 8, 1, N)).expand((8, N, N, 8, N, N)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtype, (first_x,), (BinaryOps.ADD, (2, 5)))
+    neg_first_reduce = first_reduce * ast_const(dtype, -1/(N*N), (8, N, 1, 8, N, 1))
+    second_x = UOp(UOps.LOAD, dtype, (g1, st.reshape((8, N, 1, 8, N, 1)).to_uop()))
+    squares_sum = UOp(UOps.REDUCE_AXIS, dtype, (second_x+neg_first_reduce,), (BinaryOps.ADD, (1, 4)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((8, 1, 1, 8, 1, 1)).to_uop(), squares_sum,))
     sink = UOp(UOps.SINK, src=(store,))
-    wanna_output = (x.numpy()-x.numpy().sum(axis=(1,3), keepdims=True)).sum(axis=(1,3)).reshape((8,1,1,8,1,1))
+    wanna_output = np.square(x.numpy()-(x.numpy().sum(axis=(1,3), keepdims=True)/(N*N))).sum(axis=(1,3)).reshape((8,1,1,8,1,1))
+    helper_linearizer_ast(sink, [x], wanna_output=[wanna_output])
+
+  def test_multireduce_max_smem_usage(self):
+    Tensor.manual_seed(0)
+    N = 128
+    x = Tensor.randn(12, N, 12, N, dtype=dtypes.float32).realize()
+    st = x.lazydata.st
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float32), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float32, (g1, st.reshape((12, 1, N, 12, 1, N)).expand((12, N, N, 12, N, N)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float32, (first_x,), (BinaryOps.ADD, (2, 5)))
+    neg_first_reduce = first_reduce * ast_const(dtypes.float32, -1/(N*N), (12, N, 1, 12, N, 1))
+    second_x = UOp(UOps.LOAD, dtypes.float32, (g1, st.reshape((12, N, 1, 12, N, 1)).to_uop()))
+    squares = (second_x+neg_first_reduce)*(second_x+neg_first_reduce)
+    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float32, (squares,), (BinaryOps.ADD, (1, 4)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((12, 1, 1, 12, 1, 1)).to_uop(), squares_sum,))
+    sink = UOp(UOps.SINK, src=(store,))
+    wanna_output = np.square(x.numpy()-(x.numpy().sum(axis=(1,3), keepdims=True)/(N*N))).sum(axis=(1,3)).reshape((12,1,1,12,1,1))
+    grouping = int(np.sqrt(Device[Device.DEFAULT].renderer.shared_max / 32))
+    helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts= [[
+        Opt(OptOps.UPCAST, 0, 4),
+        Opt(OptOps.GROUPTOP, 0, grouping), Opt(OptOps.GROUPTOP, 1, grouping), 
+        Opt(OptOps.GROUPTOP, 2, grouping), Opt(OptOps.GROUPTOP, 3, grouping)
+    ]])
+
+    # make sure that going over the smem limit does raise an error
+    with self.assertRaises(KernelOptError):
+      helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=[[
+          Opt(OptOps.UPCAST, 0, 6),
+          Opt(OptOps.GROUPTOP, 0, grouping), Opt(OptOps.GROUPTOP, 1, grouping), 
+          Opt(OptOps.GROUPTOP, 2, grouping), Opt(OptOps.GROUPTOP, 3, grouping)
+      ]])
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_double_reduce_multireduce(self):
+    Tensor.manual_seed(0)
+    N = 128
+    x = Tensor.randn(8, N, 8, N, dtype=dtypes.float32).realize()
+    st = x.lazydata.st
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float32), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float32, (g1, st.reshape((8, 1, N, 8, 1, N)).expand((8, N, N, 8, N, N)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float32, (first_x,), (BinaryOps.ADD, (2, 5)))
+    neg_first_reduce = first_reduce * ast_const(dtypes.float32, -1/(N*N), (8, N, 1, 8, N, 1))
+    second_x = UOp(UOps.LOAD, dtypes.float32, (g1, st.reshape((8, N, 1, 8, N, 1)).to_uop()))
+    squares = (second_x+neg_first_reduce)*(second_x+neg_first_reduce)
+    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float32, (squares,), (BinaryOps.ADD, (1, 4)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((8, 1, 1, 8, 1, 1)).to_uop(), squares_sum,))
+    sink = UOp(UOps.SINK, src=(store,))
+    wanna_output = np.square(x.numpy()-(x.numpy().sum(axis=(1,3), keepdims=True)/(N*N))).sum(axis=(1,3)).reshape((8,1,1,8,1,1))
     opts = [
       # openCL / GPU=1 is 256 max threads
-      # grouping
+      # checking how it works with one grouped reduce
       [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], # first dim of both reduces
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 3, 2)], # both dims of the second reduce
+      [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.GROUPTOP, 1, 32)],
       [Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)], # second dim of both reduces
-      [Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 3, 2)], # both dims of the first reduce
-      # group all reduce dims
+      [Opt(OptOps.GROUPTOP, 2, 32), Opt(OptOps.GROUPTOP, 3, 32)],
+      # checking how it works with two grouped reduces
       [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
-      # checking how it works with 2 grouped reduces + unrolling
-      [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
-        Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
+      [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 64), Opt(OptOps.GROUPTOP, 3, 64)], # 64 * 4 = 256 threads
+      # checking how it works with two grouped reduces + unrolling
+      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2),
+        Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)],
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 32), Opt(OptOps.GROUPTOP, 3, 32),
+        Opt(OptOps.UNROLL, 2, 4), Opt(OptOps.UNROLL, 3, 4)],
       # Checking how it works with 2 grouped reduces + locals.
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 0, 4),
-       Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
-      # Checking how it works with 2 grouped reduces + locals + unroll.
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4),
+       Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4)],
+      # # Checking how it works with 2 grouped reduces + locals + unroll.
       [Opt(OptOps.LOCAL, 0, 2),
-       Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
-       Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
-      # Checking how it works with 2 grouped reduces + locals + upcast.
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 0, 2),
-       Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 2), Opt(OptOps.GROUPTOP, 3, 2)],
-      # Checking how it works with 2 grouped reduces + locals + upcast + unroll.
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 0, 2),
-       Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4),
-       Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)],
+       Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 32), Opt(OptOps.GROUPTOP, 3, 32),
+       Opt(OptOps.UNROLL, 2, 4), Opt(OptOps.UNROLL, 3, 4)],
+      # # Checking how it works with 2 grouped reduces + locals + upcast.
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.UPCAST, 0, 2),
+       Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.UPCAST, 0, 4),
+       Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4)],
+      # No Globals
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 0, 2),
+       Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 4)],
     ]
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
     for l in lins:
+      assert sum(1 if u.op is UOps.SPECIAL else 0 for u in l.uops)-l.global_dims-l.local_dims <= 2, "shouldn't be more than 2 explicit local dims"
       ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg[1]) or (u.op is UOps.ENDRANGE and u.src[0].arg[1])]
       for i,u in enumerate(ranges):
         if i < 2: continue
@@ -282,21 +342,24 @@ class TestLinearizer(unittest.TestCase):
   def test_partial_opt_multireduce(self):
     # check how it works with one reduce optimized and one unoptimized
     Tensor.manual_seed(0)
-    x = Tensor.randn(27, 15, 5, dtype=dtypes.float).softmax(1).realize()
+    x = Tensor.randn(27, 12, 5, dtype=dtypes.float).softmax(1).realize()
     g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
-    first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 15, 5)).expand((27, 15, 15, 5)).to_uop()))
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 12, 5)).expand((27, 12, 12, 5)).to_uop()))
     first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
-    second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 15, 1, 5)).to_uop()))
-    diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 15, 1, 5)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 12, 1, 5)).to_uop()))
+    diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 12, 1, 5)))
     second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [
-      [Opt(OptOps.GROUPTOP, 0, 3)], # grouping
+      [Opt(OptOps.GROUPTOP, 0, 3)], # grouping one dimension but not the other
       [Opt(OptOps.GROUPTOP, 1, 3)],
-      [Opt(OptOps.GROUPTOP, 0, 15)],
-      [Opt(OptOps.GROUPTOP, 1, 15)],
-      [Opt(OptOps.UNROLL, 0, 3)],
+      [Opt(OptOps.GROUPTOP, 0, 6)],
+      [Opt(OptOps.GROUPTOP, 1, 6)],
+      [Opt(OptOps.GROUPTOP, 0, 6), Opt(OptOps.GROUPTOP, 1, 3)], # group the reduces differently
+      [Opt(OptOps.GROUPTOP, 0, 6), Opt(OptOps.GROUPTOP, 1, 12)],
+      [Opt(OptOps.GROUPTOP, 0, 3), Opt(OptOps.GROUPTOP, 1, 12), Opt(OptOps.UPCAST, 0, 3)], # group the reduces differently with upcasting
+      [Opt(OptOps.UNROLL, 0, 3)], # test unrolling
       [Opt(OptOps.UNROLL, 1, 3)],
     ]
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
@@ -306,6 +369,64 @@ class TestLinearizer(unittest.TestCase):
       for i,u in enumerate(ranges):
         if i == 0: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
+  
+  def test_double_reduce_uneven_grouping(self):
+    Tensor.manual_seed(0)
+    N = 128
+    x = Tensor.randn(8, N, 8, N, dtype=dtypes.float).realize()
+    st = x.lazydata.st
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, st.reshape((8, 1, N, 8, 1, N)).expand((8, N, N, 8, N, N)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2, 5)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, st.reshape((8, N, 1, 8, N, 1)).to_uop()))
+    neg_first_reduce = first_reduce * ast_const(dtypes.float, -1, (8, N, 1, 8, N, 1))
+    squares = (second_x+neg_first_reduce)*(second_x+neg_first_reduce)
+    squares_sum = UOp(UOps.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (1, 4)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((8, 1, 1, 8, 1, 1)).to_uop(), squares_sum,))
+    sink = UOp(UOps.SINK, src=(store,))
+    wanna_output = np.square(x.numpy()-x.numpy().sum(axis=(1,3), keepdims=True)).sum(axis=(1,3)).reshape((8,1,1,8,1,1))
+    opts = [
+      # openCL / GPU=1 is 256 max threads
+      # one dim
+      [Opt(OptOps.GROUPTOP, 0, 2)], [Opt(OptOps.GROUPTOP, 0, 32)], # first dim of the last reduce
+      [Opt(OptOps.GROUPTOP, 1, 2)], [Opt(OptOps.GROUPTOP, 1, 32)], # first dim of the first reduce
+      [Opt(OptOps.GROUPTOP, 2, 2)], [Opt(OptOps.GROUPTOP, 2, 32)], # second dim of the last reduce
+      [Opt(OptOps.GROUPTOP, 3, 2)], [Opt(OptOps.GROUPTOP, 3, 32)], # second dim of the first reduce
+      # two dims
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 3, 2)], # both dims of the second reduce
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 3, 32)],
+      [Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 3, 2)], # both dims of the first reduce
+      [Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 3, 32)]
+    ]
+    helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
+
+    # check for correctness when all dims are grouped differently
+    helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], \
+      opts=[[Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.GROUPTOP, 2, 4), Opt(OptOps.GROUPTOP, 3, 8)]])
+
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  def test_multireduce_dont_reuse_idxs(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(27, 12, 5, dtype=dtypes.float).softmax(1).realize()
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 1, 12, 5)).expand((27, 12, 12, 5)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((27, 12, 1, 5)).to_uop()))
+    diff = (second_x+first_reduce*ast_const(dtypes.float, -1, (27, 12, 1, 5)))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((27, 1, 1, 5)).to_uop(), second_reduce))
+    sink = UOp(UOps.SINK, src=(store,))
+    opts = [
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 0, 3)], # grouping one dimension twice in different ways, should produce two lidxs
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 0, 2)], # grouping one dimension twice in the same way, should produce two lidxs
+    ]
+    wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
+    lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
+    for l in lins[1:]: assert len([u for u in l.uops if u.op is UOps.SPECIAL]) > 1, \
+      "grouping one dimension multiple time should produce multiple lidxs"
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -325,17 +446,9 @@ class TestLinearizer(unittest.TestCase):
     store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((4, 1, 1)).to_uop(), second_reduce))
     sink = UOp(UOps.SINK, src=(store,))
     opts = [
-      # [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)], # grouping
-      # [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
-      # [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 16)],
-      # [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.GROUPTOP, 0, 32)],
       [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2)], # unroll reduce
       [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)],
       [Opt(OptOps.UNROLL, 0, 8), Opt(OptOps.UNROLL, 1, 8)] if Device.DEFAULT not in {"NV", "METAL"} else [], # can't do float8,
-      # [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 2, 2), Opt(OptOps.UNROLL, 3, 2)], # grouping + unrolling
-      # [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
-      # [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UNROLL, 2, 8), Opt(OptOps.UNROLL, 2, 8)],
-      # [Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 0, 8)],
     ]
     wanna_output = (x.numpy()-(x.numpy().sum(-1, keepdims=True)+np.exp2(x_p.numpy()).sum(-1, keepdims=True))).sum(-1).reshape(4, 1,1)
     lins = helper_linearizer_ast(sink, [x,x_p], wanna_output=[wanna_output], opts=opts)
