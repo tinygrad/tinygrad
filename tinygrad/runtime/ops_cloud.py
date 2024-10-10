@@ -42,15 +42,10 @@ class CloudHandler(BaseHTTPRequestHandler):
       ret = str(CloudHandler.buffer_num).encode()
     elif self.path.startswith("/buffer"):
       buf,sz = CloudHandler.buffers[int(self.path.split("/")[-1])]
-      if method == "PUT":
-        Device[CloudHandler.dname].allocator.copyin(buf, memoryview(bytearray(self.get_data())))
-      elif method == "DELETE":
-        Device[CloudHandler.dname].allocator.free(buf,sz)
-      elif method == "GET":
-        ret = bytearray(sz)
-        Device[CloudHandler.dname].allocator.copyout(memoryview(ret), buf)
-      else:
-        return self._fail()
+      if method == "GET": Device[CloudHandler.dname].allocator.copyout(memoryview(ret:=bytearray(sz)), buf)
+      elif method == "PUT": Device[CloudHandler.dname].allocator.copyin(buf, memoryview(bytearray(self.get_data())))
+      elif method == "DELETE": Device[CloudHandler.dname].allocator.free(buf,sz)
+      else: return self._fail()
     elif self.path.startswith("/program"):
       name, hsh = self.path.split("/")[-2:]
       if method == "PUT":
@@ -58,18 +53,15 @@ class CloudHandler(BaseHTTPRequestHandler):
         assert hashlib.sha256(src).hexdigest() == hsh
         lib = Device[CloudHandler.dname].compiler.compile_cached(src.decode())
         CloudHandler.programs[(name, hsh)] = Device[CloudHandler.dname].runtime(name, lib)
-      elif method == "DELETE":
-        del CloudHandler.programs[(name, hsh)]
       elif method == "POST":
         j = self.get_json()
         bufs = [CloudHandler.buffers[x][0] for x in j['bufs']]
         del j['bufs']
         r = CloudHandler.programs[(name, hsh)](*bufs, **j)
         if r is not None: ret = str(r).encode()
-      else:
-        return self._fail()
-    else:
-      return self._fail()
+      elif method == "DELETE": del CloudHandler.programs[(name, hsh)]
+      else: return self._fail()
+    else: return self._fail()
     self.send_response(200)
     self.end_headers()
     return self.wfile.write(ret)
