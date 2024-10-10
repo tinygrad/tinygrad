@@ -182,14 +182,13 @@ class QCOMComputeQueue(HWComputeQueue):
 class QCOMArgsState(HCQArgsState):
   def __init__(self, ptr:int, prg:QCOMProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
     super().__init__(ptr, prg, bufs, vals=vals)
-    ctypes.memset(self.ptr, 0, 1024)
+    ctypes.memset(self.ptr, 0, prg.kernargs_alloc_size)
 
     if len(bufs) + len(vals) != len(prg.buf_info): raise RuntimeError(f'incorrect args size given={len(bufs)+len(vals)} != want={len(prg.buf_info)}')
 
     self.buf_info, self.args_info, self.args_view = prg.buf_info[:len(bufs)], prg.buf_info[len(bufs):], to_mv(ptr, prg.kernargs_alloc_size).cast('Q')
 
-    for cnst_val, cnst_off, cnst_sz in prg.consts_info:
-      ctypes.memmove(self.ptr + cnst_off, (ctypes.c_int8 * cnst_sz).from_buffer_copy(cnst_val.to_bytes(cnst_sz, byteorder='little')), cnst_sz)
+    for cnst_val, cnst_off, cnst_sz in prg.consts_info: to_mv(self.ptr + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
     if prg.samp_cnt > 0: to_mv(self.ptr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     for i, b in enumerate(cast(List[QCOMBuffer], bufs)):
@@ -346,7 +345,7 @@ class QCOMDevice(HCQCompiled):
     QCOMDevice.dummy_addr = self._gpu_alloc(0x1000, map_to_cpu=False).va_addr
     QCOMDevice.signals_page = self._gpu_alloc(16 * 65536, map_to_cpu=True, uncached=True)
     QCOMDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
-    info, self.ctx, self.cmd_buf, self.cmd_buf_ptr, self.last_cmd = self._info(), self._ctx_create(), self._gpu_alloc(0x1000000, map_to_cpu=True), 0,0
+    info, self.ctx, self.cmd_buf, self.cmd_buf_ptr, self.last_cmd = self._info(), self._ctx_create(), self._gpu_alloc(16 << 20, map_to_cpu=True), 0,0
     QCOMDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
     if QCOMDevice.gpu_id >= 700: raise RuntimeError(f"Unsupported GPU: {QCOMDevice.gpu_id}")
 
