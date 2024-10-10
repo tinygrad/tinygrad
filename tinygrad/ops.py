@@ -597,8 +597,9 @@ contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
 def track_rewrites(func):
   def __wrapper(self, *args, **kwargs):
     if TRACK_MATCH_STATS >= 2: rewrite_stack.append((self, []))
-    ret = func(self, *args, **kwargs)
-    if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
+    try: ret = func(self, *args, **kwargs)
+    finally: # NOTE: even if some rewrites fail we try to save the stack
+      if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
     return ret
   return __wrapper
 
@@ -664,6 +665,7 @@ class RewriteContext:
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
   if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0:
     rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
+    #raise Exception(rewrite_stack[-1])
   return RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
