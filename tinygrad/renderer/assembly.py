@@ -6,6 +6,7 @@ from tinygrad.codegen.uopgraph import sym
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.helpers import prod
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -60,9 +61,7 @@ ptx_matcher = sym+PatternMatcher([
 class PTXRenderer(Renderer):
   device = "CUDA"
   suffix = "PTX"
-  global_max = (2147483647, 65535, 65535)
-  local_max = (1024, 1024, 64)
-  shared_max = 49152
+  global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
   tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
@@ -144,7 +143,7 @@ class PTXRenderer(Renderer):
 
     def _cast(a, dtype:DType, atype:DType, bitcast=False, u=None, pred=False):
       if atype == dtype or isinstance(atype, PtrDType):
-        if u: r[u] = a
+        if u is not None: r[u] = a
         return a
       kk(*self.render_cast((ret:=ssa('cast', u, self.types[dtype])), a, dtype, atype, bitcast))
       return ret
@@ -226,14 +225,16 @@ class PTXRenderer(Renderer):
           dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
           kk(*self.render_load(nm, ssa('dat', u, self.types[dt]), dt, ss=".param"))
         elif uop is UOps.WMMA:
-          wmma = []
+          _, (N, M, K), dtype_in, _, _, _, upcast_axes, _ = args
+          wmma, n_operands = [], tuple(prod(sz for _, sz in upc)*dtype_in.itemsize//4 for upc in upcast_axes[:2])
+          dt_map = { dtypes.half: "f16" }
           for vv in src[:2]:
             for i in range(0, len(r[vv]), 2):
               wmma.append(ssa("wmma", dtype="b32"))
               kk(f'mov.b32 {wmma[-1]}, {{{", ".join(r[vv][i:i+2])}}};')
           r[u] = [ssa("wmma", dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
-          kk(f'mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32\
-            {{{", ".join(r[u])}}}, {{{", ".join(wmma[:4])}}}, {{{", ".join(wmma[4:])}}}, {{{", ".join(r[src[2]])}}};')
+          kk(f'mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_map[dtype_in]}.{dt_map[dtype_in]}.f32\
+            {{{", ".join(r[u])}}}, {{{", ".join(wmma[:n_operands[0]])}}}, {{{", ".join(wmma[-n_operands[1]:])}}}, {{{", ".join(r[src[2]])}}};')
         else: raise NotImplementedError(f"no code for {uop}")
 
     return self.render_kernel(kernel, name, bufs, c.items())

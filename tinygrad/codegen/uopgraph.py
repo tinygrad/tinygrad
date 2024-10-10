@@ -1,10 +1,10 @@
 from __future__ import annotations
 from typing import Optional, Tuple, Dict, List, Set, cast, TYPE_CHECKING, Any, DefaultDict, Callable
-import functools, itertools, heapq, math, operator
+import functools, itertools, heapq, operator
 from collections import defaultdict
-from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType
-from tinygrad.ops import UnaryOps, BinaryOps, exec_alu, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
-from tinygrad.ops import UPat, PatternMatcher, graph_rewrite, TernaryOps
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType, DType
+from tinygrad.ops import UnaryOps, BinaryOps, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
+from tinygrad.ops import UPat, PatternMatcher, graph_rewrite, TernaryOps, symbolic_flat, is_irreducible, _get_chain
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
@@ -39,7 +39,7 @@ def fold_expanded(ex, buf):
         if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
           load_1 = new_srcs[offsets[o]]
           new_src = list(load_1.src)
-          if not new_src[1].divides(fold_length): continue
+          if new_src[1].divides(fold_length) is None: continue
           # for images, we rewrite the index. it must evenly divide 4 from the above check
           if is_image:
             new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((new_src[1] // 4) % buf.dtype.shape[1], (new_src[1] // (4 * buf.dtype.shape[1]))))
@@ -75,107 +75,7 @@ float4_folding = PatternMatcher([
   (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
 ])
 
-# ***** mod *****
-
-def _get_chain(x:UOp, sep:BinaryOps):
-  if x.op is UOps.ALU and x.arg is sep:
-    for s in x.src: yield from _get_chain(s, sep)
-  else: yield x
-
-def mod_folding(x:UOp, c:int) -> Optional[UOp]:
-  # simplify x % c, None means no change
-
-  # simple cancel mod case
-  if 0 < c and 0 <= x.vmin and (quotient:=x.vmin//c) == x.vmax//c: return x-quotient*c
-
-  remainder, something_changed = [], False
-  for u in _get_chain(x, BinaryOps.ADD):
-    if (factor:=u.const_factor())%c != factor:
-      divides = u.divides(factor)*(factor%c)
-      assert divides is not None
-      remainder.append(divides)
-      something_changed = True
-    elif u.op is UOps.ALU and u.arg is BinaryOps.MOD and (s1:=u.src[1]).op is UOps.CONST and s1.arg%c == 0:
-      remainder.append(u.src[0])
-      something_changed = True
-    else: remainder.append(u)
-  if not something_changed: return None
-  return functools.reduce(operator.add, remainder)%c if remainder else x.const_like(0)
-
-def div_folding(x:UOp, c:int) -> Optional[UOp]:
-  # simplify x // c, None means no change
-
-  # simple cancel div case
-  if 0 <= x.vmin and x.vmax < c: return x.const_like(0)
-
-  quotient, remainder, rem_const, something_changed, gcd, divisor = [], [], 0, False, c, 1
-  for u in _get_chain(x, BinaryOps.ADD):
-    if u.op is UOps.CONST:
-      # add all const together first
-      if rem_const != 0: something_changed = True
-      rem_const += u.arg
-    elif (factor:=u.const_factor())%c == 0:
-      if factor:
-        divides = u.divides(c)
-        assert divides is not None
-        quotient.append(divides)
-      something_changed = True
-    else:
-      # divisor is the smallest common divisor of all MULs
-      if u.op is UOps.ALU and u.arg is BinaryOps.MUL and factor > 1 and c % factor == 0 and (divisor == 1 or divisor > factor): divisor = factor
-      remainder.append(u)
-      gcd = math.gcd(gcd, factor)
-
-  # handle the const
-  if rem_const%c != rem_const:
-    something_changed = True
-    quotient.append(x.const_like(rem_const//c))
-    rem_const = rem_const%c
-  if rem_const != 0: remainder.append(x.const_like(rem_const))
-
-  # x // c -> quotient + (remainder // div) // (c // div)
-  div = gcd if gcd > 1 else divisor
-
-  if not something_changed: return newx//(c//div) if 1 < div < c and (newx:=div_folding(x, div)) is not None else None
-  rem:Optional[UOp] = functools.reduce(operator.add, remainder) if remainder else None
-  quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
-  if quo is None: return x.const_like(0) if rem is None else cast(UOp, div_folding(rem, div))//(c//div)
-  return quo if rem is None else cast(UOp, div_folding(rem, div))//(c//div)+quo
-
-def lt_folding(x:UOp, c:int) -> Optional[UOp]:
-  return cast(UOp, x.divides(g)).lt(c//g) if ((g:=math.gcd(x.const_factor(), c)) > 1) else None
-
-def fold_unrolled_divs(divs:UOp):
-  # div pattern in unrolled arange
-  # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  add_chain, seen_const, ans = list(_get_chain(divs, BinaryOps.ADD)), [], None
-  for u in add_chain:
-    if not (u.op is UOps.ALU and u.arg is BinaryOps.IDIV and u.src[1].op is UOps.CONST and u.src[1].arg==len(add_chain)): return None
-    # assumed CONST is the last of an ADD
-    if (s0:=u.src[0]).op is UOps.ALU and s0.arg is BinaryOps.ADD and s0.src[1].op is UOps.CONST and s0.src[1].op is UOps.CONST:
-      seen_const.append(s0.src[1].arg)
-      s0 = s0.src[0]
-    else: seen_const.append(0)
-    if ans is None: ans = s0
-    if ans != s0: return None
-  return ans if ans is not None and sorted(seen_const)==list(range(len(add_chain))) else None
-
 # ***** image load valid simplification *****
-
-def is_irreducible(u:UOp): return u.op in (UOps.DEFINE_VAR, UOps.SPECIAL, UOps.RANGE)
-
-def canonicalize_simplex(X:UOp) -> Optional[UOp]:
-  # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
-  # returns x0 + x1 + ... in such case, or None if not
-  changed, ret = False, []
-  for u in _get_chain(X, BinaryOps.ADD):
-    # assumed the const is the last src of MUL
-    if u.op is UOps.ALU and u.arg is BinaryOps.MUL and u.src[1].op is UOps.CONST and u.src[1].arg > 0:
-      changed = True
-      u = u.src[0]
-    if not (is_irreducible(u) and u.vmin >= 0): return None
-    ret.append(u)
-  return functools.reduce(operator.add, ret) if changed else None
 
 def is_increasing(f:UOp):
   # is f a monotonically increasing function regards its input
@@ -186,7 +86,7 @@ def is_increasing(f:UOp):
 
 def replace_uop(uop:UOp, old:UOp, new:UOp):
   # replace all `old` in `uop` to `new`
-  return new if uop.key == old.key else uop.replace(src=tuple(replace_uop(s, old, new) for s in uop.src))
+  return new if uop is old else uop.replace(src=tuple(replace_uop(s, old, new) for s in uop.src))
 
 def parse_valid(valid:UOp) -> Tuple[UOp, bool, int]:
   # if it's X <= c, returns X, True, c
@@ -229,8 +129,8 @@ def idx_given_valid(valid:UOp, idx:UOp) -> Optional[UOp]:
         newidxs[1].append(newidx.src[1])
 
       # if every branch in candidate gives the same simplified output, we can rewrite the idx
-      if len(newidxs[0])==1 or (len(newidxs[0]) > 1 and all_same([i.key for i in newidxs[0]])): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
-      if len(newidxs[1])==1 or (len(newidxs[1]) > 1 and all_same([i.key for i in newidxs[1]])): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
+      if len(newidxs[0])==1 or (len(newidxs[0]) > 1 and all_same(newidxs[0])): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
+      if len(newidxs[1])==1 or (len(newidxs[1]) > 1 and all_same(newidxs[1])): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
   return idx
 
 def simplify_valid_image_load(load:UOp, buf:UOp):
@@ -262,9 +162,9 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
           drop_stmt.append(stmt)
           break
 
-  if not drop_stmt and idx.key == start_idx.key: return None
+  if not drop_stmt and idx == start_idx: return None
   new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
-  return load.replace(src=((buf, idx, invalid_val, new_valid) if new_valid else (buf, idx)))
+  return load.replace(src=((buf, idx, invalid_val, new_valid) if new_valid is not None else (buf, idx)))
 
 # ***** optional patterns *****
 
@@ -370,11 +270,7 @@ def no_vectorized_wmma(wmma:UOp):
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 # this is symbolic 2.0
-sym = PatternMatcher([
-  # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
-  (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
-  (UPat.var('x', dtype=dtypes.bool) + UPat.var('y'), lambda x,y: x|y),
-  (UPat.var('x', dtype=dtypes.bool).max(UPat.var('y')), lambda x,y: x|y),
+sym = symbolic_flat+PatternMatcher([
   # self ASSIGN is just self
   (UPat(UOps.ASSIGN, src=(UPat.var('x'), UPat.var('x'))), lambda x: x),
   # ASSIGN to global is just self
@@ -423,8 +319,6 @@ sym = PatternMatcher([
     .lt(UPat.cvar("compval")).ne(UPat(UOps.CONST, name="ne", arg=True))
     .where(UPat.cvar("multconst"), UPat.const(None, 0)), m2 + UPat.var("extra")),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
-  # unrolled arange div folding
-  (UPat(UOps.ALU, name="divs", src=[UPat(), UPat(UOps.ALU, arg=BinaryOps.IDIV)], arg=BinaryOps.ADD), fold_unrolled_divs),
   # indexing, with cast or where
   (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*
     UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.any(UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE, name="rng"), UPat(UOps.RANGE, name="rng"))),
@@ -432,86 +326,16 @@ sym = PatternMatcher([
   (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).where(
     UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.any(UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE, name="rng"), UPat(UOps.RANGE, name="rng"))),
          name="ld"), UPat.const(None, 0.0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
-  # max folding
-  (UPat.max(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # GEP/CAST const rules
   (UPat(UOps.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
-  # a conditional with the same results either way is a noop, also fold const conditionals
-  (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
-  (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
-  # ** constant folding **
-  (UPat(UOps.ALU, name="root", src=UPat((UOps.VCONST, UOps.CONST))),
-   lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
   # ** self folding **
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   (UPat(UOps.REDUCE, src=(UPat.var("x"),)), lambda x: x),  # a REDUCE without ranges is a NOOP
-  (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
-  (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
-  (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
-  (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
-  (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
-  (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
-  ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
-  (UPat.var("x", dtype=dtypes.bool) & UPat.cvar("c", vec=False), lambda x,c: x if c.arg else c),
-  (UPat.var("x", dtype=dtypes.bool) | UPat.cvar("c", vec=False), lambda x,c: c if c.arg else x),
-  # ** zero folding **
-  # x*0 -> 0 or 0*x -> 0
-  # if x is nan or inf it should render the nan value.
-  # NOTE: this can be wrong for loaded NaN
-  (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
-  # ALU min==max -> CONST (slow!)
-  (UPat(UOps.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # ** load/store folding **
   (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.load(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx:UOp(UOps.NOOP)),
-  # ** two stage add/mul folding **
-  ((UPat.var("x") + UPat.cvar("c1")) + UPat.cvar("c2"), lambda x,c1,c2: x+(c1+c2)),
-  ((UPat.var("x") * UPat.cvar("c1")) * UPat.cvar("c2"), lambda x,c1,c2: x*(c1*c2)),
-  ((UPat.var("x") & UPat.cvar("c1")) & UPat.cvar("c2"), lambda x,c1,c2: x&(c1&c2)),
-  ((UPat.var("x") | UPat.cvar("c1")) | UPat.cvar("c2"), lambda x,c1,c2: x|(c1|c2)),
-  # *** rules from symbolic ***
-  # ** lt **
-  # c0*x<c1 for positive int c0,c1
-  ((UPat.cvar("c0", vec=False)*UPat.var("x")).lt(UPat.cvar("c1", vec=False)),
-   lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if dtypes.is_int(x.dtype) and c0.arg > 0 and c1.arg > 0 else None),
-  # c0*x<c1 for negative int c0 and non-positive c1
-  ((UPat.cvar("c0", vec=False)*UPat.var("x")).lt(UPat.cvar("c1", vec=False)),
-   lambda x,c0,c1: (-x).lt(-(math.floor(-c1.arg/-c0.arg))) if dtypes.is_int(x.dtype) and c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
-  # x//c0<c1 for positive int c0
-  ((UPat.var("x")//UPat.cvar("c0", vec=False)).lt(UPat.cvar("c1", vec=False)),
-   lambda x,c0,c1: x.lt(c1.arg*c0.arg) if dtypes.is_int(x.dtype) and c0.arg > 0 else None),
-  # mul add lt
-  (((UPat.cvar("c0", vec=False)*UPat.var("x"))+UPat.var("x2")).lt(UPat.cvar("c1", vec=False)),
-   lambda x,x2,c0,c1: x.lt(c1//c0) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax and x2.vmin >= 0 else None),
-  # generic lt folding
-  (UPat.var("x").lt(UPat.cvar("c", vec=False)),
-    lambda x,c: lt_folding(x, c.arg) if 0 < c.arg and dtypes.is_int(x.dtype) and not dtypes.is_unsigned(x.dtype) else None),
-  # canonicalize a simplex with positive coefficients > 0
-  # not x < 1 -> X > 0
-  (UPat.var("x").lt(1).ne(True), lambda x: newx.lt(1).ne(True) if dtypes.is_int(x.dtype) and (newx:=canonicalize_simplex(x)) is not None else None),
-  # ** div **
-  # # div folding
-  (UPat.var("x") // UPat.cvar("c", vec=False), lambda x,c:
-   newx if 0 < c.arg and not dtypes.is_unsigned(x.dtype) and (newx:=div_folding(x,c.arg)) is not None else None),
-  # ** mod **
-  # mod folding
-  (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
-  # ** combine terms **
-  (UPat.var("x")%UPat.cvar("c")+(UPat.var("x")//UPat.cvar("c"))*UPat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
-  (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
-  (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
-  (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
-  ((UPat.var("x") // UPat.cvar("c0")) // UPat.cvar("c1"), lambda x,c0,c1: x//(c0*c1)), # (x//c0)//c1 -> x//(c0*c1)
-  ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
-  (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
-  ((UPat.cvar("c0") + UPat.var("x")).lt(UPat.cvar("c1")), lambda x,c0,c1: UOp.lt(x, c1-c0)),  # c0 + x < c1 -> x < c1 - c0
-  # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
-  ((UPat.var("x") + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c if dtypes.is_int(x.dtype) else None),
   # x!=0 -> (bool)x
   (UPat.var("x").ne(0), lambda x: x.cast(dtypes.bool.vec(x.dtype.count))),
-  # bitwise noops
-  ((UPat.var("x") & UPat.var("x")), lambda x: x),
-  ((UPat.var("x") | UPat.var("x")), lambda x: x),
   # TODO: can do the invert of this (flip alt/load) when we fix double ops
   (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("gate").where(UPat.var("alt"), UPat.load(UPat.var("buf"), UPat.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
@@ -533,12 +357,6 @@ sym = PatternMatcher([
   (UPat(UOps.SINK, name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, tuple(flatten(x.src if x.op in {UOps.SINK, UOps.EXPAND} else (x,) for x in root.src)), root.arg)
       if any(x.op in {UOps.SINK, UOps.EXPAND} for x in root.src) else None),
-  # ** move add consts to end (NOTE: this is still happening before constant folding) **
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
-  # ** move mul consts to end (NOTE: this is still happening before constant folding) **
-  (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x*c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
-  (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
 ])
 
 # *** uop expander ***
@@ -719,8 +537,8 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), simplify_valid_image_load),
 ])
 
-no_pyint = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE), name="x"),
-  lambda x: UOp(x.op, dtypes.int32.vec(x.dtype.count), x.src, x.arg) if x.dtype.scalar() == dtypes.pyint else None)])
+no_pyint = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR),
+  name="x"), lambda x: UOp(x.op, dtypes.int32.vec(x.dtype.count), x.src, x.arg) if x.dtype.scalar() == dtypes.pyint else None)])
 
 # *** uop graph ***
 
@@ -802,8 +620,17 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     for x in u.src: fix_priority(x, priorities[u])
   fix_priority(sink, 0)
 
-  queue:List[Tuple[int, UOp]] = []
-  def push(u:UOp): heapq.heappush(queue, (priorities[u], u))
+  @functools.lru_cache(None)
+  def tuplize(u:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
+    # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
+    if u.op is UOps.DEFINE_VAR: arg = u.arg[0]
+    elif u.op is UOps.ALU: arg = u.arg.value
+    else: arg = u.arg
+    return (u.op.value, arg, u.dtype, tuple(tuplize(x) for x in u.src))
+
+  # NOTE: the compare should never make it all the way to u
+  queue:List[Tuple[int, Tuple, UOp]] = []
+  def push(u:UOp): heapq.heappush(queue, (priorities[u], tuplize(u), u))
 
   for u in children:
     if in_degree[u] == 0: push(u)
@@ -811,7 +638,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   scope_end: Dict[UOp, UOp] = {}
   _uops: List[UOp] = []
   while queue:
-    p,x = heapq.heappop(queue)
+    p,_,x = heapq.heappop(queue)
     if DEBUG >= 7: print(f"{p:5d}", x.op, x.dtype, x.arg)
     if x in scope_children: scope_end[x] = x
     if x.op is UOps.DEFINE_ACC:

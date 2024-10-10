@@ -2,8 +2,9 @@ from __future__ import annotations
 import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal
 from typing import Tuple, List, Any, cast, Union, Dict, Type
 from dataclasses import dataclass
-from tinygrad.device import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command, \
-                            HCQArgsState, HCQProgram, HCQSignal, BufferOptions
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command
+from tinygrad.runtime.support.hcq import HCQArgsState, HCQProgram, HCQSignal
+from tinygrad.device import BufferOptions
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod
 from tinygrad.renderer.assembly import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
@@ -67,7 +68,7 @@ assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 def nvmethod(subc, mthd, size, typ=2): return (typ << 28) | (size << 16) | (subc << 13) | (mthd >> 2)
 
 class NVSignal(HCQSignal):
-  def __init__(self, value=0):
+  def __init__(self, value=0, is_timeline=False):
     self._signal = NVDevice.signals_pool.pop()
     self.signal_addr = mv_address(self._signal)
     super().__init__(value)
@@ -87,7 +88,7 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
     if local_mem_window: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, 2), *data64(local_mem_window)]
     if shared_mem_window: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 2), *data64(shared_mem_window)]
     if local_mem: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *data64(local_mem)]
-    if local_mem_tpc_bytes: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *data64(local_mem_tpc_bytes), 0x40]
+    if local_mem_tpc_bytes: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *data64(local_mem_tpc_bytes), 0xff]
 
   def _wait(self, signal, value=0):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(signal.signal_addr), *data64_le(value),
@@ -479,7 +480,7 @@ class NVDevice(HCQCompiled):
 
     compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
     super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
-                     functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue, timeline_signals=(NVSignal(), NVSignal()))
+                     functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue)
 
     self._setup_gpfifos()
 
@@ -526,7 +527,8 @@ class NVDevice(HCQCompiled):
     bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
     self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True)
 
-    NVComputeQueue().setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
+    NVComputeQueue().wait(self.timeline_signal, self.timeline_value - 1) \
+                    .setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
 

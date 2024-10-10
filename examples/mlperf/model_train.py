@@ -28,7 +28,7 @@ def train_resnet():
   if getenv("LOGMLPERF"):
     from mlperf_logging import mllog
     import mlperf_logging.mllog.constants as mllog_constants
-    mllog.config(filename=f"result_{seed}.txt")
+    mllog.config(filename=f"result_resnet_{seed}.txt")
     mllog.config(root_dir=Path(__file__).parents[3].as_posix())  # truncate to log this. "file": "tinygrad/examples/mlperf/model_train.py"
     MLLOGGER = mllog.get_mllogger()
     if INITMLPERF:
@@ -621,7 +621,7 @@ def train_bert():
     from mlperf_logging import mllog
     import mlperf_logging.mllog.constants as mllog_constants
 
-    mllog.config(filename="bert.log")
+    mllog.config(filename=f"result_bert_{seed}.log")
     mllog.config(root_dir=Path(__file__).parents[3].as_posix())
     MLLOGGER = mllog.get_mllogger()
     MLLOGGER.logger.propagate = False
@@ -649,7 +649,7 @@ def train_bert():
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 1 * len(GPUS))
   max_lr             = config["OPT_BASE_LEARNING_RATE"] = getenv("OPT_BASE_LEARNING_RATE", 0.0001 * math.sqrt(BS/66))
 
-  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3000000 // BS)
+  train_steps        = config["TRAIN_STEPS"]            = getenv("TRAIN_STEPS", 3630000 // BS)
   warmup_steps       = config["NUM_WARMUP_STEPS"]       = getenv("NUM_WARMUP_STEPS", 1)
   max_eval_steps     = config["MAX_EVAL_STEPS"]         = getenv("MAX_EVAL_STEPS", (10000 + EVAL_BS - 1) // EVAL_BS) # EVAL_BS * MAX_EVAL_STEPS >= 10000
   eval_step_freq     = config["EVAL_STEP_FREQ"]         = getenv("EVAL_STEP_FREQ", int((math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000) / BS)) # Round down
@@ -658,7 +658,7 @@ def train_bert():
   save_ckpt_dir      = config["SAVE_CKPT_DIR"]          = getenv("SAVE_CKPT_DIR", "./ckpts")
   init_ckpt          = config["INIT_CKPT_DIR"]          = getenv("INIT_CKPT_DIR", BASEDIR)
 
-  loss_scaler        = config["LOSS_SCALER"]            = getenv("LOSS_SCALER", 2.0**13 if dtypes.default_float == dtypes.float16 else 1.0)
+  loss_scaler        = config["LOSS_SCALER"]            = getenv("LOSS_SCALER", 2.0**10 if dtypes.default_float == dtypes.float16 else 1.0)
   decay              = config["DECAY"]                  = getenv("DECAY", 0.01)
   epsilon            = config["EPSILON"]                = getenv("EPSILON", 1e-6)
   poly_power         = config["POLY_POWER"]             = getenv("POLY_POWER", 1.0)
@@ -749,6 +749,8 @@ def train_bert():
   if RUNMLPERF:
     # only load real data with RUNMLPERF
     i, train_data = start_step, get_data_bert(GPUS, train_it)
+    if MLLOGGER:
+      MLLOGGER.start(key=mllog_constants.EPOCH_START, value=i*BS, metadata={"epoch_num": i*BS})
   else:
     i, train_data = start_step, get_fake_data_bert(GPUS, BS)
 
@@ -786,7 +788,7 @@ def train_bert():
     if WANDB:
       wandb.log({"lr": optimizer_wd.lr.numpy(), "train/loss": loss, "train/step_time": cl - st,
                   "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
-                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st)})
+                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": (i+1)*BS})
 
     train_data, next_data = next_data, None
     i += 1
@@ -801,7 +803,7 @@ def train_bert():
     # ** eval loop **
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK):
       if MLLOGGER and RUNMLPERF:
-        MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": 1, "epoch_count": 1, "step_num": i})
+        MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*BS, "step_num": i})
       if getenv("RESET_STEP", 1): train_step_bert.reset()
       eval_lm_losses = []
       eval_clsf_losses = []
@@ -856,16 +858,17 @@ def train_bert():
                     "eval/clsf_accuracy": avg_clsf_acc, "eval/forward_time": avg_fw_time})
 
       if MLLOGGER and RUNMLPERF:
-        MLLOGGER.end(key=mllog_constants.EVAL_STOP, value=i, metadata={"epoch_count": 1, "step_num": i, "samples_count": config["EVAL_BS"] * config["MAX_EVAL_STEPS"]})
-        MLLOGGER.event(key=mllog_constants.EVAL_ACCURACY, value=avg_lm_acc, metadata={"epoch_num": 1, "masked_lm_accuracy": avg_lm_acc})
+        MLLOGGER.end(key=mllog_constants.EVAL_STOP, value=i*BS, metadata={"epoch_count": i*BS, "step_num": i, "samples_count": config["EVAL_BS"] * config["MAX_EVAL_STEPS"]})
+        MLLOGGER.event(key=mllog_constants.EVAL_ACCURACY, value=avg_lm_acc, metadata={"epoch_num": i*BS, "masked_lm_accuracy": avg_lm_acc})
 
       # save model if achieved target
       if not achieved and avg_lm_acc >= target:
         wc_end = time.perf_counter()
-        if not os.path.exists(ckpt_dir := save_ckpt_dir): os.mkdir(ckpt_dir)
-        fn = f"{ckpt_dir}/bert-large.safe"
-        safe_save(get_state_dict(model), fn)
-        print(f" *** Model saved to {fn} ***")
+        if getenv("CKPT"):
+          if not os.path.exists(ckpt_dir := save_ckpt_dir): os.mkdir(ckpt_dir)
+          fn = f"{ckpt_dir}/bert-large.safe"
+          safe_save(get_state_dict(model), fn)
+          print(f" *** Model saved to {fn} ***")
 
         total_seconds = wc_end - wc_start
         hours = int(total_seconds // 3600)
@@ -874,11 +877,12 @@ def train_bert():
         print(f"Reference Convergence point reached after {i * BS} datasamples and {hours}h{minutes}m{seconds:.2f}s.")
         achieved = True
         if MLLOGGER and RUNMLPERF:
+          MLLOGGER.event(key=mllog_constants.EPOCH_STOP, value=i*BS, metadata={"epoch_num": i*BS})
           MLLOGGER.end(key=mllog_constants.RUN_STOP, metadata=dict(status=mllog_constants.SUCCESS))
         # stop once hitting the target
         break
 
-    if getenv("CKPT", 1) and i % save_ckpt_freq == 0:
+    if getenv("CKPT") and i % save_ckpt_freq == 0:
       if MLLOGGER and RUNMLPERF:
         if previous_step:
           MLLOGGER.end(key=mllog_constants.BLOCK_STOP, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "first_step_num": i, "step_num": i, "step_count": i - previous_step})

@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Tuple, Optional, List, cast
 import ctypes, functools, hashlib
 from tinygrad.runtime.autogen import opencl as cl
-from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG, getenv
+from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG, getenv, mv_address
 from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
 from tinygrad.device import BufferOptions, LRUAllocator, Compiled, Compiler, CompileError
 
@@ -74,6 +74,7 @@ class CLAllocator(LRUAllocator):
       check(cl.clEnqueueWriteImage(self.device.queue, dest[0], False, (ctypes.c_size_t * 3)(0,0,0),
                                    (ctypes.c_size_t * 3)(dest[1].image.shape[1],dest[1].image.shape[0],1), 0, 0, from_mv(src), 0, None, None))
     else:
+      if mv_address(src) % 16: src = memoryview(bytearray(src))
       check(cl.clEnqueueWriteBuffer(self.device.queue, dest[0], False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
     self.device.pending_copyin.append(src)    # NOTE: these can't be freed until the GPU actually executes this command
   def copyout(self, dest:memoryview, src:Tuple[ctypes._CData, BufferOptions]):
