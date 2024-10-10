@@ -17,7 +17,9 @@ block_size = 1024
 class CausalSelfAttention:
   def __init__(self):
     # key, query, value projections for all heads, but in a batch
-    self.c_attn = nn.Linear(n_embed, 3 * n_embed)
+    self.q = nn.Linear(n_embed, n_embed)
+    self.k = nn.Linear(n_embed, n_embed)
+    self.v = nn.Linear(n_embed, n_embed)
     # output projection
     self.c_proj = nn.Linear(n_embed, n_embed)
     # regularization
@@ -29,8 +31,9 @@ class CausalSelfAttention:
 
   def __call__(self, x:Tensor):
     B, T, C = x.shape
-    qkv = self.c_attn(x)
-    q, k, v = qkv.split(self.n_embed, dim=2)
+    q = self.q(x)
+    k = self.k(x)
+    v = self.v(x)
     k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -107,10 +110,13 @@ x, y = next(data_iter)
 model = GPT()
 if SHARD:
   seen = set()
-  for p in nn.state.get_state_dict(model).values():
+  for k, p in nn.state.get_state_dict(model).items():
     if p in seen: continue
     seen.add(p)
-    p.shard_(GPUS, axis=0)
+    if k == "b0.attn.bias":
+      p.shard_(GPUS)
+    else:
+      p.shard_(GPUS, axis=0)
 
 optimizer = nn.optim.Adam(nn.state.get_parameters(model), shard_axis=0)
 
