@@ -38,7 +38,8 @@ class CloudHandler(BaseHTTPRequestHandler):
       CloudHandler.buffers[CloudHandler.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(size:=self.get_json()['size']), size)
       ret = str(CloudHandler.buffer_num).encode()
     elif self.path.startswith("/buffer"):
-      buf,sz = CloudHandler.buffers[key:=int(self.path.split("/")[-1])]
+      key = int(self.path.split("/")[-1])
+      buf,sz = CloudHandler.buffers[key]
       if method == "GET": Device[CloudHandler.dname].allocator.copyout(memoryview(ret:=bytearray(sz)), buf)
       elif method == "PUT": Device[CloudHandler.dname].allocator.copyin(buf, memoryview(bytearray(self.get_data())))
       elif method == "DELETE":
