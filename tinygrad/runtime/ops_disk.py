@@ -75,11 +75,12 @@ class DiskDevice(Compiled):
     self.fd: Optional[int] = None
     self.count = 0
     super().__init__(device, DiskAllocator(self), None, None, None)
-  def _might_open(self, size):
+  def _might_open(self, size: int):
     self.count += 1
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
-    if self.size is not None: return
     filename = self.dname[len("disk:"):]
+    unlinked = not filename.startswith("shm:") and self.fd is not None and os.fstat(self.fd).st_nlink == 0
+    if self.size is not None and not unlinked: return
     self.size = size
 
     if filename.startswith("shm:"):
@@ -87,6 +88,7 @@ class DiskDevice(Compiled):
       self.mem = mmap.mmap(fd, self.size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
       os.close(fd)
     else:
+      if self.fd is not None: os.close(self.fd)
       try: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT|(0 if OSX else os.O_DIRECT))
       except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
       if os.fstat(self.fd).st_size < self.size: os.ftruncate(self.fd, self.size)
@@ -97,6 +99,7 @@ class DiskDevice(Compiled):
     self.count -= 1
     if self.count == 0:
       if self.fd is not None: os.close(self.fd)
+      self.fd = None
       self.size = None
   def _iouring_setup(self):
     DiskDevice._tried_io_uring_init = True
