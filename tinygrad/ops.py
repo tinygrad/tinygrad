@@ -662,7 +662,6 @@ class RewriteContext:
     return ret
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
-  if TRACK_MATCH_STATS and not isinstance(pm, TrackedPatternMatcher): pm = TrackedPatternMatcher(pm.patterns)
   if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0:
     rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
   return RewriteContext(pm, ctx).rewrite(sink)
