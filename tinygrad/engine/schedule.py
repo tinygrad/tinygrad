@@ -12,6 +12,7 @@ from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from tinygrad.shape.view import View, strides_for_shape
+from tinygrad.engine.schedule2 import _graph, ScheduleItem
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
@@ -20,20 +21,6 @@ BUF_LIMIT = {"METAL": 32}
 METAOPS = {MetaOps.CUSTOM:UOps.CUSTOM, MetaOps.COPY:UOps.COPY, MetaOps.EMPTY:UOps.EMPTY, MetaOps.VIEW:UOps.BUFFER_VIEW}
 
 # *** ScheduleItem return type ***
-
-@dataclass(frozen=True)
-class ScheduleItem:
-  ast: UOp
-  bufs: Tuple[Buffer, ...]
-  metadata: Optional[Tuple[Metadata, ...]]
-  @property
-  def outputs(self) -> Tuple[Buffer, ...]:
-    """Read/write or write only buffers in the schedule."""
-    return self.bufs[:len(self.ast.src)] if self.ast.op is UOps.SINK else self.bufs[0:1]
-  @property
-  def inputs(self) -> Tuple[Buffer, ...]:
-    """Read only buffers in the schedule."""
-    return self.bufs[len(self.ast.src):] if self.ast.op is UOps.SINK else self.bufs[1:]
 
 @dataclass(frozen=True)
 class LBScheduleItem:
@@ -418,6 +405,7 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
 # *** DAG ordering: breadth first search ***
 
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  if getenv("SV2", 1): return _graph(outs), {}
   graph, in_degree, var_vals = _graph_schedule(outs)
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
