@@ -697,7 +697,7 @@ class Kernel:
           return UOp(UOps.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
         arg = (alu_op, axis)
       elif op.op is UOps.SINK:
-        arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals)
+        arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals, prod(self.full_shape) > (1 << 31))
       return op.replace(src=tuple(fixup_ast(x, apply_to_st) for x in op.src), arg=arg)
     # NOTE: rewrite with an empty PatternMatcher to dedup UOps
     return graph_rewrite(fixup_ast(self.ast), PatternMatcher([]))
