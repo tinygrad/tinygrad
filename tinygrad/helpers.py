@@ -200,10 +200,10 @@ def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
   cur = conn.cursor()
   if table not in _db_tables:
     TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
-    ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
-    cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
+    ltypes = ', '.join(f"{k} {TYPES[type(v)]}" for k,v in key.items())
+    cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key)}))")
     _db_tables.add(table)
-  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))  # noqa: E501
+  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key)}, val) VALUES ({', '.join(['?']*len(key))}, ?)", tuple(key) + (pickle.dumps(val), ))
   conn.commit()
   cur.close()
   return val
