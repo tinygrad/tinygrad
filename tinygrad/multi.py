@@ -157,7 +157,7 @@ class MultiLazyBuffer(MathTrait):
 
   def expand(self, arg:Tuple[sint, ...]):
     # NOTE: this assert isn't needed, sharded axis can have dim 1
-    assert self.axis is None or arg[self.axis] == self.shape[self.axis], f"expand not supported on sharded axis {arg=}"
+    # assert self.axis is None or arg[self.axis] == self.shape[self.axis], f"expand not supported on sharded axis {arg=}"
     return MultiLazyBuffer([x.expand(self._shape_to_single_shard(arg, x)) for x in self.lbs], self.axis, self.real)
 
   def permute(self, arg:Tuple[int, ...]):

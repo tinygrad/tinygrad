@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import List
 import pathlib
 from tinygrad.multi import MultiLazyBuffer
-
+import re
 
 SHARD_MODEL = False
 
@@ -25,7 +25,9 @@ class CausalSelfAttention:
   def __init__(self, config:GPTConfig):
     assert config.n_embd % config.n_head == 0
     # key, query, value projections for all heads, but in a batch
-    self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
+    self.q = nn.Linear(config.n_embd, config.n_embd)
+    self.k = nn.Linear(config.n_embd, config.n_embd)
+    self.v = nn.Linear(config.n_embd, config.n_embd)
     # output projection
     self.c_proj = nn.Linear(config.n_embd, config.n_embd)
     # regularization
@@ -37,8 +39,9 @@ class CausalSelfAttention:
 
   def __call__(self, x:Tensor):
     B, T, C = x.shape
-    qkv = self.c_attn(x)
-    q, k, v = qkv.split(self.n_embd, dim=2)
+    q = self.q(x)
+    k = self.k(x)
+    v = self.v(x)
     k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -163,10 +166,14 @@ if __name__ == "__main__":
   seen = set()
   if args.shard_model:
     GPUS = [f'{Device.DEFAULT}:{i}' for i in range(2)]
-    for p in nn.state.get_state_dict(model).values():
+    for k, p in nn.state.get_state_dict(model).items():
       if p in seen: continue
       seen.add(p)
-      p.shard_(GPUS, axis=0)
+      if re.match(r"h\.\d+\.attn\.bias", k):
+        print("SHard on axis None")
+        p.shard_(GPUS)
+      else:
+        p.shard_(GPUS, axis=0)
 
   # init the tokenizer
   enc = tiktoken.get_encoding("gpt2")
