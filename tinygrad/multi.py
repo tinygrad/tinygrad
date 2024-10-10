@@ -165,10 +165,7 @@ class MultiLazyBuffer(MathTrait):
     return MultiLazyBuffer([x.permute(arg) for x in self.lbs], arg.index(self.axis) if self.axis is not None else None, self.real)
 
   def shrink(self, arg:Tuple[Tuple[sint, sint], ...]):
-    if self.axis is None or arg[self.axis] == (0, self.shape[self.axis]) or arg[self.axis] in self.bounds:
-      pass
-    else:
-      raise RuntimeError(f"shrinking not supported for {arg=}")
+    assert self.axis is None or arg[self.axis] == (0, self.shape[self.axis]) or arg[self.axis] in self.bounds, f"shrinking not supported for {arg=}"
     if self.axis is not None and arg[self.axis] in self.bounds and arg[self.axis] != (0, self.shape[self.axis]):
       assert all(arg[i] == (0, s) or i == self.axis for i,s in enumerate(self.shape)), "cannot shrink sharded and non-sharded axis at the same time"
       idx = self.bounds.index(arg[self.axis])

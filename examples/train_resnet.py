@@ -5,8 +5,6 @@ from PIL import Image
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import getenv
-from tinygrad.tensor import Tensor
-from typing import List
 from extra.training import train, evaluate
 from extra.models.resnet import ResNet
 from extra.datasets import fetch_mnist
@@ -20,20 +18,15 @@ class ComposeTransforms:
     for t in self.trans:
       x = t(x)
     return x
-  
-def g_sz(tensors: List[Tensor]): return sum([t.nbytes() if isinstance(t, Tensor) else t.size for t in tensors])
-def p_sz(name, *tensors: Tensor): print(f'{name} size: {g_sz(tensors) / 1e6:.2f} MB')
+
 if __name__ == "__main__":
   X_train, Y_train, X_test, Y_test = fetch_mnist()
-  p_sz('x train', X_train)
   X_train = X_train.reshape(-1, 28, 28).astype(np.uint8)
   X_test = X_test.reshape(-1, 28, 28).astype(np.uint8)
   classes = 10
 
   TRANSFER = getenv('TRANSFER')
   model = ResNet(getenv('NUM', 18), num_classes=classes)
-  parameters = get_parameters(model)
-  p_sz('model', *parameters)
   if TRANSFER:
     model.load_from_pretrained()
 
@@ -44,9 +37,8 @@ if __name__ == "__main__":
     lambda x: x / 255.0,
     lambda x: np.tile(np.expand_dims(x, 1), (1, 3, 1, 1)).astype(np.float32),
   ])
-  optimizer = optim.SGD(get_parameters(model), lr=lr, momentum=0.9)
-  p_sz('optimizer', *get_parameters(optimizer))
   for _ in range(5):
+    optimizer = optim.SGD(get_parameters(model), lr=lr, momentum=0.9)
     train(model, X_train, Y_train, optimizer, 100, BS=32, transform=transform)
     evaluate(model, X_test, Y_test, num_classes=classes, transform=transform)
     lr /= 1.2
