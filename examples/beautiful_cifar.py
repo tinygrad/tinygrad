@@ -133,7 +133,7 @@ if __name__ == "__main__":
   eval_batchsize = 2500
   @TinyJit
   @Tensor.test()
-  def val_step() -> tuple[Tensor, Tensor]:
+  def val_step() -> Tuple[Tensor, Tensor]:
     # TODO with Tensor.no_grad()
     Tensor.no_grad = True
     loss, acc = [], []
