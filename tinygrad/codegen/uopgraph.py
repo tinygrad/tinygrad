@@ -566,7 +566,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   sink = graph_rewrite(sink, sym)
 
   # rewrite pyint
-  sink = graph_rewrite(sink, py_to_64 if sink.arg.int64_idx else py_to_32)
+  sink = graph_rewrite(sink, py_to_64 if sink.arg is not None and sink.arg.int64_idx else py_to_32)
 
   # expand
   linearize_cnt += 1
