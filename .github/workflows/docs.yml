@@ -4,17 +4,24 @@ on:
     branches:
       - master
       - mkdocs
+  pull_request:
+  pull_request_target:
+    types: [closed]
+  workflow_dispatch:
+
 permissions:
   contents: write
+  pages: write
+  id-token: write
+  pull-requests: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request_target'
     steps:
+      # Build documentation
       - uses: actions/checkout@v4
-      - name: Configure Git Credentials
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
       - uses: actions/setup-python@v5
         with:
           python-version: 3.x
@@ -27,4 +34,59 @@ jobs:
             mkdocs-material-
       - run: pip install -e .[docs]
       - run: mkdocs build --strict
-      - run: mkdocs gh-deploy --force
+
+      # Deploy main documentation
+      - name: Deploy to GitHub Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          keep_files: true
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+
+      # Deploy PR preview documentation
+      - name: Deploy PR Preview
+        if: github.event_name == 'pull_request'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          destination_dir: .pr-preview/${{ github.event.pull_request.number }}
+          keep_files: true
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+
+      # Comment on PR with preview link
+      - name: Comment PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '📖 Preview docs built from this PR at https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/.pr-preview/${{ github.event.pull_request.number }}/'
+            })
+
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+      - name: Delete PR Preview
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          if [ -d ".pr-preview/$PR_NUMBER" ]; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git rm -rf .pr-preview/$PR_NUMBER
+            git commit -m "Remove PR preview for PR #$PR_NUMBER"
+            git push
+          else
+            echo "No preview directory found for PR #$PR_NUMBER"
+          fi
