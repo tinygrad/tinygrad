@@ -126,12 +126,18 @@ reduceop_fusor = PatternMatcher([
 
 enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx.bufs.index(x.arg[0])))])
 
+PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, ScheduleItemContext, UOp]] = []
+if getenv("RUN_PROCESS_REPLAY"):
+  @atexit.register
+  def save_process_replay():
+    for base_sink,ctx,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
+
 @track_rewrites
 def full_ast_rewrite(base_sink:UOp, ctx:ScheduleItemContext) -> UOp:
   if not AST_REWRITE: return base_sink
   sink = graph_rewrite(base_sink, reduceop_fusor)
   ret = graph_rewrite(sink, enumerate_bufs, ctx)
-  if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
+  PROCESS_REPLAY_CAPTURE.append((base_sink, ctx, ret))
   return ret
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
