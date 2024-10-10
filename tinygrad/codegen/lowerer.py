@@ -127,9 +127,9 @@ def lower_load_store(ctx: IndexContext, x: UOp):
 
 pm_lowerer = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, name="x"), lower_reduce_axis),
-  (UPat(UOps.VALID, src=(UPat(UOps.SHAPETRACKER),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
-  # rewrite LOAD/STORE SHAPETRACKER to LOAD/STORE with indexed
-  (UPat((UOps.LOAD, UOps.STORE), src=(UPat(), UPat(UOps.SHAPETRACKER)), allow_any_len=True, name="x"), lower_load_store),
+  (UPat(UOps.VALID, src=(UPat(UOps.VIEW),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
+  # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
+  (UPat((UOps.LOAD, UOps.STORE), src=(UPat(), UPat(UOps.VIEW)), allow_any_len=True, name="x"), lower_load_store),
 ])
 
 def ast_to_uop(ast:UOp, opts:Renderer) -> UOp: return graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))

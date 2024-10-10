@@ -68,7 +68,7 @@ assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 def nvmethod(subc, mthd, size, typ=2): return (typ << 28) | (size << 16) | (subc << 13) | (mthd >> 2)
 
 class NVSignal(HCQSignal):
-  def __init__(self, value=0):
+  def __init__(self, value=0, is_timeline=False):
     self._signal = NVDevice.signals_pool.pop()
     self.signal_addr = mv_address(self._signal)
     super().__init__(value)
@@ -480,7 +480,7 @@ class NVDevice(HCQCompiled):
 
     compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
     super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
-                     functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue, timeline_signals=(NVSignal(), NVSignal()))
+                     functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue)
 
     self._setup_gpfifos()
 
@@ -527,7 +527,8 @@ class NVDevice(HCQCompiled):
     bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
     self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True)
 
-    NVComputeQueue().setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
+    NVComputeQueue().wait(self.timeline_signal, self.timeline_value - 1) \
+                    .setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
 
