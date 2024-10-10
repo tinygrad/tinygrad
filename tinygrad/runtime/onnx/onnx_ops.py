@@ -25,9 +25,8 @@ equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"})}
 # helper
 # TODO maybe write helper for stuff like tuple((1,0) if i == axis else None for i in range(X.ndim)), easier to read, see it everywhere
 # or in a format like:
-
-def axis_tuple_arg(default_value, ndims, axes, axis_value: Callable):
-  ...
+# def axis_tuple_arg(default_value, ndims, axes, axis_value: Callable):
+  # ...
   # args = default_value * ndims
   # for i in range(len(axes)):
   #   lol = ...
@@ -49,7 +48,7 @@ def Sub(x: Union[Tensor, Any], other: Tensor): return x - other # some test has 
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
-def Squeeze(data: Tensor, axes): return functools.reduce(lambda d, dim: d.squeeze(dim), sorted(axes), data)
+def Squeeze(data: Tensor, axes): return functools.reduce(lambda d, dim: d.squeeze(dim), sorted(axes, reverse=True), data)
 def Unsqueeze(data: Tensor, axes): return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(axes), data)
 def Mean(*data_0): return Sum(*data_0) / len(data_0)
 # NOTE: does not support saturate
@@ -194,9 +193,9 @@ def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed([(pb, pe) for pb, pe
 # (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> ((x1_begin, x1_end), (x2_begin, x2_end), ...)
 def _onnx_pads_to_pad(onnx_pads, ndims=None, axes=None):
   axes = axes or list(range(ndims))
-  np_pads = [(0,0)] * ndims
-  for i in range(len(axes)): np_pads[axes[i]] = (onnx_pads[i], onnx_pads[i + len(axes)])
-  return np_pads
+  pads = [(0,0)] * ndims
+  for i in range(len(axes)): pads[axes[i]] = (onnx_pads[i], onnx_pads[i + len(axes)])
+  return pads
 
 def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
   return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
@@ -266,7 +265,7 @@ def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1
 
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
-  ret = ((xI.reshape(-1, 1) == Tensor.arange(prod(out_sh))) * xT.reshape(-1, 1)).sum(0).reshape([1, 1] + out_sh)
+  ret = ((xI.reshape(-1, 1) == Tensor.arange(prod(out_sh))) * xT.reshape(-1, 1)).sum(0).reshape(1, 1, *out_sh)
   if outshape is not None and outshape != ret.shape:
     ret = ret.pad2d(_onnx_pads_to_pad2d_pads(_auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
   return ret
@@ -275,7 +274,7 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
 #   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
 #   ret = Tensor.zeros(prod(out_sh)).contiguous()
 #   ret[xI.flatten()] = xT.flatten()
-#   ret = ret.reshape([1, 1] + out_sh)
+#   ret = ret.reshape(1, 1, *out_sh)
 #   if outshape is not None and outshape != ret.shape:
 #     ret = ret.pad2d(_onnx_pads_to_pad2d_pads(_auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
 #   return ret
@@ -347,17 +346,8 @@ def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_ind
   else: return loss.reshape(target_shape)
 
 def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore_index=None, reduction="mean"):
-  _N, C, *s_dimensions = scores.shape
-  if ignore_index is not None: labels = (labels == ignore_index).where(C+1, labels)
-  mask = labels.unsqueeze(1) == Tensor.arange(C).reshape(1, C, *[1]*len(s_dimensions))
-  y = scores.log_softmax(axis=1)
-  loss = (mask * -y).sum(1)
-  if weights is not None:
-    weights = weights[labels, ...]
-    loss = loss * weights
-  if reduction == "mean": loss = loss.sum() / ((loss != 0).sum() if weights is None else weights.sum())
-  elif reduction == "sum": loss = loss.sum()
-  return loss, y
+  log_probs = scores.log_softmax(1)
+  return NegativeLogLikelihoodLoss(log_probs, labels, weights, ignore_index, reduction), log_probs
 
 def ArrayFeatureExtractor(x: Tensor, indices: Tensor): return x[..., indices]
 # TODO: is fuse_arange stuff working for this?
@@ -397,34 +387,28 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     elif mode == "align_corners": index = index * (input_dim - 1) / (output_dim - 1) if output_dim != 1 else Tensor([0])
     elif mode == "asymmetric": index = index / scale_dim
     elif mode == "pytorch_half_pixel": index = (index + 0.5) / scale_dim - 0.5 if output_dim != 1 else Tensor([-0.5])
-    elif mode == "half_pixel_symmetric":
-      index = input_dim / 2 * (1 - int(output_dim) / sizes_frac) + (index + 0.5) / scale_dim - 0.5
-    elif mode == "tf_crop_and_resize":
-      index = roi_dim[0] * (input_dim - 1) + index * ((roi_dim[1] - roi_dim[0]) * (input_dim - 1) / (output_dim - 1))
+    elif mode == "half_pixel_symmetric": index = input_dim / 2 * (1 - int(output_dim) / sizes_frac) + (index + 0.5) / scale_dim - 0.5
+    elif mode == "tf_crop_and_resize": index = roi_dim[0] * (input_dim - 1) + index * ((roi_dim[1] - roi_dim[0]) * (input_dim - 1) / (output_dim - 1))
     else: raise ValueError(f"invalid {coordinate_transformation_mode=}")
     return index.clip(0, input_dim-1)
 
-  if axes is not None:
-    perm = [a for a in range(len(X.shape)) if a not in axes] + list(axes)
-    inverse_perm = [perm.index(i) for i in range(len(perm))]
-    X = X.permute(*perm)
-  else: axes, inverse_perm = list(range(X.ndim)), []
+  scales, sizes = (None if scales is None else scales[-2:]), (None if sizes is None else sizes[-2:])
+  # we pre permute the axes and permute back after resize
+  axes, input_shape, = (axes or list(range(X.ndim))), X.shape[2:],
+  perm = [a for a in range(len(X.shape)) if a not in axes] + list(axes)
+  X = X.permute(*perm)
+
   if sizes is not None:
-    sizes = [1]*(X.ndim - len(sizes)) + sizes
-    scales = [sizes[i] / X.size(i) for i in range(X.ndim)]
     if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
       scale_fxn = min if keep_aspect_ratio_policy == "not_larger" else max
-      scale = scale_fxn(scale for i, scale in enumerate(scales) if i in axes)
-      scales = [scale if i in axes else 1 for i in range(X.ndim)]
-      sizes = [int((scale * X.size(i)) + 0.5) if i in axes else X.size(i) for i in range(X.ndim)]
-    elif keep_aspect_ratio_policy != "stretch": raise ValueError(f"invalid {keep_aspect_ratio_policy=}")
-  else:
-    scales = [1]*(X.ndim - len(scales)) + scales
-    sizes = [int(sc*sh) for sc, sh in zip(scales, X.shape)]
+      scales = scale_fxn([sizes[i] / input_shape[i] for i in range(X.ndim-2) if i+2 in axes])
+      sizes = [int((scales * input_shape[i]) + 0.5) if i+2 in axes else input_shape[i] for i in range(X.ndim-2)]
+    else: scales = [sizes[-2] / X.size(-2), sizes[-1] / X.size(-1)]
+  else: sizes = [int(sc*sh) for sc, sh in zip(scales, input_shape)]
+  scales = [scales] * 2 if not isinstance(scales, list) else scales
 
-  sizes_frac = [sc*sh for sc, sh in zip(scales, X.shape)][2:]
-  sizes, axes, scales, input_shape = (val[2:] if isinstance(val, list) else [None] * (X.ndim-2) for val in (sizes, axes, scales, list(X.shape)))
-  roi = [[st, ed] for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])] if isinstance(roi, list) else [None] * (X.ndim-2)
+  sizes_frac = [sc*sh for sc, sh in zip(scales, input_shape)]
+  roi = [[st, ed] for st, ed in zip(roi, roi[len(roi)//2:])] if isinstance(roi, list) else [None] * (X.ndim-2)
   indexes = [Tensor.arange(shape, dtype=dtypes.default_float, device=X.device) for shape in sizes]
   indexes = [_apply_coordinate_transformation(*args, coordinate_transformation_mode) for args in zip(indexes, input_shape, scales, roi, sizes_frac)]
   if mode == "nearest":
@@ -440,7 +424,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       X = X.gather(i, low).lerp(X.gather(i, high), perc)
   if mode == "cubic":
     raise NotImplementedError("cubic interpolation is not implemented")
-  return X.permute(*inverse_perm) if inverse_perm else X
+  return X.permute(*[perm.index(i) for i in range(len(perm))]) if perm else X
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 
 def CenterCropPad(t: Tensor, shape, axes=None):
@@ -550,13 +534,13 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids: Tensor, word_embeddi
   vocab_size, max_position_embeddings, type_vocab_size = word_embedding.size(0), position_embedding.size(0), (segment_embedding.size(0)
                                                                                                                 if compute_seg_emb else None)
 
-  def embedding(x:Tensor, vocab_size, weight:Tensor) -> Tensor:  # TODO from nn.Embedding. Could probably upstream this to Tensor
-    vocab_counter = Tensor.arange(vocab_size, dtype=x.dtype, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
-    return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
+  def embedding(x:Tensor, vocab_size, weight:Tensor) -> Tensor: return weight[x]
+    # vocab_counter = Tensor.arange(vocab_size, dtype=x.dtype, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
+    # return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
 
   # bert embedding layer
-  if epsilon is None: epsilon = 1e-12
-  if position_ids is None: position_ids = Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
+  epsilon = epsilon or 1e-12
+  position_ids = position_ids or Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
   wrd_embedding_res = embedding(input_ids, vocab_size, word_embedding)
   pos_embedding_res = embedding(position_ids, max_position_embeddings, position_embedding)
   seg_embedding_res = embedding(segment_ids, type_vocab_size, segment_embedding) if compute_seg_emb else None
@@ -589,6 +573,12 @@ def Attention(x:Tensor, weights, bias:Tensor, mask_index:Optional[Tensor]=None, 
   if past is not None:
     xk, xv = Tensor.cat(past[0], xk, dim=-2), Tensor.cat(past[1], xv, dim=-2)
     present = Tensor.cat(xk.unsqueeze(0), xv.unsqueeze(0))
+
+  # def attn(query, key, value, mask):
+  #   attn_weights = (query @ key.transpose(-1, -2)) / math.sqrt(value.shape[-1])
+  #   causal_mask = Tensor.ones((query.size(-2), key.size(-2) + 1), dtype=dtypes.bool).tril(0)[key.size(-2) - query.size(-2):]
+  #   masked = Tensor.where(causal_mask, attn_weights, -math.inf)
+  #   return masked.softmax(-1) @ value if mask is None else (masked + mask).softmax(-1) @ value
 
   def attn(query, key, value, attn_mask):
     query_length, key_length = query.shape[-2], key.shape[-2]

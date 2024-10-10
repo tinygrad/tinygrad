@@ -3278,6 +3278,9 @@ class Tensor:
     ret = -self.log_softmax(axis=1).mul(Y).sum(axis=1)
     return ret._do_reduction(reduction)
 
+  # TODO add nll_loss and softmax cross entropy
+  # def
+
   # ***** Tensor Properties *****
 
   @property
