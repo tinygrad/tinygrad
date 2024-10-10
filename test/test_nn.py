@@ -181,9 +181,9 @@ class TestNN(unittest.TestCase):
 
     # create in torch
     with torch.no_grad():
-        torch_layer = torch.nn.Conv1d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
-        torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
-        torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
+      torch_layer = torch.nn.Conv1d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
+      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
+      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
 
     # test
     x = Tensor.uniform(BS, C1, W)
