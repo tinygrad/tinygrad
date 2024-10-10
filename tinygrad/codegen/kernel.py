@@ -5,8 +5,8 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict
 from enum import Enum, auto
 
-from tinygrad.ops import BinaryOps, UNSAFE_PAD_OPS, KernelInfo, BUFFER_UOPS, UOp, UOps, print_uops, type_verify, graph_rewrite, PatternMatcher
-from tinygrad.ops import resolve
+from tinygrad.ops import UNSAFE_PAD_OPS, BUFFER_UOPS, BinaryOps, KernelInfo, UOp, UOps, PatternMatcher, print_uops, type_verify, resolve, \
+    graph_rewrite, track_rewrites
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType, PtrDType
@@ -704,6 +704,7 @@ class Kernel:
 
   # **** this is the lowerer ****
 
+  @track_rewrites
   def linearize(self) -> Kernel:
     modified_ast = self.get_optimized_ast()
 
@@ -727,7 +728,7 @@ class Kernel:
 
     if getenv("RUN_PROCESS_REPLAY"):
       from test.external.process_replay.helpers import get_process_replay_ctx
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, name, src, get_process_replay_ctx()))
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, name, get_process_replay_ctx(), src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
@@ -750,7 +751,7 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
   # only reduceuop is allowed to change shape, limited to turning n to 1
   if uop.op in {UOps.REDUCE_AXIS, UOps.WMMA}: st = ShapeTracker.from_shape(sts[uop.src[0]].reduce(uop.axis_arg))
   # movementops are pushed to SHAPETRACKER and SWIZZLE
-  elif uop.op in {UOps.SHAPETRACKER, UOps.SWIZZLE}: st = uop.arg
+  elif uop.op is UOps.VIEW: st = uop.arg
   # everything else inherits shape
   else:
     assert uop.op in {UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.CONTRACT, UOps.EXPAND, UOps.ASSIGN, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
