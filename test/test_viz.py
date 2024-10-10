@@ -2,6 +2,7 @@ from typing import List
 import unittest
 import itertools
 from tinygrad import Tensor, dtypes
+from tinygrad.device import Device
 from tinygrad.helpers import Context, getenv
 from tinygrad.engine.realize import lower_schedule
 from tinygrad.viz.serve import GraphRewriteMetadata, get_metadata, _uop_to_json
@@ -104,9 +105,10 @@ class TestViz(unittest.TestCase):
   def test_no_dedup_different_opts(self):
     a = Tensor.empty(4, 4)+Tensor.empty(4, 4)
     s = a.schedule()
-    with Context(NOOPT=1): list(lower_schedule(s.copy()))
-    with Context(NOOPT=0): list(lower_schedule(s.copy()))
+    with Context(NOOPT=1): e1 = list(lower_schedule(s.copy()))
+    with Context(NOOPT=0): e2 = list(lower_schedule(s.copy()))
     kernels = self.assert_valid_ctx()[1:]
+    raise Exception(len(kernels), e1, e2)
     self.assertEqual(len(kernels), 2)
     rewrites = [x[2] for x in kernels[0]]
     assert all(len(v) == 1 for _,v in group_rewrites(rewrites).items())
