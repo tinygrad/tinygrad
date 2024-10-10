@@ -10,7 +10,7 @@ from tinygrad.multi import MultiLazyBuffer
 import re
 
 SHARD_MODEL = False
-
+GPUS = [f'{Device.DEFAULT}:{i}' for i in range(2)]
 
 @dataclass
 class GPTConfig:
@@ -108,15 +108,7 @@ class GPT:
       idx = Tensor.cat(idx, idx_next, dim=1)
     return idx
 
-  def __call__(self, idx:Tensor, targets=None):
-
-    # x = idx.reshape((4, 64, 1))
-    # x = x.expand((4, 64, 768))
-    # x = self.linear(x)
-    # loss = x.sparse_categorical_crossentropy(targets)
-    # return x, loss
-    
-    print(f"{idx.shape=}")
+  def __call__(self, idx:Tensor, targets=None):    
     b, t = idx.shape
     pos = Tensor.arange(0, t)
     
@@ -124,19 +116,15 @@ class GPT:
       pos.shard_(GPUS, axis=0)
 
     tok_emb = self.wte(idx) # token embeddings of shape (b, t, n_embd)
-    print("tok_emb.shape", tok_emb.shape)
     pos_emb = self.wpe(pos) # position embeddings of shape (t, n_embd)
-    print('pos embe shape', pos_emb.shape)
     x = tok_emb + pos_emb
-    print("x.shape after embedding", x.shape)
     x = self.ln_f(x.sequential(self.h))
-    print("x.shape after ln_f", x.shape)
 
     if targets is not None:
       logits = self.lm_head(x)
-      print("logits.shape", logits.shape)
+      logits = logits.to(Device.DEFAULT)
+      logits.shard_(GPUS)
       logits = logits[:, :, :self.config.vocab_size]
-      print(f"{logits.shape=}")
       loss = logits.sparse_categorical_crossentropy(targets)
     else:
       logits = self.lm_head(x[:, [-1], :])[:, :, :self.config.vocab_size]
@@ -170,7 +158,6 @@ if __name__ == "__main__":
       if p in seen: continue
       seen.add(p)
       if re.match(r"h\.\d+\.attn\.bias", k):
-        print("SHard on axis None")
         p.shard_(GPUS)
       else:
         p.shard_(GPUS, axis=0)
