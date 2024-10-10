@@ -597,8 +597,9 @@ contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
 def track_rewrites(func):
   def __wrapper(self, *args, **kwargs):
     if TRACK_MATCH_STATS >= 2: rewrite_stack.append((self, []))
-    ret = func(self, *args, **kwargs)
-    if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
+    try: ret = func(self, *args, **kwargs)
+    finally: # NOTE: save everything in the stack
+      if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
     return ret
   return __wrapper
 
