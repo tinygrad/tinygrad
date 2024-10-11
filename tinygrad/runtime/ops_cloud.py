@@ -7,7 +7,7 @@
 from __future__ import annotations
 from typing import Tuple, Optional, Dict, Any
 import multiprocessing, functools, urllib.request, urllib.error, hashlib, json, time, contextlib
-from tinygrad.helpers import getenv, DEBUG
+from tinygrad.helpers import getenv, DEBUG, fromimport
 from tinygrad.device import Compiled, Allocator, Compiler, Device
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -31,8 +31,9 @@ class CloudHandler(BaseHTTPRequestHandler):
 
   def _do(self, method):
     ret = b""
-    if self.path == "/dname" and method == "GET":
-      ret = CloudHandler.dname.encode()
+    if self.path == "/renderer" and method == "GET":
+      cls, args = Device[CloudHandler.dname].renderer.__reduce__()
+      ret = json.dumps((cls.__module__, cls.__name__, args)).encode()
     elif self.path == "/alloc" and method == "POST":
       CloudHandler.buffer_num += 1
       CloudHandler.buffers[CloudHandler.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(size:=self.get_json()['size']), size)
@@ -108,8 +109,6 @@ class CloudProgram:
     ret = self.device.send("POST", "program/"+self.prgid, json.dumps(args).encode())
     if wait: return float(ret)
 
-from tinygrad.renderer.cstyle import MetalRenderer, AMDRenderer, ClangRenderer, OpenCLRenderer
-
 class CloudDevice(Compiled):
   def __init__(self, device:str):
     if (host:=getenv("HOST", "")) != "":
@@ -122,7 +121,7 @@ class CloudDevice(Compiled):
     if DEBUG >= 1: print(f"cloud with host {self.host}")
     while 1:
       try:
-        clouddev = self.send("GET", "dname", timeout=0.1).decode()
+        clouddev = json.loads(self.send("GET", "renderer", timeout=0.1).decode())
         break
       except Exception as e:
         print(e)
@@ -130,7 +129,8 @@ class CloudDevice(Compiled):
     if DEBUG >= 1: print(f"remote has device {clouddev}")
     # ugh, there needs to be a better way to do this
     # TODO: how to we have BEAM be cached on the backend? this should just send a specification of the compute. rethink what goes in Renderer
-    renderer = {"METAL": MetalRenderer, "AMD": AMDRenderer, "CLANG": ClangRenderer, "GPU": OpenCLRenderer}[clouddev]()
+    assert clouddev[0].startswith("tinygrad.renderer."), f"bad renderer {clouddev}"
+    renderer = fromimport(clouddev[0], clouddev[1])(*clouddev[2])
     super().__init__(device, CloudAllocator(self), renderer, Compiler(), functools.partial(CloudProgram, self))
 
   def send(self, method, path, data:Optional[bytes]=None, timeout=60.0) -> bytes:

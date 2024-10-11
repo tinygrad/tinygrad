@@ -89,4 +89,5 @@ class Renderer:
   extra_matcher: Any = None
   code_for_op: Dict[Op, Callable] = {}
 
+  def __reduce__(self): return self.__class__, ()
   def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")
