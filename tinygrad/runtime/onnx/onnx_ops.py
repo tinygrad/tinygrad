@@ -219,6 +219,14 @@ def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1
   return ret, indices
 
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
+# TODO: is setitem MaxUnpool more preferred? it's more lines :D
+#   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
+#   ret = Tensor.zeros(prod(out_sh)).contiguous()
+#   ret[xI.flatten()] = xT.flatten()
+#   ret = ret.reshape(1, 1, *out_sh)
+#   if outshape is not None and outshape != ret.shape:
+#     ret = ret.pad2d(_onnx_pads_to_pad2d_pads(_auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
+#   return ret
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
   ret = ((xI.reshape(-1, 1) == Tensor.arange(prod(out_sh))) * xT.reshape(-1, 1)).sum(0).reshape(1, 1, *out_sh)
   if outshape is not None and outshape != ret.shape:
@@ -301,11 +309,10 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   def _apply_nearest_mode(index: Tensor, input_dim, mode: str):
     if mode == "round_prefer_floor": index = (index - 0.5).ceil()
     elif mode == "round_prefer_ceil": index = (index + 0.5).floor()
-    elif mode == "floor": index = index.floor()
-    elif mode == "ceil": index = index.ceil()
+    elif mode in ["floor", "ceil"]: index = getattr(index, mode)()
     else: raise ValueError(f"invalid {nearest_mode=}")
     return index.cast(dtypes.int32).clip(0, input_dim-1)
-  def _apply_coordinate_transformation(index: Tensor, input_dim: int, scale_dim, roi_dim, sizes_frac, mode: str):
+  def _apply_transformation(index: Tensor, input_dim, scale_dim, roi_dim, sizes_frac, mode):
     # TODO: needs more testing, not confident in this
     # NOTE: their reference implementation differ from the implementation in their reference docs
     # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py
@@ -334,15 +341,16 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     else: scales = [sizes[-2] / X.size(-2), sizes[-1] / X.size(-1)]
   else: sizes = [int(sc*sh) for sc, sh in zip(scales, input_shape)]
   scales = [scales] * 2 if not isinstance(scales, list) else scales
-
-  sizes_frac = [sc*sh for sc, sh in zip(scales, input_shape)]
   roi = [[st, ed] for st, ed in zip(roi, roi[len(roi)//2:])] if isinstance(roi, list) else [None] * (X.ndim-2)
-  indexes = [Tensor.arange(shape, dtype=dtypes.default_float, device=X.device) for shape in sizes]
-  indexes = [_apply_coordinate_transformation(*args, coordinate_transformation_mode) for args in zip(indexes, input_shape, scales, roi, sizes_frac)]
+
+  indexes = []
+  for shape, size, scale, region in zip(input_shape, sizes, scales, roi):
+    indexes.append(_apply_transformation(Tensor.arange(size), shape,scale, region, shape * scale, coordinate_transformation_mode))
+
   if mode == "nearest":
-    indexes = [_apply_nearest_mode(*args, nearest_mode) for args in zip(indexes, input_shape)]
-    indexes = [idx.reshape(*(-1 if i == dim else 1 for i in range(len(sizes)))).expand(sizes) for dim, idx in enumerate(indexes)]
-    X = X[(..., *indexes)]
+    indexes = [_apply_nearest_mode(index, shape, nearest_mode) for (index, shape) in zip(indexes, input_shape)]
+    # meshgrid
+    X = X[(..., *[idx.reshape(*(-1 if i == dim else 1 for i in range(len(sizes)))).expand(sizes) for dim, idx in enumerate(indexes)])]
   if mode == "linear":
     expand = list(X.shape)
     for i in range(-len(sizes), 0):
@@ -418,6 +426,7 @@ def ImageDecoder(encoded_stream: bytes, pixel_format="RGB"):
   if pixel_format == "Grayscale": return Tensor(np.array(img.convert("L"))).unsqueeze(-1) # (H, W) to (H, W, 1)
   raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
+# TODO: can this be cleaned up?
 def AffineGrid(theta: Tensor, size, align_corners=0):
   _, _, *data_sz = size
   size_zeros, original_grid = Tensor.zeros(data_sz), Tensor.ones(data_sz)

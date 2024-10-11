@@ -970,7 +970,7 @@ class Tensor:
     if all(x is None or x == (0,s) for x,s in zip(arg, self.shape)): return self
     return F.Shrink.apply(self, arg=tuple(x if x is not None else (0,s) for x,s in zip(arg, self.shape)))
 
-  # 'constant', 'reflect', 'replicate' or 'circular'
+  #
   # TODO: torch pads arg is different than our pad arg, not sure if we should match
   # TODO: nasty circular implementation but it's done with only movement ops
   # TODO: reflect and replicate are also kinda nasty but bug free I think
@@ -979,10 +979,11 @@ class Tensor:
     Returns a tensor that pads the each axis based on input arg.
     `arg` must have the same length as `self.ndim`.
     For each axis, it can be `None`, which means no pad, or a tuple `(pad_before, pad_after)`.
-    If `value` is specified, the tensor is padded with `value` instead of `0.0`.
+    The padding modes is selected with `mode` which sopports 'constant', 'reflect', 'replicate' and 'circular'
+    If 'constant' is selected as `mode` and `value` is specified, the tensor is padded with `value` instead of `0.0`.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(6).reshape(2, 3)
+    t = Tensor.arange(10).reshape(2, 5)
     print(t.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
@@ -990,6 +991,9 @@ class Tensor:
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.pad(((None, (1, 2))), -2).numpy())
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.pad(((None, (2, 3))), mode="reflect").numpy())
     ```
     """
     if all(x is None or x == (0,0) for x in arg): return self

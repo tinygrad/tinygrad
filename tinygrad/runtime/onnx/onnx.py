@@ -193,6 +193,7 @@ def get_run_onnx(onnx_model: ModelProto):
       elif n.op_type == "Gradient":
         intermediate_tensors[opt["y"]].backward()
         ret = tuple([t.grad for t in inp])
+
       # onnx_ops.py
       elif hasattr(onnx_ops, n.op_type):
         fxn = getattr(onnx_ops, n.op_type)
