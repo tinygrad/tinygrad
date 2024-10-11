@@ -7,7 +7,8 @@ from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, UOps, UOp, KernelInfo
 from tinygrad.ops import UPat, PatternMatcher
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
-from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, graph_rewrite, expander, reducer, sym, float4_folding
+from tinygrad.codegen.uopgraph import full_graph_rewrite, graph_rewrite, expander, reducer, sym, float4_folding
+from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.shape.shapetracker import ShapeTracker, View
 
 simple_pm = PatternMatcher([
