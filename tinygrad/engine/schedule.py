@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
 from tinygrad.ops import REDUCE_ALU, UNSAFE_PAD_OPS, MetaOps, ReduceOps, TernaryOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, resolve, \
     graph_rewrite, track_rewrites
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, GlobalCounters, all_same, \
-    colored, diskcache_put, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
+from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, GlobalCounters, Metadata, all_same, \
+    colored, diskcache_put, prod, dedup, all_int, merge_dicts, getenv, unwrap
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.engine.lazy import LazyBuffer
@@ -130,7 +130,6 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 @track_rewrites
 def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...]) -> UOp:
-  if not AST_REWRITE: return base_sink
   sink = graph_rewrite(base_sink, reduceop_fusor)
   ret = graph_rewrite(sink, enumerate_bufs, bufs)
   PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
