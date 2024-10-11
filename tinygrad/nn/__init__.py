@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Union, Tuple, Any
+from typing import Optional, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, make_pair
 from tinygrad.nn import optim, state, datasets, Conv2d  # noqa: F401
