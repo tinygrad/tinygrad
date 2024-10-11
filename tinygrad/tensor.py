@@ -970,7 +970,6 @@ class Tensor:
     if all(x is None or x == (0,s) for x,s in zip(arg, self.shape)): return self
     return F.Shrink.apply(self, arg=tuple(x if x is not None else (0,s) for x,s in zip(arg, self.shape)))
 
-  #
   # TODO: torch pads arg is different than our pad arg, not sure if we should match
   # TODO: nasty circular implementation but it's done with only movement ops
   # TODO: reflect and replicate are also kinda nasty but bug free I think

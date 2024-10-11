@@ -31,7 +31,6 @@ def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_t
 # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_div.py
 def Div(x: Tensor, other: Tensor): return (x/other).cast(x.dtype)
 
-# TODO: change if to dict match dtype
 def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None,value_strings=None):
   if value is not None: return value
   if value_float is not None: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False)
@@ -168,6 +167,7 @@ def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
          [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
 
 # shared padding function
+# TODO: check this again
 def _padded(X: Tensor, pads=None, auto_pad="NOTSET", constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
   input_shape = X.shape[2:]
   strides, dilations = (make_pair(x, len(input_shape)) for x in (strides, dilations))
@@ -413,7 +413,7 @@ def ImageDecoder(encoded_stream: bytes, pixel_format="RGB"):
   if pixel_format == "Grayscale": return Tensor(np.array(img.convert("L"))).unsqueeze(-1) # (H, W) to (H, W, 1)
   raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
-# TODO: can this be cleaned up?
+# TODO: can this be cleaned up? This can use linspace and meshgrid but idk about line save
 def AffineGrid(theta: Tensor, size, align_corners=0):
   _, _, *data_sz = size
   size_zeros, original_grid = Tensor.zeros(data_sz), Tensor.ones(data_sz)
@@ -438,9 +438,7 @@ def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
   # this is tanh approximated
   return (x + bias).gelu()
 
-def EmbedLayerNormalization(input_ids: Tensor, segment_ids: Tensor, word_embedding:Tensor,
-                            position_embedding:Tensor, segment_embedding:Tensor, gamma=None, beta=None,
-                            mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
+def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None, segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
   assert (segment_ids is None) is (segment_embedding is None)
   assert (mask is None) is (mask_index_type is None)
@@ -448,16 +446,15 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids: Tensor, word_embeddi
   input_shape = input_ids.shape
   seq_length = input_shape[1]
   compute_seg_emb = (segment_embedding is not None and segment_ids is not None)
-  vocab_size, max_position_embeddings, type_vocab_size = word_embedding.size(0), position_embedding.size(0), (segment_embedding.size(0)
-                                                                                                                if compute_seg_emb else None)
+  vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
 
-  def embedding(x:Tensor, vocab_size, weight:Tensor) -> Tensor: return weight[x]
-    # vocab_counter = Tensor.arange(vocab_size, dtype=x.dtype, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
-    # return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
+  def embedding(x:Tensor, vocab_size, weight:Tensor) -> Tensor:  # TODO from nn.Embedding. Could probably upstream this to Tensor
+    vocab_counter = Tensor.arange(vocab_size, dtype=x.dtype, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
+    return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
 
   # bert embedding layer
-  epsilon = epsilon or 1e-12
-  position_ids = position_ids or Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
+  if epsilon is None: epsilon = 1e-12
+  if position_ids is None: position_ids = Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
   wrd_embedding_res = embedding(input_ids, vocab_size, word_embedding)
   pos_embedding_res = embedding(position_ids, max_position_embeddings, position_embedding)
   seg_embedding_res = embedding(segment_ids, type_vocab_size, segment_embedding) if compute_seg_emb else None
