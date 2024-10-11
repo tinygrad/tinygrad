@@ -22,8 +22,13 @@ class CloudSession:
   buffer_num = 0
 
 class CloudHandler(BaseHTTPRequestHandler):
+  protocol_version = 'HTTP/1.1'
   dname: str
   sessions: DefaultDict[str, CloudSession] = defaultdict(CloudSession)
+
+  def setup(self):
+    super().setup()
+    print(f"connection established with {self.client_address}, socket: {self.connection.fileno()}")
 
   def get_data(self):
     content_len = self.headers.get('Content-Length')
@@ -73,6 +78,7 @@ class CloudHandler(BaseHTTPRequestHandler):
       else: return self._fail()
     else: return self._fail()
     self.send_response(200)
+    self.send_header('Content-Length', str(len(ret)))
     self.end_headers()
     return self.wfile.write(ret)
 
