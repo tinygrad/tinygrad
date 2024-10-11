@@ -48,7 +48,7 @@ def to_struct(*t: int, _type: type = ctypes.c_ulong):
 
 def wait_check(cbuf: Any):
   msg(cbuf, "waitUntilCompleted")
-  if (error := cast(int, msg(cbuf, "error", restype=ctypes.c_ulong))) != 0: raise RuntimeError(error)
+  error_check(msg(cbuf, "error", restype=objc_instance))
 
 def elapsed_time(cbuf: objc_id):
   return cast(float, msg(cbuf, "GPUEndTime", restype=ctypes.c_double)) - cast(float, msg(cbuf, "GPUStartTime", restype=ctypes.c_double))

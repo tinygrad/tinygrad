@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type, Union
 import contextlib, decimal, statistics, random, json, atexit, time, array, ctypes
-from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv
+from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferOptions, Allocator, Compiler, Compiled, LRUAllocator
 
@@ -219,7 +219,7 @@ class HCQSignal:
     return self._get_timestamp()
   def _get_timestamp(self) -> decimal.Decimal: raise NotImplementedError("_get_timestamp() method must be implemented")
 
-  def wait(self, value:int, timeout:int=10000):
+  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
     """
     Waits the signal is greater than or equal to a specific value.
 

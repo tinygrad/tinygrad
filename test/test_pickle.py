@@ -85,6 +85,11 @@ class TestPickle(unittest.TestCase):
     sched_pk = pickle.loads(pk)
     assert_equiv_uops(sched_pk[-1].ast, sched[-1].ast)
 
+  def test_pickle_renderer(self):
+    from tinygrad.device import Device
+    pk = pickle.dumps(Device.default.renderer)
+    pickle.loads(pk)
+
 class TestPickleJIT(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
