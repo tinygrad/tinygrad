@@ -9,7 +9,7 @@ import pathlib
 from tinygrad.multi import MultiLazyBuffer
 import re
 
-SHARD_MODEL = False
+SHARD_MODEL = True
 GPUS = [f'{Device.DEFAULT}:{i}' for i in range(2)]
 
 @dataclass
@@ -39,21 +39,26 @@ class CausalSelfAttention:
 
   def __call__(self, x:Tensor):
     B, T, C = x.shape
-    q = self.q(x)
+    q = self.q(x) # B, T, n_embd --> B, T, n_head, 
+    print("q shape",q.shape, "axis", q.lazydata.axis)
     k = self.k(x)
     v = self.v(x)
     k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-
+    print("v shape", v.shape, "axis", v.lazydata.axis)
     # manual implementation of attention
     att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
     att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
     att = att.softmax()
+    print("attn", att.shape, "axis", att.lazydata.axis)
     y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+    print("0: y shape", y.shape, "axis", y.lazydata.axis)
     y = y.transpose(1, 2).view(B, T, C) # re-assemble all head outputs side by side
     # output projection
+    print('1: y shape', y.shape, 'axis', y.lazydata.axis)
     y = self.c_proj(y)
+    print("2: y shape", y.shape, "axis", y.lazydata.axis)
     return y
 
 class MLP:
@@ -85,6 +90,10 @@ class GPT:
     self.ln_f = nn.LayerNorm(config.n_embd)
     self.lm_head = nn.Linear(config.n_embd, config.padded_vocab_size, bias=False)
     self.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
+    vocab_pad = Tensor.ones(1, 1, config.padded_vocab_size).contiguous()
+    vocab_pad.requires_grad = False
+    vocab_pad[:, :, config.vocab_size:] = 0
+    self.vocab_pad = vocab_pad
 
   def load_pretrained(self):
     weights = nn.state.torch_load(fetch(f'https://huggingface.co/gpt2/resolve/main/pytorch_model.bin'))
@@ -120,21 +129,15 @@ class GPT:
     tok_emb = self.wte(idx) # token embeddings of shape (b, t, n_embd)
     pos_emb = self.wpe(pos) # position embeddings of shape (t, n_embd)
     x = tok_emb + pos_emb
-    x = self.ln_f(x.sequential(self.h))
-
+    x = x.sequential(self.h)
+    x = self.ln_f(x)
     if targets is not None:
       logits = self.lm_head(x)
-      if SHARD_MODEL:
-        logits = logits.to(Device.DEFAULT)
-        logits.shard_(GPUS)
-      logits = logits[:, :, :self.config.vocab_size]
+      logits = logits.masked_fill(self.vocab_pad == 0, 0)
       loss = logits.sparse_categorical_crossentropy(targets)
     else:
       logits = self.lm_head(x[:, [-1], :])
-      if SHARD_MODEL:
-        logits = logits.to(Device.DEFAULT)
-        logits.shard_(GPUS)
-      logits = logits[:, :, :self.config.vocab_size]
+      logits = logits.masked_fill(self.vocab_pad == 0, 0)
       loss = None
 
     return logits, loss
@@ -154,8 +157,8 @@ if __name__ == "__main__":
 
   B, T = args.batch_size, args.sequence_length
   assert 1 <= T <= 1024
-  n_head = 26
-  model = GPT(GPTConfig(n_layer=48, n_head=n_head, n_embd=n_head * 64))
+  n_head = 12
+  model = GPT(GPTConfig(n_layer=1, n_head=n_head, n_embd=n_head * 64))
   p_sz("model", *nn.state.get_parameters(model))
   seen = set()
   if SHARD_MODEL:
@@ -163,7 +166,7 @@ if __name__ == "__main__":
     for k, p in nn.state.get_state_dict(model).items():
       if p in seen: continue
       seen.add(p)
-      if re.match(r"h\.\d+\.attn\.bias", k):
+      if re.match(r"h\.\d+\.attn\.bias", k) or re.match(r"vocab_pad", k):
         p.shard_(GPUS)
       else:
         p.shard_(GPUS, axis=0)
@@ -203,8 +206,7 @@ if __name__ == "__main__":
   # forward backward for a few iterations
   data_iter = iter(get_batch())
   x, y = next(data_iter) # we'll overfit this batch below
-  # optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0, shard_axis=0)
-  optimizer = nn.optim.Adam(nn.state.get_parameters(model), shard_axis=0)
+  optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0, shard_axis=0)
   p_sz("optimizer", *nn.state.get_parameters(optimizer))
   @TinyJit
   def step(x, y):
