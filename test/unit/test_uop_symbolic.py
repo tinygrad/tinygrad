@@ -9,7 +9,8 @@ from typing import Tuple
 
 from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes, PtrDType, ConstType
-from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.ops import BinaryOps, UOp, UOps, print_uops
 from tinygrad.shape.symbolic import Variable
 import functools
