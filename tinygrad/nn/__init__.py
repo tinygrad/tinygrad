@@ -29,27 +29,27 @@ class BatchNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
+  def __init__(self, sz:int, eps:float=1e-5, affine:bool=True, track_running_stats:bool=True, momentum:float=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
     self.weight: Optional[Tensor] = Tensor.ones(sz) if affine else None
     self.bias: Optional[Tensor] = Tensor.zeros(sz) if affine else None
 
-    self.num_batches_tracked = Tensor.zeros(1, dtype='long', requires_grad=False)
+    self.num_batches_tracked: Tensor = Tensor.zeros(1, dtype='long', requires_grad=False)
     if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
 
   def calc_stats(self, x:Tensor) -> Tuple[Tensor, Tensor]:
-    shape_mask = [1, -1, *([1]*(x.ndim-2))]
+    shape_mask: list[int] = [1, -1, *([1]*(x.ndim-2))]
     if self.track_running_stats and not Tensor.training: return self.running_mean, self.running_var.reshape(shape=shape_mask).expand(x.shape)
     # This requires two full memory accesses to x
     # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
     # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
-    batch_mean = x.mean(axis=(reduce_axes:=tuple(x for x in range(x.ndim) if x != 1)))
-    y = (x - batch_mean.detach().reshape(shape=shape_mask))  # d(var)/d(mean) = 0
-    batch_var = (y*y).mean(axis=reduce_axes)
+    batch_mean: Tensor = x.mean(axis=(reduce_axes:=tuple(x for x in range(x.ndim) if x != 1)))
+    y: Tensor = (x - batch_mean.detach().reshape(shape=shape_mask))  # d(var)/d(mean) = 0
+    batch_var: Tensor = (y*y).mean(axis=reduce_axes)
     return batch_mean, batch_var
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     batch_mean, batch_var = self.calc_stats(x)
     # NOTE: wow, this is done all throughout training in most PyTorch models
     if self.track_running_stats and Tensor.training:
