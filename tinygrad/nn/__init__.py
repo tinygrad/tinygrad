@@ -1,7 +1,7 @@
 import math
 from typing import Optional, Tuple, Union, List
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod, make_pair
+from tinygrad.helpers import prod, make_pair 
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 
@@ -95,13 +95,13 @@ class Conv2d:
   print(t.numpy())
   ```
   """
-  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, padding:Union[int,List[int],str]=0,
-               dilation=1, groups=1, bias=True):
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, 
+               padding:Union[int,List[int],str]=0, dilation=1, groups=1, bias=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     if isinstance(padding, str):
       if padding.lower() != 'same': raise ValueError(f"Invalid padding string {padding!r}, only 'same' is supported")
       if stride != 1: raise ValueError("padding='same' is not supported for strided convolutions")
-      self.padding = [p for d,k in zip(make_pair(dilation,len(self.kernel_size)), self.kernel_size[::-1]) for p in (d*(k-1)//2, d*(k-1) - d*(k-1)//2)]
+      self.padding: Union[int,List[int],str] = [p for d,k in zip(make_pair(dilation,len(self.kernel_size)), self.kernel_size[::-1]) for p in (d*(k-1)//2, d*(k-1) - d*(k-1)//2)]
     else: self.padding = padding
     self.stride, self.dilation, self.groups = stride, dilation, groups
     scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
