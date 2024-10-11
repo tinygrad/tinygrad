@@ -169,12 +169,12 @@ class Linear:
   print(t.numpy())
   ```
   """
-  def __init__(self, in_features, out_features, bias=True):
-    bound = 1 / math.sqrt(in_features)
-    self.weight = Tensor.uniform(out_features, in_features, low=-bound, high=bound)
-    self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
+  def __init__(self, in_features:int, out_features:int, bias:bool=True) -> None:
+    bound: float = 1 / math.sqrt(in_features)
+    self.weight: Tensor = Tensor.uniform(out_features, in_features, low=-bound, high=bound)
+    self.bias: Optional[Tensor] = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     return x.linear(self.weight.transpose(), self.bias)
 
 class GroupNorm:
@@ -194,12 +194,12 @@ class GroupNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, num_groups:int, num_channels:int, eps:float=1e-5, affine:bool=True):
+  def __init__(self, num_groups:int, num_channels:int, eps:float=1e-5, affine:bool=True) -> None:
     self.num_groups, self.num_channels, self.eps = num_groups, num_channels, eps
     self.weight: Optional[Tensor] = Tensor.ones(num_channels) if affine else None
     self.bias: Optional[Tensor] = Tensor.zeros(num_channels) if affine else None
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     # reshape for layernorm to work as group norm
     # subtract mean and divide stddev
     x = x.reshape(x.shape[0], self.num_groups, -1).layernorm(eps=self.eps).reshape(x.shape)
@@ -225,12 +225,12 @@ class InstanceNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, num_features:int, eps:float=1e-5, affine:bool=True):
+  def __init__(self, num_features:int, eps:float=1e-5, affine:bool=True) -> None:
     self.num_features, self.eps = num_features, eps
     self.weight: Optional[Tensor] = Tensor.ones(num_features) if affine else None
     self.bias: Optional[Tensor] = Tensor.zeros(num_features) if affine else None
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     x = x.reshape(x.shape[0], self.num_features, -1).layernorm(eps=self.eps).reshape(x.shape)
     if self.weight is None or self.bias is None: return x
     return x * self.weight.reshape(1, -1, *[1] * (len(x.shape)-2)) + self.bias.reshape(1, -1, *[1] * (len(x.shape)-2))
@@ -252,12 +252,12 @@ class LayerNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, normalized_shape:Union[int, Tuple[int, ...]], eps:float=1e-5, elementwise_affine:bool=True):
-    self.normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
+  def __init__(self, normalized_shape:Union[int, Tuple[int, ...]], eps:float=1e-5, elementwise_affine:bool=True) -> None:
+    self.normalized_shape: Tuple[int, ...] = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
     self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(self.normalized_shape))), eps, elementwise_affine
     self.weight, self.bias = (Tensor.ones(*self.normalized_shape), Tensor.zeros(*self.normalized_shape)) if elementwise_affine else (None, None)
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"last dimensions of {x.shape} must match {self.normalized_shape}"
     x = x.layernorm(eps=self.eps, axis=self.axis)
     if not self.elementwise_affine: return x
@@ -279,7 +279,7 @@ class LayerNorm2d(LayerNorm):
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __call__(self, x): return super().__call__(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+  def __call__(self, x: Tensor) -> Tensor: return super().__call__(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
 
 class RMSNorm:
   """
@@ -297,9 +297,9 @@ class RMSNorm:
   print(norm(t).numpy())
   ```
   """
-  def __init__(self, dim, eps=1e-6): self.eps, self.weight = eps, Tensor.ones(dim)
+  def __init__(self, dim:int, eps:float=1e-6): self.eps, self.weight = eps, Tensor.ones(dim)
 
-  def _norm(self, x:Tensor): return x * (x.square().mean(-1, keepdim=True) + self.eps).rsqrt()
+  def _norm(self, x:Tensor) -> Tensor: return x * (x.square().mean(-1, keepdim=True) + self.eps).rsqrt()
 
   def __call__(self, x:Tensor) -> Tensor: return self._norm(x.float()).cast(x.dtype) * self.weight
 
@@ -314,7 +314,7 @@ class Embedding:
   print(emb(Tensor([1, 2, 3, 1])).numpy())
   ```
   """
-  def __init__(self, vocab_size:int, embed_size:int):
+  def __init__(self, vocab_size:int, embed_size:int) -> None:
     self.vocab_sz, self.embed_sz, self.weight = vocab_size, embed_size, Tensor.glorot_uniform(vocab_size, embed_size)
 
   def __call__(self, idx:Tensor) -> Tensor:
@@ -333,10 +333,10 @@ class LSTMCell:
     hidden_size: The number of features in the hidden state `h`
     bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`
   """
-  def __init__(self, input_size:int, hidden_size:int, bias:bool=True):
-    stdv = 1.0 / math.sqrt(hidden_size)
-    self.weight_ih = Tensor.uniform(hidden_size*4, input_size, low=-stdv, high=stdv)
-    self.weight_hh = Tensor.uniform(hidden_size*4, hidden_size, low=-stdv, high=stdv)
+  def __init__(self, input_size:int, hidden_size:int, bias:bool=True) -> None:
+    stdv: float = 1.0 / math.sqrt(hidden_size)
+    self.weight_ih: Tensor = Tensor.uniform(hidden_size*4, input_size, low=-stdv, high=stdv)
+    self.weight_hh: Tensor = Tensor.uniform(hidden_size*4, hidden_size, low=-stdv, high=stdv)
     self.bias_ih, self.bias_hh = (Tensor.zeros(hidden_size*4), Tensor.zeros(hidden_size*4)) if bias else (None, None)
 
   def __call__(self, x:Tensor, hc:Optional[Tuple[Tensor, Tensor]]=None) -> Tuple[Tensor, Tensor]:
