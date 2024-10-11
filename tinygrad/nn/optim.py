@@ -139,8 +139,7 @@ class LAMB(Optimizer):
     self.b2_t *= self.b2
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      m_i = self.b1 * self.m[i] + (1.0 - self.b1) * t.grad
-      self.m[i].assign(m_i)
+      self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
       self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
       m_hat = self.m[i] / (1.0 - self.b1_t)
       v_hat = self.v[i] / (1.0 - self.b2_t)
