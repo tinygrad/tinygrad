@@ -4,10 +4,14 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Tuple, Optional
-from tinygrad.helpers import getenv, to_function_name, tqdm
+from tinygrad.helpers import colored, getenv, to_function_name, tqdm, word_wrap
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, lines
-from tinygrad.engine.graph import word_wrap, uops_colors
 from tinygrad.codegen.kernel import Kernel
+
+uops_colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.CONST: "#e0e0e0", UOps.VCONST: "#e0e0e0",
+               UOps.DEFINE_GLOBAL: "#ffe0b0", UOps.DEFINE_LOCAL: "#ffe0d0", UOps.DEFINE_ACC: "#f0ffe0", UOps.REDUCE: "#C4A484",
+               UOps.RANGE: "#c8a0e0", UOps.ASSIGN: "#e0ffc0", UOps.BARRIER: "#ff8080", UOps.IF: "#c8b0c0", UOps.SPECIAL: "#c0c0ff",
+               UOps.WMMA: "#efefc0", UOps.VIEW: "#C8F9D4", UOps.REDUCE_AXIS: "#f58488"}
 
 # ** API spec
 
@@ -112,7 +116,6 @@ class Handler(BaseHTTPRequestHandler):
 
 # ** main loop
 
-stop_reloader = threading.Event()
 def reloader():
   mtime = os.stat(__file__).st_mtime
   while not stop_reloader.is_set():
@@ -122,7 +125,9 @@ def reloader():
     time.sleep(0.1)
 
 if __name__ == "__main__":
+  stop_reloader = threading.Event()
   multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
+  st = time.perf_counter()
   print("*** viz is starting")
   with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = pickle.load(f)
   print("*** unpickled saved rewrites")
@@ -131,11 +136,12 @@ if __name__ == "__main__":
     ret = [get_details(*args) for v in tqdm(kernels) for args in v]
     print(f"fuzzed {len(ret)} rewrite details")
   print("*** loaded kernels")
-  server = HTTPServer(('', 8000), Handler)
-  st = time.perf_counter()
+  server = HTTPServer(('', PORT:=getenv("PORT", 8000)), Handler)
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
-  if getenv("BROWSER", 1): webbrowser.open("http://localhost:8000")
+  print(f"*** started viz on http://127.0.0.1:{PORT}")
+  print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"))
+  if getenv("BROWSER", 0): webbrowser.open(f"http://127.0.0.1:{PORT}")
   try: server.serve_forever()
   except KeyboardInterrupt:
     print("*** viz is shutting down...")
