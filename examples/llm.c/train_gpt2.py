@@ -150,8 +150,8 @@ if __name__ == "__main__":
 
   B, T = args.batch_size, args.sequence_length
   assert 1 <= T <= 1024
-  n_head = 12
-  model = GPT(GPTConfig(n_layer=1, n_head=n_head, n_embd=n_head * 64))
+  n_head = 24
+  model = GPT(GPTConfig(n_layer=64, n_head=n_head, n_embd=n_head * 64))
   p_sz("model", *nn.state.get_parameters(model))
   seen = set()
   if SHARD_MODEL:
