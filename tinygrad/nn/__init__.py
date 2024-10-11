@@ -60,7 +60,7 @@ class BatchNorm:
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt())
 BatchNorm2d = BatchNorm3d = BatchNorm
 
-def Conv1d(in_channels:int, out_channels:int, kernel_size:int, stride:int=1, padding:int=0, dilation:int=1, groups:int=1, bias:bool=True) -> Conv2d:
+def Conv1d(in_channels:int, out_channels:int, kernel_size:int, stride:int=1, padding:Union[int, str]=0, dilation:int=1, groups:int=1, bias:bool=True) -> Conv2d: #noqa:E501
   """
   Applies a 1D convolution over an input signal composed of several input planes.
 
