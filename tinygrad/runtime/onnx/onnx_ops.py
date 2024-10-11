@@ -167,7 +167,7 @@ def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
          [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
 
 # shared padding function
-# TODO: check this again
+# TODO: check this again, the zips are pretty bad
 def _padded(X: Tensor, pads=None, auto_pad="NOTSET", constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
   input_shape = X.shape[2:]
   strides, dilations = (make_pair(x, len(input_shape)) for x in (strides, dilations))
@@ -191,6 +191,7 @@ def Pad(x:Tensor, pads:List[ConstType], constant_value:Optional[ConstType]=None,
   return x.pad(_onnx_pads_to_pad(pads, x.ndim, axes), constant_value, mode)
 
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
+  # TODO:
   ret = _padded(X, pads, auto_pad, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
   ret = ret.avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
   if count_include_pad: return ret
@@ -199,6 +200,9 @@ def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_i
   return ret / div
 
 def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
+  # TODO:
+  # ret, indices = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations, ceil_mode=True, return_indices=True).cast(X.dtype)
+  # return ret, indices.transpose(-2, -1) if storage_order else indices
   ret = _padded(X, pads, auto_pad, constant_value=-math.inf, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations).cast(X.dtype)
   indices = ((ret.reshape(-1, 1) == X.reshape(1, -1)) * Tensor.arange(X.numel(), dtype=dtypes.int64).unsqueeze(0)).sum(1).reshape(ret.shape)
@@ -284,7 +288,6 @@ def Gather(x: Tensor, indices: Tensor, axis=0):
     return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
   # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
   return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
-  # return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
 def ArrayFeatureExtractor(x: Tensor, indices: Tensor): return x[..., indices]
 def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
@@ -487,12 +490,6 @@ def Attention(x:Tensor, weights, bias:Tensor, mask_index:Optional[Tensor]=None, 
   if past is not None:
     xk, xv = Tensor.cat(past[0], xk, dim=-2), Tensor.cat(past[1], xv, dim=-2)
     present = Tensor.cat(xk.unsqueeze(0), xv.unsqueeze(0))
-
-  # def attn(query, key, value, mask):
-  #   attn_weights = (query @ key.transpose(-1, -2)) / math.sqrt(value.shape[-1])
-  #   causal_mask = Tensor.ones((query.size(-2), key.size(-2) + 1), dtype=dtypes.bool).tril(0)[key.size(-2) - query.size(-2):]
-  #   masked = Tensor.where(causal_mask, attn_weights, -math.inf)
-  #   return masked.softmax(-1) @ value if mask is None else (masked + mask).softmax(-1) @ value
 
   def attn(query, key, value, attn_mask):
     query_length, key_length = query.shape[-2], key.shape[-2]

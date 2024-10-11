@@ -194,9 +194,9 @@ def get_run_onnx(onnx_model: ModelProto):
         # only onnx_model_version < 10 has opt, we just unload the opt into inp to match other versions
         if opt: inp.extend([list(v) for v in reversed(opt.values())]) # axes, ends, starts -> starts, ends, axes
         (data, starts, ends), axes, steps = inp[:3], inp[3] if len(inp) > 3 else list(range(inp[0].ndim)), inp[4] if len(inp) > 4 else [1]*inp[0].ndim
-        arg = [slice(0,x,1) for x in data.shape]
-        for i, axis in enumerate(axes): arg[axis] = slice(starts[i], ends[i], steps[i])
-        ret = data[arg]
+        slices = [slice(0,x,1) for x in data.shape]
+        for i, axis in enumerate(axes): slices[axis] = slice(starts[i], ends[i], steps[i])
+        ret = data[slices]
 
       # need to call backward on intermediate_tensors
       elif n.op_type == "Gradient":
