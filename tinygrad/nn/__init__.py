@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Union, Tuple, List
+from typing import Optional, Union, Tuple, Sequence
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, make_pair
 from tinygrad.nn import optim, state, datasets  # noqa: F401
@@ -59,7 +59,7 @@ class BatchNorm:
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt())
 BatchNorm2d = BatchNorm3d = BatchNorm
 
-def Conv1d(in_channels:int, out_channels:int, kernel_size:int, stride:int=1, padding:Union[int,Tuple[int, ...],List[int]]=0,
+def Conv1d(in_channels:int, out_channels:int, kernel_size:int, stride:int=1, padding:Union[int, Sequence[int]]=0,
            dilation:Union[Tuple[int, ...], int]=1, groups:int=1, bias:bool=True) -> Conv2d:
   """
   Applies a 1D convolution over an input signal composed of several input planes.
@@ -94,8 +94,8 @@ class Conv2d:
   print(t.numpy())
   ```
   """
-  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int, ...]], stride:int=1, padding:Union[int,Tuple[int, ...],
-               List[int]]=0, dilation:Union[Tuple[int, ...], int]=1, groups:int=1, bias:bool=True):
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int, Tuple[int, ...]], stride:int=1,
+               padding:Union[str, int, Sequence[int]]=0, dilation:Union[Tuple[int, ...], int]=1, groups:int=1, bias:bool=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     if isinstance(padding, str):
       if padding.lower() != 'same': raise ValueError(f"Invalid padding string {padding!r}, only 'same' is supported")
@@ -110,7 +110,7 @@ class Conv2d:
   def __call__(self, x:Tensor) -> Tensor:
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
-def ConvTranspose1d(in_channels:int, out_channels:int, kernel_size:int, stride:int=1, padding:Union[int,Tuple[int, ...],List[int]]=0,
+def ConvTranspose1d(in_channels:int, out_channels:int, kernel_size:int, stride:int=1, padding:Union[int, Sequence[int]]=0,
                     output_padding:int=0, dilation:Union[Tuple[int, ...], int]=1, groups:int=1, bias:bool=True) -> ConvTranspose2d:
   """
   Applies a 1D transposed convolution operator over an input signal composed of several input planes.
@@ -145,8 +145,8 @@ class ConvTranspose2d(Conv2d):
   print(t.numpy())
   ```
   """
-  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int, ...]], stride:int=1, padding:Union[int,Tuple[int, ...],
-               List[int]]=0, output_padding:int=0, dilation:Union[Tuple[int, ...], int]=1, groups:int=1, bias:bool=True):
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int, ...]], stride:int=1, padding:Union[int, Sequence[int]]=0,
+               output_padding:int=0, dilation:Union[Tuple[int, ...], int]=1, groups:int=1, bias:bool=True):
     super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
     scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
     self.weight = Tensor.uniform(in_channels, out_channels//groups, *self.kernel_size, low=-scale, high=scale)
