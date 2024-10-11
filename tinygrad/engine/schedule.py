@@ -108,9 +108,9 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
 
 reduceop_fusor = PatternMatcher([
-  # SWIZZLE on VALID merges the views
-  (UPat(UOps.VIEW, src=(UPat(UOps.ALU, src=(UPat(UOps.VALID), UPat.var(), UPat.var()), name="alu", arg=TernaryOps.WHERE),), name="root"),
-   lambda root,alu: UOp(UOps.VALID, dtypes.bool, (root.st.to_uop(),)).where(*alu.src[1:]) if root.st != alu.st else alu),
+  # const + maskless swizzle = const
+  (UPat(UOps.VIEW, src=(UPat.cvar("x"),), name="view"),
+   lambda view,x: x if all(v.mask is None for v in view.st.views) else UOp(UOps.VALID, dtypes.bool, (view.st.to_uop(),)).where(x, x.const_like(0))),
   # push a SWIZZLE up to LOAD, through a reduce (eg. expands)
   (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
   # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
@@ -371,8 +371,7 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
           assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
           buf.buffer.dtype = dtypes.float32
           buf.buffer.options = None
-    if buf.op is MetaOps.CONST:
-      uop = UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(buf.dtype.scalar(), buf.arg), v.const_like(0))
+    if buf.op is MetaOps.CONST: uop = UOp.const(buf.dtype.scalar(), buf.arg)
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
     else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
     buf_uops.setdefault(buf.buffer, uop)
