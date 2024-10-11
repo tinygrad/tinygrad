@@ -68,10 +68,7 @@ def get_run_onnx(onnx_model: ModelProto):
         type_proto = getattr(type_proto, 'sequence_type').elem_type
         ret.append(1)
       elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
-      elif attr == 'map_type': raise NotImplementedError(f"map_type is not implemented: {type_proto}")
-      elif attr == 'opaque_type': raise NotImplementedError(f"opaque_type is not implemented: {type_proto}")
-      elif attr == 'sparse_tensor_type': raise NotImplementedError(f"sparse_tensor_type is not implemented: {type_proto}")
-      else: raise AttributeError(f"unknown attr: {attr}, {type_proto}")
+      else: NotImplementedError(f"{type_proto=} is not implemented")
 
   def buffer_parse(inp: TensorProto) -> Tensor:
     if inp.data_type not in DTYPE_MAP: raise NotImplementedError(f"data type not supported {inp.name} {inp.dims} {inp.data_type}")
@@ -93,7 +90,7 @@ def get_run_onnx(onnx_model: ModelProto):
     elif a.type == AttributeProto.FLOATS: return tuple(float(x) for x in a.floats)
     elif a.type == AttributeProto.INTS: return tuple(int(x) for x in a.ints)
     elif a.type == AttributeProto.STRINGS: return tuple(x.decode("utf-8") for x in a.strings)
-    elif a.type == AttributeProto.GRAPH: raise NotImplementedError(f"graph not implemented: {a.g}\n likely an OP requiring control flow")
+    elif a.type == AttributeProto.GRAPH: raise NotImplementedError(f"graph not implemented: {a.g}")
     else: raise RuntimeError(f"can't parse {a.type} {a}")
 
   tensors: Dict[str, Tensor] = {}

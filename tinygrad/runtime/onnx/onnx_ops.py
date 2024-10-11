@@ -69,6 +69,7 @@ def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, v
   if value_string is not None or value_strings is not None: raise NotImplementedError('value_string or value_strings not implemented for Constant op')
 def ConstantOfShape(shape:List[ConstType], value:Tensor): return Tensor.ones(*shape, dtype=value.dtype) * (value if shape != [0] else 1)
 
+# need default values for hardsigmoid
 def HardSigmoid(x: Tensor, alpha=0.2, beta=0.5): return x.hardsigmoid(alpha, beta)
 def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + Erf(x/math.sqrt(2)))
 def PRelu(X:Tensor, slope:Tensor):
@@ -186,9 +187,11 @@ def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_typ
 def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
   return x.reshape(x.size(0), num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
 
-# NOTE: these also works with 1D, 3D, or 1337D
+# **************** Ops with Padding ****************
+# helpers
 # (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> (..., x2_start, x2_end, x1_start, x1_end)
 def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed(list((pb, pe) for pb, pe in zip(pads, pads[len(pads)//2:]))))
+
 # (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> ((x1_begin, x1_end), (x2_begin, x2_end), ...)
 def _onnx_pads_to_pad(onnx_pads, ndims=None, axes=None):
   axes = axes or list(range(ndims))
@@ -196,10 +199,12 @@ def _onnx_pads_to_pad(onnx_pads, ndims=None, axes=None):
   for i in range(len(axes)): pads[axes[i]] = (onnx_pads[i], onnx_pads[i + len(axes)])
   return pads
 
+# (H_pad, W_pad) -> (L_pad, U_pad, R_pad, D_pad)
 def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
   return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
          [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
 
+# shared padding function
 def _padded(X: Tensor, pads=None, auto_pad="NOTSET", constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
   input_shape = X.shape[2:]
   strides, dilations = (make_pair(x, len(input_shape)) for x in (strides, dilations))
@@ -263,13 +268,7 @@ def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1
   return ret, indices
 
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
-  out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
-  ret = ((xI.reshape(-1, 1) == Tensor.arange(prod(out_sh))) * xT.reshape(-1, 1)).sum(0).reshape(1, 1, *out_sh)
-  if outshape is not None and outshape != ret.shape:
-    ret = ret.pad2d(_onnx_pads_to_pad2d_pads(_auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
-  return ret
-# TODO: is setitem more preferred? it's more lines :D
-# def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
+# TODO: is setitem MaxUnpool more preferred? it's more lines :D
 #   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
 #   ret = Tensor.zeros(prod(out_sh)).contiguous()
 #   ret[xI.flatten()] = xT.flatten()
@@ -277,6 +276,11 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
 #   if outshape is not None and outshape != ret.shape:
 #     ret = ret.pad2d(_onnx_pads_to_pad2d_pads(_auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
 #   return ret
+  out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
+  ret = ((xI.reshape(-1, 1) == Tensor.arange(prod(out_sh))) * xT.reshape(-1, 1)).sum(0).reshape(1, 1, *out_sh)
+  if outshape is not None and outshape != ret.shape:
+    ret = ret.pad2d(_onnx_pads_to_pad2d_pads(_auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
+  return ret
 
 def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
   input_shape, kernel_shape = X.shape[2:], (kernel_shape or W.shape[2:])
@@ -309,18 +313,9 @@ def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSE
   # return X if pads is None else X.shrink((None, None, *((pl, X.size(i+2)-pr) for i,(pl,pr) in enumerate(zip(pads, pads[len(pads)//2:])))))
 
 def DepthToSpace(X:Tensor, blocksize:int, mode:str="DCR"):
-  b, c, h, w = X.shape
-  if mode == "DCR":
-    return X.reshape(b, blocksize, blocksize, c // (blocksize**2), h, w).permute(0, 3, 4, 1, 5, 2).reshape(b, c // (blocksize**2), h * blocksize,
-                                                                                                           w * blocksize)
-  elif mode == "CRD":
-    return X.reshape(b, c // (blocksize ** 2), blocksize, blocksize, h, w).permute(0, 1, 4, 2, 5, 3).reshape(b, c // (blocksize ** 2), h * blocksize,
-                                                                                                             w * blocksize)
+  return X.rearrange("b (c h1 w1) h w -> b c (h h1) (w w1)" if mode=="CRD" else "b (h1 w1 c) h w -> b c (h h1) (w w1)", h1=blocksize, w1=blocksize)
 
-def SpaceToDepth(X:Tensor, blocksize:int):
-  b, c, h, w = X.shape
-  return X.reshape(b, c, h // blocksize, blocksize, w // blocksize, blocksize).permute(0, 3, 5, 1, 2, 4).reshape(b, c * (blocksize**2),
-                                                                                                                 h // blocksize, w // blocksize)
+def SpaceToDepth(X:Tensor, blocksize:int): return X.rearrange("b c (h h1) (w w1) -> b (h1 w1 c) h w", h1=blocksize, w1=blocksize)
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
 def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
@@ -448,9 +443,7 @@ def Compress(inp: Tensor, condition, axis=None):
   if axis is None:
     inp = inp.flatten()
     axis = 0
-
   if axis < 0: axis += inp.ndim
-
   con = Tensor(np.arange(len(condition))[condition]) # TODO no boolean indexing in Tensor, pretty sure it's possible now...
   return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
