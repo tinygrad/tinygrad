@@ -4,7 +4,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Tuple, Optional
-from tinygrad.helpers import getenv, to_function_name, tqdm
+from tinygrad.helpers import colored, getenv, to_function_name, tqdm
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, lines
 from tinygrad.engine.graph import word_wrap, uops_colors
 from tinygrad.codegen.kernel import Kernel
@@ -123,6 +123,7 @@ def reloader():
 
 if __name__ == "__main__":
   multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
+  st = time.perf_counter()
   print("*** viz is starting")
   with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = pickle.load(f)
   print("*** unpickled saved rewrites")
@@ -131,11 +132,12 @@ if __name__ == "__main__":
     ret = [get_details(*args) for v in tqdm(kernels) for args in v]
     print(f"fuzzed {len(ret)} rewrite details")
   print("*** loaded kernels")
-  server = HTTPServer(('', 8000), Handler)
-  st = time.perf_counter()
+  server = HTTPServer(('', PORT:=getenv("PORT", 8000)), Handler)
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
-  if getenv("BROWSER", 1): webbrowser.open("http://localhost:8000")
+  print(f"*** started viz on http://127.0.0.1:{PORT}")
+  print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"))
+  if getenv("BROWSER", 0): webbrowser.open(f"http://127.0.0.1:{PORT}")
   try: server.serve_forever()
   except KeyboardInterrupt:
     print("*** viz is shutting down...")
