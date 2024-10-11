@@ -1,8 +1,9 @@
 import math
-from typing import Optional, Union, Tuple
+from typing import Optional, Union, Tuple, Any
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, make_pair
-from tinygrad.nn import optim, state, datasets  # noqa: F401
+from tinygrad.nn import optim, state, datasets, Conv2d  # noqa: F401
+
 
 class BatchNorm:
   """
@@ -29,7 +30,7 @@ class BatchNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
+  def __init__(self, sz:int, eps:float=1e-5, affine:bool=True, track_running_stats:bool=True, momentum:float=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
     self.weight: Optional[Tensor] = Tensor.ones(sz) if affine else None
@@ -49,7 +50,7 @@ class BatchNorm:
     batch_var = (y*y).mean(axis=reduce_axes)
     return batch_mean, batch_var
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     batch_mean, batch_var = self.calc_stats(x)
     # NOTE: wow, this is done all throughout training in most PyTorch models
     if self.track_running_stats and Tensor.training:
@@ -59,7 +60,7 @@ class BatchNorm:
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt())
 BatchNorm2d = BatchNorm3d = BatchNorm
 
-def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
+def Conv1d(in_channels:int, out_channels:int, kernel_size:int, stride:int=1, padding:int=0, dilation:int=1, groups:int=1, bias:bool=True) -> Conv2d:
   """
   Applies a 1D convolution over an input signal composed of several input planes.
 
@@ -93,7 +94,8 @@ class Conv2d:
   print(t.numpy())
   ```
   """
-  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:int|tuple[int,int], stride:int=1, padding:int|str=0,
+               dilation=1, groups=1, bias=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     if isinstance(padding, str):
       if padding.lower() != 'same': raise ValueError(f"Invalid padding string {padding!r}, only 'same' is supported")
@@ -105,10 +107,10 @@ class Conv2d:
     self.weight = Tensor.uniform(out_channels, in_channels//groups, *self.kernel_size, low=-scale, high=scale)
     self.bias = Tensor.uniform(out_channels, low=-scale, high=scale) if bias else None
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
-def ConvTranspose1d(in_channels, out_channels, kernel_size, stride=1, padding=0, output_padding=0, dilation=1, groups=1, bias=True):
+def ConvTranspose1d(in_channels:int, out_channels:int, kernel_size: int, stride:int=1, padding:int=0, output_padding:int=0, dilation:int=1, groups:int=1, bias:bool=True):
   """
   Applies a 1D transposed convolution operator over an input signal composed of several input planes.
 
@@ -142,13 +144,13 @@ class ConvTranspose2d(Conv2d):
   print(t.numpy())
   ```
   """
-  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, output_padding=0, dilation=1, groups=1, bias=True):
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:tuple[int,int], stride:int=1, padding:int=0, output_padding:int=0, dilation:int=1, groups:int=1, bias:bool=True):
     super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
     scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
     self.weight = Tensor.uniform(in_channels, out_channels//groups, *self.kernel_size, low=-scale, high=scale)
     self.output_padding = output_padding
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     return x.conv_transpose2d(self.weight, self.bias, padding=self.padding, output_padding=self.output_padding, stride=self.stride,
                               dilation=self.dilation, groups=self.groups)
 
@@ -168,12 +170,12 @@ class Linear:
   print(t.numpy())
   ```
   """
-  def __init__(self, in_features, out_features, bias=True):
+  def __init__(self, in_features:int, out_features:int, bias:bool=True):
     bound = 1 / math.sqrt(in_features)
     self.weight = Tensor.uniform(out_features, in_features, low=-bound, high=bound)
     self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     return x.linear(self.weight.transpose(), self.bias)
 
 class GroupNorm:
@@ -198,7 +200,7 @@ class GroupNorm:
     self.weight: Optional[Tensor] = Tensor.ones(num_channels) if affine else None
     self.bias: Optional[Tensor] = Tensor.zeros(num_channels) if affine else None
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     # reshape for layernorm to work as group norm
     # subtract mean and divide stddev
     x = x.reshape(x.shape[0], self.num_groups, -1).layernorm(eps=self.eps).reshape(x.shape)
@@ -229,7 +231,7 @@ class InstanceNorm:
     self.weight: Optional[Tensor] = Tensor.ones(num_features) if affine else None
     self.bias: Optional[Tensor] = Tensor.zeros(num_features) if affine else None
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     x = x.reshape(x.shape[0], self.num_features, -1).layernorm(eps=self.eps).reshape(x.shape)
     if self.weight is None or self.bias is None: return x
     return x * self.weight.reshape(1, -1, *[1] * (len(x.shape)-2)) + self.bias.reshape(1, -1, *[1] * (len(x.shape)-2))
@@ -251,12 +253,12 @@ class LayerNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, normalized_shape:Union[int, Tuple[int, ...]], eps:float=1e-5, elementwise_affine:bool=True):
+  def __init__(self, normalized_shape:int|Tuple[int, ...], eps:float=1e-5, elementwise_affine:bool=True):
     self.normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
     self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(self.normalized_shape))), eps, elementwise_affine
     self.weight, self.bias = (Tensor.ones(*self.normalized_shape), Tensor.zeros(*self.normalized_shape)) if elementwise_affine else (None, None)
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"last dimensions of {x.shape} must match {self.normalized_shape}"
     x = x.layernorm(eps=self.eps, axis=self.axis)
     if not self.elementwise_affine: return x
@@ -278,7 +280,7 @@ class LayerNorm2d(LayerNorm):
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __call__(self, x): return super().__call__(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+  def __call__(self, x) -> Tensor: return super().__call__(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
 
 class RMSNorm:
   """
@@ -296,9 +298,9 @@ class RMSNorm:
   print(norm(t).numpy())
   ```
   """
-  def __init__(self, dim, eps=1e-6): self.eps, self.weight = eps, Tensor.ones(dim)
+  def __init__(self, dim:int, eps:float=1e-6): self.eps, self.weight = eps, Tensor.ones(dim)
 
-  def _norm(self, x:Tensor): return x * (x.square().mean(-1, keepdim=True) + self.eps).rsqrt()
+  def _norm(self, x:Tensor) -> Tensor: return x * (x.square().mean(-1, keepdim=True) + self.eps).rsqrt()
 
   def __call__(self, x:Tensor) -> Tensor: return self._norm(x.float()).cast(x.dtype) * self.weight
 
