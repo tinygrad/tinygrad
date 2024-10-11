@@ -137,7 +137,7 @@ if getenv("RUN_PROCESS_REPLAY"):
     for base_sink,ctx,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
 
 @track_rewrites
-def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable, int]={}) -> UOp:
+def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable, int]) -> UOp:
   sink = graph_rewrite(base_sink, reduceop_fusor)
   ret = graph_rewrite(graph_rewrite(sink, enumerate_bufs, bufs), append_st_vars, var_vals)
   PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
