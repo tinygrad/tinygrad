@@ -23,6 +23,7 @@ class CloudSession:
 
 class CloudHandler(BaseHTTPRequestHandler):
   protocol_version = 'HTTP/1.1'
+  timeout = 60.0
   dname: str
   sessions: DefaultDict[str, CloudSession] = defaultdict(CloudSession)
 
