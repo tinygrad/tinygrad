@@ -218,7 +218,7 @@ if __name__ == "__main__":
       t1 = time.time()
       print(f"iteration {i}, loss: {loss.item():.6f}, time: {(t1-t0)*1000:.3f}ms, {int(B*T/(t1-t0))} tok/s")
 
-  if True: # Generate not working yet...
+  if not args.skip_test:
     start = "<|endoftext|>"
     start_ids = encode(start)
     x = (Tensor(start_ids)[None, ...])
