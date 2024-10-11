@@ -5,18 +5,25 @@
 # it should be a secure (example: no use of pickle) boundary. HTTP is used for RPC
 
 from __future__ import annotations
-from typing import Tuple, Optional, Dict, Any
-import multiprocessing, functools, urllib.request, urllib.error, hashlib, json, time, contextlib
-from tinygrad.helpers import getenv, DEBUG, fromimport
+from typing import Tuple, Optional, Dict, Any, DefaultDict
+from collections import defaultdict
+import multiprocessing, functools, urllib.request, urllib.error, hashlib, json, time, contextlib, os, binascii
+from dataclasses import dataclass, field
+from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap
 from tinygrad.device import Compiled, Allocator, Compiler, Device
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ***** backend *****
+
+@dataclass
+class CloudSession:
+  programs: Dict[Tuple[str, str], Any] = field(default_factory=dict)
+  buffers: Dict[int, Tuple[Any, int]] = field(default_factory=dict)
+  buffer_num = 0
+
 class CloudHandler(BaseHTTPRequestHandler):
   dname: str
-  buffers: Dict[int, Tuple[Any, int]] = {}
-  buffer_num = 0
-  programs: Dict[Tuple[str,str], Any] = {}
+  sessions: DefaultDict[str, CloudSession] = defaultdict(CloudSession)
 
   def get_data(self):
     content_len = self.headers.get('Content-Length')
@@ -30,22 +37,24 @@ class CloudHandler(BaseHTTPRequestHandler):
     return 0
 
   def _do(self, method):
+    session = CloudHandler.sessions[unwrap(self.headers.get("Cookie")).split("=")[1]]
     ret = b""
     if self.path == "/renderer" and method == "GET":
       cls, args = Device[CloudHandler.dname].renderer.__reduce__()
       ret = json.dumps((cls.__module__, cls.__name__, args)).encode()
-    elif self.path == "/alloc" and method == "POST":
-      CloudHandler.buffer_num += 1
-      CloudHandler.buffers[CloudHandler.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(size:=self.get_json()['size']), size)
-      ret = str(CloudHandler.buffer_num).encode()
+    elif self.path.startswith("/alloc") and method == "POST":
+      size = int(self.path.split("=")[-1])
+      session.buffer_num += 1
+      session.buffers[session.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(size), size)
+      ret = str(session.buffer_num).encode()
     elif self.path.startswith("/buffer"):
       key = int(self.path.split("/")[-1])
-      buf,sz = CloudHandler.buffers[key]
+      buf,sz = session.buffers[key]
       if method == "GET": Device[CloudHandler.dname].allocator.copyout(memoryview(ret:=bytearray(sz)), buf)
       elif method == "PUT": Device[CloudHandler.dname].allocator.copyin(buf, memoryview(bytearray(self.get_data())))
       elif method == "DELETE":
         Device[CloudHandler.dname].allocator.free(buf,sz)
-        del CloudHandler.buffers[key]
+        del session.buffers[key]
       else: return self._fail()
     elif self.path.startswith("/program"):
       name, hsh = self.path.split("/")[-2:]
@@ -53,14 +62,14 @@ class CloudHandler(BaseHTTPRequestHandler):
         src = self.get_data()
         assert hashlib.sha256(src).hexdigest() == hsh
         lib = Device[CloudHandler.dname].compiler.compile_cached(src.decode())
-        CloudHandler.programs[(name, hsh)] = Device[CloudHandler.dname].runtime(name, lib)
+        session.programs[(name, hsh)] = Device[CloudHandler.dname].runtime(name, lib)
       elif method == "POST":
         j = self.get_json()
-        bufs = [CloudHandler.buffers[x][0] for x in j['bufs']]
+        bufs = [session.buffers[x][0] for x in j['bufs']]
         del j['bufs']
-        r = CloudHandler.programs[(name, hsh)](*bufs, **j)
+        r = session.programs[(name, hsh)](*bufs, **j)
         if r is not None: ret = str(r).encode()
-      elif method == "DELETE": del CloudHandler.programs[(name, hsh)]
+      elif method == "DELETE": del session.programs[(name, hsh)]
       else: return self._fail()
     else: return self._fail()
     self.send_response(200)
@@ -85,7 +94,7 @@ class CloudAllocator(Allocator):
   def __init__(self, device:CloudDevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size:int, options) -> int: return int(self.device.send("POST", "alloc", data=json.dumps({"size": size}).encode()))
+  def _alloc(self, size:int, options) -> int: return int(self.device.send("POST", f"alloc?size={size}"))
   def _free(self, opaque, options):
     with contextlib.suppress(urllib.error.URLError): self.device.send("DELETE", f"buffer/{opaque}", data=b"")
   def copyin(self, dest:int, src:memoryview): self.device.send("PUT", f"buffer/{dest}", data=bytes(src))
@@ -118,6 +127,7 @@ class CloudDevice(Compiled):
       p.daemon = True
       p.start()
       self.host = "http://127.0.0.1:6667/"
+    self.cookie = binascii.hexlify(os.urandom(0x10)).decode()
     if DEBUG >= 1: print(f"cloud with host {self.host}")
     while 1:
       try:
@@ -135,7 +145,8 @@ class CloudDevice(Compiled):
 
   def send(self, method, path, data:Optional[bytes]=None, timeout=60.0) -> bytes:
     # TODO: retry logic
-    with urllib.request.urlopen(urllib.request.Request(self.host+path, method=method), data=data, timeout=timeout) as r:
+    req = urllib.request.Request(self.host+path, method=method, headers={"Cookie": f"session={self.cookie}"})
+    with urllib.request.urlopen(req, data=data, timeout=timeout) as r:
       assert r.status == 200
       return r.read()
 
