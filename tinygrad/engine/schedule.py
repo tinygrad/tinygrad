@@ -17,7 +17,7 @@ from tinygrad.shape.view import View, strides_for_shape
 sys.setrecursionlimit(10000)
 
 BUF_LIMIT = {"METAL": 32}
-METAOPS = {MetaOps.CUSTOM:UOps.CUSTOM, MetaOps.COPY:UOps.COPY, MetaOps.EMPTY:UOps.EMPTY, MetaOps.VIEW:UOps.BUFFER_VIEW}
+METAOPS = {MetaOps.COPY:UOps.COPY, MetaOps.EMPTY:UOps.EMPTY, MetaOps.VIEW:UOps.BUFFER_VIEW}
 
 # *** ScheduleItem return type ***
 
