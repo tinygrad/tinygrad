@@ -991,7 +991,7 @@ class Tensor:
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.pad(((None, (1, 2))), -2).numpy())
-
+    ```
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.pad(((None, (2, 3))), mode="reflect").numpy())
     ```

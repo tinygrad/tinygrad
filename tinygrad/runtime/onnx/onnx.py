@@ -105,8 +105,6 @@ def get_run_onnx(onnx_model: ModelProto):
     attribute_dict[num] = {x.name:attribute_parse(x) for x in n.attribute}
     if n.domain: domain = n.domain
 
-  onnx_model_version = onnx_model.opset_import[0].version
-
   def run_onnx(inputs={}, debug=0):
     debug = getenv("DEBUGONNX") or debug
     input_tensors: Dict[str,Union[Tensor, List[Tensor]]] = {}
@@ -140,12 +138,25 @@ def get_run_onnx(onnx_model: ModelProto):
       if x != "": return input_tensors[x]
       return None
 
+    # tensor methods
+    exact_tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
+      "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh", "Elu", "Celu", "Xor",
+      "Round", "Softmax"}
+
+    # tensor methods with different name
+    equivalent_tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual": "__le__", "GreaterOrEqual": "__ge__", "Equal": "__eq__",
+      "LogSoftmax": "log_softmax", "Not": "logical_not", "Tile":"repeat", "Range": "arange", "NegativeLogLikelihoodLoss": "nll_loss"}
+
+    # tensor methods with different argument names
+    equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"}), "LeakyRelu": ("leakyrelu", {"alpha": "neg_slope"}),
+      "Selu": ("selu", {"gamma": "scale"})}
+
     # TODO what if we just don't buffer parse some inps or attributes so no need waste time to python const
-    # inps uses index
+    # inputs we need to turn into a python const
     to_python_const_inps: Dict[str, Tuple[int, ...]] = \
     {"Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
-     "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
-     "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4)}
+      "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
+      "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4)}
 
     for num,n in enumerate(onnx_model.graph.node):
       inp = []
@@ -160,16 +171,14 @@ def get_run_onnx(onnx_model: ModelProto):
       # to_python_consts
       inp = [to_python_const(x) if i in to_python_const_inps.get(n.op_type, ()) else x for i,x in enumerate(inp)]
 
-      # NOTE some ops live here because they require access to some local variables
-      if n.op_type in onnx_ops.exact_tensor_methods:
-        ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
-      elif n.op_type in onnx_ops.equivalent_tensor_methods:
-        ret = getattr(Tensor, onnx_ops.equivalent_tensor_methods[n.op_type])(*inp, **opt)
-      elif n.op_type in onnx_ops.equivalent_tensor_methods_exceptions:
-        # TODO: kinda ugly
-        rewrite = onnx_ops.equivalent_tensor_methods_exceptions[n.op_type]
+      # tensor methods
+      if n.op_type in exact_tensor_methods: ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
+      elif n.op_type in equivalent_tensor_methods: ret = getattr(Tensor, equivalent_tensor_methods[n.op_type])(*inp, **opt)
+      elif n.op_type in equivalent_tensor_methods_exceptions:
+        rewrite = equivalent_tensor_methods_exceptions[n.op_type]
         ret = getattr(Tensor, rewrite[0])(*inp, **{rewrite[1].get(k, k):v for k,v in opt.items()})
 
+      # NOTE some ops live here because they require access to some local variables
       # have to use n.output for cases when num_outputs is absent
       elif n.op_type == "Split":
         axis, outputs, split = opt.get("axis", 0), opt.get("num_outputs") or len(n.output), opt.get("split")
@@ -195,14 +204,7 @@ def get_run_onnx(onnx_model: ModelProto):
         ret = tuple([t.grad for t in inp])
 
       # onnx_ops.py
-      elif hasattr(onnx_ops, n.op_type):
-        fxn = getattr(onnx_ops, n.op_type)
-        if isinstance(fxn, dict):
-          for k in sorted(fxn.keys()):
-            if k <= onnx_model_version:
-              real_fxn = fxn[k]
-        else: real_fxn = fxn
-        ret = real_fxn(*inp, **opt)
+      elif hasattr(onnx_ops, n.op_type): ret = getattr(onnx_ops, n.op_type)(*inp, **opt)
       else:
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise NotImplementedError(f"op_type {n.op_type} not supported")

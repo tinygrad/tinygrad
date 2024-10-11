@@ -3,21 +3,11 @@ from typing import Union, Tuple, Optional, List, Any, cast, Literal
 from tinygrad.tensor import Tensor, _broadcast_shape, ConstType
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten, make_pair
-from .onnx import DTYPE_MAP, to_python_const
+from tinygrad.runtime.onnx.onnx import DTYPE_MAP, to_python_const
 import numpy as np
 
-# TODO maybe don't cast hack things and instead raise exceptions
+# TODO maybe don't cast hack things
 # TODO maybe implement meshgrid utility
-
-exact_tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
-  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh", "Elu", "Celu", "Xor",
-  "Round",}
-
-equivalent_tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual": "__le__", "GreaterOrEqual": "__ge__", "Equal": "__eq__",
-  "LogSoftmax": "log_softmax", "Not": "logical_not", "Tile":"repeat", "Range": "arange", "NegativeLogLikelihoodLoss": "nll_loss"}
-
-equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"}), "LeakyRelu": ("leakyrelu", {"alpha": "neg_slope"}),
-  "Selu": ("selu", {"gamma": "scale"})}
 
 # **************** Free Ops ****************
 
@@ -59,9 +49,6 @@ def PRelu(X:Tensor, slope:Tensor):
   slope = slope[0] if slope.size(-1) != X.size(-1) else slope
   return (X > 0).where(X, X * slope)
 def ThresholdedRelu(X: Tensor, alpha=1.0): return (X > alpha).where(X, 0)
-def Softmax_1(x: Tensor, axis=1): return x.softmax(axis)
-def Softmax_13(x: Tensor, axis=-1): return x.softmax(axis)
-Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
 def Clip(x: Tensor, min=None, max=None): # noqa: A002  cuz onnx just uses min and max as attribute names
   return x.clip(float('-inf') if min is None else min,float('inf') if max is None else max).cast(x.dtype)
 
