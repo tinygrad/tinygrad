@@ -108,9 +108,9 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
 
 reduceop_fusor = PatternMatcher([
-  # const + maskless swizzle = const
-  (UPat(UOps.VIEW, src=(UPat((UOps.CONST, UOps.DEFINE_VAR), name="x"),), name="view"), lambda view,x: x if all(v.mask is None for v in view.st.views)
-   and not any(isinstance(s, UOp) for s in view.st.shape) else UOp(UOps.VALID, dtypes.bool, (view.st.to_uop(),)).where(x, x.const_like(0))),
+  # const + maskless view = const TODO: what if it's an unmasked reduceop src, TestSymbolicOps.test_ones_sum
+  (UPat(UOps.VIEW, src=(UPat((UOps.CONST, UOps.DEFINE_VAR), name="x"),), name="view"),
+   lambda view,x: x if all(v.mask is None for v in view.st.views) else UOp(UOps.VALID, dtypes.bool, (view.st.to_uop(),)).where(x, x.const_like(0))),
   # push a SWIZZLE up to LOAD, through a reduce (eg. expands)
   (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
   # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
