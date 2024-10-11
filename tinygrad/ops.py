@@ -99,6 +99,7 @@ def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.
 class UOps(FastEnum):
   # uops that aren't rendered
   SINK = auto()
+  CONTIGUOUS = auto()
 
   # metaops
   CUSTOM = auto()
