@@ -6,7 +6,7 @@ from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, UOps, UOp, KernelInfo
 from tinygrad.ops import UPat, PatternMatcher
-from tinygrad.codegen.lowerer import ast_to_uop
+from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, graph_rewrite, expander, reducer, sym, float4_folding
 from tinygrad.shape.shapetracker import ShapeTracker, View
 
@@ -50,7 +50,7 @@ class TestGraphRewriteEfficiency(unittest.TestCase):
                 UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(
                   View(shape=(2, 4, 64, 8, 16, 16, 15, 3, 3, 4, 15), strides=(7200, 0, 230400, 900, 0, 14400, 15, 0, 0, 225, 1), offset=0,
                        mask=None, contiguous=False),)), src=()),)),)),)),)),)),))
-    lower_sink = ast_to_uop(sink, Device[Device.DEFAULT].renderer)
+    lower_sink = rewrite_shapetracker_with_index(sink, Device[Device.DEFAULT].renderer)
     cnt = [0]
     old_init = UOp.__init__
     def uop_hook(self, *args, **kwargs):
