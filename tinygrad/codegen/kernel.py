@@ -15,8 +15,9 @@ from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.view import strides_for_shape
-from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
-from tinygrad.codegen.lowerer import ast_to_uop, get_contraction
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite
+from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
@@ -715,7 +716,7 @@ class Kernel:
       print(self.applied_opts)
     verify_ast(modified_ast)
 
-    self.uops:List[UOp] = linearize_uop(full_graph_rewrite(ast_to_uop(modified_ast, self.opts), self.opts))
+    self.uops:List[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
     if DEBUG >= 5: print_uops(self.uops)
     if getenv("GRAPHUOPS"):
       from tinygrad.engine.graph import graph_uops

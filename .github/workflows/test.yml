@@ -230,6 +230,9 @@ jobs:
         name: Test ONNX (CLANG)
         run: CLANG=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
+        name: Run CLOUD=1 Test
+        run: CLOUDDEV=CLANG CLOUD=1 python3 test/test_ops.py TestOps.test_tiny_add
+      - if: ${{ matrix.task == 'onnx' }}
         name: Test Action Space
         run: PYTHONPATH="." GPU=1 python3 extra/optimization/get_action_space.py
       - if: ${{ matrix.task == 'onnx' }}
