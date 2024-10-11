@@ -63,40 +63,75 @@ extern "C" __global__ void __launch_bounds__(256) wmma_example(half* data0, cons
     int threads = threadIdx.x + (threadIdx.y * 32) + (threadIdx.z * 128); /* 256 */
     int num_k_blocks = K / 32;
 
-    // load indexes
-    size_t global_a_off = ((grid_m * 256) * K) + ((threads %  4) * 8) + ((threads /  4) * K);
-    size_t global_b_off = (grid_n * 128)       + ((threads % 16) * 8) + ((threads / 16) * N);
-
-    // unswizzed smem store
-    size_t store_smem_a_off = ((threads %  4) * 8) + ((threads /  4) *  32);    // 64 rows /  32 cols per copy
-    size_t store_smem_b_off = ((threads % 16) * 8) + ((threads / 16) * 128);    // 16 rows / 128 cols per copy
-
     // ldmatrix indices
     // threads 0-7 are row starts for A, 8-15 for B, 16-23 for C, 24-31 for D
     // [ A | C ]
     // [ - + - ]
     // [ B | D ]
 
-    // unswizzed ldmatrix
-    size_t load_smem_a_0_k_0 = (wg_m * 16 * 32) + ((wg_threads % 16) * 32) + ((wg_threads / 16) * 8);
-    size_t load_smem_a_1_k_0 = load_smem_a_0_k_0 + ( 64 * 32);
-    size_t load_smem_a_2_k_0 = load_smem_a_0_k_0 + (128 * 32);
-    size_t load_smem_a_3_k_0 = load_smem_a_0_k_0 + (192 * 32);
+    // unswizzled A - SMEM_A is 256 rows x 32 cols
+    // size_t global_a_off = ((grid_m * 256) * K) + ((threads %  4) * 8) + ((threads /  4) * K);
+    // size_t store_smem_a_off = ((threads %  4) * 8) + ((threads /  4) * 32); // 64 rows /  32 cols per copy
+    // size_t load_smem_a_0_k_0 = (wg_m * 16 * 32) + ((wg_threads % 16) * 32) + ((wg_threads / 16) * 8);
+    // size_t load_smem_a_1_k_0 = load_smem_a_0_k_0 + ( 64 * 32);
+    // size_t load_smem_a_2_k_0 = load_smem_a_0_k_0 + (128 * 32);
+    // size_t load_smem_a_3_k_0 = load_smem_a_0_k_0 + (192 * 32);
+    // size_t load_smem_a_0_k_1 = load_smem_a_0_k_0 + 16;
+    // size_t load_smem_a_1_k_1 = load_smem_a_0_k_1 + ( 64 * 32);
+    // size_t load_smem_a_2_k_1 = load_smem_a_0_k_1 + (128 * 32);
+    // size_t load_smem_a_3_k_1 = load_smem_a_0_k_1 + (192 * 32);
 
-    size_t load_smem_a_0_k_1 = load_smem_a_0_k_0 + 16;
-    size_t load_smem_a_1_k_1 = load_smem_a_0_k_1 + ( 64 * 32);
-    size_t load_smem_a_2_k_1 = load_smem_a_0_k_1 + (128 * 32);
-    size_t load_smem_a_3_k_1 = load_smem_a_0_k_1 + (192 * 32);
+    // unswizzled reshaped A - SMEM_A is 128 rows x 64 cols, [ (M=0, K=0), (M=0, K=1), (M=8, K=0), (M=8, K=1) ], etc.
+    // size_t global_a_off = ((grid_m * 256) * K) + ((threads %  4) * 8) + (((threads /  4) % 2) * 8 * 16 * K) + ((threads / 8) * K);
+    // size_t store_smem_a_off = ((threads %  8) * 8) + ((threads /  8) * 64); // 32 rows / 64 cols per copy
+    // size_t load_smem_a_0_k_0 = (wg_m * 16 * 64) + ((wg_threads % 16) * 64) + ((wg_threads / 16) * 8);
+    // size_t load_smem_a_1_k_0 = load_smem_a_0_k_0 + (64 * 64);
+    // size_t load_smem_a_2_k_0 = load_smem_a_0_k_0 +           + 32;
+    // size_t load_smem_a_3_k_0 = load_smem_a_0_k_0 + (64 * 64) + 32;
+    // size_t load_smem_a_0_k_1 = load_smem_a_0_k_0 + 16;
+    // size_t load_smem_a_1_k_1 = load_smem_a_1_k_0 + 16;
+    // size_t load_smem_a_2_k_1 = load_smem_a_2_k_0 + 16;
+    // size_t load_smem_a_3_k_1 = load_smem_a_3_k_0 + 16;
 
-    size_t load_smem_b_0_k_0 = (wg_n * 16) + ((wg_threads % 16) * 128) + ((wg_threads / 16) * 8);
-    size_t load_smem_b_1_k_0 = load_smem_b_0_k_0 + 32;
-    size_t load_smem_b_2_k_0 = load_smem_b_0_k_0 + 64;
-    size_t load_smem_b_3_k_0 = load_smem_b_0_k_0 + 96;
+    // swizzled A
+    size_t global_a_off = ((grid_m * 256) * K) + ((threads %  4) * 8) + (((threads /  4) % 2) * 8 * 16 * K) + ((threads / 8) * K);
+    size_t store_smem_a_off  = ((threads /  8) *  64) + (((threads * 8) ^ threads) & 56); // 32 rows / 64 cols per copy
+    size_t load_smem_a_row   = ((wg_m * 16) + (threads % 16)) * 64;
+    size_t load_smem_a_phase = (threads / 16) % 2;
+    size_t load_smem_a_0_k_0 = load_smem_a_row + ( 0 * 64) + (((load_smem_a_phase + 0) ^ (threads % 8)) * 8);
+    size_t load_smem_a_1_k_0 = load_smem_a_row + (64 * 64) + (((load_smem_a_phase + 0) ^ (threads % 8)) * 8);
+    size_t load_smem_a_2_k_0 = load_smem_a_row + ( 0 * 64) + (((load_smem_a_phase + 4) ^ (threads % 8)) * 8);
+    size_t load_smem_a_3_k_0 = load_smem_a_row + (64 * 64) + (((load_smem_a_phase + 4) ^ (threads % 8)) * 8);
+    size_t load_smem_a_0_k_1 = load_smem_a_row + ( 0 * 64) + (((load_smem_a_phase + 2) ^ (threads % 8)) * 8);
+    size_t load_smem_a_1_k_1 = load_smem_a_row + (64 * 64) + (((load_smem_a_phase + 2) ^ (threads % 8)) * 8);
+    size_t load_smem_a_2_k_1 = load_smem_a_row + ( 0 * 64) + (((load_smem_a_phase + 6) ^ (threads % 8)) * 8);
+    size_t load_smem_a_3_k_1 = load_smem_a_row + (64 * 64) + (((load_smem_a_phase + 6) ^ (threads % 8)) * 8);
 
+    // unswizzed B
+    // size_t global_b_off = (grid_n * 128) + ((threads % 16) * 8) + ((threads / 16) * N);
+    // size_t store_smem_b_off = ((threads % 16) * 8) + ((threads / 16) * 128); // 16 rows / 128 cols per copy
+    // size_t load_smem_b_0_k_0 = (wg_n * 16) + ((wg_threads % 16) * 128) + ((wg_threads / 16) * 8);
+    // size_t load_smem_b_1_k_0 = load_smem_b_0_k_0 + 32;
+    // size_t load_smem_b_2_k_0 = load_smem_b_0_k_0 + 64;
+    // size_t load_smem_b_3_k_0 = load_smem_b_0_k_0 + 96;
+    // size_t load_smem_b_0_k_1 = load_smem_b_0_k_0 + (16 * 128);
+    // size_t load_smem_b_1_k_1 = load_smem_b_0_k_1 + 32;
+    // size_t load_smem_b_2_k_1 = load_smem_b_0_k_1 + 64;
+    // size_t load_smem_b_3_k_1 = load_smem_b_0_k_1 + 96;
+
+    // swizzled B
+    size_t global_b_off = (grid_n * 128) + ((threads % 16) * 8) + ((threads / 16) * N);
+    size_t store_smem_b_off  = ((threads / 16) * 128) + ((((threads / 16) % 8) * 8) ^ ((threads % 16) * 8)); // 16 rows / 128 cols per copy
+    size_t load_smem_b_row   = (threads % 16) * 128;
+    size_t load_smem_b_phase = (wg_n * 2) + (wg_threads / 16);
+    size_t load_smem_b_0_k_0 = load_smem_b_row + (((load_smem_b_phase +  0) ^ (threads % 8)) * 8);
+    size_t load_smem_b_1_k_0 = load_smem_b_row + (((load_smem_b_phase +  4) ^ (threads % 8)) * 8);
+    size_t load_smem_b_2_k_0 = load_smem_b_row + (((load_smem_b_phase +  8) ^ (threads % 8)) * 8);
+    size_t load_smem_b_3_k_0 = load_smem_b_row + (((load_smem_b_phase + 12) ^ (threads % 8)) * 8);
     size_t load_smem_b_0_k_1 = load_smem_b_0_k_0 + (16 * 128);
-    size_t load_smem_b_1_k_1 = load_smem_b_0_k_1 + 32;
-    size_t load_smem_b_2_k_1 = load_smem_b_0_k_1 + 64;
-    size_t load_smem_b_3_k_1 = load_smem_b_0_k_1 + 96;
+    size_t load_smem_b_1_k_1 = load_smem_b_1_k_0 + (16 * 128);
+    size_t load_smem_b_2_k_1 = load_smem_b_2_k_0 + (16 * 128);
+    size_t load_smem_b_3_k_1 = load_smem_b_3_k_0 + (16 * 128);
 
     // create accs (M=4, N=8)
     half4 acc_frag_0_0 = make_half4(0.0f,0.0f,0.0f,0.0f);
@@ -163,22 +198,33 @@ extern "C" __global__ void __launch_bounds__(256) wmma_example(half* data0, cons
     __syncthreads();
 
     // load first tile
+    // unswizzled 256 x 32
+    // __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + (     0)], &data1[global_a_off + (    0)], 16);
+    // __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + ( 64*32)], &data1[global_a_off + ( 64*K)], 16);
+    // __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + (128*32)], &data1[global_a_off + (128*K)], 16);
+    // __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + (192*32)], &data1[global_a_off + (192*K)], 16);
+    // unswizzled 128 x 64
     __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + (     0)], &data1[global_a_off + (    0)], 16);
-    __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + ( 64*32)], &data1[global_a_off + ( 64*K)], 16);
-    __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + (128*32)], &data1[global_a_off + (128*K)], 16);
-    __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + (192*32)], &data1[global_a_off + (192*K)], 16);
+    __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + ( 32*64)], &data1[global_a_off + ( 32*K)], 16);
+    __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + ( 64*64)], &data1[global_a_off + ( 64*K)], 16);
+    __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + ( 96*64)], &data1[global_a_off + ( 96*K)], 16);
     __pipeline_memcpy_async(&smem_b_0[store_smem_b_off + (     0)], &data2[global_b_off + (    0)], 16);
     __pipeline_memcpy_async(&smem_b_0[store_smem_b_off + (16*128)], &data2[global_b_off + ( 16*N)], 16);
     __pipeline_commit();
-
     global_a_off += 32;
     global_b_off += 32 * N;
 
     // load second tile
+    // unswizzled 256 x 32
+    // __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + (     0)], &data1[global_a_off + (    0)], 16);
+    // __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + ( 64*32)], &data1[global_a_off + ( 64*K)], 16);
+    // __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + (128*32)], &data1[global_a_off + (128*K)], 16);
+    // __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + (192*32)], &data1[global_a_off + (192*K)], 16);
+    // unswizzled 128 x 64
     __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + (     0)], &data1[global_a_off + (    0)], 16);
-    __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + ( 64*32)], &data1[global_a_off + ( 64*K)], 16);
-    __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + (128*32)], &data1[global_a_off + (128*K)], 16);
-    __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + (192*32)], &data1[global_a_off + (192*K)], 16);
+    __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + ( 32*64)], &data1[global_a_off + ( 32*K)], 16);
+    __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + ( 64*64)], &data1[global_a_off + ( 64*K)], 16);
+    __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + ( 96*64)], &data1[global_a_off + ( 96*K)], 16);
     __pipeline_memcpy_async(&smem_b_1[store_smem_b_off + (     0)], &data2[global_b_off + (    0)], 16);
     __pipeline_memcpy_async(&smem_b_1[store_smem_b_off + (16*128)], &data2[global_b_off + ( 16*N)], 16);
     __pipeline_commit();
@@ -259,10 +305,16 @@ extern "C" __global__ void __launch_bounds__(256) wmma_example(half* data0, cons
 
         // load next tile
         if (block_k < (num_k_blocks-2)) {
+            // unswizzled 256 x 32
+            // __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + (     0)], &data1[global_a_off + (    0)], 16);
+            // __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + ( 64*32)], &data1[global_a_off + ( 64*K)], 16);
+            // __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + (128*32)], &data1[global_a_off + (128*K)], 16);
+            // __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + (192*32)], &data1[global_a_off + (192*K)], 16);
+            // unswizzled 128 x 64
             __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + (     0)], &data1[global_a_off + (    0)], 16);
-            __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + ( 64*32)], &data1[global_a_off + ( 64*K)], 16);
-            __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + (128*32)], &data1[global_a_off + (128*K)], 16);
-            __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + (192*32)], &data1[global_a_off + (192*K)], 16);
+            __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + ( 32*64)], &data1[global_a_off + ( 32*K)], 16);
+            __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + ( 64*64)], &data1[global_a_off + ( 64*K)], 16);
+            __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + ( 96*64)], &data1[global_a_off + ( 96*K)], 16);
             __pipeline_memcpy_async(&smem_b_store[store_smem_b_off + (     0)], &data2[global_b_off + (    0)], 16);
             __pipeline_memcpy_async(&smem_b_store[store_smem_b_off + (16*128)], &data2[global_b_off + ( 16*N)], 16);
             global_a_off += 32;
