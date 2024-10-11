@@ -6,7 +6,6 @@ from tinygrad import Tensor, nn, fetch, Device, TinyJit, GlobalCounters
 from dataclasses import dataclass
 from typing import List
 import pathlib
-from tinygrad.multi import MultiLazyBuffer
 import re
 
 SHARD_MODEL = True
@@ -39,12 +38,13 @@ class CausalSelfAttention:
 
   def __call__(self, x:Tensor):
     B, T, C = x.shape
-    q = self.q(x) # B, T, n_embd --> B, T, n_head, 
+    q = self.q(x)
     k = self.k(x)
     v = self.v(x)
     k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+
     # manual implementation of attention
     att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
     att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
@@ -78,6 +78,7 @@ class Block:
 class GPT:
   def __init__(self, config:GPTConfig):
     self.config = config
+
     self.wte = nn.Embedding(config.padded_vocab_size, config.n_embd)
     self.wpe = nn.Embedding(config.block_size, config.n_embd)
     self.h = [Block(config) for _ in range(config.n_layer)]
@@ -113,7 +114,7 @@ class GPT:
       idx = Tensor.cat(idx, idx_next, dim=1)
     return idx
 
-  def __call__(self, idx:Tensor, targets=None):    
+  def __call__(self, idx:Tensor, targets=None):
     b, t = idx.shape
     pos = Tensor.arange(0, t)
     
