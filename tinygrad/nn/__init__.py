@@ -111,7 +111,7 @@ class Conv2d:
   def __call__(self, x:Tensor) -> Tensor:
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
-def ConvTranspose1d(in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, padding:int=0, output_padding:int=0, 
+def ConvTranspose1d(in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, padding:int=0, output_padding:int=0,
                     dilation:int=1, groups:int=1, bias:bool=True):
   """
   Applies a 1D transposed convolution operator over an input signal composed of several input planes.
