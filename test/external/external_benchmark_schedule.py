@@ -4,7 +4,7 @@ from tinygrad import Tensor, Device
 from tinygrad.helpers import Profiling, Timing, getenv, BEAM, NOOPT, DEBUG, Context, ansilen
 from tinygrad.ops import UOps
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.lowerer import ast_to_uop
+from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
 from tinygrad.engine.search import beam_search, bufs_from_lin
 
@@ -37,7 +37,7 @@ if __name__ == "__main__":
             else: k.hand_coded_optimizations()
             kernels.append(k)
 
-        with Timing("***** model lower in     "): uops = [ast_to_uop(k.get_optimized_ast(), k.opts) for k in kernels]
+        with Timing("***** model lower in     "): uops = [rewrite_shapetracker_with_index(k.get_optimized_ast(), k.opts) for k in kernels]
         with Profiling(PROFILE, fn="/tmp/rewrite.prof"):
           with Timing("***** model rewrite in   "):
             rewritten_uops = []
