@@ -94,22 +94,22 @@ class Conv2d:
   print(t.numpy())
   ```
   """
-  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
-    self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int, Tuple[int, ...]], stride:int=1, padding:Union[int, str]=0, dilation:int=1, groups:int=1, bias:bool=True) -> None: #noqa:E501
+    self.kernel_size: Tuple[int, ...] = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     if isinstance(padding, str):
       if padding.lower() != 'same': raise ValueError(f"Invalid padding string {padding!r}, only 'same' is supported")
       if stride != 1: raise ValueError("padding='same' is not supported for strided convolutions")
-      self.padding = [p for d,k in zip(make_pair(dilation,len(self.kernel_size)), self.kernel_size[::-1]) for p in (d*(k-1)//2, d*(k-1) - d*(k-1)//2)]
+      self.padding: Union[int, List[int]] = [p for d,k in zip(make_pair(dilation,len(self.kernel_size)), self.kernel_size[::-1]) for p in (d*(k-1)//2, d*(k-1) - d*(k-1)//2)] #noqa:E501
     else: self.padding = padding
     self.stride, self.dilation, self.groups = stride, dilation, groups
-    scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
-    self.weight = Tensor.uniform(out_channels, in_channels//groups, *self.kernel_size, low=-scale, high=scale)
-    self.bias = Tensor.uniform(out_channels, low=-scale, high=scale) if bias else None
+    scale: float = 1 / math.sqrt(in_channels * prod(self.kernel_size))
+    self.weight: Tensor = Tensor.uniform(out_channels, in_channels//groups, *self.kernel_size, low=-scale, high=scale)
+    self.bias: Optional[Tensor] = Tensor.uniform(out_channels, low=-scale, high=scale) if bias else None
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
-def ConvTranspose1d(in_channels, out_channels, kernel_size, stride=1, padding=0, output_padding=0, dilation=1, groups=1, bias=True):
+def ConvTranspose1d(in_channels:int, out_channels:int, kernel_size:int, stride:int=1, padding:int=0, output_padding:int=0, dilation:int=1, groups:int=1, bias:bool=True) -> ConvTranspose2d: #noqa:E501
   """
   Applies a 1D transposed convolution operator over an input signal composed of several input planes.
 
@@ -143,13 +143,13 @@ class ConvTranspose2d(Conv2d):
   print(t.numpy())
   ```
   """
-  def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, output_padding=0, dilation=1, groups=1, bias=True):
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int, Tuple[int, ...]], stride:int=1, padding:int=0, output_padding:int=0, dilation:int=1, groups:int=1, bias:bool=True) -> None: #noqa:E501
     super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
-    scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
-    self.weight = Tensor.uniform(in_channels, out_channels//groups, *self.kernel_size, low=-scale, high=scale)
-    self.output_padding = output_padding
+    scale: float = 1 / math.sqrt(in_channels * prod(self.kernel_size))
+    self.weight: Tensor = Tensor.uniform(in_channels, out_channels//groups, *self.kernel_size, low=-scale, high=scale)
+    self.output_padding: int = output_padding
 
-  def __call__(self, x:Tensor):
+  def __call__(self, x:Tensor) -> Tensor:
     return x.conv_transpose2d(self.weight, self.bias, padding=self.padding, output_padding=self.output_padding, stride=self.stride,
                               dilation=self.dilation, groups=self.groups)
 
