@@ -1,12 +1,13 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Dict, List, Set, cast, TYPE_CHECKING, Any, DefaultDict, Callable
-import functools, itertools, heapq, operator
+from typing import Optional, Tuple, Dict, List, cast, TYPE_CHECKING, Any, DefaultDict, Callable
+import functools, itertools, operator
 from collections import defaultdict
-from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType, DType
-from tinygrad.ops import UnaryOps, BinaryOps, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType
+from tinygrad.ops import UnaryOps, BinaryOps, UOp, UOps, identity_element
 from tinygrad.ops import UPat, PatternMatcher, graph_rewrite, TernaryOps, symbolic_flat, is_irreducible, _get_chain
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition, all_same
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
+
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # ***** float4/image store handling *****
@@ -542,17 +543,6 @@ no_pyint = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIA
 
 # *** uop graph ***
 
-def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
-  if u in children: return srcs[u]
-  srcs[u] = {}
-  children[u] = []
-  for x in u.src:
-    srcs[u].update(get_children_dfs(x, children, srcs, in_degree))
-    if x.op is UOps.RANGE and x.arg[1]: srcs[u][x] = None
-    children[x].append(u)
-  in_degree[u] = len(u.src)
-  return srcs[u]
-
 linearize_cnt = 0
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   global linearize_cnt, acc_number
@@ -577,102 +567,3 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
 
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, opts.extra_matcher)
   return sink
-
-def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
-  assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
-  # filter nodes that don't link to a sink
-  # BFS toposort
-  children: Dict[UOp, List[UOp]] = {}
-  range_srcs: Dict[UOp, Dict[UOp, None]] = {}
-  in_degree: Dict[UOp, int] = {}
-  get_children_dfs(sink, children, range_srcs, in_degree)
-
-  @functools.lru_cache(None)
-  def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
-    if x.op is UOps.SINK: return set()
-    return set.union({x} if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
-
-  # scope children impact the toposort and END* insertion
-  scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
-  range_phi = {r:[p for p in scope_children[r] if p.op is UOps.ASSIGN] for r in scope_children if r.op is UOps.RANGE}
-
-  # assign priorities
-  def get_priority(u:UOp):
-    priority = 0
-    # prefer ranges that depend on the least number of independent ranges
-    if u.op is UOps.RANGE and u.arg[1]:
-      priority += u.arg[0]
-      for p in range_phi[u]:
-        priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
-    # prefer uops that are loop children
-    else:
-      priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
-    if u.op is UOps.IF and len(u.src) == 1: priority += 10000000 # if penalty
-    return priority
-  priorities:Dict[UOp, int] = {u:get_priority(u) for u in children}
-
-  # prevent priority inversion
-  @functools.lru_cache(None)
-  def fix_priority(u:UOp, lowest_priority):
-    if u.op in {UOps.CAST, UOps.BITCAST, UOps.ALU, UOps.VECTORIZE, UOps.GEP, UOps.SPECIAL, UOps.DEFINE_LOCAL, UOps.LOAD}:
-      priorities[u] = min(priorities[u], lowest_priority)
-      if u.op is UOps.LOAD: priorities[u] += 100 # load penalty (here)
-    for x in u.src: fix_priority(x, priorities[u])
-  fix_priority(sink, 0)
-
-  @functools.lru_cache(None)
-  def tuplize(u:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
-    # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
-    if u.op is UOps.DEFINE_VAR: arg = u.arg[0]
-    elif u.op is UOps.ALU: arg = u.arg.value
-    else: arg = u.arg
-    return (u.op.value, arg, u.dtype, tuple(tuplize(x) for x in u.src))
-
-  # NOTE: the compare should never make it all the way to u
-  queue:List[Tuple[int, Tuple, UOp]] = []
-  def push(u:UOp): heapq.heappush(queue, (priorities[u], tuplize(u), u))
-
-  for u in children:
-    if in_degree[u] == 0: push(u)
-
-  scope_end: Dict[UOp, UOp] = {}
-  _uops: List[UOp] = []
-  while queue:
-    p,_,x = heapq.heappop(queue)
-    if DEBUG >= 7: print(f"{p:5d}", x.op, x.dtype, x.arg)
-    if x in scope_children: scope_end[x] = x
-    if x.op is UOps.DEFINE_ACC:
-      idx = min([_uops.index(l) for l in x.src if l.op is UOps.RANGE])
-      _uops.insert(idx, x)
-    else: _uops.append(x)
-    for u, ss in scope_children.items():
-      if x in ss:
-        ss.remove(x)
-        if len(ss) == 0: scope_end[u] = x
-    for u in children[x]:
-      in_degree[u] -= 1
-      if in_degree[u] == 0: push(u)
-
-  # end scopes in toposort order
-  for u, x in scope_end.items(): _uops.insert(_uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], dtypes.void, (u,)))
-
-  # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-  if not skip_check:
-    try:
-      type_verify(_uops)
-      assert _uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {_uops[-1]}"
-      # TODO: this should be enabled, and the valid clause should be removed
-      # NOTE: multiple identical stores to DEFINE_LOCAL is okay
-      # NOTE: for PTX you have to propogate through some the calculations to determine if it is a store to DEFINE_LOCAL
-      def _islocalbuf(u: UOp): return u.op is UOps.DEFINE_LOCAL or any(_islocalbuf(x) for x in u.src if u.op in [UOps.ALU, UOps.CAST])
-      all_stores = [x.src[0:2]+x.src[3:] for x in _uops if x.op is UOps.STORE and not _islocalbuf(x.src[0])]
-      assert len(all_stores) == len(dedup(all_stores)), "repeated stores in uops"
-    except AssertionError as e:
-      print_uops(_uops)
-      if not CI and not getenv("VIZ"):
-        from tinygrad.engine.graph import graph_uops
-        graph_uops(_uops)
-      raise e
-
-  # strip the SINK
-  return _uops[:-1]

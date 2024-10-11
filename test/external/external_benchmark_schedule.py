@@ -5,7 +5,8 @@ from tinygrad.helpers import Profiling, Timing, getenv, BEAM, NOOPT, DEBUG, Cont
 from tinygrad.ops import UOps
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
-from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.engine.search import beam_search, bufs_from_lin
 
 if __name__ == "__main__":
