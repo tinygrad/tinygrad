@@ -5,7 +5,7 @@ from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, prod, getenv, all_same
+from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context
 if TYPE_CHECKING:
   from tinygrad.shape.symbolic import Variable, sint
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -33,7 +33,7 @@ class ReduceOps(FastEnum):
   """A -> B (reduce)"""
   SUM = auto(); PROD = auto(); MAX = auto() # noqa: E702
 class MetaOps(FastEnum):
-  EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
+  EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
 T = TypeVar("T")
@@ -99,11 +99,16 @@ def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.
 class UOps(FastEnum):
   # uops that aren't rendered
   SINK = auto()
-  EXT = auto()
+  CONTIGUOUS = auto()
+
+  # metaops
+  COPY = auto()
+  EMPTY = auto()
+  BUFFER_VIEW = auto()
+
   EXPAND = auto()
   CONTRACT = auto()
-  SHAPETRACKER = auto()
-  SWIZZLE = auto()
+  VIEW = auto()
   DEFINE_GLOBAL = auto()
   BUFFER = auto()
   DEFINE_VAR = auto()
@@ -196,7 +201,7 @@ class UOp(MathTrait):
   def st(self) -> Optional[ShapeTracker]:
     if not self.has_st: return None
     if self.op in BUFFER_UOPS: return self.st_arg
-    if self.op in {UOps.SHAPETRACKER, UOps.SWIZZLE}: return self.arg
+    if self.op is UOps.VIEW: return self.arg
     src_sts = [x.st for x in self.src if x.st is not None]
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
     from tinygrad.shape.shapetracker import ShapeTracker
@@ -207,7 +212,9 @@ class UOp(MathTrait):
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
   # *** uop evaluation ***
-  def simplify(self): return graph_rewrite(self, symbolic)
+  def simplify(self):
+    with Context(TRACK_MATCH_STATS=0):
+      return graph_rewrite(self, symbolic)
   def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is UOps.CONST else ret
   def _eval(self, dtype, expected_type) -> ConstType:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
@@ -224,7 +231,7 @@ class UOp(MathTrait):
   def st_arg(self) -> ShapeTracker:
     assert self.op in BUFFER_UOPS, f"st_arg called on {self.op}"
     ret = self.src[0 if self.op is UOps.VALID else 1]
-    assert ret.op is UOps.SHAPETRACKER, f"st_arg trying to return {ret}"
+    assert ret.op is UOps.VIEW, f"st_arg trying to return {ret}"
     return ret.arg
   @property
   def axis_arg(self) -> Tuple[int, ...]:
@@ -233,7 +240,7 @@ class UOp(MathTrait):
     assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
     return ret
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
-  def swizzle(self, st:ShapeTracker): return UOp(UOps.SWIZZLE, self.dtype, (self,), st)
+  def view(self, st:ShapeTracker): return UOp(UOps.VIEW, self.dtype, (self,), st)
   def const_like(self, b:ConstType|Variable|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
@@ -291,7 +298,7 @@ class UOp(MathTrait):
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
-    return self.arg.shape if self.op is UOps.SHAPETRACKER else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
+    return self.arg.shape if self.op is UOps.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
   def vars(self) -> Set[UOp]:
     bound_vars = set([x for x in self.sparents if x.op is UOps.BIND and x.src[0].op is UOps.DEFINE_VAR])
     bound_var_base = set(x.src[0] for x in bound_vars)
@@ -592,8 +599,9 @@ contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
 def track_rewrites(func):
   def __wrapper(self, *args, **kwargs):
     if TRACK_MATCH_STATS >= 2: rewrite_stack.append((self, []))
-    ret = func(self, *args, **kwargs)
-    if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
+    try: ret = func(self, *args, **kwargs)
+    finally: # NOTE: save everything in the stack
+      if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
     return ret
   return __wrapper
 
@@ -633,7 +641,7 @@ if TRACK_MATCH_STATS:
         pickle.dump(contexts, f)
     if getenv("VIZ"):
       os.environ["VIZ"] = "0"
-      os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), "..", "viz", "serve.py")])
+      os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py")])
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
@@ -679,15 +687,15 @@ spec = PatternMatcher([
   (UPat(UOps.ALU, dtype=dtypes.pyint), lambda: False),
 
   # TODO: confirm the args of both of these are shapetrackers
-  (UPat(UOps.SHAPETRACKER, src=()), lambda: True),
-  (UPat(UOps.SWIZZLE, src=(UPat(),)), lambda: True),
+  (UPat(UOps.VIEW, src=()), lambda: True),
+  (UPat(UOps.VIEW, src=(UPat(),)), lambda: True),
 
-  (UPat(UOps.VALID, dtypes.bool, (UPat(UOps.SHAPETRACKER),)), lambda: True),
+  (UPat(UOps.VALID, dtypes.bool, (UPat(UOps.VIEW),)), lambda: True),
   (UPat(UOps.CONST, name="x"), lambda x: x.dtype == x.dtype.scalar() and (type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)))),
 
   # early LOAD has a <buf, shapetracker, store?>
-  (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.SHAPETRACKER))), lambda: True),
-  (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.SHAPETRACKER), UPat(UOps.STORE))), lambda: True),
+  (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.VIEW))), lambda: True),
+  (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.VIEW), UPat(UOps.STORE))), lambda: True),
 
   # LOAD takes a <buf, idx, alt?, gate?, barrier?>
   (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat())), lambda: True),
@@ -818,9 +826,11 @@ def lt_folding(x:UOp, c:int) -> Optional[UOp]:
 def fold_unrolled_divs(divs:UOp):
   # div pattern in unrolled arange
   # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  add_chain, seen_const, ans = list(_get_chain(divs, BinaryOps.ADD)), [], None
+  add_chain, denominator, seen_const, ans = list(_get_chain(divs, BinaryOps.ADD)), None, [], None
   for u in add_chain:
-    if not (u.op is UOps.ALU and u.arg is BinaryOps.IDIV and u.src[1].op is UOps.CONST and u.src[1].arg==len(add_chain)): return None
+    if not (u.op is UOps.ALU and u.arg is BinaryOps.IDIV and u.src[1].op is UOps.CONST): return None
+    if denominator is None: denominator = u.src[1].arg
+    if denominator != u.src[1].arg: return None
     # assumed CONST is the last of an ADD
     if (s0:=u.src[0]).op is UOps.ALU and s0.arg is BinaryOps.ADD and s0.src[1].op is UOps.CONST and s0.src[1].op is UOps.CONST:
       seen_const.append(s0.src[1].arg)
@@ -828,7 +838,11 @@ def fold_unrolled_divs(divs:UOp):
     else: seen_const.append(0)
     if ans is None: ans = s0
     if ans is not s0: return None
-  return ans if ans is not None and sorted(seen_const)==list(range(len(add_chain))) else None
+  if denominator is None: return None
+  # the first (denominator-len(seen_const)) terms may have been folded to 0 already
+  for i in range(denominator-len(seen_const)):
+    if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
+  return ans if ans is not None and sorted(seen_const)==list(range(denominator)) else None
 
 def is_irreducible(u:UOp): return u.op in (UOps.DEFINE_VAR, UOps.SPECIAL, UOps.RANGE)
 

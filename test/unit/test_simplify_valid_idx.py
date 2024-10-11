@@ -1,7 +1,8 @@
 import unittest
 from typing import Tuple
 
-from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, is_increasing
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite, is_increasing
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.ops import UOp, UOps, BinaryOps
 

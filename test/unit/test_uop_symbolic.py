@@ -9,7 +9,8 @@ from typing import Tuple
 
 from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes, PtrDType, ConstType
-from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.ops import BinaryOps, UOp, UOps, print_uops
 from tinygrad.shape.symbolic import Variable
 import functools
@@ -437,6 +438,21 @@ class TestSymbolic(unittest.TestCase):
     gidx = Variable("gidx", 0, 2559)
     unrolled_div = (gidx+2561)//4+(gidx+2562)//4+(gidx+2560)//4+(gidx+2559)//4
     self.helper_test_variable(unrolled_div, 2559, 5118, "(gidx+2559)")
+
+  def test_arange_unrolled4_small(self):
+    gidx = Variable("gidx", 0, 3)
+    unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
+    self.helper_test_variable(unrolled_div, 0, 3, "gidx")
+
+    gidx = Variable("gidx", 0, 2)
+    unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
+    self.helper_test_variable(unrolled_div, 0, 2, "gidx")
+
+    # TODO: fix this, it has only one term and is no longer an add chain
+    with self.assertRaises(AssertionError):
+      gidx = Variable("gidx", 0, 1)
+      unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
+      self.helper_test_variable(unrolled_div, 0, 1, "gidx")
 
   def test_arange_unrolled2(self):
     gidx = Variable("gidx", 0, 2559)

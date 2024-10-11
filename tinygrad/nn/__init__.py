@@ -1,7 +1,7 @@
 import math
 from typing import Optional, Union, Tuple, List
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, make_pair
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm:
@@ -95,7 +95,12 @@ class Conv2d:
   """
   def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int, ...]], stride:int=1, padding:Union[int,Tuple[int, ...], List[int]]=0, dilation:Union[Tuple[int, ...], int]=1, groups:int=1, bias:bool=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
-    self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
+    if isinstance(padding, str):
+      if padding.lower() != 'same': raise ValueError(f"Invalid padding string {padding!r}, only 'same' is supported")
+      if stride != 1: raise ValueError("padding='same' is not supported for strided convolutions")
+      self.padding = [p for d,k in zip(make_pair(dilation,len(self.kernel_size)), self.kernel_size[::-1]) for p in (d*(k-1)//2, d*(k-1) - d*(k-1)//2)]
+    else: self.padding = padding
+    self.stride, self.dilation, self.groups = stride, dilation, groups
     scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
     self.weight = Tensor.uniform(out_channels, in_channels//groups, *self.kernel_size, low=-scale, high=scale)
     self.bias = Tensor.uniform(out_channels, low=-scale, high=scale) if bias else None
@@ -313,10 +318,10 @@ class Embedding:
 
   def __call__(self, idx:Tensor) -> Tensor:
     if idx.numel() == 0: return Tensor.empty(idx.shape+(self.embed_sz,), device=self.weight.device)
-    arange_shp, weight_shp, big_shp = (1, 1, self.vocab_sz, 1), (1, 1, self.vocab_sz, self.embed_sz), idx.shape+(self.vocab_sz, self.embed_sz,)
+    arange_shp, weight_shp, big_shp = (self.vocab_sz, 1), (self.vocab_sz, self.embed_sz), idx.shape+(self.vocab_sz, self.embed_sz,)
     if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).reshape(arange_shp)
     arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1,)).expand(big_shp), self.weight.reshape(weight_shp).expand(big_shp)
-    return (arange == idx).mul(vals).sum(2, acc_dtype=vals.dtype)
+    return (arange == idx).mul(vals).sum(-2, acc_dtype=vals.dtype)
 
 class LSTMCell:
   """

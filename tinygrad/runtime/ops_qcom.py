@@ -32,7 +32,7 @@ class QCOMCompiler(CLCompiler):
   def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
 
 class QCOMSignal(HCQSignal):
-  def __init__(self, value=0, **kwargs):
+  def __init__(self, value=0, is_timeline=False):
     self._signal = QCOMDevice.signals_pool.pop()
     super().__init__(value)
   def __del__(self): QCOMDevice.signals_pool.append(self._signal)
@@ -182,14 +182,13 @@ class QCOMComputeQueue(HWComputeQueue):
 class QCOMArgsState(HCQArgsState):
   def __init__(self, ptr:int, prg:QCOMProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
     super().__init__(ptr, prg, bufs, vals=vals)
-    ctypes.memset(self.ptr, 0, 1024)
+    ctypes.memset(self.ptr, 0, prg.kernargs_alloc_size)
 
     if len(bufs) + len(vals) != len(prg.buf_info): raise RuntimeError(f'incorrect args size given={len(bufs)+len(vals)} != want={len(prg.buf_info)}')
 
     self.buf_info, self.args_info, self.args_view = prg.buf_info[:len(bufs)], prg.buf_info[len(bufs):], to_mv(ptr, prg.kernargs_alloc_size).cast('Q')
 
-    for cnst_val, cnst_off, cnst_sz in prg.consts_info:
-      ctypes.memmove(self.ptr + cnst_off, (ctypes.c_int8 * cnst_sz).from_buffer_copy(cnst_val.to_bytes(cnst_sz, byteorder='little')), cnst_sz)
+    for cnst_val, cnst_off, cnst_sz in prg.consts_info: to_mv(self.ptr + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
     if prg.samp_cnt > 0: to_mv(self.ptr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     for i, b in enumerate(cast(List[QCOMBuffer], bufs)):
@@ -220,7 +219,8 @@ class QCOMProgram(HCQProgram):
     self.max_threads = min(1024, ((384 * 32) // (max(1, (self.fregs + round_up(self.hregs, 2) // 2)) * 128)) * 128)
     device._ensure_stack_size(self.hw_stack_offset * 4)
 
-    super().__init__(QCOMArgsState, self.device, self.name, kernargs_alloc_size=2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + self.samp_cnt * 0x10)
+    kernargs_alloc_size = round_up(2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + self.samp_cnt * 0x10, 0x100)
+    super().__init__(QCOMArgsState, self.device, self.name, kernargs_alloc_size=kernargs_alloc_size)
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
@@ -346,12 +346,12 @@ class QCOMDevice(HCQCompiled):
     QCOMDevice.dummy_addr = self._gpu_alloc(0x1000, map_to_cpu=False).va_addr
     QCOMDevice.signals_page = self._gpu_alloc(16 * 65536, map_to_cpu=True, uncached=True)
     QCOMDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, self.signals_page.size, 16)]
-    info, self.ctx, self.cmd_buf, self.cmd_buf_ptr, self.last_cmd = self._info(), self._ctx_create(), self._gpu_alloc(0x1000000, map_to_cpu=True), 0,0
+    info, self.ctx, self.cmd_buf, self.cmd_buf_ptr, self.last_cmd = self._info(), self._ctx_create(), self._gpu_alloc(16 << 20, map_to_cpu=True), 0,0
     QCOMDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
     if QCOMDevice.gpu_id >= 700: raise RuntimeError(f"Unsupported GPU: {QCOMDevice.gpu_id}")
 
     super().__init__(device, QCOMAllocator(self), QCOMRenderer(), QCOMCompiler(device), functools.partial(QCOMProgram, self),
-                     QCOMSignal, QCOMComputeQueue, None, timeline_signals=(QCOMSignal(), QCOMSignal()))
+                     QCOMSignal, QCOMComputeQueue, None)
 
   def _ctx_create(self):
     cr = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=(kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT |

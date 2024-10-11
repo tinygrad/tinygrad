@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type, Union
 import contextlib, decimal, statistics, random, json, atexit, time, array, ctypes
-from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv
+from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferOptions, Allocator, Compiler, Compiled, LRUAllocator
 
@@ -195,7 +195,7 @@ class HWCopyQueue(HWCommandQueue):
   def _update_copy(self, cmd_idx, dest, src): raise NotImplementedError("backend should overload this function")
 
 class HCQSignal:
-  def __init__(self, value:int=0): self._set_value(value)
+  def __init__(self, value:int=0, is_timeline:bool=False): self._set_value(value)
 
   @property
   def value(self) -> int: return self._get_value()
@@ -219,7 +219,7 @@ class HCQSignal:
     return self._get_timestamp()
   def _get_timestamp(self) -> decimal.Decimal: raise NotImplementedError("_get_timestamp() method must be implemented")
 
-  def wait(self, value:int, timeout:int=10000):
+  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
     """
     Waits the signal is greater than or equal to a specific value.
 
@@ -346,10 +346,10 @@ class HCQCompiled(Compiled):
   gpu2cpu_compute_time_diff: decimal.Decimal = decimal.Decimal('nan')
 
   def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[HCQSignal],
-               comp_queue_t:Type[HWComputeQueue], copy_queue_t:Optional[Type[HWCopyQueue]], timeline_signals:Tuple[HCQSignal, HCQSignal]):
+               comp_queue_t:Type[HWComputeQueue], copy_queue_t:Optional[Type[HWCopyQueue]]):
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
-    self.timeline_signal, self._shadow_timeline_signal = timeline_signals
+    self.timeline_signal, self._shadow_timeline_signal = self.signal_t(0, is_timeline=True), self.signal_t(0, is_timeline=True)
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
     self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool, Optional[Dict]]] = []
     self.dep_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []
