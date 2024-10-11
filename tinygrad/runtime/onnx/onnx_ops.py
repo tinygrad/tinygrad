@@ -18,8 +18,7 @@ equivalent_tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual
   "LogSoftmax": "log_softmax", "Not": "logical_not", "Tile":"repeat", "Range": "arange", "NegativeLogLikelihoodLoss": "nll_loss"}
 
 equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"}), "LeakyRelu": ("leakyrelu", {"alpha": "neg_slope"}),
-                                        "Selu": ("selu", {"gamma": "scale"})}
-
+  "Selu": ("selu", {"gamma": "scale"})}
 
 # helper
 # TODO maybe write helper for stuff like tuple((1,0) if i == axis else None for i in range(X.ndim)), easier to read, see it everywhere
@@ -33,7 +32,7 @@ equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"}), "Lea
   # return args
 # np_pads = [(0,0)] * ndims
 # for i in range(len(axes)): np_pads[axes[i]] = (onnx_pads[i], onnx_pads[i + len(axes)])
-
+# def axis_arg(actual, condition, default, length, axis): return tuple(default if condition else actual for i in range(length))
 # def dynamic_axis_value_tuple(main_value_fn: callable, default_value: Any, length: int, axis: int):
     # return tuple(main_value_fn(i) if i == axis else default_value for i in range(length))
 
@@ -159,18 +158,12 @@ def CumSum(X:Tensor, axis:int, exclusive=0, reverse=0):
 # spatial is from opset 7 and has since been removed
 def BatchNormalization(X: Tensor, scale, B, input_mean, input_var, epsilon=1e-05, momentum=0.9, training_mode=0, spatial=1, is_test=0):
   if training_mode:
-    x_detached = X.detach()
-    current_mean = x_detached.mean(axis=(0,2,3))
-    y = (x_detached - current_mean.reshape(shape=[1, -1, 1, 1]))
-    current_var = (y*y).mean(axis=(0,2,3))
-    current_invstd = current_var.add(epsilon).rsqrt()
-
-    running_mean = input_mean * momentum + current_mean * (1 - momentum)
-    running_var = input_var * momentum + current_var * (1 - momentum)
-
-    return X.batchnorm(scale, B, current_mean, current_invstd), running_mean, running_var
-  invstd = (input_var + epsilon).rsqrt()
-  return X.batchnorm(scale, B, input_mean, invstd)
+    batch_mean = X.mean(axis=(reduce_axes:=tuple(x for x in range(X.ndim) if x != 1)))
+    y = (X - batch_mean.detach().reshape(shape=[1, -1, *([1]*(X.ndim-2))]))  # d(var)/d(mean) = 0
+    batch_var = (y*y).mean(axis=reduce_axes)
+    running_mean, running_var = input_mean * momentum + batch_mean * (1 - momentum), input_var * momentum + batch_var * (1 - momentum)
+    return X.batchnorm(scale, B, batch_mean, batch_var.add(epsilon).rsqrt()), running_mean, running_var
+  return X.batchnorm(scale, B, input_mean, (input_var + epsilon).rsqrt())
 
 def InstanceNormalization(x: Tensor, scale: Tensor, bias: Tensor, epsilon=1e-05):
   axis = tuple(range(2, x.ndim))
@@ -223,34 +216,9 @@ def _padded(X: Tensor, pads=None, auto_pad="NOTSET", constant_value=0., strides=
   if pads is None: return X
   return X.pad2d(_onnx_pads_to_pad2d_pads(pads), value=constant_value)
 
-def Pad(x:Tensor, pads:List[ConstType], constant_value:Optional[ConstType]=None, axes:Optional[List[ConstType]]=None, mode="constant",
-        value:float=0.):
-  constant_value = value if constant_value is None else float(constant_value)
-  base_shape = x.shape
-  formatted_pads = _onnx_pads_to_pad(pads, ndims=len(x.shape), axes=axes)
-  if mode == "wrap":
-    repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(formatted_pads, base_shape)]
-    new_shape = [s*r for s,r in zip(base_shape, repeat_args)]
-    shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh if dim[1]%sh != 0 else 0))
-                   for dim, sh, nsh in zip(formatted_pads, base_shape, new_shape)]
-    return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
-  if mode == "reflect":
-    for i,s in enumerate(x.shape):
-      if formatted_pads[i] != (0,0):
-        xL = x.flip(i).shrink(tuple((s-formatted_pads[i][0]-1, s_-1) if i_ == i else None for i_,s_ in enumerate(x.shape)))
-        xR = x.flip(i).shrink(tuple((1, formatted_pads[i][1]+1) if i_ == i else None for i_ in range(x.ndim)))
-        x = xL.cat(x, xR, dim=i)
-    return x
-  if mode == "edge":
-    for i,s in enumerate(x.shape):
-      if formatted_pads[i] != (0,0):
-        xL = x.shrink(tuple((0,1) if i_ == i else None for i_ in range(x.ndim))).expand([formatted_pads[i][0] if i_ == i else None for i_ in
-                                                                                         range(x.ndim)])
-        xR = x.shrink(tuple((s_-1, s_) if i_ == i else None for i_,s_ in enumerate(x.shape))).expand([formatted_pads[i][1] if i_ == i else None
-                                                                                                      for i_ in range(x.ndim)])
-        x = xL.cat(x, xR, dim=i)
-    return x
-  if mode == "constant": return x.pad(_onnx_pads_to_pad(pads, x.ndim, axes), constant_value)
+def Pad(x:Tensor, pads:List[ConstType], constant_value:Optional[ConstType]=None, axes:Optional[List[ConstType]]=None, mode="constant",value:float=0.):
+  constant_value, mode = value if constant_value is None else float(constant_value), {"edge": "replicate", "wrap":"circular"}.get(mode, mode)
+  return x.pad(_onnx_pads_to_pad(pads, x.ndim, axes), constant_value, mode)
 
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
   ret = _padded(X, pads, auto_pad, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)

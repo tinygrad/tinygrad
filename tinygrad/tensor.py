@@ -970,7 +970,11 @@ class Tensor:
     if all(x is None or x == (0,s) for x,s in zip(arg, self.shape)): return self
     return F.Shrink.apply(self, arg=tuple(x if x is not None else (0,s) for x,s in zip(arg, self.shape)))
 
-  def pad(self, arg:Tuple[Optional[Tuple[sint, sint]], ...], value:float=0.0) -> Tensor:
+  # 'constant', 'reflect', 'replicate' or 'circular'
+  # TODO: torch pads arg is different than our pad arg, not sure if we should match
+  # TODO: nasty circular implementation but it's done with only movement ops
+  # TODO: reflect and replicate are also kinda nasty but bug free I think
+  def pad(self, arg:Tuple[Optional[Tuple[sint, sint]], ...], value:float=0.0, mode:str="constant") -> Tensor:
     """
     Returns a tensor that pads the each axis based on input arg.
     `arg` must have the same length as `self.ndim`.
@@ -989,8 +993,24 @@ class Tensor:
     ```
     """
     if all(x is None or x == (0,0) for x in arg): return self
-    ret = F.Pad.apply(self, arg=(narg:=tuple(x if x is not None else (0,0) for x in arg)))
-    return ret if 0 == value else ret + F.Pad.apply(Tensor.ones_like(self), arg=narg).where(0, value)
+    narg = tuple(x if x is not None else (0,0) for x in arg)
+    if mode == "constant":
+      return F.Pad.apply(self,arg=narg) if 0 == value else F.Pad.apply(self,arg=narg) + F.Pad.apply(Tensor.ones_like(self),arg=narg).where(0,value)
+    x = self
+    if mode == "circular":
+      repeat_args = [math.ceil(pB/sh) + math.ceil(pA/sh) + 1 for (pB,pA), sh in zip(narg, x.shape)]
+      shrink_args = [(sh-pB%sh if pB%sh != 0 else 0, sh*rarg-(sh-pA%sh if pA%sh != 0 else 0)) for (pB,pA),sh,rarg in zip(narg, x.shape, repeat_args)]
+      return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
+    for d,(pB,pA) in enumerate(narg):
+      if mode == "reflect":
+        if pB > (s:=x.size(d)) or pA > s: raise RuntimeError(f"padding ({pB},{pA}) cannot be more than the corresponding input dimension {s}")
+        xB = x[[slice(pB,0,-1) if i == d else slice(None) for i in range(x.ndim)]] if pB else None
+        xA = x[[slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1) if i==d else slice(None) for i in range(x.ndim)]] if pA else None
+      if mode == "replicate":
+        xB = x[[slice(None,1) if i==d else slice(None) for i in range(x.ndim)]].expand([pB if i==d else None for i in range(x.ndim)]) if pB else None
+        xA = x[[slice(-1,None) if i==d else slice(None) for i in range(x.ndim)]].expand([pA if i==d else None for i in range(x.ndim)]) if pA else None
+      x = Tensor.cat(*(x_ for x_ in (xB, x, xA) if x_ is not None), dim=d)
+    return x
 
   # ***** movement high level ops *****
 
@@ -1417,10 +1437,11 @@ class Tensor:
     The rolling operation is circular, meaning that elements that go beyond the edge are wrapped around to the beginning of the dimension.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.rand(3, 4, 1).roll(shifts=1, dims=0))
+    t = Tensor.arange(4)
+    print(t.roll(shifts=1, dims=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.rand(3, 4, 1).roll(shifts=-1, dims=0))
+    print(t.roll(shifts=-1, dims=0).numpy())
     ```
     """
     dims, rolled = tuple(self._resolve_dim(d) for d in make_pair(dims, 1)), self
