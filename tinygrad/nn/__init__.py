@@ -1,3 +1,4 @@
+from __future__ import annotations
 import math
 from typing import Optional, Union, Tuple, List
 from tinygrad.tensor import Tensor
@@ -59,7 +60,7 @@ class BatchNorm:
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt())
 BatchNorm2d = BatchNorm3d = BatchNorm
 
-def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
+def Conv1d(in_channels:int, out_channels:int, kernel_size:int, stride:int=1, padding:int=0, dilation:int=1, groups:int=1, bias:bool=True) -> Conv2d:
   """
   Applies a 1D convolution over an input signal composed of several input planes.
 
