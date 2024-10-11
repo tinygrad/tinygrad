@@ -3278,8 +3278,31 @@ class Tensor:
     ret = -self.log_softmax(axis=1).mul(Y).sum(axis=1)
     return ret._do_reduction(reduction)
 
-  # TODO add nll_loss and softmax cross entropy
-  # def
+  def nll_loss(self, Y:Tensor, weight:Optional[Tensor]=None, ignore_index:Optional[int]=None, reduction:ReductionStr="mean") -> Tensor:
+    """
+    Compute the negative log likelihood loss between input logits and target.
+
+    NOTE: `self` are logits and `Y` are the Y labels or class probabilities.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.nll_loss.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.nll_loss(Y).item())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.nll_loss(Y, reduction='none').numpy())
+    ```
+    """
+    x, Y, target_shape = self.reshape(self.size(0), self.size(1), -1), Y.reshape(self.size(0), -1), Y.shape
+    mask = Tensor.ones_like(Y) if ignore_index is None else (Y != ignore_index)
+    masked_weight = mask if weight is None else weight[Y] * mask
+    ret = (-x.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight).reshape(target_shape)
+    if reduction == "mean": return ret.sum() / (masked_weight.sum())
+    return ret._do_reduction(reduction)
 
   # ***** Tensor Properties *****
 

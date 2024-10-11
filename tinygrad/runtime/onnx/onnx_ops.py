@@ -1,5 +1,5 @@
 import functools, io, math
-from typing import Union, Tuple, Optional, List, Any, cast, Literal, Callable
+from typing import Union, Tuple, Optional, List, Any, cast, Literal
 from tinygrad.tensor import Tensor, _broadcast_shape, ConstType
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten, make_pair
@@ -9,17 +9,16 @@ import numpy as np
 # TODO maybe don't cast hack things and instead raise exceptions
 # TODO implement meshgrid
 
+
 exact_tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
-                  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-                  "Elu", "Celu", "Xor", "Round",}
+  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh", "Elu", "Celu", "Xor",
+  "Round",}
 
-# "Softmax_13": "softmax"
-# NOTE: equivalent_tensor_methods turns opts all into positional args in case of arg name mismatch
-equivalent_tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual": "__le__", "GreaterOrEqual": "__ge__",
-                      "Equal": "__eq__", "LogSoftmax": "log_softmax", "Not": "logical_not", "LeakyRelu": "leakyrelu", "Selu": "selu", "Tile":"repeat",
-                      "Range": "arange"}
+equivalent_tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual": "__le__", "GreaterOrEqual": "__ge__", "Equal": "__eq__",
+  "LogSoftmax": "log_softmax", "Not": "logical_not", "Tile":"repeat", "Range": "arange", "NegativeLogLikelihoodLoss": "nll_loss"}
 
-equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"})}
+equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"}), "LeakyRelu": ("leakyrelu", {"alpha": "neg_slope"}),
+                                        "Selu": ("selu", {"gamma": "scale"})}
 
 
 # helper
@@ -30,7 +29,7 @@ equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"})}
   # args = default_value * ndims
   # for i in range(len(axes)):
   #   lol = ...
-  #   args[axes[i]] = axis_value(lol)
+  #   args[] = axis_value(lol)
   # return args
 # np_pads = [(0,0)] * ndims
 # for i in range(len(axes)): np_pads[axes[i]] = (onnx_pads[i], onnx_pads[i + len(axes)])
@@ -189,7 +188,7 @@ def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsil
 
 # NOTE: these also works with 1D, 3D, or 1337D
 # (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> (..., x2_start, x2_end, x1_start, x1_end)
-def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed([(pb, pe) for pb, pe in zip(pads, pads[len(pads)//2:])]))
+def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed(list((pb, pe) for pb, pe in zip(pads, pads[len(pads)//2:]))))
 # (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> ((x1_begin, x1_end), (x2_begin, x2_end), ...)
 def _onnx_pads_to_pad(onnx_pads, ndims=None, axes=None):
   axes = axes or list(range(ndims))
@@ -336,20 +335,10 @@ def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
 
 def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)): return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
 
-def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_index=None, reduction="mean"):
-  target_shape, x, target = target.shape, x.reshape(x.size(0), x.size(1), -1), target.reshape(x.size(0), -1)
-  mask = Tensor.ones_like(target) if ignore_index is None else (target != ignore_index)
-  weight = mask if weight is None else weight[target] * mask
-  loss = -x.gather(1, target.unsqueeze(1)).squeeze(1) * mask * weight
-  if reduction == "mean": return loss.sum() / weight.sum() if weight is not None else loss.sum() / mask.sum()
-  elif reduction == "sum": return loss.sum()
-  else: return loss.reshape(target_shape)
-
 def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore_index=None, reduction="mean"):
   log_probs = scores.log_softmax(1)
-  return NegativeLogLikelihoodLoss(log_probs, labels, weights, ignore_index, reduction), log_probs
+  return log_probs.nll_loss(labels, weights, ignore_index, reduction), log_probs
 
-def ArrayFeatureExtractor(x: Tensor, indices: Tensor): return x[..., indices]
 # TODO: is fuse_arange stuff working for this?
 def Gather(x: Tensor, indices: Tensor, axis=0):
   if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
@@ -363,6 +352,7 @@ def Gather(x: Tensor, indices: Tensor, axis=0):
   # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
   return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
   # return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
+def ArrayFeatureExtractor(x: Tensor, indices: Tensor): return x[..., indices]
 def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
   return x.gather(axis, indices)

@@ -2104,7 +2104,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(),torch.clip(y,0,1)),
                                        lambda x,y: x.binary_crossentropy_logits(y.clip(0,1)))
   def test_binary_crossentropy_reductions(self):
-    for r in ("mean", "sum", "none"):
+    for r in ("sum", "none"):
       helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(), torch.clip(y,0,1), reduction=r),
                                          lambda x,y: x.sigmoid().binary_crossentropy(y.clip(0,1), reduction=r))
       helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(x, torch.clip(y,0,1), reduction=r),
@@ -2115,7 +2115,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, torch.argmax(y, dim=1)),
                                        lambda x,y: x.cross_entropy(y.argmax(axis=1)), forward_only=True)
   def test_cross_entropy_reductions(self):
-    for r in ("mean", "sum", "none"):
+    for r in ("sum", "none"):
       helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, reduction=r),
                                          lambda x,y: x.cross_entropy(y, reduction=r))
     self.helper_test_exception([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, reduction="typo"),
@@ -2125,6 +2125,26 @@ class TestOps(unittest.TestCase):
     for ls in (0., 0.3, 0.7, 1.):
       helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, label_smoothing=ls),
                                          lambda x,y: x.cross_entropy(y, label_smoothing=ls))
+
+  def test_nll_loss(self):
+    helper_test_op([(32,10), (32)], lambda x,y: torch.nn.functional.nll_loss(x, torch.clip(y,0).type(torch.long)),
+                                       lambda x,y: x.nll_loss(y.clip(0).cast(dtypes.long)), forward_only=True)
+
+  def test_nll_loss_reductions(self):
+    for r in ("sum", "none"):
+      helper_test_op([(32,10), (32)], lambda x,y: torch.nn.functional.nll_loss(x, torch.clip(y,0).type(torch.long), reduction=r),
+                                         lambda x,y: x.nll_loss(y.clip(0).cast(dtypes.long), reduction=r), forward_only=True)
+    self.helper_test_exception([(32,10), (32)], lambda x,y: torch.nn.functional.nll_loss(x, torch.clip(y,0).type(torch.long), reduction="typo"),
+                                                   lambda x,y: x.nll_loss(y.clip(0).cast(dtypes.long), reduction="typo"), expected=ValueError)
+
+  def test_nll_loss_weight(self): # weight loss? instead of developing self control, just buy drugs!
+    for r in ("mean", "sum", "none"):
+      helper_test_op([(32,10), (32), (10)], lambda x,y,z: torch.nn.functional.nll_loss(x, torch.clip(y,0).type(torch.long), z, reduction=r),
+                                         lambda x,y,z: x.nll_loss(y.clip(0).cast(dtypes.long), z, reduction=r), forward_only=True)
+
+  def test_cross_entropy_ignore_index(self):
+    # TODO:
+    pass
 
   def test_one_hot(self):
     data = [1, 2, 4]

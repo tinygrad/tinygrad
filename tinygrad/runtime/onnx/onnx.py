@@ -167,7 +167,7 @@ def get_run_onnx(onnx_model: ModelProto):
       if n.op_type in onnx_ops.exact_tensor_methods:
         ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
       elif n.op_type in onnx_ops.equivalent_tensor_methods:
-        ret = getattr(Tensor, onnx_ops.equivalent_tensor_methods[n.op_type])(*inp, *opt.values())
+        ret = getattr(Tensor, onnx_ops.equivalent_tensor_methods[n.op_type])(*inp, **opt)
       elif n.op_type in onnx_ops.equivalent_tensor_methods_exceptions:
         # TODO: kinda ugly
         rewrite = onnx_ops.equivalent_tensor_methods_exceptions[n.op_type]
