@@ -7,7 +7,7 @@
 from __future__ import annotations
 from typing import Tuple, Optional, Dict, Any, DefaultDict
 from collections import defaultdict
-import multiprocessing, functools, urllib.request, urllib.error, hashlib, json, time, contextlib, os, binascii
+import multiprocessing, functools, http.client, hashlib, json, time, contextlib, os, binascii
 from dataclasses import dataclass, field
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap
 from tinygrad.device import Compiled, Allocator, Compiler, Device
@@ -37,7 +37,7 @@ class CloudHandler(BaseHTTPRequestHandler):
     return 0
 
   def _do(self, method):
-    session = CloudHandler.sessions[unwrap(self.headers.get("Cookie")).split("=")[1]]
+    session = CloudHandler.sessions[unwrap(self.headers.get("Cookie")).split("session=")[1]]
     ret = b""
     if self.path == "/renderer" and method == "GET":
       cls, args = Device[CloudHandler.dname].renderer.__reduce__()
@@ -96,7 +96,7 @@ class CloudAllocator(Allocator):
     super().__init__()
   def _alloc(self, size:int, options) -> int: return int(self.device.send("POST", f"alloc?size={size}"))
   def _free(self, opaque, options):
-    with contextlib.suppress(urllib.error.URLError): self.device.send("DELETE", f"buffer/{opaque}", data=b"")
+    with contextlib.suppress(ConnectionRefusedError, http.client.CannotSendRequest): self.device.send("DELETE", f"buffer/{opaque}", data=b"")
   def copyin(self, dest:int, src:memoryview): self.device.send("PUT", f"buffer/{dest}", data=bytes(src))
   def copyout(self, dest:memoryview, src:int):
     resp = self.device.send("GET", f"buffer/{src}")
@@ -121,33 +121,34 @@ class CloudProgram:
 class CloudDevice(Compiled):
   def __init__(self, device:str):
     if (host:=getenv("HOST", "")) != "":
-      self.host = f"http://{host}/"
+      self.host = host
     else:
       p = multiprocessing.Process(target=cloud_server, args=(6667,))
       p.daemon = True
       p.start()
-      self.host = "http://127.0.0.1:6667/"
+      self.host = "127.0.0.1:6667"
     self.cookie = binascii.hexlify(os.urandom(0x10)).decode()
     if DEBUG >= 1: print(f"cloud with host {self.host}")
     while 1:
       try:
-        clouddev = json.loads(self.send("GET", "renderer", timeout=0.1).decode())
+        self.conn = http.client.HTTPConnection(self.host, timeout=0.1)
+        clouddev = json.loads(self.send("GET", "renderer").decode())
         break
       except Exception as e:
         print(e)
         time.sleep(0.1)
     if DEBUG >= 1: print(f"remote has device {clouddev}")
-    # ugh, there needs to be a better way to do this
+    self.conn.timeout = 60.0
     # TODO: how to we have BEAM be cached on the backend? this should just send a specification of the compute. rethink what goes in Renderer
     assert clouddev[0].startswith("tinygrad.renderer."), f"bad renderer {clouddev}"
     renderer = fromimport(clouddev[0], clouddev[1])(*clouddev[2])
     super().__init__(device, CloudAllocator(self), renderer, Compiler(), functools.partial(CloudProgram, self))
 
-  def send(self, method, path, data:Optional[bytes]=None, timeout=60.0) -> bytes:
+  def send(self, method, path, data:Optional[bytes]=None) -> bytes:
     # TODO: retry logic
-    req = urllib.request.Request(self.host+path, method=method, headers={"Cookie": f"session={self.cookie}"})
-    with urllib.request.urlopen(req, data=data, timeout=timeout) as r:
-      assert r.status == 200
-      return r.read()
+    self.conn.request(method, "/"+path, data, headers={"Cookie": f"session={self.cookie}"})
+    response = self.conn.getresponse()
+    assert response.status == 200, f"failed on {method} {path}"
+    return response.read()
 
 if __name__ == "__main__": cloud_server(getenv("PORT", 6667))
