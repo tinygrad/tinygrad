@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, make_pair
 from tinygrad.nn import optim, state, datasets  # noqa: F401
@@ -95,7 +95,7 @@ class Conv2d:
   print(t.numpy())
   ```
   """
-  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, padding:Union[int,str]=0,
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, padding:Union[List[int],str]=0,
                dilation=1, groups=1, bias=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     if isinstance(padding, str):
