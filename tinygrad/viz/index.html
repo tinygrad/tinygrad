@@ -187,6 +187,19 @@
     ...hljs.getLanguage('cpp'),
     contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
   }));
+
+  function recenterRects(svg, zoom) {
+    const svgBounds = svg.node().getBoundingClientRect();
+    for (const rect of svg.node().querySelectorAll("rect")) {
+      const rectBounds = rect.getBoundingClientRect();
+      const outOfBounds = rectBounds.top < svgBounds.top || rectBounds.left < svgBounds.left ||
+        rectBounds.bottom > svgBounds.bottom || rectBounds.right > svgBounds.right;
+      // if there's at least one rect in view we don't do anything
+      if (!outOfBounds) return;
+    }
+    svg.call(zoom.transform, d3.zoomIdentity)
+  }
+
   function renderGraph(graph, additions) {
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
     g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5); rx: 8; ry: 8;" : "display: none;"});
@@ -207,6 +220,7 @@
         const transform = d3.event.transform;
         inner.attr("transform", transform);
       });
+    recenterRects(svg, zoom);
     svg.call(zoom);
     const render = new dagreD3.render();
     render(inner, g);

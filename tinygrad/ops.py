@@ -5,7 +5,7 @@ from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, prod, getenv, all_same
+from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context
 if TYPE_CHECKING:
   from tinygrad.shape.symbolic import Variable, sint
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -33,7 +33,7 @@ class ReduceOps(FastEnum):
   """A -> B (reduce)"""
   SUM = auto(); PROD = auto(); MAX = auto() # noqa: E702
 class MetaOps(FastEnum):
-  EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
+  EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
 T = TypeVar("T")
@@ -99,9 +99,9 @@ def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.
 class UOps(FastEnum):
   # uops that aren't rendered
   SINK = auto()
+  CONTIGUOUS = auto()
 
   # metaops
-  CUSTOM = auto()
   COPY = auto()
   EMPTY = auto()
   BUFFER_VIEW = auto()
@@ -212,7 +212,9 @@ class UOp(MathTrait):
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
   # *** uop evaluation ***
-  def simplify(self): return graph_rewrite(self, symbolic)
+  def simplify(self):
+    with Context(TRACK_MATCH_STATS=0):
+      return graph_rewrite(self, symbolic)
   def ssimplify(self) -> Union[UOp, ConstType]: return ret.arg if (ret:=self.simplify()).op is UOps.CONST else ret
   def _eval(self, dtype, expected_type) -> ConstType:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"

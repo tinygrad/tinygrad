@@ -10,7 +10,8 @@ from tinygrad.ops import UOps, UOp, UPat, UnaryOps, BinaryOps, TernaryOps, Reduc
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule, reduceop_fusor
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
-from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, sym
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
 from tinygrad.shape.symbolic import Variable
 from test.helpers import is_dtype_supported, assert_equiv_uops
 
