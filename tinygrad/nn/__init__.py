@@ -60,7 +60,7 @@ class BatchNorm:
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt())
 BatchNorm2d = BatchNorm3d = BatchNorm
 
-def Conv1d(in_channels:int, out_channels:int, kernel_size:int, stride:int=1, padding:int=0, dilation:int=1, groups:int=1,
+def Conv1d(in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, padding:int=0, dilation:int=1, groups:int=1,
            bias:bool=True):
   """
   Applies a 1D convolution over an input signal composed of several input planes.
@@ -77,7 +77,7 @@ def Conv1d(in_channels:int, out_channels:int, kernel_size:int, stride:int=1, pad
   print(t.numpy())
   ```
   """
-  return Conv2d(in_channels, out_channels, (kernel_size,), stride, padding, dilation, groups, bias)
+  return Conv2d(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
 
 class Conv2d:
   """
@@ -95,7 +95,7 @@ class Conv2d:
   print(t.numpy())
   ```
   """
-  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,tuple[int,int]], stride:int=1, padding:Union[int|str]=0,
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, padding:Union[int,str]=0,
                dilation=1, groups=1, bias=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     if isinstance(padding, str):
@@ -111,8 +111,8 @@ class Conv2d:
   def __call__(self, x:Tensor) -> Tensor:
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
-def ConvTranspose1d(in_channels:int, out_channels:int, kernel_size: int, stride:int=1, padding:int=0, output_padding:int=0, dilation:int=1,
-                    groups:int=1, bias:bool=True):
+def ConvTranspose1d(in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, padding:int=0, output_padding:int=0, 
+                    dilation:int=1, groups:int=1, bias:bool=True):
   """
   Applies a 1D transposed convolution operator over an input signal composed of several input planes.
 
@@ -128,7 +128,7 @@ def ConvTranspose1d(in_channels:int, out_channels:int, kernel_size: int, stride:
   print(t.numpy())
   ```
   """
-  return ConvTranspose2d(in_channels, out_channels, (kernel_size,), stride, padding, output_padding, dilation, groups, bias)
+  return ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding, output_padding, dilation, groups, bias)
 
 class ConvTranspose2d(Conv2d):
   """
@@ -146,7 +146,7 @@ class ConvTranspose2d(Conv2d):
   print(t.numpy())
   ```
   """
-  def __init__(self, in_channels:int, out_channels:int, kernel_size:tuple[int,int], stride:int=1, padding:int=0, output_padding:int=0,
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, padding:int=0, output_padding:int=0,
                dilation:int=1, groups:int=1, bias:bool=True):
     super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
     scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
