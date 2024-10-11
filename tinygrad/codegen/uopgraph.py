@@ -541,6 +541,9 @@ reducer = PatternMatcher([
 no_pyint = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR),
   name="x"), lambda x: UOp(x.op, dtypes.int32.vec(x.dtype.count), x.src, x.arg) if x.dtype.scalar() == dtypes.pyint else None)])
 
+gated_store_to_if = PatternMatcher([(UPat(UOps.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(), UPat(dtype=dtypes.bool)), name='x'),
+  lambda x: UOp(x.op, x.dtype, x.src[:3] + (UOp(UOps.IF, src=(x.src[3],)),), x.arg))])
+
 # *** uop graph ***
 
 linearize_cnt = 0
@@ -564,6 +567,9 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
       sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
       sink = graph_rewrite(sink, sym+reducer)
       sink = graph_rewrite(sink, sym+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
+
+  # gated store rewrite to UOps.IF
+  sink = graph_rewrite(sink, gated_store_to_if)
 
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, opts.extra_matcher)
   return sink
