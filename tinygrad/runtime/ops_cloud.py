@@ -131,7 +131,7 @@ class CloudDevice(Compiled):
     if DEBUG >= 1: print(f"cloud with host {self.host}")
     while 1:
       try:
-        self.conn = http.client.HTTPConnection(self.host, timeout=0.1)
+        self.conn = http.client.HTTPConnection(self.host, timeout=1)
         clouddev = json.loads(self.send("GET", "renderer").decode())
         break
       except Exception as e:
