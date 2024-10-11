@@ -11,7 +11,7 @@ from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA,
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import MetaOps, truncate, smax, resolve, UOp, UOps, BinaryOps
 from tinygrad.device import Device, Buffer, BufferOptions
-from tinygrad.shape.symbolic import sint, Variable
+from tinygrad.shape.symbolic import sint
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule, memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
@@ -205,7 +205,7 @@ class Tensor:
 
   # ***** data handlers ****
 
-  def schedule_with_vars(self, *lst:Tensor) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  def schedule_with_vars(self, *lst:Tensor) -> Tuple[List[ScheduleItem], Dict[UOp, int]]:
     """
     Creates the schedule needed to realize these Tensor(s), with Variables.
 

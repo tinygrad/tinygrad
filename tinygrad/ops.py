@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar
+from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar, Generic
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -7,7 +7,7 @@ from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context
 if TYPE_CHECKING:
-  from tinygrad.shape.symbolic import Variable, sint
+  from tinygrad.shape.symbolic import sint
   from tinygrad.shape.shapetracker import ShapeTracker
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
@@ -40,7 +40,7 @@ T = TypeVar("T")
 class MathTrait:
   # required to implement
   def alu(self:T, arg:Union[UnaryOps, BinaryOps, TernaryOps], *src) -> T: raise NotImplementedError
-  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): raise NotImplementedError
+  def const_like(self, b:ConstType|UOp|Tuple[ConstType]): raise NotImplementedError
 
   # great functions you get!
   def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
@@ -175,7 +175,7 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
 
 ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
-class UOp(MathTrait):
+class UOp(MathTrait, Generic[T]):
   def __reduce__(self): return UOp, (self.op, self.dtype, self.src, self.arg)
   def __new__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
     if (ret:=ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
@@ -241,7 +241,7 @@ class UOp(MathTrait):
     return ret
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def view(self, st:ShapeTracker): return UOp(UOps.VIEW, self.dtype, (self,), st)
-  def const_like(self, b:ConstType|Variable|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)
+  def const_like(self, b:ConstType|UOp|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
@@ -268,20 +268,25 @@ class UOp(MathTrait):
       out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(UOps.ALU, out_dtype, (self,)+src, arg)
   @staticmethod
-  def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return UOp._const(dtype, b)
+  def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|UOp): return UOp._const(dtype, b)
   @staticmethod
-  def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
-    # TODO: fix dtype of b.max after Variable is just an UOp
-    #if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
+  def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|UOp):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is UOps.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
-  def unbind(self) -> Tuple[Variable, int]:
+  @property
+  def expr(self):
+    assert self.op is UOps.DEFINE_VAR, f"no expr on {self.op}"
+    return self.arg[0]
+  def bind(self, val:int):
+    assert self.op is UOps.DEFINE_VAR, f"op is {self.op}"
+    assert self.arg[1] <= val and val <= self.arg[2], f"bind {val} not in range {self.arg[1]}-{self.arg[2]}"
+    return UOp(UOps.BIND, self.dtype, (self, self.const_like(val)))
+  def unbind(self) -> Tuple[UOp, int]:
     assert self.op is UOps.BIND and self.src[0].op is UOps.DEFINE_VAR and self.src[1].op is UOps.CONST, f"can't unbind {self}"
-    from tinygrad.shape.symbolic import Variable
-    return cast(Variable, self.src[0]), self.src[1].arg
+    return self.src[0], self.src[1].arg
   @property
   def val(self) -> int: return self.unbind()[1]
   # TODO: this is context rewrite
@@ -304,10 +309,9 @@ class UOp(MathTrait):
     bound_var_base = set(x.src[0] for x in bound_vars)
     all_vars = set([x for x in self.sparents if x.op is UOps.DEFINE_VAR])
     return bound_vars.union(set([x for x in all_vars if x not in bound_var_base]))
-  def variables(self) -> List[Variable]:
-    st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
-    from tinygrad.shape.symbolic import Variable
-    return sorted(set.union(*st_vars, [x.unbind()[0] if not isinstance(x, Variable) else x for x in self.vars()]), key=lambda v: v.arg)
+  def variables(self) -> List[UOp]:
+    st_vars: List[Set[UOp]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
+    return sorted(set.union(*st_vars, [x.unbind()[0] if x.op is not UOps.DEFINE_VAR else x for x in self.vars()]), key=lambda v: v.arg)
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
@@ -405,7 +409,6 @@ def exec_alu(op:Op, dtype:DType, operands):
 def uop_alu_resolve(u:UOp) -> sint:
   if u.op is UOps.CONST: return u.arg
   if u.op is UOps.DEFINE_VAR: return u
-  #if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1], u.arg[2])
   if u.op is UOps.ALU: return exec_alu(u.arg, u.dtype, tuple(map(uop_alu_resolve, u.src)))
   raise RuntimeError(f"ALU resolve fail @ {u.op}")
 
@@ -511,7 +514,7 @@ class UPat(MathTrait):
   @staticmethod
   def store(*src:UPat): return UPat(UOps.STORE, dtypes.void, src)
 
-  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return UPat.const(self.dtype, b)
+  def const_like(self, b:ConstType|UOp|Tuple[ConstType]): return UPat.const(self.dtype, b)
   def alu(self, arg, *src:UPat):
     asrc = (self,)+src
     return UPat(UOps.ALU, None if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else asrc[-1].dtype, list(asrc) if arg in COMMUTATIVE else asrc, arg)
