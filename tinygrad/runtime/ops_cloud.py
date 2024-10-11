@@ -102,7 +102,8 @@ class CloudAllocator(Allocator):
     super().__init__()
   def _alloc(self, size:int, options) -> int: return int(self.device.send("POST", f"alloc?size={size}"))
   def _free(self, opaque, options):
-    with contextlib.suppress(ConnectionRefusedError, http.client.CannotSendRequest): self.device.send("DELETE", f"buffer/{opaque}", data=b"")
+    with contextlib.suppress(ConnectionRefusedError, http.client.CannotSendRequest, http.client.RemoteDisconnected):
+      self.device.send("DELETE", f"buffer/{opaque}", data=b"")
   def copyin(self, dest:int, src:memoryview): self.device.send("PUT", f"buffer/{dest}", data=bytes(src))
   def copyout(self, dest:memoryview, src:int):
     resp = self.device.send("GET", f"buffer/{src}")
