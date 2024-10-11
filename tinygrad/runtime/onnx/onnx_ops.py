@@ -7,8 +7,7 @@ from .onnx import DTYPE_MAP, to_python_const
 import numpy as np
 
 # TODO maybe don't cast hack things and instead raise exceptions
-# TODO implement meshgrid
-
+# TODO maybe implement meshgrid utility
 
 exact_tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
   "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh", "Elu", "Celu", "Xor",
@@ -19,22 +18,6 @@ equivalent_tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual
 
 equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"}), "LeakyRelu": ("leakyrelu", {"alpha": "neg_slope"}),
   "Selu": ("selu", {"gamma": "scale"})}
-
-# helper
-# TODO maybe write helper for stuff like tuple((1,0) if i == axis else None for i in range(X.ndim)), easier to read, see it everywhere
-# or in a format like:
-# def axis_tuple_arg(default_value, ndims, axes, axis_value: Callable):
-  # ...
-  # args = default_value * ndims
-  # for i in range(len(axes)):
-  #   lol = ...
-  #   args[] = axis_value(lol)
-  # return args
-# np_pads = [(0,0)] * ndims
-# for i in range(len(axes)): np_pads[axes[i]] = (onnx_pads[i], onnx_pads[i + len(axes)])
-# def axis_arg(actual, condition, default, length, axis): return tuple(default if condition else actual for i in range(length))
-# def dynamic_axis_value_tuple(main_value_fn: callable, default_value: Any, length: int, axis: int):
-    # return tuple(main_value_fn(i) if i == axis else default_value for i in range(length))
 
 # **************** Free Ops ****************
 
@@ -236,14 +219,6 @@ def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1
   return ret, indices
 
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
-# TODO: is setitem MaxUnpool more preferred? it's more lines :D
-#   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
-#   ret = Tensor.zeros(prod(out_sh)).contiguous()
-#   ret[xI.flatten()] = xT.flatten()
-#   ret = ret.reshape(1, 1, *out_sh)
-#   if outshape is not None and outshape != ret.shape:
-#     ret = ret.pad2d(_onnx_pads_to_pad2d_pads(_auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
-#   return ret
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
   ret = ((xI.reshape(-1, 1) == Tensor.arange(prod(out_sh))) * xT.reshape(-1, 1)).sum(0).reshape(1, 1, *out_sh)
   if outshape is not None and outshape != ret.shape:
@@ -398,12 +373,7 @@ def OneHot(indices: Tensor, depth, values, axis=-1):
 
 def Erf(x: Tensor):
   t = 1.0 / (1.0 + 0.3275911 * x.abs())
-  term1 = 0.254829592 * t
-  term2 = -0.284496736 * t ** 2
-  term3 = 1.421413741 * t ** 3
-  term4 = -1.453152027 * t ** 4
-  term5 = 1.061405429 * t ** 5
-  y = (term1 + term2 + term3 + term4 + term5)
+  y = (0.254829592 * t + -0.284496736 * t ** 2 + 1.421413741 * t ** 3 + -1.453152027 * t ** 4 + 1.061405429 * t ** 5)
   z = 1.0 - y * (-x * x).exp()
   return (x > 0).where(z, -z)
 

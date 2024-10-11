@@ -1003,7 +1003,7 @@ class Tensor:
       return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
     for d,(pB,pA) in enumerate(narg):
       if mode == "reflect":
-        if pB > (s:=x.size(d)) or pA > s: raise RuntimeError(f"padding ({pB},{pA}) cannot be more than the corresponding input dimension {s}")
+        if pB > (s:=x.shape[d]) or pA > s: raise RuntimeError(f"padding ({pB},{pA}) cannot be more than the corresponding input dimension {s}")
         xB = x[[slice(pB,0,-1) if i == d else slice(None) for i in range(x.ndim)]] if pB else None
         xA = x[[slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1) if i==d else slice(None) for i in range(x.ndim)]] if pA else None
       if mode == "replicate":

@@ -169,6 +169,7 @@ def get_run_onnx(onnx_model: ModelProto):
         # TODO: kinda ugly
         rewrite = onnx_ops.equivalent_tensor_methods_exceptions[n.op_type]
         ret = getattr(Tensor, rewrite[0])(*inp, **{rewrite[1].get(k, k):v for k,v in opt.items()})
+
       # have to use n.output for cases when num_outputs is absent
       elif n.op_type == "Split":
         axis, outputs, split = opt.get("axis", 0), opt.get("num_outputs") or len(n.output), opt.get("split")
@@ -180,26 +181,13 @@ def get_run_onnx(onnx_model: ModelProto):
         if len(inp) == 1 and split is None: ret = inp[0].split([size // outputs + (1 if i < size % outputs else 0) for i in range(outputs)], axis)
 
       # need to check onnx_model_version
-      # TODO yeah this can be improved
       elif n.op_type == "Slice":
-        if onnx_model_version < 10:
-          axes, ends, starts, steps = list(opt.get("axes", range(inp[0].ndim))), list(opt["ends"]), list(opt["starts"]), [1]*inp[0].ndim
-        else:
-          starts, ends = inp[1:3]
-          axes = list(range(inp[0].ndim)) if len(inp) <= 3 else inp[3]
-          steps = inp[4] if len(inp) > 4 else [1]*inp[0].ndim
-          starts, ends = starts, ends
-        arg = [(0,x,1) for x in inp[0].shape]
-        for i, axis in enumerate(axes):
-          axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
-          if starts[i] < 0: starts[i] += inp[0].shape[axis]
-          if ends[i] < 0: ends[i] += inp[0].shape[axis]
-          starts[i], ends[i] = max(0, min(starts[i], inp[0].shape[axis])), max(0, min(ends[i], inp[0].shape[axis]))
-          if starts[i] > ends[i] and steps[i] >= 0: steps[i] = -steps[i]
-          arg[axis] = (starts[i], ends[i], steps[i])
-        new_shape = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in arg)
-        if any(s==e for s,e in new_shape): ret = inp[0].shrink(new_shape)
-        else: ret = inp[0][tuple([slice(s,e,st) for s,e,st in arg])]
+        # only onnx_model_version < 10 has opt, we just unload the opt into inp to match other versions
+        if opt: inp.extend([list(v) for v in reversed(opt.values())]) # axes, ends, starts -> starts, ends, axes
+        (data, starts, ends), axes, steps = inp[:3], inp[3] if len(inp) > 3 else list(range(inp[0].ndim)), inp[4] if len(inp) > 4 else [1]*inp[0].ndim
+        arg = [slice(0,x,1) for x in data.shape]
+        for i, axis in enumerate(axes): arg[axis] = slice(starts[i], ends[i], steps[i])
+        ret = data[arg]
 
       # need to call backward on intermediate_tensors
       elif n.op_type == "Gradient":
