@@ -33,7 +33,7 @@ class ReduceOps(FastEnum):
   """A -> B (reduce)"""
   SUM = auto(); PROD = auto(); MAX = auto() # noqa: E702
 class MetaOps(FastEnum):
-  EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
+  EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
 T = TypeVar("T")
@@ -101,7 +101,6 @@ class UOps(FastEnum):
   SINK = auto()
 
   # metaops
-  CUSTOM = auto()
   COPY = auto()
   EMPTY = auto()
   BUFFER_VIEW = auto()
