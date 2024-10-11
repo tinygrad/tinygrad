@@ -641,6 +641,7 @@ def train_bert():
 
     if RUNMLPERF:
       MLLOGGER.start(key=mllog_constants.RUN_START, value=None)
+      MLLOGGER.event(key=mllog_constants.SEED, value=seed)
   else:
     MLLOGGER = None
 
