@@ -23,7 +23,6 @@ class CloudSession:
 
 class CloudHandler(BaseHTTPRequestHandler):
   protocol_version = 'HTTP/1.1'
-  timeout = 60.0
   dname: str
   sessions: DefaultDict[str, CloudSession] = defaultdict(CloudSession)
 
@@ -138,14 +137,13 @@ class CloudDevice(Compiled):
     if DEBUG >= 1: print(f"cloud with host {self.host}")
     while 1:
       try:
-        self.conn = http.client.HTTPConnection(self.host, timeout=1)
+        self.conn = http.client.HTTPConnection(self.host, timeout=60.0)
         clouddev = json.loads(self.send("GET", "renderer").decode())
         break
       except Exception as e:
         print(e)
         time.sleep(0.1)
     if DEBUG >= 1: print(f"remote has device {clouddev}")
-    self.conn.timeout = 60.0
     # TODO: how to we have BEAM be cached on the backend? this should just send a specification of the compute. rethink what goes in Renderer
     assert clouddev[0].startswith("tinygrad.renderer."), f"bad renderer {clouddev}"
     renderer = fromimport(clouddev[0], clouddev[1])(*clouddev[2])
