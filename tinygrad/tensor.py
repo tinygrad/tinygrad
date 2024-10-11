@@ -1063,6 +1063,9 @@ class Tensor:
       indices_filtered[dim] = ((index, index+1), 1) if index >= 0 else ((size+index, size+index+1), 1)
     for dim in type_dim[slice]:
       if (index := indices_filtered[dim]).step == 0: raise ValueError(f"{index=} on {dim=} cannot have 0 as step")
+      if not all(isinstance(x, (int, type(None))) for x in (index.start, index.stop, index.step)):
+        raise TypeError(f"Unsupported slice for dimension {dim}. Expected slice with integers or None, got slice("
+                        f"{', '.join(type(x).__name__ for x in (index.start, index.stop, index.step))}).")
       s, e, st = index.indices(self.shape[dim])
       indices_filtered[dim] = ((0, 0) if (st * (e - s)) < 0 else (s, e) if st > 0 else (e+1, s+1), st)
     # skip all Tensor dims for basic indexing
