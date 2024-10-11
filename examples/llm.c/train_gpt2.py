@@ -40,25 +40,19 @@ class CausalSelfAttention:
   def __call__(self, x:Tensor):
     B, T, C = x.shape
     q = self.q(x) # B, T, n_embd --> B, T, n_head, 
-    print("q shape",q.shape, "axis", q.lazydata.axis)
     k = self.k(x)
     v = self.v(x)
     k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-    print("v shape", v.shape, "axis", v.lazydata.axis)
     # manual implementation of attention
     att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
     att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
     att = att.softmax()
-    print("attn", att.shape, "axis", att.lazydata.axis)
     y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-    print("0: y shape", y.shape, "axis", y.lazydata.axis)
     y = y.transpose(1, 2).view(B, T, C) # re-assemble all head outputs side by side
     # output projection
-    print('1: y shape', y.shape, 'axis', y.lazydata.axis)
     y = self.c_proj(y)
-    print("2: y shape", y.shape, "axis", y.lazydata.axis)
     return y
 
 class MLP:
@@ -124,7 +118,7 @@ class GPT:
     pos = Tensor.arange(0, t)
     
     if SHARD_MODEL:
-      pos.shard_(GPUS, axis=0)
+      pos.shard_(GPUS)
 
     tok_emb = self.wte(idx) # token embeddings of shape (b, t, n_embd)
     pos_emb = self.wpe(pos) # position embeddings of shape (t, n_embd)
@@ -139,7 +133,6 @@ class GPT:
       logits = self.lm_head(x[:, [-1], :])
       logits = logits.masked_fill(self.vocab_pad == 0, 0)
       loss = None
-
     return logits, loss
 
 def g_sz(tensors: List[Tensor]): return sum([t.nbytes() if isinstance(t, Tensor) else t.size for t in tensors])
@@ -224,7 +217,7 @@ if __name__ == "__main__":
       t1 = time.time()
       print(f"iteration {i}, loss: {loss.item():.6f}, time: {(t1-t0)*1000:.3f}ms, {int(B*T/(t1-t0))} tok/s")
 
-  if False: # Generate not working yet...
+  if True: # Generate not working yet...
     start = "<|endoftext|>"
     start_ids = encode(start)
     x = (Tensor(start_ids)[None, ...])
@@ -234,6 +227,5 @@ if __name__ == "__main__":
     temperature = 1.0
     top_k = 40
     y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
-    print(f"{y.shape=}")
     print(decode(y[0].tolist()))
 
