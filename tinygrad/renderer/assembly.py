@@ -65,7 +65,9 @@ class PTXRenderer(Renderer):
   tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
-  def __init__(self, arch:str, device="CUDA"): self.device, self.tensor_cores = device, PTXRenderer.tensor_cores if int(arch[3:]) >= 80 else []
+  def __init__(self, arch:str, device="CUDA"):
+    self.device, self.tensor_cores, self.arch = device, PTXRenderer.tensor_cores if int(arch[3:]) >= 80 else [], arch
+  def __reduce__(self): return self.__class__, (self.arch, self.device)
 
   # language options
   kernel_prefix = """.version VERSION
