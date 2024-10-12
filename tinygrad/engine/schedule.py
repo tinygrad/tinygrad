@@ -240,8 +240,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     if x.base.realized is None: children[x.base][buf] = None
     _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
 
-def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Optional[Dict[LazyBuffer, bool]] = None) -> bool:
-  if cache is None: cache = {}
+def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict[LazyBuffer, bool]) -> bool:
   if buf in cache: return cache[buf]
   if buf in realizes: return True
   # NOTE: this broke to_image_idx and coder with JIT
@@ -297,7 +296,7 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
 
   # check if we have to realize pads
   for p in simple_pads:
-    if not _is_padding_okay(p, realizes):
+    if not _is_padding_okay(p, realizes, {}):
       realizes[p] = None
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
