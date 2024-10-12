@@ -123,7 +123,6 @@ class MetalBuffer:
 
 class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice, name: str):
-    print("allocator", device)
     self.device:MetalDevice = device
     self.mem = 0
     self.name = name
@@ -135,9 +134,10 @@ class MetalAllocator(LRUAllocator):
     reset_color = "\u001b[39m"
     magenta = "\u001b[35m"
     blue = "\u001b[34m"
-    color = magenta if self.name == "METAL" else blue
-    if mem > 0:
-      print(f"{color}{self.name} mem: {self.mem} bytes, highest: {self.mem_high} bytes {reset_color}")
+    cyan = "\u001b[36m"
+    white = "\u001b[37m"
+    color = magenta if self.name == "METAL" else blue if self.name == "METAL:1" else cyan if self.name == "METAL:2" else white
+    print(f"{color}{self.name} {mem} mem: {self.mem} bytes, highest: {self.mem_high} bytes {reset_color}")
   def _alloc(self, size:int, options) -> MetalBuffer:
     self.mem_changed(size)
     # Buffer is explicitly released in _free() rather than garbage collected via reference count
@@ -179,7 +179,6 @@ class MetalAllocator(LRUAllocator):
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):
-    print('device', device)
     self.device = libmetal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = msg(self.device, "newCommandQueueWithMaxCommandBufferCount:", 1024, restype=objc_instance)
     if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
