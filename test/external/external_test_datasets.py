@@ -16,6 +16,7 @@ class ExternalTestDatasets(unittest.TestCase):
     np.random.seed(42)
     random.seed(42)
 
+class TestKiTS19Dataset(ExternalTestDatasets):
   def _create_samples(self, val, num_samples=2):
     self._set_seed()
 
