@@ -43,7 +43,8 @@ def compile():
     print(f"run {i}")
     with Context(DEBUG=max(DEBUG.value, 2 if i == 2 else 1)):
       ret = next(iter(run_onnx_jit(**new_inputs).values())).cast('float32').numpy()
-    if i == 0: test_val = np.copy(ret)
+    # copy i == 1 so use of JITBEAM is okay
+    if i == 1: test_val = np.copy(ret)
   print(f"captured {len(run_onnx_jit.captured.jit_cache)} kernels")
   np.testing.assert_equal(test_val, ret)
   print("jit run validated")

@@ -369,16 +369,6 @@ code_for_op_hip = { UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half
                     # TODO: MAX with int uses fmax_f32?
                     BinaryOps.MAX: lambda a,b,dtype: f"__ocml_fmax_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({a},{b})",}
 
-def _make_hip_code_for_op():
-  def wrapper(key, func):
-    def cast_bf16(*args):
-      if args[-1] == dtypes.bfloat16:
-        operands = tuple(f"(float)({arg})" for arg in (args[1:-1] if key is TernaryOps.WHERE else args[:-1]))
-        return f"(hip_bfloat16)({func(*(((args[0],) if key is TernaryOps.WHERE else ()) + operands), dtypes.float)})"
-      return func(*args)
-    return cast_bf16
-  return { k:wrapper(k,v) for k,v in {**CStyleLanguage.code_for_op, **code_for_op_hip}.items() }
-
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
@@ -397,13 +387,18 @@ class AMDRenderer(CStyleLanguage):
   kernel_prefix += '\nextern "C" __attribute__((global))'
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
-  code_for_op = _make_hip_code_for_op()
+  code_for_op = { **CStyleLanguage.code_for_op, **code_for_op_hip }
   smem_prefix = "__attribute__((shared))"
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
   uses_ptr_arithmetic = False  # NOTE: this fixes TestLinearizerOverflowAlt
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
+  extra_matcher = PatternMatcher([
+    (UPat(UOps.ALU, arg=TernaryOps.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dtypes.bfloat16), UPat.var("y", dtype=dtypes.bfloat16))),
+      lambda b,x,y: UOp(UOps.ALU, arg=TernaryOps.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(dtypes.bfloat16)),
+    *[(UPat(UOps.ALU, dtype=dtypes.bfloat16, name="x"),
+      lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)))]]) + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
