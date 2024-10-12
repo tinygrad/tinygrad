@@ -538,9 +538,6 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), simplify_valid_image_load),
 ])
 
-no_pyint = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR),
-  name="x"), lambda x: UOp(x.op, dtypes.int32.vec(x.dtype.count), x.src, x.arg) if x.dtype.scalar() == dtypes.pyint else None)])
-
 # *** uop graph ***
 
 linearize_cnt = 0
@@ -551,9 +548,6 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # do graph rewrite
   acc_number = 0
   sink = graph_rewrite(sink, sym)
-
-  # rewrite pyint to int32
-  sink = graph_rewrite(sink, no_pyint)
 
   # expand
   linearize_cnt += 1

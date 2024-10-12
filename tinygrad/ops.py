@@ -298,8 +298,10 @@ class UOp(MathTrait):
 
   # *** uop Variable stuff ***
 
+  # TOOD: replace all define_var with variable
   @staticmethod
-  def variable(name:str, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtypes.int, arg=(name, min_val, max_val))
+  def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.int):
+    return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   @staticmethod
   def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   @property
@@ -693,9 +695,6 @@ spec = PatternMatcher([
 
   (UPat(UOps.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
   (UPat(UOps.SPECIAL, src=()), lambda: True),
-
-  # no pyint allowed here!
-  (UPat(UOps.ALU, dtype=dtypes.pyint), lambda: False),
 
   # TODO: confirm the args of both of these are shapetrackers
   (UPat(UOps.VIEW, src=()), lambda: True),
