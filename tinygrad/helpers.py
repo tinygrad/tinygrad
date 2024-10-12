@@ -220,7 +220,9 @@ def diskcache(func):
 _PROCESS_REPLAY_CAPTURE: List[Tuple[Tuple, Dict, Tuple, Any]] = []
 def process_replay(func):
   def wrapper(*args, **kwargs):
-    _PROCESS_REPLAY_CAPTURE.append((args, kwargs, ({k:v.value for k,v in ContextVar._cache.items()},), ret:=func(*args, **kwargs)))
+    frm = sys._getframe(0)
+    while frm.f_back: loc = ((frm:=frm.f_back).f_code.co_filename, frm.f_lineno)
+    _PROCESS_REPLAY_CAPTURE.append((args, kwargs, ({k:v.value for k,v in ContextVar._cache.items()}, loc), ret:=func(*args, **kwargs)))
     return ret
   return wrapper
 if getenv("RUN_PROCESS_REPLAY"):
