@@ -361,11 +361,14 @@ class UOp(MathTrait):
       if self.arg is BinaryOps.MUL:
         # both are non-positive
         if (s0.vmax <= 0 and s1.vmax <= 0): return s0.vmax*s1.vmax, s0.vmin*s1.vmin
-        # at lease one is non-negative
+        # at least one is non-negative
         if (s0.vmin >= 0 or s1.vmin >= 0):
           Lmin, Lmax = (s0.vmin, s0.vmax) if s1.vmin >= 0 else (s0.vmax, s0.vmin)
           Rmin, Rmax = (s1.vmin, s1.vmax) if s0.vmin >= 0 else (s1.vmax, s1.vmin)
           return Lmin*Rmin, Lmax*Rmax
+        # arbitrary
+        products = [s0.vmin * s1.vmin, s0.vmin * s1.vmax, s0.vmax * s1.vmin, s0.vmax * s1.vmax]
+        return min(products), max(products)
       if self.arg is BinaryOps.MOD and s1.vmin > 0: return 0, s1.vmax-1
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
         if s1.arg > 0: return s0.vmin//s1.arg, s0.vmax//s1.arg
