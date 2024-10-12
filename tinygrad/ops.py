@@ -311,8 +311,9 @@ class UOp(MathTrait):
     if self in dvars: return dvars[self]
     return self.replace(src=tuple(x.substitute(dvars) for x in self.src))
   @staticmethod
-  def range(dtype:DType, start:ConstType, end:ConstType, idx:int):
-    return UOp(UOps.RANGE, dtype=dtype, src=(UOp.const(dtype, start), UOp.const(dtype, end)), arg=(idx,))
+  def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
+    return UOp(UOps.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
+                                             UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=idx)
   def reduce(self, op:BinaryOps, *rng:UOp): return UOp(UOps.REDUCE, self.dtype, (self,) + rng, op)
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents}}

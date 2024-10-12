@@ -2,6 +2,7 @@ from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Union
+from tinygrad.dtype import dtypes
 from tinygrad.ops import resolve, UOp
 from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import NumNode, Variable, sint, sym_infer
@@ -82,6 +83,8 @@ def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
     offs -= here * stride
   return result
 
+def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.pyint, x) if isinstance(x, int) else x
+
 @dataclass(frozen=True)
 class View:
   shape:Tuple[sint, ...]
@@ -89,6 +92,16 @@ class View:
   offset:sint
   mask:Optional[Tuple[Tuple[sint, sint], ...]]
   contiguous:bool
+
+  def to_indexed_uops(self:View, _idxs:Optional[List[UOp]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> Tuple[UOp, UOp]:
+    idxs = [UOp.range(dtypes.pyint, 0, s, i) for i,s in enumerate(self.shape)] if _idxs is None else _idxs
+    iexpr = variable_to_uop(self.offset)
+    for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else [None]*len(self.shape)):
+      if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
+      if m is not None:
+        if resolve(m[0] != 0): vexpr = vexpr * idx.ge(m[0])
+        if resolve(m[1] != sh): vexpr = vexpr * idx.lt(m[1])
+    return iexpr, vexpr
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def size(self) -> int:
