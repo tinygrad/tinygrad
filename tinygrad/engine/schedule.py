@@ -240,7 +240,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     if x.base.realized is None: children[x.base][buf] = None
     _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
 
-def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict[LazyBuffer, bool] = None) -> bool:
+def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Optional[Dict[LazyBuffer, bool]] = None) -> bool:
   if cache is None: cache = {}
   if buf in cache: return cache[buf]
   if buf in realizes: return True
