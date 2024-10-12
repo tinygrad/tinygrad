@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Union, Optional, Dict, Literal
+from typing import Union, Optional, Dict
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, UOps, exec_alu, ConstType
 
@@ -8,7 +8,7 @@ sint = Union[int, UOp]
 def NumNode(val:int): return UOp.const(dtypes.int, val)
 def Variable(expr:str, nmin:ConstType, nmax:ConstType): return UOp.define_var(expr, dtypes.int, nmin, nmax)
 
-def sym_infer(uop: Union[UOp, int], var_vals: Optional[Dict[UOp[Literal[UOps.DEFINE_VAR]], int]]) -> int:
+def sym_infer(uop: Union[UOp, int], var_vals: Optional[Dict[UOp, int]]) -> int:
   if isinstance(uop, (int, float)): return uop   # TODO: ugh, the float is a hack for qcom
   if uop.op == UOps.CONST: return uop.arg
   if uop.op == UOps.DEFINE_VAR and var_vals is not None: return var_vals[uop]
