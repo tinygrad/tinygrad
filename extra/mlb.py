@@ -8,7 +8,7 @@ def print_lb(lb):
       if lb.axis is not None:
         text += _indent() + f"shape {lb.shape} axis {lb.axis}"
         text += _indent() + f" bounds {lb.bounds}"
-        text += "\n"
+      text += "\n"
       indent += 4
       text += _indent()
       for i, _lb in enumerate(lb.lbs):
