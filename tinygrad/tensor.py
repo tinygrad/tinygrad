@@ -3521,7 +3521,7 @@ if IMAGE:
 
 def _metadata_wrapper(fn):
   def _wrapper(*args, **kwargs):
-    if _METADATA.get() is not None: return fn(*args, **kwargs)
+    if _METADATA.get() is not None or not TRACEMETA: return fn(*args, **kwargs)
 
     if TRACEMETA >= 2:
       caller_frame = sys._getframe(frame := 1)
