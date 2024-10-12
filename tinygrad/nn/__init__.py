@@ -336,7 +336,7 @@ class LSTMCell:
     hidden_size: The number of features in the hidden state `h`
     bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`
   """
-  def __init__(self, input_size:int, hidden_size:int, bias=True):
+  def __init__(self, input_size:int, hidden_size:int, bias:bool=True):
     stdv = 1.0 / math.sqrt(hidden_size)
     self.weight_ih = Tensor.uniform(hidden_size*4, input_size, low=-stdv, high=stdv)
     self.weight_hh = Tensor.uniform(hidden_size*4, hidden_size, low=-stdv, high=stdv)
