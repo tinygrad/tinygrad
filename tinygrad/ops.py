@@ -295,12 +295,9 @@ class UOp(MathTrait):
 
   # *** uop Variable stuff ***
 
-  # TOOD: replace all define_var with variable
   @staticmethod
   def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.int):
     return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
-  @staticmethod
-  def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   @property
   def expr(self):
     assert self.op is UOps.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
