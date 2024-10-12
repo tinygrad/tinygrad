@@ -44,7 +44,7 @@ class TestUOpResolve(unittest.TestCase):
     self.assertEqual((8 * UOp.const(dtypes.int, 4)).ssimplify(), 32)
 
   def test_ambiguous_less_than(self):
-    u = UOp.define_var("i", dtypes.pyint, 1, 10)
+    u = UOp.variable("i", 1, 10)
     self.assertTrue(resolve(u < 4))
     self.assertFalse(resolve(u < 4, False))
     self.assertTrue(resolve(u < 11, False))
@@ -56,64 +56,64 @@ class TestUOpResolve(unittest.TestCase):
     self.assertEqual(float(u), 11.5)
 
   def test_var_cmp_t(self):
-    u = UOp.define_var("i", dtypes.pyint, 1, 10) < 20
+    u = UOp.variable("i", 1, 10) < 20
     self.assertTrue(u)
 
   def test_var_cmp_t2(self):
-    u = UOp.define_var("i", dtypes.pyint, 1, 10)//2 < 20
+    u = UOp.variable("i", 1, 10)//2 < 20
     self.assertTrue(u)
 
   def test_var_cmp_f(self):
-    u = UOp.define_var("i", dtypes.pyint, 1, 10) < 1
+    u = UOp.variable("i", 1, 10) < 1
     self.assertFalse(u)
 
   def test_var_cmp_f2(self):
-    u = UOp.define_var("i", dtypes.pyint, 1, 10) > 11
+    u = UOp.variable("i", 1, 10) > 11
     self.assertFalse(u)
 
   def test_or_true(self):
-    u = UOp.define_var("b", dtypes.bool, False, True) | True
+    u = UOp.variable("b", False, True, dtypes.bool) | True
     self.assertTrue(u)
 
   def test_or_false(self):
     with self.assertRaises(ValueError):
-      u = UOp.define_var("b", dtypes.bool, False, True) | False
+      u = UOp.variable("b", False, True, dtypes.bool) | False
       self.assertTrue(u)
 
   def test_and_false(self):
-    u = UOp.define_var("b", dtypes.bool, False, True) & False
+    u = UOp.variable("b", False, True, dtypes.bool) & False
     self.assertFalse(u)
 
   def test_max(self):
-    x = UOp.define_var("x", dtypes.pyint, 1, 10)
-    y = UOp.define_var("y", dtypes.pyint, 5, 10)
+    x = UOp.variable("x", 1, 10)
+    y = UOp.variable("y", 5, 10)
     u = x.max(y)
     self.assertTrue(u < 20)
     self.assertFalse(u < 3)
 
   def test_x_lt_x(self):
-    x = UOp.define_var("i", dtypes.pyint, 1, 10)
+    x = UOp.variable("i", 1, 10)
     self.assertFalse(x < x)
 
   @unittest.expectedFailure
   def test_x_lt_xp1(self):
-    x = UOp.define_var("i", dtypes.pyint, 1, 10)
+    x = UOp.variable("i", 1, 10)
     self.assertTrue(x < (x+1))
 
   def test_and_true(self):
     with self.assertRaises(ValueError):
-      u = UOp.define_var("b", dtypes.bool, False, True) & True
+      u = UOp.variable("b", False, True, dtypes.bool) & True
       self.assertFalse(u)
 
   @unittest.expectedFailure
   def test_var_cmp_range(self):
-    v = UOp.define_var("i", dtypes.pyint, 1, 10)
+    v = UOp.variable("i", 1, 10)
     u = (v > 4) | (v < 6)
     self.assertTrue(u)
 
   def test_var_cmp_assert(self):
     with self.assertRaises(ValueError):
-      u = UOp.define_var("i", dtypes.pyint, 1, 10) < 5
+      u = UOp.variable("i", 1, 10) < 5
       self.assertFalse(u)
 
 if __name__ == '__main__':

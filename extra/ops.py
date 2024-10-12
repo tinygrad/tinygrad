@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from tinygrad.helpers import dedup, prod
 from tinygrad.ops import ReduceOps, UnaryOps, BinaryOps, TernaryOps, UOp, UOps, pretty_print
 from tinygrad.dtype import ImageDType, PtrDType, dtypes, DType, ConstType
-from tinygrad.shape.symbolic import Variable, sint
+from tinygrad.ops import Variable, sint
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # these ops are deleted after AST is UOp
