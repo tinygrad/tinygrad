@@ -36,7 +36,7 @@
         <p id="gpuInfo"></p>
         <p id="serverAddress"></p>
         <p id="connectionStatus"></p>
-        <button class="primarybutton" id="start" onclick="" disabled>Initializing</button>
+        <button class="primarybutton" id="start" onclick="" disabled>Start</button>
     </div>
     <script>
         let device;
@@ -44,6 +44,10 @@
         const setError = (e, prefix) => {
             console.error(`${prefix} error`, e)
             error.textContent = `${prefix} error: ${e.message}`;
+        }
+        const makeButtonReady = () => {
+            const start = document.getElementById("start")
+            start.disabled = false;
         }
         const handlePotentialDeviceLost = (promise) => {
             if (!promise) {
@@ -71,9 +75,6 @@
                 })
                 let _device = await adapter.requestDevice()
                 handlePotentialDeviceLost(_device.lost)
-                const start = document.getElementById("start")
-                start.disabled = false;
-                start.textContent = "Start"
                 device = _device;
             }
             catch (e) {
@@ -221,19 +222,30 @@
             }
         }
        
+        const handleServerCommands = (data) => {
+
+        }
         const wsInit = () => {
             try {
-                const address = "ws://localhost:8765"
+                const address = "ws://localhost:9999"
                 const socket = new WebSocket(address);
                 // Listen for messages
                 socket.addEventListener("message", (event) => {
                     console.log("Message from server ", event.data);
                 });
+                socket.addEventListener("error", () => {
+                    setError(new Error("Unable to establish connection"), "Websocket initialization")
+                })
                 socket.addEventListener("open", () => {
                     console.log("Connection established")
-                    document.getElementById("connectionStatus").textContent = `🌐 Connected`
+                    document.getElementById("connectionStatus").textContent = `🟢 online`
                     document.getElementById("serverAddress").textContent = `Server: ${address}`
                     socket.send("YO")
+                    makeButtonReady()
+                })
+                socket.addEventListener("close", () => {
+                    console.log("Disconnected")
+                    document.getElementById("connectionStatus").textContent = `🔴 offline`
                 })
             } catch (e) {
                 setError(e, "WS")
