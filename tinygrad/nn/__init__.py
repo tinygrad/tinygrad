@@ -1,7 +1,7 @@
 import math
 from typing import Optional, Tuple, Union, List
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod, make_pair 
+from tinygrad.helpers import prod, make_pair
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 
@@ -30,7 +30,7 @@ class BatchNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, sz:int, eps:float=1e-5, affine:bool=True, track_running_stats:bool=True, momentum:float=0.1):
+  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
     self.weight: Optional[Tensor] = Tensor.ones(sz) if affine else None
@@ -60,8 +60,7 @@ class BatchNorm:
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt())
 BatchNorm2d = BatchNorm3d = BatchNorm
 
-def Conv1d(in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, padding:int=0, dilation:int=1, groups:int=1,
-           bias:bool=True):
+def Conv1d(in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride=1, padding=0, dilation=1, groups=1, bias=True):
   """
   Applies a 1D convolution over an input signal composed of several input planes.
 
@@ -95,13 +94,14 @@ class Conv2d:
   print(t.numpy())
   ```
   """
-  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, 
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride=1,
                padding:Union[int,List[int],str]=0, dilation=1, groups=1, bias=True):
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     if isinstance(padding, str):
       if padding.lower() != 'same': raise ValueError(f"Invalid padding string {padding!r}, only 'same' is supported")
       if stride != 1: raise ValueError("padding='same' is not supported for strided convolutions")
-      self.padding: Union[int,List[int],str] = [p for d,k in zip(make_pair(dilation,len(self.kernel_size)), self.kernel_size[::-1]) for p in (d*(k-1)//2, d*(k-1) - d*(k-1)//2)]
+      self.padding: Union[int,List[int],str] = [p for d,k in zip(make_pair(dilation,len(self.kernel_size)), self.kernel_size[::-1])
+                                                for p in (d*(k-1)//2, d*(k-1) - d*(k-1)//2)]
     else: self.padding = padding
     self.stride, self.dilation, self.groups = stride, dilation, groups
     scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
@@ -111,8 +111,8 @@ class Conv2d:
   def __call__(self, x:Tensor) -> Tensor:
     return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
 
-def ConvTranspose1d(in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, padding:int=0, output_padding:int=0,
-                    dilation:int=1, groups:int=1, bias:bool=True):
+def ConvTranspose1d(in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride=1, padding=0, output_padding=0,
+                    dilation=1, groups=1, bias=True):
   """
   Applies a 1D transposed convolution operator over an input signal composed of several input planes.
 
@@ -146,8 +146,8 @@ class ConvTranspose2d(Conv2d):
   print(t.numpy())
   ```
   """
-  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride:int=1, padding:int=0, output_padding:int=0,
-               dilation:int=1, groups:int=1, bias:bool=True):
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int,Tuple[int,int]], stride=1, padding=0, output_padding=0,
+               dilation=1, groups=1, bias=True):
     super().__init__(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
     scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
     self.weight = Tensor.uniform(in_channels, out_channels//groups, *self.kernel_size, low=-scale, high=scale)
@@ -173,7 +173,7 @@ class Linear:
   print(t.numpy())
   ```
   """
-  def __init__(self, in_features:int, out_features:int, bias:bool=True):
+  def __init__(self, in_features:int, out_features:int, bias=True):
     bound = 1 / math.sqrt(in_features)
     self.weight = Tensor.uniform(out_features, in_features, low=-bound, high=bound)
     self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
@@ -198,7 +198,7 @@ class GroupNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, num_groups:int, num_channels:int, eps:float=1e-5, affine:bool=True):
+  def __init__(self, num_groups:int, num_channels:int, eps=1e-5, affine=True):
     self.num_groups, self.num_channels, self.eps = num_groups, num_channels, eps
     self.weight: Optional[Tensor] = Tensor.ones(num_channels) if affine else None
     self.bias: Optional[Tensor] = Tensor.zeros(num_channels) if affine else None
@@ -229,7 +229,7 @@ class InstanceNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, num_features:int, eps:float=1e-5, affine:bool=True):
+  def __init__(self, num_features:int, eps=1e-5, affine=True):
     self.num_features, self.eps = num_features, eps
     self.weight: Optional[Tensor] = Tensor.ones(num_features) if affine else None
     self.bias: Optional[Tensor] = Tensor.zeros(num_features) if affine else None
@@ -256,7 +256,7 @@ class LayerNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, normalized_shape:Union[int,Tuple[int, ...]], eps:float=1e-5, elementwise_affine:bool=True):
+  def __init__(self, normalized_shape:Union[int,Tuple[int, ...]], eps=1e-5, elementwise_affine=True):
     self.normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
     self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(self.normalized_shape))), eps, elementwise_affine
     self.weight, self.bias = (Tensor.ones(*self.normalized_shape), Tensor.zeros(*self.normalized_shape)) if elementwise_affine else (None, None)
@@ -301,7 +301,7 @@ class RMSNorm:
   print(norm(t).numpy())
   ```
   """
-  def __init__(self, dim:int, eps:float=1e-6): self.eps, self.weight = eps, Tensor.ones(dim)
+  def __init__(self, dim:int, eps=1e-6): self.eps, self.weight = eps, Tensor.ones(dim)
 
   def _norm(self, x:Tensor) -> Tensor: return x * (x.square().mean(-1, keepdim=True) + self.eps).rsqrt()
 
@@ -337,7 +337,7 @@ class LSTMCell:
     hidden_size: The number of features in the hidden state `h`
     bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`
   """
-  def __init__(self, input_size:int, hidden_size:int, bias:bool=True):
+  def __init__(self, input_size:int, hidden_size:int, bias=True):
     stdv = 1.0 / math.sqrt(hidden_size)
     self.weight_ih = Tensor.uniform(hidden_size*4, input_size, low=-stdv, high=stdv)
     self.weight_hh = Tensor.uniform(hidden_size*4, hidden_size, low=-stdv, high=stdv)
