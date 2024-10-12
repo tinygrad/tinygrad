@@ -7,19 +7,17 @@ import numpy as np
 import functools
 from typing import List, Optional, Union, cast
 
-from tinygrad import nn, dtypes
-from tinygrad.device import Device
+from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.dtype import DType, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps, graph_rewrite
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, reduceop_fusor, st_fixup
 from tinygrad.engine.realize import CompiledRunner, run_schedule
-from test.helpers import ast_const, is_dtype_supported, Context, timeit
 from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
+from test.helpers import ast_const, is_dtype_supported, Context, timeit
 from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
@@ -876,10 +874,15 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 12, 64, 64).realize()
     out = x.softmax()
-    # run_schedule(check_schedule(out, 2))
     run_schedule(check_schedule(out, 3))
     expected = (x_exp:=np.exp(x.numpy()-x.numpy().max(-1, keepdims=True)))/x_exp.sum(-1, keepdims=True)
     np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-4)
+
+  def test_softmax_backward(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 12, 64, 64, requires_grad=True).realize()
+    x.softmax().sum().backward()
+    run_schedule(check_schedule(x.grad, 6))
 
   # changed by: multireduce spec
   def test_layernorm_onelayer_fusion(self):
