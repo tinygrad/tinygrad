@@ -3,7 +3,7 @@ import functools, operator, itertools, math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Union
 from tinygrad.dtype import dtypes
-from tinygrad.ops import resolve, UOp, UOps
+from tinygrad.ops import resolve, UOp
 from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import NumNode, Variable, sint, sym_infer
 
@@ -94,9 +94,7 @@ class View:
   contiguous:bool
 
   def to_indexed_uops(self:View, _idxs:Optional[List[UOp]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> Tuple[UOp, UOp]:
-    idxs = [UOp(UOps.RANGE, dtypes.pyint, (UOp.const(dtypes.pyint, 0), variable_to_uop(s)), i) for i,s in enumerate(self.shape)] \
-      if _idxs is None else _idxs
-    # TODO: dtypes.realint
+    idxs = [UOp.range(dtypes.pyint, 0, s, i) for i,s in enumerate(self.shape)] if _idxs is None else _idxs
     iexpr = variable_to_uop(self.offset)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else [None]*len(self.shape)):
       if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
