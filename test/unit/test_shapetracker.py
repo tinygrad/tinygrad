@@ -4,7 +4,8 @@ import numpy as np
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
-from tinygrad.shape.symbolic import Variable, NumNode
+from tinygrad import Variable
+from tinygrad.shape.symbolic import NumNode
 from tinygrad.ops import UOp, UOps, graph_rewrite
 from tinygrad.codegen.uopgraph import sym
 from itertools import product

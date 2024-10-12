@@ -12,7 +12,7 @@ from tinygrad.dtype import dtypes, PtrDType, ConstType
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.ops import BinaryOps, UOp, UOps, print_uops
-from tinygrad.shape.symbolic import Variable
+from tinygrad import Variable
 import functools
 
 def render(self) -> Tuple[str, ConstType, ConstType]:
