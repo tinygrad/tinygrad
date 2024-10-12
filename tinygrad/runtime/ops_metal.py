@@ -122,15 +122,31 @@ class MetalBuffer:
   def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
 
 class MetalAllocator(LRUAllocator):
-  def __init__(self, device:MetalDevice):
+  def __init__(self, device:MetalDevice, name: str):
+    print("allocator", device)
     self.device:MetalDevice = device
+    self.mem = 0
+    self.name = name
+    self.mem_high = 0
     super().__init__()
+  def mem_changed(self, mem):
+    self.mem += mem
+    self.mem_high = max(self.mem, self.mem_high)
+    reset_color = "\u001b[39m"
+    magenta = "\u001b[35m"
+    blue = "\u001b[34m"
+    color = magenta if self.name == "METAL" else blue
+    if mem > 0:
+      print(f"{color}{self.name} mem: {self.mem} bytes, highest: {self.mem_high} bytes {reset_color}")
   def _alloc(self, size:int, options) -> MetalBuffer:
+    self.mem_changed(size)
     # Buffer is explicitly released in _free() rather than garbage collected via reference count
     ret = msg(self.device.device, "newBufferWithLength:options:", size, MTLResourceOptions.MTLResourceStorageModeShared, restype=objc_id)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
-  def _free(self, opaque:MetalBuffer, options): msg(opaque.buf, "release")
+  def _free(self, opaque:MetalBuffer, options):
+    self.mem_changed(-1 * opaque.size)
+    msg(opaque.buf, "release")
   def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = msg(src_dev.mtl_queue, "commandBuffer", restype=objc_instance)
@@ -163,6 +179,7 @@ class MetalAllocator(LRUAllocator):
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):
+    print('device', device)
     self.device = libmetal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = msg(self.device, "newCommandQueueWithMaxCommandBufferCount:", 1024, restype=objc_instance)
     if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
@@ -172,7 +189,7 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler(None if getenv("METAL_XCODE") else self),
+    super().__init__(device, MetalAllocator(self, name=device), MetalRenderer(), MetalCompiler(None if getenv("METAL_XCODE") else self),
                      functools.partial(MetalProgram, self), MetalGraph)
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
