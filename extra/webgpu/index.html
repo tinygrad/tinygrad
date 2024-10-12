@@ -39,7 +39,6 @@
     <script>
         let device;
         let error = document.getElementById("error")
-        console.log("WebGPU demo page loaded");
         const handlePotentialDeviceLost = (promise) => {
             if (!promise) {
                 throw new Error("handleLostDevice received null")
@@ -78,12 +77,8 @@
         }
         init()
 
-        const createBufferInit = (
-            device,
-            descriptor,
-        )=> {
+        const createBufferInit = (device,descriptor)=> {
             const contents = new Uint8Array(descriptor.contents);
-
             const alignMask = 4 - 1;
             const paddedSize = Math.max(
                 (contents.byteLength + alignMask) & ~alignMask,
