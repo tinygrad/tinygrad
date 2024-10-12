@@ -1,7 +1,6 @@
 import unittest
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad import Variable
-from tinygrad.ops import NumNode
 from tinygrad.tensor import Tensor
 
 class TestSymbolic(unittest.TestCase):
@@ -16,17 +15,17 @@ class TestSymbolic(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_real_strides_0(self):
-    st = ShapeTracker(views=(View(shape=(2, (NumNode(1)+Variable('start_pos', 1, 8)), 1, 1), strides=(8, 1, 0, 0), offset=0, mask=((0, 2), (0, Variable('start_pos', 1, 8)), (0, 1), (0, 1)), contiguous=False), View(shape=(2, (NumNode(1)+Variable('start_pos', 1, 8))), strides=((NumNode(1)+Variable('start_pos', 1, 8)), 1), offset=0, mask=None, contiguous=True)))   # noqa: E501
+    st = ShapeTracker(views=(View(shape=(2, (Variable('start_pos', 1, 8)+1), 1, 1), strides=(8, 1, 0, 0), offset=0, mask=((0, 2), (0, Variable('start_pos', 1, 8)), (0, 1), (0, 1)), contiguous=False), View(shape=(2, (Variable('start_pos', 1, 8)+1)), strides=((Variable('start_pos', 1, 8)+1), 1), offset=0, mask=None, contiguous=True)))   # noqa: E501
     self.assertEqual(st.real_strides(), (8, None))
 
   @unittest.expectedFailure
   def test_real_strides_1(self):
-    st = ShapeTracker(views=(View(shape=(3, (NumNode(2)+Variable('i', 1, 10))), strides=(Variable('i', 1, 10), 1), offset=NumNode(0), mask=((0, 3), (0, Variable('i', 1, 10))), contiguous=False),))   # noqa: E501
+    st = ShapeTracker(views=(View(shape=(3, (Variable('i', 1, 10)+2)), strides=(Variable('i', 1, 10), 1), offset=0, mask=((0, 3), (0, Variable('i', 1, 10))), contiguous=False),))   # noqa: E501
     self.assertEqual(st.real_strides(), (Variable('i', 1, 10), None))
 
   @unittest.expectedFailure
   def test_real_strides_2(self):
-    st = ShapeTracker(views=(View(shape=(3, (Variable('i', 1, 10)+Variable('j', 1, 10))), strides=(Variable('i', 1, 10), 1), offset=NumNode(0), mask=((0, 3), (0, Variable('i', 1, 10))), contiguous=False),))   # noqa: E501
+    st = ShapeTracker(views=(View(shape=(3, (Variable('i', 1, 10)+Variable('j', 1, 10))), strides=(Variable('i', 1, 10), 1), offset=0, mask=((0, 3), (0, Variable('i', 1, 10))), contiguous=False),))   # noqa: E501
     self.assertEqual(st.real_strides(), (Variable('i', 1, 10), None))
 
   def test_cat_dim0_strides(self):
@@ -152,12 +151,12 @@ class TestSymbolicReshapeFromContiguous(unittest.TestCase):
   def test_symbolic_mask(self):
     # taken from gpt2 single kvcache
     # these two caused problems in gpt2 if reshape merged views
-    view = View(shape=(1, (NumNode(1)+Variable('start_pos', 1, 128).bind(2)), 16, 64), strides=(0, 0, 64, 1), offset=NumNode(1024), mask=((0, 1), (Variable('start_pos', 1, 128).bind(2), (NumNode(1)+Variable('start_pos', 1, 128).bind(2))), (0, 16), (0, 64)), contiguous=False)   # noqa: E501
-    new_shape = (1, 1, (NumNode(1)+Variable('start_pos', 1, 128).bind(2)), 16, 64)
+    view = View(shape=(1, (Variable('start_pos', 1, 128).bind(2)+1), 16, 64), strides=(0, 0, 64, 1), offset=1024, mask=((0, 1), (Variable('start_pos', 1, 128).bind(2), (Variable('start_pos', 1, 128).bind(2)+1)), (0, 16), (0, 64)), contiguous=False)   # noqa: E501
+    new_shape = (1, 1, (Variable('start_pos', 1, 128).bind(2)+1), 16, 64)
     assert view.reshape(new_shape) is None
 
-    view = View(shape=(2, 1, (NumNode(1)+Variable('start_pos', 1, 128)), 16, 64), strides=(0, 0, 1024, 64, 1), offset=131072, mask=((1, 2), (0, 1), (0, (NumNode(1)+Variable('start_pos', 1, 128))), (0, 16), (0, 64)), contiguous=False)   # noqa: E501
-    new_shape = (2, (NumNode(1)+Variable('start_pos', 1, 128)), 16, 64)
+    view = View(shape=(2, 1, (Variable('start_pos', 1, 128)+1), 16, 64), strides=(0, 0, 1024, 64, 1), offset=131072, mask=((1, 2), (0, 1), (0, (Variable('start_pos', 1, 128)+1)), (0, 16), (0, 64)), contiguous=False)   # noqa: E501
+    new_shape = (2, (Variable('start_pos', 1, 128)+1), 16, 64)
     assert view.reshape(new_shape) is None
 
 class TestSymbolicReshapeFromNonContiguous(unittest.TestCase):

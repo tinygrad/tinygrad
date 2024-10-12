@@ -1,8 +1,8 @@
 import itertools
 import random
-from tinygrad import Variable
+from tinygrad import Variable, dtypes
+from tinygrad.ops import UOp
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import NumNode
 random.seed(42)
 
 def add_v(expr, rng=None):
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     tape = [random.choice(ops) for _ in range(random.randint(2, 30))]
     # 10% of the time, add one of lt, le, gt, ge
     if random.random() < 0.1: tape.append(random.choice([lt, le, gt, ge]))
-    expr = NumNode(0)
+    expr = UOp.const(dtypes.int, 0)
     rngs = []
     for t in tape:
       expr, rng = t(expr)
