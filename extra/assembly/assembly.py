@@ -3,7 +3,7 @@ from tinygrad.codegen.kernel import UOps, MemOp, UOp
 from tinygrad.ops import BinaryOps, UnaryOps
 from tinygrad.dtype import DType, dtypes
 from tinygrad.helpers import DEBUG
-from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
+from tinygrad.ops import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
 import functools
 import math
 from collections import defaultdict

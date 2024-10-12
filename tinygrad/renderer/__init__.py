@@ -2,8 +2,7 @@ from typing import Optional, List, Tuple, Dict, Callable, Any
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.ops import Op, UOps, UOp, flops_mem
-from tinygrad.shape.symbolic import sym_infer, sint, Variable
+from tinygrad.ops import Op, UOps, UOp, flops_mem, sym_infer, sint, Variable
 from tinygrad.dtype import DType
 
 @dataclass(frozen=True)

@@ -3,9 +3,8 @@ import functools, operator, itertools, math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Union
 from tinygrad.dtype import dtypes
-from tinygrad.ops import resolve, UOp
+from tinygrad.ops import resolve, UOp, NumNode, Variable, sint, sym_infer
 from tinygrad.helpers import prod, all_int, argsort
-from tinygrad.shape.symbolic import NumNode, Variable, sint, sym_infer
 
 @functools.lru_cache(maxsize=None)
 def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:

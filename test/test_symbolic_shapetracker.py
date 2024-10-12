@@ -1,7 +1,7 @@
 import unittest
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad import Variable
-from tinygrad.shape.symbolic import NumNode
+from tinygrad.ops import NumNode
 from tinygrad.tensor import Tensor
 
 class TestSymbolic(unittest.TestCase):

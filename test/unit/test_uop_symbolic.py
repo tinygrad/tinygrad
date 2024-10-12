@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest, pickle
 from typing import Tuple
-#from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, Node, sym_render, sym_infer, create_lt_node, create_ge_node
+#from tinygrad.ops import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, Node, sym_render, sym_infer, create_lt_node, create_ge_node
 
 # TODO: fix all the @unittest.expectedFailure
 

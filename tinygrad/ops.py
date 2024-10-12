@@ -7,7 +7,6 @@ from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context
 if TYPE_CHECKING:
-  from tinygrad.shape.symbolic import Variable, sint
   from tinygrad.shape.shapetracker import ShapeTracker
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
@@ -154,7 +153,7 @@ COMMUTATIVE = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, Bin
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.ENDRANGE)}
 
 # With True as the default, this matches the old symbolic behavior
-# python3 -c 'from tinygrad.shape.symbolic import Variable; print(bool(Variable("a", 1, 10) < 4))' -> True
+# python3 -c 'from tinygrad.ops import Variable; print(bool(Variable("a", 1, 10) < 4))' -> True
 def resolve(x, default:bool=True):
   if not isinstance(x, UOp): return bool(x)
   assert x.dtype is dtypes.bool, "UOp in resolve must be bool"
@@ -306,10 +305,8 @@ class UOp(MathTrait):
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
     return sorted(set.union(*st_vars, [x.unbind()[0] if x.op is not UOps.DEFINE_VAR else x for x in self.vars()]), key=lambda v: v.arg)
 
-  # TODO: this is context rewrite
-  def substitute(self, dvars:Dict[UOp, UOp]):
-    if self in dvars: return dvars[self]
-    return self.replace(src=tuple(x.substitute(dvars) for x in self.src))
+  def substitute(self, dvars:Dict[UOp, UOp]): return graph_rewrite(self, substitute, dvars)
+
   @staticmethod
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(UOps.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
@@ -967,6 +964,8 @@ symbolic_flat = symbolic+PatternMatcher([
   ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
 ])
 
+substitute = PatternMatcher([(UPat(tuple(UOps), name="x"), lambda ctx,x: ctx.get(x,None))])
+
 # for debug
 renderer = PatternMatcher([
   (UPat(UOps.DEFINE_VAR, name="x"), lambda x: UOp(UOps.NOOP, arg=x.arg[0])),
@@ -979,3 +978,12 @@ renderer = PatternMatcher([
   (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.CMPLT, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}<{x.src[1].arg})")),
   (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.CMPNE, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}!={x.src[1].arg})")),
 ])
+
+# *** what was symbolic.py ***
+
+sint = Union[int, UOp]
+Variable = UOp
+
+def NumNode(val:int): return UOp.const(dtypes.int, val)
+def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int:
+  return int(uop.substitute({k:k.const_like(v) for k,v in var_vals.items()})) if isinstance(uop, UOp) else uop

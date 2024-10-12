@@ -10,7 +10,7 @@ from tinygrad.engine.realize import Runner
 from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import Context, CI, OSX, getenv
-from tinygrad.shape.symbolic import sint
+from tinygrad.ops import sint
 
 def derandomize_model(model):
   with Context(GRAPH=0):
