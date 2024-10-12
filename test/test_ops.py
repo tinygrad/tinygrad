@@ -1265,6 +1265,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4), value=5), lambda x: x.pad2d(padding=(1,2,3,4),value=5))
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (-1,2,-3,4), value=5), lambda x: x.pad2d(padding=(-1,2,-3,4),value=5))
 
+  def test_pad2d_modes(self):
+    for mode in ("reflect", "replicate", "circular"):
+      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (1,2,3,4), mode=mode),lambda x: x.pad2d((1,2,3,4), mode=mode))
+      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (1,0,0,4), mode=mode),lambda x: x.pad2d((1,0,0,4), mode=mode))
+
   def test_pad(self):
     helper_test_op([(3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)),lambda x: x.pad(((3,4),(1,2))))
     helper_test_op([(3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4), value=5), lambda x: x.pad(((3,4), (1,2)), value=5))
@@ -1272,11 +1277,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4), value=-math.inf), lambda x: x.pad(((3,4), (1,2)), value=-math.inf))
     helper_test_op([(3,3)], lambda x: torch.nn.functional.pad(x, (0,0,3,4), value=1), lambda x: x.pad(((3,4), None), value=1))
     helper_test_op([(3,3)], lambda x: torch.nn.functional.pad(x, (0,0,0,0), value=1), lambda x: x.pad((None, None), value=1))
-
-  def test_pad_modes(self):
-    for mode in ("reflect", "replicate", "circular"):
-      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (1,2,3,4), mode=mode),lambda x: x.pad(((0,0),(0,0),(3,4),(1,2)), mode=mode))
-      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (1,0,0,4), mode=mode),lambda x: x.pad(((0,0),(0,0),(0,4),(1,0)), mode=mode))
 
   def test_pad_reshape(self):
     helper_test_op([(1, 2)],

@@ -154,13 +154,6 @@ def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsil
 # (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> (..., x2_start, x2_end, x1_start, x1_end)
 def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed(list((pb, pe) for pb, pe in zip(pads, pads[len(pads)//2:]))))
 
-# (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> ((x1_begin, x1_end), (x2_begin, x2_end), ...)
-def _onnx_pads_to_pad(onnx_pads, ndims=None, axes=None):
-  axes = axes or list(range(ndims))
-  pads = [(0,0)] * ndims
-  for i in range(len(axes)): pads[axes[i]] = (onnx_pads[i], onnx_pads[i + len(axes)])
-  return pads
-
 # (H_pad, W_pad) -> (L_pad, U_pad, R_pad, D_pad)
 def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
   return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
@@ -186,9 +179,11 @@ def _padded(X: Tensor, pads=None, auto_pad="NOTSET", constant_value=0., strides=
   if pads is None: return X
   return X.pad2d(_onnx_pads_to_pad2d_pads(pads), value=constant_value)
 
-def Pad(x:Tensor, pads:List[ConstType], constant_value:Optional[ConstType]=None, axes:Optional[List[ConstType]]=None, mode="constant",value:float=0.):
+def Pad(x:Tensor, pads:List[int], constant_value:Optional[ConstType]=None, axes:Optional[List[int]]=None, mode="constant",value:float=0.):
   constant_value, mode = value if constant_value is None else float(constant_value), {"edge": "replicate", "wrap":"circular"}.get(mode, mode)
-  return x.pad(_onnx_pads_to_pad(pads, x.ndim, axes), constant_value, mode)
+  axes, real_pads  = axes or list(range(x.ndim)), [0] * (x.ndim*2)
+  for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
+  return x.pad2d(_onnx_pads_to_pad2d_pads(real_pads), constant_value, mode)
 
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
   # TODO:
@@ -210,7 +205,7 @@ def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1
   return ret, indices
 
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
-# TODO: is setitem MaxUnpool more preferred? it's more lines :D
+# TODO: is setitem MaxUnpool the more preferred implementation? it's more lines :D
 #   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
 #   ret = Tensor.zeros(prod(out_sh)).contiguous()
 #   ret[xI.flatten()] = xT.flatten()
@@ -441,7 +436,9 @@ def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
   # this is tanh approximated
   return (x + bias).gelu()
 
-def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None, segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
+def EmbedLayerNormalization(input_ids: Tensor, segment_ids: Tensor, word_embedding:Tensor,
+                            position_embedding:Tensor, segment_embedding:Tensor, gamma=None, beta=None,
+                            mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
   assert (segment_ids is None) is (segment_embedding is None)
   assert (mask is None) is (mask_index_type is None)
@@ -449,9 +446,10 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   input_shape = input_ids.shape
   seq_length = input_shape[1]
   compute_seg_emb = (segment_embedding is not None and segment_ids is not None)
-  vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
+  vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0]
+                                                                                                                if compute_seg_emb else None)
 
-  def embedding(x:Tensor, vocab_size, weight:Tensor) -> Tensor:  # TODO from nn.Embedding. Could probably upstream this to Tensor
+  def embedding(x, vocab_size, weight) -> Tensor:
     vocab_counter = Tensor.arange(vocab_size, dtype=x.dtype, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
     return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
 
