@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, dedup
 from tinygrad.helpers import NO_MEMORY_PLANNER
-from tinygrad.ops import MetaOps, UOps, UOp
+from tinygrad.ops import UOps, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -104,12 +104,6 @@ class CompiledRunner(Runner):
       assert len(local_size) == 3, "local size must have len 3"
     return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
 
-class CustomOp(Runner):
-  def __init__(self, fxn):
-    self.fxn = fxn
-    super().__init__(self.fxn.__name__, "CUSTOM", 0, 0)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): self.fxn(*rawbufs)
-
 class EmptyOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
@@ -125,7 +119,8 @@ class BufferCopy(Runner):
     else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
     super().__init__(colored(name, "yellow"), dest_device, 0, total_sz)
   def copy(self, dest, src):
-    disk_supports_fast_copyout = src.device.startswith("DISK") and hasattr(src.allocator.device, 'io_uring') and hasattr(src.allocator.device, 'fd')
+    disk_supports_fast_copyout = src.device.startswith("DISK") and hasattr(src.allocator.device, 'io_uring') and \
+      getattr(src.allocator.device, 'fd', None) is not None
     if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_disk') and disk_supports_fast_copyout and src.nbytes >= 4096:
       dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
     elif src.device.startswith("DISK") and hasattr(dest.allocator, 'as_buffer'):
@@ -188,19 +183,18 @@ class ExecItem:
     return et
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  assert len(set(x.device for x in si.bufs)) == 1 or (si.ast.op is UOps.EXT and si.ast.arg[0] is MetaOps.COPY)
+  assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is UOps.COPY
   if si.ast.op is UOps.SINK:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
-  out, (op, arg) = si.outputs[0], si.ast.arg
-  if op is MetaOps.COPY:
+  out, arg = si.outputs[0], si.ast.arg
+  if si.ast.op is UOps.COPY:
     kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       kernel_type = BufferXfer
     return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
-  if op is MetaOps.CUSTOM: return ExecItem(CustomOp(arg), list(si.bufs))
-  if op is MetaOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
-  if op is MetaOps.VIEW: return ExecItem(ViewOp(out), list(si.bufs))
+  if si.ast.op is UOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
+  if si.ast.op is UOps.BUFFER_VIEW: return ExecItem(ViewOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {si.ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
