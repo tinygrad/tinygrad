@@ -137,7 +137,8 @@ class MetalAllocator(LRUAllocator):
     cyan = "\u001b[36m"
     white = "\u001b[37m"
     color = magenta if self.name == "METAL" else blue if self.name == "METAL:1" else cyan if self.name == "METAL:2" else white
-    print(f"{color}{self.name} {mem} mem: {self.mem} bytes, highest: {self.mem_high} bytes {reset_color}")
+    if os.environ.get("DEBUG_MEM"):
+      print(f"\n{color}ALLOC{self.name} {mem} mem: {self.mem} bytes, highest: {self.mem_high} bytes {reset_color}")
   def _alloc(self, size:int, options) -> MetalBuffer:
     self.mem_changed(size)
     # Buffer is explicitly released in _free() rather than garbage collected via reference count
