@@ -1,5 +1,5 @@
 import os, random, pickle, queue
-from typing import List
+from typing import List, Tuple
 from pathlib import Path
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
 
@@ -356,34 +356,50 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
 
 ### RetinaNet
 
-def load_retinanet_data(base_dir:Path, queue_in:Queue, queue_out:Queue, X:Tensor):
+def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue, X:Tensor, Y_boxes:Tensor, Y_labels:Tensor, anchors:np.ndarray):
   from extra.datasets.openimages import image_load, prepare_target, random_horizontal_flip, resize
+  from examples.mlperf.helpers import box_iou, find_matches
+
   while (data:=queue_in.get()) is not None:
     idx, img, ann = data
     img_id = img["id"]
-    img = image_load(base_dir, "train", img["file_name"])
+    img = image_load(base_dir, img["subset"], img["file_name"])
     tgt = prepare_target(ann, img_id, img.size[::-1])
     img, tgt = random_horizontal_flip(img, tgt)
-    img, _ = resize(img)
+    img, tgt, _ = resize(img, tgt=tgt)
+    match_quality_matrix = box_iou(tgt["boxes"], anchors)
+    matches = find_matches(match_quality_matrix, allow_low_quality_matches=True)
+    matches = np.clip(matches, 0, None)
+    boxes, labels = tgt["boxes"][matches], tgt["labels"][matches]
 
     X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+    Y_boxes[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = boxes.tobytes()
+    Y_labels[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = labels.tobytes()
 
     queue_out.put(idx)
   queue_out.put(None)
 
-def batch_load_retinanet(dataset, base_dir:Path, batch_size:int=32, seed:int=None):
+def batch_load_retinanet(dataset, val:bool, anchors:np.ndarray, base_dir:Path, batch_size:int=32, seed:int=None):
+  def _enqueue_batch(bc):
+    for idx in range(bc * batch_size, (bc+1) * batch_size):
+      img = dataset.loadImgs(next(dataset_iter))[0]
+      ann = dataset.loadAnns(dataset.getAnnIds(img["id"]))
+      queue_in.put((idx, img, ann))
+
+  def _setup_shared_mem(shm_name:str, size:Tuple[int, ...], dtype:dtypes) -> Tuple[shared_memory.SharedMemory, Tensor]:
+    if os.path.exists(f"/dev/shm/{shm_name}"): os.unlink(f"/dev/shm/{shm_name}")
+    shm = shared_memory.SharedMemory(name=shm_name, create=True, size=prod(size))
+    shm_tensor = Tensor.empty(*size, dtype=dtype, device=f"disk:/dev/shm/{shm_name}")
+    return shm, shm_tensor
+
   image_ids = sorted(dataset.imgs.keys())
   batch_count = min(32, len(image_ids) // batch_size)
 
   queue_in, queue_out = Queue(), Queue()
   procs, data_out_count = [], [0] * batch_count
-  shm_name_x = "retinanet_x"
-  # shm_name_x, shm_name_y = "retinanet_x", "retinanet_y"
-  sz = (batch_size * batch_count, 800, 800, 3)
-  if os.path.exists(f"/dev/shm/{shm_name_x}"): os.unlink(f"/dev/shm/{shm_name_x}")
-  # if os.path.exists(f"/dev/shm/{shm_name_y}"): os.unlink(f"/dev/shm/{shm_name_y}")
-  shm_x = shared_memory.SharedMemory(name=shm_name_x, create=True, size=prod(sz))
-  # shm_y = shared_memory.SharedMemory(name=shm_name_y, create=True, size=prod(sz))
+  shm_x, X = _setup_shared_mem("retinanet_x", (batch_size * batch_count, 800, 800, 3), dtypes.uint8)
+  shm_y_boxes, Y_boxes = _setup_shared_mem("retinanet_y_boxes", (batch_size * batch_count, 120087, 4), dtypes.float32)
+  shm_y_labels, Y_labels = _setup_shared_mem("retinanet_y_labels", (batch_size * batch_count, 120087), dtypes.int64)
 
   shutdown = False
   class Cookie:
@@ -391,14 +407,8 @@ def batch_load_retinanet(dataset, base_dir:Path, batch_size:int=32, seed:int=Non
       self.bc = bc
     def __del__(self):
       if not shutdown:
-        try: enqueue_batch(self.bc)
+        try: _enqueue_batch(self.bc)
         except StopIteration: pass
-
-  def enqueue_batch(bc):
-    for idx in range(bc * batch_size, (bc+1) * batch_size):
-      img = dataset.loadImgs(next(dataset_iter))[0]
-      ann = dataset.loadAnns(dataset.getAnnIds(img["id"]))
-      queue_in.put((idx, img, ann))
 
   # def shuffle_indices(file_indices, seed=None):
   #   rng = random.Random(seed)
@@ -408,17 +418,14 @@ def batch_load_retinanet(dataset, base_dir:Path, batch_size:int=32, seed:int=Non
   dataset_iter = iter(image_ids)
 
   try:
-    X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/{shm_name_x}")
-  #   Y = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/{shm_name_y}")
-
     for _ in range(cpu_count()):
-      proc = Process(target=load_retinanet_data, args=(base_dir, queue_in, queue_out, X))
+      proc = Process(target=load_retinanet_data, args=(base_dir, val, queue_in, queue_out, X, Y_boxes, Y_labels, anchors))
       proc.daemon = True
       proc.start()
       procs.append(proc)
 
     for bc in range(batch_count):
-      enqueue_batch(bc)
+      _enqueue_batch(bc)
 
     for _ in range(len(image_ids) // batch_size):
       while True:
@@ -427,7 +434,7 @@ def batch_load_retinanet(dataset, base_dir:Path, batch_size:int=32, seed:int=Non
         if data_out_count[bc] == batch_size: break
 
       data_out_count[bc] = 0
-      yield X[bc * batch_size:(bc + 1) * batch_size], Cookie(bc)
+      yield X[bc * batch_size:(bc + 1) * batch_size], Y_boxes[bc * batch_size:(bc + 1) * batch_size], Y_labels[bc * batch_size:(bc + 1) * batch_size], Cookie(bc)
   finally:
     shutdown = True
 
@@ -442,10 +449,12 @@ def batch_load_retinanet(dataset, base_dir:Path, batch_size:int=32, seed:int=Non
     for proc in procs: proc.join()
 
     shm_x.close()
-    # shm_y.close()
+    shm_y_boxes.close()
+    shm_y_labels.close()
     try:
       shm_x.unlink()
-      # shm_y.unlink()
+      shm_y_boxes.unlink()
+      shm_y_labels.unlink()
     except FileNotFoundError:
       # happens with BENCHMARK set
       pass
@@ -474,8 +483,9 @@ if __name__ == "__main__":
     from extra.datasets.openimages import BASEDIR, download_dataset
     from pycocotools.coco import COCO
     dataset = COCO(download_dataset(base_dir:=getenv("BASE_DIR", BASEDIR), "validation" if val else "train"))
+    anchors = np.ones((120087, 4))
     with tqdm(total=len(dataset.imgs.keys())) as pbar:
-      for x, _ in batch_load_retinanet(dataset, base_dir):
+      for x, _, _, _ in batch_load_retinanet(dataset, val, anchors, base_dir):
         pbar.update(x.shape[0])
 
   load_fn_name = f"load_{getenv('MODEL', 'resnet')}"

@@ -1,6 +1,6 @@
 from collections import OrderedDict
 import unicodedata
-from typing import Optional
+from typing import Optional, Tuple
 import numpy as np
 from tinygrad.nn import state
 from tinygrad.tensor import Tensor, dtypes
@@ -238,3 +238,40 @@ def get_fake_data_bert(GPUS:list[str], BS:int):
     "masked_lm_weights": Tensor.empty((BS, 76), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
     "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.float32).contiguous().shard_(GPUS, axis=0),
   }
+
+def find_matches(match_quality_matrix:np.ndarray, high_threshold:float=0.5, low_threshold:float=0.4, allow_low_quality_matches:bool=False) -> np.ndarray:
+  BELOW_LOW_THRESHOLD, BETWEEN_THRESHOLDS = -1, -2
+
+  def _set_low_quality_matches_(matches:np.ndarray, all_matches:np.ndarray, match_quality_matrix:np.ndarray):
+    highest_quality_foreach_gt = np.max(match_quality_matrix, axis=1)
+    pred_inds_to_update = np.nonzero(match_quality_matrix == highest_quality_foreach_gt[:, None])[1]
+    matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
+
+  assert low_threshold <= high_threshold
+
+  matched_vals, matches = match_quality_matrix.max(axis=0), match_quality_matrix.argmax(axis=0)
+  all_matches = np.copy(matches) if allow_low_quality_matches else None
+  below_low_threshold = matched_vals < low_threshold
+  between_thresholds = (matched_vals >= low_threshold) & (matched_vals < high_threshold)
+  matches[below_low_threshold] = BELOW_LOW_THRESHOLD
+  matches[between_thresholds] = BETWEEN_THRESHOLDS
+
+  if allow_low_quality_matches:
+    assert all_matches is not None
+    _set_low_quality_matches_(matches, all_matches, match_quality_matrix)
+
+  return matches
+
+def box_iou(boxes1:np.ndarray, boxes2:np.ndarray) -> np.ndarray:
+  def _box_area(boxes:np.ndarray) -> np.ndarray: return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+
+  def _box_inter_union(boxes1:np.ndarray, boxes2:np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    area1, area2 = _box_area(boxes1), _box_area(boxes2)
+    lt, rb = np.maximum(boxes1[:, None, :2], boxes2[:, :2]), np.minimum(boxes1[:, None, 2:], boxes2[:, 2:])
+    wh = np.clip(rb - lt, a_min=0, a_max=None)
+    inter = wh[:, :, 0] * wh[:, :, 1]
+    union = area1[:, None] + area2 - inter
+    return inter, union
+
+  inter, union = _box_inter_union(boxes1, boxes2)
+  return inter / union

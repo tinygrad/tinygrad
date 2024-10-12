@@ -349,6 +349,8 @@ def train_retinanet():
   from extra.models import resnet
   from pycocotools.coco import COCO
   from tinygrad.helpers import get_child
+  
+  import numpy as np
 
   NUM_CLASSES = len(MLPERF_CLASSES)
   BASE_DIR = getenv("BASE_DIR", BASEDIR)
@@ -380,14 +382,16 @@ def train_retinanet():
   optim = Adam(params, lr=LR)
 
   # ** dataset **
+  anchors = np.concatenate(model.anchor_gen((800, 800)), axis=0)
+
   train_dataset = COCO(download_dataset(BASE_DIR, "train"))
   val_dataset = COCO(download_dataset(BASE_DIR, "validation"))
 
-  train_dataloader = batch_load_retinanet(train_dataset, Path(BASE_DIR), batch_size=256)
+  train_dataloader = batch_load_retinanet(train_dataset, False, anchors, Path(BASE_DIR), batch_size=256)
 
   # ** training loop **
   with tqdm(total=len(train_dataset.imgs.keys())) as pbar:
-    for x, _ in train_dataloader:
+    for x, _, _, _ in train_dataloader:
       pbar.update(x.shape[0])
 
 def train_unet3d():

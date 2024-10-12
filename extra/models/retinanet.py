@@ -21,18 +21,18 @@ def generate_anchors(input_size, grid_sizes, scales, aspect_ratios):
   assert len(scales) == len(aspect_ratios) == len(grid_sizes)
   anchors = []
   for s, ar, gs in zip(scales, aspect_ratios, grid_sizes):
-    s, ar = Tensor(s), Tensor(ar)
-    h_ratios = ar.sqrt()
+    s, ar = np.array(s), np.array(ar)
+    h_ratios = np.sqrt(ar)
     w_ratios = 1 / h_ratios
     ws = (w_ratios[:, None] * s[None, :]).reshape(-1)
     hs = (h_ratios[:, None] * s[None, :]).reshape(-1)
-    base_anchors = (Tensor.stack(-ws, -hs, ws, hs, dim=1) / 2).round()
+    base_anchors = (np.stack([-ws, -hs, ws, hs], axis=1) / 2).round()
     stride_h, stride_w = input_size[0] // gs[0], input_size[1] // gs[1]
-    shifts_y, shifts_x = meshgrid(Tensor.arange(0, stop=gs[0], dtype=dtypes.float32) * stride_h, Tensor.arange(0, stop=gs[1], dtype=dtypes.float32) * stride_w)
+    shifts_x, shifts_y = np.meshgrid(np.arange(gs[1]) * stride_w, np.arange(gs[0]) * stride_h)
     shifts_x = shifts_x.reshape(-1)
     shifts_y = shifts_y.reshape(-1)
-    shifts = Tensor.stack(shifts_x, shifts_y, shifts_x, shifts_y, dim=1)
-    anchors.append((shifts.reshape(-1, 1, 4) + base_anchors.reshape(1, -1, 4)).reshape(-1, 4))
+    shifts = np.stack([shifts_x, shifts_y, shifts_x, shifts_y], axis=1, dtype=np.float32)
+    anchors.append((shifts[:, None] + base_anchors[None, :]).reshape(-1, 4))
   return anchors
 
 class RetinaNet:
@@ -96,7 +96,7 @@ class RetinaNet:
         # bbox coords from offsets
         anchor_idxs = topk_idxs // self.num_classes
         labels_per_level = topk_idxs % self.num_classes
-        boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level.numpy()[anchor_idxs]) # TODO: remove numpy conversion
+        boxes_per_level = decode_bbox(offsets_per_level[anchor_idxs], anchors_per_level[anchor_idxs])
         # clip to image size
         clipped_x = boxes_per_level[:, 0::2].clip(0, w)
         clipped_y = boxes_per_level[:, 1::2].clip(0, h)

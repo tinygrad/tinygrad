@@ -6,6 +6,7 @@ from pathlib import Path
 import boto3, botocore
 from tinygrad import Tensor
 from tinygrad.helpers import fetch, tqdm, getenv
+from typing import Optional, Dict, Tuple, Union
 import pandas as pd
 import concurrent.futures
 
@@ -185,11 +186,24 @@ def random_horizontal_flip(img, tgt, prob=0.5):
     tgt["boxes"][:, [0, 2]] = w - tgt["boxes"][:, [2, 0]]
   return img, tgt
 
-def resize(img, size=(800, 800)):
+def resize(img:Image, tgt:Optional[Dict[str, Union[np.ndarray, Tuple]]]=None, size:Tuple[int, int]=(800, 800)) -> Union[Tuple[np.ndarray, np.ndarray, Tuple], Tuple[np.ndarray, Tuple]]:
   import torchvision.transforms.functional as F
   img_size = img.size[::-1]
   img = F.resize(img, size=size)
   img = np.array(img)
+
+  if tgt is not None:
+    ratios = [s / s_orig for s, s_orig in zip(size, img.shape[::-1])]
+    ratio_w, ratio_h = ratios
+    x_min, y_min, x_max, y_max = [tgt["boxes"][:, i] for i in range(tgt["boxes"].shape[-1])]
+    x_min = x_min * ratio_w
+    x_max = x_max * ratio_w
+    y_min = y_min * ratio_h
+    y_max = y_max * ratio_h
+
+    tgt["boxes"] = np.stack([x_min, y_min, x_max, y_max], axis=1)
+    return img, tgt, img_size
+
   return img, img_size
 
 def normalize(img):
