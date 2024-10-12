@@ -48,7 +48,7 @@ def diff(offset:int) -> Union[Tuple[int, int], bool]:
     # try unpickle
     try:
       args, kwargs, ctx, compare = pickle.loads(row[0])
-      ctx_vars, loc = ctx
+      ctx_vars, stack = ctx
     except Exception as e:
       logging.warning(f"FAILED TO UNPICKLE OBJECTS {e}")
       if ASSERT_DIFF: return True
@@ -59,7 +59,7 @@ def diff(offset:int) -> Union[Tuple[int, int], bool]:
       compare = compare.src if isinstance(compare, Program) else str(compare)
     except Exception as e:
       logging.warning(f"FAILED TO RECREATE KERNEL {e}")
-      logging.info(f"{loc[0]}:{loc[1]}")
+      logging.info(stack)
       if isinstance(x:=args[0], Kernel): args = [x.ast, x.applied_opts] # TODO: can Kernel have __repr__
       for x in args[:-1]: logging.info(x)
       if ASSERT_DIFF: return True
@@ -68,7 +68,7 @@ def diff(offset:int) -> Union[Tuple[int, int], bool]:
     try: assert compare == good
     except AssertionError:
       logging.info("PROCESS REPLAY DETECTED CHANGE")
-      logging.info(f"{loc[0]}:{loc[1]}")
+      logging.info(stack)
       if isinstance(x:=args[0], Kernel): args = [x.ast, x.applied_opts]
       for x in args: logging.info(x)
       print_diff(good, compare)
