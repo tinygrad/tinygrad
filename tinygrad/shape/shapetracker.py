@@ -6,18 +6,7 @@ from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite, resolve, _get_chain, symbolic_flat
-
-def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.pyint, x) if isinstance(x, int) else x
-def _uop_view(view:View, idxs:List[UOp], vexpr:UOp) -> Tuple[UOp, UOp]:
-  # TODO: dtypes.realint
-  iexpr = variable_to_uop(view.offset)
-  for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
-    if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*variable_to_uop(st)
-    if m is not None:
-      if resolve(m[0] != 0): vexpr = vexpr * idx.ge(variable_to_uop(m[0]))
-      if resolve(m[1] != sh): vexpr = vexpr * idx.lt(variable_to_uop(m[1]))
-  return iexpr, vexpr
+from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite, _get_chain, symbolic_flat
 
 @dataclass(frozen=True)
 class ShapeTracker:
@@ -55,17 +44,14 @@ class ShapeTracker:
   def to_uop(self) -> UOp: return UOp(UOps.VIEW, dtypes.void, (), self)
 
   def to_indexed_uops(self, _idxs:Optional[List[UOp]]=None) -> Tuple[UOp, UOp]:
-    idxs = [UOp(UOps.RANGE, dtypes.pyint, (UOp.const(dtypes.pyint, 0), variable_to_uop(s)), i) for i,s in enumerate(self.shape)] \
-      if _idxs is None else _idxs
-    idx, valid = _uop_view(self.views[-1], idxs, UOp.const(dtypes.bool, True))
+    idx, valid = self.views[-1].to_indexed_uops(_idxs)
     for view in reversed(self.views[0:-1]):
       view = view.minify()
       acc, idxs = 1, []
-      for _d in reversed(view.shape):
-        d = variable_to_uop(_d)
+      for d in reversed(view.shape):
         idxs.append((idx//acc)%d)
         acc *= d
-      idx, valid = _uop_view(view, idxs[::-1], valid)
+      idx, valid = view.to_indexed_uops(idxs[::-1], valid)
     return idx, valid
 
   def real_size(self) -> int:
