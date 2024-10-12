@@ -39,7 +39,6 @@ class Sin(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return (math.pi/2 - self.x).sin() * grad_output
 
-# NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.ret = x.max(0)
