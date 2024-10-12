@@ -282,11 +282,8 @@ class UOp(MathTrait):
       out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(UOps.ALU, out_dtype, (self,)+src, arg)
   @staticmethod
-  def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return UOp._const(dtype, b)
-  @staticmethod
-  def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
+  def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
     # TODO: fix dtype of b.max after Variable is just an UOp
-    #if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
     if isinstance(b, UOp): return b.unbind()[0] if b.op is UOps.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
@@ -299,9 +296,8 @@ class UOp(MathTrait):
   # *** uop Variable stuff ***
 
   @staticmethod
-  def variable(name:str, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtypes.int, arg=(name, min_val, max_val))
-  @staticmethod
-  def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
+  def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.int):
+    return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
   @property
   def expr(self):
     assert self.op is UOps.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
@@ -693,9 +689,6 @@ spec = PatternMatcher([
 
   (UPat(UOps.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
   (UPat(UOps.SPECIAL, src=()), lambda: True),
-
-  # no pyint allowed here!
-  (UPat(UOps.ALU, dtype=dtypes.pyint), lambda: False),
 
   # TODO: confirm the args of both of these are shapetrackers
   (UPat(UOps.VIEW, src=()), lambda: True),

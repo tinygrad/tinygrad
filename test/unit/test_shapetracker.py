@@ -11,7 +11,7 @@ from tinygrad.codegen.uopgraph import sym
 from itertools import product
 
 def shapetracker_getitem(st:ShapeTracker, val:int):
-  idx, valid = st.reshape((st.size,)).to_indexed_uops([UOp.const(dtypes.pyint, val)])
+  idx, valid = st.reshape((st.size,)).to_indexed_uops([UOp.const(dtypes.int, val)])
   idx, valid = graph_rewrite(idx, sym), graph_rewrite(valid, sym)
   assert idx.op is UOps.CONST and valid.op is UOps.CONST
   return idx.arg, valid.arg
