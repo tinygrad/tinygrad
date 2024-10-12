@@ -5,7 +5,7 @@ from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
 from tinygrad.ops import REDUCE_ALU, UNSAFE_PAD_OPS, MetaOps, ReduceOps, TernaryOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, resolve, \
     graph_rewrite, track_rewrites, Variable, sint
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, GlobalCounters, Metadata, all_same, \
-    colored, diskcache_put, prod, dedup, all_int, merge_dicts, getenv, unwrap
+    colored, process_replay, prod, dedup, all_int, merge_dicts, getenv, unwrap
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -121,18 +121,11 @@ reduceop_fusor = PatternMatcher([
 
 enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx.index(x.arg[0])))])
 
-PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, Tuple[int, ...], UOp]] = []
-if getenv("RUN_PROCESS_REPLAY"):
-  @atexit.register
-  def save_process_replay():
-    for base_sink,ctx,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
-
 @track_rewrites
+@process_replay
 def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...]) -> UOp:
   sink = graph_rewrite(base_sink, reduceop_fusor)
-  ret = graph_rewrite(sink, enumerate_bufs, bufs)
-  PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
-  return ret
+  return graph_rewrite(sink, enumerate_bufs, bufs)
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
 
