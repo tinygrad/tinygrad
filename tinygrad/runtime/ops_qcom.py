@@ -281,11 +281,11 @@ class QCOMProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True, nolru=True))
 
 class QCOMBuffer(HCQBuffer):
-  def __init__(self, va_addr:int, size:int, info=None, mapped=False):
-    self.va_addr, self.size, self.info, self.mmapped = va_addr, size, info, mapped
+  def __init__(self, va_addr:int, size:int, info=None, mapped=False, desc=None, ibo=None, pitch=None, real_stride=None, **kwargs):
+    self.va_addr, self.size, self.info, self.mapped = va_addr, size, info, mapped
 
     # Texture specific definitions
-    self.desc, self.ibo, self.pitch, self.real_stride = None, None, None, None
+    self.desc, self.ibo, self.pitch, self.real_stride = [0] * 16, [0] * 16, pitch, real_stride
 
 class QCOMAllocator(HCQAllocator):
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
@@ -301,8 +301,7 @@ class QCOMAllocator(HCQAllocator):
       if options.external_ptr: texture = QCOMBuffer(options.external_ptr, size)
       else: texture = self.device._gpu_alloc(pitch * imgh, kgsl.KGSL_MEMTYPE_TEXTURE, map_to_cpu=True)
 
-      # Extend HCQBuffer with texture-related info.
-      texture.pitch, texture.real_stride, texture.desc, texture.ibo = pitch, real_stride, [0] * 16, [0] * 16
+      texture.pitch, texture.real_stride = pitch, real_stride
 
       tex_fmt = adreno.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else adreno.FMT6_16_16_16_16_FLOAT
       texture.desc[0] = qreg.a6xx_tex_const_0(swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt)
