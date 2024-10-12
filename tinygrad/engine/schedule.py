@@ -161,20 +161,19 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
     if buf not in assign_targets and buf not in inputs: inputs.append(buf)
     return UOp(UOps.LOAD, dtype, (ubuf, unbound_st.to_uop()))
 
-  # reduce ops change ShapeTracker
-  if buf.op in ReduceOps:
-    rsrc = _recursive_uop(buf.srcs[0], ShapeTracker.from_shape(buf.srcs[0].shape), outputs, var_vals, inputs, buf_uops, assign_targets, cache)
-    return cache.setdefault((buf, st), UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (REDUCE_ALU[cast(ReduceOps, buf.op)], buf.arg)).view(st))
-
-  # elementwise ops pass shapetracker
-  in_uops = tuple(_recursive_uop(x, st, outputs, var_vals, inputs, buf_uops, assign_targets, cache) for x in buf.srcs)
-  if buf.op is MetaOps.CONTIGUOUS:
+  # only reduceop changes shape
+  src_st = ShapeTracker.from_shape(buf.srcs[0].shape) if buf.op in ReduceOps else st
+  src: List[UOp] = [_recursive_uop(x, src_st, outputs, var_vals, inputs, buf_uops, assign_targets, cache) for x in buf.srcs]
+  if buf.op in ReduceOps: ret = UOp(UOps.REDUCE_AXIS, dtype, tuple(src), (REDUCE_ALU[cast(ReduceOps, buf.op)], buf.arg)).view(st)
+  elif buf.op is MetaOps.CONTIGUOUS:
     assert buf in outputs, f"{buf.op} must be writable"
-    return in_uops[0]
-  if buf.op is MetaOps.ASSIGN: return cache.setdefault((buf, st), UOp(UOps.ASSIGN, dtype, (in_uops[1].src[0], in_uops[0])))
-  if buf.op is UnaryOps.CAST: return cache.setdefault((buf, st), UOp(UOps.CAST, dtype, in_uops))
-  if buf.op is UnaryOps.BITCAST: return cache.setdefault((buf, st), UOp(UOps.BITCAST, dtype, in_uops))
-  return cache.setdefault((buf, st), UOp(UOps.ALU, dtype, in_uops, buf.op))
+    ret = src[0]
+  elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (src[1].src[0], src[0]))
+  elif buf.op is UnaryOps.CAST: ret = src[0].cast(dtype)
+  elif buf.op is UnaryOps.BITCAST: ret = src[0].bitcast(dtype)
+  else: ret = UOp(UOps.ALU, dtype, tuple(src), buf.op)
+  cache[(buf, st)] = ret
+  return ret
 
 def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp]) -> Tuple[LBScheduleItem, Dict[Variable, int]]:
   """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
