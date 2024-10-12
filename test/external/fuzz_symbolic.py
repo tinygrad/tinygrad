@@ -1,7 +1,8 @@
 import itertools
 import random
+from tinygrad import Variable
 from tinygrad.helpers import DEBUG
-from tinygrad.shape.symbolic import Variable, NumNode
+from tinygrad.shape.symbolic import NumNode
 random.seed(42)
 
 def add_v(expr, rng=None):

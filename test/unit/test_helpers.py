@@ -1,10 +1,11 @@
 import gzip, unittest
 from PIL import Image
+from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv
 from tinygrad.tensor import get_shape
 from tinygrad.codegen.lowerer import get_contraction
-from tinygrad.shape.symbolic import Variable, NumNode
+from tinygrad.shape.symbolic import NumNode
 import numpy as np
 
 VARIABLE = ContextVar("VARIABLE", 0)
