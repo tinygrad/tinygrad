@@ -34,11 +34,17 @@
         <h1>Web GPU</h1>
         <p class="error" id="error"></p>
         <p id="gpuInfo"></p>
-        <button class="primarybutton" id="computeButton" onclick="exampleCompute()" disabled>Initializing</button>
+        <p id="serverAddress"></p>
+        <p id="connectionStatus"></p>
+        <button class="primarybutton" id="start" onclick="" disabled>Initializing</button>
     </div>
     <script>
         let device;
         let error = document.getElementById("error")
+        const setError = (e, prefix) => {
+            console.error(`${prefix} error`, e)
+            error.textContent = `${prefix} error: ${e.message}`;
+        }
         const handlePotentialDeviceLost = (promise) => {
             if (!promise) {
                 throw new Error("handleLostDevice received null")
@@ -49,7 +55,7 @@
                 document.getElementById("gpuDeviceLostError").textContent = `Fatal error: ${GPU_DEVICE_LOST}`
             })
         }
-        const init = async () => {
+        const deviceInit = async () => {
             try {
                 if (!navigator.gpu) {
                     console.error("Navigator.gpu is null")
@@ -65,17 +71,15 @@
                 })
                 let _device = await adapter.requestDevice()
                 handlePotentialDeviceLost(_device.lost)
-                const computeButton = document.getElementById("computeButton")
-                computeButton.disabled = false;
-                computeButton.textContent = "Compute"
+                const start = document.getElementById("start")
+                start.disabled = false;
+                start.textContent = "Start"
                 device = _device;
             }
             catch (e) {
-                console.error("init error", e)
-                mainError.textContent = `Initialization error: ${e.message}`;
+               setError(e, "Device initialization")
             }
         }
-        init()
 
         const createBufferInit = (device,descriptor)=> {
             const contents = new Uint8Array(descriptor.contents);
@@ -213,11 +217,34 @@
                 stagingBuffer.unmap();
 
             } catch (e) {
-                console.error("compute error", e)
-                mainError.textContent = `Compute error: ${e.message}`
+                setError(e, "Example compute")
             }
         }
        
+        const wsInit = () => {
+            try {
+                const address = "ws://localhost:8765"
+                const socket = new WebSocket(address);
+                // Listen for messages
+                socket.addEventListener("message", (event) => {
+                    console.log("Message from server ", event.data);
+                });
+                socket.addEventListener("open", () => {
+                    console.log("Connection established")
+                    document.getElementById("connectionStatus").textContent = `🌐 Connected`
+                    document.getElementById("serverAddress").textContent = `Server: ${address}`
+                    socket.send("YO")
+                })
+            } catch (e) {
+                setError(e, "WS")
+            }
+        }
+
+        const main = async () => {
+            await deviceInit()
+            await wsInit()
+        }
+        main()
     </script>
 </body>
 </html>
