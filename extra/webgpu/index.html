@@ -21,21 +21,52 @@
             border-radius: 10px;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
         }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Welcome to WebGPU Demo</h1>
-        <p>This is a placeholder page for the WebGPU demonstration.</p>
-        <p>Content will be added here as the WebGPU functionality is implemented.</p>
+        <p class="error" id="gpuDeviceLostError"></p>
+        <h1>Web GPU</h1>
+        <p class="error" id="mainError"></p>
+        <p id="gpuInfo"></p>
     </div>
     <script>
-        // Placeholder for future WebGPU JavaScript code
         console.log("WebGPU demo page loaded");
-        navigator.gpu.requestAdapter().then(async (adapter) => {
-            const device = await adapter.requestDevice();
+        const handlePotentialDeviceLost = (promise) => {
+            if (!promise) {
+                throw new Error("handleLostDevice received null")
+            }
+            promise.then(info => {
+                GPU_DEVICE_LOST = "GPU device was lost. Behaviour may be undefined, restart the page"
+                console.error(GPU_DEVICE_LOST)
+                document.getElementById("gpuDeviceLostError").textContent = `Fatal error: ${GPU_DEVICE_LOST}`
+            })
+        }
+        const main = async () => {
+            if (!navigator.gpu) {
+                console.error("Navigator.gpu is null")
+                throw new Error("Web GPU not supported")
+            }
+            const adapter = await navigator.gpu.requestAdapter()
+            if (!adapter) {
+                console.error("requestAdapter returned null")
+                throw new Error("Unable to get GPU device")
+            }
+            let device = await adapter.requestDevice()
+            handlePotentialDeviceLost(device.lost)
+            
             console.log(device)
+        }
+        main().catch(e => {
+            console.error(e)
+            document.getElementById("mainError").textContent = `Error: ${e.message}`;
         })
+       
     </script>
 </body>
 </html>
