@@ -538,8 +538,19 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), simplify_valid_image_load),
 ])
 
+def int64_indexing(x:UOp):
+  if x.op is UOps.ALU:
+    if all(s.op in (UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR) for s in x.src):
+      return UOp(x.op, dtypes.int64.vec(x.dtype.count), (s.cast(dtypes.int64) for s in x.src), x.arg) if max(x._min_max, key=abs) > dtypes.max(x.dtype) else None
+    return None
+  return UOp(x.op, dtypes.int64.vec(x.dtype.count), (s.cast(dtypes.int64) for s in x.src), x.arg) if max(x._min_max, key=abs) > dtypes.max(x.dtype) else None
+
+#int64_idx = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR),
+#  dtypes.int32, name="x"), lambda x: UOp(x.op, dtypes.int64.vec(x.dtype.count), (s.cast(dtypes.int64) for s in x.src), x.arg)
+#  if max(x._min_max, key=abs) > dtypes.max(x.dtype) else None)])
+
 int64_idx = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR),
-  dtypes.int32, name="x"), lambda x: UOp(x.op, dtypes.int64.vec(x.dtype.count), (s.cast(dtypes.int64) for s in x.src), x.arg) if max(x._min_max, key=abs) > dtypes.max(x.dtype) else None)])
+  dtypes.int32, name="x"), int64_indexing)])
 
 # *** uop graph ***
 
