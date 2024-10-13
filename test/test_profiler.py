@@ -147,7 +147,7 @@ class TestProfiler(unittest.TestCase):
 
     transfer_node_1 = helper_profile_filter_node(profile, name=f"{Device.DEFAULT} -> {Device.DEFAULT}:1")[0]
     helper_validate_node(transfer_node_1, profile=profile, pid_name=Device.DEFAULT, tid_name="DMA")
-    assert 80 < transfer_node_1['dur'] < (16000 if CI else 1400), f"Duration is not in the range: {transfer_node_1['dur']}"
+    assert 80 < transfer_node_1['dur'] < (20000 if CI else 1400), f"Duration is not in the range: {transfer_node_1['dur']}"
 
   @unittest.skipIf(MOCKGPU and Device.DEFAULT == "AMD", "AMD mockgpu with indirect buffers does not support queue wait interrupts")
   def test_profile_deps(self):

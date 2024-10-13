@@ -7,7 +7,7 @@ from tinygrad.ops import END_FOR_UOP, UOp, print_uops
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import DEBUG, colored
-from tinygrad.shape.symbolic import Variable
+from tinygrad.ops import Variable
 from tinygrad.tensor import _to_np_dtype
 from test.external.fuzz_schedule import FUZZ_SCHEDULE_MAX_PATHS, find_all_toposorts
 

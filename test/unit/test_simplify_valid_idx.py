@@ -32,7 +32,7 @@ def render(uop:UOp) -> str:
   return fxn.split("val0 = ")[1].split(";")[0]
 
 def Special(expr, nmax): return UOp(UOps.SPECIAL, dtypes.int, (), (expr, nmax))
-def Variable(expr, nmin, nmax): return UOp.define_var(expr, dtypes.int, nmin, nmax)
+def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
 def Range(n, nmax):
   return UOp(UOps.RANGE, dtypes.int, arg=(n, True), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, nmax),))
 
