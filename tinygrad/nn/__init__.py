@@ -31,6 +31,7 @@ class BatchNorm:
   """
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, dtype=None):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
+
     self.weight: Optional[Tensor] = Tensor.ones(sz) if affine else None
     self.bias: Optional[Tensor] = Tensor.zeros(sz) if affine else None
 
