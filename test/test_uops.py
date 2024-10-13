@@ -10,8 +10,8 @@ from tinygrad.ops import UOps, UOp, UPat, UnaryOps, BinaryOps, TernaryOps, Reduc
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule, reduceop_fusor
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
-from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, constant_folder
-from tinygrad.shape.symbolic import Variable
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
 from test.helpers import is_dtype_supported, assert_equiv_uops
 
 def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
@@ -305,7 +305,7 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_basic(self):
     uops = []
-    smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), ('smem', 16))
+    smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.float32, local=True), (), ('smem', 16))
     st = uop(uops, UOps.STORE, dtypes.void, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), uop(uops, UOps.CONST, dtypes.float32, (), 42.0)))
     barr = uop(uops, UOps.BARRIER, dtypes.void, (st,))
     sres = uop(uops, UOps.LOAD, dtypes.float32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), barr))
@@ -314,7 +314,7 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_indirect(self):
     uops = []
-    smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.int32), (), ('smem', 16))
+    smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.int32, local=True), (), ('smem', 16))
     st1 = uop(uops, UOps.STORE, dtypes.void, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 1), uop(uops, UOps.CONST, dtypes.int32, (), 2)))
     st2 = uop(uops, UOps.STORE, dtypes.void, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 2), uop(uops, UOps.CONST, dtypes.int32, (), 42)))
     barr = uop(uops, UOps.BARRIER, dtypes.void, (st1,st2))
@@ -349,6 +349,7 @@ class TestAssembly(unittest.TestCase):
     self.assertEqual(uops[-2].arg, BinaryOps.IDIV)
 
 class TestUOpMethod(unittest.TestCase):
+  @unittest.skip("uops lt no longer ordered")
   def test_compare_alu_same_src_different_arg(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0)
     b = UOp(UOps.CONST, dtypes.float, (), 3.0)
@@ -358,7 +359,7 @@ class TestUOpMethod(unittest.TestCase):
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
 
   def test_uop_variables(self):
-    a = Variable("a", 1, 10)
+    a = UOp.variable("a", 1, 10)
     uop_var = UOp.const(dtypes.int, a)
     st_var = UOp(UOps.LOAD, dtypes.float, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0),
                                            ShapeTracker.from_shape((2, a)).to_uop()))
@@ -374,6 +375,11 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual((gidx0*3+6).const_factor(), 3)
     self.assertEqual((gidx0*3+1).const_factor(), 1)
 
+  def test_replace(self):
+    x = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.void), (), 0)
+    self.assertIs(x.replace(arg=None).arg, None)
+    with self.assertRaises(AssertionError): x.replace(field="a")
+
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0) + UOp(UOps.CONST, dtypes.float, (), 3.0)
@@ -388,15 +394,11 @@ class TestUOpStr(unittest.TestCase):
       sink = UOp(UOps.SINK, dtypes.void, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
     assert_equiv_uops(sink, eval(str(sink)))
 
-  def test_variable_const(self):
-    # TODO: this is not possible after VALID.
-    uop = UOp(UOps.CONST, dtypes.int, (), arg=Variable("a",1,10))
-    assert str(eval(str(uop))) == str(uop)
-
   def test_vectorized_str(self):
     vec = UOp(UOps.VECTORIZE, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
     assert str(eval(str(vec))) == str(vec)
 
+@unittest.skip("uop no longer has order like this")
 class TestIndexingOrdering(unittest.TestCase):
   # NOTE: these tests skip type_verify since they add dtype to STORE
   @unittest.expectedFailure
@@ -438,7 +440,7 @@ class TestIndexingOrdering(unittest.TestCase):
 
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
-    self.assertEqual(constant_folder.patterns[0][0].location[0].split("/")[-1], "uopgraph.py")
+    self.assertEqual(sym.patterns[-1][0].location[0].split("/")[-1], "uopgraph.py")
     self.assertEqual(reduceop_fusor.patterns[0][0].location[0].split("/")[-1], "schedule.py")
     self.assertEqual(spec.patterns[0][0].location[0].split("/")[-1], "ops.py")
     with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?
