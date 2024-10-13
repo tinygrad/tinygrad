@@ -141,7 +141,7 @@ def fsdp_main(rank, world_size, args):
 
     model = FSDP(model)
 
-    optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr)
 
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
     init_start_event.record()
@@ -184,12 +184,14 @@ if __name__ == '__main__':
                         help='random seed (default: 1)')
     parser.add_argument('--save-model', action='store_true', default=False,
                         help='For Saving the current Model')
+    parser.add_argument('--world-size', type=int, default=2)
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
 
-    WORLD_SIZE = torch.cuda.device_count()
+
+    assert args.world_size <= torch.cuda.device_count()
     mp.spawn(fsdp_main,
-        args=(WORLD_SIZE, args),
-        nprocs=WORLD_SIZE,
+        args=(args.world_size, args),
+        nprocs=args.world_size,
         join=True)
