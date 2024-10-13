@@ -7,7 +7,6 @@ from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context
 if TYPE_CHECKING:
-  from tinygrad.shape.symbolic import Variable, sint
   from tinygrad.shape.shapetracker import ShapeTracker
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
@@ -154,7 +153,6 @@ COMMUTATIVE = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, Bin
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.ENDRANGE)}
 
 # With True as the default, this matches the old symbolic behavior
-# python3 -c 'from tinygrad.shape.symbolic import Variable; print(bool(Variable("a", 1, 10) < 4))' -> True
 def resolve(x, default:bool=True):
   if not isinstance(x, UOp): return bool(x)
   assert x.dtype is dtypes.bool, "UOp in resolve must be bool"
@@ -185,6 +183,7 @@ class UOp(MathTrait):
   __slots__ = ["op", "dtype", "src", "arg"]
   def __init__(self, op: UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
     # TODO: instant check rules here make debugging easier
+    #assert op in UOps and isinstance(dtype, DType), f"bad UOp creation with {op} {dtype}"
     #if op is UOps.ALU and arg is BinaryOps.CMPNE: assert dtype.scalar() == dtypes.bool
     #if op is UOps.VECTORIZE and dtype != dtypes.void: assert len(src) == dtype.count, f"{len(src)} invalid for {dtype}"
     #if op is UOps.ALU and arg not in (BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE): assert all_same([dtype] + [x.dtype for x in src])
@@ -195,6 +194,18 @@ class UOp(MathTrait):
     new_args = (kwargs.get("op", self.op), kwargs.get("dtype", self.dtype), kwargs.get("src", self.src), kwargs.get("arg", self.arg))
     if (self.op, self.dtype, self.src, self.arg) == new_args: return self
     return UOp(*new_args)
+  @functools.cached_property
+  def key(self) -> bytes:
+    return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
+  def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
+  def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
+  @functools.cached_property
+  def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents}}
+  @property  # parents with self
+  def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
+
+  # *** uop shape stuff ***
+
   @property
   def has_st(self) -> bool: return self.op not in {UOps.DEFINE_LOCAL, UOps.DEFINE_GLOBAL, UOps.BUFFER, UOps.CONST, UOps.DEFINE_VAR}
   @functools.cached_property
@@ -207,11 +218,11 @@ class UOp(MathTrait):
     from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg)) if self.op is UOps.REDUCE_AXIS else src_sts[0]
   @functools.cached_property
-  def key(self) -> bytes:
-    return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
-  def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
-  def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
+  def full_shape(self) -> Tuple[sint, ...]:
+    return self.arg.shape if self.op is UOps.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
+
   # *** uop evaluation ***
+
   def simplify(self):
     with Context(TRACK_MATCH_STATS=0):
       return graph_rewrite(self, symbolic)
@@ -226,7 +237,10 @@ class UOp(MathTrait):
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
   def __float__(self): return self._eval(dtypes.floats, float)
-  # *** uop syntactic sugar
+  def substitute(self, dvars:Dict[UOp, UOp]): return graph_rewrite(self, _substitute, dvars)
+
+  # *** uop syntactic sugar ***
+
   @property
   def st_arg(self) -> ShapeTracker:
     assert self.op in BUFFER_UOPS, f"st_arg called on {self.op}"
@@ -268,37 +282,34 @@ class UOp(MathTrait):
       out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(UOps.ALU, out_dtype, (self,)+src, arg)
   @staticmethod
-  def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable): return UOp._const(dtype, b)
-  @staticmethod
-  def _const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
-    # TODO: fix dtype of b.max after Variable is just an UOp
-    #if isinstance(b, Variable): return UOp.define_var(b.expr, dtype, b.min, cast(int, b.max))
+  def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is UOps.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
-  def define_var(name:str, dtype:DType, min_val:ConstType, max_val:ConstType): return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
+  def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
+    return UOp(UOps.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
+                                             UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=idx)
+  def reduce(self, op:BinaryOps, *rng:UOp): return UOp(UOps.REDUCE, self.dtype, (self,) + rng, op)
+
+  # *** uop Variable stuff ***
+
+  @staticmethod
+  def variable(name:str, min_val:ConstType, max_val:ConstType, dtype:DType=dtypes.int):
+    return UOp(UOps.DEFINE_VAR, dtype, arg=(name, min_val, max_val))
+  @property
+  def expr(self):
+    assert self.op is UOps.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
+    return self.arg[0]
+  def bind(self, val:int):
+    assert self.op is UOps.DEFINE_VAR, f"op is {self.op}, need DEFINE_VAR"
+    assert self.arg[1] <= val and val <= self.arg[2], f"bind {val} not in range {self.arg[1]}-{self.arg[2]}"
+    return UOp(UOps.BIND, self.dtype, (self, self.const_like(val)))
   def unbind(self) -> Tuple[Variable, int]:
     assert self.op is UOps.BIND and self.src[0].op is UOps.DEFINE_VAR and self.src[1].op is UOps.CONST, f"can't unbind {self}"
-    from tinygrad.shape.symbolic import Variable
-    return cast(Variable, self.src[0]), self.src[1].arg
+    return self.src[0], self.src[1].arg
   @property
   def val(self) -> int: return self.unbind()[1]
-  # TODO: this is context rewrite
-  def substitute(self, dvars:Dict[UOp, UOp]):
-    if self in dvars: return dvars[self]
-    return self.replace(src=tuple(x.substitute(dvars) for x in self.src))
-  @staticmethod
-  def range(dtype:DType, start:ConstType, end:ConstType, idx:int):
-    return UOp(UOps.RANGE, dtype=dtype, src=(UOp.const(dtype, start), UOp.const(dtype, end)), arg=(idx,))
-  def reduce(self, op:BinaryOps, *rng:UOp): return UOp(UOps.REDUCE, self.dtype, (self,) + rng, op)
-  @functools.cached_property
-  def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents}}
-  @property  # parents with self
-  def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
-  @functools.cached_property
-  def full_shape(self) -> Tuple[sint, ...]:
-    return self.arg.shape if self.op is UOps.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
   def vars(self) -> Set[UOp]:
     bound_vars = set([x for x in self.sparents if x.op is UOps.BIND and x.src[0].op is UOps.DEFINE_VAR])
     bound_var_base = set(x.src[0] for x in bound_vars)
@@ -306,8 +317,10 @@ class UOp(MathTrait):
     return bound_vars.union(set([x for x in all_vars if x not in bound_var_base]))
   def variables(self) -> List[Variable]:
     st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFFER_UOPS]
-    from tinygrad.shape.symbolic import Variable
-    return sorted(set.union(*st_vars, [x.unbind()[0] if not isinstance(x, Variable) else x for x in self.vars()]), key=lambda v: v.arg)
+    return sorted(set.union(*st_vars, [x.unbind()[0] if x.op is not UOps.DEFINE_VAR else x for x in self.vars()]), key=lambda v: v.arg)
+
+  # *** uop symbolic stuff ***
+
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is UOps.CONST: return self.arg
@@ -341,17 +354,20 @@ class UOp(MathTrait):
     if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is UOps.CONST: return self.arg, self.arg
     if self.op is UOps.VCONST: return (min(self.arg), max(self.arg))
-    if self.op is UOps.ALU and self.dtype.count == 1:
+    if self.op is UOps.ALU:
       s0,s1,s2 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(3)]
       if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
       if self.arg is BinaryOps.MUL:
         # both are non-positive
         if (s0.vmax <= 0 and s1.vmax <= 0): return s0.vmax*s1.vmax, s0.vmin*s1.vmin
-        # at lease one is non-negative
+        # at least one is non-negative
         if (s0.vmin >= 0 or s1.vmin >= 0):
           Lmin, Lmax = (s0.vmin, s0.vmax) if s1.vmin >= 0 else (s0.vmax, s0.vmin)
           Rmin, Rmax = (s1.vmin, s1.vmax) if s0.vmin >= 0 else (s1.vmax, s1.vmin)
           return Lmin*Rmin, Lmax*Rmax
+        # arbitrary
+        products = [s0.vmin * s1.vmin, s0.vmin * s1.vmax, s0.vmax * s1.vmin, s0.vmax * s1.vmax]
+        return min(products), max(products)
       if self.arg is BinaryOps.MOD and s1.vmin > 0: return 0, s1.vmax-1
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
         if s1.arg > 0: return s0.vmin//s1.arg, s0.vmax//s1.arg
@@ -402,13 +418,6 @@ def exec_alu(op:Op, dtype:DType, operands):
     return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
   return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
 
-def uop_alu_resolve(u:UOp) -> sint:
-  if u.op is UOps.CONST: return u.arg
-  if u.op is UOps.DEFINE_VAR: return u
-  #if u.op is UOps.DEFINE_VAR: return Variable(u.arg[0], u.arg[1], u.arg[2])
-  if u.op is UOps.ALU: return exec_alu(u.arg, u.dtype, tuple(map(uop_alu_resolve, u.src)))
-  raise RuntimeError(f"ALU resolve fail @ {u.op}")
-
 # ***** uop helpers *****
 
 def print_uops(uops:List[UOp]):
@@ -435,7 +444,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   for u in uops:
     if u.op is UOps.RANGE:
       mult_stack.append(mults)
-      mults *= uop_alu_resolve(u.src[1] - u.src[0])
+      mults *= (u.src[1] - u.src[0]).ssimplify()
     elif u.op is UOps.ENDRANGE:
       mults = mult_stack.pop(-1)
     elif u.op is UOps.SPECIAL:
@@ -682,9 +691,6 @@ spec = PatternMatcher([
 
   (UPat(UOps.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
   (UPat(UOps.SPECIAL, src=()), lambda: True),
-
-  # no pyint allowed here!
-  (UPat(UOps.ALU, dtype=dtypes.pyint), lambda: False),
 
   # TODO: confirm the args of both of these are shapetrackers
   (UPat(UOps.VIEW, src=()), lambda: True),
@@ -953,6 +959,8 @@ symbolic_flat = symbolic+PatternMatcher([
   ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
 ])
 
+_substitute = PatternMatcher([(UPat(tuple(UOps), name="x"), lambda ctx,x: ctx.get(x,None))])
+
 # for debug
 renderer = PatternMatcher([
   (UPat(UOps.DEFINE_VAR, name="x"), lambda x: UOp(UOps.NOOP, arg=x.arg[0])),
@@ -965,3 +973,12 @@ renderer = PatternMatcher([
   (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.CMPLT, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}<{x.src[1].arg})")),
   (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.CMPNE, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}!={x.src[1].arg})")),
 ])
+
+# *** what was symbolic.py ***
+
+sint = Union[int, UOp]
+Variable = UOp
+
+def NumNode(val:int): return UOp.const(dtypes.int, val)
+def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int:
+  return int(uop.substitute({k:k.const_like(v) for k,v in var_vals.items()})) if isinstance(uop, UOp) else uop

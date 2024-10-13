@@ -89,13 +89,7 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
-    if (url:=urlparse(self.path)).path == "/favicon.svg":
-      self.send_response(200)
-      self.send_header("Content-type", "image/svg+xml")
-      self.end_headers()
-      with open(os.path.join(os.path.dirname(__file__), "favicon.svg"), "rb") as f:
-        ret = f.read()
-    if url.path == "/":
+    if (url:=urlparse(self.path)).path == "/":
       self.send_response(200)
       self.send_header("Content-type", "text/html")
       self.end_headers()
