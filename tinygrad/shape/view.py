@@ -96,7 +96,12 @@ class View:
     idxs = [UOp.range(dtypes.int, 0, s, i) for i,s in enumerate(self.shape)] if _idxs is None else _idxs
     iexpr = variable_to_uop(self.offset)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else [None]*len(self.shape)):
-      if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
+      if resolve(sh != 1) and resolve(st != 0):
+        iexpr = iexpr + idx*st
+
+        if max(iexpr._min_max, key=abs) > dtypes.max(iexpr.dtype):
+          iexpr = UOp(iexpr.op, dtypes.int64.vec(iexpr.dtype.count), iexpr.src, iexpr.arg)
+
       if m is not None:
         if resolve(m[0] != 0): vexpr = vexpr * idx.ge(m[0])
         if resolve(m[1] != sh): vexpr = vexpr * idx.lt(m[1])
