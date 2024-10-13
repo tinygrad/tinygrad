@@ -6,14 +6,13 @@ from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict
 from enum import Enum, auto
 
 from tinygrad.ops import UNSAFE_PAD_OPS, BUFFER_UOPS, BinaryOps, KernelInfo, UOp, UOps, PatternMatcher, print_uops, type_verify, resolve, \
-    graph_rewrite, track_rewrites
+    graph_rewrite, track_rewrites, Variable, sint
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put
 from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite
@@ -603,7 +602,8 @@ class Kernel:
     # kernel name (before late upcast)
     name = ("r" if self.reduceop is not None else ("C" if all(x.op in BUFFER_UOPS for x in self.ast.parents) else "E")) + \
                  (f"{len(self.ast.src)}_" if len(self.ast.src) > 1 else "_") + \
-                 colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
+                 colored('_', 'BLACK').join([colored(str(x.render() if isinstance(x, UOp) else x), c) \
+                                             for x,c in zip(self.full_shape, self.colors())])
 
     # name the function something unique
     Kernel.kernel_cnt[(function_name := to_function_name(name))] += 1

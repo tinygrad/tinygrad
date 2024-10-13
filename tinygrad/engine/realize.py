@@ -4,10 +4,9 @@ from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, dedup
 from tinygrad.helpers import NO_MEMORY_PLANNER
-from tinygrad.ops import UOps, UOp
+from tinygrad.ops import UOps, UOp, Variable, sym_infer, sint
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
-from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.renderer import Renderer, Program
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import ScheduleItem
@@ -164,9 +163,10 @@ class ExecItem:
   prg: Runner
   bufs: List[Optional[Buffer]]
   metadata: Optional[Tuple[Metadata, ...]] = None
-  def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
+  def run(self, _var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
+    var_vals = {} if _var_vals is None else _var_vals
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
-    et = self.prg(bufs, var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
+    et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
     if do_update_stats:
       GlobalCounters.kernel_count += 1
       GlobalCounters.global_ops += (op_est:=sym_infer(self.prg.op_estimate, var_vals))

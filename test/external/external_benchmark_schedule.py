@@ -1,6 +1,6 @@
 from typing import List
 from extra.models.resnet import ResNet50
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, nn
 from tinygrad.helpers import Profiling, Timing, getenv, BEAM, NOOPT, DEBUG, Context, ansilen
 from tinygrad.ops import UOps
 from tinygrad.codegen.kernel import Kernel
@@ -11,6 +11,7 @@ from tinygrad.engine.search import beam_search, bufs_from_lin
 
 if __name__ == "__main__":
   mdl = ResNet50()
+  for p in nn.state.get_parameters(mdl): p.replace(Tensor.empty(p.shape))
   img = Tensor.empty(64, 3, 224, 224)
 
   PROFILE = getenv("PROFILE", 0)
