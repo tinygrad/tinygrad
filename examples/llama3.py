@@ -3,7 +3,7 @@ from typing import List
 import json, argparse, random, time
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
-from models.llama import Transformer, convert_from_huggingface, fix_bf16
+from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
 from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm
