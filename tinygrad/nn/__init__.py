@@ -30,15 +30,14 @@ class BatchNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, dtype=None):
+  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
     self.weight: Optional[Tensor] = Tensor.ones(sz) if affine else None
     self.bias: Optional[Tensor] = Tensor.zeros(sz) if affine else None
 
     self.num_batches_tracked = Tensor.zeros(1, dtype='long', requires_grad=False)
-    if track_running_stats:
-      self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False, dtype=dtype), Tensor.ones(sz, requires_grad=False, dtype=dtype)
+    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
 
   def calc_stats(self, x:Tensor) -> Tuple[Tensor, Tensor]:
     shape_mask: List[int] = [1, -1, *([1]*(x.ndim-2))]
@@ -55,6 +54,7 @@ class BatchNorm:
     batch_mean, batch_var = self.calc_stats(x)
     # NOTE: wow, this is done all throughout training in most PyTorch models
     if self.track_running_stats and Tensor.training:
+      self.running_mean, self.running_var = self.running_mean.cast(x.dtype), self.running_var.cast(x.dtype)
       self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
       self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * prod(x.shape)/(prod(x.shape)-x.shape[1]) * batch_var.detach())
       self.num_batches_tracked += 1

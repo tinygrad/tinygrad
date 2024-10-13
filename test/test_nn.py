@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit
+from tinygrad.dtype import dtypes
 from tinygrad.ops import UOps
 from tinygrad.helpers import CI, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
@@ -92,9 +93,9 @@ class TestNN(unittest.TestCase):
   def test_batchnorm3d_training(self): self.test_batchnorm2d(True, True, True)
   def test_batchnorm3d_no_running_stats(self): self.test_batchnorm2d(False, True, False)
   def test_batchnorm3d_training_no_running_stats(self): self.test_batchnorm2d(True, True, False)
-  @unittest.expectedFailure
-  def test_batchnorm_training_dtype_double_fail(self):
-    with Tensor.train(): BatchNorm(1)(Tensor.randn(1, 1, dtype="double"))
+  def test_batchnorm_training_dtypes(self):
+    with Tensor.train():
+      for dtype in dtypes.floats: BatchNorm(2)(Tensor.randn(2, 2, dtype=dtype))
 
   def test_batchnorm_axis(self):
     sz = (2, 4, 3, 2, 2)
