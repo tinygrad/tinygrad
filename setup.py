@@ -58,6 +58,7 @@ setup(name='tinygrad',
             "nibabel",
             "bottle",
         ],
+        'webgpu': ["wgpu>=v0.18.0"],
         'docs': [
             "mkdocs",
             "mkdocs-material",
