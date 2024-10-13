@@ -29,8 +29,8 @@ if REF == "master": SKIP_PROCESS_REPLAY = True
 
 # *** recreators
 
-def recreate_sched(sink:UOp, ctx) -> UOp: return full_ast_rewrite(sink, ctx)
-def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str, ctx:ProcessReplayContext) -> str:
+def recreate_sched(sink:UOp, ctx, _) -> UOp: return full_ast_rewrite(sink, ctx)
+def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str, ctx:ProcessReplayContext, _) -> str:
   with Context(**{k:v for k,v in ctx.ctx_vars.items() if k in ContextVar._cache and k != "DEBUG"}):
     k = Kernel(ast, opts=opts)
     for opt in applied_opts: k.apply_opt(opt)
@@ -53,7 +53,7 @@ def diff(offset:int, name:str, fxn:Callable) -> Union[Tuple[int, int], bool]:
       if ASSERT_DIFF: return True
       continue
     # try recreate
-    try: good = fxn(*args[:-1])
+    try: good = fxn(*args)
     except Exception as e:
       logging.warning(f"FAILED TO RECREATE KERNEL {e}")
       for x in args[:-1]: logging.info(x)
