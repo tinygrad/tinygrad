@@ -172,28 +172,23 @@
             }
         }
        
-        
+        const lookup = {
+            PUT_BUFFER: {
+                call: createBufferInit,
+                enc: "32i"
+            }
+        }
+        const decode = () => {}
         const wsInit = () => {            
             const socket = new WebSocket(address);
             socket.binaryType = "arraybuffer";
-            socket.addEventListener("message", (event) => {
-                
+            socket.addEventListener("message", async ({data}) => {
+                const name = decode(data.slice(10))
+                const fn = lookup[fn]
+                const decoded = decode(data.slice(11))
+                const result = await fn.call(decoded)
+                socket.send(result)
             });
-
-            socket.addEventListener("open", () => {
-                console.log("Connection established")
-                clearTimeout(timeoutId)
-                document.getElementById("connectionStatus").textContent = ONLINE
-                
-                socket.send("YO")
-                document.getElementById("connect").disabled = true
-                document.getElementById("connect").textContent = "Connected"
-                const start = document.getElementById("start")
-                start.disabled = false
-                res(true)
-            })
-            socket.addEventListener("close", () => {
-            })
         }
     </script>
 </body>
