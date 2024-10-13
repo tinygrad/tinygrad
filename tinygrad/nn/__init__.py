@@ -36,7 +36,8 @@ class BatchNorm:
     self.bias: Optional[Tensor] = Tensor.zeros(sz) if affine else None
 
     self.num_batches_tracked = Tensor.zeros(1, dtype='long', requires_grad=False)
-    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False, dtype=dtype), Tensor.ones(sz, requires_grad=False, dtype=dtype)
+    if track_running_stats:
+      self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False, dtype=dtype), Tensor.ones(sz, requires_grad=False, dtype=dtype)
 
   def calc_stats(self, x:Tensor) -> Tuple[Tensor, Tensor]:
     shape_mask = [1, -1, *([1]*(x.ndim-2))]
