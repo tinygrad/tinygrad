@@ -65,21 +65,19 @@
         <p class="error" id="error"></p>
         <p id="gpuInfo"></p>
         <p id="serverAddress"></p>
-        <p id="connectionStatus">🔴 offline</p>
-        <button class="primaryButton" id="connect" onclick="wsInit()">Connect to server</button>
+        <p id="connectionStatus"></p>
+        <button class="primaryButton" id="connect" onclick="wsInit()"></button>
         <button class="primaryButton" id="start" onclick="" disabled>Start</button>
     </div>
     <script>
         const address = "ws://localhost:8766"
         let device;
         let error = document.getElementById("error")
+        const ONLINE = "🟢 online"
+        const OFFLINE = "🔴 offline"
         const setError = (e, prefix) => {
             console.error(`${prefix} error`, e)
             error.textContent = `${prefix} error: ${e.message}`;
-        }
-        const makeStartButtonReady = () => {
-            const start = document.getElementById("start")
-            start.disabled = false;
         }
         const handlePotentialDeviceLost = (promise) => {
             if (!promise) {
@@ -91,9 +89,15 @@
                 document.getElementById("gpuDeviceLostError").textContent = `Fatal error: ${GPU_DEVICE_LOST}`
             })
         }
+        const uiInit = async () => {
+            document.getElementById("serverAddress").textContent = `Server: ${address}`
+            document.getElementById("connectionStatus").textContent = OFFLINE
+            document.getElementById("connect").textContent = "Connect to server"
+            
+        }
         const deviceInit = async () => {
             try {
-                document.getElementById("serverAddress").textContent = `Server: ${address}`
+                
                 if (!navigator.gpu) {
                     console.error("Navigator.gpu is null")
                     throw new Error("Web GPU not supported")
@@ -264,31 +268,43 @@
             }, 5000)
             
             const socket = new WebSocket(address);
-            // Listen for messages
+            socket.binaryType = "arraybuffer";
             socket.addEventListener("message", (event) => {
-                console.log("Message from server ", event.data, typeof(event.data));
+                if (event.data instanceof ArrayBuffer) {
+                    const view = new DataView(event.data);
+                    console.log("ArrayBuffer", view.getInt32(0));
+                } else {
+                    console.log("Text data", event.data);
+                }
             });
             socket.addEventListener("error", () => {
                 setError(new Error("Unable to establish connection"), "Websocket initialization")
             })
+
             socket.addEventListener("open", () => {
                 console.log("Connection established")
                 clearTimeout(timeoutId)
-                document.getElementById("connectionStatus").textContent = `🟢 online`
+                document.getElementById("connectionStatus").textContent = ONLINE
                 
                 socket.send("YO")
                 document.getElementById("connect").disabled = true
                 document.getElementById("connect").textContent = "Connected"
-                makeStartButtonReady()
+                const start = document.getElementById("start")
+                start.disabled = false
                 res(true)
             })
             socket.addEventListener("close", () => {
                 console.log("Disconnected")
-                document.getElementById("connectionStatus").textContent = ``
+                document.getElementById("connectionStatus").textContent = OFFLINE
+                document.getElementById("connect").textContent = "Connect to server"
+                document.getElementById("connect").disabled = false
+                const start = document.getElementById("start")
+                start.disabled = true;
             })
         }).catch((e) => setError(e, "WS"))
 
         const main = async () => {
+            await uiInit()
             await deviceInit()
         }
         main()

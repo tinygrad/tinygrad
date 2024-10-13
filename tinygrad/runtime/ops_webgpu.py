@@ -54,8 +54,11 @@ class WebSocketsHandler(socketserver.StreamRequestHandler):
       decoded += chr(char ^ masks[len(decoded) % 4])
     self.on_message(decoded)
 
+
   def msg(self, message):
-    self.request.send(bytes([129]))
+    TEXT = bytes([129])
+    BINARY = bytes([130])
+    self.request.send(BINARY)
     length = len(message)
     if length <= 125:
       self.request.send(bytes([length]))
