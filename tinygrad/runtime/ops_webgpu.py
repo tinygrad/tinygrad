@@ -8,6 +8,12 @@ import multiprocessing
 import socket
 import time
 import threading
+import os, subprocess, pathlib, ctypes, tempfile, functools
+from typing import List, Any, Tuple, Optional, cast, TypeVar
+from tinygrad.helpers import prod, getenv, DEBUG
+from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
+from tinygrad.renderer.cstyle import MetalRenderer
+
 
 server_ready = False
 
@@ -86,9 +92,13 @@ class WebSocketsHandler(socketserver.StreamRequestHandler):
 class Server(socketserver.TCPServer):
   allow_reuse_address = True
 
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self.ws = None
+
   def finish_request(self, request, client_address):
-    self.inflight_request = self.RequestHandlerClass.__new__(self.RequestHandlerClass)
-    self.inflight_request.__init__(request, client_address, self)
+    self.ws = self.RequestHandlerClass.__new__(self.RequestHandlerClass)
+    self.ws.__init__(request, client_address, self)
 
 
 HOST, PORT = "localhost", 8766
@@ -101,6 +111,12 @@ class WebDevice:
     self.process = threading.Thread(target=server.serve_forever)
     self.process.daemon = True
     self.process.start()
+    self.server = server
+    while server.ws is None:
+      print("Waiting for browser connect")
+      time.sleep(3)
+    print("Browser ready")
+
 
 
 if __name__ == "__main__":
