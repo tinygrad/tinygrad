@@ -14,6 +14,7 @@ from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 import traceback
+from enum import Enum
 
 server_ready = False
 
@@ -109,6 +110,12 @@ class Server(socketserver.TCPServer):
 HOST, PORT = "localhost", 8766
 
 server = Server((HOST, PORT), WebSocketsHandler)
+
+class Methods:
+  createShaderModule: 0
+  createBuffer: 1
+  createBufferInit: 2
+  createComputePipeline: 3
 
 class WebGPUAllocator:
   def _alloc(self, size: int):
