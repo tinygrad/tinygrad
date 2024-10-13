@@ -94,7 +94,7 @@ class LLVMRenderer(Renderer):
       if uop is UOps.IF:
         condition_value = lvars[src[0]]
         if condition_value.type != ir.IntType(1):
-            condition_value = bb[-1].icmp_unsigned('!=', condition_value, ir.Constant(condition_value.type, 0))
+          condition_value = bb[-1].icmp_unsigned('!=', condition_value, ir.Constant(condition_value.type, 0))
         then_bb = bb[-1].function.append_basic_block(f"if_then_{len(if_stack)}")
         endif_bb = bb[-1].function.append_basic_block(f"if_end_{len(if_stack)}")
         bb[-1].cbranch(condition_value, then_bb, endif_bb)
@@ -102,7 +102,7 @@ class LLVMRenderer(Renderer):
         bb.append(ir.IRBuilder(then_bb))
       elif uop is UOps.ENDIF:
         if not bb[-1].block.is_terminated:
-            bb[-1].branch(if_stack[-1])
+          bb[-1].branch(if_stack[-1])
         bb.pop()
         bb.append(ir.IRBuilder(if_stack.pop()))
       elif uop is UOps.STORE:
