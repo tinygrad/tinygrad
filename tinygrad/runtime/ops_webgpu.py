@@ -14,7 +14,7 @@ from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 import traceback
-from enum import Enum
+from enum import Enum, auto
 
 server_ready = False
 
@@ -56,7 +56,7 @@ class WebSocketsHandler(socketserver.StreamRequestHandler):
     self.on_message(decoded)
 
 
-  def msg(self, message):
+  def send(self, message):
     TEXT = bytes([129])
     BINARY = bytes([130])
     self.request.send(BINARY)
@@ -111,15 +111,42 @@ HOST, PORT = "localhost", 8766
 
 server = Server((HOST, PORT), WebSocketsHandler)
 
-class Methods:
-  createShaderModule: 0
-  createBuffer: 1
-  createBufferInit: 2
-  createComputePipeline: 3
+class Methods(Enum):
+  PUT_PROGRAM = auto()
+  POST_PROGRAM = auto()
+  DELETE_PROGRAM = auto()
+  GET_BUFFER = auto()
+  PUT_BUFFER = auto()
+  POST_BUFFER = auto()
+  DELETE_BUFFER = auto()
+
+def encode(method: Methods, args):
+  pass
+
+class WebGPUCompiler:
+  def __init__(self, device):
+    self.device = device
+  def compile(self, src: str):
+    return self.device.send(encode(Methods.POST_PROGRAM, src))
 
 class WebGPUAllocator:
+  def __init__(self, device):
+    self.device = device
   def _alloc(self, size: int):
-    pass
+    self.device.send(encode(Methods.POST_BUFFER, size))
+  def _free(self, opaque):
+    self.device.send(encode(Methods.DELETE_BUFFER, opaque))
+  def copyin(self, dest: int, src: memoryview):
+    self.device.send(encode(Methods.PUT_BUFFER))
+  def copyout(self): pass
+
+class WebGPUProgram:
+  def __init__(self, device, lib):
+    self.device = device
+    self.lib = lib
+  def __call__(self, *bufs, global_size, local_size):
+    self.device.send("")
+
 
 class WebDevice:
   def __init__(self):
@@ -140,4 +167,4 @@ if __name__ == "__main__":
   while True:
     if a.device:
       text = input('Hit enter to send HELLO')
-      a.device.msg(b'HELLO')
+      a.device.send(b'HELLO')
