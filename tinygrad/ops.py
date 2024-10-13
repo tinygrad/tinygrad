@@ -348,7 +348,7 @@ class UOp(MathTrait):
     # NOTE: returned UOp is assumed to be CONST
     if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
-    if self.op is UOps.BIND: return self.src[0].vmin, self.src[0].vmax  # ignore the bound value
+    if self.op in (UOps.BIND, UOps.CAST): return self.src[0].vmin, self.src[0].vmax  # ignore the bound value
     if self.op is UOps.EXPAND: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
