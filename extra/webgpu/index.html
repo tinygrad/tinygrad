@@ -225,32 +225,36 @@
         const handleServerCommands = (data) => {
 
         }
-        const wsInit = () => {
-            try {
-                const address = "ws://localhost:8766"
-                const socket = new WebSocket(address);
-                // Listen for messages
-                socket.addEventListener("message", (event) => {
-                    console.log("Message from server ", event.data);
-                });
-                socket.addEventListener("error", () => {
-                    setError(new Error("Unable to establish connection"), "Websocket initialization")
-                })
-                socket.addEventListener("open", () => {
-                    console.log("Connection established")
-                    document.getElementById("connectionStatus").textContent = `🟢 online`
-                    document.getElementById("serverAddress").textContent = `Server: ${address}`
-                    socket.send("YO")
-                    makeButtonReady()
-                })
-                socket.addEventListener("close", () => {
-                    console.log("Disconnected")
-                    document.getElementById("connectionStatus").textContent = `🔴 offline`
-                })
-            } catch (e) {
-                setError(e, "WS")
-            }
-        }
+        const wsInit = () => new Promise((res, rej) => {
+            console.log('wsinit')
+            const timeoutId = setTimeout(() => {
+                rej(new Error("Websocket timeout. Currently only supports single client, is another tab using it already?"))
+            }, 5000)
+            const address = "ws://localhost:8766"
+            const socket = new WebSocket(address);
+            // Listen for messages
+            socket.addEventListener("message", (event) => {
+                console.log("Message from server ", event.data);
+            });
+            socket.addEventListener("error", () => {
+                setError(new Error("Unable to establish connection"), "Websocket initialization")
+            })
+            socket.addEventListener("open", () => {
+                console.log("Connection established")
+                clearTimeout(timeoutId)
+                document.getElementById("connectionStatus").textContent = `🟢 online`
+                document.getElementById("serverAddress").textContent = `Server: ${address}`
+                socket.send("YO")
+                makeButtonReady()
+                res(true)
+            })
+            socket.addEventListener("close", () => {
+                console.log("Disconnected")
+                document.getElementById("connectionStatus").textContent = `🔴 offline`
+            })
+            
+            
+        }).catch((e) => setError(e, "WS"))
 
         const main = async () => {
             await deviceInit()

@@ -88,13 +88,9 @@ class WebSocketsHandler(socketserver.StreamRequestHandler):
 class Server(socketserver.TCPServer):
   allow_reuse_address = True
 
-  def send_message(self, msg):
-    print("send message method", msg)
-
   def finish_request(self, request, client_address):
-    """Finish one request by instantiating RequestHandlerClass."""
+    print("finish request called")
     self.inflight_request = self.RequestHandlerClass.__new__(self.RequestHandlerClass)
-    print("request instance created")
     self.inflight_request.__init__(request, client_address, self)
 
 
