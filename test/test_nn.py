@@ -93,7 +93,7 @@ class TestNN(unittest.TestCase):
   def test_batchnorm3d_no_running_stats(self): self.test_batchnorm2d(False, True, False)
   def test_batchnorm3d_training_no_running_stats(self): self.test_batchnorm2d(True, True, False)
   @unittest.expectedFailure
-  def test_batchnorm_training_dtype_double_fail(self): 
+  def test_batchnorm_training_dtype_double_fail(self):
     with Tensor.train(): BatchNorm(1)(Tensor.randn(1, 1, dtype="double"))
 
   def test_batchnorm_axis(self):
