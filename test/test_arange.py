@@ -142,8 +142,8 @@ class TestIndexing(unittest.TestCase):
     from tinygrad.nn.datasets import mnist
     X_train, Y_train, _, _ = mnist()
     with Context(NOOPT=noopt, FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
+      samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0]).realize()
       GlobalCounters.reset()
-      samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0])
       x = X_train[samples].numpy()
       y = Y_train[samples].numpy()
       assert GlobalCounters.global_ops < op_limit, f"too many ops {GlobalCounters.global_ops} != {op_limit}"

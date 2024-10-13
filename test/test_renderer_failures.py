@@ -1,7 +1,8 @@
 import unittest
 from typing import List, cast
 import numpy as np
-from tinygrad.codegen.uopgraph import full_graph_rewrite, linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite
+from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.device import Buffer, Device
 from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.engine.realize import CompiledRunner
@@ -10,7 +11,7 @@ from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.ops import BinaryOps, UOp, UOps
 from tinygrad.renderer import Program
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 
 def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
   for x in inputs: x.realize()
@@ -33,10 +34,12 @@ class TestCStyleFailures(unittest.TestCase):
     b = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 1)
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.int, (b, idx))
-    alu = ld.alu(BinaryOps.MAX, UOp.const(dtypes.int, dtypes.min(dtypes.int)))
+    alu = ld.alu(BinaryOps.MAX, UOp.const(dtypes.int, dtypes.min(dtypes.int)+1))
     store = UOp.store(a, idx, alu)
+    sink = UOp(UOps.SINK, dtypes.void, (store,))
+    uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
     # CLANG doesn't use the max function
-    ret = _test_uop_result([Tensor([1])], [store])[0]
+    ret = _test_uop_result([Tensor([1])], uops)[0]
     self.assertEqual(ret[0], 1)
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
