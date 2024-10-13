@@ -538,12 +538,8 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), simplify_valid_image_load),
 ])
 
-#int64_idx = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR),
-#  dtypes.int32, name="x"), lambda x: UOp(x.op, dtypes.int64.vec(x.dtype.count), (s.cast(dtypes.int64) for s in x.src), x.arg)
-#  if max(x._min_max, key=abs) > dtypes.max(x.dtype) else None)])
-
-fixup_int64idx = PatternMatcher([(UPat(UOps.ALU, dtypes.int64, name="x"), lambda x: UOp(x.op, x.dtype, (s.cast(dtypes.int64) for s in x.src), x.arg)
-                                  if any(s.dtype != dtypes.int64 for s in x.src) else None)])
+fixup_alus = PatternMatcher([(UPat(UOps.ALU, (dtypes.int32, dtypes.int64), name="x"), lambda x: UOp(x.op, x.dtype, (s.cast(x.dtype) for s in x.src), x.arg)
+  if any(s.dtype != x.dtype for s in x.src) else None)])
 
 # *** uop graph ***
 
@@ -556,7 +552,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   acc_number = 0
   sink = graph_rewrite(sink, sym)
   # int64 indexing
-  sink = graph_rewrite(sink, fixup_int64idx)
+  sink = graph_rewrite(sink, fixup_alus)
 
   # expand
   linearize_cnt += 1
