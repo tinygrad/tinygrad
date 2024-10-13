@@ -31,6 +31,27 @@ def assert_jit_cache_len(fxn, expected_len):
     assert type(fxn.jit_cache[0].prg).__name__.endswith('Graph')
     assert len(fxn.jit_cache[0].prg.jit_cache) == expected_len
 
+<<<<<<< HEAD
+=======
+def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
+  if dtype == dtypes.bfloat16:
+    # NOTE: this requires bf16 buffer support
+    return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
+  if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.float, dtypes.int32, dtypes.uint32]
+  if device == "WEBGL": return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
+  # for CI GPU and OSX, cl_khr_fp16 isn't supported
+  # for CI LLVM, it segfaults because it can't link to the casting function
+  # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
+  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
+  if dtype == dtypes.half:
+    if device == "GPU": return not CI and not OSX
+    if device in ["CUDA", "NV"]: return not CI
+    if device == "LLVM": return OSX
+    if device == "PYTHON": return sys.version_info >= (3, 12)
+  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
+  return True
+
+>>>>>>> 497ad144 (Start from andredaprato:webgpu-clean)
 def rand_for_dtype(dt:DType, size:int):
   if dtypes.is_unsigned(dt):
     return np.random.randint(0, 100, size=size, dtype=_to_np_dtype(dt))
