@@ -976,6 +976,5 @@ renderer = PatternMatcher([
 sint = Union[int, UOp]
 Variable = UOp
 
-def NumNode(val:int): return UOp.const(dtypes.int, val)
 def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int:
   return int(uop.substitute({k:k.const_like(v) for k,v in var_vals.items()})) if isinstance(uop, UOp) else uop
