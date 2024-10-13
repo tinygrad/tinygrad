@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebGPU Demo</title>
     <style>
+        h1, p {
+            margin: 10px;
+        }
+        button {
+            margin: 10px;
+        }
         body {
             font-family: Arial, sans-serif;
             display: flex;
@@ -15,7 +21,12 @@
             background-color: #f0f0f0;
         }
         .container {
-            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            width: 300px;
+            text-align: start;
             padding: 20px;
             background-color: white;
             border-radius: 10px;
@@ -24,6 +35,25 @@
         .error {
             color: red;
             font-weight: bold;
+        }
+        .primaryButton {
+            padding: 10px;
+            display: block;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s ease;
+        }
+        .primaryButton:hover {
+            background-color: #45a049;
+        }
+        .primaryButton:disabled {
+            background-color: #cccccc;
+            color: #666666;
+            cursor: not-allowed;
         }
 
     </style>
@@ -35,17 +65,19 @@
         <p class="error" id="error"></p>
         <p id="gpuInfo"></p>
         <p id="serverAddress"></p>
-        <p id="connectionStatus"></p>
-        <button class="primarybutton" id="start" onclick="" disabled>Start</button>
+        <p id="connectionStatus">🔴 offline</p>
+        <button class="primaryButton" id="connect" onclick="wsInit()">Connect to server</button>
+        <button class="primaryButton" id="start" onclick="" disabled>Start</button>
     </div>
     <script>
+        const address = "ws://localhost:8766"
         let device;
         let error = document.getElementById("error")
         const setError = (e, prefix) => {
             console.error(`${prefix} error`, e)
             error.textContent = `${prefix} error: ${e.message}`;
         }
-        const makeButtonReady = () => {
+        const makeStartButtonReady = () => {
             const start = document.getElementById("start")
             start.disabled = false;
         }
@@ -61,6 +93,7 @@
         }
         const deviceInit = async () => {
             try {
+                document.getElementById("serverAddress").textContent = `Server: ${address}`
                 if (!navigator.gpu) {
                     console.error("Navigator.gpu is null")
                     throw new Error("Web GPU not supported")
@@ -226,11 +259,10 @@
 
         }
         const wsInit = () => new Promise((res, rej) => {
-            console.log('wsinit')
             const timeoutId = setTimeout(() => {
                 rej(new Error("Websocket timeout. Currently only supports single client, is another tab using it already?"))
             }, 5000)
-            const address = "ws://localhost:8766"
+            
             const socket = new WebSocket(address);
             // Listen for messages
             socket.addEventListener("message", (event) => {
@@ -243,22 +275,21 @@
                 console.log("Connection established")
                 clearTimeout(timeoutId)
                 document.getElementById("connectionStatus").textContent = `🟢 online`
-                document.getElementById("serverAddress").textContent = `Server: ${address}`
+                
                 socket.send("YO")
-                makeButtonReady()
+                document.getElementById("connect").disabled = true
+                document.getElementById("connect").textContent = "Connected"
+                makeStartButtonReady()
                 res(true)
             })
             socket.addEventListener("close", () => {
                 console.log("Disconnected")
-                document.getElementById("connectionStatus").textContent = `🔴 offline`
+                document.getElementById("connectionStatus").textContent = ``
             })
-            
-            
         }).catch((e) => setError(e, "WS"))
 
         const main = async () => {
             await deviceInit()
-            await wsInit()
         }
         main()
     </script>

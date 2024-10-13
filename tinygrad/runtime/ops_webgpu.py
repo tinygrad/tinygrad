@@ -54,7 +54,7 @@ class WebSocketsHandler(socketserver.StreamRequestHandler):
       decoded += chr(char ^ masks[len(decoded) % 4])
     self.on_message(decoded)
 
-  def send_message(self, message):
+  def msg(self, message):
     self.request.send(bytes([129]))
     length = len(message)
     if length <= 125:
@@ -103,6 +103,10 @@ HOST, PORT = "localhost", 8766
 
 server = Server((HOST, PORT), WebSocketsHandler)
 
+class WebGPUAllocator:
+  def _alloc(self, size: int):
+    pass
+
 class WebDevice:
   def __init__(self):
     self.sock = None
@@ -113,13 +117,13 @@ class WebDevice:
     while server.ws is None:
       print("Waiting for browser connect")
       time.sleep(3)
+    self.device = self.server.ws
     print("Browser ready")
-
 
 
 if __name__ == "__main__":
   a = WebDevice()
   while True:
-    text = input('typesomething')
-    print('ws req', server.inflight_request)
-    server.inflight_request.send_message(text)
+    if a.device:
+      text = input('Type something to send to browser: ')
+      a.device.msg(text)
