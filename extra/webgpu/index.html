@@ -4,119 +4,32 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebGPU Demo</title>
-    <style>
-        h1, p {
-            margin: 10px;
-        }
-        button {
-            margin: 10px;
-        }
-        body {
-            font-family: Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-            background-color: #f0f0f0;
-        }
-        .container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: flex-start;
-            width: 300px;
-            text-align: start;
-            padding: 20px;
-            background-color: white;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-        .error {
-            color: red;
-            font-weight: bold;
-        }
-        .primaryButton {
-            padding: 10px;
-            display: block;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 16px;
-            transition: background-color 0.3s ease;
-        }
-        .primaryButton:hover {
-            background-color: #45a049;
-        }
-        .primaryButton:disabled {
-            background-color: #cccccc;
-            color: #666666;
-            cursor: not-allowed;
-        }
-
-    </style>
 </head>
 <body>
     <div class="container">
-        <p class="error" id="gpuDeviceLostError"></p>
         <h1>Web GPU</h1>
-        <p class="error" id="error"></p>
         <p id="gpuInfo"></p>
-        <p id="serverAddress"></p>
-        <p id="connectionStatus"></p>
-        <button class="primaryButton" id="connect" onclick="wsInit()"></button>
-        <button class="primaryButton" id="start" onclick="" disabled>Start</button>
+        <p id="status"></p>
     </div>
     <script>
         const address = "ws://localhost:8766"
         let device;
-        let error = document.getElementById("error")
-        const ONLINE = "🟢 online"
-        const OFFLINE = "🔴 offline"
-        const setError = (e, prefix) => {
-            console.error(`${prefix} error`, e)
-            error.textContent = `${prefix} error: ${e.message}`;
-        }
-        const handlePotentialDeviceLost = (promise) => {
-            if (!promise) {
-                throw new Error("handleLostDevice received null")
+        const initDevice = async () => {
+            if (!navigator.gpu) {
+                console.error("Navigator.gpu is null")
+                document.getElementById("gpuInfo").textContent = `Web GPU not supported`
+                throw new Error("Web GPU not supported")
             }
-            promise.then(info => {
-                GPU_DEVICE_LOST = "GPU device was lost. Behaviour may be undefined, restart the page"
-                console.error(GPU_DEVICE_LOST)
-                document.getElementById("gpuDeviceLostError").textContent = `Fatal error: ${GPU_DEVICE_LOST}`
+            const adapter = await navigator.gpu.requestAdapter()
+            if (!adapter) {
+                console.error("requestAdapter returned null")
+                throw new Error("Unable to get GPU device")
+            }
+            adapter.requestAdapterInfo().then(({vendor, architecture}) => {
+                document.getElementById("gpuInfo").textContent = `Device: ${vendor} ${architecture}`
             })
-        }
-        const uiInit = async () => {
-            document.getElementById("serverAddress").textContent = `Server: ${address}`
-            document.getElementById("connectionStatus").textContent = OFFLINE
-            document.getElementById("connect").textContent = "Connect to server"
-            
-        }
-        const deviceInit = async () => {
-            try {
-                
-                if (!navigator.gpu) {
-                    console.error("Navigator.gpu is null")
-                    throw new Error("Web GPU not supported")
-                }
-                const adapter = await navigator.gpu.requestAdapter()
-                if (!adapter) {
-                    console.error("requestAdapter returned null")
-                    throw new Error("Unable to get GPU device")
-                }
-                adapter.requestAdapterInfo().then(({vendor, architecture}) => {
-                    document.getElementById("gpuInfo").textContent = `Device: ${vendor} ${architecture}`
-                })
-                let _device = await adapter.requestDevice()
-                handlePotentialDeviceLost(_device.lost)
-                device = _device;
-            }
-            catch (e) {
-               setError(e, "Device initialization")
-            }
+            let _device = await adapter.requestDevice()
+            device = _device;
         }
 
         const createBufferInit = (device,descriptor)=> {
@@ -259,27 +172,13 @@
             }
         }
        
-        const handleServerCommands = (data) => {
-
-        }
-        const wsInit = () => new Promise((res, rej) => {
-            const timeoutId = setTimeout(() => {
-                rej(new Error("Websocket timeout. Currently only supports single client, is another tab using it already?"))
-            }, 5000)
-            
+        
+        const wsInit = () => {            
             const socket = new WebSocket(address);
             socket.binaryType = "arraybuffer";
             socket.addEventListener("message", (event) => {
-                if (event.data instanceof ArrayBuffer) {
-                    const view = new DataView(event.data);
-                    console.log("ArrayBuffer", view.getInt32(0));
-                } else {
-                    console.log("Text data", event.data);
-                }
+                
             });
-            socket.addEventListener("error", () => {
-                setError(new Error("Unable to establish connection"), "Websocket initialization")
-            })
 
             socket.addEventListener("open", () => {
                 console.log("Connection established")
@@ -294,20 +193,8 @@
                 res(true)
             })
             socket.addEventListener("close", () => {
-                console.log("Disconnected")
-                document.getElementById("connectionStatus").textContent = OFFLINE
-                document.getElementById("connect").textContent = "Connect to server"
-                document.getElementById("connect").disabled = false
-                const start = document.getElementById("start")
-                start.disabled = true;
             })
-        }).catch((e) => setError(e, "WS"))
-
-        const main = async () => {
-            await uiInit()
-            await deviceInit()
         }
-        main()
     </script>
 </body>
 </html>
