@@ -4,7 +4,9 @@ from base64 import b64encode
 from hashlib import sha1
 from email.parser import Parser
 from io import StringIO
+from multiprocessing import Process
 
+server_ready = False
 class WebSocketsHandler(socketserver.StreamRequestHandler):
     magic = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 
@@ -58,11 +60,23 @@ class WebSocketsHandler(socketserver.StreamRequestHandler):
         response += 'Connection: Upgrade\r\n'
         response += f'Sec-WebSocket-Accept: {digest}\r\n\r\n'
         self.handshake_done = self.request.send(response.encode())
+        global server_ready
+        server_ready = True
 
     def on_message(self, message):
         print(message)
 
-if __name__ == "__main__":
-    server = socketserver.TCPServer(
-        ("localhost", 9999), WebSocketsHandler)
-    server.serve_forever()
+server = socketserver.TCPServer(
+        ("localhost", 9999), WebSocketsHandler
+    )
+  
+server_process = Process(target=server.serve_forever)
+server_process.daemon = True
+server_process.start()
+
+try:
+    while True:
+        pass
+except KeyboardInterrupt:
+    server_process.terminate()
+    server_process.join()
