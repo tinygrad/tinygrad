@@ -52,9 +52,10 @@ class BatchNorm:
     return batch_mean, batch_var
 
   def __call__(self, x:Tensor) -> Tensor:
-    batch_mean, batch_var = self.calc_stats(x.cast(dtypes.float32))
+    batch_mean, batch_var = self.calc_stats(x)
     # NOTE: wow, this is done all throughout training in most PyTorch models
     if self.track_running_stats and Tensor.training:
+      if x.dtype in dtypes.floats: self.running_mean, self.running_var = self.running_mean.cast(x.dtype), self.running_var.cast(x.dtype)
       self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
       self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * prod(x.shape)/(prod(x.shape)-x.shape[1]) * batch_var.detach())
       self.num_batches_tracked += 1
