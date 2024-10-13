@@ -47,5 +47,13 @@ class TestFusionOp(unittest.TestCase):
     with self.assertRaises(AssertionError): assert_equiv_uops(sched1[-1].ast, sched3[-1].ast)
     self.assertLess(time.perf_counter()-st, 2.0)
 
+  def test_strongly_connected_DAG(self):
+    st = time.perf_counter()
+    a = Tensor(1.0)
+    for _ in range(24): a = Tensor.stack(a, a)[0]
+    sched = create_schedule([a.lazydata])
+    assert len(sched) == 1
+    self.assertLess(time.perf_counter()-st, 2.0)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
