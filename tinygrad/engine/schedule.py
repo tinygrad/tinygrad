@@ -241,7 +241,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
 
 def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict[LazyBuffer, bool]) -> bool:
-  if buf in cache: return cache[buf]
+  if (n:=cache.get(buf)) is not None: return n
   if buf in realizes: return True
   # NOTE: this broke to_image_idx and coder with JIT
   if buf.op in UNSAFE_PAD_OPS: return False
