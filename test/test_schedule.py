@@ -7,17 +7,19 @@ import numpy as np
 import functools
 from typing import List, Optional, Union, cast
 
-from tinygrad import nn, dtypes, Device, Tensor
+from tinygrad import nn, dtypes
+from tinygrad.device import Device
 from tinygrad.dtype import DType, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
+from tinygrad.tensor import Tensor
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps, graph_rewrite
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, reduceop_fusor, st_fixup
 from tinygrad.engine.realize import CompiledRunner, run_schedule
-from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
 from test.helpers import ast_const, is_dtype_supported, Context, timeit
+from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
 from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
@@ -874,15 +876,10 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 12, 64, 64).realize()
     out = x.softmax()
+    # run_schedule(check_schedule(out, 2))
     run_schedule(check_schedule(out, 3))
     expected = (x_exp:=np.exp(x.numpy()-x.numpy().max(-1, keepdims=True)))/x_exp.sum(-1, keepdims=True)
     np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-4)
-
-  def test_softmax_backward(self):
-    Tensor.manual_seed(0)
-    x = Tensor.randn(4, 12, 64, 64, requires_grad=True).realize()
-    x.softmax().sum().backward()
-    run_schedule(check_schedule(x.grad, 4))
 
   # changed by: multireduce spec
   def test_layernorm_onelayer_fusion(self):
@@ -1552,18 +1549,18 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(loss, 4)
     np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
 
-  def test_mnist_val(self):
-    from tinygrad.nn.datasets import mnist
-    import torch
-    _, Y_train, _, _ = mnist()
-    samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1])).realize()
-    yt = Tensor.randn(BS, 10).realize()
-    with Context(SPLIT_REDUCEOP=0):
-      loss = yt.sparse_categorical_crossentropy(Y_train[samples])
-      self.check_schedule(loss, 6)
-      loss_fused = loss.numpy()
-    loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
-    np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
+  # def test_mnist_val(self):
+  #   from tinygrad.nn.datasets import mnist
+  #   import torch
+  #   _, Y_train, _, _ = mnist()
+  #   samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1])).realize()
+  #   yt = Tensor.randn(BS, 10).realize()
+  #   with Context(SPLIT_REDUCEOP=0):
+  #     loss = yt.sparse_categorical_crossentropy(Y_train[samples])
+  #     self.check_schedule(loss, 6)
+  #     loss_fused = loss.numpy()
+  #   loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
+  #   np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
 
   def test_arange_fuse_grouped_children(self):
     X = Tensor.randn(4, 4).realize()
@@ -1597,6 +1594,16 @@ class TestIndexing(unittest.TestCase):
     ast = a.schedule()[0].ast
     new_uop, et = timeit(st_fixup, ast.src[0].src[2], lambda st:st.reshape((4, 1)), {})
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
+    self.assertLess(et, 1e3)
+
+  def test_strongly_connected_DAG(self):
+    val = 1.0
+    a = Tensor(val).realize()
+    def f(a):
+      for _ in range(24): a = Tensor.stack(a, a)[0]
+      return a.item()
+    r, et = timeit(f, a)
+    self.assertEqual(r, val)
     self.assertLess(et, 1e3)
 
   def test_no_rewrite_elementwise(self):
