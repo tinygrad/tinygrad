@@ -7,6 +7,8 @@ from io import StringIO
 from multiprocessing import Process
 
 server_ready = False
+
+
 class WebSocketsHandler(socketserver.StreamRequestHandler):
     magic = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 
@@ -66,10 +68,11 @@ class WebSocketsHandler(socketserver.StreamRequestHandler):
     def on_message(self, message):
         print(message)
 
+
 server = socketserver.TCPServer(
-        ("localhost", 9999), WebSocketsHandler
-    )
-  
+    ("localhost", 9999), WebSocketsHandler
+)
+
 server_process = Process(target=server.serve_forever)
 server_process.daemon = True
 server_process.start()

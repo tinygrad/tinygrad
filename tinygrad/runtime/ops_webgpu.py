@@ -13,23 +13,33 @@ server_ready = False
 
 
 class WebSocketsHandler(socketserver.StreamRequestHandler):
-  magic = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
+  def __init__(self, request, client_address, server):
+    self.request = request
+    self.client_address = client_address
+    self.server = server
+    self.setup()
+    try:
+        self.handle()
+    finally:
+        self.finish()
+  magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
   def setup(self):
-    print("setup")
     socketserver.StreamRequestHandler.setup(self)
     print("connection established", self.client_address)
     self.handshake_done = False
 
   def handle(self):
-    print("request object", self.request)
-    return
-    # while True:
-    #   if not self.handshake_done:
-    #     self.handshake()
-    #   else:
+    while True:
+      if not self.handshake_done:
+        self.handshake()
+      else:
+        self.read_next_message()
+      print('handling')
+    print('done handle')
 
   def read_next_message(self):
+    print("waiting to read")
     length = self.rfile.read(2)[1] & 127
     if length == 126:
       length = struct.unpack(">H", self.rfile.read(2))[0]
@@ -38,8 +48,9 @@ class WebSocketsHandler(socketserver.StreamRequestHandler):
     masks = [byte for byte in self.rfile.read(4)]
     decoded = ""
     for char in self.rfile.read(length):
-        decoded += chr(char ^ masks[len(decoded) % 4])
+      decoded += chr(char ^ masks[len(decoded) % 4])
     self.on_message(decoded)
+    print("read next message")
 
   def send_message(self, message):
     self.request.send(bytes([129]))
@@ -56,35 +67,45 @@ class WebSocketsHandler(socketserver.StreamRequestHandler):
 
   def handshake(self):
     data = self.request.recv(1024).strip().decode()
-    headers = Parser().parsestr(data.split('\r\n', 1)[1])
+    headers = Parser().parsestr(data.split("\r\n", 1)[1])
     if headers.get("Upgrade", None) != "websocket":
       return
-    print('Handshaking...')
-    key = headers['Sec-WebSocket-Key']
+    print("Handshaking...")
+    key = headers["Sec-WebSocket-Key"]
     digest = b64encode(sha1((key + self.magic).encode()).digest()).decode()
-    response = 'HTTP/1.1 101 Switching Protocols\r\n'
-    response += 'Upgrade: websocket\r\n'
-    response += 'Connection: Upgrade\r\n'
-    response += f'Sec-WebSocket-Accept: {digest}\r\n\r\n'
+    response = "HTTP/1.1 101 Switching Protocols\r\n"
+    response += "Upgrade: websocket\r\n"
+    response += "Connection: Upgrade\r\n"
+    response += f"Sec-WebSocket-Accept: {digest}\r\n\r\n"
     self.handshake_done = self.request.send(response.encode())
     global server_ready
     server_ready = True
 
   def on_message(self, message):
-    print("Received message", message)
+    print(message)
+
+
+class Server(socketserver.TCPServer):
+  allow_reuse_address = True
+
+  def send_message(self, msg):
+    print("send message method", msg)
+
+  def finish_request(self, request, client_address):
+    """Finish one request by instantiating RequestHandlerClass."""
+    self.inflight_request = self.RequestHandlerClass.__new__(self.RequestHandlerClass)
+    print("request instance created")
+    self.inflight_request.__init__(request, client_address, self)
+
 
 HOST, PORT = "localhost", 8766
-def start_server():
-  server = socketserver.TCPServer((HOST, PORT), WebSocketsHandler)
-  print("Serving")
-  server.serve_forever()
 
+server = Server((HOST, PORT), WebSocketsHandler)
 
 class WebDevice:
   def __init__(self):
     self.sock = None
-    self.server = socketserver.TCPServer((HOST, PORT), WebSocketsHandler)
-    self.process = threading.Thread(target=self.server.serve_forever)
+    self.process = threading.Thread(target=server.serve_forever)
     self.process.daemon = True
     self.process.start()
     print("server started")
@@ -95,21 +116,19 @@ class WebDevice:
     if not self.connected:
       self.sock.connect((HOST, PORT))
       self.connected = True
-    self.sock.sendall(bytes("HELLO\n", "utf-8"))
+    self.sock.sendall(bytes("HELLO", "utf-8"))
     print("sent")
 
   def __del__(self):
-    print('closing')
+    print("closing")
     if self.sock:
       self.sock.close()
-    print('socks closed')
+    print("socks closed")
+
 
 if __name__ == "__main__":
-  try:
-    a = WebDevice()
-    time.sleep(1)
-    a.connect()
-    time.sleep(10)
-  finally:
-    print('shutdown')
-    a.server.shutdown()
+  a = WebDevice()
+  while True:
+    text = input('typesomething')
+    print('ws req', server.inflight_request)
+    server.inflight_request.send_message(text)
