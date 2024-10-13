@@ -43,7 +43,6 @@ class WebSocketsHandler(socketserver.StreamRequestHandler):
         self.read_next_message()
 
   def read_next_message(self):
-    print("waiting to read")
     length = self.rfile.read(2)[1] & 127
     if length == 126:
       length = struct.unpack(">H", self.rfile.read(2))[0]
@@ -54,7 +53,6 @@ class WebSocketsHandler(socketserver.StreamRequestHandler):
     for char in self.rfile.read(length):
       decoded += chr(char ^ masks[len(decoded) % 4])
     self.on_message(decoded)
-    print("read next message")
 
   def send_message(self, message):
     self.request.send(bytes([129]))
