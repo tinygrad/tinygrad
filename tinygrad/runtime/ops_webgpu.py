@@ -160,6 +160,10 @@ class WebDevice:
       time.sleep(3)
     self.device = self.server.ws
     print("Browser ready")
+  
+  def send(self, msg):
+    self.device.send(msg)
+    self.device.on_message
 
 
 if __name__ == "__main__":
