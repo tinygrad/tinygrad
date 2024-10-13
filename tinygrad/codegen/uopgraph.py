@@ -539,7 +539,7 @@ reducer = PatternMatcher([
 ])
 
 int64_idx = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR),
-  dtypes.int32, name="x"), lambda x: UOp(x.op, dtypes.int64.vec(x.dtype.count), (s.cast(dtypes.int64) for s in x.src), x.arg) if max(x._min_max, key=abs) >= dtypes.max(x.dtype) else None)])
+  dtypes.int32, name="x"), lambda x: UOp(x.op, dtypes.int64.vec(x.dtype.count), (s.cast(dtypes.int64) for s in x.src), x.arg) if max(x._min_max, key=abs) > dtypes.max(x.dtype) else None)])
 
 # *** uop graph ***
 
