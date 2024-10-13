@@ -4,7 +4,7 @@ import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.helpers import getenv, temp, CI, _METADATA, mv_address
+from tinygrad.helpers import getenv, temp, CI, _METADATA, mv_address, Context
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from test.helpers import is_dtype_supported
@@ -759,6 +759,14 @@ class TestTensorMetadata(unittest.TestCase):
     assert s[-1].metadata[1].name == "sigmoid"
     assert s[-1].metadata[1].backward
     assert s[-1].metadata[2].name == "relu"
+
+  def test_with_tracemeta_0(self):
+    _METADATA.set(None)
+    with Context(TRACEMETA=0):
+      x = Tensor.rand(3, requires_grad=True)
+      y = Tensor.rand(3, requires_grad=True)
+      out = (x.relu() * y.sigmoid()).sum()
+    assert out.lazydata.metadata is None
 
 if __name__ == '__main__':
   unittest.main()

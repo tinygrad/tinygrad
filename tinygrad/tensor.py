@@ -3522,8 +3522,8 @@ if IMAGE:
 def _metadata_wrapper(fn):
   def _wrapper(*args, **kwargs):
     if _METADATA.get() is not None: return fn(*args, **kwargs)
-
-    if TRACEMETA >= 2:
+    if TRACEMETA.value == 0: return fn(*args, **kwargs)
+    if TRACEMETA .value >= 2:
       caller_frame = sys._getframe(frame := 1)
       caller_module = caller_frame.f_globals.get("__name__", None)
       caller_func = caller_frame.f_code.co_name
@@ -3551,7 +3551,6 @@ def _metadata_wrapper(fn):
     return ret
   return _wrapper
 
-if TRACEMETA >= 1:
-  for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
-    if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential"]: continue
-    setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
+for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
+  if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential"]: continue
+  setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
