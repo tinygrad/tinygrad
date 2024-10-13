@@ -13,7 +13,7 @@ from typing import List, Any, Tuple, Optional, cast, TypeVar
 from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
-
+import traceback
 
 server_ready = False
 
@@ -65,7 +65,7 @@ class WebSocketsHandler(socketserver.StreamRequestHandler):
     else:
       self.request.send(bytes([127]))
       self.request.send(struct.pack(">Q", length))
-    self.request.send(message.encode())
+    self.request.send(message)
 
   def handshake(self):
     data = self.request.recv(1024).strip().decode()
@@ -95,8 +95,12 @@ class Server(socketserver.TCPServer):
     self.ws = None
 
   def finish_request(self, request, client_address):
-    self.ws = self.RequestHandlerClass.__new__(self.RequestHandlerClass)
-    self.ws.__init__(request, client_address, self)
+    try:
+      self.ws = self.RequestHandlerClass.__new__(self.RequestHandlerClass)
+      self.ws.__init__(request, client_address, self)
+    except Exception:
+      print("Error ocurred in websocket, likely that the client disconnected you should restart the program")
+      print(traceback.format_exc())
 
 
 HOST, PORT = "localhost", 8766
@@ -125,5 +129,5 @@ if __name__ == "__main__":
   a = WebDevice()
   while True:
     if a.device:
-      text = input('Type something to send to browser: ')
-      a.device.msg(text)
+      text = input('Hit enter to send HELLO')
+      a.device.msg(b'HELLO')

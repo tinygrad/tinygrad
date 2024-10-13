@@ -266,7 +266,7 @@
             const socket = new WebSocket(address);
             // Listen for messages
             socket.addEventListener("message", (event) => {
-                console.log("Message from server ", event.data);
+                console.log("Message from server ", event.data, typeof(event.data));
             });
             socket.addEventListener("error", () => {
                 setError(new Error("Unable to establish connection"), "Websocket initialization")
