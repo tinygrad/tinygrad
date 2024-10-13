@@ -35,8 +35,6 @@ class WebSocketsHandler(socketserver.StreamRequestHandler):
         self.handshake()
       else:
         self.read_next_message()
-      print('handling')
-    print('done handle')
 
   def read_next_message(self):
     print("waiting to read")
@@ -89,7 +87,6 @@ class Server(socketserver.TCPServer):
   allow_reuse_address = True
 
   def finish_request(self, request, client_address):
-    print("finish request called")
     self.inflight_request = self.RequestHandlerClass.__new__(self.RequestHandlerClass)
     self.inflight_request.__init__(request, client_address, self)
 
@@ -104,22 +101,6 @@ class WebDevice:
     self.process = threading.Thread(target=server.serve_forever)
     self.process.daemon = True
     self.process.start()
-    print("server started")
-    self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    self.connected = False
-
-  def connect(self):
-    if not self.connected:
-      self.sock.connect((HOST, PORT))
-      self.connected = True
-    self.sock.sendall(bytes("HELLO", "utf-8"))
-    print("sent")
-
-  def __del__(self):
-    print("closing")
-    if self.sock:
-      self.sock.close()
-    print("socks closed")
 
 
 if __name__ == "__main__":
