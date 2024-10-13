@@ -80,6 +80,7 @@ class LLVMRenderer(Renderer):
       if a.type.is_pointer: a.add_attribute("noalias")
 
     bb = [ir.IRBuilder(func.append_basic_block("entry"))]
+    if_stack: List = []
     loop_blocks: List = []
     reduce_phis: List = []
     # TODO: newvar probably shouldn't be optional
@@ -90,13 +91,23 @@ class LLVMRenderer(Renderer):
 
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
-      if uop is UOps.STORE:
+      if uop is UOps.IF:
+        condition_value = lvars[src[0]]
+        if condition_value.type != ir.IntType(1):
+            condition_value = bb[-1].icmp_unsigned('!=', condition_value, ir.Constant(condition_value.type, 0))
+        then_bb = bb[-1].function.append_basic_block(f"if_then_{len(if_stack)}")
+        endif_bb = bb[-1].function.append_basic_block(f"if_end_{len(if_stack)}")
+        bb[-1].cbranch(condition_value, then_bb, endif_bb)
+        if_stack.append(endif_bb)
+        bb.append(ir.IRBuilder(then_bb))
+      elif uop is UOps.ENDIF:
+        if not bb[-1].block.is_terminated:
+            bb[-1].branch(if_stack[-1])
+        bb.pop()
+        bb.append(ir.IRBuilder(if_stack.pop()))
+      elif uop is UOps.STORE:
         element = cast(bb, lvars[src[2]], src[2].dtype, src[0].dtype)
-        if len(src) > 3:
-          with bb[-1].if_then(lvars[src[3]]):
-            bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
-        else:
-          bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
+        bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
       elif uop is UOps.ENDRANGE:
         loop_entry_bb, phis = loop_blocks.pop()
         idx_p1 = bb[-1].add(lvars[src[0]], ir.Constant(ir.IntType(32), 1))
