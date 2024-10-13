@@ -56,6 +56,7 @@ class ht:
   int64 = strat.integers(-9223372036854775808, 9223372036854775807)
   bool = strat.booleans()
 
+@np.errstate(all='ignore') # floating-point error handling decorator NOTE: operations on integer scalar types (such as int16) are also affected
 def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
@@ -63,6 +64,7 @@ def universal_test(a, b, dtype, op):
   if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
+@np.errstate(all='ignore')
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   out: Tensor = op[0](Tensor([a], dtype=dtype))
@@ -78,11 +80,13 @@ def universal_test_unary(a, dtype, op):
     op = [x for x in ast.parents if x.op is UOps.ALU and x.arg in UnaryOps][0]
     assert op.dtype == dtype
 
+@np.errstate(all='ignore')
 def universal_test_cast(a, in_dtype, dtype):
   tensor_value = Tensor([a], dtype=in_dtype).cast(dtype)
   numpy_value = np.array([a]).astype(_to_np_dtype(dtype))
   np.testing.assert_equal(tensor_value.numpy(), numpy_value)
 
+@np.errstate(all='ignore')
 def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   if not isinstance(op1, tuple): op1 = (op1, op1)
   if not isinstance(op2, tuple): op2 = (op2, op2)
@@ -181,6 +185,7 @@ class TestFromFuzzer(unittest.TestCase):
     _test_value(np.pi / 2)
      # worst case of ulp 1.5
     _test_value(np.pi * 2, unit=1.5)
+  @np.errstate(all='ignore')
   @given(strat.sampled_from(dtypes_float))
   def test_log2(self, dtype):
     if not is_dtype_supported(dtype): return
