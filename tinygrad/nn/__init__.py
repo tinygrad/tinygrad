@@ -29,14 +29,13 @@ class BatchNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
+  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, dtype=None):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
-
     self.weight: Optional[Tensor] = Tensor.ones(sz) if affine else None
     self.bias: Optional[Tensor] = Tensor.zeros(sz) if affine else None
 
     self.num_batches_tracked = Tensor.zeros(1, dtype='long', requires_grad=False)
-    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
+    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False, dtype=dtype), Tensor.ones(sz, requires_grad=False, dtype=dtype)
 
   def calc_stats(self, x:Tensor) -> Tuple[Tensor, Tensor]:
     shape_mask = [1, -1, *([1]*(x.ndim-2))]
