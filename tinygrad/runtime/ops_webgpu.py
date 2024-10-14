@@ -197,7 +197,7 @@ def write(req: socket.socket, message: bytes):
   else:
     req.send(bytes([127]))
     req.send(struct.pack(">Q", length))
-  req.send(message.encode())
+  req.send(message)
 
 class WebDevice:
   def __init__(self, address):
@@ -224,4 +224,5 @@ class WebDevice:
 
 if __name__ == "__main__":
   a = WebDevice((HOST, PORT))
-  a.send(b"alloc")
+  print("sending message")
+  a.send(b"\x06hello\x01\x01\x01")

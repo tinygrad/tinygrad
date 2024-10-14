@@ -184,8 +184,14 @@
             const socket = new WebSocket(address);
             socket.binaryType = "arraybuffer";
             socket.addEventListener("message", async ({data}) => {
-                console.log("message received", data)
-                socket.send("Reply from client")
+                const view = new DataView(data);
+                const argsOffset = view.getInt8(0)
+                let selector = ''
+                for (let i = 1; i < argsOffset; i++) {
+                    selector = selector + String.fromCharCode(view.getInt8(i))
+                }
+                const args = data.slice(argsOffset)
+                console.log({selector, args})
             });
         }
     </script>
