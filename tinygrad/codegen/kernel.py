@@ -751,15 +751,14 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
   for x in uop.src: _assert_valid_uop(x, st, sts)
   # only reduceuop is allowed to change shape, limited to turning n to 1
   if uop.op in {UOps.REDUCE_AXIS, UOps.WMMA}: st = ShapeTracker.from_shape(sts[uop.src[0]].reduce(uop.axis_arg))
-  # movementops are pushed to SHAPETRACKER and SWIZZLE
+  # movementops are pushed to VIEW
   elif uop.op is UOps.VIEW: st = uop.arg
   # everything else inherits shape
   else:
-    assert uop.op in {UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.CONTRACT, UOps.EXPAND, UOps.ASSIGN, *BUFFER_UOPS}, f"bad UOp in intermediate uops {uop}"
     st = (src_sts:=[sts[x] for x in uop.src if x.has_st])[0]
     if not all_same(shapes:=[x.shape for x in src_sts]):
       if all_same(sizes:=[prod(x) for x in shapes]): raise AssertionError(f"found implicit reshape {shapes}")
-      raise AssertionError(f"found implicit expand {sizes}")
+      raise AssertionError(f"found implicit expand {sizes} {shapes}")
   sts[uop] = st
 
 def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
