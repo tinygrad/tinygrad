@@ -10,7 +10,7 @@ from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
-from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG
+from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG, Timing
 from tinygrad.ops import UnaryOps, UOp, UOps
 from test.helpers import is_dtype_supported
 
@@ -231,14 +231,13 @@ if __name__ == "__main__":
       print("skipping kernel due to not supported dtype")
       continue
 
-    print(f"testing ast {i}")
-    tested += 1
-
-    fuzz_failures = fuzz_linearizer(lin, rtol=args.rtol, atol=args.atol)
-    if fuzz_failures: failed_ids.append(i)
-    for k, v in fuzz_failures.items():
-      for f in v:
-        failures[k].append(f)
+    with Timing(f"tested ast {i}: "):
+      tested += 1
+      fuzz_failures = fuzz_linearizer(lin, rtol=args.rtol, atol=args.atol)
+      if fuzz_failures: failed_ids.append(i)
+      for k, v in fuzz_failures.items():
+        for f in v:
+          failures[k].append(f)
 
   for msg, errors in failures.items():
     for i, (ast, opts) in enumerate(errors):
