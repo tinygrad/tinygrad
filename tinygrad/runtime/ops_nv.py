@@ -558,8 +558,8 @@ class NVDevice(HCQCompiled):
     if sm_errors.mmuFault.valid:
       mmu_info = rmctrl.debug_read_mmu_fault_info(self.fd_ctl, self.root, self.debugger)
       for i in range(mmu_info.count):
-        valo, vahi = ((pfaddr:=(pf:=mmu_info.mmuFaultInfoList[i]).faultAddress) - (1 << 30)) & ~0xffffff, round_up(pfaddr + (1 << 30), 0x1000000)
-        report += [f"MMU fault: 0x{pfaddr:X} | {NV_PFAULT_FAULT_TYPE[pf.faultType]} | {NV_PFAULT_ACCESS_TYPE[pf.accessType]}"]
+        pfinfo = mmu_info.mmuFaultInfoList[i]
+        report += [f"MMU fault: 0x{pfinfo.faultAddress:X} | {NV_PFAULT_FAULT_TYPE[pfinfo.faultType]} | {NV_PFAULT_ACCESS_TYPE[pfinfo.accessType]}"]
         report += ["All GPU mappings:" + "\n".join([f"\t0x{x:X} | size: 0x{y:X}" for x,y in self._debug_mappings])]
     else:
       for i, e in enumerate(sm_errors.smErrorStateArray):
