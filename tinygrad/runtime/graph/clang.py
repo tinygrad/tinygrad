@@ -23,7 +23,7 @@ class ClangGraph(GraphRunner):
       for buf in ji.bufs:
         assert buf is not None
         if buf in input_rawbuffers:
-          kernel_args.append((render_dtype(buf.dtype), f"arg{input_rawbuffers.index(buf)}", False))
+          kernel_args.append((render_dtype(buf.dtype), f"arg{input_rawbuffers.index(buf)}", True))
         else:
           kernel_args.append((render_dtype(buf.dtype), f"({render_dtype(buf.dtype)}*)0x{ctypes.addressof(buf._buf):X}", True))
       variables = cast(CompiledRunner, ji.prg).p.vars
