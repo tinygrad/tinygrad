@@ -456,9 +456,12 @@ class UOp(MathTrait):
 
   # movement functions
   def _view(self, method, arg):
-    from tinygrad.shape.shapetracker import ShapeTracker
-    st = ShapeTracker.from_shape(tuple() if self.shape is None else self.shape)
-    return UOp(UOps.VIEW, self.dtype, (self,), st.__getattribute__(method)(arg))
+    if self.op is UOps.VIEW:
+      return UOp(UOps.VIEW, self.dtype, (self.src[0],), self.st.__getattribute__(method)(arg))
+    else:
+      from tinygrad.shape.shapetracker import ShapeTracker
+      st = ShapeTracker.from_shape(tuple() if self.shape is None else self.shape)
+      return UOp(UOps.VIEW, self.dtype, (self,), st.__getattribute__(method)(arg))
   def reshape(self, shape): return self._view('reshape', shape)
   def expand(self, shape): return self._view('expand', shape)
   def permute(self, arg): return self._view('permute', arg)
