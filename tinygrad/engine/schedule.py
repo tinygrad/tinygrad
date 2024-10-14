@@ -2,15 +2,15 @@ import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
-from tinygrad.ops import REDUCE_ALU, UNSAFE_PAD_OPS, MetaOps, ReduceOps, TernaryOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, resolve, \
-    graph_rewrite, track_rewrites, Variable, sint
+from tinygrad.ops import REDUCE_ALU, UNSAFE_PAD_OPS, MetaOps, ReduceOps, TernaryOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, Variable, resolve, \
+    graph_rewrite, track_rewrites, sint
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, GlobalCounters, Metadata, all_same, \
     colored, diskcache_put, prod, dedup, all_int, merge_dicts, getenv, unwrap
 from tinygrad.dtype import ImageDType, dtypes
-from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer
 from tinygrad.shape.view import View, strides_for_shape
+from tinygrad.engine.lazy import LazyBuffer
+from tinygrad.device import Buffer
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
@@ -115,7 +115,7 @@ reduceop_fusor = PatternMatcher([
   # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.VIEW, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
   # push SWIZZLE(s) down to STORE, through an elementwise op (ONLY reshapes)
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.STORE), name="root"), push_swizzle_down_through_elementwise),
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.CONTIGUOUS, UOps.STORE), name="root"), push_swizzle_down_through_elementwise),
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
@@ -137,8 +137,7 @@ def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...]) -> UOp:
 # *** List[LazyBuffer] lowering to ScheduleItem ***
 
 def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], inputs:List[LazyBuffer],
-                      buf_uops:Dict[Buffer, UOp], assign_targets:Dict[LazyBuffer, LazyBuffer],
-                      cache:Dict[Tuple[LazyBuffer, ShapeTracker], UOp]) -> UOp:
+                   buf_uops:Dict[Buffer, UOp], assign_targets:Dict[LazyBuffer, LazyBuffer], cache:Dict[Tuple[LazyBuffer, ShapeTracker], UOp]) -> UOp:
   """recursively create a UOp"""
   if buf is not buf.base: st, buf = buf.st+st, buf.base
   if (buf, st) in cache: return cache[(buf, st)]
@@ -165,10 +164,8 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   src_st = ShapeTracker.from_shape(buf.srcs[0].shape) if buf.op in ReduceOps else st
   src: List[UOp] = [_recursive_uop(x, src_st, outputs, var_vals, inputs, buf_uops, assign_targets, cache) for x in buf.srcs]
   if buf.op in ReduceOps: ret = UOp(UOps.REDUCE_AXIS, dtype, tuple(src), (REDUCE_ALU[cast(ReduceOps, buf.op)], buf.arg)).view(st)
-  elif buf.op is MetaOps.CONTIGUOUS:
-    assert buf in outputs, f"{buf.op} must be writable"
-    ret = src[0]
-  elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (src[1].src[0], src[0]))
+  elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, (buf_uops[buf.buffer], src[0]))
+  elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]))
   elif buf.op is UnaryOps.CAST: ret = src[0].cast(dtype)
   elif buf.op is UnaryOps.BITCAST: ret = src[0].bitcast(dtype)
   else: ret = UOp(UOps.ALU, dtype, tuple(src), buf.op)
@@ -182,7 +179,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp]) -> Tupl
                           (out.metadata,) if out.metadata is not None else None), {}
   # create the stores
   var_vals = merge_dicts([out.st.var_vals.copy() for out in outs])
-  assign_targets = {x.srcs[1]:x for x in outs if x.op is MetaOps.ASSIGN}
+  assign_targets = {x.srcs[0]:x for x in outs if x.op is MetaOps.ASSIGN}
   cache: Dict[Tuple[LazyBuffer, ShapeTracker], UOp] = {}
   ast: List[UOp] = []
   inputs: List[LazyBuffer] = []
@@ -195,7 +192,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp]) -> Tupl
     var_vals.update(vv)
     ast.append(UOp(UOps.STORE, dtypes.void, (buf_uops[out.buffer], output_st.to_uop(), src)))
   sink = full_ast_rewrite(ast[0].sink(*ast[1:]), tuple(buf_uops[x.buffer].arg[0] for x in outs+inputs))
-  return LBScheduleItem(sink, tuple(outs+inputs), tuple(dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))), var_vals
+  return LBScheduleItem(sink, tuple(outs+inputs), tuple(dedup([x.metadata for x,_ in cache if x.metadata and x not in inputs]))), var_vals
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
@@ -227,9 +224,9 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   allbufs[buf] = None
   if buf.forced_realize or buf.op in MetaOps: realizes[buf] = None
   if buf.op is MetaOps.ASSIGN:
-    assert buf.srcs[1].base is buf.srcs[1], f"assign must be to base {buf.srcs[1]}"
-    assert buf.srcs[1].realized is not None, f"assign must be already realized to schedule {buf.srcs[1]}"
-    assign_targets[buf.srcs[1]] = buf
+    assign_targets[(target:=buf.srcs[0])] = buf
+    assert target._base is None, f"assign must be to base {target}"
+    assert target.is_realized(), f"assign must be already realized to schedule {target}"
   if buf.op is MetaOps.COPY:
     assert buf.srcs[0].st.contiguous and buf.srcs[0].size == buf.srcs[0].base.size, "can only copy contig"
     realizes[buf.srcs[0].base] = None
@@ -238,11 +235,13 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     if x.base.realized is None: children[x.base][buf] = None
     _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
 
-def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
+def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict[LazyBuffer, bool]) -> bool:
+  if (n:=cache.get(buf)) is not None: return n
   if buf in realizes: return True
   # NOTE: this broke to_image_idx and coder with JIT
   if buf.op in UNSAFE_PAD_OPS: return False
-  return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
+  cache[buf] = ret = all(_is_padding_okay(x.base, realizes, cache) for x in buf.srcs)
+  return ret
 
 def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
                      realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Dict[LazyBuffer, None],
@@ -276,11 +275,12 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def _get_output_groups(outs:List[LazyBuffer]) -> \
-  Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]],  # these are the output groups
-        Dict[Buffer, UOp],                          # this is a map of realized Buffers to UOps.BUFFER
-        Dict[LazyBuffer, LazyBuffer]]:              # these are the buffers we ASSIGN to in this schedule
-  """find all the realizes in the graph, group the output LazyBuffers into kernels."""
+SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
+def _graph_schedule(outs:List[LazyBuffer]) -> \
+  Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
+        DefaultDict[LBScheduleItem, int], # this is the in-degree of the graph
+        Dict[Variable, int]]: # this has all the var values of the schedule
+  """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
   allbufs: Dict[LazyBuffer, None] = {}
@@ -292,7 +292,7 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
 
   # check if we have to realize pads
   for p in simple_pads:
-    if not _is_padding_okay(p, realizes):
+    if not _is_padding_okay(p, realizes, {}):
       realizes[p] = None
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
@@ -374,20 +374,12 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
     else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
     buf_uops.setdefault(buf.buffer, uop)
-  return output_groups, buf_uops, assign_targets
 
-SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
-def _graph_schedule(outs:List[LazyBuffer]) -> \
-  Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
-        DefaultDict[LBScheduleItem, int], # this is the in-degree of the graph
-        Dict[Variable, int]]: # this has all the var values of the schedule
-  """create a graph for realizing the outputs"""
-  output_groups, buf_uops, assign_targets = _get_output_groups(outs)
   # preschedule all buffers in realizes
   prescheduled: List[LBScheduleItem] = []
   var_vals: Dict[Variable, int] = {}
-  for group in output_groups.values():
-    prescheduled.append((ret:=_lower_lazybuffer(group, buf_uops))[0])
+  for outs in output_groups.values():
+    prescheduled.append((ret:=_lower_lazybuffer(outs, buf_uops))[0])
     var_vals = merge_dicts([var_vals, ret[1]])
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
