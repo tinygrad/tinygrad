@@ -44,10 +44,10 @@ class ClangProgram:
     self.buf, self.len = libc.mmap(0, len(code), mmap.PROT_READ | mmap.PROT_WRITE | mmap.PROT_EXEC,
                                    mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS, -1, 0), len(code)
     ctypes.memmove(self.buf, (ctypes.c_char * len(code)).from_buffer_copy(code), len(code))
-    self.fxn = lambda *args: ctypes.CFUNCTYPE(None)(self.buf)(*args)
   def __del__(self):
     libc.munmap(self.buf, self.len)
-  def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
+  def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: ctypes.CFUNCTYPE(None)(self.buf)(*bufs, *vals)
+, enable=wait)
 
 class ClangDevice(Compiled):
   def __init__(self, device:str):
