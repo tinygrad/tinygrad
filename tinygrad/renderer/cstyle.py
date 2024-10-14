@@ -99,6 +99,7 @@ class CStyleLanguage(Renderer):
 
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
+  tinygrad_section = False
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
@@ -108,8 +109,7 @@ class CStyleLanguage(Renderer):
                 self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
     prg = ''.join([f"{self.kernel_prefix}void {self.get_kernel_modifier(uops)}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
-    [") __attribute__((section(\".tinygrad\"))) {\n" + tmp] + ['\n'.join(kernel), "\n}"])
-    prg += "_Thread_local int errno;"
+    [")" + (" __attribute__((section(\".tinygrad\")))" if self.tinygrad_section else "") + "{\n" + tmp] + ['\n'.join(kernel), "\n}"])
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
   def render_dtype(self, var_dtype:DType) -> str:
@@ -175,6 +175,7 @@ class ClangRenderer(CStyleLanguage):
   global_max = None
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
+  tinygrad_section = True
 
   # language options
   buffer_suffix = " restrict"
@@ -201,7 +202,7 @@ class ClangRenderer(CStyleLanguage):
   AMX_SET(0);\n  for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(4, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}
   AMX(0, (int *)(&data2), 0ull<<62); AMX(1, (int *)(&data1), 0ull<<62); AMX(12, 0, 0ull);
   for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(5, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}\n  AMX_SET(1);\n  return data0;\n}}"""] # noqa: E501
-    return super().render_kernel(function_name, kernel, bufs, uops, macros + prefix)
+    return super().render_kernel(function_name, kernel, bufs, uops, macros + prefix) + "\n_Thread_local int errno;"
 
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"

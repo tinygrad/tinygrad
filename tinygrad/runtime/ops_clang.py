@@ -21,7 +21,6 @@ SECTIONS {
     }
 }
 '''
-
 class ClangCompiler(Compiler):
   def __init__(self, cachekey="compile_clang", args:Optional[List[str]]=None):
     self.args = ['-march=native'] if args is None else args
