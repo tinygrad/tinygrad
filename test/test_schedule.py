@@ -7,20 +7,17 @@ import numpy as np
 import functools
 from typing import List, Optional, Union, cast
 
-from tinygrad import nn, dtypes
-from tinygrad.device import Device
+from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.dtype import DType, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.tensor import Tensor
-from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps
-from tinygrad.ops import graph_rewrite
-from tinygrad.helpers import AST_REWRITE, CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod
+from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps, graph_rewrite
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, reduceop_fusor, st_fixup
 from tinygrad.engine.realize import CompiledRunner, run_schedule
-from test.helpers import ast_const, is_dtype_supported, Context, timeit
 from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
+from test.helpers import ast_const, is_dtype_supported, Context, timeit
 from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
@@ -877,10 +874,15 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 12, 64, 64).realize()
     out = x.softmax()
-    # run_schedule(check_schedule(out, 2))
     run_schedule(check_schedule(out, 3))
     expected = (x_exp:=np.exp(x.numpy()-x.numpy().max(-1, keepdims=True)))/x_exp.sum(-1, keepdims=True)
     np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-4)
+
+  def test_softmax_backward(self):
+    Tensor.manual_seed(0)
+    x = Tensor.randn(4, 12, 64, 64, requires_grad=True).realize()
+    x.softmax().sum().backward()
+    run_schedule(check_schedule(x.grad, 4))
 
   # changed by: multireduce spec
   def test_layernorm_onelayer_fusion(self):
@@ -1302,7 +1304,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_conv2d(self): _test_conv2d(7)
   def test_conv2d_fused(self): _test_conv2d(6, FUSE_CONV_BW=1)
-  def test_conv2d_fused_ast_rewrite(self): _test_conv2d(6, FUSE_CONV_BW=1, AST_REWRITE=1)
+  def test_conv2d_fused_ast_rewrite(self): _test_conv2d(6, FUSE_CONV_BW=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_conv2d_half(self): _test_conv2d(7, dtype=dtypes.half)
@@ -1311,7 +1313,7 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.expectedFailure
-  def test_conv2d_fused_ast_rewrite_half(self): _test_conv2d(6, FUSE_CONV_BW=1, AST_REWRITE=1, dtype=dtypes.half)
+  def test_conv2d_fused_ast_rewrite_half(self): _test_conv2d(6, FUSE_CONV_BW=1, dtype=dtypes.half)
 
   def _test_buf_cnt(self, cnt:int, allowed:int):
     if (m:=BUF_LIMIT.get(Device.DEFAULT)) is None or m != 32: self.skipTest(f"test needs a buf_max of 32 {Device.DEFAULT}")
@@ -1589,18 +1591,22 @@ class TestIndexing(unittest.TestCase):
       ref = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
     np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 
-class TestScheduleRewrite(unittest.TestCase):
-  def setUp(self):
-    self.old_val = AST_REWRITE.value
-    AST_REWRITE.value = 1
-  def tearDown(self): AST_REWRITE.value = self.old_val
-
   def test_recursive_st_fixup(self):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
     ast = a.schedule()[0].ast
     new_uop, et = timeit(st_fixup, ast.src[0].src[2], lambda st:st.reshape((4, 1)), {})
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
+    self.assertLess(et, 1e3)
+
+  def test_strongly_connected_DAG(self):
+    val = 1.0
+    a = Tensor(val).realize()
+    def f(a):
+      for _ in range(24): a = Tensor.stack(a, a)[0]
+      return a.item()
+    r, et = timeit(f, a)
+    self.assertEqual(r, val)
     self.assertLess(et, 1e3)
 
   def test_no_rewrite_elementwise(self):

@@ -483,25 +483,25 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: openpilot compile 0.9.4
-      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 python examples/openpilot/compile2.py | tee openpilot_compile_0_9_4.txt
+      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python examples/openpilot/compile2.py | tee openpilot_compile_0_9_4.txt
     - name: openpilot compile 0.9.7
-      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 python examples/openpilot/compile2.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_compile_0_9_7.txt
+      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python examples/openpilot/compile2.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_compile_0_9_7.txt
     - name: validate openpilot 0.9.7
-      run: PYTHONPATH=. FLOAT16=0 IMAGE=2 QCOM=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_7.txt
+      run: PYTHONPATH=. FLOAT16=0 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_7.txt
     - name: benchmark openpilot 0.9.4
-      run: PYTHONPATH=. QCOM=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_4.txt
+      run: PYTHONPATH=. QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_4.txt
     - name: benchmark openpilot 0.9.7
-      run: PYTHONPATH=. QCOM=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_7.txt
+      run: PYTHONPATH=. QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_0_9_7.txt
     - name: benchmark openpilot w IMAGE=2 0.9.4
-      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_4.txt
+      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_4.txt
     - name: benchmark openpilot w IMAGE=2 0.9.7
-      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_7.txt
+      run: PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx | tee openpilot_image_0_9_7.txt
     - name: openpilot compile3 0.9.7
-      run: PYTHONPATH="." QCOM=1 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx
+      run: PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx
     - name: openpilot compile3 0.9.7+ tomb raider
-      run: PYTHONPATH="." QCOM=1 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/e8bea2c78ffa92685ece511e9b554122aaf1a79d/selfdrive/modeld/models/supercombo.onnx
+      run: PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/e8bea2c78ffa92685ece511e9b554122aaf1a79d/selfdrive/modeld/models/supercombo.onnx
     - name: openpilot dmonitoring compile3 0.9.7
-      run: PYTHONPATH="." QCOM=1 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/dmonitoring_model.onnx
+      run: PYTHONPATH="." QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/dmonitoring_model.onnx
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
     - uses: actions/upload-artifact@v4

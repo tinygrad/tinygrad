@@ -4,10 +4,9 @@ from collections import defaultdict
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA, dedup
 from tinygrad.helpers import NO_MEMORY_PLANNER
-from tinygrad.ops import UOps, UOp
+from tinygrad.ops import UOps, UOp, Variable, sym_infer, sint
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
-from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.renderer import Renderer, Program
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import ScheduleItem
@@ -104,12 +103,6 @@ class CompiledRunner(Runner):
       assert len(local_size) == 3, "local size must have len 3"
     return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
 
-class CustomOp(Runner):
-  def __init__(self, fxn):
-    self.fxn = fxn
-    super().__init__(self.fxn.__name__, "CUSTOM", 0, 0)
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): self.fxn(*rawbufs)
-
 class EmptyOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False): pass
@@ -170,9 +163,10 @@ class ExecItem:
   prg: Runner
   bufs: List[Optional[Buffer]]
   metadata: Optional[Tuple[Metadata, ...]] = None
-  def run(self, var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
+  def run(self, _var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
+    var_vals = {} if _var_vals is None else _var_vals
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
-    et = self.prg(bufs, var_vals if var_vals is not None else {}, wait=wait or DEBUG >= 2)
+    et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
     if do_update_stats:
       GlobalCounters.kernel_count += 1
       GlobalCounters.global_ops += (op_est:=sym_infer(self.prg.op_estimate, var_vals))
@@ -199,7 +193,6 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       kernel_type = BufferXfer
     return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
-  if si.ast.op is UOps.CUSTOM: return ExecItem(CustomOp(arg), list(si.bufs))
   if si.ast.op is UOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
   if si.ast.op is UOps.BUFFER_VIEW: return ExecItem(ViewOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {si.ast}")
