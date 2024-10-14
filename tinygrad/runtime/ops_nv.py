@@ -560,7 +560,7 @@ class NVDevice(HCQCompiled):
       for i in range(mmu_info.count):
         valo, vahi = ((pfaddr:=(pf:=mmu_info.mmuFaultInfoList[i]).faultAddress) - (1 << 30)) & ~0xffffff, round_up(pfaddr + (1 << 30), 0x1000000)
         report += [f"MMU fault: 0x{pfaddr:X} | {NV_PFAULT_FAULT_TYPE[pf.faultType]} | {NV_PFAULT_ACCESS_TYPE[pf.accessType]}"]
-        report += [f"All GPU mappings:" + "\n".join([f"\t0x{x:X} | size: 0x{y:X}" for x,y in self._debug_mappings])]
+        report += ["All GPU mappings:" + "\n".join([f"\t0x{x:X} | size: 0x{y:X}" for x,y in self._debug_mappings])]
     else:
       for i, e in enumerate(sm_errors.smErrorStateArray):
         if e.hwwGlobalEsr or e.hwwWarpEsr: report += [f"SM{i} fault: esr={e.hwwGlobalEsr} warp_esr={e.hwwWarpEsr} warp_pc={e.hwwWarpEsrPc64}"]
