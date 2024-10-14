@@ -41,6 +41,9 @@ def load_store_ptr_arithmetic(x:UOp, buf:UOp, alu:Optional[UOp]=None, const:Opti
 
 supports_half: List[Op] = [UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
 ptx_matcher = sym+PatternMatcher([
+  # invert predicate for UOps.IF
+  (UPat((UOps.IF,), name="x", allow_any_len=True, src=(UPat(dtype=dtypes.bool),)),
+   lambda x: UOp(x.op, dtype=x.dtype, src=(x.src[0].logical_not(),) + x.src[1:], arg=x.arg)),
   # bool CMPNE is XOR, bool CMPLT is XOR+AND (universal makes this slow, this is for renderer only)
   (UPat.var('x', dtype=dtypes.bool).ne(UPat.var('y')), lambda x,y: x^y),
   (UPat.var('x', dtype=dtypes.bool).lt(UPat.var('y')), lambda x,y: (x^True)&y),
@@ -56,9 +59,6 @@ ptx_matcher = sym+PatternMatcher([
   # load/store use pointer arithmetic
   (UPat((UOps.LOAD, UOps.STORE), name="x", allow_any_len=True, src=(UPat((UOps.DEFINE_LOCAL,UOps.DEFINE_GLOBAL), name="buf"),
     UPat.any(UPat.var("alu")+UPat.cvar("const"), UPat.cvar("const"), UPat.var("alu")))), load_store_ptr_arithmetic),
-    # invert predicate for UOps.IF
-  (UPat((UOps.IF,), name="x", allow_any_len=True, src=(UPat(dtype=dtypes.bool),)),
-   lambda x: UOp(x.op, dtype=x.dtype, src=(x.src[0].logical_not(),) + x.src[1:], arg=x.arg)),
 ])
 
 class PTXRenderer(Renderer):
