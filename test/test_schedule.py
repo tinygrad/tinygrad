@@ -882,7 +882,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 12, 64, 64, requires_grad=True).realize()
     x.softmax().sum().backward()
-    run_schedule(check_schedule(x.grad, 6))
+    run_schedule(check_schedule(x.grad, 4))
 
   # changed by: multireduce spec
   def test_layernorm_onelayer_fusion(self):
@@ -1597,6 +1597,16 @@ class TestIndexing(unittest.TestCase):
     ast = a.schedule()[0].ast
     new_uop, et = timeit(st_fixup, ast.src[0].src[2], lambda st:st.reshape((4, 1)), {})
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
+    self.assertLess(et, 1e3)
+
+  def test_strongly_connected_DAG(self):
+    val = 1.0
+    a = Tensor(val).realize()
+    def f(a):
+      for _ in range(24): a = Tensor.stack(a, a)[0]
+      return a.item()
+    r, et = timeit(f, a)
+    self.assertEqual(r, val)
     self.assertLess(et, 1e3)
 
   def test_no_rewrite_elementwise(self):
