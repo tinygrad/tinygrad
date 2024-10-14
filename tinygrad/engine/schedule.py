@@ -379,7 +379,6 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
     buf_uops.setdefault(buf.buffer, uop)
 
   # preschedule all buffers in realizes
-  var_vals: Dict[Variable, int] = {}
   prescheduled = [_lower_lazybuffer(outs, buf_uops, var_vals) for outs in output_groups.values()]
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
