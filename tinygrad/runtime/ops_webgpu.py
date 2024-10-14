@@ -16,6 +16,7 @@ from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 import traceback
 from enum import Enum, auto
+from typing import Literal
 
 server_ready = False
 
@@ -184,10 +185,10 @@ def read(rfile: io.BufferedReader):
   print(f"{decoded=}")
   return decoded
 
-def write(req: socket.socket, message: bytes):
+def write(req: socket.socket, message: bytes, mode: Literal['b', 't']):
   TEXT = bytes([129])
   BINARY = bytes([130])
-  req.send(BINARY)
+  req.send(BINARY if mode == 'b' else TEXT)
   length = len(message)
   if length <= 125:
     req.send(bytes([length]))
@@ -197,7 +198,7 @@ def write(req: socket.socket, message: bytes):
   else:
     req.send(bytes([127]))
     req.send(struct.pack(">Q", length))
-  req.send(message)
+  req.send(message if mode == 'b' else message.encode('utf-8'))
 
 class WebDevice:
   def __init__(self, address):
@@ -216,8 +217,8 @@ class WebDevice:
     self.rfile = req.makefile("rb", -1)
     self.req = req
 
-  def send(self, msg):
-    write(self.req, msg)
+  def send(self, msg, mode: Literal['t', 'b']):
+    write(self.req, msg, mode)
     response = read(self.rfile)
     return response
 
@@ -225,4 +226,5 @@ class WebDevice:
 if __name__ == "__main__":
   a = WebDevice((HOST, PORT))
   print("sending message")
-  a.send(b"\x06hello\x01\x01\x01")
+  a.send(b"\x06hello\x01\x01\x01", 'b')
+  a.send('{"receiver": "device", "method": "createBuffer"}', 't')

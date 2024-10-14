@@ -184,14 +184,22 @@
             const socket = new WebSocket(address);
             socket.binaryType = "arraybuffer";
             socket.addEventListener("message", async ({data}) => {
-                const view = new DataView(data);
-                const argsOffset = view.getInt8(0)
-                let selector = ''
-                for (let i = 1; i < argsOffset; i++) {
-                    selector = selector + String.fromCharCode(view.getInt8(i))
+                if (data instanceof ArrayBuffer) {
+                    console.log("Binary data")
+                    const view = new DataView(data);
+                    const argsOffset = view.getInt8(0)
+                    let selector = ''
+                    for (let i = 1; i < argsOffset; i++) {
+                        selector = selector + String.fromCharCode(view.getInt8(i))
+                    }
+                    const args = data.slice(argsOffset)
+                    console.log({selector, args})
+                    socket.send(new ArrayBuffer(10))
+                } else {
+                    console.log("text data")
+                    console.log(data)
+                    socket.send("ACK")
                 }
-                const args = data.slice(argsOffset)
-                console.log({selector, args})
             });
         }
     </script>
