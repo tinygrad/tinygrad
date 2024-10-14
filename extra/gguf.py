@@ -6,29 +6,29 @@ from tinygrad.dtype import DType, dtypes
 from tinygrad.tensor import Tensor
 
 class GGUFConverters:
+  def convert_bitcast(dtype: DType, t: Tensor, n: int): return t[:dtype.itemsize * n].bitcast(dtype)
   def dequantize_q4_0(t: Tensor, n: int):
     blocks = t[:(n//32)*18].reshape((-1, 18))
-    delta = blocks[:,:2].bitcast(dtypes.float16)
-    return (GGUFConverters._q4_to_uint8(blocks[:,2:]).cast(dtypes.int8) - 8) * delta
+    delta = blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
+    return (GGUFConverters._q_to_uint8(blocks[:,2:], 4).cast(dtypes.int8) - 8) * delta
   def dequantize_q6_K(t: Tensor, n: int):
     blocks = t[:(n//256)*210].reshape((-1, 210))
-    xl: Tensor = GGUFConverters._q4_to_uint8(blocks[:,:128].reshape((-1, 2, 64)))
-    xh: Tensor = GGUFConverters._q2_to_uint8(blocks[:,128:192].reshape((-1, 2, 32))).lshift(4)
+    xl: Tensor = GGUFConverters._q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4)
+    xh: Tensor = GGUFConverters._q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
     x = xl.bitwise_or(xh).bitcast(dtypes.int8) - 32
     scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((blocks.shape[0], 16, 16)).reshape((blocks.shape[0], 2, 128))
-    d = blocks[:,-2:].bitcast(dtypes.float16).expand((-1, 256)).reshape((-1, 2, 128))
-    return x * scales * d
+    d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256)).reshape((-1, 2, 128))
+    return d * x * scales
+  def _q_to_uint8(t: Tensor, b: int):
+    nels = 8 // b
+    shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(nels) ]), 0xff >> (8 - b)
+    return t.unsqueeze(-1).expand((*t.shape,nels)).div(shift_tensor, upcast=False).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
+  converter_map: dict[int, Callable[[Tensor, int], Tensor]] = { 0: partial(convert_bitcast, dtypes.float32),
+    1: partial(convert_bitcast, dtypes.float16), 2: dequantize_q4_0, 14: dequantize_q6_K, 16: partial(convert_bitcast, dtypes.int8),
+    17: partial(convert_bitcast, dtypes.int16), 18: partial(convert_bitcast, dtypes.int32) }
 
-  def convert_bitcast(dtype: DType, t: Tensor, n: int): return t[:dtype.itemsize * n].bitcast(dtype)
-  def _q4_to_uint8(t: Tensor):
-    return t.unsqueeze(-1).expand((*t.shape,2)).mul(Tensor([16,1], device=t.device, dtype=dtypes.uint8)).rshift(4).transpose(-1, -2).flatten(-2)
-  def _q2_to_uint8(t: Tensor):
-    return t.unsqueeze(-1).expand((*t.shape,4)).mul(Tensor([64,16,4,1], device=t.device, dtype=dtypes.uint8)).rshift(6).transpose(-1, -2).flatten(-2)
-
-  converter_map = { 0: partial(convert_bitcast, dtypes.float32), 1: partial(convert_bitcast, dtypes.float16), 2: dequantize_q4_0, 14: dequantize_q6_K,
-    16: partial(convert_bitcast, dtypes.int8), 17: partial(convert_bitcast, dtypes.int16), 18: partial(convert_bitcast, dtypes.int32) }
-
-def load_gguf(tensor: Tensor):
+def load_gguf(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
+  if tensor.dtype != dtypes.uint8: raise ValueError("GGUF tensor must have dtype uint8!")
   cursor_pos, read_buffer, rb_start, kv_data, tensor_data = 0, memoryview(bytes()), 0, {}, {}
   def read_bytes(n: int):
     nonlocal cursor_pos, read_buffer, rb_start
@@ -44,9 +44,9 @@ def load_gguf(tensor: Tensor):
     2: ("<H", 2), 3: ("<h", 2), 4: ("<I", 4), 5: ("<i", 4), 6: ("<f", 4), 7: ("<?", 1), 10: ("<Q", 8), 11: ("<q", 8), 12: ("<d", 8) }.items() }
   read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
-  if read_bytes(4) != b"GGUF": raise AssertionError("Invalid file format.")
+  if read_bytes(4) != b"GGUF": raise ValueError("Invalid GGUF file.")
   version, n_tensors, n_kv = read_int32(), read_int64(), read_int64()
-  if version not in [2, 3]: raise AssertionError("Invalid format version. Only v3 and v2 are supported!")
+  if version not in [2, 3]: raise NotImplementedError("Only GGUF v3 and v2 are supported!")
   for _ in range(n_kv):
     k, t = read_string(), read_int32()
     kv_data[k] = readers[t]()
