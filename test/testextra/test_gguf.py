@@ -12,8 +12,9 @@ np.random.seed(1337)
 block_count = 4
 
 class TestGGUF(unittest.TestCase):
-  def test_dequantization_q4_0(self): self._test_dequantization(2)
-  def test_dequantization_q6_k(self): self._test_dequantization(14)
+  def test_dequantization_q4_0(self): self._test_dequantization(ggml.GGML_TYPE_Q4_0)
+  def test_dequantization_q8_0(self): self._test_dequantization(ggml.GGML_TYPE_Q8_0)
+  def test_dequantization_q6_k(self): self._test_dequantization(ggml.GGML_TYPE_Q6_K)
   def _test_dequantization(self, ttype: int):
     type_traits = ggml.ggml_internal_get_type_traits(ttype)
     n_el, n_bytes = block_count * type_traits.blck_size, block_count * type_traits.type_size

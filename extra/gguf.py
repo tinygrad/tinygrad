@@ -7,6 +7,9 @@ from tinygrad.tensor import Tensor
 
 class GGUFConverters:
   def convert_bitcast(dtype: DType, t: Tensor, n: int): return t[:dtype.itemsize * n].bitcast(dtype)
+  def dequantize_q8_0(t: Tensor, n: int):
+    blocks = t[:(n//32)*34].reshape((-1, 34))
+    return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].cast(dtypes.int8)
   def dequantize_q4_0(t: Tensor, n: int):
     blocks = t[:(n//32)*18].reshape((-1, 18))
     delta = blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
@@ -24,8 +27,8 @@ class GGUFConverters:
     shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(nels) ]), 0xff >> (8 - b)
     return t.unsqueeze(-1).expand((*t.shape,nels)).div(shift_tensor, upcast=False).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
   converter_map: dict[int, Callable[[Tensor, int], Tensor]] = { 0: partial(convert_bitcast, dtypes.float32),
-    1: partial(convert_bitcast, dtypes.float16), 2: dequantize_q4_0, 14: dequantize_q6_K, 16: partial(convert_bitcast, dtypes.int8),
-    17: partial(convert_bitcast, dtypes.int16), 18: partial(convert_bitcast, dtypes.int32) }
+    1: partial(convert_bitcast, dtypes.float16), 16: partial(convert_bitcast, dtypes.int8), 17: partial(convert_bitcast, dtypes.int16),
+    18: partial(convert_bitcast, dtypes.int32), 2: dequantize_q4_0, 14: dequantize_q6_K, 8: dequantize_q8_0 }
 
 def load_gguf(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   if tensor.dtype != dtypes.uint8: raise ValueError("GGUF tensor must have dtype uint8!")
