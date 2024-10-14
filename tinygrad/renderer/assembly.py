@@ -57,7 +57,7 @@ ptx_matcher = sym+PatternMatcher([
   (UPat((UOps.LOAD, UOps.STORE), name="x", allow_any_len=True, src=(UPat((UOps.DEFINE_LOCAL,UOps.DEFINE_GLOBAL), name="buf"),
     UPat.any(UPat.var("alu")+UPat.cvar("const"), UPat.cvar("const"), UPat.var("alu")))), load_store_ptr_arithmetic),
     # invert predicate for UOps.IF
-  (UPat((UOps.IF), name="x", allow_any_len=True, src=(UPat.var("pred"),)),
+  (UPat((UOps.IF), name="x", allow_any_len=True, src=(UPat(),)),
    lambda x: UOp(x.op, src=(x.src[0].logical_not(),) + x.src[1:]))
 ])
 
