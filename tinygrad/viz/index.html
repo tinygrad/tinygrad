@@ -208,10 +208,12 @@
     const render = new dagreD3.render();
     render(inner, g);
   }
+
   function toPath(loc) {
     const [fp, lineno] = loc;
     return `${fp.split("/").pop()}:${lineno}`
   }
+
   var ret = {};
   var cache = {};
   var kernels = null;
@@ -230,7 +232,7 @@
     kernels.forEach((k, i) => {
       const kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "",
         style: "overflow-x: auto; cursor: initial;" });
-      const p = Object.assign(document.createElement("p"), {id: `kernel-${k[0].kernel_name}`, innerText: k[0].kernel_name ?? "UNPARENTED",
+      const p = Object.assign(document.createElement("p"), { id: `kernel-${k[0].kernel_name}`, innerText: k[0].kernel_name ?? "UNPARENTED",
         style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       k.forEach((u, j) => {
