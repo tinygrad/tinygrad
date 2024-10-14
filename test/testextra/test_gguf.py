@@ -13,13 +13,14 @@ block_count = 4
 
 class TestGGUF(unittest.TestCase):
   def test_dequantization_q4_0(self): self._test_dequantization(ggml.GGML_TYPE_Q4_0)
+  def test_dequantization_q4_1(self): self._test_dequantization(ggml.GGML_TYPE_Q4_1)
   def test_dequantization_q8_0(self): self._test_dequantization(ggml.GGML_TYPE_Q8_0)
   def test_dequantization_q6_k(self): self._test_dequantization(ggml.GGML_TYPE_Q6_K)
   def _test_dequantization(self, ttype: int):
     type_traits = ggml.ggml_internal_get_type_traits(ttype)
     n_el, n_bytes = block_count * type_traits.blck_size, block_count * type_traits.type_size
 
-    data_in = (np.random.random((n_el,)).astype(np.float32) * 100).ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+    data_in = (np.random.random((n_el,)).astype(np.float32) * 100 - 50).ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
     c_q_data, c_dq_data = (ctypes.c_char * n_bytes)(0), (ctypes.c_float * n_el)(0)
     type_traits.from_float(data_in, c_q_data, n_el)

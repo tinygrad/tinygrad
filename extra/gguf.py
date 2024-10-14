@@ -14,6 +14,10 @@ class GGUFConverters:
     blocks = t[:(n//32)*18].reshape((-1, 18))
     delta = blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
     return (GGUFConverters._q_to_uint8(blocks[:,2:], 4).cast(dtypes.int8) - 8) * delta
+  def dequantize_q4_1(t: Tensor, n: int):
+    blocks = t[:(n//32)*20].reshape((-1, 20))
+    d, m = tuple(blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
+    return GGUFConverters._q_to_uint8(blocks[:,4:], 4).cast(dtypes.int8) * d + m
   def dequantize_q6_K(t: Tensor, n: int):
     blocks = t[:(n//256)*210].reshape((-1, 210))
     xl: Tensor = GGUFConverters._q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4)
@@ -28,7 +32,7 @@ class GGUFConverters:
     return t.unsqueeze(-1).expand((*t.shape,nels)).div(shift_tensor, upcast=False).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
   converter_map: dict[int, Callable[[Tensor, int], Tensor]] = { 0: partial(convert_bitcast, dtypes.float32),
     1: partial(convert_bitcast, dtypes.float16), 16: partial(convert_bitcast, dtypes.int8), 17: partial(convert_bitcast, dtypes.int16),
-    18: partial(convert_bitcast, dtypes.int32), 2: dequantize_q4_0, 14: dequantize_q6_K, 8: dequantize_q8_0 }
+    18: partial(convert_bitcast, dtypes.int32), 2: dequantize_q4_0, 3: dequantize_q4_1, 14: dequantize_q6_K, 8: dequantize_q8_0 }
 
 def load_gguf(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   if tensor.dtype != dtypes.uint8: raise ValueError("GGUF tensor must have dtype uint8!")
