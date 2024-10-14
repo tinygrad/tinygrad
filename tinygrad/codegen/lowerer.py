@@ -6,7 +6,7 @@ from typing import List, Tuple, cast, Optional
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import variable_to_uop
 from tinygrad.dtype import dtypes
-from tinygrad.ops import KernelInfo, BinaryOps, UOp, UOps, graph_rewrite, PatternMatcher, UPat, resolve, sint
+from tinygrad.ops import KernelInfo, BinaryOps, UOp, UOps, graph_rewrite, PatternMatcher, UPat, sint
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten
 
@@ -56,8 +56,8 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   full_shape = ast.full_shape
   first_upcasted = len(full_shape)-ki.upcasted
   first_output_st: ShapeTracker = ast.src[0].st_arg
-  # if there's no reduce, this is first_upcasted
-  first_reduce = [resolve(x!=y) for x,y in zip(first_output_st.shape[:first_upcasted]+(0,), full_shape[:first_upcasted]+(1,))].index(True)
+  # if there's no reduce, this is first_upcasted. assumes reduces are at the end
+  first_reduce = min([first_upcasted]+flatten(x.axis_arg for x in ast.sparents if x.op is UOps.REDUCE_AXIS))
   local_loads = [x for x in ast.parents if x.op is UOps.LOAD and x.src[0].op is UOps.DEFINE_LOCAL]
   # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
   group_for_reduces = sum([any(j!=y for j in x) for x,y in zip(
@@ -99,6 +99,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
 def lower_reduce_axis(ctx: IndexContext, x: UOp):
   # NOTE: always using ridxs is fine here
   reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is UOps.RANGE)
+  assert all(x.op is UOps.EXPAND for x in reduce_expand), f"not all EXPANDS in {reduce_expand} for {x.axis_arg}"
   alu_op: BinaryOps = x.arg[0]
   ret = x.src[0]
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
