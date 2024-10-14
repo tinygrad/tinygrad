@@ -167,7 +167,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   elif buf.op is MetaOps.CONTIGUOUS:
     assert buf in outputs, f"{buf.op} must be writable"
     ret = src[0]
-  elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[0]))
+  elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]))
   elif buf.op is UnaryOps.CAST: ret = src[0].cast(dtype)
   elif buf.op is UnaryOps.BITCAST: ret = src[0].bitcast(dtype)
   else: ret = UOp(UOps.ALU, dtype, tuple(src), buf.op)
@@ -181,7 +181,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp]) -> Tupl
                           (out.metadata,) if out.metadata is not None else None), {}
   # create the stores
   var_vals = merge_dicts([out.st.var_vals.copy() for out in outs])
-  assign_targets = {x.srcs[1]:x for x in outs if x.op is MetaOps.ASSIGN}
+  assign_targets = {x.srcs[0]:x for x in outs if x.op is MetaOps.ASSIGN}
   cache: Dict[Tuple[LazyBuffer, ShapeTracker], UOp] = {}
   ast: List[UOp] = []
   inputs: List[LazyBuffer] = []
@@ -226,9 +226,9 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   allbufs[buf] = None
   if buf.forced_realize or buf.op in MetaOps: realizes[buf] = None
   if buf.op is MetaOps.ASSIGN:
-    assert buf.srcs[1].base is buf.srcs[1], f"assign must be to base {buf.srcs[1]}"
-    assert buf.srcs[1].realized is not None, f"assign must be already realized to schedule {buf.srcs[1]}"
-    assign_targets[buf.srcs[1]] = buf
+    assign_targets[(target:=buf.srcs[0])] = buf
+    assert target._base is None, f"assign must be to base {target}"
+    assert target.is_realized(), f"assign must be already realized to schedule {target}"
   if buf.op is MetaOps.COPY:
     assert buf.srcs[0].st.contiguous and buf.srcs[0].size == buf.srcs[0].base.size, "can only copy contig"
     realizes[buf.srcs[0].base] = None
