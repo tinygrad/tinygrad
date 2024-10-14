@@ -354,6 +354,7 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
     if DEBUG_ARANGE: print(colored(f"folding {r}", "green"))
     for tr in group: del realizes[tr]
 
+  # preschedule all buffers in realizes
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   buf_uops: Dict[Buffer, UOp] = {}
   var_vals: Dict[Variable, int] = {}
@@ -377,11 +378,9 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
     else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
     buf_uops.setdefault(buf.buffer, uop)
-
-  # preschedule all buffers in realizes
   prescheduled = [_lower_lazybuffer(outs, buf_uops, var_vals) for outs in output_groups.values()]
-  schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
+  schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
   graph: DefaultDict[LBScheduleItem, List[LBScheduleItem]] = defaultdict(list)
   in_degree: DefaultDict[LBScheduleItem, int] = defaultdict(int)
   for lsi in prescheduled:
