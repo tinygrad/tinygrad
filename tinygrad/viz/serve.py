@@ -67,9 +67,9 @@ def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
   replaces[base] = ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
   return ret
 @functools.lru_cache(None)
-def _prg(k:Optional[Kernel]) -> Optional[str]: return k.to_program().src if isinstance(k, Kernel) else None
-def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
-  g = GraphRewriteDetails(**asdict(metadata), graphs=[_uop_to_json(ctx.sink)], diffs=[], changed_nodes=[], kernel_code=_prg(k))
+def _prg(k:Optional[Kernel]) -> List[Optional[str]]: return [prg.src for prg in k.to_program()] if isinstance(k, Kernel) else [None]
+def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata) -> List[GraphRewriteDetails]:
+  gs = [GraphRewriteDetails(**asdict(metadata), graphs=[_uop_to_json(ctx.sink)], diffs=[], changed_nodes=[], kernel_code=prg) for prg in _prg(k)]
   replaces: Dict[UOp, UOp] = {}
   sink = ctx.sink
   for i,(u0,u1,upat) in enumerate(ctx.rewrites):
@@ -80,10 +80,11 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
     if new_sink is sink:
       raise AssertionError(f"rewritten sink wasn't rewritten! {i} {upat.location}")
     # update ret data
-    g.changed_nodes.append([id(x) for x in u1.sparents if x.op is not UOps.CONST])
-    g.diffs.append(list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())))
-    g.graphs.append(_uop_to_json(sink:=new_sink))
-  return g
+    for g in gs:
+      g.changed_nodes.append([id(x) for x in u1.sparents if x.op is not UOps.CONST])
+      g.diffs.append(list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())))
+      g.graphs.append(_uop_to_json(sink:=new_sink))
+  return gs
 
 # ** HTTP server
 
@@ -94,19 +95,19 @@ class Handler(BaseHTTPRequestHandler):
       self.send_header("Content-type", "text/html")
       self.end_headers()
       with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f:
-        ret = f.read()
+        rets = [f.read()]
     elif url.path == "/kernels":
       self.send_response(200)
       self.send_header("Content-type", "application/json")
       self.end_headers()
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
-        ret = json.dumps(asdict(get_details(*kernels[int(qkernel[0])][int(query["idx"][0])]))).encode()
-      else: ret = json.dumps([list(map(lambda x:asdict(x[2]), v)) for v in kernels]).encode()
+        rets = [json.dumps(asdict(dets)).encode() for dets in get_details(*kernels[int(qkernel[0])][int(query["idx"][0])])]
+      else: rets = [json.dumps([list(map(lambda x:asdict(x[2]), v)) for v in kernels]).encode()]
     else:
       self.send_response(404)
-      ret = b""
-    return self.wfile.write(ret)
+      rets = [b""]
+    return [self.wfile.write(ret) for ret in rets]
 
 # ** main loop
 

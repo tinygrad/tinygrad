@@ -1,5 +1,6 @@
 import unittest, contextlib
 import numpy as np
+from test.helpers import unpack1
 from tinygrad import Tensor, GlobalCounters, dtypes, nn
 from tinygrad.helpers import CI, Context, getenv
 from tinygrad.engine.realize import run_schedule
@@ -16,7 +17,7 @@ class TestArange(unittest.TestCase):
     k = Kernel(sched[-1].ast)
     if opts is not None:
       for o in opts: k.apply_opt(o)
-    p = k.to_program()
+    p = unpack1(k.to_program())
     print(p.name)
     #print(p.src)
     ExecItem(CompiledRunner(p), [tt.lazydata.buffer]).run()

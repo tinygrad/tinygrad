@@ -141,19 +141,19 @@ class BufferXfer(BufferCopy):
 
 # **************** method cache ****************
 
-method_cache: Dict[Tuple[str, bytes, int, int, bool], CompiledRunner] = {}
-def get_runner(dname:str, ast:UOp) -> CompiledRunner:
+method_cache: Dict[Tuple[str, bytes, int, int, bool], List[CompiledRunner]] = {}
+def get_runner(dname:str, ast:UOp) -> List[CompiledRunner]:
   ckey = (dname, ast.key, BEAM.value, NOOPT.value, False)
   if cret:=method_cache.get(ckey): return cret
   bkey = (dname.split(":")[0], ast.key, BEAM.value, NOOPT.value, True)
-  if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
+  if brets:=method_cache.get(bkey):
+    method_cache[ckey] = ret = [CompiledRunner(replace(bret.p, dname=dname), bret.lib) for bret in brets]
   else:
-    prg: Program = get_kernel(Device[dname].renderer, ast).to_program()
+    prgs: List[Program] = get_kernel(Device[dname].renderer, ast).to_program()
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
-      return UOpsFuzzerRunner(replace(prg, dname=dname))
-    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=dname))
+      return [UOpsFuzzerRunner(replace(prg, dname=dname)) for prg in prgs]
+    method_cache[ckey] = method_cache[bkey] = ret = [CompiledRunner(replace(prg, dname=dname)) for prg in prgs]
   return ret
 
 # **************** lowering functions ****************
@@ -182,22 +182,22 @@ class ExecItem:
       self.prg.first_run = False
     return et
 
-def lower_schedule_item(si:ScheduleItem) -> ExecItem:
+def lower_schedule_item(si:ScheduleItem) -> List[ExecItem]:
   assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is UOps.COPY
   if si.ast.op is UOps.SINK:
-    runner = get_runner(si.outputs[0].device, si.ast)
-    return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
+    runners = get_runner(si.outputs[0].device, si.ast)
+    return [ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata) for runner in runners]
   out, arg = si.outputs[0], si.ast.arg
   if si.ast.op is UOps.COPY:
     kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       kernel_type = BufferXfer
-    return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
-  if si.ast.op is UOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
-  if si.ast.op is UOps.BUFFER_VIEW: return ExecItem(ViewOp(out), list(si.bufs))
+    return [ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))]
+  if si.ast.op is UOps.EMPTY: return [ExecItem(EmptyOp(out), list(si.bufs))]
+  if si.ast.op is UOps.BUFFER_VIEW: return [ExecItem(ViewOp(out), list(si.bufs))]
   raise RuntimeError(f"don't know how to lower {si.ast}")
 
-def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
+def lower_schedule(schedule:List[ScheduleItem]) -> Generator[List[ExecItem], None, None]:
   while len(schedule):
     si = schedule.pop(0)
     try: yield lower_schedule_item(si)
@@ -213,9 +213,9 @@ def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, Non
 capturing: List = []  # put classes with an add method in here
 
 def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None, do_update_stats=True):
-  for ei in lower_schedule(schedule):
-    if len(capturing) and CAPTURING: capturing[0].add(ei)
-    ei.run(var_vals, do_update_stats=do_update_stats)
+  for eis in lower_schedule(schedule):
+    if len(capturing) and CAPTURING: list(map(capturing[0].add, eis))
+    for ei in eis: ei.run(var_vals, do_update_stats=do_update_stats)
 
 # **************** memory planning ****************
 

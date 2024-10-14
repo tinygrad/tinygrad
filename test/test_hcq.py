@@ -6,6 +6,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_runner, CompiledRunner
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
+from test.helpers import unpack1
 
 MOCKGPU = getenv("MOCKGPU")
 
@@ -18,7 +19,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
 
-    TestHCQ.runner = get_runner(TestHCQ.d0.dname, si.ast)
+    TestHCQ.runner = unpack1(get_runner(TestHCQ.d0.dname, si.ast))
     TestHCQ.b.lazydata.buffer.allocate()
 
     TestHCQ.kernargs_ba_ptr = TestHCQ.runner.clprg.fill_kernargs([TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf])
@@ -147,7 +148,7 @@ class TestHCQ(unittest.TestCase):
     k = Kernel(si.ast, opts=TestHCQ.d0.renderer)
     for i in range(3): k.apply_opt(Opt(op=OptOps.LOCAL, axis=0, amt=3))
 
-    runner = CompiledRunner(k.to_program())
+    runner = CompiledRunner(unpack1(k.to_program()))
 
     zb = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferOptions(cpu_access=True, nolru=True)).ensure_allocated()
     zt = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferOptions(cpu_access=True, nolru=True)).ensure_allocated()
@@ -426,7 +427,7 @@ class TestHCQ(unittest.TestCase):
   def test_memory_barrier(self):
     a = Tensor([0, 1], device=Device.DEFAULT, dtype=dtypes.int8).realize()
     b = a + 1
-    runner = get_runner(TestHCQ.d0.dname, create_schedule([b.lazydata])[-1].ast)
+    runner = unpack1(get_runner(TestHCQ.d0.dname, create_schedule([b.lazydata])[-1].ast))
 
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
     buf2 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferOptions(cpu_access=True, nolru=True)).ensure_allocated()

@@ -2,6 +2,7 @@ import unittest
 from tinygrad import Device, Tensor
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.runtime.ops_amd import AMDDevice
+from test.helpers import unpack1
 
 class TestAMD(unittest.TestCase):
   @classmethod
@@ -10,7 +11,7 @@ class TestAMD(unittest.TestCase):
     TestAMD.a = Tensor([0.,1.], device="AMD").realize()
     TestAMD.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
-    TestAMD.d0_runner = TestAMD.d0.get_runner(*si.ast)
+    TestAMD.d0_runner = unpack1(TestAMD.d0.get_runner(*si.ast))
     TestAMD.b.lazydata.buffer.allocate()
 
   def test_amd_ring_64bit_doorbell(self):

@@ -12,7 +12,7 @@ from tinygrad.engine.schedule import create_schedule, reduceop_fusor
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
-from test.helpers import is_dtype_supported, assert_equiv_uops
+from test.helpers import is_dtype_supported, assert_equiv_uops, unpack1
 
 def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
 
@@ -240,7 +240,7 @@ class TestConstantFolding(unittest.TestCase):
     t = Tensor(1, dtype=dtypes.float).bitcast(dtypes.int)
     si = create_schedule([t.lazydata])
     assert len(si) == 1
-    ji = lower_schedule_item(si[-1])
+    ji = unpack1(lower_schedule_item(si[-1]))
     assert any(uop.op is UOps.BITCAST for uop in ji.prg.p.uops), f"{[uop.op for uop in ji.prg.p.uops]} does not contain bitcast"
 
 class TestGatedStoreRewrite(unittest.TestCase):

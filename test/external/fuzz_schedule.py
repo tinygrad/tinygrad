@@ -70,9 +70,9 @@ def fuzz_schedule(outs:List[LazyBuffer]):
           raise e
 
 def _exec_si(si:ScheduleItem, seed:int):
-  ei = lower_schedule_item(si)
-  if len(capturing): capturing[0].add(ei)
-  ei.run()
+  eis = lower_schedule_item(si)
+  if len(capturing): list(map(capturing[0].add, eis))
+  for ei in eis: ei.run()
 
 T = TypeVar("T")
 def find_all_toposorts(graph:DefaultDict[T, List[T]], in_degree:Union[DefaultDict[T, int], Dict[T, int]]) -> List[Tuple[T, ...]]:

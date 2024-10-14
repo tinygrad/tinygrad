@@ -9,6 +9,7 @@ from tinygrad.device import Compiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import DEBUG, ansilen, getenv, colored, TRACEMETA
+from test.helpers import unpack1
 
 def get_sched_resnet():
   mdl = ResNet50()
@@ -109,7 +110,7 @@ if __name__ == "__main__":
     choices = []
     for lin, nm in lins:
       tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
-      ops = (prg:=lin.to_program()).op_estimate
+      ops = (prg:=unpack1(lin.to_program())).op_estimate
       gflops = sym_infer(ops, {k:k.min for k in lin.ast.variables()})*1e-9/tm
       choices.append((tm, gflops, lin, prg, nm))
 

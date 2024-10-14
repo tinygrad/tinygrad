@@ -17,7 +17,7 @@ from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, reduceop_fusor, st_fixup
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
-from test.helpers import ast_const, is_dtype_supported, Context, timeit
+from test.helpers import ast_const, is_dtype_supported, Context, timeit, unpack1
 from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
@@ -1696,7 +1696,7 @@ class TestIndexing(unittest.TestCase):
     sink = graph_rewrite(sink, reduceop_fusor)
     # verify output
     k = Kernel(sink)
-    p = k.to_program()
+    p = unpack1(k.to_program())
     a = Tensor.randint(32, 32).realize()
     b = Tensor.empty((), dtype=dtypes.int).realize()
     CompiledRunner(p).exec([b.lazydata.buffer, a.lazydata.buffer])
@@ -1719,7 +1719,7 @@ class TestIndexing(unittest.TestCase):
     sink = graph_rewrite(sink, reduceop_fusor)
     # verify output
     k = Kernel(sink)
-    p = k.to_program()
+    p = unpack1(k.to_program())
     b = Tensor.empty((1,), dtype=dtypes.int).realize()
     CompiledRunner(p).exec([b.lazydata.buffer, a.lazydata.buffer])
     np.testing.assert_equal(b.numpy(), expected_out)
@@ -1742,7 +1742,7 @@ class TestIndexing(unittest.TestCase):
     sink = graph_rewrite(sink, reduceop_fusor)
     # verify output
     k = Kernel(sink)
-    p = k.to_program()
+    p = unpack1(k.to_program())
     c = Tensor.empty((1,), dtype=dtypes.int).realize()
     CompiledRunner(p).exec([c.lazydata.buffer, a.lazydata.buffer, b.lazydata.buffer])
     np.testing.assert_equal(c.numpy(), expected_out)

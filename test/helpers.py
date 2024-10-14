@@ -1,5 +1,5 @@
 import sys, time
-from typing import Callable, Optional, Tuple, TypeVar
+from typing import Callable, Optional, Tuple, TypeVar, List, Any
 import numpy as np
 from test.external.process_replay.helpers import print_diff
 from tinygrad import Tensor, Device, dtypes
@@ -71,3 +71,7 @@ def timeit(fxn:Callable[..., T], *args, **kwargs) -> Tuple[T, float]:
   st = time.perf_counter_ns()
   ret = fxn(*args, **kwargs)
   return ret, (time.perf_counter_ns()-st)*1e-6
+
+def unpack1(l:List) -> Any:
+  assert len(l) == 1
+  return l[0]

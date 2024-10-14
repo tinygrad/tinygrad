@@ -105,8 +105,8 @@ class TestImageDType(unittest.TestCase):
       loss = x.image_dot(w1).image_dot(w2).float().max()
       loss.backward()
       sched = w1.grad.schedule()
-      for s,ei in zip(sched, lower_schedule(sched[:])):
-        ei.run()
+      for s,eis in zip(sched, lower_schedule(sched[:])):
+        for ei in eis: ei.run()
         if s.outputs[0].dtype is dtypes.float:
           lst = s.outputs[0].as_buffer().cast("f").tolist()
           print(lst)

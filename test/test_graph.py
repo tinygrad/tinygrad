@@ -1,6 +1,7 @@
 import numpy as np
 import unittest, ctypes
 
+from test.helpers import unpack1
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
@@ -22,7 +23,7 @@ def helper_exec_op(device, outbuf, inbufs):
       for i in range(1, len(inbufs)): s = s.xor(fst[i])
 
       si = create_schedule([s.lazydata])[-1]
-      prg = get_runner(device, si.ast)
+      prg = unpack1(get_runner(device, si.ast))
     cached_prgs[(device, len(inbufs))] = prg
 
   return ExecItem(cached_prgs[(device, len(inbufs))], [outbuf] + inbufs)

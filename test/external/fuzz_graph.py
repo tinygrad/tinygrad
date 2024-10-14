@@ -7,6 +7,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import ExecItem, BufferXfer, get_runner
 from tinygrad.engine.jit import apply_graph_to_jit
+from test.helpers import unpack1
 
 BUF_LEN = getenv("BUF_LEN", 128)
 
@@ -20,7 +21,7 @@ def gen_prg(device, inputs_cnt):
     for i in range(1, inputs_cnt): s = s.xor(fst[i])
 
     si = create_schedule([s.lazydata])[-1]
-    prg = get_runner(device, si.ast)
+    prg = unpack1(get_runner(device, si.ast))
   cached_prgs[(device, inputs_cnt)] = prg
   return prg
 

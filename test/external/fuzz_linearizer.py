@@ -57,13 +57,13 @@ def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None):
 
   # TODO: images needs required_optimization
   try:
-    prg = CompiledRunner(lin.to_program())
+    prgs = [CompiledRunner(prg) for prg in lin.to_program()]
   except Exception:
     traceback.print_exc()
     return "COMPILE_ERROR"
 
   try:
-    prg(rawbufs, var_vals, wait=True)
+    [prg(rawbufs, var_vals, wait=True) for prg in prgs]
   except Exception:
     traceback.print_exc()
     return "EXEC_ERROR"

@@ -62,9 +62,10 @@ class TestMultiTensor(unittest.TestCase):
     out = (X + X)
     sched = create_schedule(out.lazydata.lbs)
     names = []
-    for si, ei in zip(sched[:], lower_schedule(sched)):
-      if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
-      ei.run()
+    for si, eis in zip(sched[:], lower_schedule(sched)):
+      for ei in eis:
+        if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
+        ei.run()
     assert names[-2] == names[-1], "function was relinearized"
 
   def test_sharded_memory(self):

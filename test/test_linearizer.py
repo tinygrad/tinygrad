@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from dataclasses import replace
 
-from test.helpers import ast_const
+from test.helpers import ast_const, unpack1
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
 from tinygrad.ops import UOp, UOps, BinaryOps, TernaryOps, UnaryOps
@@ -67,9 +67,10 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(4), Tensor.randn(4)
     np_a, np_b = a.numpy(), b.numpy()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
-    lowered = list(lower_schedule(create_schedule([c.lazydata])))
-    for ei in lowered: ei.run()
-    rawbufs = lowered[-1].bufs
+    lowered_list = list(lower_schedule(create_schedule([c.lazydata])))
+    for eis in lowered_list:
+      for ei in eis: ei.run()
+    rawbufs = lowered_list[-1][-1].bufs
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.base.realized, b.lazydata.base.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
@@ -386,7 +387,7 @@ class TestLinearizer(unittest.TestCase):
 
     ast = UOp(UOps.SINK, src=(store0, store1))
     k = Kernel(ast)
-    prg = CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
+    prg = CompiledRunner(replace(unpack1(k.to_program()), dname=Device.DEFAULT))
     inbufs = [x.lazydata.base.buffer]
     outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
     prg.exec(outbufs+inbufs)
@@ -1087,7 +1088,7 @@ class TestLinearizer(unittest.TestCase):
         assert len([uop for uop in k.uops if uop.op is UOps.WMMA]) > 0, "tensor core not triggered"
         assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
 
-        prg = CompiledRunner(k.to_program())
+        prg = CompiledRunner(unpack1(k.to_program()))
         real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=_to_np_dtype(real_bufs[0].dtype)).data) # Zero to check that all values are filled
         prg.exec(real_bufs)
         result = np.frombuffer(real_bufs[0].as_buffer(), _to_np_dtype(real_bufs[0].dtype))
@@ -1783,7 +1784,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:List[Buffer], opts=[]
   lins: List[Kernel] = []
   outbufs = real_bufs[:len(realized_ast.src)]
 
-  def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
+  def get_prg(k:Kernel): return CompiledRunner(replace(unpack1(k.to_program()), dname=Device.DEFAULT))
 
   def check_opt(opts, create_k, expected_color_size):
     k = create_k()

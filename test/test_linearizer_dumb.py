@@ -3,7 +3,7 @@
 # like test_linearizer_failures, but they don't have to fail
 
 import unittest
-from test.helpers import ast_const
+from test.helpers import ast_const, unpack1
 from tinygrad import Device, dtypes
 from tinygrad.dtype import PtrDType
 from tinygrad.ops import UOp, UOps, BinaryOps, TernaryOps
@@ -39,7 +39,7 @@ class TestLinearizerDumb(unittest.TestCase):
     k = Kernel(ast, opts=Device["METAL"].renderer)
     k.required_optimizations()
     for opt in opts: k.apply_opt(opt)
-    prg = k.to_program()
+    prg = unpack1(k.to_program())
     print(prg.src)
     Device[Device.DEFAULT].compiler.compile_cached(prg.src)
     gate_count = len([x for x in prg.src.splitlines() if "if" in x])
@@ -74,7 +74,7 @@ class TestLinearizerDumb(unittest.TestCase):
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     k.required_optimizations()
     for opt in opts: k.apply_opt(opt)
-    prg = k.to_program()
+    prg = unpack1(k.to_program())
     print(prg.src)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
@@ -91,7 +91,7 @@ class TestLinearizerDumb(unittest.TestCase):
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     k.required_optimizations()
     for opt in opts: k.apply_opt(opt)
-    prg = k.to_program()
+    prg = unpack1(k.to_program())
     print(prg.src)
     if_uops = [u for u in k.uops if u.op is UOps.IF]
     self.assertIn(len(if_uops), {1,3})
@@ -126,7 +126,7 @@ class TestLinearizerDumb(unittest.TestCase):
                   UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2, src=()),
                   UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4096, 32000, 1), strides=(1, 4096, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),)),))
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-    prg = k.to_program()
+    prg = unpack1(k.to_program())
     print(prg.src)
 
   # from process replay https://github.com/tinygrad/tinygrad/actions/runs/10389229290/job/28766762085#step:18:6490
@@ -156,7 +156,7 @@ class TestLinearizerDumb(unittest.TestCase):
     opts = [Opt(op=OptOps.UNROLL, axis=0, amt=0), Opt(op=OptOps.LOCAL, axis=0, amt=3)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     for opt in opts: k.apply_opt(opt)
-    prg = k.to_program()
+    prg = unpack1(k.to_program())
     print(prg.src)
     load_idxs = [x.src[1] for x in k.uops if x.op is UOps.LOAD and x.src[0].arg == 3]
     assert load_idxs[0] < load_idxs[1], f"first loaded idx {load_idxs[0].arg} then {load_idxs[1].arg}!"
@@ -187,7 +187,7 @@ class TestLinearizerDumb(unittest.TestCase):
     opts = [Opt(op=OptOps.UNROLL, axis=0, amt=0)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     for opt in opts: k.apply_opt(opt)
-    prg = k.to_program()
+    prg = unpack1(k.to_program())
     print(prg.src)
     load_idxs = [x.src[1] for x in k.uops if x.op is UOps.LOAD and x.src[0].arg == 2]
     assert load_idxs[0] < load_idxs[1], f"first loaded idx {load_idxs[0].arg} then {load_idxs[1].arg}!"
@@ -211,7 +211,7 @@ class TestLinearizerDumb(unittest.TestCase):
     opts = [Opt(op=OptOps.UPCAST, axis=3, amt=0), Opt(op=OptOps.UPCAST, axis=2, amt=0)]
     k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
     for opt in opts: k.apply_opt(opt)
-    prg = k.to_program()
+    prg = unpack1(k.to_program())
     print(prg.src)
     store_idxs = [x.src[1] for x in k.uops if x.op is UOps.STORE]
     for i in range(len(store_idxs) - 1):

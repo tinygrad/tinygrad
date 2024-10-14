@@ -1,7 +1,7 @@
 import unittest
 import time
 import numpy as np
-from test.helpers import assert_equiv_uops
+from test.helpers import assert_equiv_uops, unpack1
 from tinygrad import Tensor, dtypes
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item, run_schedule
@@ -28,7 +28,7 @@ class TestFusionOp(unittest.TestCase):
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
     sched = create_schedule([a.lazydata])
-    ei = lower_schedule_item(sched[-1])
+    ei = unpack1(lower_schedule_item(sched[-1]))
     self.assertLess(time.perf_counter()-st, 2.0)
     assert len(ei.prg.p.src.splitlines()) < 250
 
