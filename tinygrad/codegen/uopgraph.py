@@ -123,20 +123,12 @@ def idx_given_valid(valid:UOp, idx:UOp) -> Optional[UOp]:
     candidates.append([(uop, UOp.variable("fake", uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1], uop.dtype))])
 
     for candidate in candidates:
+      newidxs = [replace_uop(graph_rewrite(replace_uop(idx, X, newX), sym), newX, X) for X,newX in candidate]
       if idx.op is UOps.VECTORIZE:
-        newidxs: List[List[UOp]] = [[], []]
-        for X,newX in candidate:
-          newidx = replace_uop(graph_rewrite(replace_uop(idx, X, newX), sym), newX, X)
-          newidxs[0].append(newidx.src[0])
-          newidxs[1].append(newidx.src[1])
-
         # if every branch in candidate gives the same simplified output, we can rewrite the idx
-        if all_same(newidxs[0]): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
-        if all_same(newidxs[1]): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
-      else:
-        buf_newidxs = []
-        for X,newX in candidate: buf_newidxs.append(replace_uop(graph_rewrite(replace_uop(idx, X, newX), sym), newX, X))
-        if all_same(buf_newidxs): idx = buf_newidxs[0]
+        if all_same([idxs.src[0] for idxs in newidxs]): idx = idx.replace(src=(newidxs[0].src[0], idx.src[1]))
+        if all_same([idxs.src[1] for idxs in newidxs]): idx = idx.replace(src=(idx.src[0], newidxs[0].src[1]))
+      elif all_same(newidxs): idx = newidxs[0]
 
   return idx
 
@@ -146,8 +138,7 @@ def simplify_buffer_load(load:UOp):
   try:
     if (idx:=idx_given_valid(valid, start_idx)) is None: return load.replace(src=(buf, start_idx, invalid_val, valid.const_like(False)))
   except ValueError: return None
-  if idx.key == start_idx.key: return None
-  return load.replace(src=((buf, idx, invalid_val, valid)))
+  return None if idx is start_idx else load.replace(src=((buf, idx, invalid_val, valid)))
 
 def simplify_image_load(load:UOp):
   if not isinstance(buf_dtype:=load.src[0].dtype, ImageDType) or len(load.src) != 4: return None
