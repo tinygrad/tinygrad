@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal
-from typing import Tuple, List, Any, cast, Union, Dict, Type
+from typing import Set, Tuple, List, Any, cast, Union, Dict, Type
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command
 from tinygrad.runtime.support.hcq import HCQArgsState, HCQProgram, HCQSignal
@@ -378,6 +378,7 @@ class NVDevice(HCQCompiled):
       nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made:=nv_gpu.NVOS00_PARAMETERS(hRoot=self.root, hObjectParent=self.device, hObjectOld=mem.hMemory))
       if made.status != 0: raise RuntimeError(f"_gpu_free returned {get_error_str(made.status)}")
 
+    self._debug_mappings.remove((mem.va_addr, mem.size))
     uvm.free(self.fd_uvm, base=mem.va_addr, length=mem.size)
     if mem.has_cpu_mapping: libc.munmap(mem.va_addr, mem.size)
 
@@ -386,6 +387,7 @@ class NVDevice(HCQCompiled):
     attrs = (nv_gpu.struct_c__SA_UvmGpuMappingAttributes*256)(nv_gpu.struct_c__SA_UvmGpuMappingAttributes(gpuUuid=self.gpu_uuid, gpuMappingType=1))
 
     # NOTE: va_addr is set to make rawbufs compatable with HCQBuffer protocol.
+    self._debug_mappings.add((va_base, size))
     return uvm.map_external_allocation(self.fd_uvm, base=va_base, length=size, rmCtrlFd=self.fd_ctl, hClient=self.root, hMemory=mem_handle,
       gpuAttributesCount=1, perGpuAttributes=attrs, va_addr=va_base, size=size, mapped_gpu_ids=[self.gpu_uuid], has_cpu_mapping=has_cpu_mapping)
 
@@ -437,6 +439,7 @@ class NVDevice(HCQCompiled):
     self.gpu_mmio = to_mv(self._gpu_map_to_cpu(self.usermode, mmio_sz:=0x10000, flags=2), mmio_sz).cast("I")
 
     self._setup_nvclasses()
+    self._debug_mappings: Set[Tuple[int, int]] = set()
 
     rmctrl.perf_boost(self.fd_ctl, self.root, self.subdevice, duration=0xffffffff, flags=((nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CUDA_YES << 4) | \
       (nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CUDA_PRIORITY_HIGH << 6) | (nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CMD_BOOST_TO_MAX << 0)))
@@ -555,16 +558,9 @@ class NVDevice(HCQCompiled):
     if sm_errors.mmuFault.valid:
       mmu_info = rmctrl.debug_read_mmu_fault_info(self.fd_ctl, self.root, self.debugger)
       for i in range(mmu_info.count):
-        valo, vahi = ((pfaddr:=(pf:=mmu_info.mmuFaultInfoList[i]).faultAddress) - (1 << 30)) & ~0xffffff, round_up(pfaddr + (1 << 30), 0x1000000)
-        report += [f"MMU fault: 0x{pfaddr:X} | {NV_PFAULT_FAULT_TYPE[pf.faultType]} | {NV_PFAULT_ACCESS_TYPE[pf.accessType]}"]
-
-        # Scan mapped regions (1GB around the faulted area).
-        report += [f"Valid mapping on range 0x{valo:X} - 0x{vahi:X}:"]
-        while valo != vahi:
-          mappings = rmctrl.get_mappings(self.fd_ctl, self.root, self.debugger, vaLo=valo, vaHi=vahi)
-          for i in range(mappings.count): report += [f"\t0x{mappings.opsBuffer[-1].gpuVA:X} | size: 0x{mappings.opsBuffer[-1].size:X}"]
-          if mappings.hasMore: valo = mappings.opsBuffer[-1].gpuVA + mappings.opsBuffer[-1].size
-          else: break
+        pfinfo = mmu_info.mmuFaultInfoList[i]
+        report += [f"MMU fault: 0x{pfinfo.faultAddress:X} | {NV_PFAULT_FAULT_TYPE[pfinfo.faultType]} | {NV_PFAULT_ACCESS_TYPE[pfinfo.accessType]}"]
+        report += ["All GPU mappings:" + "\n".join([f"\t0x{x:X} | size: 0x{y:X}" for x,y in self._debug_mappings])]
     else:
       for i, e in enumerate(sm_errors.smErrorStateArray):
         if e.hwwGlobalEsr or e.hwwWarpEsr: report += [f"SM{i} fault: esr={e.hwwGlobalEsr} warp_esr={e.hwwWarpEsr} warp_pc={e.hwwWarpEsrPc64}"]
