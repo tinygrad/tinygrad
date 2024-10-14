@@ -440,7 +440,12 @@ class UOp(MathTrait):
     assert self.op == UOps.BUFFER, f"no buffer on {self.op}"
     buffers[self] = ret = Buffer(self.arg[0], self.arg[1], self.dtype)
     return ret
+  @property
+  def realized(self): return buffers.get(self)
   def is_realized(self): return self in buffers
+
+  # TODO: make CONTIGUOUS still work
+  forced_realize = False
 
   buffer_num = -1
   @staticmethod
@@ -471,7 +476,7 @@ class UOp(MathTrait):
 
   # hacks for srcs deleting
   @property
-  def srcs(self): return None
+  def srcs(self): return self.src
   @srcs.deleter
   def srcs(self): pass
 
