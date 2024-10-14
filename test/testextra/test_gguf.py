@@ -4,7 +4,6 @@ import unittest
 from extra.gguf import GGUFConverters
 from tinygrad.tensor import Tensor
 import ggml
-import ggml.utils
 
 params = ggml.ggml_init_params(mem_size=0, mem_buffer=None)
 ctx = ggml.ggml_init(params)
