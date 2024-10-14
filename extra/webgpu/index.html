@@ -10,6 +10,7 @@
         <h1>Web GPU</h1>
         <p id="gpuInfo"></p>
         <p id="status"></p>
+        <button onclick="wsInit()">Connect</button>
     </div>
     <script>
         const address = "ws://localhost:8766"
@@ -183,11 +184,8 @@
             const socket = new WebSocket(address);
             socket.binaryType = "arraybuffer";
             socket.addEventListener("message", async ({data}) => {
-                const name = decode(data.slice(10))
-                const fn = lookup[fn]
-                const decoded = decode(data.slice(11))
-                const result = await fn.call(decoded)
-                socket.send(result)
+                console.log("message received", data)
+                socket.send("Reply from client")
             });
         }
     </script>
