@@ -44,18 +44,15 @@ class LBScheduleItem:
   @property
   def inputs(self) -> Tuple[LazyBuffer, ...]: return self.bufs[len(self.ast.src):] if self.ast.op is UOps.SINK else self.bufs[1:]
 
-# *** UOp with SWIZZLE (movementops) rewriting to UOp we can index ***
+# *** UOp with VIEW (movementops) rewriting to UOp we can index ***
 
 # ** helpers for doing movementops on uops
 
 def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], cache:Dict[UOp, UOp]) -> UOp:
   if (n:=cache.get(u)) is not None: return n
-  if u.op is UOps.VIEW:
-    new_st = apply_to_st(u.arg)
-    return u if u.arg == new_st else UOp(UOps.VIEW, dtypes.void, (), new_st)
+  if u.op is UOps.VIEW: return u.replace(arg=apply_to_st(u.arg))
   if len(u.src) == 0 or (u.st is not None and u.st == apply_to_st(u.st)): return u
-  new_srcs = tuple(st_fixup(x, apply_to_st, cache) for x in u.src)
-  cache[u] = ret = u if new_srcs == u.src else UOp(u.op, u.dtype, new_srcs, u.arg)
+  cache[u] = ret = u.replace(src=tuple(st_fixup(x, apply_to_st, cache) for x in u.src))
   return ret
 
 def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:
