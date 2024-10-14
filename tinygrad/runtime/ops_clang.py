@@ -9,12 +9,16 @@ linker_script = '''
 SECTIONS {
     .text : {
         . = 0x0;
+        *(.tinygrad);
         *(.text);
         *(.rodata*);
     }
     /DISCARD/ : {
-      *(.*);
-    } : phdr
+        *(.dynstr*);
+        *(.rela.dyn*);
+        *(.note*);
+        *(.dynamic*);
+    }
 }
 '''
 
@@ -26,9 +30,9 @@ class ClangCompiler(Compiler):
     with tempfile.NamedTemporaryFile(delete=True) as file, tempfile.NamedTemporaryFile(delete=True) as linker_file:
       pathlib.Path(linker_file.name).write_text(linker_script)
       subprocess.check_output([
-        'clang', *self.args, '-O2', '-Wall', '-Werror', '-x', 'c', '-', '-fmerge-all-constants',
-        '-ffreestanding', '-fPIE', '-fPIC', '-nostdlib', '-', '-o', pathlib.Path(file.name),
-        '-T', pathlib.Path(linker_file.name)
+        'clang', *self.args, '-O2', '-Wall', '-Werror', '-Wno-gcc-compat', '-x', 'c', '-',
+        '-fPIE', '-fPIC', '-static', '-', '-o', pathlib.Path(file.name),
+        '-T', pathlib.Path(linker_file.name), '-Wl,-w', '-lc', '-lm', '-nostdlib'
       ], input=src.encode('utf-8'))
       raw_function_bytes = subprocess.check_output([
         'objcopy', '-O', 'binary', '--only-section=.text', pathlib.Path(file.name), '/dev/stdout'])
