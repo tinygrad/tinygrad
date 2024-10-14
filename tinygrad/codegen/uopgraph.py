@@ -539,13 +539,13 @@ reducer = PatternMatcher([
 ])
 
 def fixup_alus(alu:UOp) -> Optional[UOp]:
-  if alu.arg in (BinaryOps.ADD, BinaryOps.MUL) and all(s.dtype in (dtypes.int32, dtypes.int64) for s in alu.src):
-    return UOp(alu.op, alu.dtype, (s.cast(alu.dtype) for s in alu.src), alu.arg)
+  if alu.arg in (BinaryOps.ADD, BinaryOps.MUL) and (set(s.dtype for s in alu.src) == (dtypes.int32) or set(s.dtype for s in alu.src) == (dtypes.int32, dtypes.int64)):
+    return UOp(alu.op, alu.dtype, tuple(s.cast(alu.dtype) for s in alu.src), alu.arg)
   return None
 
 fixup_alus = PatternMatcher([
   (UPat(UOps.ALU, dtypes.int64, name="alu"), fixup_alus),
-  (UPat(UOps.ALU, dtypes.int32, name="alu"), lambda alu: UOp(alu.op, alu.dtype, (s.cast(alu.dtype) for s in alu.src), alu.arg)
+  (UPat(UOps.ALU, dtypes.int32, name="alu"), lambda alu: UOp(alu.op, alu.dtype, tuple(s.cast(alu.dtype) for s in alu.src), alu.arg)
                               if any(s.dtype == dtypes.int64 for s in alu.src) else None)
 ])
 
