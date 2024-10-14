@@ -110,7 +110,7 @@ if __name__ == "__main__":
     for lin, nm in lins:
       tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
       ops = (prg:=lin.to_program()).op_estimate
-      gflops = sym_infer(ops, {k:k.min for k in lin.ast.variables()})*1e-9/tm
+      gflops = sym_infer(ops, {k:k.vmin for k in lin.ast.variables()})*1e-9/tm
       choices.append((tm, gflops, lin, prg, nm))
 
     sorted_choices = sorted(choices, key=lambda x: x[0])
