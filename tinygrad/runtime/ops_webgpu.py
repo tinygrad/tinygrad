@@ -184,10 +184,10 @@ def read(rfile: io.BufferedReader):
   print(f"{decoded=}")
   return decoded
 
-def write(req: socket.socket, message: str):
+def write(req: socket.socket, message: bytes):
   TEXT = bytes([129])
   BINARY = bytes([130])
-  req.send(TEXT)
+  req.send(BINARY)
   length = len(message)
   if length <= 125:
     req.send(bytes([length]))
@@ -208,25 +208,20 @@ class WebDevice:
     self.socket.listen(1)
     print("Waiting on connection")
     req, address = self.socket.accept()
+    print("Connection received", address, req)
     t = threading.Thread(target=handleExtraConnection, args=(self.socket,))
     t.daemon = True
     t.start()
-    print("Con received", address, req)
     handshake(req)
-    rfile = req.makefile("rb", -1)
-    print("handshake done")
-    print("send instruction")
-    write(req, "message from server")
-    while True:
-      print("waiting to read")
-      content = read(rfile)
-
-
+    self.rfile = req.makefile("rb", -1)
+    self.req = req
 
   def send(self, msg):
-    self.device.send(msg)
-    self.device.on_message
+    write(self.req, msg)
+    response = read(self.rfile)
+    return response
 
 
 if __name__ == "__main__":
   a = WebDevice((HOST, PORT))
+  a.send(b"alloc")
