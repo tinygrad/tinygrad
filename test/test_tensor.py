@@ -760,7 +760,7 @@ class TestTensorMetadata(unittest.TestCase):
     assert s[-1].metadata[1].backward
     assert s[-1].metadata[2].name == "relu"
 
-  def test_metadata_tracking_disabled_within_context:
+  def test_metadata_tracking_disabled_within_context(self):
     _METADATA.set(None)
 
     with Context(TRACEMETA=0):
