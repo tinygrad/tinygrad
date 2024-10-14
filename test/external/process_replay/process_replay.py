@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, functools
-from typing import List, Tuple, Union, cast
+from typing import Callable, List, Tuple, Union, cast
 from tinygrad.engine.schedule import full_ast_rewrite
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 from tinygrad.codegen.kernel import Kernel
@@ -26,19 +26,9 @@ if not getenv("ASSERT_PROCESS_REPLAY", 1): ASSERT_DIFF = 0
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
 if REF == "master": SKIP_PROCESS_REPLAY = True
 
-# *** recreators
-
-def recreate(compare, *args, **kwargs) -> str:
-  if isinstance(x:=args[0], Kernel):
-    k = Kernel(x.ast, opts=x.opts)
-    for opt in x.applied_opts: k.apply_opt(opt)
-    # NOTE: replay with the captured renderer, not the one in master
-    return k.opts.render(compare.function_name, cast(List,k.to_program().uops))
-  return str(full_ast_rewrite(*args, **kwargs))
-
 # *** diff a "good" recreation against the generated version
 
-def diff(offset:int) -> Union[Tuple[int, int], bool]:
+def diff(offset:int, fxn:Callable[[Tuple], str]) -> Union[Tuple[int, int], bool]:
   if early_stop.is_set(): return True
   conn = db_connection()
   cur = conn.cursor()
@@ -55,7 +45,7 @@ def diff(offset:int) -> Union[Tuple[int, int], bool]:
       continue
     # try recreate
     try:
-      with Context(**{k:v for k,v in ctx_vars.items() if k in ContextVar._cache and k != "DEBUG"}): good = recreate(compare, *args, **kwargs)
+      with Context(**{k:v for k,v in ctx_vars.items() if k in ContextVar._cache and k != "DEBUG"}): good = fxn(compare, *args, **kwargs)
       compare = compare.src if isinstance(compare, Program) else str(compare)
     except Exception as e:
       logging.warning(f"FAILED TO RECREATE KERNEL {e}")
@@ -84,9 +74,7 @@ def diff(offset:int) -> Union[Tuple[int, int], bool]:
   cur.close()
   return additions, deletions
 
-# *** generic runner for executing fxn across all rows of a table in parallel
-
-def main() -> None:
+def _pmap(fxn:Callable[[Tuple], str]) -> None:
   conn = db_connection()
   cur = conn.cursor()
   try: row_count = cur.execute(f"select count(*) from '{TABLE_NAME}'").fetchone()[0]
@@ -97,7 +85,7 @@ def main() -> None:
   cur.close()
   with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), maxtasksperchild=16) as pool:
     inputs = list(range(0, row_count, PAGE_SIZE))
-    ret: List[Union[bool, Tuple[int, int]]] = list(tqdm(pool.imap_unordered(functools.partial(diff), inputs), total=len(inputs)))
+    ret: List[Union[bool, Tuple[int, int]]] = list(tqdm(pool.imap_unordered(functools.partial(diff, fxn=fxn), inputs), total=len(inputs)))
     pool.close()
     pool.join()
     pool.terminate()
@@ -108,14 +96,23 @@ def main() -> None:
     if sum(deletions) != 0: logging.info(colored(f"{sum(deletions)} deletions(-)", "red"))
     if any(changed) and ASSERT_DIFF: raise AssertionError("process replay detected changes")
 
+# ** replay the return value of a process given the same args
+
+def replay(compare, *args, **kwargs) -> str:
+  if isinstance(x:=args[0], Kernel):
+    k = Kernel(x.ast, opts=x.opts)
+    for opt in x.applied_opts: k.apply_opt(opt)
+    # NOTE: replay with the captured renderer, not the one in master
+    return k.opts.render(compare.function_name, cast(List,k.to_program().uops))
+  return str(full_ast_rewrite(*args, **kwargs))
+
 # *** main loop
 
 if __name__ == "__main__":
   if SKIP_PROCESS_REPLAY:
     logging.info("skipping process replay.")
     exit(0)
-
-  try: main()
+  try: _pmap(fxn=replay)
   except Exception as e:
     if ASSERT_DIFF: raise e
     logging.error(f"diff err {e}")
