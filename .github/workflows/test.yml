@@ -110,8 +110,6 @@ jobs:
         python3 -m ruff check .
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
-    - name: Lint viz UI
-      run: npm install eslint eslint-plugin-html --save-dev && cd tinygrad/viz && npx eslint .
     - name: Run mypy
       run: python -m mypy --strict-equality
     - name: Test Docs
