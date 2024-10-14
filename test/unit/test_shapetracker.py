@@ -5,7 +5,6 @@ from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad import Variable
-from tinygrad.ops import NumNode
 from tinygrad.ops import UOp, UOps, graph_rewrite
 from tinygrad.codegen.uopgraph import sym
 from itertools import product
@@ -154,13 +153,12 @@ class TestViewMinify(unittest.TestCase):
     assert len(View.create((10,10,10,10)).permute((1,0,2,3)).minify().shape) == 3
 
 class TestIndexExpressions2d(unittest.TestCase):
-
   def setUp(self):
     shapes = [(30, 5), (15, 10), (15, 1), (5, 10), (5, 1)] # Make sure dim0 is a multiple of 5, one of the tests divides this dimension by 5
     offsets = [0, 1, 15, 28, 10000]
     self.sts = [ShapeTracker.from_shape((prod(base_shape)+offset,)).shrink(((offset, offset+prod(base_shape)),)).\
                 reshape(base_shape) for base_shape in shapes for offset in offsets]
-    self.offset = [NumNode(offset) for base_shape in shapes for offset in offsets]
+    self.offset = [offset for base_shape in shapes for offset in offsets]
     self.shapes = [shape for shape in shapes for offset in offsets]
     self.idxs_exprs = []
 
@@ -791,8 +789,8 @@ class TestShapeTrackerSize(unittest.TestCase):
     self.assertEqual(st.real_size(), 9950)    # careful here
 
   def test_size_variable(self):
-    st = ShapeTracker(views=(View(shape=(1, 1, 1, (NumNode(1)+Variable('start_pos', 0, 8192)), 1, 8, 4, 128), strides=(0, 0, 0, 1024, 0, 128, 0, 1),
-                                  offset=0, mask=None, contiguous=False), View(shape=(1, 32, 1, (NumNode(1)+Variable('start_pos', 0, 8192)), 128),
+    st = ShapeTracker(views=(View(shape=(1, 1, 1, (Variable('start_pos', 0, 8192)+1), 1, 8, 4, 128), strides=(0, 0, 0, 1024, 0, 128, 0, 1),
+                                  offset=0, mask=None, contiguous=False), View(shape=(1, 32, 1, (Variable('start_pos', 0, 8192)+1), 128),
                                                                                strides=(0, 128, 0, 4096, 1), offset=0, mask=None, contiguous=False)))
     self.assertEqual(st.real_size(), 8389632)
 

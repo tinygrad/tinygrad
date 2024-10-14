@@ -85,7 +85,7 @@ def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=No
 
   if var_vals is None:
     # TODO: handle symbolic max case
-    var_vals = {v: random.randint(v.min, v.max if isinstance(v.max, int) else v.min) for v in lin.ast.variables()}
+    var_vals = {v: random.randint(v.vmin, v.vmax) for v in lin.ast.variables()}
 
   if ground_truth is None and not has_bf16:
     unoptimized = Kernel(lin.ast)

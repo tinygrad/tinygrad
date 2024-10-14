@@ -3,7 +3,7 @@ import functools, operator, itertools, math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Union
 from tinygrad.dtype import dtypes
-from tinygrad.ops import resolve, UOp, NumNode, Variable, sint, sym_infer
+from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer
 from tinygrad.helpers import prod, all_int, argsort
 
 @functools.lru_cache(maxsize=None)
@@ -177,14 +177,14 @@ class View:
     # Merge dimensions in vm2 if required.
     # NB: Merging too many dimensions can make it difficult to project vm2's mask, hence only combining when required.
     idxs: List[UOp] = [UOp.variable(f"idx{i}", 0, s-1) for i,s in enumerate(vm1.shape)]
-    merged_size, merged_term = 1, NumNode(0)
+    merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
     extents: List[Tuple[sint, UOp]] = []
     for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
       merged_term += sum([idxs[d1] * (s1 * merged_size) for d1, s1 in term]) + o * merged_size
       merged_size *= s
       if not resolve(merged_term >= merged_size) and not resolve(merged_term < 0):
         extents.append((merged_size, merged_term))
-        merged_size, merged_term = 1, NumNode(0)
+        merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
     if resolve(merged_term != 0): return None
     if (vm2_shape := tuple(s for s,_ in reversed(extents))) != vm2.shape:
       return (reshaped_vm2 := vm2.reshape(vm2_shape)) and reshaped_vm2 + vm1
