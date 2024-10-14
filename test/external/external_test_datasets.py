@@ -1,9 +1,12 @@
 from extra.datasets.kits19 import iterate, preprocess
 from examples.mlperf.dataloader import batch_load_unet3d
+from test.external.mlperf_retinanet.openimages import get_openimages
 from test.external.mlperf_unet3d.kits19 import PytTrain, PytVal
 from tinygrad.helpers import temp
 from pathlib import Path
+from PIL import Image
 
+import json
 import nibabel as nib
 import numpy as np
 import os
@@ -39,7 +42,7 @@ class TestKiTS19Dataset(ExternalTestDatasets):
 
     return preproc_pth, list(preproc_pth.glob("*_x.npy")), list(preproc_pth.glob("*_y.npy"))
 
-  def _create_kits19_ref_dataloader(self, preproc_img_pths, preproc_lbl_pths, val):
+  def _create_ref_dataloader(self, preproc_img_pths, preproc_lbl_pths, val):
     if val:
       dataset = PytVal(preproc_img_pths, preproc_lbl_pths)
     else:
@@ -47,7 +50,7 @@ class TestKiTS19Dataset(ExternalTestDatasets):
 
     return iter(dataset)
 
-  def _create_kits19_tinygrad_dataloader(self, preproc_pth, val, batch_size=1, shuffle=False, seed=42, use_old_dataloader=False):
+  def _create_tinygrad_dataloader(self, preproc_pth, val, batch_size=1, shuffle=False, seed=42, use_old_dataloader=False):
     if use_old_dataloader:
       dataset = iterate(list(Path(tempfile.gettempdir()).glob("case_*")), preprocessed_dir=preproc_pth, val=val, shuffle=shuffle, bs=batch_size)
     else:
@@ -55,10 +58,10 @@ class TestKiTS19Dataset(ExternalTestDatasets):
 
     return iter(dataset)
 
-  def test_kits19_training_set(self):
+  def test_training_set(self):
     preproc_pth, preproc_img_pths, preproc_lbl_pths = self._create_samples(False)
-    ref_dataset = self._create_kits19_ref_dataloader(preproc_img_pths, preproc_lbl_pths, False)
-    tinygrad_dataset = self._create_kits19_tinygrad_dataloader(preproc_pth, False)
+    ref_dataset = self._create_ref_dataloader(preproc_img_pths, preproc_lbl_pths, False)
+    tinygrad_dataset = self._create_tinygrad_dataloader(preproc_pth, False)
 
     for ref_sample, tinygrad_sample in zip(ref_dataset, tinygrad_dataset):
       self._set_seed()
@@ -66,14 +69,49 @@ class TestKiTS19Dataset(ExternalTestDatasets):
       np.testing.assert_equal(tinygrad_sample[0][:, 0].numpy(), ref_sample[0])
       np.testing.assert_equal(tinygrad_sample[1][:, 0].numpy(), ref_sample[1])
 
-  def test_kits19_validation_set(self):
+  def test_validation_set(self):
     preproc_pth, preproc_img_pths, preproc_lbl_pths = self._create_samples(True)
-    ref_dataset = self._create_kits19_ref_dataloader(preproc_img_pths, preproc_lbl_pths, True)
-    tinygrad_dataset = self._create_kits19_tinygrad_dataloader(preproc_pth, True, use_old_dataloader=True)
+    ref_dataset = self._create_ref_dataloader(preproc_img_pths, preproc_lbl_pths, True)
+    tinygrad_dataset = self._create_tinygrad_dataloader(preproc_pth, True, use_old_dataloader=True)
 
     for ref_sample, tinygrad_sample in zip(ref_dataset, tinygrad_dataset):
       np.testing.assert_equal(tinygrad_sample[0][:, 0], ref_sample[0])
       np.testing.assert_equal(tinygrad_sample[1], ref_sample[1])
+
+class TestOpenImagesDataset(ExternalTestDatasets):
+  def _create_samples(self, subset):
+    os.makedirs(Path(base_dir:=tempfile.gettempdir() + "/openimages") / f"{subset}/data", exist_ok=True)
+    os.makedirs(base_dir / Path(f"{subset}/labels"), exist_ok=True)
+
+    lbls, img_size = ["class_1", "class_2"], (447, 1024)
+    cats = [{"id": i, "name": c, "supercategory": None} for i, c in enumerate(lbls)]
+    imgs = [{"id": i, "file_name": f"image_{i}.jpg", "height": img_size[0], "width": img_size[1], "subset": subset, "license": None, "coco_url": None} for i in range(len(lbls))]
+    annots = [
+      {"id": i, "image_id": i, "category_id": 0, "bbox": [23.217183744, 31.75409775, 964.1241282560001, 326.09017434000003], "area": 314391.4050683996, "IsOccluded": 0, "IsInside": 0, "IsDepiction": 0, "IsTruncated": 0, "IsGroupOf": 0, "iscrowd": 0}
+      for i in range(len(lbls))
+    ]
+    info = {"dataset": "openimages_mlperf", "version": "v6"}
+    coco_annotations = {"info": info, "licenses": [], "categories": cats, "images": imgs, "annotations": annots}
+
+    with open(ann_file:=base_dir / Path(f"{subset}/labels/openimages-mlperf.json"), "w") as fp:
+      json.dump(coco_annotations, fp)
+
+    for i in range(len(lbls)):
+      img = Image.new("RGB", img_size[::-1])
+      img.save(base_dir / Path(f"{subset}/data/image_{i}.jpg"))
+
+    return base_dir, ann_file
+
+  def _create_ref_dataloader(self, subset):
+    base_dir, ann_file = self._create_samples(subset)
+    print(f"{base_dir=} {ann_file=}")
+
+  def _create_tinygrad_dataloader(self):
+    pass
+
+  def test_training_set(self):
+    self._create_ref_dataloader("train")
+    assert 1==0
 
 if __name__ == '__main__':
   unittest.main()
