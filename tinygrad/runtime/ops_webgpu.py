@@ -109,7 +109,6 @@ class Server(socketserver.TCPServer):
 
 HOST, PORT = "localhost", 8766
 
-server = Server((HOST, PORT), WebSocketsHandler)
 
 class Methods(Enum):
   PUT_PROGRAM = auto()
@@ -147,28 +146,40 @@ class WebGPUProgram:
   def __call__(self, *bufs, global_size, local_size):
     self.device.send("")
 
+def handleExtraConnection(socket: socket.socket):
+  while True:
+    req, addr = socket.accept()
+    print(f"Address {addr} attempted to connect, turning down")
+    try:
+      req.sendall(b"Only one connection allowed\n")
+    finally:
+      req.close()
 
 class WebDevice:
-  def __init__(self):
-    self.sock = None
-    self.process = threading.Thread(target=server.serve_forever)
-    self.process.daemon = True
-    self.process.start()
-    self.server = server
-    while server.ws is None:
-      print("Waiting for browser connect")
-      time.sleep(3)
-    self.device = self.server.ws
-    print("Browser ready")
-  
+  def __init__(self, address):
+    self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    self.socket.bind(address)
+    self.socket.listen(1)
+    print("Waiting on connection")
+    req, address = self.socket.accept()
+    t = threading.Thread(target=handleExtraConnection, args=(self.socket,))
+    t.daemon = True
+    t.start()
+    rfile = req.makefile('rb', 1024)
+    print('req', req)
+    data = rfile.read(4)
+    while data:
+      print('read', data)
+      data = rfile.read(4)
+
+
+
   def send(self, msg):
     self.device.send(msg)
     self.device.on_message
 
 
 if __name__ == "__main__":
-  a = WebDevice()
-  while True:
-    if a.device:
-      text = input('Hit enter to send HELLO')
-      a.device.send(b'HELLO')
+  a = WebDevice((HOST, PORT))
