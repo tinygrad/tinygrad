@@ -14,25 +14,28 @@ class ClangGraph(GraphRunner):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
-    prgs = '\n'.join(dedup([cast(CompiledRunner, ji.prg).p.src for ji in jit_cache]))
     args = [f"{render_dtype(x.dtype)}* arg{i}" for i,x in enumerate(input_rawbuffers)]
     args += sorted([f"int {v.expr}" for v in var_vals])
-    code = ["void batched("+','.join(args)+") {"]
+    code = ["\nvoid batched("+','.join(args)+") __attribute__((section(\".tinygrad\"))) {"]
+    i = 0
     for ji in jit_cache:
-      args = []
+      kernel_args = []
       for buf in ji.bufs:
         assert buf is not None
         if buf in input_rawbuffers:
-          args.append(f"arg{input_rawbuffers.index(buf)}")
+          kernel_args.append((render_dtype(buf.dtype), f"arg{input_rawbuffers.index(buf)}", False))
         else:
-          args.append(f"({render_dtype(buf.dtype)}*)0x{ctypes.addressof(buf._buf):X}")
-      args += [x.expr for x in cast(CompiledRunner, ji.prg).p.vars]
-      code.append(f"  {cast(CompiledRunner, ji.prg).p.function_name}({','.join(args)});")
+          kernel_args.append((render_dtype(buf.dtype), f"({render_dtype(buf.dtype)}*)0x{ctypes.addressof(buf._buf):X}", True))
+      variables = cast(CompiledRunner, ji.prg).p.vars
+      kernel_args = kernel_args + [(render_dtype(v.dtype), v.expr, False) for v in variables]
+      code.append(f"  typedef void kernel{i}_t(" + ",".join([f"{arg[0]}{"*" if arg[2] else ""}" for arg in kernel_args]) + ";\n" + \
+        f"  ((kernel{i}_t*)0x{cast(CompiledRunner, ji.prg).clprg.buf:X})({','.join([arg[1] for arg in kernel_args])});")
+      i+=1
     code.append("}")
     if DEBUG >= 4: print("\n".join(code))
     compiler = Device["CLANG"].compiler
     assert compiler is not None
-    self.clprg = ClangProgram("batched", compiler.compile(prgs+"\n"+"\n".join(code))) # no point in caching the pointers
+    self.clprg = ClangProgram("batched", compiler.compile("\n".join(code))) # no point in caching the pointers
 
   def __call__(self, rawbufs: List[Buffer], var_vals: Dict[Variable, int], wait=False):
     return cpu_time_execution(
