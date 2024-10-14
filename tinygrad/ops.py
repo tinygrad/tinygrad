@@ -722,7 +722,7 @@ spec = PatternMatcher([
   (UPat(UOps.ALU, arg=BinaryOps.IDIV, name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(UOps.ALU, name="x"), lambda x: all(x.dtype == y.dtype for y in x.src)),
 
-  (UPat(UOps.ASSIGN, src=(UPat((UOps.DEFINE_ACC, UOps.DEFINE_GLOBAL)), UPat())), lambda: True),
+  (UPat((UOps.ASSIGN, UOps.CONTIGUOUS), src=(UPat((UOps.DEFINE_ACC, UOps.DEFINE_GLOBAL)), UPat())), lambda: True),
   (UPat(UOps.ENDRANGE, dtype=dtypes.void, src=(UPat(UOps.RANGE),)), lambda: True),
 
   # all WMMA has 3 args, <x, w, acc>
@@ -976,6 +976,5 @@ renderer = PatternMatcher([
 sint = Union[int, UOp]
 Variable = UOp
 
-def NumNode(val:int): return UOp.const(dtypes.int, val)
 def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int:
   return int(uop.substitute({k:k.const_like(v) for k,v in var_vals.items()})) if isinstance(uop, UOp) else uop

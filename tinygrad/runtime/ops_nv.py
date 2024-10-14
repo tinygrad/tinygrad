@@ -16,6 +16,9 @@ if MOCKGPU:=getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylin
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
 
+NV_PFAULT_FAULT_TYPE = {dt:name for name,dt in nv_gpu.__dict__.items() if name.startswith("NV_PFAULT_FAULT_TYPE_")}
+NV_PFAULT_ACCESS_TYPE = {dt:name.split("_")[-1] for name,dt in nv_gpu.__dict__.items() if name.startswith("NV_PFAULT_ACCESS_TYPE_")}
+
 def nv_iowr(fd, nr, args):
   ret = fcntl.ioctl(fd, (3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord('F') & 0xFF) << 8 | (nr & 0xFF), args)
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
@@ -36,8 +39,8 @@ def rm_control(cmd, sttyp, fd, client, obj, **kwargs):
 
 def make_rmctrl_type():
   return type("NVRMCTRL", (object,), {name[name.find("_CTRL_CMD_")+10:].lower(): functools.partial(rm_control, dt, sttyp)
-    for name,dt in nv_gpu.__dict__.items() if name.find("_CTRL_CMD_")>=0 and
-      (sttyp:=getattr(nv_gpu, name.replace("_CTRL_CMD_", "_CTRL_")+"_PARAMS", getattr(nv_gpu, name+"_PARAMS", None)))})
+    for name,dt in nv_gpu.__dict__.items() if name.find("_CTRL_CMD_")>=0 and (sttyp:=getattr(nv_gpu, name.replace("_CTRL_CMD_", "_CTRL_")+"_PARAMS", \
+      getattr(nv_gpu, name+"_PARAMS", getattr(nv_gpu, name.replace("_CTRL_CMD_", "_CTRL_DEBUG_")+"_PARAMETERS", None))))})
 rmctrl = make_rmctrl_type()
 
 def uvm_ioctl(cmd, sttyp, fd, **kwargs):
@@ -465,7 +468,7 @@ class NVDevice(HCQCompiled):
     ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=vaspace, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     ctxshare = rm_alloc(self.fd_ctl, nv_gpu.FERMI_CONTEXT_SHARE_A, self.root, channel_group, ctxshare_params).hObjectNew
 
-    self.compute_gpfifo = self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0, entries=0x10000)
+    self.compute_gpfifo = self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0, entries=0x10000, enable_debug=True)
     self.dma_gpfifo = self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0x100000, entries=0x10000)
 
     rmctrl.gpfifo_schedule(self.fd_ctl, self.root, channel_group, bEnable=1)
@@ -484,14 +487,19 @@ class NVDevice(HCQCompiled):
 
     self._setup_gpfifos()
 
-  def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400) -> GPFifo:
+  def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400, enable_debug=False) -> GPFifo:
     notifier = self._gpu_system_alloc(48 << 20)
     params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=notifier.hMemory, hObjectBuffer=gpfifo_area.hMemory,
       gpFifoOffset=gpfifo_area.va_addr+offset, gpFifoEntries=entries, hContextShare=ctxshare,
       hUserdMemory=(ctypes.c_uint32*8)(gpfifo_area.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset))
     gpfifo = rm_alloc(self.fd_ctl, nv_gpu.AMPERE_CHANNEL_GPFIFO_A, self.root, channel_group, params).hObjectNew
-    rm_alloc(self.fd_ctl, self.compute_class, self.root, gpfifo, None)
+    comp = rm_alloc(self.fd_ctl, self.compute_class, self.root, gpfifo, None).hObjectNew
     rm_alloc(self.fd_ctl, nv_gpu.AMPERE_DMA_COPY_B, self.root, gpfifo, None)
+
+    if enable_debug:
+      self.debug_compute_obj, self.debug_channel = comp, gpfifo
+      debugger_params = nv_gpu.NV83DE_ALLOC_PARAMETERS(hAppClient=self.root, hClass3dObject=self.debug_compute_obj)
+      self.debugger = rm_alloc(self.fd_ctl, nv_gpu.GT200_DEBUGGER, self.root, self.device, debugger_params).hObjectNew
 
     ws_token_params = rmctrl.gpfifo_get_work_submit_token(self.fd_ctl, self.root, gpfifo, workSubmitToken=-1)
     assert ws_token_params.workSubmitToken != -1
@@ -536,3 +544,29 @@ class NVDevice(HCQCompiled):
     rmctrl.fb_flush_gpu_cache(self.fd_ctl, self.root, self.subdevice,
       flags=((nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_WRITE_BACK_YES << 2) | (nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_INVALIDATE_YES << 3) |
              (nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FLUSH_MODE_FULL_CACHE << 4)))
+
+  def on_device_hang(self):
+    # Prepare fault report.
+    # TODO: Restore the GPU using NV83DE_CTRL_CMD_CLEAR_ALL_SM_ERROR_STATES if needed.
+
+    report = []
+    sm_errors = rmctrl.debug_read_all_sm_error_states(self.fd_ctl, self.root, self.debugger, hTargetChannel=self.debug_channel, numSMsToRead=100)
+
+    if sm_errors.mmuFault.valid:
+      mmu_info = rmctrl.debug_read_mmu_fault_info(self.fd_ctl, self.root, self.debugger)
+      for i in range(mmu_info.count):
+        valo, vahi = ((pfaddr:=(pf:=mmu_info.mmuFaultInfoList[i]).faultAddress) - (1 << 30)) & ~0xffffff, round_up(pfaddr + (1 << 30), 0x1000000)
+        report += [f"MMU fault: 0x{pfaddr:X} | {NV_PFAULT_FAULT_TYPE[pf.faultType]} | {NV_PFAULT_ACCESS_TYPE[pf.accessType]}"]
+
+        # Scan mapped regions (1GB around the faulted area).
+        report += [f"Valid mapping on range 0x{valo:X} - 0x{vahi:X}:"]
+        while valo != vahi:
+          mappings = rmctrl.get_mappings(self.fd_ctl, self.root, self.debugger, vaLo=valo, vaHi=vahi)
+          for i in range(mappings.count): report += [f"\t0x{mappings.opsBuffer[-1].gpuVA:X} | size: 0x{mappings.opsBuffer[-1].size:X}"]
+          if mappings.hasMore: valo = mappings.opsBuffer[-1].gpuVA + mappings.opsBuffer[-1].size
+          else: break
+    else:
+      for i, e in enumerate(sm_errors.smErrorStateArray):
+        if e.hwwGlobalEsr or e.hwwWarpEsr: report += [f"SM{i} fault: esr={e.hwwGlobalEsr} warp_esr={e.hwwWarpEsr} warp_pc={e.hwwWarpEsrPc64}"]
+
+    raise RuntimeError("\n".join(report))

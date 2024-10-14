@@ -1599,6 +1599,16 @@ class TestIndexing(unittest.TestCase):
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
     self.assertLess(et, 1e3)
 
+  def test_strongly_connected_DAG(self):
+    val = 1.0
+    a = Tensor(val).realize()
+    def f(a):
+      for _ in range(24): a = Tensor.stack(a, a)[0]
+      return a.item()
+    r, et = timeit(f, a)
+    self.assertEqual(r, val)
+    self.assertLess(et, 1e3)
+
   def test_no_rewrite_elementwise(self):
     bufs = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), i) for i in range(3)]
     ld1 = UOp(UOps.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))

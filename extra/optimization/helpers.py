@@ -7,7 +7,6 @@ from tinygrad.ops import UOp, UOps, KernelInfo
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import NumNode
 inf, nan = float('inf'), float('nan')
 
 # kernel unpacker
