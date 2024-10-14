@@ -196,9 +196,11 @@
                     console.log({selector, args})
                     socket.send(new ArrayBuffer(10))
                 } else {
-                    console.log("text data")
+                    console.log("Command received")
                     console.log(data)
-                    socket.send("ACK")
+                    alert(`Instruction received, ${data}`)
+                    console.log("Returning result")
+                    socket.send(JSON.stringify({bufferId: 10}))
                 }
             });
         }
