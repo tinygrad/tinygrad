@@ -538,9 +538,12 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), simplify_valid_image_load),
 ])
 
+def fixup_alus(alu:UOp) -> Optional[UOp]:
+  if alu.arg not in (BinaryOps.ADD, BinaryOps.MUL) or all(s.dtype != dtypes.int32 for s in alu.src): return None
+  return UOp(alu.op, alu.dtype, (s.cast(alu.dtype) for s in alu.src), alu.arg)
+
 fixup_alus = PatternMatcher([
-  (UPat(UOps.ALU, dtypes.int64, name="alu"), lambda alu: UOp(alu.op, alu.dtype, (s.cast(alu.dtype) for s in alu.src), alu.arg)
-                              if any(s.dtype != alu.dtype for s in alu.src) else None),
+  (UPat(UOps.ALU, dtypes.int64, name="alu"), fixup_alus),
   (UPat(UOps.ALU, dtypes.int32, name="alu"), lambda alu: UOp(alu.op, alu.dtype, (s.cast(alu.dtype) for s in alu.src), alu.arg)
                               if any(s.dtype == dtypes.int64 for s in alu.src) else None)
 ])
