@@ -435,7 +435,7 @@ class UOp(MathTrait):
     from tinygrad.device import Buffer
     if (ret:=buffers.get(self)) is not None: return ret
     if self.op is UOps.VIEW:
-      assert self.st.contiguous == True, "VIEW only works here if it's contiguous"
+      assert self.st.contiguous, "VIEW only works here if it's contiguous"
       return self.src[0].buffer
     assert self.op == UOps.BUFFER, f"no buffer on {self.op}"
     buffers[self] = ret = Buffer(self.arg[0], self.arg[1], self.dtype)
@@ -456,9 +456,12 @@ class UOp(MathTrait):
 
   # movement functions
   def _view(self, method, arg):
-    from tinygrad.shape.shapetracker import ShapeTracker
-    st = ShapeTracker.from_shape(tuple() if self.shape is None else self.shape)
-    return UOp(UOps.VIEW, self.dtype, (self,), st.__getattribute__(method)(arg))
+    if self.op is UOps.VIEW:
+      return UOp(UOps.VIEW, self.dtype, (self.src[0],), self.st.__getattribute__(method)(arg))
+    else:
+      from tinygrad.shape.shapetracker import ShapeTracker
+      st = ShapeTracker.from_shape(tuple() if self.shape is None else self.shape)
+      return UOp(UOps.VIEW, self.dtype, (self,), st.__getattribute__(method)(arg))
   def reshape(self, shape): return self._view('reshape', shape)
   def expand(self, shape): return self._view('expand', shape)
   def permute(self, arg): return self._view('permute', arg)
