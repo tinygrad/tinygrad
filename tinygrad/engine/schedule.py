@@ -275,11 +275,12 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def _get_output_groups(outs:List[LazyBuffer]) -> \
-  Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]],  # these are the output groups
-        Dict[Buffer, UOp],                          # this is a map of realized Buffers to UOps.BUFFER
-        Dict[LazyBuffer, LazyBuffer]]:              # these are the buffers we ASSIGN to in this schedule
-  """find all the realizes in the graph, group the output LazyBuffers into kernels."""
+SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
+def _graph_schedule(outs:List[LazyBuffer]) -> \
+  Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
+        DefaultDict[LBScheduleItem, int], # this is the in-degree of the graph
+        Dict[Variable, int]]: # this has all the var values of the schedule
+  """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
   allbufs: Dict[LazyBuffer, None] = {}
@@ -373,20 +374,12 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
     else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
     buf_uops.setdefault(buf.buffer, uop)
-  return output_groups, buf_uops, assign_targets
 
-SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
-def _graph_schedule(outs:List[LazyBuffer]) -> \
-  Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
-        DefaultDict[LBScheduleItem, int], # this is the in-degree of the graph
-        Dict[Variable, int]]: # this has all the var values of the schedule
-  """create a graph for realizing the outputs"""
-  output_groups, buf_uops, assign_targets = _get_output_groups(outs)
   # preschedule all buffers in realizes
   prescheduled: List[LBScheduleItem] = []
   var_vals: Dict[Variable, int] = {}
-  for group in output_groups.values():
-    prescheduled.append((ret:=_lower_lazybuffer(group, buf_uops))[0])
+  for outs in output_groups.values():
+    prescheduled.append((ret:=_lower_lazybuffer(outs, buf_uops))[0])
     var_vals = merge_dicts([var_vals, ret[1]])
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
