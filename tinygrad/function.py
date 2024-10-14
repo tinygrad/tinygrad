@@ -21,7 +21,8 @@ class Cast(Function):
     return x.bitcast(dtype) if self.bitcast else x.cast(dtype)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.bitcast(self.input_dtype) if self.bitcast else grad_output.cast(self.input_dtype)
+    if self.bitcast: raise RuntimeError("bitcast cannot backward")
+    return grad_output.cast(self.input_dtype)
 
 # ************* unary ops *************
 

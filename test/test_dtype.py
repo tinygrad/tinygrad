@@ -802,5 +802,11 @@ class TestTensorMethod(unittest.TestCase):
     ret = (a - b).abs()
     np.testing.assert_allclose(ret.numpy(), np.abs(a.numpy()-b.numpy()))
 
+class TestDtypeUsage(unittest.TestCase):
+  def test_max_w_alu(self):
+    for d in dtypes.ints:
+      t = Tensor([[1, 2], [3, 4]], dtype=d)
+      (t*t).max().item()
+
 if __name__ == '__main__':
   unittest.main()

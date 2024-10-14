@@ -1,8 +1,7 @@
 from __future__ import annotations
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable
-import math, struct, ctypes
+import math, struct, ctypes, functools
 from dataclasses import dataclass
-import functools
 from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
