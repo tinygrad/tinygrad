@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal
-from typing import Tuple, List, Any, cast, Union, Dict, Type
+from typing import Set, Tuple, List, Any, cast, Union, Dict, Type
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command
 from tinygrad.runtime.support.hcq import HCQArgsState, HCQProgram, HCQSignal
@@ -378,7 +378,7 @@ class NVDevice(HCQCompiled):
       nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made:=nv_gpu.NVOS00_PARAMETERS(hRoot=self.root, hObjectParent=self.device, hObjectOld=mem.hMemory))
       if made.status != 0: raise RuntimeError(f"_gpu_free returned {get_error_str(made.status)}")
 
-    self._debug_mappings.erase((mem.va_addr, mem.size))
+    self._debug_mappings.remove((mem.va_addr, mem.size))
     uvm.free(self.fd_uvm, base=mem.va_addr, length=mem.size)
     if mem.has_cpu_mapping: libc.munmap(mem.va_addr, mem.size)
 
@@ -439,7 +439,7 @@ class NVDevice(HCQCompiled):
     self.gpu_mmio = to_mv(self._gpu_map_to_cpu(self.usermode, mmio_sz:=0x10000, flags=2), mmio_sz).cast("I")
 
     self._setup_nvclasses()
-    self._debug_mappings = set()
+    self._debug_mappings: Set[Tuple[int, int]] = set()
 
     rmctrl.perf_boost(self.fd_ctl, self.root, self.subdevice, duration=0xffffffff, flags=((nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CUDA_YES << 4) | \
       (nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CUDA_PRIORITY_HIGH << 6) | (nv_gpu.NV2080_CTRL_PERF_BOOST_FLAGS_CMD_BOOST_TO_MAX << 0)))
