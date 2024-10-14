@@ -86,6 +86,6 @@ class WebDevice:
 
 if __name__ == "__main__":
   a = WebDevice((HOST, PORT))
-  print("Creating buffer on browser")
-  response = a.send('{"receiver": "device", "method": "createBuffer"}', 't')
-  print("response", response)
+  print("Initializing device on browser...")
+  response = a.send('{"method": "initDevice"}', 't')
+  print(response)

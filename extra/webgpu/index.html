@@ -15,6 +15,7 @@
     <script>
         const address = "ws://localhost:8766"
         let device;
+        let deviceInfo;
         const initDevice = async () => {
             if (!navigator.gpu) {
                 console.error("Navigator.gpu is null")
@@ -26,11 +27,11 @@
                 console.error("requestAdapter returned null")
                 throw new Error("Unable to get GPU device")
             }
-            adapter.requestAdapterInfo().then(({vendor, architecture}) => {
-                document.getElementById("gpuInfo").textContent = `Device: ${vendor} ${architecture}`
-            })
+            const info = await adapter.requestAdapterInfo()
+            deviceInfo = `${info.vendor} ${info.architecture}`
             let _device = await adapter.requestDevice()
             device = _device;
+            console.log("Device initialized")
         }
 
         const createBufferInit = (device,descriptor)=> {
@@ -199,8 +200,9 @@
                     console.log("Command received")
                     console.log(data)
                     alert(`Instruction received, ${data}`)
-                    console.log("Returning result")
-                    socket.send(JSON.stringify({bufferId: 10}))
+                    await initDevice()
+                    alert("Device initialized, returning response")
+                    socket.send(`Device initialized: ${deviceInfo}`)
                 }
             });
         }
