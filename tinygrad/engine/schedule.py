@@ -115,7 +115,7 @@ reduceop_fusor = PatternMatcher([
   # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.VIEW, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
   # push SWIZZLE(s) down to STORE, through an elementwise op (ONLY reshapes)
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.STORE), name="root"), push_swizzle_down_through_elementwise),
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.CONTIGUOUS, UOps.STORE), name="root"), push_swizzle_down_through_elementwise),
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
@@ -164,9 +164,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   src_st = ShapeTracker.from_shape(buf.srcs[0].shape) if buf.op in ReduceOps else st
   src: List[UOp] = [_recursive_uop(x, src_st, outputs, var_vals, inputs, buf_uops, assign_targets, cache) for x in buf.srcs]
   if buf.op in ReduceOps: ret = UOp(UOps.REDUCE_AXIS, dtype, tuple(src), (REDUCE_ALU[cast(ReduceOps, buf.op)], buf.arg)).view(st)
-  elif buf.op is MetaOps.CONTIGUOUS:
-    assert buf in outputs, f"{buf.op} must be writable"
-    ret = src[0]
+  elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, (buf_uops[buf.buffer], src[0]))
   elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]))
   elif buf.op is UnaryOps.CAST: ret = src[0].cast(dtype)
   elif buf.op is UnaryOps.BITCAST: ret = src[0].bitcast(dtype)
