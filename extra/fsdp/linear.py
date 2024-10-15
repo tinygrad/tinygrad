@@ -6,9 +6,10 @@ import tinygrad.nn as nn
 import math
 from dataclasses import dataclass
 from extra.fsdp.mlb import print_lb
+from tinygrad.multi import MultiLazyBuffer
 
 
-GPUS = [f"{Device.DEFAULT}:{i}" for i in range(4)]
+GPUS = [f"{Device.DEFAULT}:{i}" for i in range(2)]
 print(GPUS)
 
 class Linear:
@@ -34,25 +35,29 @@ class Optimizer:
 
   def step(self):
     for x in self.params:
-      x.assign(x.detach() - x.grad.all_gather_())
+      if isinstance(x.grad.lazydata, MultiLazyBuffer) and (axis:=x.grad.lazydata.axis) is not None and axis != x.lazydata.axis:
+        x.grad.all_gather_()
+      x.assign(x.detach() - x.grad)
     Tensor.realize(*self.params)
 
 class Model:
   def __init__(self):
-    self.lin = Linear(8, 12, bias=False)
+    self.layers = [
+      Linear(8, 12, bias=False),
+      Linear(12, 10, bias=False),
+    ]
 
   def __call__(self, x):
-    return self.lin(x)
+    return x.sequential(self.layers)
 
 x = Tensor.empty(2, 8)
 model = Model()
 
 x.shard_(GPUS)
-for p in nn.state.get_parameters(model):
+opt = Optimizer(nn.state.get_parameters(model))
+for p in nn.state.get_parameters(opt):
   p.shard_(GPUS, axis=0)
   p.realize()
-
-opt = Optimizer(nn.state.get_parameters(model))
 
 def train():
   y = model(x)
@@ -62,5 +67,5 @@ def train():
   opt.zero_grad()
 
 with Tensor.train():
-  for i in range(3):
+  for i in range(1):
     train()
