@@ -41,9 +41,6 @@ def load_store_ptr_arithmetic(x:UOp, buf:UOp, alu:Optional[UOp]=None, const:Opti
 
 supports_half: List[Op] = [UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
 ptx_matcher = sym+PatternMatcher([
-  # invert predicate for UOps.IF
-  (UPat((UOps.IF,), name="x", allow_any_len=True, src=(UPat(dtype=dtypes.bool),)),
-   lambda x: UOp(x.op, dtype=x.dtype, src=(x.src[0].logical_not(),) + x.src[1:], arg=x.arg)),
   # bool CMPNE is XOR, bool CMPLT is XOR+AND (universal makes this slow, this is for renderer only)
   (UPat.var('x', dtype=dtypes.bool).ne(UPat.var('y')), lambda x,y: x^y),
   (UPat.var('x', dtype=dtypes.bool).lt(UPat.var('y')), lambda x,y: (x^True)&y),
@@ -99,7 +96,8 @@ class PTXRenderer(Renderer):
 
   def render_loop(self, idx, start, label, acc=None) -> List[str]: return [f"mov.u32 {idx}, {start};", f"{label}:"]
 
-  def render_bra(self, b1, pred=None) -> List[str]: return [f"@{pred} bra {b1};"] if pred else [f"bra {b1};"]
+  def render_bra(self, b1, pred=None, invert=False) -> List[str]:
+    return [f"@{'!' if invert else ''}{pred} bra {b1};"] if pred else [f"bra {b1};"]
 
   def render_load(self, loc, dest, dtype, gate=None, alt=None, ss="", offset=0) -> List[str]:
     assert dtype != dtypes.bool
@@ -156,7 +154,8 @@ class PTXRenderer(Renderer):
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       if uop is UOps.IF:
-        kk(*self.render_bra(f"IF_{r[src[0]][1:]}_{uops.index(u)}", _cast(r[src[0]], dtypes.bool, src[0].dtype, u=u)))
+        pred_reg = _cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)
+        kk(*self.render_bra(f"IF_{r[src[0]][1:]}_{uops.index(u)}", pred_reg, invert=True))
       elif uop is UOps.BARRIER and self.barrier: kk(self.barrier)
       elif uop is UOps.ENDRANGE:
         kk(self.code_for_op[BinaryOps.ADD](r[src[0]], r[src[0]], "1", dtypes.int, self.types[dtypes.int]),
