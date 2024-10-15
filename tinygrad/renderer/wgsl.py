@@ -25,6 +25,7 @@ wgsl_matcher = PatternMatcher([
   (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("val", dtype=dtypes.bool), UPat.var("gate")),
    lambda buf,idx,val,gate: UOp.store(buf, idx, val.cast(dtypes.int), gate)),
   (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("val", dtype=dtypes.bool)), lambda buf,idx,val: UOp.store(buf, idx, val.cast(dtypes.int))),
+  (UPat(UOps.ALU, name="m", arg=BinaryOps.MAX), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
 ])
 
 type_map = {dtypes.float: "f32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
@@ -38,8 +39,7 @@ class WGSLRenderer(CStyleLanguage):
   external_local_bufs = True
   supports_float4 = False
   barrier = "workgroupBarrier();"
-  code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a})"}
-  infinity = "inf(1.0)"
+  code_for_op = {**CStyleLanguage.code_for_op, TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a})"}
   nan = "nan()"
   type_map = type_map
 
@@ -59,7 +59,8 @@ class WGSLRenderer(CStyleLanguage):
     local_size = [u.arg[1] for u in uops if u.op is UOps.SPECIAL and u.arg[0][0] == 'l']
     if not local_size: local_size = [1]
     bind_it = iter(range(len(bufs)))
-    prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\nfn inf(a: f32) -> f32 { return a/0.0; }\n"
-    prg += "\n".join((prefix or [])+[f"@group(0) @binding({next(bind_it)}) {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}: {f'array<{self.type_map[dtype]}>' if isinstance(dtype, PtrDType) else 'i32'};" for name,(dtype,rw) in bufs])  # noqa: E501
+    prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\nfn inf() -> f32 { return bitcast<f32>(0x7F800000u);}\n"
+    prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
+    prg += "\n".join((prefix or [])+[f"@group(0) @binding({next(bind_it)+1}) {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}: {f'array<{self.type_map[dtype]}>' if isinstance(dtype, PtrDType) else 'i32'};" for name,(dtype,rw) in bufs])  # noqa: E501
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501
     return prg
