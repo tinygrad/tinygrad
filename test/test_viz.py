@@ -1,7 +1,8 @@
 from typing import Dict, List, Optional
 import unittest
 from tinygrad.dtype import PtrDType, dtypes
-from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, TrackedPatternMatcher as PatternMatcher, UOp, UOps, UPat, graph_rewrite, contexts, track_rewrites
+from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, TrackedPatternMatcher as PatternMatcher, UOp, UOps, UPat, \
+    graph_rewrite, contexts, track_rewrites
 from tinygrad.viz.serve import _replace_uop, get_details, get_metadata
 
 @track_rewrites
@@ -26,7 +27,7 @@ class TestViz(unittest.TestCase):
     self.tms = TRACK_MATCH_STATS.value
     TRACK_MATCH_STATS.value = 2
   def tearDown(self): TRACK_MATCH_STATS.value = self.tms
-  
+
   def test_viz_simple(self):
     pm = PatternMatcher([
       (UPat.var("x")*1, lambda x:x),
@@ -46,7 +47,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(uops), 2)
     self.assertEqual(uops[0], a*2)
     self.assertEqual(uops[1], graph_rewrite(a+a, pm))
-  
+
   @unittest.expectedFailure
   def test_rewrite_with_ctx(self):
     a = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0), UOp.const(dtypes.int, 0)))
