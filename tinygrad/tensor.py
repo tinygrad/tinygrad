@@ -377,7 +377,7 @@ class Tensor:
     return self
   
   def all_gather(self):
-    assert isinstance(self.lazydata, MultiLazyBuffer), "can only gather MultiLazyBuffer"
+    if not isinstance(self.lazydata, MultiLazyBuffer): return self
     return Tensor(all_gather(self.lazydata), device=self.device)
   
   def all_gather_(self):

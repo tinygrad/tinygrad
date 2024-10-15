@@ -8,6 +8,7 @@ from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
 
 def all_gather(mlb: "MultiLazyBuffer") -> "MultiLazyBuffer":
+  if mlb.axis is None: return mlb
   return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None, )
 
 

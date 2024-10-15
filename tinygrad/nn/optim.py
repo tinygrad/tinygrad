@@ -93,11 +93,11 @@ class LARS(Optimizer):
       # classic momentum does post learning rate update
       if self.classic: g = g * r * self.lr
       if self.momentum:
-        self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
+        self.b[i].assign((self.momentum * self.b[i] + g).all_gather_())  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
-      t.assign((t.detach() - g).cast(t.dtype))
+      t.assign(((t.detach() - g).all_gather_()).cast(t.dtype))
     return self.b
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
@@ -139,8 +139,8 @@ class LAMB(Optimizer):
     self.b2_t *= self.b2
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
-      self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
+      self.m[i].assign((self.b1 * self.m[i] + (1.0 - self.b1) * t.grad).all_gather_())
+      self.v[i].assign((self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad)).all_gather_())
       m_hat = self.m[i] / (1.0 - self.b1_t)
       v_hat = self.v[i] / (1.0 - self.b2_t)
       up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
@@ -150,5 +150,5 @@ class LAMB(Optimizer):
         r = Tensor.where(r1 > 0, Tensor.where(r2 > 0, r1 / r2, 1.0), 1.0)
       else:
         r = 1.0
-      t.assign((t.detach() - self.lr * r * up).cast(t.dtype))
+      t.assign(((t.detach() - self.lr * r * up).all_gather_()).cast(t.dtype))
     return [self.b1_t, self.b2_t] + self.m + self.v
