@@ -388,7 +388,7 @@ class UOp(MathTrait):
   # *** this was LazyBuffer ***
 
   def copy_to_device(self, device): return UOp(UOps.COPY, self.dtype, (self,), device)
-  def r(self, op, axis): return UOp(UOps.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op], axis, tuple(self.shape[x] for x in axis)))
+  def r(self, op, axis): return UOp(UOps.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op], axis))
   def contiguous(self):
     if self.op is UOps.CONTIGUOUS: return self  # should be an instant rule
     return UOp(UOps.CONTIGUOUS, self.dtype, (self,))
