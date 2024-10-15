@@ -5,12 +5,11 @@ from tinygrad.device import Device
 import tinygrad.nn as nn
 import math
 from dataclasses import dataclass
-from extra.fsdp.mlb import print_lb
+from extra.fsdp.utils import print_size
 from tinygrad.multi import MultiLazyBuffer
 
 
 GPUS = [f"{Device.DEFAULT}:{i}" for i in range(2)]
-print(GPUS)
 
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
@@ -36,6 +35,7 @@ class Optimizer:
   def step(self):
     for x in self.params:
       if isinstance(x.grad.lazydata, MultiLazyBuffer) and (axis:=x.grad.lazydata.axis) is not None and axis != x.lazydata.axis:
+        print("ALL GATHER")
         x.grad.all_gather_()
       x.assign(x.detach() - x.grad)
     Tensor.realize(*self.params)
@@ -52,12 +52,19 @@ class Model:
 
 x = Tensor.empty(2, 8)
 model = Model()
-
-x.shard_(GPUS)
 opt = Optimizer(nn.state.get_parameters(model))
-for p in nn.state.get_parameters(opt):
-  p.shard_(GPUS, axis=0)
-  p.realize()
+print_size("model", *nn.state.get_parameters(model))
+print_size("model with optimizer", *nn.state.get_parameters(opt))
+
+if os.environ.get("SHARD"):
+  print("SHARDING ON", GPUS)
+  x.shard_(GPUS)
+  for p in nn.state.get_parameters(opt):
+    p.shard_(GPUS, axis=0)
+    p.realize()
+else:
+  for p in nn.state.get_parameters(opt):
+    p.realize()
 
 def train():
   y = model(x)
