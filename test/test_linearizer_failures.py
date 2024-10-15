@@ -1239,6 +1239,7 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.TC, axis=0, amt=2)]
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
+  @unittest.skipIf(CI and Device.DEFAULT in {"METAL"}, "hangs metal gpu CI")
   def test_failure_52(self):
     # resnet beam.
     # NV also fails with a pf.
