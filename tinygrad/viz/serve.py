@@ -4,7 +4,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Tuple, Optional
-from tinygrad.helpers import colored, getenv, to_function_name, tqdm, word_wrap
+from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, lines
 from tinygrad.codegen.kernel import Kernel
 
@@ -47,7 +47,7 @@ def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List
     name = to_function_name(k.name) if isinstance(k, Kernel) else None
     for ctx in ctxs:
       if ctx.sink.op is UOps.CONST: continue
-      upats = [(upat.location, upat.printable()) for _,_,upat in ctx.rewrites]
+      upats = [(upat.location, upat.printable()) for _,_,upat in ctx.matches if upat is not None]
       if name not in kernels: kernels[name] = []
       kernels[name].append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
@@ -72,13 +72,15 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
   g = GraphRewriteDetails(**asdict(metadata), graphs=[ctx.sink], diffs=[], changed_nodes=[], kernel_code=_prg(k))
   replaces: Dict[UOp, UOp] = {}
   sink = ctx.sink
-  for i,(u0,u1,upat) in enumerate(ctx.rewrites):
-    # first, rewrite this UOp with the current rewrite + all the seen rewrites before this
-    replaces[u0] = u1
+  for i,(u0,u1,upat) in enumerate(ctx.matches):
+    replaces[u0] = u0 if u1 is None else u1
+    # if the match didn't result in a rewrite we move forward
+    if u1 is None: continue
+    # first, rewrite this UOp with the current rewrite + all the seen matches before this
     new_sink = _replace_uop(sink, {**replaces})
     # sanity check
     if new_sink is sink:
-      raise AssertionError(f"rewritten sink wasn't rewritten! {i} {upat.location}")
+      raise AssertionError(f"rewritten sink wasn't rewritten! {i} {unwrap(upat).location}")
     # update ret data
     g.changed_nodes.append([id(x) for x in u1.sparents if x.op is not UOps.CONST])
     g.diffs.append(list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())))
