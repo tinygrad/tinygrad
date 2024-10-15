@@ -62,20 +62,18 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
       if x.op is UOps.CONST: label += f"\nCONST{idx} {x.arg:g}"
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x.op is not UOps.CONST], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
-def _replace_uop(base:UOp, replaces:Dict[UOp, Optional[UOp]]) -> UOp:
-  if base in replaces:
-    new_base = replaces[base]
-    return base if new_base is None else new_base
+def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
+  if (found:=replaces.get(base)) is not None: return found
   replaces[base] = ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
   return ret
 @functools.lru_cache(None)
 def _prg(k:Optional[Kernel]) -> Optional[str]: return k.to_program().src if isinstance(k, Kernel) else None
 def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
   g = GraphRewriteDetails(**asdict(metadata), graphs=[ctx.sink], diffs=[], changed_nodes=[], kernel_code=_prg(k))
-  replaces: Dict[UOp, Optional[UOp]] = {}
+  replaces: Dict[UOp, UOp] = {}
   sink = ctx.sink
   for i,(u0,u1,upat) in enumerate(ctx.matches):
-    replaces[u0] = u1
+    replaces[u0] = u0 if u1 is None else u1
     # if the match didn't result in a rewrite we move forward
     if u1 is None: continue
     # first, rewrite this UOp with the current rewrite + all the seen matches before this

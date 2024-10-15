@@ -598,7 +598,7 @@ match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 class TrackedRewriteContext:
   loc: Tuple[str, int]                                                                       # location that called graph_rewrite
   sink: UOp                                                                                  # the sink passed into the rewrite
-  matches: List[Tuple[UOp, Optional[UOp], Optional[UPat]]] = field(default_factory=list)     # all matches of sparents. (before, _maybe_ after, _maybe_ UPat)
+  matches: List[Tuple[UOp, Optional[UOp], Optional[UPat]]] = field(default_factory=list)     # all matches of sparents. (start, replace, _maybe_ UPat)
 
 rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
 contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
