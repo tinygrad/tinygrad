@@ -57,9 +57,11 @@ def get_fuzz_rawbufs(lin):
       rawbuf.copyin(Tensor(data, device=lin.opts.device).realize().lazydata.realized.as_buffer())
   return rawbufs
 
-def get_fuzz_rawbuf_like(rawbuf, zero=False, size=None):
-  rawbuf = type(rawbuf)(rawbuf.device, rawbuf.size if size is None else size, rawbuf.dtype).allocate()
-  if zero:
+def get_fuzz_rawbuf_like(old_rawbuf, zero=False, copy=False, size=None, force_device=None):
+  rawbuf = type(old_rawbuf)(force_device or old_rawbuf.device, old_rawbuf.size if size is None else size, old_rawbuf.dtype).allocate()
+  if copy:
+    with Context(DEBUG=0): rawbuf.copyin(old_rawbuf.as_buffer())
+  elif zero:
     with Context(DEBUG=0):
       mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
       ctypes.memset(from_mv(mv), 0, len(mv))
@@ -196,7 +198,8 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
         if state1 is not None and validate_device is not None:
           validate_lin = test_lin.copy()
           validate_lin.opts = validate_device.renderer
-          (_msg, _, _, _, state2) = compare_linearizer(validate_lin, None, var_vals, ground_truth, rtol=rtol, atol=atol)
+          validate_rawbufs = [get_fuzz_rawbuf_like(x, copy=True, force_device=validate_device.dname) for x in rawbufs]
+          (_msg, _, _, _, state2) = compare_linearizer(validate_lin, validate_rawbufs, var_vals, ground_truth, rtol=rtol, atol=atol)
 
           if _msg != "PASS": failures[f"VALIDATE_DEV_{_msg}"].append((validate_lin.ast, validate_lin.applied_opts))
 
