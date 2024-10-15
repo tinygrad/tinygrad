@@ -93,11 +93,11 @@ class LARS(Optimizer):
       # classic momentum does post learning rate update
       if self.classic: g = g * r * self.lr
       if self.momentum:
-        self.b[i].assign((self.momentum * self.b[i] + g).all_gather_())  # NOTE: self.b[i] is zero on the first run, no if required
+        self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
-      t.assign(((t.detach() - g).all_gather_()).cast(t.dtype))
+      t.assign((t.detach() - g.all_gather_()).cast(t.dtype))
     return self.b
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.

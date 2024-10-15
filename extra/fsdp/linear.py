@@ -5,7 +5,7 @@ from tinygrad.device import Device
 import tinygrad.nn as nn
 import math
 from dataclasses import dataclass
-from extra.mlb import print_lb
+from extra.fsdp.mlb import print_lb
 
 
 GPUS = [f"{Device.DEFAULT}:{i}" for i in range(4)]
@@ -28,13 +28,13 @@ class Optimizer:
         p.requires_grad = True
     self.params = [x for x in params if x.requires_grad]
 
-  def zero(self):
+  def zero_grad(self):
     for x in self.params:
       x.grad = None
 
   def step(self):
     for x in self.params:
-      x.assign(x.detach() - x.grad)
+      x.assign(x.detach() - x.grad.all_gather_())
     Tensor.realize(*self.params)
 
 class Model:
@@ -52,7 +52,7 @@ for p in nn.state.get_parameters(model):
   p.shard_(GPUS, axis=0)
   p.realize()
 
-opt = nn.optim.AdamW(nn.state.get_parameters(model))
+opt = Optimizer(nn.state.get_parameters(model))
 
 def train():
   y = model(x)
