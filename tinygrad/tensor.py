@@ -8,7 +8,7 @@ from collections import defaultdict
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv
-from tinygrad.multi import MultiLazyBuffer
+from tinygrad.multi import MultiLazyBuffer, all_gather
 from tinygrad.ops import MetaOps, truncate, smax, resolve, UOp, UOps, BinaryOps, sint, Variable
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.engine.lazy import LazyBuffer
@@ -374,6 +374,14 @@ class Tensor:
     Shards the tensor across the given devices in place.
     """
     self.lazydata = self.shard(devices, axis, splits).lazydata
+    return self
+  
+  def all_gather(self):
+    assert isinstance(self.lazydata, MultiLazyBuffer), "can only gather MultiLazyBuffer"
+    return Tensor(all_gather(self.lazydata), device=self.device)
+  
+  def all_gather_(self):
+    self.lazydata = self.all_gather().lazydata
     return self
 
   @staticmethod

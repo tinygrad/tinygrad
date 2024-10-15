@@ -7,6 +7,10 @@ from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, R
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
 
+def all_gather(mlb: "MultiLazyBuffer") -> "MultiLazyBuffer":
+  return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None, )
+
+
 def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
   assert all_same([lb.shape[0] for lb in lbs]), "allreduce with uneven shards is undefined"
