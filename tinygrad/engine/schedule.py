@@ -105,7 +105,12 @@ def _schedule_rewrite(sink:UOp) -> List[ScheduleItem]:
     ret.append(ScheduleItem(ast, bufs, None))
   return ret
 
-def create_schedule_with_vars(sched:List[UOp]) -> Tuple[List[ScheduleItem], Dict[UOp, int]]:
-  sink = UOp.sink(*[x.base for x in sched])
+def create_schedule_with_vars(outs:List[UOp]) -> Tuple[List[ScheduleItem], Dict[UOp, int]]:
+  sink = UOp.sink(*[x.base for x in outs])
   sched = _schedule_rewrite(sink)
   return sched, {}
+
+def create_schedule(outs:List[UOp]) -> List[ScheduleItem]:
+  schedule, var_vals = create_schedule_with_vars(outs)
+  assert len(var_vals) == 0
+  return schedule

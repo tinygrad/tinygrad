@@ -435,12 +435,12 @@ class UOp(MathTrait):
   @property
   def buffer(self) -> Buffer:
     from tinygrad.device import Buffer
-    if (ret:=buffers.get(self)) is not None: return ret
+    if (ret:=buffers.get(key:=self.replace(src=()))) is not None: return ret
     if self.op is UOps.VIEW:
-      assert self.st.contiguous, "VIEW only works here if it's contiguous"
+      assert self.st is not None and self.st.contiguous, "VIEW only works here if it's contiguous"
       return self.src[0].buffer
     assert self.op == UOps.BUFFER, f"no buffer on {self.op}"
-    buffers[self] = ret = Buffer(self.arg[0], self.arg[1], self.dtype)
+    buffers[key] = ret = Buffer(self.arg[0], self.arg[1], self.dtype)
     return ret
 
   @property
