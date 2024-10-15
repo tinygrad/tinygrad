@@ -1970,7 +1970,21 @@ class Tensor:
   def _padding2d(self, padding:Union[int, Sequence[int]], dims:int) -> Sequence[int]:
     return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
 
-  # TODO: ADD CEIL MODE
+  # :D:D:D:D:D:D:D:D:D:D:D:D:D:D:D, yes this is unreadable gibberish I know
+  def _ceil_mode_padding2d(self,d_,k_,s_,p_) -> List[int]:
+    (d_,k_,s_,p_) = (make_pair(x, len(i_ := self.shape[-len(k_):])) for x in (d_,k_,s_,p_))
+    o_ = [ceildiv(i+2*p-d*(k-1)-1,s)+1 for i,d,k,s,p in zip(i_,d_,k_,s_,p_)]
+    pads = list(self._padding2d(p_, len(k_)))
+    # we have to pre-pad before _pool so that o_ in _pool is calculated correctly
+    for j, (o,i,s,p,k,d) in enumerate(zip(o_, i_, s_, p_, k_, d_)):
+      # pad so that sliding windows inside the input shape is _pool-ed with full kernel shape
+      pads[-1-j*2] += ((o-1)*s+d*(k-1)+1)-(i+2*p)
+      # remove extra end pads that result in sliding windows starting in the padded region outside input shape
+      pads[-1-j*2] -= max(0, s*(o-1)+1-i-p)
+    # print(f"{i_=}, {o_=}, {k_=}, {d_=}, {s_=}, {p=}")
+    # print(pads)
+    return pads
+
   # NOTE: these work for more than 2D
   def avg_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False, count_include_pad=True):
     """
@@ -1990,9 +2004,9 @@ class Tensor:
     """
     padding_, axis = self._padding2d(padding, len(k_ := make_pair(kernel_size))), tuple(range(-len(k_), 0))
     def pool(x:Tensor) -> Tensor: return x.pad2d(padding_)._pool(k_, stride if stride is not None else k_, dilation)
+    if ceil_mode: padding_ = self._ceil_mode_padding2d(dilation, k_, stride if stride is not None else k_, padding)
     return pool(self).mean(axis=axis) if count_include_pad else pool(self).sum(axis=axis) / pool(self.ones_like()).sum(axis=axis)
 
-  # TODO: ADD CEIL MODE
   # TODO: ADD return_indices
   def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False, return_indices=False):
     """
@@ -2011,6 +2025,7 @@ class Tensor:
     ```
     """
     padding_ = self._padding2d(padding, len(k_ := make_pair(kernel_size)))
+    if ceil_mode: padding_ = self._ceil_mode_padding2d(dilation, k_, stride if stride is not None else k_, padding)
     return self.pad2d(padding_, value=float('-inf'))._pool(k_, stride if stride is not None else k_, dilation).max(axis=tuple(range(-len(k_), 0)))
 
   def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, acc_dtype:DTypeLike|None=None) -> Tensor:

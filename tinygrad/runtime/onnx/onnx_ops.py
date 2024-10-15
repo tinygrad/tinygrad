@@ -154,30 +154,10 @@ def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsil
 # (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> (..., x2_start, x2_end, x1_start, x1_end)
 def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed(list((pb, pe) for pb, pe in zip(pads, pads[len(pads)//2:]))))
 
-# (H_pad, W_pad) -> (L_pad, U_pad, R_pad, D_pad)
+# (H_pad, W_pad) -> (U_pad, L_pad, D_pad, R_pad) aka (x1_begin, x2_begin, ..., x1_end, x2_end, ...)
 def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
   return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
          [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
-
-# shared padding function
-# TODO: check this again, the zips are pretty bad
-def _padded(X: Tensor, pads=None, auto_pad="NOTSET", constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
-  input_shape = X.shape[2:]
-  strides, dilations = (make_pair(x, len(input_shape)) for x in (strides, dilations))
-  if auto_pad != "NOTSET":
-    pads = _auto_pad([(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(input_shape, strides, kernel_shape, dilations)], auto_pad)
-  elif ceil_mode:
-    out_spatial_shape = [math.ceil((sh - dil * (ker-1)-1)/st + 1) if ceil_mode else math.floor((sh - dil * (ker-1)-1)/st + 1)
-                         for sh, st, ker, dil in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
-    pads = [(osh-1)*st+((ks-1)*dil+1)-ish for osh, st, ks, dil, ish in zip(out_spatial_shape, strides, kernel_shape, dilations, input_shape)]
-    pads = _auto_pad(pads, "SAME_UPPER") # -> (x1_begin, x2_begin, ..., x1_end, x2_end, ...)
-    # ceil_mode case follows https://pytorch.org/docs/stable/generated/torch.nn.MaxPool2d.html#torch.nn.MaxPool2d
-    # so if any kernels start in right padded region, we decrease right pads to omit that kernel. Only omitting 1 kernel now.
-    for i, (ks, st, xs) in enumerate(zip(kernel_shape, strides, input_shape)):
-      # decrease right pads
-      if (rpad := ks + st%(st-(((pads[i]+xs)%st)))) <= pads[i+len(pads)//2]: pads[i+len(pads)//2] -= rpad
-  if pads is None: return X
-  return X.pad2d(_onnx_pads_to_pad2d_pads(pads), value=constant_value)
 
 def Pad(x:Tensor, pads:List[int], constant_value:Optional[ConstType]=None, axes:Optional[List[int]]=None, mode="constant",value:float=0.):
   constant_value, mode = value if constant_value is None else float(constant_value), {"edge": "replicate", "wrap":"circular"}.get(mode, mode)
@@ -185,24 +165,34 @@ def Pad(x:Tensor, pads:List[int], constant_value:Optional[ConstType]=None, axes:
   for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
   return x.pad2d(_onnx_pads_to_pad2d_pads(real_pads), constant_value, mode)
 
-def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
-  # TODO:
-  ret = _padded(X, pads, auto_pad, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
-  ret = ret.avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
+# TODO: clean this up a bit more
+# NOTE: these pool ops with padding is really annoying since they both have asymmetrical padding
+# these pool ops with padding is really annoying since they both have asymmetrical padding
+def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, count_include_pad=False, dilations=1, pads=0, strides=1):
+  if isinstance(pads, (tuple, list)):
+    if not all(start==end for start,end in zip(pads, pads[len(pads)//2:])): raise ValueError(f"asymmetrical {pads=} not supported")
+    pads = pads[:-len(pads)//2]
+  if auto_pad == "NOTSET": return X.avg_pool2d(kernel_shape, strides, dilations, pads, ceil_mode, count_include_pad)
+  s_, k_ = make_pair(strides, len(i_ := X.shape[-len(kernel_shape):])), kernel_shape
+  o_ = [(math.floor((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) / s) + 1) for i,k,s in zip(i_, k_, s_)]
+  pads = _auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad)
+  X, pads, divisor = X.pad2d(_onnx_pads_to_pad2d_pads(pads)), 0, X.ones_like().pad2d(_onnx_pads_to_pad2d_pads(pads))
+  ret = X.avg_pool2d(kernel_shape, strides, dilations, pads, ceil_mode)
   if count_include_pad: return ret
-  div = _padded(Tensor.ones(X.shape), pads, auto_pad, strides=strides, kernel_shape=kernel_shape, dilations=dilations,
-                ceil_mode=ceil_mode).avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
-  return ret / div
+  return ret / divisor.avg_pool2d(kernel_shape, strides, dilations, pads, ceil_mode)
 
-def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
-  # TODO:
-  # ret, indices = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations, ceil_mode=True, return_indices=True).cast(X.dtype)
-  # return ret, indices.transpose(-2, -1) if storage_order else indices
-  ret = _padded(X, pads, auto_pad, constant_value=-math.inf, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
-  ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations).cast(X.dtype)
+def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, dilations=1, pads=0, storage_order=0, strides=1):
+  if isinstance(pads, (tuple, list)):
+    if not all(start==end for start,end in zip(pads, pads[len(pads)//2:])): raise ValueError(f"asymmetrical {pads=} not supported")
+    pads = pads[:-len(pads)//2]
+  s_, k_ = make_pair(strides, len(i_ := X.shape[-len(kernel_shape):])), kernel_shape
+  if auto_pad != "NOTSET":
+    o_ = [(math.floor((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) / s) + 1) for i,k,s in zip(i_, k_, s_)]
+    pads = _auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad)
+    X, pads = X.pad2d(_onnx_pads_to_pad2d_pads(pads), float('-inf')), 0
+  ret = X.max_pool2d(kernel_shape, strides, dilations, list(pads) if isinstance(pads, tuple) else pads, ceil_mode, return_indices=True)
   indices = ((ret.reshape(-1, 1) == X.reshape(1, -1)) * Tensor.arange(X.numel(), dtype=dtypes.int64).unsqueeze(0)).sum(1).reshape(ret.shape)
-  if storage_order: indices = indices.transpose(-2, -1)
-  return ret, indices
+  return ret.cast(X.dtype), indices.transpose(-2, -1) if storage_order else indices
 
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
 # TODO: is setitem MaxUnpool the more preferred implementation? it's more lines :D
@@ -224,7 +214,7 @@ def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilat
   strides, dilations = (make_pair(x, len(input_shape)) for x in (strides, dilations))
   if auto_pad != "NOTSET":
     # zip to fit in 1 line lmao
-    pads = _auto_pad([(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(input_shape, strides, kernel_shape, dilations)], auto_pad)
+    pads = _auto_pad([(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh,st,ks,di in zip(input_shape, strides, kernel_shape, dilations)], auto_pad)
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=_onnx_pads_to_pad2d_pads(pads) if pads is not None else 0)
 
 # TODO: their reference implementation and their documentation has different information
