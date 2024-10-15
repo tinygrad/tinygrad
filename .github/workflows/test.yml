@@ -396,7 +396,7 @@ jobs:
         backend: [llvm, clang, gpu, ptx, amd, nv] #, triton]
 
     name: Tests on (${{ matrix.backend }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 20
 
     steps:
