@@ -63,5 +63,5 @@ def load_gguf(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   data_start = cursor_pos = cursor_pos + (alignment - cursor_pos % alignment if cursor_pos % alignment != 0 else 0)
 
   for name, shape, ttype, offset in tensor_infos:
-    tensor_data[name] = GGUFConverters.converter_map[ttype](tensor[data_start + offset:], prod(shape)).reshape(shape)
+    tensor_data[name] = GGUFConverters.converter_map[ttype](tensor[data_start + offset:], prod(shape)).reshape(*reversed(shape))
   return kv_data, tensor_data
