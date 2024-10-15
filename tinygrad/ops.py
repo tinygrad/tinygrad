@@ -444,8 +444,8 @@ class UOp(MathTrait):
     return ret
 
   @property
-  def realized(self): return buffers.get(self)
-  def is_realized(self): return self in buffers
+  def realized(self): return realized.get(self.base).buffer
+  def is_realized(self): return self.base in realized
 
   buffer_num = -1
   @staticmethod
@@ -483,6 +483,7 @@ class UOp(MathTrait):
 if TYPE_CHECKING:
   from tinygrad.device import Buffer
 buffers: Dict[UOp, Buffer] = {}
+realized: Dict[UOp, UOp] = {}
 
 @dataclass(frozen=True)
 class KernelInfo:

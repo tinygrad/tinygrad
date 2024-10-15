@@ -2,7 +2,7 @@ from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 from tinygrad.helpers import Context, Metadata
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, graph_rewrite, PatternMatcher, UPat, UOps, symbolic, track_rewrites, buffers
+from tinygrad.ops import UOp, graph_rewrite, PatternMatcher, UPat, UOps, symbolic, track_rewrites, realized
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 
@@ -38,6 +38,8 @@ pm_push_views = symbolic+pm_merge_views_and_consts+PatternMatcher([
                       tuple(UOp(UOps.VIEW, x.dtype, (x,), s.arg) for x in alu.src), alu.arg)),
   # don't need CONTIGUOUS any more
   (UPat(UOps.CONTIGUOUS, src=(UPat.var('x'),)), lambda x: x),
+  # remove unneeded (new) buffers
+  (UPat(UOps.BUFFER, src=(UPat(UOps.VIEW, src=(UPat(UOps.BUFFER, name="b"),), name="v"), )), lambda b,v: b if v.st.contiguous else None)
 ])
 
 # *********
@@ -70,7 +72,7 @@ break_sched = PatternMatcher([
 # *********
 
 pm_remove_buffer = PatternMatcher([(UPat(UOps.VIEW, src=(UPat(UOps.BUFFER, src=(UPat.var('x'),)),)), lambda x: x), ])
-def add_buffer(to_realize:Tuple[Dict[UOp, Optional[UOp]], Dict[UOp, UOp]], x:UOp):
+def add_buffer(to_realize:Dict[UOp, Optional[UOp]], x:UOp):
   # TODO: ugh, this is the worst way to do this
   with Context(TRACK_MATCH_STATS=0): x_bl = graph_rewrite(x, pm_remove_buffer)
   if to_realize.get(x_bl, True) is None:
@@ -79,6 +81,10 @@ def add_buffer(to_realize:Tuple[Dict[UOp, Optional[UOp]], Dict[UOp, UOp]], x:UOp
     return ret.reshape(x.shape)
   return None
 pm_add_buffer = PatternMatcher([(UPat(tuple(UOps), name="x"), add_buffer), ])
+
+pm_put_in_realized = PatternMatcher([
+  (UPat(tuple(UOps), name='x'), lambda ctx,x: ctx.get(x)),
+])
 
 @track_rewrites
 def _schedule_rewrite(sink:UOp) -> List[ScheduleItem]:
@@ -95,7 +101,10 @@ def _schedule_rewrite(sink:UOp) -> List[ScheduleItem]:
     if p.op is UOps.REDUCE_AXIS:
       to_realize[p] = None
   sink = graph_rewrite(sink, pm_add_buffer, to_realize)
-  for k,v in to_realize.items(): buffers[k] = v.buffer
+  sink = graph_rewrite(sink, pm_put_in_realized, ctx=realized)
+  for k,v in to_realize.items():
+    if v is None: continue
+    realized[k] = v.replace(src=()).reshape(k.shape)
   sink = graph_rewrite(sink, pm_push_views)
   graph_rewrite(sink, break_sched, sched:=[])
   ret = []
