@@ -2,13 +2,13 @@ from typing import Dict, List, Optional
 import unittest
 from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, TrackedPatternMatcher as PatternMatcher, UOp, UOps, UPat, graph_rewrite, contexts, track_rewrites
-from tinygrad.viz.serve import _replace_uop
+from tinygrad.viz.serve import _replace_uop, get_details, get_metadata
 
 @track_rewrites
-def _rewrite(sink:UOp, pm:PatternMatcher, ctx): return graph_rewrite(sink, pm, ctx)
+def rewrite(sink:UOp, pm:PatternMatcher, ctx=None): return graph_rewrite(sink, pm, ctx)
 
-def viz(sink:UOp, pm:PatternMatcher, ctx=None) -> List[UOp]:
-  _rewrite(sink, pm, ctx)
+def helper_test_viz(sink:UOp, pm:PatternMatcher, ctx=None) -> List[UOp]:
+  rewrite(sink, pm, ctx)
   assert len(contexts) == 1
   assert len(contexts[0][1]) == 1
   ctx = contexts[0][1][0]
@@ -26,13 +26,13 @@ class TestViz(unittest.TestCase):
     self.tms = TRACK_MATCH_STATS.value
     TRACK_MATCH_STATS.value = 2
   def tearDown(self): TRACK_MATCH_STATS.value = self.tms
-
+  
   def test_viz_simple(self):
     pm = PatternMatcher([
       (UPat.var("x")*1, lambda x:x),
     ])
     a = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0), UOp.const(dtypes.int, 0)))
-    uops = viz(a*1, pm)
+    uops = helper_test_viz(a*1, pm)
     self.assertEqual(len(uops), 1)
     self.assertEqual(uops[0], a)
 
@@ -42,7 +42,7 @@ class TestViz(unittest.TestCase):
       (UPat.var("x", dtypes.int)*2, lambda x:x.alu(BinaryOps.SHL, UOp.const(dtypes.int, 1))),
     ])
     a = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0), UOp.const(dtypes.int, 0)))
-    uops = viz(a+a, pm)
+    uops = helper_test_viz(a+a, pm)
     self.assertEqual(len(uops), 2)
     self.assertEqual(uops[0], a*2)
     self.assertEqual(uops[1], graph_rewrite(a+a, pm))
@@ -58,9 +58,46 @@ class TestViz(unittest.TestCase):
     pm = PatternMatcher([
       (UPat(UOps.LOAD, name="x"), store_load),
     ])
-    uops = viz(a+b, pm, {})
+    uops = helper_test_viz(a+b, pm, {})
     self.assertEqual(len(uops), 2)
     self.assertEqual(uops[-1], graph_rewrite(a+b, pm, {}))
+
+  def test_track_rewrites(self):
+    simple = PatternMatcher([(UPat.var("x")*1, lambda x:x)])
+    @track_rewrites
+    def do_rewrite(key:str, x:UOp): return graph_rewrite(x, simple)
+    ld = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1), UOp.const(dtypes.int, 0)))
+    do_rewrite("uop_0", ld*1)
+    do_rewrite("uop_1", ld*2)
+    ret = get_metadata(contexts)
+    self.assertEqual(len(ret), 1)
+    key, _, m = ret[0][0]
+    self.assertEqual(key, "uop_0")
+    self.assertEqual(len(m.upats), 1)
+    key, _, m = ret[0][1]
+    self.assertEqual(key, "uop_1")
+    self.assertEqual(len(m.upats), 0)
+
+  def test_track_rewrites_with_exception(self):
+    simple = PatternMatcher([(UPat.var("x")*1, lambda x:x)])
+    @track_rewrites
+    def do_rewrite(key:str, x:UOp):
+      x = graph_rewrite(x, simple) # NOTE: viz tracks this
+      raise Exception("test")
+    ld = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1), UOp.const(dtypes.int, 0)))
+    with self.assertRaises(Exception): do_rewrite("uop_0", ld*1)
+    ret = get_metadata(contexts)
+    self.assertEqual(len(ret), 1)
+
+  def test_fold_const(self):
+    pm = PatternMatcher([
+      (UPat.var("x")*1, lambda x:x),
+    ])
+    a = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0), UOp.const(dtypes.int, 0)))
+    rewrite(a, pm)
+    graph = get_details(*get_metadata(contexts)[0][0]).graphs[-1]
+    assert not any(v[0].startswith("CONST") for v in graph.values())
+    assert len([x for x in graph.values() if "CONST" in x[0]]) == 1
 
 if __name__ == "__main__":
   unittest.main()
