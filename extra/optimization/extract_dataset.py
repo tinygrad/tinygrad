@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 # extract asts from process replay artifacts
 import os
-from tinygrad.helpers import db_connection, VERSION
+from tinygrad.codegen.kernel import Kernel
+from tinygrad.helpers import db_connection
 from test.external.process_replay.process_replay import _pmap
-
-PAGE_SIZE = 100
-TABLE_NAME = f"kernel_process_replay_{VERSION}"
 LOGOPS = os.getenv("LOGOPS", "/tmp/sops")
 
-def extract_ast(*args) -> bool:
-  open(LOGOPS, "a").write(str(args[0]).replace("\n", "").replace(" ", "")+"\n")
-  return args[-1]
+def extract_ast(compare, *args, **kwargs):
+  if not isinstance(x:=args[0], Kernel): return str(compare)
+  open(LOGOPS, "a").write(str(x.ast).replace("\n", "").replace(" ", "")+"\n")
+  return compare.src
 
 if __name__ == "__main__":
   conn = db_connection()
-  row_count = conn.execute(f"SELECT COUNT(*) FROM '{TABLE_NAME}'").fetchone()[0]
-  _pmap("kernel", extract_ast)
+  _pmap(extract_ast)

@@ -216,6 +216,20 @@ def diskcache(func):
     return diskcache_put(table, key, func(*args, **kwargs))
   return wrapper
 
+# *** process replay ***
+_PROCESS_REPLAY_CAPTURE: List[Tuple[Tuple, Dict, Tuple, Any]] = []
+def process_replay(func):
+  def wrapper(*args, **kwargs):
+    frm = sys._getframe(0)
+    stack: List[Tuple[str, int]] = []
+    while frm.f_back: stack.append(((frm:=frm.f_back).f_code.co_filename, frm.f_lineno))
+    _PROCESS_REPLAY_CAPTURE.append((args, kwargs, ({k:v.value for k,v in ContextVar._cache.items()}, stack), ret:=func(*args, **kwargs)))
+    return ret
+  return wrapper
+if getenv("RUN_PROCESS_REPLAY"):
+  import atexit
+  atexit.register(lambda: [diskcache_put("process_replay", id(vals[0]), vals) for vals in _PROCESS_REPLAY_CAPTURE])
+
 # *** http support ***
 
 def _ensure_downloads_dir() -> pathlib.Path:
