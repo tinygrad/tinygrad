@@ -32,13 +32,13 @@ class LazyBuffer(MathTrait):
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a UOp, except the src is LazyBuffers and not UOps
-      assert self.op is not MetaOps.ASSIGN or srcs[1].base.realized is not None, "assign target must be realized"
+      assert self.op is not MetaOps.ASSIGN or srcs[0].base.realized is not None, "assign target must be realized"
 
       if self.op is MetaOps.VIEW:
         # some LazyBuffers can be processed with only a view, no AST required
         self.buffer: Buffer = srcs[0].base.buffer.view(st.size, self.dtype, srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
       else:
-        self.buffer = srcs[1].base.buffer if self.op is MetaOps.ASSIGN else Buffer(device, self.size, self.dtype)
+        self.buffer = srcs[0].base.buffer if self.op is MetaOps.ASSIGN else Buffer(device, self.size, self.dtype)
       self.buffer.ref(1)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
@@ -80,7 +80,7 @@ class LazyBuffer(MathTrait):
 
   def assign(self, x:LazyBuffer) -> LazyBuffer:
     assert x.size == self.size, f"assign target must have same size {self.size=} != {x.size=}"
-    return LazyBuffer.metaop(MetaOps.ASSIGN, self.shape, self.dtype, self.device, arg=() if self.st.contiguous else (self.st,), src=(x, self.base))
+    return LazyBuffer.metaop(MetaOps.ASSIGN, self.shape, self.dtype, self.device, arg=() if self.st.contiguous else (self.st,), src=(self.base, x))
 
   def can_view(self):
     return (self.st.consecutive and not self.is_unrealized_const() and not isinstance(self.dtype, ImageDType) and
