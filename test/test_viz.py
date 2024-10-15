@@ -1,14 +1,14 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 import unittest
 from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, TrackedPatternMatcher as PatternMatcher, UOp, UOps, UPat, graph_rewrite, contexts, track_rewrites
 from tinygrad.viz.serve import _replace_uop
 
 @track_rewrites
-def _rewrite(sink:UOp, pm:PatternMatcher): return graph_rewrite(sink, pm)
+def _rewrite(sink:UOp, pm:PatternMatcher, ctx): return graph_rewrite(sink, pm, ctx)
 
-def viz(sink:UOp, pm:PatternMatcher) -> List[UOp]:
-  _rewrite(sink, pm)
+def viz(sink:UOp, pm:PatternMatcher, ctx=None) -> List[UOp]:
+  _rewrite(sink, pm, ctx)
   assert len(contexts) == 1
   assert len(contexts[0][1]) == 1
   ctx = contexts[0][1][0]
@@ -46,6 +46,21 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(uops), 2)
     self.assertEqual(uops[0], a*2)
     self.assertEqual(uops[1], graph_rewrite(a+a, pm))
+  
+  @unittest.expectedFailure
+  def test_rewrite_with_ctx(self):
+    a = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0), UOp.const(dtypes.int, 0)))
+    b = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 1), UOp.const(dtypes.int, 0)))
+    def store_load(visited:Dict[UOp, None], x:UOp) -> Optional[UOp]:
+      if x in visited: return None
+      visited[x] = None
+      return UOp.store(*x.src, x)
+    pm = PatternMatcher([
+      (UPat(UOps.LOAD, name="x"), store_load),
+    ])
+    uops = viz(a+b, pm, {})
+    self.assertEqual(len(uops), 2)
+    self.assertEqual(uops[-1], graph_rewrite(a+b, pm, {}))
 
 if __name__ == "__main__":
   unittest.main()
