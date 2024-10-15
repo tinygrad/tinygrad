@@ -9,15 +9,15 @@ class GGUFConverters:
   def conv_bc(dtype: DType, t: Tensor, n: int): return t[:dtype.itemsize * n].bitcast(dtype)
   def dequantize_q8_0(t: Tensor, n: int):
     blocks = t[:(n//32)*34].reshape((-1, 34))
-    return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].cast(dtypes.int8)
+    return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].bitcast(dtypes.int8)
   def dequantize_q4_0(t: Tensor, n: int):
     blocks = t[:(n//32)*18].reshape((-1, 18))
     delta = blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
-    return (GGUFConverters._q_to_uint8(blocks[:,2:], 4).cast(dtypes.int8) - 8) * delta
+    return (GGUFConverters._q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * delta
   def dequantize_q4_1(t: Tensor, n: int):
     blocks = t[:(n//32)*20].reshape((-1, 20))
     d, m = tuple(blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
-    return GGUFConverters._q_to_uint8(blocks[:,4:], 4).cast(dtypes.int8) * d + m
+    return GGUFConverters._q_to_uint8(blocks[:,4:], 4).bitcast(dtypes.int8) * d + m
   def dequantize_q6_K(t: Tensor, n: int):
     blocks = t[:(n//256)*210].reshape((-1, 210))
     xl: Tensor = GGUFConverters._q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4)
