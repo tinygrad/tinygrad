@@ -74,14 +74,14 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   assert v.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
   m1 = {dtypes.float64: 0x000FFFFFFFFFFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
-  m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3C00}[v.dtype]
-  bias = {dtypes.float64: 1022, dtypes.float32: 126, dtypes.float16: 15}[v.dtype]
+  m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3800}[v.dtype]
   bits = float_to_bits(v)
   exponent = shr(bits, significand_bits(v.dtype)) & exponent_mask(v.dtype)
   exponent_zero = exponent.ne(0.0)
+  # Set the exponent bits appropriately to normalize the mantissa into the range of [0.5, 1.0).
   result_f = bits_to_float((bits & m1) | m2, v.dtype)
   value = exponent_zero.where(result_f, v)
-  exp = exponent + (-bias)
+  exp = exponent - exponent_bias(v.dtype)
   exp = exponent_zero.where(exp, exp.const_like(0))
   if v.dtype == dtypes.float16: exp = exp.bitcast(dtypes.int16)
   return value, exp
