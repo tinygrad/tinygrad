@@ -149,7 +149,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
   seen_uops = {}
   last_lins = [lin]
   failures:DefaultDict[str, List[Tuple[Tuple[UOp,...],List[Opt]]]] = defaultdict(list)
-  rawbufs, var_vals, ground_truth = None, None, None
+  rawbufs, var_vals, ground_truth, validate_rawbufs = None, None, None, None
 
   FUZZ_ALL_ACTIONS = getenv("FUZZ_ALL_ACTIONS", 0)
   FUZZ_MAX_SIZE = getenv("FUZZ_MAX_SIZE", 0)
@@ -198,7 +198,8 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
         if state1 is not None and validate_device is not None:
           validate_lin = test_lin.copy()
           validate_lin.opts = validate_device.renderer
-          validate_rawbufs = [get_fuzz_rawbuf_like(x, copy=True, force_device=validate_device.dname) for x in rawbufs]
+          if validate_rawbufs is None:
+            validate_rawbufs = [get_fuzz_rawbuf_like(x, copy=True, force_device=validate_device.dname) for x in rawbufs]
           (_msg, _, _, _, state2) = compare_linearizer(validate_lin, validate_rawbufs, var_vals, ground_truth, rtol=rtol, atol=atol)
 
           if _msg != "PASS": failures[f"VALIDATE_DEV_{_msg}"].append((validate_lin.ast, validate_lin.applied_opts))
