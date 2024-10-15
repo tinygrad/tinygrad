@@ -65,7 +65,7 @@ class TestGGML(unittest.TestCase):
     type_traits.to_float(c_q_data, c_dq_data, n_el)
 
     q_tensor = Tensor(np.frombuffer(c_q_data, dtype=np.uint8, count=n_bytes))
-    dq_tensor = GGUFConverters.converter_map[ttype](q_tensor, n_el).reshape(n_el)
+    dq_tensor = GGUFConverters.type_map[ttype](q_tensor, n_el).reshape(n_el)
 
     np.testing.assert_equal(dq_tensor.numpy(), np.frombuffer(c_dq_data, dtype=np.float32))
 

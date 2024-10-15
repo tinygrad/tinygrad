@@ -6,7 +6,7 @@ from tinygrad.dtype import DType, dtypes
 from tinygrad.tensor import Tensor
 
 class GGUFConverters:
-  def convert_bitcast(dtype: DType, t: Tensor, n: int): return t[:dtype.itemsize * n].bitcast(dtype)
+  def conv_bc(dtype: DType, t: Tensor, n: int): return t[:dtype.itemsize * n].bitcast(dtype)
   def dequantize_q8_0(t: Tensor, n: int):
     blocks = t[:(n//32)*34].reshape((-1, 34))
     return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].cast(dtypes.int8)
@@ -30,9 +30,9 @@ class GGUFConverters:
     nels = 8 // b
     shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(nels) ]), 0xff >> (8 - b)
     return t.unsqueeze(-1).expand((*t.shape,nels)).div(shift_tensor, upcast=False).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
-  converter_map: dict[int, Callable[[Tensor, int], Tensor]] = { 0: partial(convert_bitcast, dtypes.float32),
-    1: partial(convert_bitcast, dtypes.float16), 16: partial(convert_bitcast, dtypes.int8), 17: partial(convert_bitcast, dtypes.int16),
-    18: partial(convert_bitcast, dtypes.int32), 2: dequantize_q4_0, 3: dequantize_q4_1, 14: dequantize_q6_K, 8: dequantize_q8_0 }
+  type_map: dict[int, Callable[[Tensor, int], Tensor]] = { 0: partial(conv_bc, dtypes.float32), 1: partial(conv_bc, dtypes.float16),
+    16: partial(conv_bc, dtypes.int8), 17: partial(conv_bc, dtypes.int16), 18: partial(conv_bc, dtypes.int32), 2: dequantize_q4_0,
+    3: dequantize_q4_1, 14: dequantize_q6_K, 8: dequantize_q8_0 }
 
 def load_gguf(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   if tensor.dtype != dtypes.uint8: raise ValueError("GGUF tensor must have dtype uint8!")
@@ -44,9 +44,9 @@ def load_gguf(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   def read_unpack(fmt: str, n: int): return struct.unpack(fmt, read_bytes(n))[0]
   def read_string(): return str(read_bytes(read_uint64()), "utf-8")
   def read_array():
-    result, reader, n = [], readers[read_int32()], read_uint64()
-    for _ in range(n): result.append(reader())
-    return result
+    reader, n = readers[read_int32()], read_uint64()
+    return [ reader() for _ in range(n) ]
+
   readers: dict[int, Callable] = { 8: read_string, 9: read_array } | { k: partial(read_unpack, *args) for k, args in { 0: ("<c", 1), 1: ("<b", 1),
     2: ("<H", 2), 3: ("<h", 2), 4: ("<I", 4), 5: ("<i", 4), 6: ("<f", 4), 7: ("<?", 1), 10: ("<Q", 8), 11: ("<q", 8), 12: ("<d", 8) }.items() }
   read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
@@ -63,5 +63,5 @@ def load_gguf(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   data_start = cursor_pos = cursor_pos + (alignment - cursor_pos % alignment if cursor_pos % alignment != 0 else 0)
 
   for name, shape, ttype, offset in tensor_infos:
-    tensor_data[name] = GGUFConverters.converter_map[ttype](tensor[data_start + offset:], prod(shape)).reshape(*reversed(shape))
+    tensor_data[name] = GGUFConverters.type_map[ttype](tensor[data_start + offset:], prod(shape)).reshape(*reversed(shape))
   return kv_data, tensor_data
