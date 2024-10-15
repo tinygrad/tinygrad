@@ -14,16 +14,21 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cpp.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/1.0.3/purify.min.js"></script>
-  <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
+  <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" media="(prefers-color-scheme: dark), (prefers-color-scheme: no-preference)"/>
+  <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-light.min.css" media="(prefers-color-scheme: light)"/>
+
   <style>
+  :root {
+    color-scheme: light dark;
+  }
   * {
     box-sizing: border-box;
     margin-block-start: initial;
     margin-block-end: initial;
   }
   html, body {
-    background-color: #08090e;
-    color: #f0f0f5;
+    background-color: light-dark(white, #08090e);
+    color: light-dark(black, #f0f0f5);
     margin: 0;
     padding: 0;
     width: 100%;
@@ -46,7 +51,7 @@
     cursor: pointer;
   }
   ul.active {
-    color: #f0f0f5;
+    color: light-dark(black, #f0f0f5);
   }
   svg {
     width: 100%;
@@ -82,7 +87,7 @@
     height: 100%;
   }
   .container {
-    background-color: #0f1018;
+    background-color: light-dark(#efedea, #08090e);
     height: 100%;
     border-radius: 8px;
     padding: 8px;
@@ -152,6 +157,14 @@
     <div class="container metadata"></div>
   </div>
   <script>
+  let darkMode = true;
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+    darkMode = false;
+  }
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', event => {
+    const darkMode = !event.matches;
+  });
+
   /* global hljs, dagreD3, d3, DOMPurify */
   // extra definitions for UOps
   hljs.registerLanguage("python", (hljs) => ({
@@ -185,7 +198,7 @@
 
   function renderGraph(graph, additions) {
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5);" : "display: none;"});
+    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? `fill: ${darkMode ? "rgba(26, 27, 38, 0.5)" : "#efedea"};` : "display: none;"});
     for (const [k,u] of Object.entries(graph)) {
       g.setNode(k, {label: u[0], style: `fill: ${u[4]};` });
       for (const src of u[2]) {
@@ -341,7 +354,7 @@
             hljs.highlightElement(pre);
             metadata.appendChild(div);
             const diffHtml = diff.map((line) => {
-              const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
+              const color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : (darkMode ? "#f0f0f5" : "black");
               return `<span style="color: ${color};">${line}</span>`;
             }).join("<br>");
             metadata.appendChild(Object.assign(document.createElement("pre"), { innerHTML: `<code>${diffHtml}</code>`, className: "wrap" }));
