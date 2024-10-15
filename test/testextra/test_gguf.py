@@ -2,7 +2,8 @@ import ctypes
 import os
 import numpy as np
 import unittest
-from extra.gguf import GGUFConverters, load_gguf
+from test.helpers import is_dtype_supported
+from tinygrad.nn.state import GGUFConv, load_gguf
 from tinygrad import Device, dtypes, fetch, Tensor
 import ggml
 
@@ -43,17 +44,23 @@ gguf_val_getters = [
   ggml.gguf_get_val_u64, ggml.gguf_get_val_i64, ggml.gguf_get_val_f64,
 ]
 
-class TestGGML(unittest.TestCase):
+@unittest.skipIf(any(not is_dtype_supported(t) for t in [ dtypes.uint8, dtypes.half ]), "Backend must support uint8 and half")
+class TestGGUF(unittest.TestCase):
   def setUp(self) -> None:
-    params = ggml.ggml_init_params(mem_size=1024*1024, mem_buffer=None)
-    self.ctx = ggml.ggml_init(params)
-  def tearDown(self) -> None:
-    ggml.ggml_free(self.ctx)
+    params = ggml.ggml_init_params(mem_size=0, mem_buffer=None, no_alloc=False)
+    self.ctx = ctypes.cast(ggml.ggml_init(params), ctypes.POINTER(ctypes.c_void_p))
+  def tearDown(self) -> None: ggml.ggml_free(self.ctx)
+
+  def test_load_tinyllama_q8_0(self): self._test_load_gguf("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q8_0.gguf?download=true")
+  def test_load_tinyllama_q4_0(self): self._test_load_gguf("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true")
+  def test_load_gpt2_q4_1(self): self._test_load_gguf("https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.Q4_1.gguf?download=true")
+  def test_load_sample_q6_k(self): self._test_load_gguf("https://huggingface.co/Isotr0py/test-gguf-sample/resolve/main/Quant_Q6_K_1024.gguf?download=true")
 
   def test_dequantization_q4_0(self): self._test_dequantization(ggml.GGML_TYPE_Q4_0)
   def test_dequantization_q4_1(self): self._test_dequantization(ggml.GGML_TYPE_Q4_1)
   def test_dequantization_q8_0(self): self._test_dequantization(ggml.GGML_TYPE_Q8_0)
   def test_dequantization_q6_k(self): self._test_dequantization(ggml.GGML_TYPE_Q6_K)
+
   def _test_dequantization(self, ttype: int):
     type_traits = ggml.ggml_internal_get_type_traits(ttype)
     n_el, n_bytes = block_count * type_traits.blck_size, block_count * type_traits.type_size
@@ -65,25 +72,16 @@ class TestGGML(unittest.TestCase):
     type_traits.to_float(c_q_data, c_dq_data, n_el)
 
     q_tensor = Tensor(np.frombuffer(c_q_data, dtype=np.uint8, count=n_bytes))
-    dq_tensor = GGUFConverters.type_map[ttype](q_tensor, n_el).reshape(n_el)
+    dq_tensor = GGUFConv.type_map[ttype](q_tensor, n_el).reshape(n_el)
 
     np.testing.assert_equal(dq_tensor.numpy(), np.frombuffer(c_dq_data, dtype=np.float32))
-
-class TestGGUF(unittest.TestCase):
-  def test_load_gpt2_q8_0(self): self._test_load_gguf("https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.Q8_0.gguf?download=true")
-  def test_load_gpt2_q4_0(self): self._test_load_gguf("https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.Q4_0.gguf?download=true")
-  def test_load_gpt2_q4_1(self): self._test_load_gguf("https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.Q4_1.gguf?download=true")
-  def test_load_gpt2_q6_k(self): self._test_load_gguf("https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.Q6_K.gguf?download=true")
   def _test_load_gguf(self, url: str):
     fp = fetch(url)
     model_size = os.stat(fp).st_size
     gguf_tensor = Tensor.empty(model_size, dtype=dtypes.uint8, device=f"disk:{fp}").to(Device.DEFAULT)
     kv_data, tensors = load_gguf(gguf_tensor)
 
-    params = ggml.ggml_init_params(mem_size=0, mem_buffer=None, no_alloc=False)
-    ctx = ctypes.cast(ggml.ggml_init(params), ctypes.POINTER(ctypes.c_void_p))
-
-    gguf_params = ggml.gguf_init_params(ctx=ctx, no_alloc=False)
+    gguf_params = ggml.gguf_init_params(ctx=self.ctx, no_alloc=False)
     gguf_ctx = ggml.gguf_init_from_file(str(fp).encode("utf8"), gguf_params)
     param_ctx = gguf_params.ctx.contents.value
 
@@ -101,7 +99,6 @@ class TestGGUF(unittest.TestCase):
       if (get_fn := gguf_val_getters[v_type]) is not None: self.assertEqual(get_fn(gguf_ctx, gguf_key_id), v)
 
     ggml.gguf_free(gguf_ctx)
-    ggml.ggml_free(ctx)
 
 if __name__ == '__main__':
   unittest.main()

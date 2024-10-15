@@ -1,7 +1,7 @@
-import os, json, pathlib, zipfile, pickle, tarfile, struct
-from typing import Dict, Union, List, Optional, Any, Tuple
+import os, json, pathlib, zipfile, pickle, tarfile, struct, functools
+from typing import Dict, Union, List, Optional, Any, Tuple, Callable
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, DType
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.multi import MultiLazyBuffer
@@ -226,3 +226,69 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
         base_offset += 8 + lens[i]
       f.seek(rwd)
       return TorchPickle(f).load()
+
+class GGUFConv:
+  def conv_bc(dtype: DType, t: Tensor, n: int): return t[:dtype.itemsize * n].bitcast(dtype)
+  def dequantize_q8_0(t: Tensor, n: int):
+    blocks = t[:(n//32)*34].reshape((-1, 34))
+    return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].bitcast(dtypes.int8)
+  def dequantize_q4_0(t: Tensor, n: int):
+    blocks = t[:(n//32)*18].reshape((-1, 18))
+    return (GGUFConv._q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
+  def dequantize_q4_1(t: Tensor, n: int):
+    blocks = t[:(n//32)*20].reshape((-1, 20))
+    d, m = tuple(blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
+    return GGUFConv._q_to_uint8(blocks[:,4:], 4).bitcast(dtypes.int8) * d + m
+  def dequantize_q6_K(t: Tensor, n: int):
+    blocks = t[:(n//256)*210].reshape((-1, 210))
+    xl, xh = GGUFConv._q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), GGUFConv._q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
+    scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((blocks.shape[0], 16, 16)).reshape((blocks.shape[0], 2, 128))
+    d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256)).reshape((-1, 2, 128))
+    return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32) * scales
+  def _q_to_uint8(t: Tensor, b: int) -> Tensor:
+    shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
+    return t.unsqueeze(-1).expand((*t.shape,8//b)).div(shift_tensor, upcast=False).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
+  type_map: Dict[int, Callable[[Tensor, int], Tensor]] = { 0: functools.partial(conv_bc, dtypes.float32),
+    1: functools.partial(conv_bc, dtypes.float16), 16: functools.partial(conv_bc, dtypes.int8), 17: functools.partial(conv_bc, dtypes.int16),
+    18: functools.partial(conv_bc, dtypes.int32), 2: dequantize_q4_0, 3: dequantize_q4_1, 14: dequantize_q6_K, 8: dequantize_q8_0 }
+
+def load_gguf(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
+  """
+  Loads a gguf file from a tensor.
+
+  ```python
+  fn = "Meta-Llama-3-8B-Instruct.Q4_0.gguf"
+  gguf_tensor = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}").to(Device.DEFAULT)
+  kv_data, state_dict = load_gguf(gguf_tensor)
+  ```
+  """
+  if tensor.dtype != dtypes.uint8 or len(tensor.shape) != 1: raise ValueError("GGUF tensor must be 1d and of dtype uint8!")
+  pos, read_buffer, rb_start, kv_data, tensor_data = 0, memoryview(bytes()), 0, {}, {}
+  def read_bytes(n: int):
+    nonlocal pos, read_buffer, rb_start
+    if rb_start + len(read_buffer) < pos + n: rb_start, read_buffer = pos, tensor[pos:(pos+max(n, 1000_000))].data()
+    return read_buffer[pos-rb_start:(pos:=pos+n)-rb_start]
+  def read_unpack(fmt: str, n: int): return struct.unpack(fmt, read_bytes(n))[0]
+  def read_str(): return str(read_bytes(read_uint64()), "utf-8")
+  def read_arr():
+    reader, n = readers[read_int32()], read_uint64()
+    return [ reader() for _ in range(n) ]
+
+  readers: Dict[int, Callable[[], Any]] = { t: functools.partial(read_unpack, "<"+f, nb) for t, f, nb in [ (0,"c",1), (1,"b",1), (2,"H",2),
+    (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } | { 8: read_str, 9: read_arr }
+  read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
+
+  magic, version, n_tensors, n_kv = read_bytes(4), read_int32(), read_int64(), read_int64()
+  if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
+  for _ in range(n_kv):
+    k, t = read_str(), read_int32()
+    kv_data[k] = readers[t]()
+
+  tensor_infos = [ (read_str(), tuple(read_uint64() for _ in range(read_uint32())), read_int32(), read_uint64()) for _ in range(n_tensors) ]
+  alignment = kv_data.get("general.alignment", 32)
+  data_start = pos = pos + (alignment - pos % alignment if pos % alignment != 0 else 0)
+
+  for name, shape, ttype, offset in tensor_infos:
+    tensor_data[name] = GGUFConv.type_map[ttype](tensor[data_start + offset:], prod(shape)).reshape(*reversed(shape))
+
+  return kv_data, tensor_data
