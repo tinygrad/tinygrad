@@ -1,6 +1,6 @@
 import os
 os.environ["TRACEMETA"] = "0"
-from tinygrad import Tensor
+from tinygrad import Tensor, TinyJit
 from tinygrad.device import Device
 import tinygrad.nn as nn
 import math
@@ -68,6 +68,7 @@ else:
   for p in nn.state.get_parameters(opt):
     p.realize()
 
+@TinyJit
 def train():
   y = model(x)
   print(f"{y.shape=}")
@@ -77,5 +78,5 @@ def train():
   opt.zero_grad()
 
 with Tensor.train():
-  for i in range(1):
+  for i in range(10):
     train()
