@@ -102,6 +102,8 @@ def _schedule_rewrite(sink:UOp) -> List[ScheduleItem]:
   ret = []
   for s in sched:
     ast = graph_rewrite(s, enumerate_bufs, bufs:=[])
+    # TODO: fix this, COPY order is backward
+    if ast.op is UOps.COPY: bufs = bufs[::-1]
     ret.append(ScheduleItem(ast, bufs, None))
   return ret
 
