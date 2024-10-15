@@ -198,6 +198,8 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
           validate_lin.opts = validate_device.renderer
           (_msg, _, _, _, state2) = compare_linearizer(validate_lin, None, var_vals, ground_truth, rtol=rtol, atol=atol)
 
+          if _msg != "PASS": failures[f"VALIDATE_DEV_{_msg}"].append((validate_lin.ast, validate_lin.applied_opts))
+
           ok, err_msg = compare_states(state1, state2)
           if not ok: failures["HCQ_COMPARE_FAILURE"].append((err_msg, test_lin.ast, test_lin.applied_opts, state1, state2))
 

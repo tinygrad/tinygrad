@@ -242,7 +242,7 @@ def compare_launch_state(states1, states2):
   states1 = states1 or list()
   states2 = states2 or list()
   if len(states1) != 1 or len(states2) != 1:
-    return False, f"Something went wrong, comapre has different sizes != 1 | {len(states1)} & {len(states2)}"
+    return False, f"Some states not captured. {len(states1)}!=1 || {len(states2)}!=1"
 
   for i in range(len(states1)):
     state1, state2 = states1[i], states2[i]
