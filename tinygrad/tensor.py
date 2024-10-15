@@ -1681,7 +1681,7 @@ class Tensor:
 
   def _softmax(self, axis, dtype:Optional[DTypeLike]=None):
     x = self.cast(dtype) if dtype is not None else self
-    m = x - x.max(axis=axis, keepdim=True)
+    m = x - x.max(axis=axis, keepdim=True).detach()
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 

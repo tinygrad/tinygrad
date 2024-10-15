@@ -5,7 +5,6 @@ from tinygrad.helpers import Context, ContextVar
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv
 from tinygrad.tensor import get_shape
 from tinygrad.codegen.lowerer import get_contraction
-from tinygrad.ops import NumNode
 import numpy as np
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -141,7 +140,6 @@ class TestProd(unittest.TestCase):
   def test_ints(self): self.assertEqual(30, prod((2, 3, 5)))
   def test_variable(self): self.assertEqual("(a*12)", prod((Variable("a", 1, 5), 3, 4)).render())
   def test_variable_order(self): self.assertEqual("(a*12)", prod((3, 4, Variable("a", 1, 5))).render())
-  def test_num_nodes(self): self.assertEqual(NumNode(6).render(), prod((NumNode(2), NumNode(3))).render())
 
 class TestRoundUp(unittest.TestCase):
   def test_round_up(self):

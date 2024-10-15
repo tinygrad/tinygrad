@@ -59,6 +59,8 @@
   .node rect {
     stroke: #4a4b57;
     stroke-width: 1.5px;
+    rx: 8px;
+    ry: 8px;
   }
   .label text {
     color: #08090e;
@@ -137,26 +139,6 @@
     border-radius: 8px;
     padding: 8px;
   }
-  .spinner {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 32px;
-    height: 32px;
-    border: 4px solid #B4B4B4;
-    border-bottom-color: transparent;
-    border-radius: 50%;
-    display: inline-block;
-    animation: spin 1s linear infinite;
-  }
-  @keyframes spin {
-    0% {
-      transform: rotate(0deg);
-    }
-    100% {
-      transform: rotate(360deg);
-    }
-  }
   </style>
 </head>
 <body>
@@ -170,6 +152,7 @@
     <div class="container metadata"></div>
   </div>
   <script>
+  /* global hljs, dagreD3, d3, DOMPurify */
   // extra definitions for UOps
   hljs.registerLanguage("python", (hljs) => ({
     ...hljs.getLanguage("python"),
@@ -202,10 +185,10 @@
 
   function renderGraph(graph, additions) {
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
-    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5); rx: 8; ry: 8;" : "display: none;"});
-    for ([k,u] of Object.entries(graph)) {
-      g.setNode(k, {label: u[0], style: `fill: ${u[4]}; rx: 8; ry: 8;` });
-      for (src of u[2]) {
+    g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5);" : "display: none;"});
+    for (const [k,u] of Object.entries(graph)) {
+      g.setNode(k, {label: u[0], style: `fill: ${u[4]};` });
+      for (const src of u[2]) {
         g.setEdge(src, k, {curve: d3.curveBasis})
       }
       if (additions.includes(parseInt(k))) {
@@ -225,10 +208,12 @@
     const render = new dagreD3.render();
     render(inner, g);
   }
+
   function toPath(loc) {
     const [fp, lineno] = loc;
     return `${fp.split("/").pop()}:${lineno}`
   }
+
   var ret = {};
   var cache = {};
   var kernels = null;
@@ -245,11 +230,14 @@
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
     kernels.forEach((k, i) => {
-      kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "", style: "overflow-x: auto; cursor: initial;" });
-      const p = Object.assign(document.createElement("p"), {id: `kernel-${k[0].kernel_name}`, innerText: k[0].kernel_name ?? "UNPARENTED", style: "cursor: pointer;"});
+      const kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "",
+        style: "overflow-x: auto; cursor: initial;" });
+      const p = Object.assign(document.createElement("p"), { id: `kernel-${k[0].kernel_name}`, innerText: k[0].kernel_name ?? "UNPARENTED",
+        style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       k.forEach((u, j) => {
-        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.upats.length}`, key: `uop-rewrite-${j}`, className: (j === currentUOp && i == currentKernel) ? "active" : "" })
+        const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.upats.length}`, key: `uop-rewrite-${j}`,
+          className: (j === currentUOp && i == currentKernel) ? "active" : "" })
         rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
           e.stopPropagation();
@@ -260,7 +248,7 @@
         }
         kernelUl.appendChild(rwUl)
       })
-      p.onclick = (e) => {
+      p.onclick = () => {
         if (i === currentKernel) {
           expandKernel = !expandKernel;
           main();
@@ -275,7 +263,7 @@
       kernelList.appendChild(kernelUl);
     });
     // ***** UOp graph
-    cacheKey = `${currentKernel}-${currentUOp}`;
+    const cacheKey = `${currentKernel}-${currentUOp}`;
     if (cacheKey in cache) {
       ret = cache[cacheKey];
     }
@@ -288,7 +276,8 @@
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
     metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: toPath(ret.loc) }));
-    const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(ret.code_line)}</code>`, className: "wrap code-block language-python" });
+    const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(ret.code_line)}</code>`,
+      className: "wrap code-block language-python" });
     metadata.appendChild(pre);
     hljs.highlightElement(pre);
     // ** resizer
@@ -315,7 +304,7 @@
         document.querySelector(".graph").style.width = `${100-newWidth-10}%`;
       }
     }
-    function stopResize(e) {
+    function stopResize() {
       document.documentElement.removeEventListener("mousemove", resize, false);
       document.documentElement.removeEventListener("mouseup", stopResize, false);
       document.documentElement.style.cursor = "initial";
@@ -324,7 +313,8 @@
     // ** code blocks
     if (ret.kernel_code != null) {
       const code = ret.kernel_code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(code)}</code>`, className: "code-block language-cpp" });
+      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(code)}</code>`,
+        className: "code-block language-cpp" });
       hljs.highlightElement(pre);
       metadata.appendChild(pre);
     }
@@ -333,7 +323,7 @@
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
       metadata.appendChild(rewriteList);
       ret.graphs.forEach((rw, i) => {
-        gUl = Object.assign(document.createElement("ul"), { innerText: i, key: `rewrite-${i}` });
+        const gUl = Object.assign(document.createElement("ul"), { innerText: i, key: `rewrite-${i}` });
         rewriteList.appendChild(gUl);
         if (i === currentRewrite) {
           gUl.classList.add("active");
@@ -342,7 +332,8 @@
             const [loc, pattern] = ret.upats[i-1];
             const parts = loc.join(":").split("/");
             const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
-            link = Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n", href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" })
+            const link = Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
+              href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" })
             div.appendChild(link);
             const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
             pre.appendChild(Object.assign(document.createElement("code"), { textContent: DOMPurify.sanitize(pattern), className: "language-python" }));
