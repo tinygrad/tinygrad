@@ -48,7 +48,9 @@ class Model:
     ]
 
   def __call__(self, x):
-    return x.sequential(self.layers)
+    x = self.layers[0](x)
+    x = self.layers[1](x)
+    return x
 
 x = Tensor.empty(2, 8)
 model = Model()
@@ -68,6 +70,7 @@ else:
 
 def train():
   y = model(x)
+  print(f"{y.shape=}")
   loss = y.sum(0).sum(0)
   loss.backward()
   opt.step()
