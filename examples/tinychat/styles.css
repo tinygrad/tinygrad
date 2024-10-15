@@ -5,12 +5,17 @@ body {
   background-color: #fff;
   color: #000;
   height: 100vh;
+  width: 100vw;
 
   /* Dark mode */
   @media (prefers-color-scheme: dark) {
     background-color: #1a1a1a;
     color: #fff;
   }
+}
+
+.logo {
+  height: 150px;
 }
 
 .title-container {
@@ -45,6 +50,55 @@ main {
   flex-direction: column;
 }
 
+.see-history-button {
+  font-size: 16px;
+  color: black;
+  background-color: transparent;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  border: none;
+  cursor: pointer;
+}
+.modal {
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-content {
+  background-color: white;
+  padding: 20px;
+  border-radius: 5px;
+  width: 80%;
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.close-modal-button {
+  padding: 5px 10px;
+  background-color: #000;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+/* Update the existing .histories-container styles */
+.histories-container {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
 .histories-container {
   flex: 1;
   overflow-y: auto;
@@ -52,6 +106,8 @@ main {
   display: flex;
   flex-direction: column;
   align-items: center;
+  max-height: 70%;
+  overflow-y: auto;
 }
 
 .history {
@@ -91,6 +147,7 @@ main {
   overflow-y: auto;
   width: 100%;
   align-items: center;
+  overflow-x: hidden;
 }
 
 .messages-inner {
@@ -132,10 +189,10 @@ main {
 }
 
 .input-container {
-  padding: 1rem;
-  background-color: #fff;
   display: flex;
-  justify-content: center;
+  flex-direction: column; /* Aligns performance stats above the input */
+  align-items: center;
+  padding-bottom: 1rem;
 }
 
 .input {
@@ -170,6 +227,22 @@ main {
   cursor: not-allowed;
 }
 
+.input-performance {
+  display: flex;
+  justify-content: space-around; /* Spread the stats evenly */
+  padding: 0.25rem 0; /* Smaller padding */
+  font-size: 0.85rem; /* Smaller font size for minimalistic design */
+  color: #333;
+  margin-bottom: 0.5rem; /* Space between stats and input box */
+}
+
+.input-performance-point {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
 /* Utilities */
 [hidden] {
   display: none !important;
@@ -184,4 +257,8 @@ main {
 
 .monospace {
   font-family: monospace;
+}
+
+[x-cloak] {
+  display: none !important;
 }

@@ -42,7 +42,115 @@ document.addEventListener("alpine:init", () => {
         messages: [
           {
             role: "user",
-            content: "What are some healthy breakfast options?",
+            content: "What are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options?",
+          }
+        ]
+      },
+        {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "What are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options?",
+          }
+        ]
+      },
+        {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "What are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options?",
+          }
+        ]
+      },
+        {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "What are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options?",
+          }
+        ]
+      },
+        {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "What are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options?",
+          }
+        ]
+      },
+        {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "What are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options?",
+          }
+        ]
+      },
+        {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "What are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options?",
+          }
+        ]
+      },
+      {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "What are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options?",
+          }
+        ]
+      },
+      {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "What are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options?",
+          }
+        ]
+      },
+      {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "What are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options?",
+          }
+        ]
+      },
+      {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "What are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options?",
+          }
+        ]
+      },
+      {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "What are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options?",
+          }
+        ]
+      },
+      {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "What are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options? hat are some healthy breakfast options?",
           }
         ]
       }
@@ -50,7 +158,9 @@ document.addEventListener("alpine:init", () => {
 
     home: 0,
     generating: false,
+    showHistoryModal: false,
     endpoint: `${window.location.origin}/v1`,
+    
 
     // performance tracking
     time_till_first: 0,
