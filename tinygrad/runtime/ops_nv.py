@@ -533,7 +533,7 @@ class NVDevice(HCQCompiled):
     self.synchronize()
     if hasattr(self, 'shader_local_mem'): self._gpu_free(self.shader_local_mem) # type: ignore # pylint: disable=access-member-before-definition
 
-    self.slm_per_thread = round_up(required, 32)
+    self.slm_per_thread = round_up(required, 64)
     bytes_per_warp = round_up(self.slm_per_thread * 32, 0x200)
     bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
     self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True, tag="local_memory")
