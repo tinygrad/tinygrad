@@ -118,12 +118,13 @@ reduceop_fusor = PatternMatcher([
 
 enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx.index(x.arg[0])))])
 
-def append_var(var_vals:Dict[Variable, int], x:UOp) -> Optional[UOp]:
-  st = unwrap(x.st).simplify()
-  if any(x.op is UOps.BIND for x in st.vars()):
-    st, vv = st.unbind()
-    var_vals.update(vv)
-  return None if st == x.st else st.to_uop()
+def append_var(ctx:Tuple[Dict[ShapeTracker, None], Dict[Variable, int]], x:UOp) -> Optional[UOp]:
+  sts, var_vals = ctx
+  if (st:=unwrap(x.st)) in sts: return None
+  st, vv = st.simplify().unbind()
+  var_vals.update(vv)
+  sts[st] = None
+  return st.to_uop()
 simplify_views = PatternMatcher([(UPat(UOps.VIEW, name="x"), append_var)])
 
 PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, Tuple[int, ...], UOp]] = []
@@ -135,7 +136,7 @@ if getenv("RUN_PROCESS_REPLAY"):
 @track_rewrites
 def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable, int]) -> UOp:
   sink = graph_rewrite(base_sink, reduceop_fusor)
-  ret = graph_rewrite(graph_rewrite(sink, enumerate_bufs, bufs), simplify_views, var_vals)
+  ret = graph_rewrite(graph_rewrite(sink, enumerate_bufs, bufs), simplify_views, ({}, var_vals))
   PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
   return ret
 
