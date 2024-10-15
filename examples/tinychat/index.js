@@ -1,13 +1,52 @@
 document.addEventListener("alpine:init", () => {
   Alpine.data("state", () => ({
     // current state
-    cstate: {
+     cstate: {
       time: null,
       messages: [],
     },
 
     // historical state
-    histories: JSON.parse(localStorage.getItem("histories")) || [],
+    histories: JSON.parse(localStorage.getItem("histories")) || [
+      {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "Hello! Can you tell me about the benefits of exercise?",
+          },
+          {
+            role: "assistant",
+            content: "Certainly! Exercise has numerous benefits for both physical and mental health. Here are some key advantages:\n\n1. Improved cardiovascular health\n2. Increased muscle strength and endurance\n3. Better weight management\n4. Reduced risk of chronic diseases\n5. Enhanced mental health and mood\n6. Improved sleep quality\n7. Increased energy levels\n8. Better cognitive function\n\nRegular exercise can significantly improve your overall quality of life. It's recommended to aim for at least 150 minutes of moderate-intensity aerobic activity or 75 minutes of vigorous-intensity aerobic activity per week, along with muscle-strengthening activities at least twice a week.",
+          },
+          {
+            role: "user",
+            content: "That's great information! How can I start a simple exercise routine?",
+          },
+          {
+            role: "assistant",
+            content: "Starting a simple exercise routine is a great way to incorporate physical activity into your daily life. Here's a beginner-friendly approach:\n\n1. Start with walking: Aim for a 10-15 minute walk every day, gradually increasing the duration and pace.\n\n2. Add bodyweight exercises: Include simple exercises like push-ups, squats, and lunges. Start with 5-10 repetitions of each.\n\n3. Incorporate stretching: Spend 5-10 minutes stretching major muscle groups after your walk or exercises.\n\n4. Be consistent: Try to exercise at the same time each day to build a habit.\n\n5. Gradually increase intensity: As you get comfortable, increase the duration, add more exercises, or try jogging instead of walking.\n\n6. Stay hydrated and listen to your body: Drink plenty of water and rest when needed.\n\nRemember, the key is to start slow and gradually build up. Consult with a doctor before starting any new exercise program, especially if you have any health concerns.",
+          },
+          {
+            role: "user",
+            content: "Thank you! I'll start with a daily walk and bodyweight exercises.",
+          },
+          {
+            role: "assistant",
+            content: "You're welcome! That's a great way to begin. Remember to listen to your body and enjoy the process. If you have any questions or need further guidance, feel free to ask. I'm here to help!",
+          },
+        ],
+      },
+      {
+        time: Date.now(),
+        messages: [
+          {
+            role: "user",
+            content: "What are some healthy breakfast options?",
+          }
+        ]
+      }
+    ],
 
     home: 0,
     generating: false,
@@ -56,9 +95,9 @@ document.addEventListener("alpine:init", () => {
 
       // start receiving server sent events
       let gottenFirstChunk = false;
-      for await (
-        const chunk of this.openaiChatCompletion(this.cstate.messages)
-      ) {
+      for await (const chunk of this.openaiChatCompletion(
+        this.cstate.messages
+      )) {
         if (!gottenFirstChunk) {
           this.cstate.messages.push({ role: "assistant", content: "" });
           gottenFirstChunk = true;
@@ -111,9 +150,12 @@ document.addEventListener("alpine:init", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages }),
-      }).then((response) => response.json()).then((data) => {
-        this.total_tokens = data.length;
-      }).catch(console.error);
+      })
+        .then((response) => response.json())
+        .then((data) => {
+          this.total_tokens = data.length;
+        })
+        .catch(console.error);
     },
 
     async *openaiChatCompletion(messages) {
@@ -124,16 +166,18 @@ document.addEventListener("alpine:init", () => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          "messages": messages,
-          "stream": true,
+          messages: messages,
+          stream: true,
         }),
       });
       if (!response.ok) {
         throw new Error("Failed to fetch");
       }
 
-      const reader = response.body.pipeThrough(new TextDecoderStream())
-        .pipeThrough(new EventSourceParserStream()).getReader();
+      const reader = response.body
+        .pipeThrough(new TextDecoderStream())
+        .pipeThrough(new EventSourceParserStream())
+        .getReader();
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
@@ -155,13 +199,15 @@ document.addEventListener("alpine:init", () => {
 });
 
 const { markedHighlight } = globalThis.markedHighlight;
-marked.use(markedHighlight({
-  langPrefix: "hljs language-",
-  highlight(code, lang, _info) {
-    const language = hljs.getLanguage(lang) ? lang : "plaintext";
-    return hljs.highlight(code, { language }).value;
-  },
-}));
+marked.use(
+  markedHighlight({
+    langPrefix: "hljs language-",
+    highlight(code, lang, _info) {
+      const language = hljs.getLanguage(lang) ? lang : "plaintext";
+      return hljs.highlight(code, { language }).value;
+    },
+  })
+);
 
 // **** eventsource-parser ****
 class EventSourceParserStream extends TransformStream {
@@ -277,7 +323,7 @@ function createParser(onParse) {
     const noValue = fieldLength < 0;
     const field = lineBuffer.slice(
       index,
-      index + (noValue ? lineLength : fieldLength),
+      index + (noValue ? lineLength : fieldLength)
     );
     let step = 0;
     if (noValue) {

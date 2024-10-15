@@ -9,16 +9,16 @@
   --green-color: #228039;
   --silver-color: #88808e;
 }
-@media(prefers-color-scheme: light) {
+@media (prefers-color-scheme: light) {
   :root {
-    --primary-bg-color: #f0f0f0;
+    --primary-bg-color: #fff;
     --secondary-bg-color: #eeeeee;
     --tertiary-bg-color: #dddddd;
     --foreground-color: #111111;
     --accent-color: #000000;
   }
 }
-@media(prefers-color-scheme: dark) {
+@media (prefers-color-scheme: dark) {
   :root {
     --primary-bg-color: #111111;
     --secondary-bg-color: #131313;
@@ -81,7 +81,11 @@ main {
   top: 0;
   position: absolute;
 
-  background: linear-gradient(180deg, var(--primary-bg-color) 0%, transparent 100%);
+  background: linear-gradient(
+    180deg,
+    var(--primary-bg-color) 0%,
+    transparent 100%
+  );
 }
 .histories-end {
   height: 3rem;
@@ -91,7 +95,11 @@ main {
   bottom: 0;
   position: absolute;
 
-  background: linear-gradient(0deg, var(--primary-bg-color) 0%, transparent 100%);
+  background: linear-gradient(
+    0deg,
+    var(--primary-bg-color) 0%,
+    transparent 100%
+  );
 }
 
 .history {
@@ -201,7 +209,11 @@ main {
   bottom: 0;
 
   /* linear gradient from background-color to transparent on the top */
-  background: linear-gradient(0deg, var(--primary-bg-color) 55%, transparent 100%);
+  background: linear-gradient(
+    0deg,
+    var(--primary-bg-color) 55%,
+    transparent 100%
+  );
 
   width: 100%;
   display: flex;

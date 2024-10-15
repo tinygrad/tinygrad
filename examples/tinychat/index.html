@@ -28,8 +28,7 @@
     crossorigin="anonymous" referrerpolicy="no-referrer" />
   <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/styles/vs2015.min.css">
 
-  <link rel="stylesheet" href="index.css">
-  <link rel="stylesheet" href="common.css">
+  <link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
@@ -47,7 +46,7 @@
         total_tokens = 0;
       }
     ">
-      <h1 class="title megrim-regular">tinychat</h1>
+      <h1 class="title">tinychat</h1>
       <div class="histories-container-container">
         <template x-if="histories.length">
           <div class="histories-start"></div>
@@ -86,7 +85,9 @@
         </template>
       </div>
     </div>
-    <div x-ref="messages" class="messages" x-init="
+
+    <div x-ref="messages" class="messages">
+      <div x-ref="messages" class="messages-inner" x-init="
       $watch('cstate', value => {
         $el.innerHTML = '';
         value.messages.forEach(({ role, content }) => {
@@ -129,9 +130,11 @@
     " x-intersect="
       $el.scrollTo({ top: $el.scrollHeight, behavior: 'smooth' });
     " x-show="home === 2" x-transition>
+      </div>
     </div>
+
     <div class="input-container">
-      <div class="input-performance">
+      <!-- <div class="input-performance">
         <span class="input-performance-point">
           <p class="monospace" x-text="(time_till_first / 1000).toFixed(2)"></p>
           <p class="megrim-regular">SEC TO FIRST TOKEN</p>
@@ -144,11 +147,10 @@
           <p class="monospace" x-text="total_tokens"></p>
           <p class="megrim-regular">TOKENS</p>
         </span>
-      </div>
+      </div> -->
       <div class="input">
         <textarea x-ref="inputForm" id="input-form" class="input-form" autofocus rows=1 x-autosize
           :placeholder="generating ? 'Generating...' : 'Say something'" :disabled="generating" @input="
-            home = (home === 0) ? 1 : home
             if (cstate.messages.length === 0 && $el.value === '') home = -1;
 
             if ($el.value !== '') {
