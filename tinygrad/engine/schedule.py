@@ -71,7 +71,6 @@ break_sched = PatternMatcher([
 
 pm_remove_buffer = PatternMatcher([(UPat(UOps.VIEW, src=(UPat(UOps.BUFFER, src=(UPat.var('x'),)),)), lambda x: x), ])
 def add_buffer(to_realize:Tuple[Dict[UOp, Optional[UOp]], Dict[UOp, UOp]], x:UOp):
-  #print(x.op, x.arg)
   # TODO: ugh, this is the worst way to do this
   with Context(TRACK_MATCH_STATS=0): x_bl = graph_rewrite(x, pm_remove_buffer)
   if to_realize.get(x_bl, True) is None:
@@ -88,7 +87,7 @@ def _schedule_rewrite(sink:UOp) -> List[ScheduleItem]:
   # mark buffers to be realized
   for p in sink.sparents:
     if p.op is UOps.COPY:
-      to_realize[p.src[0]] = None
+      if p.src[0].op is not UOps.VIEW or not p.src[0].st.contiguous: to_realize[p.src[0]] = None
       to_realize[p] = None
     if p.op is UOps.CONTIGUOUS:
       to_realize[p] = None
