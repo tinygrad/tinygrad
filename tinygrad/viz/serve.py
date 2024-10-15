@@ -30,7 +30,7 @@ class GraphRewriteMetadata:
 @dataclass
 class GraphRewriteDetails(GraphRewriteMetadata):
   """Full details about a single call to graph_rewrite"""
-  graphs: List[Dict[int, Tuple[str, str, List[int], str, str]]]
+  graphs: List[UOp]
   """Sink at every step of graph_rewrite"""
   diffs: List[List[str]]
   """.diff style before and after of the rewritten UOp child"""
@@ -52,7 +52,7 @@ def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List
       kernels[name].append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
 
-def _uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
+def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   for u in x.sparents:
@@ -69,7 +69,7 @@ def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
 @functools.lru_cache(None)
 def _prg(k:Optional[Kernel]) -> Optional[str]: return k.to_program().src if isinstance(k, Kernel) else None
 def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
-  g = GraphRewriteDetails(**asdict(metadata), graphs=[_uop_to_json(ctx.sink)], diffs=[], changed_nodes=[], kernel_code=_prg(k))
+  g = GraphRewriteDetails(**asdict(metadata), graphs=[ctx.sink], diffs=[], changed_nodes=[], kernel_code=_prg(k))
   replaces: Dict[UOp, UOp] = {}
   sink = ctx.sink
   for i,(u0,u1,upat) in enumerate(ctx.rewrites):
@@ -82,7 +82,7 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
     # update ret data
     g.changed_nodes.append([id(x) for x in u1.sparents if x.op is not UOps.CONST])
     g.diffs.append(list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())))
-    g.graphs.append(_uop_to_json(sink:=new_sink))
+    g.graphs.append(sink:=new_sink)
   return g
 
 # ** HTTP server
@@ -101,7 +101,8 @@ class Handler(BaseHTTPRequestHandler):
       self.end_headers()
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
-        ret = json.dumps(asdict(get_details(*kernels[int(qkernel[0])][int(query["idx"][0])]))).encode()
+        g = get_details(*kernels[int(qkernel[0])][int(query["idx"][0])])
+        ret = json.dumps({**asdict(g), "graphs": list(map(uop_to_json, g.graphs))}).encode()
       else: ret = json.dumps([list(map(lambda x:asdict(x[2]), v)) for v in kernels]).encode()
     else:
       self.send_response(404)
