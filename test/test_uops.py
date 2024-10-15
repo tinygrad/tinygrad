@@ -12,7 +12,6 @@ from tinygrad.engine.schedule import create_schedule, reduceop_fusor
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
-from tinygrad.shape.symbolic import Variable
 from test.helpers import is_dtype_supported, assert_equiv_uops
 
 def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
@@ -360,7 +359,7 @@ class TestUOpMethod(unittest.TestCase):
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
 
   def test_uop_variables(self):
-    a = Variable("a", 1, 10)
+    a = UOp.variable("a", 1, 10)
     uop_var = UOp.const(dtypes.int, a)
     st_var = UOp(UOps.LOAD, dtypes.float, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0),
                                            ShapeTracker.from_shape((2, a)).to_uop()))

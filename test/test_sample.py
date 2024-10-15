@@ -1,7 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor
-from tinygrad.shape.symbolic import Variable
+from tinygrad import Tensor, Variable
 
 class TestSample(unittest.TestCase):
   def test_sample(self):

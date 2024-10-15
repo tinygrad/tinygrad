@@ -1,8 +1,7 @@
 from __future__ import annotations
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable
-import math, struct, ctypes
+import math, struct, ctypes, functools
 from dataclasses import dataclass
-import functools
 from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
@@ -84,9 +83,7 @@ class dtypes:
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
-  # TODO: priority should be higher than bool
   void: Final[DType] = DType(-1, 0, "void", None, 1)
-  pyint: Final[DType] = DType(-1, 8, "pyint", None, 1)   # arbitrary precision integer, same itemsize to int64 so min/max works
   bool: Final[DType] = DType(0, 1, "bool", '?', 1)
   int8: Final[DType] = DType(1, 1, "char", 'b', 1)
   uint8: Final[DType] = DType(2, 1, "unsigned char", 'B', 1)
@@ -118,7 +115,7 @@ class dtypes:
 
   floats = (float16, bfloat16, float32, float64)
   uints = (uint8, uint16, uint32, uint64)
-  sints = (int8, int16, int32, int64, pyint)
+  sints = (int8, int16, int32, int64)
   ints = uints + sints
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):

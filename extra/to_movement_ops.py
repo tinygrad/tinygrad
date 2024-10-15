@@ -6,7 +6,7 @@ from extra.optimization.helpers import load_worlds, ast_str_to_ast
 from tinygrad.helpers import prod, tqdm
 from tinygrad.ops import UOp, UOps
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import sym_infer, Node
+from tinygrad.ops import sym_infer, Node
 
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
 

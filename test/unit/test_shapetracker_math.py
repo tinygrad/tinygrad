@@ -3,7 +3,7 @@ from typing import List
 from tinygrad.helpers import prod
 from tinygrad.shape.view import View
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable
+from tinygrad import Variable
 from test.unit.test_shapetracker import shapetracker_getitem
 
 class MultiShapeTracker:
