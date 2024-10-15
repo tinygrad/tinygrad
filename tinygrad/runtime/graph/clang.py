@@ -28,8 +28,8 @@ class ClangGraph(GraphRunner):
           kernel_args.append((render_dtype(buf.dtype), f"({render_dtype(buf.dtype)}*)0x{ctypes.addressof(buf._buf):X}", True))
       variables = cast(CompiledRunner, ji.prg).p.vars
       kernel_args = kernel_args + [(render_dtype(v.dtype), v.expr, False) for v in variables]
-      code.append(f"  typedef void kernel{i}_t(" + ",".join([(arg[0] + ("*" if arg[2] else "")) for arg in kernel_args]) + ");\n" + \
-        f"  ((kernel{i}_t*)0x{cast(CompiledRunner, ji.prg).clprg.buf:X})({','.join([arg[1] for arg in kernel_args])});")
+      code.append(f"  typedef void kernel{i}_t(" + ",".join([(arg[0] + ("*" if arg[2] else "")) for arg in kernel_args]) + ");\n")
+      code.append(f"  ((kernel{i}_t*)0x{cast(CompiledRunner, ji.prg).clprg.buf:X})({','.join([arg[1] for arg in kernel_args])});")
       i+=1
     code.append("}")
     if DEBUG >= 4: print("\n".join(code))

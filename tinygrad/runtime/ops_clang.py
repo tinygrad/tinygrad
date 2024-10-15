@@ -13,12 +13,6 @@ SECTIONS {
         *(.text);
         *(.rodata*);
     }
-    /DISCARD/ : {
-        *(.dynstr*);
-        *(.rela.dyn*);
-        *(.note*);
-        *(.dynamic*);
-    }
 }
 '''
 class ClangCompiler(Compiler):
@@ -29,14 +23,10 @@ class ClangCompiler(Compiler):
     with tempfile.NamedTemporaryFile(delete=True) as file, tempfile.NamedTemporaryFile(delete=True) as linker_file:
       pathlib.Path(linker_file.name).write_text(linker_script)
       subprocess.check_output([
-        'clang', *self.args, '-O2', '-Wall', '-Werror', '-Wno-gcc-compat', '-x', 'c', '-',
-        '-fPIE', '-fPIC', '-static', '-', '-o', pathlib.Path(file.name),
-        '-T', pathlib.Path(linker_file.name), '-lc', '-lm', '-nostdlib',
-        '-ffreestanding'
+        'clang', *self.args, '-O2', '-Wall', '-Werror', '-Wno-gcc-compat', '-x', 'c', '-', '-fPIE', '-fPIC', '-static',
+        '-', '-o', pathlib.Path(file.name), '-T', pathlib.Path(linker_file.name), '-lc', '-lm', '-nostdlib', '-ffreestanding'
       ], input=src.encode('utf-8'))
-      raw_function_bytes = subprocess.check_output([
-        'objcopy', '-O', 'binary', '--only-section=.text', pathlib.Path(file.name), '/dev/stdout'])
-      return raw_function_bytes
+      return subprocess.check_output(['objcopy', '-O', 'binary', '--only-section=.text', pathlib.Path(file.name), '/dev/stdout'])
 
 class ClangProgram:
   def __init__(self, name:str, code:bytes):
@@ -50,8 +40,7 @@ class ClangProgram:
     ctypes.memmove(self.buf, (ctypes.c_char * len(code)).from_buffer_copy(code), len(code))
   def __del__(self):
     libc.munmap(self.buf, self.len)
-  def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: ctypes.CFUNCTYPE(None)(self.buf)(*bufs, *vals)
-, enable=wait)
+  def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: ctypes.CFUNCTYPE(None)(self.buf)(*bufs, *vals), enable=wait)
 
 class ClangDevice(Compiled):
   def __init__(self, device:str):
