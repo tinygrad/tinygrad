@@ -180,17 +180,15 @@ def _dump_gpfifo(mark):
   for start,size in gpus_fifo:
     gpfifo_controls = nv_gpu.AmpereAControlGPFifo.from_address(start+size*8)
     gpfifo = to_mv(start, gpfifo_controls.GPPut * 8).cast("Q")
-    if old_gpputs[start] == gpfifo_controls.GPPut: continue
-
-    # print(f"gpfifo {start}: {gpfifo_controls.GPPut=}")
-    for i in range(old_gpputs[start], gpfifo_controls.GPPut):
-      addr = ((gpfifo[i % size] & ((1 << 40)-1)) >> 2) << 2
-      pckt_cnt = (gpfifo[i % size]>>42)&((1 << 20)-1)
+    while old_gpputs[start] != gpfifo_controls.GPPut:
+      addr = ((gpfifo[old_gpputs[start]] & ((1 << 40)-1)) >> 2) << 2
+      pckt_cnt = (gpfifo[old_gpputs[start]]>>42)&((1 << 20)-1)
 
       # print(f"\t{i}: 0x{gpfifo[i % size]:x}: addr:0x{addr:x} packets:{pckt_cnt} sync:{(gpfifo[i % size] >> 63) & 0x1} fetch:{gpfifo[i % size] & 0x1}")
-      old_gpputs[start] = gpfifo_controls.GPPut
       x = _dump_qmd(addr, pckt_cnt)
       if isinstance(x, list): launches += x
+      old_gpputs[start] += 1
+      old_gpputs[start] %= size
   return launches
 
 import types
