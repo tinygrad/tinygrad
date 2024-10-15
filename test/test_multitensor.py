@@ -6,10 +6,11 @@ from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner
-from tinygrad.multi import all_reduce, MultiLazyBuffer
+from tinygrad.multi import all_reduce, MultiLazyBuffer, all_gather
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from test.helpers import is_dtype_supported
+from extra.fsdp.mlb import print_lb
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -949,6 +950,23 @@ def helper_test_shard_op(shps, fxn, atol=1e-6, rtol=1e-3):
 class TestTensorOps(unittest.TestCase):
   def test_interpolate(self):
     helper_test_shard_op([(4,16,16),(4,24,24)], lambda x: Tensor.interpolate(x, (19,19)))
+
+GPUS = [f"{Device.DEFAULT}:{i}" for i in range(2)]
+class TestAllGather(unittest.TestCase):
+  def test_shrinked_allgather(self):
+    a = Tensor.empty(8, 8).shard_(GPUS, 0)
+    b = a.shrink(((0, 4), (0, 8)))
+    assert b.lazydata.real == [True, False]
+  def test_regular_allgather(self):
+    a = Tensor.empty(8, 8).shard_(GPUS, 0)
+    print()
+    print_lb(a.lazydata)
+    mlb = all_gather(a.lazydata)
+    print_lb(mlb)
+    b = Tensor(mlb)
+    b.realize()
+
+
 
 if __name__ == '__main__':
   unittest.main()
