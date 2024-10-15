@@ -2,27 +2,30 @@ import functools
 from tinygrad.device import  Compiled, Allocator, Compiler
 from tinygrad.renderer.wgsl import WGSLRenderer
 import wgpu
+import struct
 
 class WGSLCompiler(Compiler):
   def compile(self, src):
     return src.encode()
 
-def create_uniform(wgpu_device, val: int) -> wgpu.GPUBuffer:
+def create_uniform(wgpu_device, val: int | float) -> wgpu.GPUBuffer:
   buf = wgpu_device.create_buffer(size=4, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
-  wgpu_device.queue.write_buffer(buf, 0, val.to_bytes(4, "little"))
+  if isinstance(val, int): wgpu_device.queue.write_buffer(buf, 0, val.to_bytes(4, "little"))
+  else: wgpu_device.queue.write_buffer(buf, 0, struct.pack('<f', val))
+
   return buf
 
 class WebGPUProgram:
   def __init__(self, device, name:str, lib:bytes):
     (self.device, self.timestamp_supported) = device
     self.name, self.lib, self.prg = name, lib, self.device.create_shader_module(code=lib.decode())   # NOTE: this is the compiler
-    # self.max_buffers = self.device.limits["max_storage_buffers_per_shader_stage"]
   def __call__(self, *bufs, global_size=(1,1,1), local_size=(1,1,1), vals=(), wait=False):
-    # assert len(bufs) <= self.max_buffers, f"WEBGPU only supports {self.max_buffers} buffers"
     wait = wait and self.timestamp_supported
-    binding_layouts = [{"binding": i, "visibility": wgpu.ShaderStage.COMPUTE,
+    binding_layouts = [{"binding": 0, "visibility": wgpu.ShaderStage.COMPUTE, "buffer": {"type": wgpu.BufferBindingType.uniform }}]
+    binding_layouts += [{"binding": i+1, "visibility": wgpu.ShaderStage.COMPUTE,
                         "buffer": {"type": wgpu.BufferBindingType.uniform if i >= len(bufs) else wgpu.BufferBindingType.storage }} for i in range(len(bufs)+len(vals))]  # noqa: E501
-    bindings = [{"binding": i, "resource": {"buffer": create_uniform(self.device, x) if i >= len(bufs) else x, "offset": 0,
+    bindings = [{"binding": 0, "resource": {"buffer": create_uniform(self.device, float('inf')), "offset": 0, "size": 4}}]
+    bindings += [{"binding": i+1, "resource": {"buffer": create_uniform(self.device, x) if i >= len(bufs) else x, "offset": 0,
                                             "size": 4 if i >= len(bufs) else x.size}} for i,x in enumerate(bufs+vals)]  # noqa: E501
     bind_group_layout = self.device.create_bind_group_layout(entries=binding_layouts)
     pipeline_layout = self.device.create_pipeline_layout(bind_group_layouts=[bind_group_layout])
