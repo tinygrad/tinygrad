@@ -43,7 +43,6 @@ class TestViz(unittest.TestCase):
     self.assertEqual(uops[0], a*2)
     self.assertEqual(uops[1], graph_rewrite(a+a, pm))
 
-  @unittest.expectedFailure
   def test_rewrite_with_ctx(self):
     a = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0), UOp.const(dtypes.int, 0)))
     b = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 1), UOp.const(dtypes.int, 0)))
