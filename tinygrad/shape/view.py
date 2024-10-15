@@ -98,7 +98,7 @@ class View:
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else [None]*len(self.shape)):
       if resolve(sh != 1) and resolve(st != 0):
         iexpr = iexpr + idx*st
-
+        # TODO: add int64 for idx
         if max(iexpr._min_max, key=abs) > dtypes.max(iexpr.dtype):
           iexpr = UOp(iexpr.op, dtypes.int64.vec(iexpr.dtype.count), iexpr.src, iexpr.arg)
 

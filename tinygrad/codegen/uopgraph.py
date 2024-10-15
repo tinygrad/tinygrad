@@ -544,9 +544,11 @@ def fixup_alus(alu:UOp) -> Optional[UOp]:
   return None
 
 fixup_alus = PatternMatcher([
-  (UPat(UOps.ALU, dtypes.int64, name="alu"), fixup_alus),
-  (UPat(UOps.ALU, dtypes.int32, name="alu"), lambda alu: UOp(alu.op, alu.dtype, tuple(s.cast(alu.dtype) for s in alu.src), alu.arg)
-                              if any(s.dtype == dtypes.int64 for s in alu.src) else None)
+  #(UPat(UOps.ALU, dtypes.int64, name="alu"), fixup_alus),
+  #(UPat(UOps.ALU, dtypes.int32, name="alu"), lambda alu: UOp(alu.op, alu.dtype, tuple(s.cast(alu.dtype) for s in alu.src), alu.arg)
+  #                            if any(s.dtype == dtypes.int64 for s in alu.src) else None)
+  (UPat(UOps.ALU, (dtypes.int32, dtypes.int64), name="alu"), lambda alu: UOp(alu.op, alu.dtype, tuple(s.cast(alu.dtype) for s in alu.src), alu.arg)
+                              if any(s.dtype != alu.dtype for s in alu.src) and isinstance(alu.arg, BinaryOps) else None)
 ])
 
 # *** uop graph ***
