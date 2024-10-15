@@ -3,7 +3,7 @@ import unittest
 from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, TrackedPatternMatcher as PatternMatcher, UOp, UOps, UPat, \
     graph_rewrite, contexts, track_rewrites
-from tinygrad.viz.serve import _replace_uop, get_details, get_metadata
+from tinygrad.viz.serve import get_details, get_metadata, uop_to_json
 
 @track_rewrites
 def rewrite(sink:UOp, pm:PatternMatcher, ctx=None): return graph_rewrite(sink, pm, ctx)
@@ -12,14 +12,9 @@ def helper_test_viz(sink:UOp, pm:PatternMatcher, ctx=None) -> List[UOp]:
   rewrite(sink, pm, ctx)
   assert len(contexts) == 1
   assert len(contexts[0][1]) == 1
-  ctx = contexts[0][1][0]
-  uops = [ctx.sink]
-  replaces: Dict[UOp, UOp] = {}
-  for u0,u1,_ in ctx.rewrites:
-    replaces[u0] = u1
-    new_sink = _replace_uop(uops[-1], {**replaces})
-    uops.append(new_sink)
-  return uops[1:]
+  k = get_metadata(contexts)[0][0]
+  g = get_details(*k)
+  return g.graphs[1:]
 
 class TestViz(unittest.TestCase):
   def setUp(self):
@@ -91,12 +86,8 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(ret), 1)
 
   def test_fold_const(self):
-    pm = PatternMatcher([
-      (UPat.var("x")*1, lambda x:x),
-    ])
     a = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0), UOp.const(dtypes.int, 0)))
-    rewrite(a, pm)
-    graph = get_details(*get_metadata(contexts)[0][0]).graphs[-1]
+    graph = uop_to_json(a)
     assert not any(v[0].startswith("CONST") for v in graph.values())
     assert len([x for x in graph.values() if "CONST" in x[0]]) == 1
 
