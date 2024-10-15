@@ -63,7 +63,8 @@ enumerate_bufs = PatternMatcher([
 # *********
 
 def append_kernel(k:List[UOp], base:UOp):
-  k.append(base.sink())
+  # NOTE: is this slow?
+  if base.replace(src=()).reshape(base.shape) not in realized.values(): k.append(base.sink())
   return base.replace(src=())
 break_sched = PatternMatcher([
   (UPat(UOps.BUFFER, src=(UPat(),), name="base"), append_kernel),
@@ -77,14 +78,11 @@ def add_buffer(to_realize:Dict[UOp, Optional[UOp]], x:UOp):
   with Context(TRACK_MATCH_STATS=0): x_bl = graph_rewrite(x, pm_remove_buffer)
   if to_realize.get(x_bl, True) is None:
     #print(len(to_realize), "HIT", sum((x is not None) for x in to_realize.values()))
-    to_realize[x_bl] = ret = UOp.new_buffer(x.dtype, x.device, x.size, (x,))
+    ret = UOp.new_buffer(x.dtype, x.device, x.size, (x,)) if x_bl not in realized else realized[x_bl].base.replace(src=(x,))
+    to_realize[x_bl] = ret
     return ret.reshape(x.shape)
   return None
 pm_add_buffer = PatternMatcher([(UPat(tuple(UOps), name="x"), add_buffer), ])
-
-pm_put_in_realized = PatternMatcher([
-  (UPat(tuple(UOps), name='x'), lambda ctx,x: ctx.get(x)),
-])
 
 @track_rewrites
 def _schedule_rewrite(sink:UOp) -> List[ScheduleItem]:
@@ -93,20 +91,19 @@ def _schedule_rewrite(sink:UOp) -> List[ScheduleItem]:
   # mark buffers to be realized
   for p in sink.sparents:
     if p.op is UOps.COPY:
-      if p.src[0].op is not UOps.VIEW or not p.src[0].st.contiguous: to_realize[p.src[0]] = None
+      if (p.src[0].op is not UOps.VIEW or not p.src[0].st.contiguous) and p.op is not UOps.CONTIGUOUS: to_realize[p.src[0]] = None
       to_realize[p] = None
     if p.op is UOps.CONTIGUOUS:
-      to_realize[p] = None
+      to_realize[p.src[0]] = None
     # very simple rule
     if p.op is UOps.REDUCE_AXIS:
       to_realize[p] = None
   sink = graph_rewrite(sink, pm_add_buffer, to_realize)
-  sink = graph_rewrite(sink, pm_put_in_realized, ctx=realized)
-  for k,v in to_realize.items():
-    if v is None: continue
-    realized[k] = v.replace(src=()).reshape(k.shape)
   sink = graph_rewrite(sink, pm_push_views)
   graph_rewrite(sink, break_sched, sched:=[])
+  for k,v in to_realize.items():
+    if v is None: continue
+    realized[k] = v.base.replace(src=()).reshape(k.shape)
   ret = []
   for s in sched:
     ast = graph_rewrite(s, enumerate_bufs, bufs:=[])
