@@ -14,21 +14,20 @@ from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG, Tim
 from tinygrad.ops import UnaryOps, UOp, UOps
 from test.helpers import is_dtype_supported
 
-on_linearizer_will_run = lambda: None
-on_linearizer_did_run = lambda: None
-compare_states = lambda x, y: True
+def on_linearizer_will_run(): pass
+def on_linearizer_did_run(): pass
+def compare_states(x, y): return True
 
 if getenv("VALIDATE_HCQ"):
   if Device.DEFAULT == "NV":
     print("VALIDATE_HCQ: Comparing NV to CUDA")
     import extra.nv_gpu_driver.nv_ioctl
-    validate_dname = "CUDA"
-    validate_device = Device[validate_dname]
+    validate_device = Device["CUDA"]
     on_linearizer_will_run = extra.nv_gpu_driver.nv_ioctl.before_launch
     on_linearizer_did_run = extra.nv_gpu_driver.nv_ioctl.collect_last_launch_state
     compare_states = extra.nv_gpu_driver.nv_ioctl.compare_launch_state
   else:
-    print("VALIDATE_HCQ options is ignored")
+    print(colored("VALIDATE_HCQ options is ignored", 'red'))
 
 def tuplize_uops(uops:List[UOp]) -> Tuple:
   return tuple([(x.op, x.dtype, tuple(uops.index(x) for x in x.src), x.arg) for x in uops])
@@ -74,6 +73,7 @@ def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None) -> Tuple[str, Any]:
   # TODO: images needs required_optimization
   try:
     prg = CompiledRunner(lin.to_program())
+  except KeyboardInterrupt: raise
   except Exception:
     traceback.print_exc()
     return "COMPILE_ERROR", None
@@ -81,6 +81,7 @@ def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None) -> Tuple[str, Any]:
   if getenv("VALIDATE_HCQ"): on_linearizer_will_run()
   try:
     prg(rawbufs, var_vals, wait=True)
+  except KeyboardInterrupt: raise
   except Exception:
     traceback.print_exc()
     return "EXEC_ERROR", None
@@ -100,6 +101,7 @@ def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=No
       rawbufs = get_fuzz_rawbufs(lin)
     else:
       rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True) # get a new output buffer
+  except KeyboardInterrupt: raise
   except BaseException:
     return ("RAWBUFS_ERROR", rawbufs, var_vals, ground_truth, None)
 
@@ -122,6 +124,7 @@ def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=No
     if not has_bf16:
       result = np.frombuffer(rawbufs[0].as_buffer(), _to_np_dtype(rawbufs[0].dtype))
       np.testing.assert_allclose(result, ground_truth, rtol=rtol, atol=atol)
+  except KeyboardInterrupt: raise
   except AssertionError as e:
     if DEBUG >= 2:
       print(f"COMPARE_ERROR details: {e}")
@@ -176,6 +179,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2):
 
         # stop if kernel uops repeat
         try: tuops = tuplize_uops(test_lin.linearize().uops)
+        except KeyboardInterrupt: raise
         except BaseException as e:
           print(test_lin.ast)
           print(test_lin.applied_opts)
@@ -248,24 +252,27 @@ if __name__ == "__main__":
   failed_ids = []
   failures = defaultdict(list)
   seen_ast_strs = set()
-  for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
-    if (nth := getenv("FUZZ_NTH", -1)) != -1 and i != nth: continue
-    if "dtypes.image" in ast and Device.DEFAULT != "GPU": continue  # IMAGE is only for GPU
-    if ast in seen_ast_strs: continue
-    seen_ast_strs.add(ast)
 
-    lin = ast_str_to_lin(ast)
-    if not all(is_dtype_supported(buf.dtype) for buf in lin.bufs):
-      print("skipping kernel due to not supported dtype")
-      continue
+  try:
+    for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
+      if (nth := getenv("FUZZ_NTH", -1)) != -1 and i != nth: continue
+      if "dtypes.image" in ast and Device.DEFAULT != "GPU": continue  # IMAGE is only for GPU
+      if ast in seen_ast_strs: continue
+      seen_ast_strs.add(ast)
 
-    with Timing(f"tested ast {i}: "):
-      tested += 1
-      fuzz_failures = fuzz_linearizer(lin, rtol=args.rtol, atol=args.atol)
-      if fuzz_failures: failed_ids.append(i)
-      for k, v in fuzz_failures.items():
-        for f in v:
-          failures[k].append(f)
+      lin = ast_str_to_lin(ast)
+      if not all(is_dtype_supported(buf.dtype) for buf in lin.bufs):
+        print("skipping kernel due to not supported dtype")
+        continue
+
+      with Timing(f"tested ast {i}: "):
+        tested += 1
+        fuzz_failures = fuzz_linearizer(lin, rtol=args.rtol, atol=args.atol)
+        if fuzz_failures: failed_ids.append(i)
+        for k, v in fuzz_failures.items():
+          for f in v:
+            failures[k].append(f)
+  except KeyboardInterrupt: print(colored("STOPPING...", 'red'))
 
   for msg, errors in failures.items():
     for i, payload in enumerate(errors):

@@ -239,6 +239,8 @@ def before_launch(): _dump_gpfifo("before launch")
 def collect_last_launch_state(): return _dump_gpfifo("after launch")
 
 def compare_launch_state(states1, states2):
+  states1 = states1 or list()
+  states2 = states2 or list()
   if len(states1) != 1 or len(states2) != 1:
     return False, f"Something went wrong, comapre has different sizes != 1 | {len(states1)} & {len(states2)}"
 
