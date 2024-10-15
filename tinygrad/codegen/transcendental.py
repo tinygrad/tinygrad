@@ -83,7 +83,7 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   value = exponent_zero.where(result_f, v)
   exp = exponent - exponent_bias(v.dtype)
   exp = exponent_zero.where(exp, exp.const_like(0))
-  if v.dtype == dtypes.float16: exp = exp.bitcast(dtypes.uint16)
+  if v.dtype == dtypes.float16: exp = exp.bitcast(dtypes.int16)
   return value, exp
 
 def polyN(u:UOp, s:UOp, coeffs:List[float]) -> UOp: return functools.reduce(lambda u,c: u*s+c, coeffs, u)
