@@ -63,9 +63,10 @@ enumerate_bufs = PatternMatcher([
 # *********
 
 def append_kernel(k:List[UOp], base:UOp):
+  ret = base.replace(src=())
   # NOTE: is this slow?
-  if base.replace(src=()).reshape(base.shape) not in realized.values(): k.append(base.sink())
-  return base.replace(src=())
+  if ret not in realized.values(): k.append(base.sink())
+  return ret
 break_sched = PatternMatcher([
   (UPat(UOps.BUFFER, src=(UPat(),), name="base"), append_kernel),
 ])
@@ -78,8 +79,8 @@ def add_buffer(to_realize:Dict[UOp, Optional[UOp]], x:UOp):
   with Context(TRACK_MATCH_STATS=0): x_bl = graph_rewrite(x, pm_remove_buffer)
   if to_realize.get(x_bl, True) is None:
     #print(len(to_realize), "HIT", sum((x is not None) for x in to_realize.values()))
-    ret = UOp.new_buffer(x.dtype, x.device, x.size, (x,)) if x_bl not in realized else realized[x_bl].base.replace(src=(x,))
-    to_realize[x_bl] = ret
+    ret = UOp.new_buffer(x.dtype, x.device, x.size, (x,)) if x_bl not in realized else realized[x_bl].replace(src=(x,))
+    to_realize[x_bl] = ret.replace(src=())
     return ret.reshape(x.shape)
   return None
 pm_add_buffer = PatternMatcher([(UPat(tuple(UOps), name="x"), add_buffer), ])
@@ -103,7 +104,7 @@ def _schedule_rewrite(sink:UOp) -> List[ScheduleItem]:
   graph_rewrite(sink, break_sched, sched:=[])
   for k,v in to_realize.items():
     if v is None: continue
-    realized[k] = v.base.replace(src=()).reshape(k.shape)
+    realized[k] = v
   ret = []
   for s in sched:
     ast = graph_rewrite(s, enumerate_bufs, bufs:=[])
