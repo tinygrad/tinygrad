@@ -179,7 +179,7 @@ def _dump_gpfifo(mark):
   # print("_dump_gpfifo:", mark)
   for start,size in gpus_fifo:
     gpfifo_controls = nv_gpu.AmpereAControlGPFifo.from_address(start+size*8)
-    gpfifo = to_mv(start, gpfifo_controls.GPPut * 8).cast("Q")
+    gpfifo = to_mv(start, size * 8).cast("Q")
     while old_gpputs[start] != gpfifo_controls.GPPut:
       addr = ((gpfifo[old_gpputs[start]] & ((1 << 40)-1)) >> 2) << 2
       pckt_cnt = (gpfifo[old_gpputs[start]]>>42)&((1 << 20)-1)
