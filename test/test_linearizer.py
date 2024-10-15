@@ -308,6 +308,48 @@ class TestLinearizer(unittest.TestCase):
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+  def test_multireduce_smem_usage(self):
+    Tensor.manual_seed(0)
+    max_smem = Device[Device.DEFAULT].renderer.shared_max / 4 / (8 + 8)
+    N = 16
+    L = int(np.floor(np.log2(max_smem)))
+    H = int(np.floor(np.log2(max_smem))+1)
+    U = int(np.power(2, H))
+    x = Tensor.randn(U, N, dtype=dtypes.float).realize()
+    g0, g1 = [UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=i) for i in range(2)]
+    first_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((U, 1, N)).expand((U, N, N)).to_uop()))
+    first_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
+    second_x = UOp(UOps.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((U, N, 1)).to_uop()))
+    second_reduce = UOp(UOps.REDUCE_AXIS, dtypes.float, (first_reduce+second_x,), (BinaryOps.ADD, (1,)))
+    store = UOp(UOps.STORE, src=(g0, ShapeTracker.from_shape((U, 1, 1,)).to_uop(), second_reduce))
+    sink = UOp(UOps.SINK, src=(store,))
+    wanna_output = (x.numpy()+x.numpy().sum(axis=(1,), keepdims=True)).sum(axis=(1,)).reshape(U,1,1)
+
+    # before the PR this will raise an error when it doesn't need to
+    # num bytes stored in temp buffers = 2 ^ floor(log2(max_smem / 4 / (8 + 8))) * 4 * (8 + 8) <= max_smem
+    safe_opts = [
+      [*[Opt(OptOps.UPCAST, 0, 2) for _ in range(L)], Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)],
+      [Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8), *[Opt(OptOps.UPCAST, 0, 2) for _ in range(L)]],
+      [*[Opt(OptOps.UPCAST, 0, 2) for _ in range(L-1)], Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8), Opt(OptOps.LOCAL, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 2), *[Opt(OptOps.UPCAST, 0, 2) for _ in range(L-1)], Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)]
+    ]
+    helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=safe_opts)
+
+    # this should always raise an error
+    # num bytes stored in temp buffers = 2 ^ (1+floor(log2(max_smem / 4 / (8 + 8)))) * 4 * (8 + 8) > max_smem
+    unsafe_opts = [
+      [[*[Opt(OptOps.UPCAST, 0, 2) for _ in range(H)], Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)]],
+      [[Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8), *[Opt(OptOps.UPCAST, 0, 2) for _ in range(H)]]],
+      [[*[Opt(OptOps.UPCAST, 0, 2) for _ in range(H-1)], Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8), Opt(OptOps.LOCAL, 0, 2)]],
+      [[Opt(OptOps.LOCAL, 0, 2), *[Opt(OptOps.UPCAST, 0, 2) for _ in range(H-1)], Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 8)]]
+    ]
+    for opts in unsafe_opts:
+      with self.assertRaises(KernelOptError):
+        helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   def test_multireduce_with_parallel(self):
