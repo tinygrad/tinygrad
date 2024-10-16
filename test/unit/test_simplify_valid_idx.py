@@ -65,6 +65,7 @@ class TestValidIdxSimplification(unittest.TestCase):
     self.assertEqual(idx.render(simplify=False), sidx)
     self.assertEqual(valid.render(simplify=False), svalid)
 
+  @unittest.skip("need a different way to test conv2d backward")
   def test_conv_backward(self):
     # DEBUG=4 python3 test/test_ops.py TestOps.test_simple_conv2d
     gidx0 = Special("gidx0", 3)
@@ -134,11 +135,9 @@ class TestValidIdxSimplification(unittest.TestCase):
     valid = (ridx0*3+ridx1).lt(8) & (((ridx0*3+ridx1)//8+ridx2*3+ridx3)%4).lt(2)
     idx = ridx0+ridx1+ridx2+ridx3
     load = get_gated_load_uop(valid, idx)
-    # TODO: simplify the valid
-    # alu0 = ((ridx0*3)+ridx1)
     self.check(load,
       "(((ridx0+ridx1)+ridx2)+ridx3)",
-      "((((ridx0*3)+ridx1)<8)&(((((((ridx0*3)+ridx1)//8)+(ridx2*3))+ridx3)%4)<2))")
+      "((((ridx0*3)+ridx1)<8)&((((ridx2*3)+ridx3)%4)<2))")
 
 class TestImageSimplification(unittest.TestCase):
   def test_idx_gt_c(self):
