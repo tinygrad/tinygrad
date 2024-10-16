@@ -24,7 +24,7 @@ class GraphRewriteMetadata:
   """The Python line calling graph_rewrite"""
   kernel_name: Optional[str]
   """The kernel calling graph_rewrite"""
-  upats: List[Tuple[Tuple[str, int], str]]
+  upats: List[Tuple[Tuple[str, int], str, float]]
   """List of all the applied UPats"""
 
 @dataclass
@@ -47,7 +47,7 @@ def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List
     name = to_function_name(k.name) if isinstance(k, Kernel) else None
     for ctx in ctxs:
       if ctx.sink.op is UOps.CONST: continue
-      upats = [(upat.location, upat.printable()) for _,_,upat in ctx.matches if upat is not None]
+      upats = [(upat.location, upat.printable(), tm) for _,_,upat,tm in ctx.matches if upat is not None]
       if name not in kernels: kernels[name] = []
       kernels[name].append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
@@ -72,7 +72,7 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
   g = GraphRewriteDetails(**asdict(metadata), graphs=[ctx.sink], diffs=[], changed_nodes=[], kernel_code=_prg(k))
   replaces: Dict[UOp, UOp] = {}
   sink = ctx.sink
-  for i,(u0,u1,upat) in enumerate(ctx.matches):
+  for i,(u0,u1,upat,_) in enumerate(ctx.matches):
     replaces[u0] = u0 if u1 is None else u1
     # if the match didn't result in a rewrite we move forward
     if u1 is None: continue
