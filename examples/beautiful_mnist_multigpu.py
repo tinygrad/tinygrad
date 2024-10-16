@@ -22,12 +22,12 @@ class Model:
 if __name__ == "__main__":
   X_train, Y_train, X_test, Y_test = mnist()
   # we shard the test data on axis 0
-  X_test.shard_(GPUS)
-  Y_test.shard_(GPUS)
+  X_test.shard_(GPUS, axis=0)
+  Y_test.shard_(GPUS, axis=0)
 
   model = Model()
-  for k, x in nn.state.get_state_dict(model).items(): x.shard_(GPUS, axis=0)  # we put a copy of the model on every GPU
-  opt = nn.optim.Adam(nn.state.get_parameters(model), shard_axis=0)
+  for k, x in nn.state.get_state_dict(model).items(): x.to_(GPUS)  # we put a copy of the model on every GPU
+  opt = nn.optim.Adam(nn.state.get_parameters(model))
 
   @TinyJit
   def train_step() -> Tensor:
