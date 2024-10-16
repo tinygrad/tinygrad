@@ -3185,7 +3185,7 @@ class Tensor:
     Computes the mean squared error between `self` and `Y`
 
     See: https://pytorch.org/docs/stable/generated/torch.nn.MSELoss.html#torch.nn.MSELoss
-    
+
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([0.1, 0.9, 0.2])
     Y = Tensor([0, 1, 0])
@@ -3206,7 +3206,6 @@ class Tensor:
     ```
     """
     return (-Y*self.log() - (1-Y)*(1-self).log())._do_reduction(reduction)
-
 
   def binary_crossentropy_logits(self, Y:Tensor, reduction:ReductionStr="mean") -> Tensor:
     """
