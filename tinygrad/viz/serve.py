@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser
+import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
@@ -122,6 +122,9 @@ def reloader():
     time.sleep(0.1)
 
 if __name__ == "__main__":
+  with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    if s.connect_ex(((HOST:="http://127.0.0.1").replace("http://", ""), PORT:=getenv("PORT", 8000))) == 0:
+      raise RuntimeError(f"{HOST}:{PORT} is occupied! use PORT= to change.")
   stop_reloader = threading.Event()
   multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
   st = time.perf_counter()
@@ -133,12 +136,12 @@ if __name__ == "__main__":
     ret = [get_details(*args) for v in tqdm(kernels) for args in v]
     print(f"fuzzed {len(ret)} rewrite details")
   print("*** loaded kernels")
-  server = HTTPServer(('', PORT:=getenv("PORT", 8000)), Handler)
+  server = HTTPServer(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
-  print(f"*** started viz on http://127.0.0.1:{PORT}")
+  print(f"*** started viz on {HOST}:{PORT}")
   print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"))
-  if getenv("BROWSER", 0): webbrowser.open(f"http://127.0.0.1:{PORT}")
+  if getenv("BROWSER", 0): webbrowser.open(f"{HOST}:{PORT}")
   try: server.serve_forever()
   except KeyboardInterrupt:
     print("*** viz is shutting down...")
