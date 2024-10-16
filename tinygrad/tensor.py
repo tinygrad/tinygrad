@@ -8,7 +8,7 @@ from collections import defaultdict
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv
-from tinygrad.multi import MultiLazyBuffer, all_gather
+from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import MetaOps, truncate, smax, resolve, UOp, UOps, BinaryOps, sint, Variable
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.engine.lazy import LazyBuffer
@@ -118,8 +118,7 @@ class Tensor:
   no_grad: ClassVar[bool] = False
 
   def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, 'np.ndarray', bytes, MultiLazyBuffer, UOp, pathlib.Path],  # type: ignore [name-defined] # noqa: F821
-               device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None,
-               shard_axis: Optional[int] = None):
+               device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
@@ -169,7 +168,7 @@ class Tensor:
         assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
         self.lazydata: Union[LazyBuffer, MultiLazyBuffer] = data
       else:
-        self.lazydata = MultiLazyBuffer.from_sharded(data, device, shard_axis, None)
+        self.lazydata = MultiLazyBuffer.from_sharded(data, device, None, None)
     else:
       self.lazydata = data if data.device == device else data.copy_to_device(device)
 
@@ -252,7 +251,7 @@ class Tensor:
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
-    assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, f"axis must match on MultiLazyBuffer {self.lazydata.axis=} {x.lazydata.axis=}"
+    assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     assert not x.requires_grad  # self requires_grad is okay?
     if not self.lazydata.is_realized(): return self.replace(x)
     self.lazydata = self.lazydata.assign(x.lazydata)
@@ -375,14 +374,6 @@ class Tensor:
     Shards the tensor across the given devices in place.
     """
     self.lazydata = self.shard(devices, axis, splits).lazydata
-    return self
-  
-  def all_gather(self):
-    if not isinstance(self.lazydata, MultiLazyBuffer): return self
-    return Tensor(all_gather(self.lazydata), device=self.device)
-  
-  def all_gather_(self):
-    self.lazydata = self.all_gather().lazydata
     return self
 
   @staticmethod
