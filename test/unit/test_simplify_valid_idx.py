@@ -114,6 +114,18 @@ class TestValidIdxSimplification(unittest.TestCase):
     load = get_gated_load_uop(gate, idx)
     self.assertEqual(render(load), "(((((gidx0*4)+lidx0)<19)!=1)?data0[0]:0.0f)")
 
+  def test_simplify_within_valid(self):
+    ridx0 = Range(0, 4)
+    ridx1 = Range(1, 4)
+    ridx2 = Range(2, 4)
+    ridx3 = Range(3, 4)
+    valid = (ridx0*3+ridx1).lt(8) & (((ridx0*3+ridx1)//8+ridx2*3+ridx3)%4).lt(2)
+    idx = ridx0+ridx1+ridx2+ridx3
+    load = get_gated_load_uop(valid, idx)
+    # TODO: simplify the valid
+    # alu0 = ((ridx0*3)+ridx1)
+    self.assertEqual(render(load), "(((alu0<8)&((((alu0//8)+(ridx2*3)+ridx3)%4)<2))?data0[ridx0+ridx1+ridx2+ridx3]:0.0f)")
+
 class TestImageSimplification(unittest.TestCase):
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
