@@ -270,8 +270,8 @@ def load_gguf(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
     reader, n = readers[read_int32()], read_uint64()
     return [ reader() for _ in range(n) ]
 
-  readers: Dict[int, Callable[[], Any]] = { t: functools.partial(read_unpack, "<"+f, nb) for t, f, nb in [ (0,"c",1), (1,"b",1), (2,"H",2),
-    (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } | { 8: read_str, 9: read_arr }
+  readers: Dict[int, Callable[[], Any]] = { 8: read_str, 9: read_arr, **{ t: functools.partial(read_unpack, "<"+f, nb) for t, f, nb in [ (0,"c",1),
+    (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
   read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
   magic, version, n_tensors, n_kv = read_bytes(4), read_int32(), read_int64(), read_int64()
