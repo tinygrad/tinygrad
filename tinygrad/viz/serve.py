@@ -4,7 +4,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Tuple, Optional
-from tinygrad.helpers import colored, getenv, to_function_name, tqdm, word_wrap
+from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedRewriteContext, UOp, UOps, lines
 from tinygrad.codegen.kernel import Kernel
 
@@ -24,13 +24,13 @@ class GraphRewriteMetadata:
   """The Python line calling graph_rewrite"""
   kernel_name: Optional[str]
   """The kernel calling graph_rewrite"""
-  upats: List[Tuple[Tuple[str, int], str]]
+  upats: List[Tuple[Tuple[str, int], str, float]]
   """List of all the applied UPats"""
 
 @dataclass
 class GraphRewriteDetails(GraphRewriteMetadata):
   """Full details about a single call to graph_rewrite"""
-  graphs: List[Dict[int, Tuple[str, str, List[int], str, str]]]
+  graphs: List[UOp]
   """Sink at every step of graph_rewrite"""
   diffs: List[List[str]]
   """.diff style before and after of the rewritten UOp child"""
@@ -47,12 +47,12 @@ def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List
     name = to_function_name(k.name) if isinstance(k, Kernel) else None
     for ctx in ctxs:
       if ctx.sink.op is UOps.CONST: continue
-      upats = [(upat.location, upat.printable()) for _,_,upat in ctx.rewrites]
+      upats = [(upat.location, upat.printable(), tm) for _,_,upat,tm in ctx.matches if upat is not None]
       if name not in kernels: kernels[name] = []
       kernels[name].append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
 
-def _uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
+def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   for u in x.sparents:
@@ -69,20 +69,22 @@ def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
 @functools.lru_cache(None)
 def _prg(k:Optional[Kernel]) -> Optional[str]: return k.to_program().src if isinstance(k, Kernel) else None
 def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
-  g = GraphRewriteDetails(**asdict(metadata), graphs=[_uop_to_json(ctx.sink)], diffs=[], changed_nodes=[], kernel_code=_prg(k))
+  g = GraphRewriteDetails(**asdict(metadata), graphs=[ctx.sink], diffs=[], changed_nodes=[], kernel_code=_prg(k))
   replaces: Dict[UOp, UOp] = {}
   sink = ctx.sink
-  for i,(u0,u1,upat) in enumerate(ctx.rewrites):
-    # first, rewrite this UOp with the current rewrite + all the seen rewrites before this
-    replaces[u0] = u1
+  for i,(u0,u1,upat,_) in enumerate(ctx.matches):
+    replaces[u0] = u0 if u1 is None else u1
+    # if the match didn't result in a rewrite we move forward
+    if u1 is None: continue
+    # first, rewrite this UOp with the current rewrite + all the seen matches before this
     new_sink = _replace_uop(sink, {**replaces})
     # sanity check
     if new_sink is sink:
-      raise AssertionError(f"rewritten sink wasn't rewritten! {i} {upat.location}")
+      raise AssertionError(f"rewritten sink wasn't rewritten! {i} {unwrap(upat).location}")
     # update ret data
     g.changed_nodes.append([id(x) for x in u1.sparents if x.op is not UOps.CONST])
     g.diffs.append(list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())))
-    g.graphs.append(_uop_to_json(sink:=new_sink))
+    g.graphs.append(sink:=new_sink)
   return g
 
 # ** HTTP server
@@ -101,7 +103,8 @@ class Handler(BaseHTTPRequestHandler):
       self.end_headers()
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
-        ret = json.dumps(asdict(get_details(*kernels[int(qkernel[0])][int(query["idx"][0])]))).encode()
+        g = get_details(*kernels[int(qkernel[0])][int(query["idx"][0])])
+        ret = json.dumps({**asdict(g), "graphs": list(map(uop_to_json, g.graphs)), "uops": list(map(str, g.graphs))}).encode()
       else: ret = json.dumps([list(map(lambda x:asdict(x[2]), v)) for v in kernels]).encode()
     else:
       self.send_response(404)

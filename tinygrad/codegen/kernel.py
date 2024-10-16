@@ -718,9 +718,6 @@ class Kernel:
 
     self.uops:List[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
     if DEBUG >= 5: print_uops(self.uops)
-    if getenv("GRAPHUOPS"):
-      from tinygrad.engine.graph import graph_uops
-      graph_uops(self.uops)
     return self
 
   def to_program(self, name_override:Optional[str]=None) -> Program:
