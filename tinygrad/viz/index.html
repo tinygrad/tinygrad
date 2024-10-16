@@ -47,6 +47,7 @@
   }
   ul.active {
     color: #f0f0f5;
+    overflow-y: auto;
   }
   svg {
     width: 100%;
@@ -237,7 +238,13 @@
       kernelUl.appendChild(p)
       k.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.upats.length}`, key: `uop-rewrite-${j}`,
-          className: (j === currentUOp && i == currentKernel) ? "active" : "" })
+          className: "" })
+        if (j === currentUOp && i == currentKernel) {
+            rwUl.className = "active";
+            setTimeout(() => {
+                rwUl.scrollIntoView({ behavior: "smooth", block: "end" });
+            }, [100])
+        }
         rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
           e.stopPropagation();
