@@ -55,9 +55,10 @@ class TimeoutException(Exception): pass
 def timeout_handler(signum, frame): raise TimeoutException()
 
 def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tuple[int, Optional[Tuple[Program, bytes, float]]]:
-  signal.signal(signal.SIGALRM, timeout_handler)
-  # set timeout
-  signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
+  if hasattr(signal, "SIGALRM"):
+    signal.signal(signal.SIGALRM, timeout_handler)
+    # set timeout
+    signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
   try:
     p = x[1].to_program(name_override="test")
     assert p.uops is not None, "uop list wasn't generated?"
@@ -75,7 +76,7 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tup
     if getenv("BEAM_STRICT_MODE"): raise e
     ret = None
   finally:
-    signal.alarm(0)
+    if hasattr(signal, "SIGALRM"): signal.alarm(0)
   return x[0], ret
 
 # workers should ignore ctrl c
