@@ -176,7 +176,6 @@ def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], var_val
     return LBScheduleItem(UOp(METAOPS[cast(MetaOps, out.op)], out.dtype, (), out.arg), (out,)+tuple(x.base for x in out.srcs),
                           (out.metadata,) if out.metadata is not None else None)
   # create the stores
-  var_vals = merge_dicts([out.st.var_vals.copy() for out in outs])
   cache: Dict[LazyBuffer, UOp] = {}
   ast: List[UOp] = []
   inputs: List[LazyBuffer] = []
