@@ -9,7 +9,7 @@ import argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
 from tinygrad import Tensor, Device, GlobalCounters, nn
-from tinygrad.helpers import Context, Timing, Profiling, DEBUG, JIT, getenv, colored
+from tinygrad.helpers import Context, Timing, Profiling, DEBUG, JIT, getenv, colored, fetch
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from sentencepiece import SentencePieceProcessor
@@ -190,6 +190,11 @@ def load(fn:str):
   else:
     return torch_load(fn)
 
+def fetch_tiny_llama():
+  print("No model specified. Fetching tiny LLaMA...")
+  fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.model", name="tokenizer.model")
+  return fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/model.safetensors", name='model.safetensors')
+
 class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=None, device=None):
@@ -344,6 +349,9 @@ if __name__ == "__main__":
   parser.add_argument("--shard", type=int, default=1, help="number of devices to load the weights to")
 
   args = parser.parse_args()
+  if not args.model:
+    args.model = fetch_tiny_llama()
+    args.gen = "tiny"
   if args.gen not in MODEL_PARAMS: raise ValueError("Invalid model generation")
   if args.size is None: args.size = list(MODEL_PARAMS[args.gen].items())[0][0]
   chatbot = args.prompt == None
