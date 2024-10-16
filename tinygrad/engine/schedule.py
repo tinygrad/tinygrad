@@ -126,7 +126,7 @@ def simplify_and_unbind(ctx, x:UOp) -> Optional[UOp]:
   st, var_vals = st.simplify().unbind()
   ctx[0].update(var_vals)
   ctx[2].add(st)
-  return st.to_uop()
+  return st.to_uop() if st != x.st else None
 append_vars = PatternMatcher([(UPat(UOps.VIEW, name="x"), simplify_and_unbind)])
 enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx[1].index(x.arg[0])))])
 
