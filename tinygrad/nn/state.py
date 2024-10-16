@@ -1,7 +1,7 @@
 import os, json, pathlib, zipfile, pickle, tarfile, struct, functools
 from typing import Dict, Union, List, Optional, Any, Tuple, Callable
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.multi import MultiLazyBuffer
@@ -227,30 +227,26 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       f.seek(rwd)
       return TorchPickle(f).load()
 
-class GGUFConv:
-  def conv_bc(dtype: DType, t: Tensor, n: int): return t[:dtype.itemsize * n].bitcast(dtype)
-  def dequantize_q8_0(t: Tensor, n: int):
-    blocks = t[:(n//32)*34].reshape((-1, 34))
-    return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].bitcast(dtypes.int8)
-  def dequantize_q4_0(t: Tensor, n: int):
-    blocks = t[:(n//32)*18].reshape((-1, 18))
-    return (GGUFConv._q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
-  def dequantize_q4_1(t: Tensor, n: int):
-    blocks = t[:(n//32)*20].reshape((-1, 20))
+def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int):
+  bc_dtype = { 0:dtypes.float32, 1: dtypes.float16, 16: dtypes.int8, 17: dtypes.int16, 18: dtypes.int32 }.get(ggml_type, None)
+  if bc_dtype is not None: return t[:bc_dtype.itemsize * n].bitcast(bc_dtype)
+
+  def q_to_uint8(t: Tensor, b: int) -> Tensor:
+    shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
+    return t.unsqueeze(-1).expand((*t.shape,8//b)).div(shift_tensor, upcast=False).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
+
+  blk_nel, blk_nb = { 2: (32, 18), 3: (32, 20), 14: (256, 210), 8: (32, 34) }[ggml_type]
+  blocks = t[:(n//blk_nel)*blk_nb].reshape((-1, blk_nb))
+  if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
+  elif ggml_type == 8: return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].bitcast(dtypes.int8)
+  elif ggml_type == 3:
     d, m = tuple(blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
-    return GGUFConv._q_to_uint8(blocks[:,4:], 4).bitcast(dtypes.int8) * d + m
-  def dequantize_q6_K(t: Tensor, n: int):
-    blocks = t[:(n//256)*210].reshape((-1, 210))
-    xl, xh = GGUFConv._q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), GGUFConv._q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
+    return q_to_uint8(blocks[:,4:], 4).bitcast(dtypes.int8) * d + m
+  elif ggml_type == 14:
+    xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
     scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((blocks.shape[0], 16, 16)).reshape((blocks.shape[0], 2, 128))
     d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256)).reshape((-1, 2, 128))
     return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32) * scales
-  def _q_to_uint8(t: Tensor, b: int) -> Tensor:
-    shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
-    return t.unsqueeze(-1).expand((*t.shape,8//b)).div(shift_tensor, upcast=False).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
-  type_map: Dict[int, Callable[[Tensor, int], Tensor]] = { 0: functools.partial(conv_bc, dtypes.float32),
-    1: functools.partial(conv_bc, dtypes.float16), 16: functools.partial(conv_bc, dtypes.int8), 17: functools.partial(conv_bc, dtypes.int16),
-    18: functools.partial(conv_bc, dtypes.int32), 2: dequantize_q4_0, 3: dequantize_q4_1, 14: dequantize_q6_K, 8: dequantize_q8_0 }
 
 def load_gguf(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
   """
@@ -263,7 +259,7 @@ def load_gguf(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
   ```
   """
   if tensor.dtype != dtypes.uint8 or len(tensor.shape) != 1: raise ValueError("GGUF tensor must be 1d and of dtype uint8!")
-  pos, read_buffer, rb_start, kv_data, tensor_data = 0, memoryview(bytes()), 0, {}, {}
+  pos, read_buffer, rb_start, kv_data, state_dict = 0, memoryview(bytes()), 0, {}, {}
   def read_bytes(n: int):
     nonlocal pos, read_buffer, rb_start
     if rb_start + len(read_buffer) < pos + n: rb_start, read_buffer = pos, tensor[pos:(pos+max(n, 1000_000))].data()
@@ -281,14 +277,13 @@ def load_gguf(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
   magic, version, n_tensors, n_kv = read_bytes(4), read_int32(), read_int64(), read_int64()
   if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
   for _ in range(n_kv):
-    k, t = read_str(), read_int32()
-    kv_data[k] = readers[t]()
+    k, typ = read_str(), read_int32()
+    kv_data[k] = readers[typ]()
 
-  tensor_infos = [ (read_str(), tuple(read_uint64() for _ in range(read_uint32())), read_int32(), read_uint64()) for _ in range(n_tensors) ]
+  t_infos = [ (read_str(), tuple(read_uint64() for _ in range(read_uint32())), read_int32(), read_uint64()) for _ in range(n_tensors) ]
   alignment = kv_data.get("general.alignment", 32)
   data_start = pos = pos + (alignment - pos % alignment if pos % alignment != 0 else 0)
 
-  for name, shape, ttype, offset in tensor_infos:
-    tensor_data[name] = GGUFConv.type_map[ttype](tensor[data_start + offset:], prod(shape)).reshape(*reversed(shape))
+  for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
 
-  return kv_data, tensor_data
+  return kv_data, state_dict

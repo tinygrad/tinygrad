@@ -5,7 +5,7 @@ import tarfile, ggml, ctypes
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
-from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load, tar_extract, GGUFConv, load_gguf
+from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load, tar_extract, ggml_data_to_tensor, load_gguf
 from tinygrad.helpers import Timing, fetch, temp, CI
 from test.helpers import is_dtype_supported
 
@@ -508,7 +508,7 @@ class TestGGUF(unittest.TestCase):
     type_traits.to_float(c_q_data, c_dq_data, n_el)
 
     q_tensor = Tensor(np.frombuffer(c_q_data, dtype=np.uint8, count=n_bytes))
-    dq_tensor = GGUFConv.type_map[ttype](q_tensor, n_el).reshape(n_el)
+    dq_tensor = ggml_data_to_tensor(q_tensor, n_el, ttype).reshape(n_el)
 
     np.testing.assert_equal(dq_tensor.numpy(), np.frombuffer(c_dq_data, dtype=np.float32))
   def _test_load_gguf(self, url: str):
