@@ -14,7 +14,7 @@ def print_size(name, *tensors: Tensor):
 def print_lb(lb):
   seen = set()
   def repr_lb(lb, indent=0):
-    text = "\u001b[2m" if lb in seen else ""
+    text = "\u001b[2m" if lb in seen else "\u001b[0m"
     seen.add(lb)
     def _indent(): return " " * indent
     if isinstance(lb, MultiLazyBuffer):
@@ -26,10 +26,9 @@ def print_lb(lb):
       indent += 4
       text += _indent()
       for i, _lb in enumerate(lb.lbs):
-        text += "\u001b[0m"
         text += repr_lb(_lb, indent)
         if i < len(lb.lbs) - 1: text += _indent()
-    else:
+    else:     
       text += "LB"
       view = lb.st.views[0]
       text += f" shape {view.shape}"
@@ -43,10 +42,11 @@ def print_lb(lb):
         text += repr_lb(lb._base, indent + 7)
         return text
       else:
-        text += _indent() + f"\u001b[35m{lb.op}\u001b[30m "
+        text += _indent()
+        text += f"{lb.device} "
+        text += f"\u001b[35m{lb.op}\u001b[30m "
         text += f"arg: {lb.arg} " if lb.arg is not None else ""
-        text += f"size: {lb.size} "
-        text += f"device: {lb.device} \n"
+        text += f"size: {lb.size} \n"
         if hasattr(lb, "buffer") and hasattr(lb.buffer, "_buf"):
           text += _indent() + f"buf: {lb.buffer.nbytes} bytes\n"
           return text
@@ -57,7 +57,6 @@ def print_lb(lb):
             text += "\u001b[0m"
             text += repr_lb(src, indent)
             if i < len(lb.srcs) - 1: text += _indent()
-    text += "\u001b[0m"
     return text
-  print(repr_lb(lb))
+  print(repr_lb(lb) + "\u001b[0m")
 
