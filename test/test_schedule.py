@@ -12,12 +12,12 @@ from tinygrad.dtype import DType, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps, graph_rewrite
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, view_right, st_fixup, view_left
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
-from test.helpers import ast_const, is_dtype_supported, Context, timeit
+from test.helpers import ast_const, is_dtype_supported, timeit
 from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
@@ -1587,7 +1587,7 @@ class TestIndexing(unittest.TestCase):
     X = Tensor.randn(2,3,4,4).numpy()
     with Context(FUSE_ARANGE=1):
       compare = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
-    with Context(FUSE_ARANGE=0, GRAPH=0, SAVE_SCHEDULE=1):
+    with Context(FUSE_ARANGE=0, SAVE_SCHEDULE=1):
       ref = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
     np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 

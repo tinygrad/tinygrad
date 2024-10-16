@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
 from tinygrad.ops import BUFFER_UOPS, UNSAFE_PAD_OPS, MetaOps, ReduceOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, Variable, resolve, \
     graph_rewrite, track_rewrites, sint
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, GlobalCounters, Metadata, all_same, \
+from tinygrad.helpers import DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, Metadata, all_same, \
     colored, diskcache_put, prod, dedup, all_int, merge_dicts, getenv, unwrap
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -204,9 +204,6 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs: return None
   if buf.base.realized is not None: return realizes.setdefault(buf.base)
-  if GRAPH:
-    from tinygrad.engine.graph import log_lazybuffer
-    log_lazybuffer(buf, scheduled)
   # check if we need to realize views
   if buf is not buf.base:
     # fuse some pads
@@ -414,13 +411,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   graph, in_degree, var_vals = _graph_schedule(outs)
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
-  kernel_number = GlobalCounters.kernel_count
   while queue:
     lsi = queue.popleft()
-    if GRAPH:
-      kernel_number += 1
-      from tinygrad.engine.graph import realized_lazybuffer
-      for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     for out in lsi.outputs: del out.srcs  # can only schedule once
     schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.bufs if x.size != 0), lsi.metadata))
     if (m:=BUF_LIMIT.get(device:=si.outputs[0].device)) and len(si.bufs) >= m:
