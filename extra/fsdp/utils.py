@@ -12,9 +12,11 @@ def print_size(name, *tensors: Tensor):
     print(f'{name} size: {size:.2f} {unit}')
 
 def print_lb(lb):
+  seen = set()
   def repr_lb(lb, indent=0):
+    text = "\u001b[2m" if lb in seen else ""
+    seen.add(lb)
     def _indent(): return " " * indent
-    text = ""
     if isinstance(lb, MultiLazyBuffer):
       text += _indent() + "MLB "
       if lb.axis is not None:
@@ -24,6 +26,7 @@ def print_lb(lb):
       indent += 4
       text += _indent()
       for i, _lb in enumerate(lb.lbs):
+        text += "\u001b[0m"
         text += repr_lb(_lb, indent)
         if i < len(lb.lbs) - 1: text += _indent()
     else:
@@ -40,7 +43,7 @@ def print_lb(lb):
         text += repr_lb(lb._base, indent + 7)
         return text
       else:
-        text += _indent() + f"{lb.op} "
+        text += _indent() + f"\u001b[35m{lb.op}\u001b[30m "
         text += f"arg: {lb.arg} " if lb.arg is not None else ""
         text += f"size: {lb.size} "
         text += f"device: {lb.device} \n"
@@ -50,8 +53,10 @@ def print_lb(lb):
           text += _indent() + "srcs: "
           indent += 6
           for i, src in enumerate(lb.srcs):
+            text += "\u001b[0m"
             text += repr_lb(src, indent)
             if i < len(lb.srcs) - 1: text += _indent()
+    text += "\u001b[0m"
     return text
   print(repr_lb(lb))
 
