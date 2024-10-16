@@ -6,7 +6,8 @@ Device.DEFAULT = "CLANG"
 from train_gpt2 import GPT, GPTConfig
 from tinygrad.helpers import dedup, to_function_name, flatten, getenv, GRAPH, GlobalCounters, ansilen, to_function_name
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import get_kernel, memory_planner, run_schedule
+from tinygrad.engine.realize import get_kernel, run_schedule
+from tinygrad.engine.memory import memory_planner
 from tinygrad.ops import MetaOps, UOps
 
 TIMING = getenv("TIMING")
