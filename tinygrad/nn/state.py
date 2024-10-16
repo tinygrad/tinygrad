@@ -238,11 +238,11 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int):
   blk_nel, blk_nb = { 2: (32, 18), 3: (32, 20), 14: (256, 210), 8: (32, 34) }[ggml_type]
   blocks = t[:(n//blk_nel)*blk_nb].reshape((-1, blk_nb))
   if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
-  elif ggml_type == 8: return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].bitcast(dtypes.int8)
-  elif ggml_type == 3:
+  if ggml_type == 8: return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].bitcast(dtypes.int8)
+  if ggml_type == 3:
     d, m = tuple(blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
     return q_to_uint8(blocks[:,4:], 4).bitcast(dtypes.int8) * d + m
-  elif ggml_type == 14:
+  if ggml_type == 14:
     xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
     scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((blocks.shape[0], 16, 16)).reshape((blocks.shape[0], 2, 128))
     d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256)).reshape((-1, 2, 128))
