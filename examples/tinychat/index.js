@@ -125,6 +125,9 @@ document.addEventListener("alpine:init", () => {
       if (index !== -1) {
         this.histories.splice(index, 1);
         localStorage.setItem("histories", JSON.stringify(this.histories));
+        if (this.cstate.time === cstate.time) {
+          this.cstate = { time: null, messages: [] };
+        }
       }
     },
 
@@ -159,11 +162,29 @@ document.addEventListener("alpine:init", () => {
         }
       }
 
-      this.cstate.time = Date.now();
-      this.histories.push(this.cstate);
+      // Update or add the current state in histories
+      if (!this.cstate.time) {
+        // If cstate.time is not set, set it and push to histories
+        this.cstate.time = Date.now();
+        this.histories.push(JSON.parse(JSON.stringify(this.cstate)));
+      } else {
+        // Find the index of the existing cstate in histories
+        const index = this.histories.findIndex(
+          (state) => state.time === this.cstate.time
+        );
+        if (index !== -1) {
+          // Update the existing history entry
+          this.histories[index] = JSON.parse(JSON.stringify(this.cstate));
+        } else {
+          // If not found, push the new cstate
+          this.histories.push(JSON.parse(JSON.stringify(this.cstate)));
+        }
+      }
+
       localStorage.setItem("histories", JSON.stringify(this.histories));
       this.generating = false;
     },
+
 
     handleEnter(event) {
       if (!event.shiftKey) {
