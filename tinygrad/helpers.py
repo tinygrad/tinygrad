@@ -307,7 +307,7 @@ class tqdm:
     bar = '\r' + self.desc + (f'{100*prog:3.0f}%|{("█"*int(num:=sz*prog)+" ▏▎▍▌▋▊▉"[int(8*num)%8].strip()).ljust(sz," ")}| ' if self.t else '') + suf
     print(bar[:ncols+1], flush=True, end='\n'*close, file=sys.stderr)
   @classmethod
-  def write(cls, s:str): print("\n\x1b[A" + " " * shutil.get_terminal_size().columns + f"\n\x1b[A{s}", file=sys.stderr)
+  def write(cls, s:str): print(f"\r\033[K{s}", flush=True, file=sys.stderr)
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
