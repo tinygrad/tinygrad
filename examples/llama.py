@@ -191,7 +191,6 @@ def load(fn:str):
     return torch_load(fn)
 
 def fetch_tiny_llama():
-  print("No model specified. Fetching tiny LLaMA...")
   fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.model", name="tokenizer.model")
   return fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/model.safetensors", name='model.safetensors')
 
@@ -349,9 +348,9 @@ if __name__ == "__main__":
   parser.add_argument("--shard", type=int, default=1, help="number of devices to load the weights to")
 
   args = parser.parse_args()
-  if not args.model:
+  if not args.model and args.gen == "tiny":
+    print("No model specified. Fetching tiny LLaMA...")
     args.model = fetch_tiny_llama()
-    args.gen = "tiny"
   if args.gen not in MODEL_PARAMS: raise ValueError("Invalid model generation")
   if args.size is None: args.size = list(MODEL_PARAMS[args.gen].items())[0][0]
   chatbot = args.prompt == None
@@ -520,3 +519,4 @@ After you are done speaking, output [EOS]. You are not Chad.
       print("\n" + colored("output validated", "green"))  # NOTE: "\n" iside colored does not render the color in github action
     except KeyError:
       pass
+
