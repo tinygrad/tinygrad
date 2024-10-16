@@ -482,8 +482,10 @@ class UOp(MathTrait):
 
 if TYPE_CHECKING:
   from tinygrad.device import Buffer
-buffers: Dict[UOp, Buffer] = {}
-realized: Dict[UOp, UOp] = {}
+
+# TODO: this should be both WeakKeyDictionary, but fine to do later
+buffers: Dict[UOp, Buffer] = {}    # this maps the Buffer UOps to actual Buffers
+realized: Dict[UOp, UOp] = {}      # this maps UOps from the big graph (on Tensor) to Buffer UOps
 
 @dataclass(frozen=True)
 class KernelInfo:
