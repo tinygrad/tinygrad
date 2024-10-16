@@ -353,8 +353,7 @@ class UOp(MathTrait):
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL:
       if isinstance(self.arg[1], int): return 0, self.arg[1]-1
-      if isinstance(self.arg[1], UOp) and self.arg[1].op is UOps.ALU: return 0, self.arg[1].vmax
-      if isinstance(self.arg[1], UOp) and self.arg[1].op is UOps.DEFINE_VAR: return 0, self.arg[1].arg[2]
+      if isinstance(self.arg[1], UOp) and self.arg[1].op in (UOps.ALU, UOps.DEFINE_VAR): return 0, self.arg[1].vmax
       return 0, dtypes.max(self.dtype)
     if self.op is UOps.CONST: return self.arg, self.arg
     if self.op is UOps.VCONST: return (min(self.arg), max(self.arg))

@@ -545,16 +545,23 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, name="load"), simplify_buffer_load),
 ])
 
-def fixup_alu(alu:UOp) -> Optional[UOp]:
-  # TODO: handle indexing alus with alu operands
-  # target just indexing alus
-  if alu.arg in (BinaryOps.ADD, BinaryOps.MUL) and \
-  all(s.op in (UOps.CONST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR) for s in alu.src):
-    if max(alu._min_max, key=abs) > dtypes.max(alu.dtype): return UOp(alu.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in alu.src), alu.arg)
+def split_uop2(x:UOp):
+  if x.op is UOps.ALU:
+    for s in x.src: yield from split_uop2(s)
+  else: yield x
+
+def int64_indexing(alu:UOp) -> Optional[UOp]:
+  # TODO: need to add uops.cast to _min_max without tests breaking
+  # for alus we need to make sure all operands are valid, this is might be overkill though
+  operands = tuple(split_uop2(alu)) # UOps.CAST
+  if any(o.op not in (UOps.CONST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR) for o in operands): return None
+  if max(alu._min_max, key=abs) > dtypes.max(alu.dtype): return UOp(alu.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in alu.src), alu.arg)
   return None
 
-fixup_alus = PatternMatcher([
-  (UPat(UOps.ALU, dtypes.int32, name="alu"), fixup_alu),
+int64_idx = PatternMatcher([
+  (UPat(UOps.ALU, dtypes.int32, name="alu"), int64_indexing),
+  (UPat((UOps.CONST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR), dtypes.int32, name="x"),
+    lambda x: UOp(x.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in x.src), x.arg) if max(x._min_max, key=abs) > dtypes.max(x.dtype) else None)
 ])
 
 # *** uop graph ***
@@ -568,7 +575,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   acc_number = 0
   sink = graph_rewrite(sink, sym)
   # int64 indexing
-  sink = graph_rewrite(sink, fixup_alus)
+  sink = graph_rewrite(sink, int64_idx)
 
   # expand
   linearize_cnt += 1
@@ -581,4 +588,6 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
       sink = graph_rewrite(sink, sym+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
 
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, opts.extra_matcher)
+  print(sink)
+  print("\n")
   return sink
