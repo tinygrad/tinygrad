@@ -104,7 +104,6 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def size(self) -> int:
-    # NOTE: Variable and the Node derived from it in symbolic shapes can only have int as max.
     ret = prod([x.vmax if isinstance(x, UOp) else x for x in self.shape])
     assert isinstance(ret, int), f"{ret=} is not int"
     return ret
@@ -120,7 +119,6 @@ class View:
     if mask is not None and all(m == (0,s) for m,s in zip(mask, shape)): mask = None
     # if any dimension has size >1, but is masked such that only one index in the dimension is unmasked
     # then its stride can also be set to 0, albeit with a corresponding adjustment required to the offset
-    # TODO: assert comparison with LtNode to avoid mis-using symbolic
     if mask and any(elim := [not resolve(b+1 < e) for b,e in mask]):
       if any(not resolve(b < e) for b,e in mask):
         strides, offset, mask = (0,) * len(shape), 0, ((0,0),) * len(shape)
@@ -324,7 +322,6 @@ class View:
     strides, r_new_shape = [], reversed(new_shape)
     for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
       acc = 1
-      # TODO: this <= and != is for symbolic!?
       while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and (new_dim := next(r_new_shape, 0)) > 0:
         strides.append(new_stride)
         if resolve(new_dim != 1): new_stride *= (new_dim if resolve((acc := acc * new_dim) < real_dim) else 0)
