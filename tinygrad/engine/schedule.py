@@ -2,7 +2,7 @@ import sys, pickle, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
-from tinygrad.ops import BUFFER_UOPS, REDUCE_ALU, UNSAFE_PAD_OPS, MetaOps, ReduceOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, Variable, resolve, \
+from tinygrad.ops import BUFFER_UOPS, UNSAFE_PAD_OPS, MetaOps, ReduceOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, Variable, resolve, \
     graph_rewrite, track_rewrites, sint
 from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, GlobalCounters, Metadata, all_same, \
     colored, diskcache_put, prod, dedup, all_int, merge_dicts, getenv, unwrap
@@ -62,22 +62,20 @@ def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTr
 
 # ** reduceop fusor
 
-def push_swizzle_up_through_reduce(swizzle:UOp, reduceop:UOp) -> Optional[UOp]:
-  if (swizzle_st:=unwrap(swizzle.st)).contiguous: return None
-  rsrc = reduceop.src[0]
-  tmp, rshape = permute_reduce(ShapeTracker.from_shape(unwrap(rsrc.st).shape), reduceop.axis_arg)
+def view_r(view:UOp, r:UOp, rsrc:UOp) -> Optional[UOp]:
+  if (st:=unwrap(view.st)).contiguous: return None
+  tmp, rshape = permute_reduce(ShapeTracker.from_shape(unwrap(rsrc.st).shape), r.axis_arg)
   prshape = prod(rshape)
   strides = strides_for_shape(rshape)
   nv: List[View] = []
-  for v in swizzle_st.views:
+  for v in st.views:
     nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
                           v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
   # update input_st and axis
   new_input_st = tmp + ShapeTracker(tuple(nv))
-  _, new_rshape = permute_reduce(new_input_st, reduceop.axis_arg)
+  _, new_rshape = permute_reduce(new_input_st, r.axis_arg)
   new_axis = tuple(range(len(new_input_st.shape)-len(new_rshape), len(new_input_st.shape)))
-  return UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda st:st+new_input_st, {}),),
-             (reduceop.arg[0], new_axis)).view(ShapeTracker.from_shape(swizzle_st.shape))
+  return st_fixup(rsrc, lambda st:st+new_input_st, {}).r(r.arg[0], new_axis).view(ShapeTracker.from_shape(st.shape))
 
 def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:
   swizzle_st, src_st = unwrap(swizzle.st), unwrap(swizzle.src[0].st)
@@ -85,7 +83,7 @@ def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:
   assert prod(swizzle_st.shape) == prod(src_st.shape), "can't push expands down to STORE"
   output_shape = swizzle_st.reduce(root.axis_arg)
   new_axis = tuple(i for i,(s,u) in enumerate(zip(src_st.shape, output_shape)) if s != u)
-  return UOp(UOps.REDUCE_AXIS, root.dtype, swizzle.src, (root.arg[0], new_axis)).view(ShapeTracker.from_shape(output_shape))
+  return swizzle.src[0].r(root.arg[0], new_axis).view(ShapeTracker.from_shape(output_shape))
 
 def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   swizzles = [x for x in root.src if x.op is UOps.VIEW and len(x.src) != 0]
@@ -101,14 +99,14 @@ def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
   assert not any(x.op is UOps.REDUCE_AXIS for x in first_reduce.parents), "can't merge more than two reduceops at a time"
-  return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
+  return first_reduce.src[0].r(first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg)
 
 merge_views = PatternMatcher([(UPat(UOps.VIEW, src=(UPat(UOps.VIEW, name="s0"),), name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st))])
 
 # push VIEW to loads
 view_left = merge_views+PatternMatcher([
   # view on reduce
-  (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
+  (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, src=UPat.var("rsrc"), name="r"),), name="view"), view_r),
   # view on elementwise
   (UPat(UOps.VIEW, src=(UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.CONTIGUOUS, *BUFFER_UOPS), name="e"),), name="v"),
    lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
@@ -167,7 +165,7 @@ def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ..
   # only reduceop changes shape
   src_st = ShapeTracker.from_shape(buf.srcs[0].shape) if buf.op in ReduceOps else st
   src: List[UOp] = [_recursive_uop(x, src_st, outputs, var_vals, inputs, buf_uops, assign_targets, cache) for x in buf.srcs]
-  if buf.op in ReduceOps: ret = UOp(UOps.REDUCE_AXIS, dtype, tuple(src), (REDUCE_ALU[cast(ReduceOps, buf.op)], buf.arg)).view(st)
+  if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg).view(st)
   elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, (buf_uops[buf.buffer], src[0]))
   elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]))
   elif buf.op is UnaryOps.CAST: ret = src[0].cast(dtype)
