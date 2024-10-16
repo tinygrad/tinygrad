@@ -8,13 +8,12 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
 from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import Context, CI, OSX, getenv, colored
+from tinygrad.helpers import CI, OSX, getenv, colored
 
 def derandomize_model(model):
-  with Context(GRAPH=0):
-    for p in get_parameters(model):
-      p.lazydata = Tensor.empty(p.shape, device=p.device, dtype=p.dtype).lazydata
-      p.realize()
+  for p in get_parameters(model):
+    p.lazydata = Tensor.empty(p.shape, device=p.device, dtype=p.dtype).lazydata
+    p.realize()
 
 def assert_jit_cache_len(fxn, expected_len):
   if not fxn.jit_cache:

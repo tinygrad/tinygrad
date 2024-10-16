@@ -63,10 +63,6 @@ class TestGraphRewriteEfficiency(unittest.TestCase):
     et = time.perf_counter() - st
     UOp.__init__ = old_init
     print(f"rewrote in {et*1000:.2f} ms, from {len(lower_sink.sparents)} -> {len(new_sink.sparents)}, creating {cnt[0]} uops")
-    #from collections import Counter
-    #print(Counter(x.op for x in new_sink.sparents))
-    #from tinygrad.engine.graph import graph_uops
-    #graph_uops(linearize_uop(new_sink))
 
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
