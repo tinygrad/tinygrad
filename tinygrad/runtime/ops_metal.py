@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
 from typing import List, Any, Tuple, Optional, cast, TypeVar
-from tinygrad.helpers import prod, getenv, DEBUG
+from tinygrad.helpers import prod, getenv, DEBUG, size_unit
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -137,8 +137,10 @@ class MetalAllocator(LRUAllocator):
     cyan = "\u001b[36m"
     white = "\u001b[37m"
     color = magenta if self.name == "METAL" else blue if self.name == "METAL:1" else cyan if self.name == "METAL:2" else white
+    mem, mem_unit = size_unit(self.mem)
+    mem_high, mem_high_unit = size_unit(self.mem_high)
     if os.environ.get("DEBUG_MEM"):
-      print(f"\n{color}ALLOC{self.name} {mem} mem: {self.mem} bytes, highest: {self.mem_high} bytes {reset_color}")
+      print(f"\n{color}ALLOC{self.name} {mem} mem: {mem:.2f} {mem_unit}, highest: {mem_high:.2f} {mem_high_unit} {reset_color}")
   def _alloc(self, size:int, options) -> MetalBuffer:
     self.mem_changed(size)
     # Buffer is explicitly released in _free() rather than garbage collected via reference count

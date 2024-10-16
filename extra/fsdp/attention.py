@@ -5,9 +5,8 @@ from tinygrad.device import Device
 import tinygrad.nn as nn
 import math
 from dataclasses import dataclass
-from extra.mlb import print_lb
-GPUS = [f"{Device.DEFAULT}:{i}" for i in range(2)]
-print(GPUS)
+from extra.fsdp.utils import print_size, print_lb
+from tinygrad.helpers import prod
 class Optimizer:
   def __init__(self, params):
     for p in params:
@@ -50,20 +49,44 @@ class Model:
     v = v.view(3, 2, 3).transpose(0, 1)
 
     att = (q @ k.transpose(1, 2))
-    att = att.masked_fill(self.bias[:, :3, :3] == 0, float('-inf'))
+    mask = self.bias[:, :3, :3]
+    mask_zero = mask == 0
+    att = att.masked_fill(mask_zero, float('-inf'))
     att = att.softmax()
     y = att @v
     y = y.transpose(0, 1).view(3, 6)
     return y
 
 model = Model()
-x = Tensor.empty(3, 6)
-x.shard_(GPUS)
-for k, p in nn.state.get_state_dict(model).items():
-  p.shard_(GPUS, axis=None if k == "bias" else 0)
-  p.realize()
-
 opt = Optimizer(nn.state.get_parameters(model))
+x = Tensor.empty(3, 6)
+
+print_size("model", *nn.state.get_parameters(model))
+print_size("model with optimizer", *nn.state.get_parameters(opt))
+SHARD = int(os.environ.get("SHARD"))
+GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
+if SHARD > 1:
+  print("SHARDING ON", GPUS)
+  x.shard_(GPUS)
+  seen = set()
+  for k, p in nn.state.get_state_dict(opt).items():
+    if p in seen: continue
+    seen.add(p)
+    p.shard_(GPUS, axis=None if prod(p.shape) <= 1 else 0)
+    p.realize()
+  for k, p in nn.state.get_state_dict(model).items():
+    if p in seen: continue
+    seen.add(p)
+    if k == "bias":
+      p.shard_(GPUS)
+    else:
+      p.shard_(GPUS, axis=None if prod(p.shape) <= 1 else 0)
+    p.realize()
+else:
+  print("NO SHARD")
+  for p in nn.state.get_parameters(opt):
+    p.realize()
+
 
 def train():
   y = model(x)
@@ -72,7 +95,5 @@ def train():
   opt.step()
   opt.zero()
 
-for i in range(3):
+for i in range(10):
   train()
-
-y = model(x)

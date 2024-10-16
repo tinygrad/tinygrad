@@ -3,7 +3,7 @@ from typing import List
 from tinygrad.helpers import dedup, flatten, getenv
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, least_upper_dtype
-
+from tinygrad.multi import MultiLazyBuffer
 class Optimizer:
   """
   Base class for all optimizers.
@@ -81,7 +81,10 @@ class LARS(Optimizer):
       assert t.grad is not None
       # contiguous is needed since the grads can allegedly form a "diamond"
       # TODO: fix this in lazy.py
+      if isinstance(t.grad.lazydata, MultiLazyBuffer) and t.grad.lazydata.axis != t.lazydata.axis:
+        t.grad.gather_()
       g = t.grad.contiguous()
+
       if self.tcoef != 0:
         r1 = t.detach().square().sum().sqrt()
         r2 = g.square().sum().sqrt()
@@ -135,6 +138,8 @@ class LAMB(Optimizer):
     self.b2_t *= self.b2
     for i, t in enumerate(self.params):
       assert t.grad is not None
+      if isinstance(t.grad.lazydata, MultiLazyBuffer) and t.grad.lazydata.axis != t.lazydata.axis:
+        t.grad.gather_()
       self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
       self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
       m_hat = self.m[i] / (1.0 - self.b1_t)
