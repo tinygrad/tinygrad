@@ -348,7 +348,7 @@ if __name__ == "__main__":
   parser.add_argument("--shard", type=int, default=1, help="number of devices to load the weights to")
 
   args = parser.parse_args()
-  if not args.model and args.gen == "tiny":
+  if args.model is None and args.gen == "tiny":
     print("No model specified. Fetching tiny LLaMA...")
     args.model = fetch_tiny_llama()
   if args.gen not in MODEL_PARAMS: raise ValueError("Invalid model generation")
