@@ -1,32 +1,16 @@
 /* Base Styles */
 :root {
-  --background-color: #fff;
-  --text-color: #000;
-  --primary-color: #000;
-  --secondary-color: #f4f4f4;
-  --button-background-color: #000;
-  --button-text-color: #fff;
-  --message-user-background-color: #000;
-  --message-user-text-color: #fff;
-  --message-assistant-background-color: #f4f4f4;
-  --message-assistant-text-color: #000;
-  --input-form-background-color: #f4f4f4;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background-color: #1a1a1a;
-    --text-color: #fff;
-    --primary-color: #fff;
-    --secondary-color: #2a2a2a;
-    --button-background-color: #fff;
-    --button-text-color: #000;
-    --message-user-background-color: #fff;
-    --message-user-text-color: #000;
-    --message-assistant-background-color: #2a2a2a;
-    --message-assistant-text-color: #fff;
-    --input-form-background-color: #2a2a2a;
-  }
+  --background-color: #1a1a1a;
+  --text-color: #fff;
+  --primary-color: #fff;
+  --secondary-color: #2a2a2a;
+  --button-background-color: #fff;
+  --button-text-color: #000;
+  --message-user-background-color: #fff;
+  --message-user-text-color: #000;
+  --message-assistant-background-color: #2a2a2a;
+  --message-assistant-text-color: #fff;
+  --input-form-background-color: #2a2a2a;
 }
 
 body {

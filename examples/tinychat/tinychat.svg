@@ -28,15 +28,8 @@
   </g>
 
 <style>
-  @media (prefers-color-scheme: dark) {
     #logo {
       fill: #fff;
     }
-  }
-  @media (prefers-color-scheme: light) {
-    #logo {
-      fill: #000;
-    }
-  }
   </style>
 </svg>
