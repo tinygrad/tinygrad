@@ -123,7 +123,7 @@ def reloader():
 
 if __name__ == "__main__":
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    if s.connect_ex(((HOST:="localhost").replace("http://", ""), PORT:=getenv("PORT", 8000))) == 0:
+    if s.connect_ex(((HOST:="http://127.0.0.1").replace("http://", ""), PORT:=getenv("PORT", 8000))) == 0:
       raise RuntimeError(f"{HOST}:{PORT} is occupied! use PORT= to change.")
   stop_reloader = threading.Event()
   multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
