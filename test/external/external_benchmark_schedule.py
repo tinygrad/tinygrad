@@ -50,10 +50,6 @@ if __name__ == "__main__":
         if getenv("LINEARIZE", 1):
           with Timing("***** model linearize in "): uops = [linearize_uop(u) for u in uops]
           print(sum(len(u) for u in uops))
-          if getenv("GRAPHUOPS", 0):
-            for u in uops:
-              from tinygrad.engine.graph import graph_uops
-              graph_uops(u)
           if getenv("SRC", 0):
             renderer = Device[Device.DEFAULT].renderer
             for k,u in zip(kernels, uops): print(renderer.render(k.name, u))
