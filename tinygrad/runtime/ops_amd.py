@@ -34,11 +34,10 @@ class AMDSignal(HCQSignal):
     self._signal = AMDDevice.signals_pool.pop()
     self._value_addr, self._timestamp_addr = mv_address(self._signal), mv_address(self._signal) + 8
     if is_timeline:
-      sync_event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, auto_reset=1)
-      self._event_mailbox_ptr = AMDDevice.event_page.va_addr + sync_event.event_slot_index*8
-      self._event_id = sync_event.event_id
-      self._evt_array = (kfd.struct_kfd_event_data)(event_id=self._event_id)
-    else: self._event_mailbox_ptr = self._event_id = 0
+      self._event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, auto_reset=1)
+      self._event_mailbox_ptr = AMDDevice.event_page.va_addr + self._event.event_slot_index*8
+      self._evt_array = (kfd.struct_kfd_event_data)(event_id=self._event.event_id)
+    else: self._event_mailbox_ptr = 0
     super().__init__(value)
   def __del__(self): AMDDevice.signals_pool.append(self._signal)
   def _get_value(self) -> int: return self._signal[0]
@@ -50,7 +49,7 @@ class AMDSignal(HCQSignal):
       if self._signal[0] >= value: return
 
       # Wait active for 5s, then going to sleep.
-      if time_spent > 5000 and self._event_id != 0:
+      if time_spent > 5000 and self._event_mailbox_ptr != 0:
         kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(self._evt_array), num_events=1, wait_for_all=1, timeout=1000)
     raise RuntimeError(f"wait_signal: not set to {value}, but {self._signal[0]}, {timeout} ms TIMEOUT!")
 
@@ -149,7 +148,7 @@ class AMDComputeQueue(HWComputeQueue):
     self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal._value_addr, value=value, cache_flush=True)
     if signal._event_mailbox_ptr != 0:
       self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal._event_mailbox_ptr,
-                        value=signal._event_id, cst=signal._event_id, cache_flush=False)
+                        value=signal._event.event_id, cst=signal._event.event_id, cache_flush=False)
 
   def _update_wait(self, cmd_idx, signal=None, value=None):
     if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(signal._value_addr))
@@ -161,7 +160,7 @@ class AMDComputeQueue(HWComputeQueue):
 
     # Check if the signal command has mailptr part
     if signal is not None and self.cmds_len[cmd_idx] > 8:
-      self._patch(cmd_idx, offset=11, data=[*data64_le(signal._event_mailbox_ptr), *data64_le(signal._event_id), signal._event_id])
+      self._patch(cmd_idx, offset=11, data=[*data64_le(signal._event_mailbox_ptr), *data64_le(signal._event.event_id), signal._event.event_id])
 
   def bind(self, device):
     self.binded_device = device
@@ -212,8 +211,8 @@ class AMDCopyQueue(HWCopyQueue):
     self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._value_addr), value])
 
     if signal._event_mailbox_ptr != 0:
-      self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._event_mailbox_ptr), signal._event_id])
-      self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(signal._event_id)])
+      self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._event_mailbox_ptr), signal._event.event_id])
+      self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(signal._event.event_id)])
 
   def _wait(self, signal, value=0):
     self._q([amd_gpu.SDMA_OP_POLL_REGMEM | amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
@@ -425,6 +424,9 @@ class AMDDevice(HCQCompiled):
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size)
     self.sdma_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000)
 
+    self.mem_fault_event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_type=kfd.KFD_IOC_EVENT_MEMORY)
+    self.hw_fault_event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_type=kfd.KFD_IOC_EVENT_HW_EXCEPTION)
+
     super().__init__(device, AMDAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
 
@@ -451,3 +453,19 @@ class AMDDevice(HCQCompiled):
     AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
     self.synchronize()
+
+  def on_device_hang(self):
+    report = []
+
+    ev = (kfd.struct_kfd_event_data)(event_id=self.mem_fault_event.event_id)
+    kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(ev), num_events=1, wait_for_all=1)
+    if ev.memory_exception_data.gpu_id:
+      pfstatus = ' '.join(f'{k[0]}={getattr(ev.memory_exception_data.failure, k[0])}' for k in ev.memory_exception_data.failure._fields_)
+      report += [f"MMU fault: 0x{ev.memory_exception_data.va:X} | {pfstatus}"]
+
+    ev = (kfd.struct_kfd_event_data)(event_id=self.hw_fault_event.event_id)
+    kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(ev), num_events=1, wait_for_all=1)
+    if ev.hw_exception_data.gpu_id:
+      report += [f"HW fault: {' '.join(f'{k[0]}={getattr(ev.hw_exception_data, k[0])}' for k in ev.hw_exception_data._fields_)}"]
+
+    raise RuntimeError("\n".join(report))
