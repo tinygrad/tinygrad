@@ -3180,6 +3180,20 @@ class Tensor:
     reductions: Dict[str, Callable[[Tensor], Tensor]] = {"mean": Tensor.mean, "sum": Tensor.sum, "none": lambda x: x}
     return reductions[reduction](self)
 
+  def mean_squared_error(self, Y:Tensor, reduction:ReductionStr="mean") -> Tensor:
+    """
+    Computes the mean squared error between `self` and `Y`
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.MSELoss.html#torch.nn.MSELoss
+    
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([0.1, 0.9, 0.2])
+    Y = Tensor([0, 1, 0])
+    print(t.mean_squared_error(Y).item())
+    ```
+    """
+    return self.sub(Y).pow(2)._do_reduction(reduction)
+  
   def binary_crossentropy(self, Y:Tensor, reduction:ReductionStr="mean") -> Tensor:
     """
     Computes the binary cross-entropy loss between `self` and `Y`.
@@ -3193,6 +3207,7 @@ class Tensor:
     ```
     """
     return (-Y*self.log() - (1-Y)*(1-self).log())._do_reduction(reduction)
+
 
   def binary_crossentropy_logits(self, Y:Tensor, reduction:ReductionStr="mean") -> Tensor:
     """
