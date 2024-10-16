@@ -311,13 +311,16 @@
       metadata.style.userSelect = "initial";
     }
     // ** code blocks
+    let code = ret.uops[currentRewrite];
+    let lang = "python"
     if (ret.kernel_code != null) {
-      const code = ret.kernel_code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-      const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(code)}</code>`,
-        className: "code-block language-cpp" });
-      hljs.highlightElement(pre);
-      metadata.appendChild(pre);
+      code = ret.kernel_code.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+      lang = "cpp";
     }
+    const codeBlock = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(code)}</code>`,
+      className: `code-block language-${lang}` });
+    hljs.highlightElement(codeBlock);
+    metadata.appendChild(codeBlock);
     // ** rewrite list
     if (ret.graphs.length > 1) {
       const rewriteList = Object.assign(document.createElement("div"), { className: "rewrite-list" })
