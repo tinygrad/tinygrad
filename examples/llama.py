@@ -519,4 +519,3 @@ After you are done speaking, output [EOS]. You are not Chad.
       print("\n" + colored("output validated", "green"))  # NOTE: "\n" iside colored does not render the color in github action
     except KeyError:
       pass
-
