@@ -97,9 +97,9 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
         global_dim_idx, local_dim_idx = find_symbolic_dim(ji.prg.p.global_size), find_symbolic_dim(ji.prg.p.local_size)
         if global_dim_idx is not None or local_dim_idx is not None: self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
 
-    # used in MultiGraphRunner
-    self.w_dependency_map: Dict[Any, Any] = {}
-    self.r_dependency_map: Dict[Any, List[Any]] = collections.defaultdict(list)
+    # used in MultiGraphRunner. the ints are id() of _bufs
+    self.w_dependency_map: Dict[int, Any] = {}
+    self.r_dependency_map: Dict[int, List[Any]] = collections.defaultdict(list)
 
     super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
                      ssimplify(op_estimate), ssimplify(mem_estimate), ssimplify(lds_estimate))
@@ -113,7 +113,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     dims = [tuple(sym_infer(s, var_vals) for s in dim) for dim in self.symbolic_dims]
     for j, (gl, lc) in self.launch_dims_replace.items(): yield j, (dims[gl] if gl is not None else None), (dims[lc] if lc is not None else None)
 
-  def _access_resources(self, read, write, new_dependency:Any):
+  def _access_resources(self, read:List[Buffer], write:List[Buffer], new_dependency:Any):
     # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
     # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
     wait_nodes = []
