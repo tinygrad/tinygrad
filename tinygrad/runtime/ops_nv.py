@@ -27,7 +27,9 @@ def rm_alloc(fd, clss, root, parant, params):
   made = nv_gpu.NVOS21_PARAMETERS(hRoot=root, hObjectParent=parant, hClass=clss,
                                   pAllocParms=ctypes.cast(ctypes.byref(params), ctypes.c_void_p) if params is not None else None)
   nv_iowr(fd, nv_gpu.NV_ESC_RM_ALLOC, made)
-  if made.status != 0: raise RuntimeError(f"rm_alloc returned {get_error_str(made.status)}")
+  if made.status != 0:
+    if made.status == nv_gpu.NV_ERR_NO_MEMORY: raise MemoryError(f"rm_alloc returned {get_error_str(made.status)}")
+    raise RuntimeError(f"rm_alloc returned {get_error_str(made.status)}")
   return made
 
 def rm_control(cmd, sttyp, fd, client, obj, **kwargs):
@@ -530,13 +532,19 @@ class NVDevice(HCQCompiled):
   def _ensure_has_local_memory(self, required):
     if self.slm_per_thread >= required: return
 
-    self.synchronize()
-    if hasattr(self, 'shader_local_mem'): self._gpu_free(self.shader_local_mem) # type: ignore # pylint: disable=access-member-before-definition
+    if hasattr(self, 'shader_local_mem'):
+      self.allocator.free(self.shader_local_mem, BufferOptions(nolru=True)) # type: ignore # pylint: disable=access-member-before-definition
 
-    self.slm_per_thread = round_up(required, 32)
+    self.slm_per_thread, old_slm_per_thread = round_up(required, 32), self.slm_per_thread
     bytes_per_warp = round_up(self.slm_per_thread * 32, 0x200)
     bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
-    self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True, tag="local_memory")
+
+    try: self.shader_local_mem = self.allocator.alloc(round_up(bytes_per_tpc * 64, 0x20000), BufferOptions(nolru=True))
+    except MemoryError:
+      # If can't allocate a new size, reallocator the old buffer.
+      self.slm_per_thread = old_slm_per_thread
+      bytes_per_tpc = round_up(round_up(self.slm_per_thread * 32, 0x200) * 48 * 2, 0x8000)
+      self.shader_local_mem = self.allocator.alloc(round_up(bytes_per_tpc * 64, 0x20000), BufferOptions(nolru=True))
 
     NVComputeQueue().wait(self.timeline_signal, self.timeline_value - 1) \
                     .setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
