@@ -111,7 +111,7 @@ view_left = merge_views+PatternMatcher([
   (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
   # view on elementwise
   (UPat(UOps.VIEW, src=(UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.CONTIGUOUS, *BUFFER_UOPS), name="e"),), name="v"),
-   lambda e,v:e.replace(src=tuple(s.view(v.arg) if s.has_st else s for s in e.src))),
+   lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
 ])
 
 # push VIEW to stores
