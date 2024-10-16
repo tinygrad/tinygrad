@@ -105,15 +105,15 @@ merge_views = PatternMatcher([(UPat(UOps.VIEW, src=(UPat(UOps.VIEW, name="s0"),)
 
 # push VIEW to loads
 view_left = merge_views+PatternMatcher([
-  # view on reduce
-  (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, src=UPat.var("rsrc"), name="r"),), name="view"), view_r),
-  # view on elementwise
+  # view before ALU
   (UPat(UOps.VIEW, src=(UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.CONTIGUOUS, *BUFFER_UOPS), name="e"),), name="v"),
    lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
 ])
 
 # push VIEW to stores
 view_right = merge_views+PatternMatcher([
+  # view on reduce creates a new VIEW
+  (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, src=UPat.var("rsrc"), name="r"),), name="view"), view_r),
   # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.VIEW, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
   # push SWIZZLE(s) down to STORE, through an elementwise op (ONLY reshapes)
@@ -126,7 +126,7 @@ def simplify_and_unbind(ctx, x:UOp) -> Optional[UOp]:
   st, var_vals = st.simplify().unbind()
   ctx[0].update(var_vals)
   ctx[2].add(st)
-  return st.to_uop()
+  return st.to_uop() if st != x.st else None
 append_vars = PatternMatcher([(UPat(UOps.VIEW, name="x"), simplify_and_unbind)])
 enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx[1].index(x.arg[0])))])
 
@@ -145,31 +145,24 @@ def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
 
-def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ...], inputs:List[LazyBuffer],
-                   buf_uops:Dict[Buffer, UOp], cache:Dict[Tuple[LazyBuffer, ShapeTracker], UOp]) -> UOp:
-  """recursively create a UOp"""
-  if buf is not buf.base: st, buf = buf.st+st, buf.base
-  if (buf, st) in cache: return cache[(buf, st)]
-  assert buf.op is not None, "base must be a base itself"
+def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], inputs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], cache:Dict[LazyBuffer, UOp]) -> UOp:
+  if (r:=cache.get(buf)) is not None: return r
+  if buf is not buf.base:
+    cache[buf] = ret = to_uop(buf.base, outputs, inputs, buf_uops, cache).view(buf.st)
+    return ret
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
-
-  # buffer ops define ShapeTracker
-  # if it's realized, it's a load and we add it to the inputs
   if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs:
-    if buf.op is MetaOps.CONST: return ubuf.view(st)
+    if buf.op is MetaOps.CONST: return ubuf
     if not any(x.buffer is buf.buffer for x in outputs) and buf not in inputs: inputs.append(buf)
-    return UOp(UOps.LOAD, dtype, (ubuf, st.to_uop()))
-
-  # only reduceop changes shape
-  src_st = ShapeTracker.from_shape(buf.srcs[0].shape) if buf.op in ReduceOps else st
-  src: List[UOp] = [_recursive_uop(x, src_st, outputs, inputs, buf_uops, cache) for x in buf.srcs]
-  if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg).view(st)
+    return UOp.load(ubuf, buf.st.to_uop(), dtype=dtype)
+  src = tuple(to_uop(x, outputs, inputs, buf_uops, cache) for x in buf.srcs)
+  if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
   elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, (buf_uops[buf.buffer], src[0]))
   elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]))
-  elif buf.op is UnaryOps.CAST: ret = src[0].cast(dtype)
-  elif buf.op is UnaryOps.BITCAST: ret = src[0].bitcast(dtype)
-  else: ret = UOp(UOps.ALU, dtype, tuple(src), buf.op)
-  cache[(buf, st)] = ret
+  elif buf.op is UnaryOps.CAST: ret = UOp(UOps.CAST, dtype, src)
+  elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
+  else: ret = UOp(UOps.ALU, dtype, src, buf.op)
+  cache[buf] = ret
   return ret
 
 def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], var_vals:Dict[Variable, int]) -> LBScheduleItem:
@@ -178,14 +171,15 @@ def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], var_val
     return LBScheduleItem(UOp(METAOPS[cast(MetaOps, out.op)], out.dtype, (), out.arg), (out,)+tuple(x.base for x in out.srcs),
                           (out.metadata,) if out.metadata is not None else None)
   # create the stores
-  cache: Dict[Tuple[LazyBuffer, ShapeTracker], UOp] = {}
+  cache: Dict[LazyBuffer, UOp] = {}
   ast: List[UOp] = []
   inputs: List[LazyBuffer] = []
   for out in outs:
-    src = _recursive_uop(out, output_st:=ShapeTracker.from_shape(out.shape), tuple(outs), inputs, buf_uops, cache=cache)
+    src = to_uop(out, outs, inputs, buf_uops, cache)
     if out.op is MetaOps.ASSIGN and out.arg:
       assert out.arg[0].shape == out.shape, f"ASSIGN must not override output shape {out.arg[0].shape} != {out.shape}"
       output_st = out.arg[0]
+    else: output_st = ShapeTracker.from_shape(out.shape)
     ast.append(UOp(UOps.STORE, dtypes.void, (buf_uops[out.buffer], output_st.to_uop(), src)))
   sink = full_ast_rewrite(ast[0].sink(*ast[1:]), tuple(buf_uops[x.buffer].arg[0] for x in outs+inputs), var_vals)
   # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
@@ -194,7 +188,8 @@ def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], var_val
         and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in sink.sparents if x.op is UOps.LOAD and x.src[0] in assign_targets):
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  return LBScheduleItem(sink, tuple(outs+inputs), tuple(dedup([x.metadata for x,_ in cache if x.metadata and x not in inputs])))
+  return LBScheduleItem(sink, tuple(outs+inputs),
+                        tuple(dedup([x.metadata for x in cache if x.metadata is not None and (x.base in outs or x.base.buffer not in buf_uops)])))
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
