@@ -228,7 +228,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       return TorchPickle(f).load()
 
 def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int):
-  bc_dtype = { 0:dtypes.float32, 1: dtypes.float16, 16: dtypes.int8, 17: dtypes.int16, 18: dtypes.int32 }.get(ggml_type, None)
+  bc_dtype = { 0: dtypes.float32, 1: dtypes.float16, 16: dtypes.int8, 17: dtypes.int16, 18: dtypes.int32 }.get(ggml_type, None)
   if bc_dtype is not None: return t[:bc_dtype.itemsize * n].bitcast(bc_dtype)
 
   def q_to_uint8(t: Tensor, b: int) -> Tensor:

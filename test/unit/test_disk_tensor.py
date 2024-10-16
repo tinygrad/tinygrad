@@ -446,25 +446,31 @@ class TestPathTensor(unittest.TestCase):
     np.testing.assert_array_equal(t_cpu.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
 ggml_test_block_count = 4
-GGML_TYPE_TO_NP_DTYPE = {
+ggml_type_to_np_dtype = {
   ggml.GGML_TYPE_F16: np.float16, ggml.GGML_TYPE_F32:np.float32, ggml.GGML_TYPE_F64:np.float64,
   ggml.GGML_TYPE_I8:np.int8, ggml.GGML_TYPE_I16: np.int16, ggml.GGML_TYPE_I32: np.int32, ggml.GGML_TYPE_I64: np.int64,
 }
-NP_DTYPE_TO_CTYPE = { np.float16: ctypes.c_uint16 }
+np_dtype_to_ctype = { np.float16: ctypes.c_uint16 }
+gguf_val_getters = [
+  ggml.gguf_get_val_u8, ggml.gguf_get_val_i8, ggml.gguf_get_val_u16, ggml.gguf_get_val_i16,
+  ggml.gguf_get_val_u32, ggml.gguf_get_val_i32, ggml.gguf_get_val_f32, ggml.gguf_get_val_bool,
+  lambda *args: ggml.gguf_get_val_str(*args).decode("utf-8"), None,
+  ggml.gguf_get_val_u64, ggml.gguf_get_val_i64, ggml.gguf_get_val_f64,
+]
 
 def ggml_tensor_to_numpy(tensor: ggml.ggml_tensor_p):
   ctx: ggml.ggml_context_p | None = None
   ggml_type, n_dims, n_els = tensor.contents.type, ggml.ggml_n_dims(tensor), ggml.ggml_nelements(tensor)
   shape = tuple(reversed(tensor.contents.ne[:n_dims]))
-  if ggml_type not in GGML_TYPE_TO_NP_DTYPE:
+  if ggml_type not in ggml_type_to_np_dtype:
     ctx = ggml.ggml_init(ggml.ggml_init_params(mem_size=n_els * 5 + 500, mem_buffer=None))
     ntensor = ggml.ggml_new_tensor(ctx, ggml.GGML_TYPE_F32, n_dims, tensor.contents.ne)
     type_traits = ggml.ggml_internal_get_type_traits(ggml_type)
     type_traits.to_float(ggml.ggml_get_data(tensor), ggml.ggml_get_data_f32(ntensor), n_els)
     tensor, ggml_type = ntensor, ggml.GGML_TYPE_F32
 
-  np_type = GGML_TYPE_TO_NP_DTYPE[ggml_type]
-  ctypes_type = NP_DTYPE_TO_CTYPE.get(np_type, None) or np.ctypeslib.as_ctypes_type(np_type)
+  np_type = ggml_type_to_np_dtype[ggml_type]
+  ctypes_type = np_dtype_to_ctype.get(np_type, None) or np.ctypeslib.as_ctypes_type(np_type)
   data = ggml.ggml_get_data(tensor)
   if data is None: raise ValueError("tensor data is None")
   arr = (ctypes_type * ggml.ggml_nelements(tensor)).from_address(data)
@@ -472,13 +478,6 @@ def ggml_tensor_to_numpy(tensor: ggml.ggml_tensor_p):
   output = np.ctypeslib.as_array(arr)
   output.dtype = np_type
   return np.lib.stride_tricks.as_strided(output, shape=shape, strides=strides), ctx
-
-gguf_val_getters = [
-  ggml.gguf_get_val_u8, ggml.gguf_get_val_i8, ggml.gguf_get_val_u16, ggml.gguf_get_val_i16,
-  ggml.gguf_get_val_u32, ggml.gguf_get_val_i32, ggml.gguf_get_val_f32, ggml.gguf_get_val_bool,
-  lambda *args: ggml.gguf_get_val_str(*args).decode("utf-8"), None,
-  ggml.gguf_get_val_u64, ggml.gguf_get_val_i64, ggml.gguf_get_val_f64,
-]
 
 @unittest.skipIf(any(not is_dtype_supported(t) for t in [ dtypes.uint8, dtypes.half ]), "Backend must support uint8 and half")
 class TestGGUF(unittest.TestCase):
