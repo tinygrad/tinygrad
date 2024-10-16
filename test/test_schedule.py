@@ -1587,7 +1587,7 @@ class TestIndexing(unittest.TestCase):
     X = Tensor.randn(2,3,4,4).numpy()
     with Context(FUSE_ARANGE=1):
       compare = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
-    with Context(FUSE_ARANGE=0, SAVE_SCHEDULE=1):
+    with Context(FUSE_ARANGE=0, TRACK_MATCH_STATS=0):
       ref = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
     np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 
