@@ -546,7 +546,7 @@ reducer = PatternMatcher([
 ])
 
 def split_uop2(x:UOp):
-  if x.op is UOps.ALU and x.op in (BinaryOps.ADD, BinaryOps.MUL, BinaryOps.IDIV):
+  if x.op is UOps.ALU and x.arg in (BinaryOps.ADD, BinaryOps.MUL, BinaryOps.IDIV):
     for s in x.src: yield from split_uop2(s)
   else: yield x
 
