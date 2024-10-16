@@ -3,9 +3,8 @@ import numpy as np
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.jit import TinyJit
-from tinygrad import Tensor, Device, GlobalCounters, dtypes
+from tinygrad import Tensor, Device, GlobalCounters, dtypes, Variable
 from tinygrad.helpers import CI, Context
-from tinygrad.shape.symbolic import Variable
 from extra.lr_scheduler import OneCycleLR
 from test.helpers import derandomize_model, is_dtype_supported
 

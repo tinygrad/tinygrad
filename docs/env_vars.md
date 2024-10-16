@@ -40,9 +40,6 @@ METAL_XCODE         | [1]        | enable Metal using macOS Xcode SDK
 CLANG               | [1]        | enable Clang backend
 LLVM                | [1]        | enable LLVM backend
 BEAM                | [#]        | number of beams in kernel beam search
-GRAPH               | [1]        | create a graph of all operations (requires graphviz)
-GRAPHUOPS           | [1]        | create a graph of uops (requires graphviz and saves at /tmp/uops.{svg,dot})
-GRAPHPATH           | [/path/to] | where to put the generated graph
 DEFAULT_FLOAT       | [HALF, ...]| specify the default float dtype (FLOAT32, HALF, BFLOAT16, FLOAT64, ...), default to FLOAT32
 IMAGE               | [1-2]      | enable 2d specific optimizations
 FLOAT16             | [1]        | use float16 for images instead of float32

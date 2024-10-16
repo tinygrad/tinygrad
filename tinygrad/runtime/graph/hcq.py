@@ -3,7 +3,7 @@ from typing import List, Any, Dict, cast, Optional, Tuple, Set
 from tinygrad.helpers import round_up, PROFILE, memsize_to_str
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, HCQArgsState
 from tinygrad.device import Buffer, BufferOptions, Compiled, Device
-from tinygrad.shape.symbolic import Variable
+from tinygrad.ops import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
 

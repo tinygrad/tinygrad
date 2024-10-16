@@ -4,7 +4,7 @@ import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import init_c_var, dedup
 from tinygrad.device import Buffer, Device
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
-from tinygrad.shape.symbolic import Variable
+from tinygrad.ops import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner, GraphException
 

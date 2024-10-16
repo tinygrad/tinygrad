@@ -10,7 +10,7 @@ from tinygrad.ops import UOp, UOps, BinaryOps, TernaryOps, UnaryOps
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-# from tinygrad.shape.symbolic import Variable
+# from tinygrad.ops import Variable
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner

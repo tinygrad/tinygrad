@@ -3,7 +3,7 @@ from tinygrad import Tensor
 from tinygrad.helpers import getenv, GlobalCounters
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item
-from tinygrad.codegen.uopgraph import linearize_uop
+from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.ops import BinaryOps, TernaryOps, flops_mem, UOps, UOp
 from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError

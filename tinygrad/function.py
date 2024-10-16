@@ -3,10 +3,9 @@ import math
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
-from tinygrad.ops import ReduceOps, resolve
+from tinygrad.ops import ReduceOps, resolve, sint
 from tinygrad.tensor import Function
 from tinygrad.engine.lazy import LazyBuffer
-from tinygrad.shape.symbolic import sint
 
 class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
@@ -22,7 +21,8 @@ class Cast(Function):
     return x.bitcast(dtype) if self.bitcast else x.cast(dtype)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.bitcast(self.input_dtype) if self.bitcast else grad_output.cast(self.input_dtype)
+    if self.bitcast: raise RuntimeError("bitcast cannot backward")
+    return grad_output.cast(self.input_dtype)
 
 # ************* unary ops *************
 
@@ -40,7 +40,6 @@ class Sin(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return (math.pi/2 - self.x).sin() * grad_output
 
-# NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.ret = x.max(0)

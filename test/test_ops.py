@@ -1241,6 +1241,7 @@ class TestOps(unittest.TestCase):
     with self.assertRaisesRegex(IndexError, "out of bounds"): a[1, -4]
     with self.assertRaisesRegex(IndexError, "single ellipsis"): a[..., ...] # IndexError: only single ellipsis
     with self.assertRaises(ValueError): a[::0, 1] # no 0 strides
+    with self.assertRaises(TypeError): a[:Tensor([3]), 1] # Tensor can't be used as a slice parameter
     with self.assertRaises(IndexError): b[:] # slice cannot be applied to a 0-dim tensor
 
   def test_slice_ellipsis(self):
@@ -2147,6 +2148,9 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.float(), vals=[[True, False]], forward_only=True)
     helper_test_op([(3, 3)], lambda x: x.int(), forward_only=True)
     helper_test_op([(3, 3)], lambda x: x.bool(), forward_only=True)
+
+  def test_bitcast(self):
+    helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
 class TestOpsUint8(unittest.TestCase):
   @unittest.skip('this is broken for negative numbers')

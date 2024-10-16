@@ -296,7 +296,7 @@ class HCQProgram:
     q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
     self.device.timeline_value += 1
 
-    if wait: self.device.timeline_signal.wait(self.device.timeline_value - 1)
+    if wait: self.device.synchronize()
     return (float(sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
 
 class ProfileLogger:
@@ -363,7 +363,10 @@ class HCQCompiled(Compiled):
     self.devices.append(self)
 
   def synchronize(self):
-    self.timeline_signal.wait(self.timeline_value - 1) if not hasattr(self, '_syncdev') else self._syncdev()
+    try: self.timeline_signal.wait(self.timeline_value - 1) if not hasattr(self, '_syncdev') else self._syncdev()
+    except RuntimeError as e:
+      if hasattr(self, 'on_device_hang'): self.on_device_hang()
+      else: raise e
 
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE:

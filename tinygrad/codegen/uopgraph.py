@@ -1,12 +1,13 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Dict, List, Set, cast, TYPE_CHECKING, Any, DefaultDict, Callable
-import functools, itertools, heapq, operator
+from typing import Optional, Tuple, Dict, List, cast, TYPE_CHECKING, Any, DefaultDict, Callable
+import functools, itertools, operator
 from collections import defaultdict
-from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType, DType
-from tinygrad.ops import UnaryOps, BinaryOps, UOp, UOps, END_FOR_UOP, type_verify, print_uops, identity_element
-from tinygrad.ops import UPat, PatternMatcher, graph_rewrite, TernaryOps, symbolic_flat, is_irreducible, _get_chain
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, CI, partition, all_same
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOp, UOps, UPat, PatternMatcher
+from tinygrad.ops import graph_rewrite, symbolic_flat, is_irreducible, split_uop, identity_element
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
+
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # ***** float4/image store handling *****
@@ -77,14 +78,14 @@ float4_folding = PatternMatcher([
 
 # ***** image load valid simplification *****
 
-def is_increasing(f:UOp):
+def is_increasing(f:UOp) -> bool:
   # is f a monotonically increasing function regards its input
-  if f.op is UOps.CONST or is_irreducible(f): return True
+  if is_irreducible(f): return True
   if f.op is UOps.ALU and f.arg is BinaryOps.ADD: return is_increasing(f.src[0]) and is_increasing(f.src[1])
   if f.op is UOps.ALU and f.arg in (BinaryOps.MUL, BinaryOps.IDIV) and f.src[1].op is UOps.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
   return False  # False if not sure
 
-def replace_uop(uop:UOp, old:UOp, new:UOp):
+def replace_uop(uop:UOp, old:UOp, new:UOp) -> UOp:
   # replace all `old` in `uop` to `new`
   return new if uop is old else uop.replace(src=tuple(replace_uop(s, old, new) for s in uop.src))
 
@@ -104,7 +105,7 @@ def idx_given_valid(valid:UOp, idx:UOp) -> Optional[UOp]:
 
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:DefaultDict[UOp, List[Optional[ConstType]]] = defaultdict(lambda: [None, None])
-  for stmt in _get_chain(valid, BinaryOps.AND):
+  for stmt in split_uop(valid, BinaryOps.AND):
     expr, is_upper, c = parse_valid(stmt)
     bounds[expr][int(is_upper)] = c
 
@@ -115,38 +116,43 @@ def idx_given_valid(valid:UOp, idx:UOp) -> Optional[UOp]:
 
     # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the idx into a same output, we rewrite idx
     candidates = []
-    if uop.op is UOps.ALU and uop.arg is BinaryOps.ADD and all(is_irreducible(u) and u.vmin == 0 for u in _get_chain(uop, BinaryOps.ADD)):
+    if uop.op is UOps.ALU and uop.arg is BinaryOps.ADD and all(is_irreducible(u) and u.vmin == 0 for u in split_uop(uop, BinaryOps.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      candidates.append([(Xi, UOp.define_var("fake", Xi.dtype, 1, Xi.vmax)) for Xi in _get_chain(uop, BinaryOps.ADD)])
+      candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(uop, BinaryOps.ADD)])
     # try checking the whole clause
-    candidates.append([(uop, UOp.define_var("fake", uop.dtype, uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1]))])
+    candidates.append([(uop, UOp.variable("fake", uop.vmin if v[0] is None else v[0], uop.vmax if v[1] is None else v[1], uop.dtype))])
 
     for candidate in candidates:
-      newidxs:List[List[UOp]] = [[], []]
-      for X,newX in candidate:
-        newidx = replace_uop(graph_rewrite(replace_uop(idx, X, newX), sym), newX, X)
-        newidxs[0].append(newidx.src[0])
-        newidxs[1].append(newidx.src[1])
+      newidxs = [replace_uop(graph_rewrite(replace_uop(idx, X, newX), sym), newX, X) for X,newX in candidate]
+      if idx.op is UOps.VECTORIZE and len(idx.src) == 2:
+        # if every branch in candidate gives the same simplified output, we can rewrite the idx
+        if all_same([idxs.src[0] for idxs in newidxs]): idx = idx.replace(src=(newidxs[0].src[0], idx.src[1]))
+        if all_same([idxs.src[1] for idxs in newidxs]): idx = idx.replace(src=(idx.src[0], newidxs[0].src[1]))
+      elif all_same(newidxs): idx = newidxs[0]
 
-      # if every branch in candidate gives the same simplified output, we can rewrite the idx
-      if len(newidxs[0])==1 or (len(newidxs[0]) > 1 and all_same(newidxs[0])): idx = idx.replace(src=(newidxs[0][0], idx.src[1]))
-      if len(newidxs[1])==1 or (len(newidxs[1]) > 1 and all_same(newidxs[1])): idx = idx.replace(src=(idx.src[0], newidxs[1][0]))
   return idx
 
-def simplify_valid_image_load(load:UOp, buf:UOp):
-  if not isinstance(buf_dtype:=buf.dtype, ImageDType) or len(load.src) < 4: return None
+def simplify_buffer_load(load:UOp) -> Optional[UOp]:
+  if not isinstance(load.src[0].dtype, PtrDType) or len(load.src) != 4: return None
+  buf, start_idx, invalid_val, valid = load.src
+  try:
+    if (idx:=idx_given_valid(valid, start_idx)) is None: return load.replace(src=(buf, start_idx, invalid_val, valid.const_like(False)))
+  except ValueError: return None
+  return None if idx is start_idx else load.replace(src=((buf, idx, invalid_val, valid)))
+
+def simplify_image_load(load:UOp) -> Optional[UOp]:
+  if not isinstance(buf_dtype:=load.src[0].dtype, ImageDType) or len(load.src) != 4: return None
   buf, start_idx, invalid_val, valid = load.src
   if (idx:=idx_given_valid(valid, start_idx)) is None: return load.replace(src=(buf, start_idx, invalid_val, valid.const_like(False)))
 
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
-  for stmt in _get_chain(valid, BinaryOps.AND):
+  for stmt in split_uop(valid, BinaryOps.AND):
     X, is_upper_bound, c = parse_valid(stmt)
 
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
-    if not is_upper_bound and c == 1 and X.op is UOps.ALU and X.arg is BinaryOps.ADD and \
-      all(is_irreducible(u) and u.vmin == 0 for u in _get_chain(X, BinaryOps.ADD)):
-      testidx = functools.reduce(lambda nowidx,u: replace_uop(nowidx, u, u.const_like(0)), _get_chain(X, BinaryOps.ADD), idx)
+    if not is_upper_bound and c == 1 and all(is_irreducible(u) and u.vmin == 0 for u in split_uop(X, BinaryOps.ADD)):
+      testidx = functools.reduce(lambda nowidx,u: replace_uop(nowidx, u, u.const_like(0)), split_uop(X, BinaryOps.ADD), idx)
       testidx = graph_rewrite(testidx, sym)
       if testidx.src[0].vmax < 0 or testidx.src[1].vmax < 0:
         drop_stmt.append(stmt)
@@ -162,8 +168,8 @@ def simplify_valid_image_load(load:UOp, buf:UOp):
           drop_stmt.append(stmt)
           break
 
-  if not drop_stmt and idx == start_idx: return None
-  new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in _get_chain(valid, BinaryOps.AND) if s not in drop_stmt]) else None
+  if not drop_stmt and idx is start_idx: return None
+  new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in split_uop(valid, BinaryOps.AND) if s not in drop_stmt]) else None
   return load.replace(src=((buf, idx, invalid_val, new_valid) if new_valid is not None else (buf, idx)))
 
 # ***** optional patterns *****
@@ -273,8 +279,8 @@ def no_vectorized_wmma(wmma:UOp):
 sym = symbolic_flat+PatternMatcher([
   # self ASSIGN is just self
   (UPat(UOps.ASSIGN, src=(UPat.var('x'), UPat.var('x'))), lambda x: x),
-  # ASSIGN to global is just self
-  (UPat(UOps.ASSIGN, src=(UPat(UOps.DEFINE_GLOBAL), UPat.var("x"))), lambda x: x),
+  # ASSIGN or CONTIGUOUS to global is just self
+  (UPat((UOps.ASSIGN, UOps.CONTIGUOUS), src=(UPat(UOps.DEFINE_GLOBAL), UPat.var("x"))), lambda x: x),
   # VECTORIZE/GEP: the expander rule allows tuple GEP creation, this is just for removal
   (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"),
    lambda vec,x: x if x.dtype == vec.dtype and tuple(y.arg[0] for y in vec.src) == tuple(range(len(vec.src))) else None),
@@ -340,15 +346,15 @@ sym = symbolic_flat+PatternMatcher([
   (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("gate").where(UPat.var("alt"), UPat.load(UPat.var("buf"), UPat.var("idx")))),
    lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
   # fold gated LOAD/STORE
-  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat.const(None, True)),
+  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat.const(dtypes.bool, True)),
    lambda buf,idx,var: UOp.load(buf, idx, dtype=var.dtype)),
-  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat.const(None, True), UPat.var("barrier")),
+  (UPat.load(UPat.var("buf"), UPat.var("idx"), UPat.var("var"), UPat.const(dtypes.bool, True), UPat.var("barrier")),
    lambda buf,idx,var,barrier: UOp.load(buf, idx, barrier, dtype=var.dtype)),
-  (UPat.load(UPat.var(), UPat.var(), UPat.var("var"), UPat.const(None, False)), lambda var: var),
-  (UPat.load(UPat.var(), UPat.var(), UPat.var("var"), UPat.const(None, False), UPat.var()), lambda var: var),
-  (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("val"), UPat.const(None, True)),
+  (UPat.load(UPat.var(), UPat.var(), UPat.var("var"), UPat.const(dtypes.bool, False)), lambda var: var),
+  (UPat.load(UPat.var(), UPat.var(), UPat.var("var"), UPat.const(dtypes.bool, False), UPat.var()), lambda var: var),
+  (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("val"), UPat.const(dtypes.bool, True)),
    lambda buf,idx,val: UOp.store(buf, idx, val)), # pylint: disable=unnecessary-lambda
-  (UPat.store(UPat.var(), UPat.var(), UPat.var(), UPat.const(None, False)), lambda: UOp(UOps.NOOP)),
+  (UPat.store(UPat.var(), UPat.var(), UPat.var(), UPat.const(dtypes.bool, False)), lambda: UOp(UOps.NOOP)),
   # remove NOOPs from SINK
   (UPat(UOps.SINK, name="root"),
     lambda root: UOp(UOps.SINK, root.dtype, a, root.arg) if len(a:=tuple(x for x in root.src if x.op is not UOps.NOOP)) != len(root.src) else None),
@@ -533,25 +539,13 @@ reducer = PatternMatcher([
   (UPat(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
-  # image load valid simplification
-  (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), simplify_valid_image_load),
+  # image load valid idx simplification
+  (UPat(UOps.LOAD, name="load"), simplify_image_load),
+  # buffer load valid idx simplification
+  (UPat(UOps.LOAD, name="load"), simplify_buffer_load),
 ])
 
-no_pyint = PatternMatcher([(UPat((UOps.CONST, UOps.VCONST, UOps.ALU, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR),
-  name="x"), lambda x: UOp(x.op, dtypes.int32.vec(x.dtype.count), x.src, x.arg) if x.dtype.scalar() == dtypes.pyint else None)])
-
 # *** uop graph ***
-
-def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
-  if u in children: return srcs[u]
-  srcs[u] = {}
-  children[u] = []
-  for x in u.src:
-    srcs[u].update(get_children_dfs(x, children, srcs, in_degree))
-    if x.op is UOps.RANGE and x.arg[1]: srcs[u][x] = None
-    children[x].append(u)
-  in_degree[u] = len(u.src)
-  return srcs[u]
 
 linearize_cnt = 0
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
@@ -561,9 +555,6 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # do graph rewrite
   acc_number = 0
   sink = graph_rewrite(sink, sym)
-
-  # rewrite pyint to int32
-  sink = graph_rewrite(sink, no_pyint)
 
   # expand
   linearize_cnt += 1
@@ -577,102 +568,3 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
 
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, opts.extra_matcher)
   return sink
-
-def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
-  assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
-  # filter nodes that don't link to a sink
-  # BFS toposort
-  children: Dict[UOp, List[UOp]] = {}
-  range_srcs: Dict[UOp, Dict[UOp, None]] = {}
-  in_degree: Dict[UOp, int] = {}
-  get_children_dfs(sink, children, range_srcs, in_degree)
-
-  @functools.lru_cache(None)
-  def get_recursive_children(x:UOp, end:UOps, include_self=False) -> Set[UOp]:
-    if x.op is UOps.SINK: return set()
-    return set.union({x} if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
-
-  # scope children impact the toposort and END* insertion
-  scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
-  range_phi = {r:[p for p in scope_children[r] if p.op is UOps.ASSIGN] for r in scope_children if r.op is UOps.RANGE}
-
-  # assign priorities
-  def get_priority(u:UOp):
-    priority = 0
-    # prefer ranges that depend on the least number of independent ranges
-    if u.op is UOps.RANGE and u.arg[1]:
-      priority += u.arg[0]
-      for p in range_phi[u]:
-        priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
-    # prefer uops that are loop children
-    else:
-      priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
-    if u.op is UOps.IF and len(u.src) == 1: priority += 10000000 # if penalty
-    return priority
-  priorities:Dict[UOp, int] = {u:get_priority(u) for u in children}
-
-  # prevent priority inversion
-  @functools.lru_cache(None)
-  def fix_priority(u:UOp, lowest_priority):
-    if u.op in {UOps.CAST, UOps.BITCAST, UOps.ALU, UOps.VECTORIZE, UOps.GEP, UOps.SPECIAL, UOps.DEFINE_LOCAL, UOps.LOAD}:
-      priorities[u] = min(priorities[u], lowest_priority)
-      if u.op is UOps.LOAD: priorities[u] += 100 # load penalty (here)
-    for x in u.src: fix_priority(x, priorities[u])
-  fix_priority(sink, 0)
-
-  @functools.lru_cache(None)
-  def tuplize(u:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
-    # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
-    if u.op is UOps.DEFINE_VAR: arg = u.arg[0]
-    elif u.op is UOps.ALU: arg = u.arg.value
-    else: arg = u.arg
-    return (u.op.value, arg, u.dtype, tuple(tuplize(x) for x in u.src))
-
-  # NOTE: the compare should never make it all the way to u
-  queue:List[Tuple[int, Tuple, UOp]] = []
-  def push(u:UOp): heapq.heappush(queue, (priorities[u], tuplize(u), u))
-
-  for u in children:
-    if in_degree[u] == 0: push(u)
-
-  scope_end: Dict[UOp, UOp] = {}
-  _uops: List[UOp] = []
-  while queue:
-    p,_,x = heapq.heappop(queue)
-    if DEBUG >= 7: print(f"{p:5d}", x.op, x.dtype, x.arg)
-    if x in scope_children: scope_end[x] = x
-    if x.op is UOps.DEFINE_ACC:
-      idx = min([_uops.index(l) for l in x.src if l.op is UOps.RANGE])
-      _uops.insert(idx, x)
-    else: _uops.append(x)
-    for u, ss in scope_children.items():
-      if x in ss:
-        ss.remove(x)
-        if len(ss) == 0: scope_end[u] = x
-    for u in children[x]:
-      in_degree[u] -= 1
-      if in_degree[u] == 0: push(u)
-
-  # end scopes in toposort order
-  for u, x in scope_end.items(): _uops.insert(_uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], dtypes.void, (u,)))
-
-  # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-  if not skip_check:
-    try:
-      type_verify(_uops)
-      assert _uops[-1].op is UOps.SINK, f"didn't end with SINK, ended with {_uops[-1]}"
-      # TODO: this should be enabled, and the valid clause should be removed
-      # NOTE: multiple identical stores to DEFINE_LOCAL is okay
-      # NOTE: for PTX you have to propogate through some the calculations to determine if it is a store to DEFINE_LOCAL
-      def _islocalbuf(u: UOp): return u.op is UOps.DEFINE_LOCAL or any(_islocalbuf(x) for x in u.src if u.op in [UOps.ALU, UOps.CAST])
-      all_stores = [x.src[0:2]+x.src[3:] for x in _uops if x.op is UOps.STORE and not _islocalbuf(x.src[0])]
-      assert len(all_stores) == len(dedup(all_stores)), "repeated stores in uops"
-    except AssertionError as e:
-      print_uops(_uops)
-      if not CI and not getenv("VIZ"):
-        from tinygrad.engine.graph import graph_uops
-        graph_uops(_uops)
-      raise e
-
-  # strip the SINK
-  return _uops[:-1]
