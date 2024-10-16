@@ -2010,8 +2010,8 @@ class Tensor:
     # if we have specified padding, that padded region is counted in denominator while the inferred pading for ceil_mode isn't
     if (padding != 0 and not all(p==0 for p in make_pair(padding))) and ceil_mode and count_include_pad:
       padding_ = self._ceil_mode_padding2d(dilation, k_, stride if stride is not None else k_, padding)
-      real_pads = [after - before for after, before in zip(padding_, self._padding2d(padding, len(k_)))]
-      return pool(self).sum(axis=axis) / self.pad2d(self._padding2d(padding, len(k_))).ones_like().pad2d(real_pads)\
+      inferred_pads = [after - before for after, before in zip(padding_, self._padding2d(padding, len(k_)))]
+      return pool(self).sum(axis=axis) / self.pad2d(self._padding2d(padding, len(k_))).ones_like().pad2d(inferred_pads)\
                                              ._pool(k_, stride if stride is not None else k_, dilation).sum(axis=axis)
     if ceil_mode: padding_ = self._ceil_mode_padding2d(dilation, k_, stride if stride is not None else k_, padding)
     return pool(self).mean(axis=axis) if count_include_pad else pool(self).sum(axis=axis) / pool(self.ones_like()).sum(axis=axis)

@@ -7,7 +7,7 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import getenv, DEBUG, CI, OSX
 from tinygrad.dtype import ConstType, DType
-from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
+from onnx import AttributeProto, ModelProto, TensorProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -65,7 +65,7 @@ def buffer_parse(inp: TensorProto) -> Tensor:
 attrs = {AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i), AttributeProto.STRING: lambda a: a.s.decode("utf-8"),
          AttributeProto.TENSOR: lambda a: buffer_parse(a.t), AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats),
          AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints), AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)}
-def attribute_parse(a: AttributeProto) -> Union[float, int, str, Tensor, Tuple[int, ...], Tuple[float, ...], Tuple[str, ...]]:
+def attribute_parse(a: AttributeProto):
   if (ret := attrs.get(a.type, lambda _: None)(a)) is None: raise NotImplementedError(f"{a.type} not implemented")
   return ret
 
@@ -106,7 +106,7 @@ def get_run_onnx(onnx_model: ModelProto):
     attribute_dict[num] = {x.name:attribute_parse(x) for x in n.attribute}
     if n.domain: domain = n.domain
 
-  def run_onnx(inputs={}, debug=0):
+  def run_onnx(inputs={}, debug=0, hook=None):
     debug = getenv("DEBUGONNX") or debug
     input_tensors: Dict[str,Union[Tensor, List[Tensor]]] = {}
     intermediate_tensors: Dict[str,Tensor] = {}
@@ -201,6 +201,10 @@ def get_run_onnx(onnx_model: ModelProto):
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       for i in range(len(n.output)): intermediate_tensors[n.output[i]] = ret[i]
       if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{n.output[i]} - {ret[i]}" for i in range(len(n.output))))
+
+      # run hook
+      if hook: hook(num, n.op_type, tuple(inp), ret)
+
       if num == ONNXLIMIT:
         output_tensor_names = n.output
         break

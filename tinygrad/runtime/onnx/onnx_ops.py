@@ -158,7 +158,7 @@ def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
   return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
          [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
 
-# only for pool ops
+# only for avg_pool and max_pool. Conv supports asymmetrical padding.
 def _validate_pads(pads):
   if isinstance(pads, (tuple, list)):
     if not all(start==end for start,end in zip(pads, pads[len(pads)//2:])): raise ValueError(f"asymmetrical {pads=} not supported")
@@ -190,11 +190,12 @@ def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, cou
 def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, dilations=1, pads=None, storage_order=0, strides=1):
   pads = _resolve_pool_pad(X.shape[-len(kernel_shape):], kernel_shape, dilations, strides, _validate_pads(pads), auto_pad)
   if auto_pad != "NOTSET": X, pads = X.pad2d(_onnx_pads_to_pad2d_pads(pads), float('-inf')), 0
-  ret = X.max_pool2d(kernel_shape, strides, dilations, list(pads) if isinstance(pads, tuple) else pads, ceil_mode, return_indices=True)
+  ret = X.max_pool2d(kernel_shape, strides, dilations, list(pads) if isinstance(pads, tuple) else pads, ceil_mode)
   indices = ((ret.reshape(-1, 1) == X.reshape(1, -1)) * Tensor.arange(X.numel(), dtype=dtypes.int64).unsqueeze(0)).sum(1).reshape(ret.shape)
   return ret.cast(X.dtype), indices.transpose(-2, -1) if storage_order else indices
 
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
+  assert pads is None, "no tests covering pads"
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
   ret = ((xI.reshape(-1, 1) == Tensor.arange(prod(out_sh))) * xT.reshape(-1, 1)).sum(0).reshape(1, 1, *out_sh)
   if outshape is not None and outshape != ret.shape:
@@ -202,8 +203,8 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
   return ret
 
 def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
-  pads = _resolve_pool_pad(X.shape[-len(kernel_shape):], kernel_shape, dilations, strides, _validate_pads(pads), auto_pad)
-  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads)
+  pads = _resolve_pool_pad(X.shape[-len(kernel_shape):], kernel_shape, dilations, strides, 0 if pads is None else pads, auto_pad)
+  return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=_onnx_pads_to_pad2d_pads(pads))
 
 # TODO: their reference implementation and their documentation have different information
 # ref: https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_conv_transpose.py
