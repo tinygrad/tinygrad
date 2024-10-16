@@ -2007,11 +2007,16 @@ class Tensor:
     """
     padding_, axis = self._padding2d(padding, len(k_ := make_pair(kernel_size))), tuple(range(-len(k_), 0))
     def pool(x:Tensor) -> Tensor: return x.pad2d(padding_)._pool(k_, stride if stride is not None else k_, dilation)
+    # if we have specified padding, that padded region is counted in denominator while the inferred pading for ceil_mode isn't
+    if (padding != 0 and not all(p==0 for p in make_pair(padding))) and ceil_mode and count_include_pad:
+      padding_ = self._ceil_mode_padding2d(dilation, k_, stride if stride is not None else k_, padding)
+      real_pads = [after - before for after, before in zip(padding_, self._padding2d(padding, len(k_)))]
+      return pool(self).sum(axis=axis) / self.pad2d(self._padding2d(padding, len(k_))).ones_like().pad2d(real_pads)\
+                                             ._pool(k_, stride if stride is not None else k_, dilation).sum(axis=axis)
     if ceil_mode: padding_ = self._ceil_mode_padding2d(dilation, k_, stride if stride is not None else k_, padding)
     return pool(self).mean(axis=axis) if count_include_pad else pool(self).sum(axis=axis) / pool(self.ones_like()).sum(axis=axis)
 
-  # TODO: ADD return_indices
-  def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False, return_indices=False):
+  def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False):
     """
     Applies max pooling over a tensor.
 

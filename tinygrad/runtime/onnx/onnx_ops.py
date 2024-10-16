@@ -337,9 +337,11 @@ def CenterCropPad(t: Tensor, shape, axes=None):
   return t.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
 def OneHot(indices: Tensor, depth, values, axis=-1):
-    axis = axis if axis >= 0 else axis + indices.ndim + 1
-    cond = (indices.unsqueeze(axis) == Tensor.arange(depth).reshape((1,) * axis + (depth,) + (1,) * (indices.ndim - axis)))
-    return cond.where(values[1], values[0])
+  indices, rank = (indices < 0).where(indices+depth, indices), indices.ndim
+  if axis < 0: axis += rank + 1
+  ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
+  cond = indices[:,None] == Tensor.arange(int(depth)).reshape((1,) * len(ls) + (int(depth),) + (1,) * len(rs))
+  return cond.where(values[1], values[0])
 
 def Erf(x: Tensor):
   t = 1.0 / (1.0 + 0.3275911 * x.abs())

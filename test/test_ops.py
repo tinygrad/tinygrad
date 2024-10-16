@@ -1841,8 +1841,6 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, count_include_pad=False),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, count_include_pad=False), rtol=1e-5)
 
-  # TODO:
-  @unittest.expectedFailure
   def test_avgpool2d_ceil_mode_include_pad(self):
     shape = (1,1,6,6)
     for ksz in [(3,3), 2, 3, (3,2)]:
