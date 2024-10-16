@@ -768,12 +768,5 @@ def verify_ast(ast:UOp) -> Dict[UOp, ShapeTracker]:
   for out in ast.src: _assert_valid_uop(out, out.st_arg, sts)
   shape_dims = [sorted(dedup(dims)) for dims in zip(*[x.shape for x in sts.values()])]
   assert all(len(x) == 1 or (len(x) == 2 and x[0] == 1) for x in shape_dims), f"shapes must have either 1 or n in each dimension, {shape_dims}"
-  # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
-  if len(assign_targets:=[x.src[0] for x in ast.sparents if x.op is UOps.ASSIGN]) != 0:
-    st_loads = [x.st_arg for x in ast.sparents if x.op is UOps.LOAD and x.src[0] in assign_targets]
-    if not all(s.contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \
-        and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for s in st_loads):
-      raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
-                         +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
   type_verify(list(sts))
   return sts
