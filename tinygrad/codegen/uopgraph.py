@@ -546,7 +546,7 @@ reducer = PatternMatcher([
 ])
 
 def split_uop2(x:UOp):
-  if x.op is UOps.ALU:
+  if x.op is UOps.ALU and x.op in (BinaryOps.ADD, BinaryOps.MUL, BinaryOps.IDIV):
     for s in x.src: yield from split_uop2(s)
   else: yield x
 
@@ -559,7 +559,7 @@ def int64_indexing(alu:UOp) -> Optional[UOp]:
   return None
 
 int64_idx = PatternMatcher([
-  #(UPat(UOps.ALU, dtypes.int32, name="alu"), int64_indexing),
+  (UPat(UOps.ALU, dtypes.int32, name="alu"), int64_indexing),
   (UPat((UOps.CONST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR), dtypes.int32, name="x"),
     lambda x: UOp(x.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in x.src), x.arg) if max(x._min_max, key=abs) > dtypes.max(x.dtype) else None)
 ])
