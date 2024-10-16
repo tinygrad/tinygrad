@@ -10,7 +10,7 @@ from tinygrad.engine.jit import MultiGraphRunner
 class HCQGraph(MultiGraphRunner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
-    self.devices = list(set(cast(HCQCompiled, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
+    self.devices = list(set(cast(HCQCompiled, d) for ji in jit_cache for d in [Device[x.device] for x in ji.bufs]))
 
     # Allocate kernel args.
     kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
@@ -26,7 +26,7 @@ class HCQGraph(MultiGraphRunner):
     for j,ji in enumerate(self.jit_cache):
       if not isinstance(ji.prg, CompiledRunner): continue
       kargs_ptrs[ji.prg.device] = (kargs_ptr:=kargs_ptrs[ji.prg.device]) + round_up(ji.prg.clprg.kernargs_alloc_size, 16)
-      self.ji_args[j] = ji.prg.clprg.fill_kernargs([cast(Buffer, b)._buf for b in ji.bufs], [var_vals[v] for v in ji.prg.p.vars], kargs_ptr)
+      self.ji_args[j] = ji.prg.clprg.fill_kernargs([b._buf for b in ji.bufs], [var_vals[v] for v in ji.prg.p.vars], kargs_ptr)
 
     # Schedule Dependencies.
     # There are two types of queues on each device: copy and compute. Both must synchronize with all external operations before launching any
@@ -70,8 +70,8 @@ class HCQGraph(MultiGraphRunner):
 
       # Ensure device is ready for use in current context: the graph has initialized the device and it's safe to operate on it within this graph.
       for dep_queue, _ in opt_deps: dev_access[enqueue_queue].update(dev_access[dep_queue])
-      sync_signals = [(self.signals[d], self.kickoff_value) for b in ji.bufs if (d:=Device[cast(Buffer, b).device]) not in dev_access[enqueue_queue]]
-      dev_access[enqueue_queue].update(cast(HCQCompiled, Device[cast(Buffer, b).device]) for b in ji.bufs)
+      sync_signals = [(self.signals[d], self.kickoff_value) for b in ji.bufs if (d:=Device[b.device]) not in dev_access[enqueue_queue]]
+      dev_access[enqueue_queue].update(cast(HCQCompiled, Device[b.device]) for b in ji.bufs)
 
       # Remove self-dependency for compute and copy queues.
       # For compute, in case of NV, optimize when only 1 same-queue dependency exists, since NV chains 2+ executions in this case,
@@ -120,7 +120,7 @@ class HCQGraph(MultiGraphRunner):
       if isinstance(ji.prg, CompiledRunner):
         cast(HWComputeQueue, enqueue_queue).exec(ji.prg.clprg, self.ji_args[j], *ji.prg.p.launch_dims(var_vals))
       elif isinstance(ji.prg, BufferXfer):
-        dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
+        dest, src = ji.bufs[0:2]
         cast(HCQAllocator, Device[src.device].allocator).map(dest._buf)
         cast(HWCopyQueue, enqueue_queue).copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes)
         self.copy_to_devs[cast(HCQCompiled, Device[dest.device])].add(cast(HCQCompiled, Device[src.device]))

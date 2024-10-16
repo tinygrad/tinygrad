@@ -3,7 +3,7 @@ from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, O
 import functools, itertools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.engine.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, all_same
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.ops import UOp, ssimplify, Variable, sint, sym_infer
@@ -27,10 +27,8 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
     nonlocal current_batch, current_device, max_batch_size
     try:
       if len(current_batch) <= 1 or current_device is None: raise GraphException("only one kernel doesn't graph")
-      graph_runner = current_device.graph(current_batch, input_rawbuffers, var_vals)
-      # clear jit inputs to allow their memory to be freed/reused
-      for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
-      graphed_jit_cache.append(ExecItem(graph_runner, cast(List[Optional[Buffer]], input_rawbuffers)))
+      graph_runner: GraphRunner = current_device.graph(current_batch, input_rawbuffers, var_vals)
+      graphed_jit_cache.append(ExecItem(graph_runner, input_rawbuffers))
       max_batch_size *= 2
       if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
     except GraphException as e:
@@ -148,27 +146,31 @@ class CapturedJit(Generic[ReturnType]):
     self._jit_cache: List[ExecItem] = self.jit_cache
     self._input_replace: Dict[Tuple[int, int], int] = self.input_replace
     self._graphed = False
-    self._clear_inputs()
+    input_buffers: List[List[Buffer]] = [[] for _ in range(max(self._input_replace.values())+1)]
+    for (j,i),input_idx in self._input_replace.items(): input_buffers[input_idx].append(self._jit_cache[j].bufs[i])
+    self._empty_buffers = [Buffer(b[0].device, b[0].size, b[0].dtype, fake=True) for b in input_buffers if all_same(b)]
+    assert len(self._empty_buffers) == len(input_buffers), "some input buffers didn't match?"
+    self._assign_inputs(self._empty_buffers)
 
-  def _clear_inputs(self):
-    for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
+  def _assign_inputs(self, input_buffers:List[Buffer]) -> None:
+    input_buffers_copy = input_buffers.copy()
+    # assign inputs
+    for idx, offset, device, size, dtype in self.extra_view_inputs:
+      input_buffers_copy.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset))
+    for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers_copy[input_idx]
 
   # jit exec
   def __call__(self, input_buffers:List[Buffer], var_vals:Dict[Variable, int]) -> ReturnType:
-    # assign inputs
-    for idx, offset, device, size, dtype in self.extra_view_inputs:
-      input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
-    for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
-
     # Condense the items into a graph executor.
     if JIT < 2 and not self._graphed:
-      self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
-      self._input_replace = get_input_replace(self._jit_cache, input_buffers)
+      self._jit_cache = apply_graph_to_jit(self.jit_cache, self._empty_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
+      self._input_replace = get_input_replace(self._jit_cache, self._empty_buffers)
       self._graphed = True
 
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
+    self._assign_inputs(input_buffers)
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
-    self._clear_inputs()
+    self._assign_inputs(self._empty_buffers)
     return self.ret
 
 def _prepare_jit_inputs(args, kwargs):
@@ -264,20 +266,20 @@ class TinyJit(Generic[ReturnType]):
         for ei in jit_cache:
           if any(b in depends for b in ei.bufs):
             if isinstance(ei.prg, CompiledRunner):
-              for out in ei.prg.p.outs: depends.add(cast(Buffer, ei.bufs[out]))
+              for out in ei.prg.p.outs: depends.add(ei.bufs[out])
         pruned, onetime = partition(jit_cache,
                                     lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
         # run the onetime kernels here
         for ei in onetime:
-          for b in ei.bufs: cast(Buffer, b).ensure_allocated()
+          for b in ei.bufs: b.ensure_allocated()
           ei.run(var_vals, jit=True)
         jit_cache = pruned
 
       # memory planning (optional)
       # Exclude buffers involved in transfer ops to preserve parallelism.
       noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, BufferXfer) for b in ji.bufs}
-      assigned = _internal_memory_planner([cast(List[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
+      assigned = _internal_memory_planner([item.bufs for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
       jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
 
       input_replace = get_input_replace(jit_cache, input_buffers)

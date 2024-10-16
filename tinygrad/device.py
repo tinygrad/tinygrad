@@ -52,10 +52,10 @@ class BufferOptions:
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None,
-               initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
+               initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False, fake=False):
     assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
-    self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
+    self.device, self.size, self.dtype, self.options, self.offset, self.fake = device, size, dtype, options, offset, fake
     if base is None:
       assert offset == 0, "base buffers can't have offset"
       self._base = None
@@ -77,6 +77,7 @@ class Buffer:
   def is_allocated(self) -> bool: return hasattr(self, '_buf')
   def ensure_allocated(self) -> Buffer: return self.allocate() if not hasattr(self, '_buf') else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
+    assert not self.fake, "can't allocate a fake buffer"
     assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
     self.allocator = Device[self.device].allocator
     if external_ptr is not None:
@@ -92,7 +93,7 @@ class Buffer:
   def __reduce__(self):
     buf = None
     if self._base is not None:
-      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, hasattr(self, '_buf'))
+      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, hasattr(self, '_buf'), self.fake)
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
     if self.is_allocated() and not SAVE_SCHEDULE:
       buf = bytearray(self.nbytes)

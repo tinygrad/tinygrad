@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, cast, Generator, Tuple
+from typing import List, Dict, Optional, Generator, Tuple
 import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA
@@ -159,11 +159,11 @@ def get_runner(dname:str, ast:UOp) -> CompiledRunner:
 @dataclass(frozen=True)
 class ExecItem:
   prg: Runner
-  bufs: List[Optional[Buffer]]
+  bufs: List[Buffer]
   metadata: Optional[Tuple[Metadata, ...]] = None
   def run(self, _var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
     var_vals = {} if _var_vals is None else _var_vals
-    bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
+    bufs = [x.ensure_allocated() for x in self.bufs]
     et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
     if do_update_stats:
       GlobalCounters.kernel_count += 1
