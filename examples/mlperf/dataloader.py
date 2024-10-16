@@ -359,8 +359,13 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
 def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue, X:Tensor, Y_boxes:Tensor, Y_labels:Tensor, anchors:np.ndarray):
   from extra.datasets.openimages import image_load, prepare_target, random_horizontal_flip, resize
   from examples.mlperf.helpers import box_iou, find_matches
+  import torch
 
   while (data:=queue_in.get()) is not None:
+    np.random.seed(42)
+    random.seed(42)
+    torch.manual_seed(42)
+
     idx, img, ann = data
     img_id = img["id"]
     img = image_load(base_dir, img["subset"], img["file_name"])
@@ -387,9 +392,9 @@ def batch_load_retinanet(dataset, val:bool, anchors:np.ndarray, base_dir:Path, b
       queue_in.put((idx, img, ann))
 
   def _setup_shared_mem(shm_name:str, size:Tuple[int, ...], dtype:dtypes) -> Tuple[shared_memory.SharedMemory, Tensor]:
-    if os.path.exists(f"/dev/shm/{shm_name}"): os.unlink(f"/dev/shm/{shm_name}")
+    if os.path.exists(f"/Users/flata/Downloads/shm/{shm_name}"): os.unlink(f"/Users/flata/Downloads/shm/{shm_name}")
     shm = shared_memory.SharedMemory(name=shm_name, create=True, size=prod(size))
-    shm_tensor = Tensor.empty(*size, dtype=dtype, device=f"disk:/dev/shm/{shm_name}")
+    shm_tensor = Tensor.empty(*size, dtype=dtype, device=f"disk:/Users/flata/Downloads/shm/{shm_name}")
     return shm, shm_tensor
 
   image_ids = sorted(dataset.imgs.keys())

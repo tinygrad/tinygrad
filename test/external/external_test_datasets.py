@@ -1,10 +1,14 @@
 from extra.datasets.kits19 import iterate, preprocess
-from examples.mlperf.dataloader import batch_load_unet3d
-from test.external.mlperf_retinanet.openimages import get_openimages
+from extra.datasets.openimages import download_dataset
+from examples.mlperf.dataloader import batch_load_unet3d, batch_load_retinanet
+from test.external.mlperf_retinanet.openimages import get_openimages, postprocess_targets
+from test.external.mlperf_retinanet.presets import DetectionPresetTrain, DetectionPresetEval
+from test.external.mlperf_retinanet.transforms import GeneralizedRCNNTransform
 from test.external.mlperf_unet3d.kits19 import PytTrain, PytVal
 from tinygrad.helpers import temp
 from pathlib import Path
 from PIL import Image
+from pycocotools.coco import COCO
 
 import json
 import nibabel as nib
@@ -12,12 +16,14 @@ import numpy as np
 import os
 import random
 import tempfile
+import torch
 import unittest
 
 class ExternalTestDatasets(unittest.TestCase):
   def _set_seed(self):
     np.random.seed(42)
     random.seed(42)
+    torch.manual_seed(42)
 
 class TestKiTS19Dataset(ExternalTestDatasets):
   def _create_samples(self, val, num_samples=2):
@@ -54,7 +60,7 @@ class TestKiTS19Dataset(ExternalTestDatasets):
     if use_old_dataloader:
       dataset = iterate(list(Path(tempfile.gettempdir()).glob("case_*")), preprocessed_dir=preproc_pth, val=val, shuffle=shuffle, bs=batch_size)
     else:
-      dataset = iter(batch_load_unet3d(preproc_pth, batch_size=batch_size, val=val, shuffle=shuffle, seed=seed))
+      dataset = batch_load_unet3d(preproc_pth, batch_size=batch_size, val=val, shuffle=shuffle, seed=seed)
 
     return iter(dataset)
 
@@ -80,6 +86,8 @@ class TestKiTS19Dataset(ExternalTestDatasets):
 
 class TestOpenImagesDataset(ExternalTestDatasets):
   def _create_samples(self, subset):
+    self._set_seed()
+
     os.makedirs(Path(base_dir:=tempfile.gettempdir() + "/openimages") / f"{subset}/data", exist_ok=True)
     os.makedirs(base_dir / Path(f"{subset}/labels"), exist_ok=True)
 
@@ -102,16 +110,35 @@ class TestOpenImagesDataset(ExternalTestDatasets):
 
     return base_dir, ann_file
 
-  def _create_ref_dataloader(self, subset):
+  def _create_ref_dataloader(self, subset, batch_size=1):
     base_dir, ann_file = self._create_samples(subset)
-    print(f"{base_dir=} {ann_file=}")
+    transforms = DetectionPresetTrain("hflip")
+    dataset = get_openimages(ann_file.stem, base_dir, subset, transforms)
+    return iter(dataset)
 
-  def _create_tinygrad_dataloader(self):
-    pass
+  def _create_tinygrad_dataloader(self, subset, anchors, batch_size=1):
+    base_dir, ann_file = self._create_samples(subset)
+    dataset = COCO(ann_file)
+    dataloader = batch_load_retinanet(dataset, subset == "validation", anchors, Path(base_dir), batch_size=batch_size)
+    return iter(dataloader)
 
   def test_training_set(self):
-    self._create_ref_dataloader("train")
-    assert 1==0
+    img_size, img_mean, img_std, anchors = (800, 800), [0.485, 0.456, 0.406], [0.229, 0.224, 0.225], torch.ones((120087, 4))
+    tinygrad_dataloader, ref_dataloader = self._create_tinygrad_dataloader("train", anchors.numpy()), self._create_ref_dataloader("train")
+    transform = GeneralizedRCNNTransform(img_size, img_mean, img_std)
+
+    for ((tinygrad_img, tinygrad_boxes, tinygrad_labels, _), (ref_img, ref_tgt)) in zip(tinygrad_dataloader, ref_dataloader):
+      self._set_seed()
+      ref_tgt = [ref_tgt]
+      print(f"{ref_img=} {ref_tgt=}")
+
+      ref_img, ref_tgt = transform(ref_img, [ref_tgt])
+      ref_tgt = postprocess_targets(ref_tgt, anchors.unsqueeze(0))
+      ref_boxes, ref_labels = ref_tgt[0]["boxes"], ref_tgt[0]["labels"]
+      
+      np.testing.assert_equal(tinygrad_img.numpy(), ref_img.tensors.transpose(1, 3).numpy())
+      # print(f"{tinygrad_img.shape=} {tinygrad_boxes.shape=} {tinygrad_labels.shape=}")
+      # print(f"{ref_boxes.shape=} {ref_labels.shape=} {ref_img.tensors.shape=}")
 
 if __name__ == '__main__':
   unittest.main()
