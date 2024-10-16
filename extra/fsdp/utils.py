@@ -48,6 +48,7 @@ def print_lb(lb):
         text += f"size: {lb.size} "
         text += f"device: {lb.device} \n"
         if hasattr(lb, "buffer") and hasattr(lb.buffer, "_buf"):
+          text += _indent() + f"buf: {lb.buffer.nbytes} bytes\n"
           return text
         elif len(lb.srcs) > 0:
           text += _indent() + "srcs: "
