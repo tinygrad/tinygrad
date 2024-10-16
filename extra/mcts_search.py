@@ -86,7 +86,7 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
     return ret
 
   rawbufs = _ensure_buffer_alloc(rawbufs)
-  var_vals = {k:(k.max+k.min)//2 for k in lin.ast.variables()}
+  var_vals = {k:(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
   dev = Device[lin.opts.device]
   root = MCTSNode(lin)
 
@@ -148,7 +148,14 @@ def mcts_search(lin:Kernel, rawbufs:List[Buffer], amt:int) -> Kernel:
   if DEBUG>=2: print()
 
   if getenv("MCTSGRAPH"):
-    from tinygrad.engine.graph import nx, save_graph, GRAPHPATH
+    import networkx as nx
+    import os
+    GRAPHPATH = "/tmp/net"
+    def save_graph(G, fn, opt=""):
+      print("saving", G, f"to {fn}.svg")
+      nx.drawing.nx_pydot.write_dot(G, f'{fn}.dot')
+      os.system(f'dot {opt} -Tsvg {fn}.dot -o {fn}.svg')
+
     G = nx.DiGraph()
     def add_node(node:MCTSNode):
       if node.n == 0: return

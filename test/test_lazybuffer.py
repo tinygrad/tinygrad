@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.ops import UOps
-from tinygrad.lazy import LazyBuffer, MetaOps
+from tinygrad.engine.lazy import LazyBuffer, MetaOps
 from tinygrad.engine.schedule import create_schedule
 
 class TestLazyBuffer(unittest.TestCase):

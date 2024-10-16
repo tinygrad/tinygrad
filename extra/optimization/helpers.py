@@ -1,12 +1,11 @@
 # stuff needed to unpack a kernel
 from typing import Tuple
-from extra.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer, MetaOps
+from tinygrad import Variable
 from tinygrad.codegen.kernel import Opt, OptOps
-from tinygrad.ops import UOp, UOps, KernelInfo
+from tinygrad.ops import UOp, UOps, KernelInfo, TernaryOps, BinaryOps, UnaryOps, ReduceOps, MetaOps
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.shape.symbolic import Variable, NumNode
 inf, nan = float('inf'), float('nan')
 
 # kernel unpacker
@@ -41,7 +40,6 @@ def assert_same_lin(l1, l2):
 
 # get features
 import math
-from tinygrad.shape.symbolic import Node
 
 MAX_DIMS = 16
 MAX_BUFS = 9
@@ -58,7 +56,7 @@ def lin_to_feats(lin:Kernel, use_sts=True):
 
   # first, the full shape, including the colors
   for s,os,c in zip(lin.full_shape,lin.output_shape,lc):
-    if isinstance(s, Node):
+    if isinstance(s, UOp):
       ret.append(False)
       ret += [0]*9
     else:

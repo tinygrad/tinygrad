@@ -1,15 +1,17 @@
 from typing import List
 from extra.models.resnet import ResNet50
-from tinygrad import Tensor, Device
-from tinygrad.helpers import Profiling, Timing, getenv, BEAM, NOOPT, DEBUG, Context, ansilen, _CURRENT_KERNEL
+from tinygrad import Tensor, Device, nn
+from tinygrad.helpers import Profiling, Timing, getenv, BEAM, NOOPT, DEBUG, Context, ansilen
 from tinygrad.ops import UOps
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.codegen.lowerer import ast_to_uop
-from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite
+from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.engine.search import beam_search, bufs_from_lin
 
 if __name__ == "__main__":
   mdl = ResNet50()
+  for p in nn.state.get_parameters(mdl): p.replace(Tensor.empty(p.shape))
   img = Tensor.empty(64, 3, 224, 224)
 
   PROFILE = getenv("PROFILE", 0)
@@ -37,22 +39,17 @@ if __name__ == "__main__":
             else: k.hand_coded_optimizations()
             kernels.append(k)
 
-        with Timing("***** model lower in     "): uops = [ast_to_uop(k.get_optimized_ast(), k.opts) for k in kernels]
+        with Timing("***** model lower in     "): uops = [rewrite_shapetracker_with_index(k.get_optimized_ast(), k.opts) for k in kernels]
         with Profiling(PROFILE, fn="/tmp/rewrite.prof"):
           with Timing("***** model rewrite in   "):
             rewritten_uops = []
             for i,(k,u) in enumerate(zip(kernels, uops)):
               with Timing(f"rewrite {i:2d} {k.name}{' '*(50-ansilen(k.name))}", enabled=getenv("VERBOSE", 0)):
-                if getenv("VIZ"): _CURRENT_KERNEL.set(k.name)
                 rewritten_uops.append(full_graph_rewrite(u, k.opts))
             uops = rewritten_uops
         if getenv("LINEARIZE", 1):
           with Timing("***** model linearize in "): uops = [linearize_uop(u) for u in uops]
           print(sum(len(u) for u in uops))
-          if getenv("GRAPHUOPS", 0):
-            for u in uops:
-              from tinygrad.engine.graph import graph_uops
-              graph_uops(u)
           if getenv("SRC", 0):
             renderer = Device[Device.DEFAULT].renderer
             for k,u in zip(kernels, uops): print(renderer.render(k.name, u))

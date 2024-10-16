@@ -18,7 +18,7 @@ class Model:
   def __call__(self, x:Tensor) -> Tensor: return x.sequential(self.layers)
 
 if __name__ == "__main__":
-  X_train, Y_train, X_test, Y_test = mnist()
+  X_train, Y_train, X_test, Y_test = mnist(fashion=getenv("FASHION"))
 
   model = Model()
   opt = nn.optim.Adam(nn.state.get_parameters(model))

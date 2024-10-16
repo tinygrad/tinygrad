@@ -8,10 +8,10 @@ from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import UOps, UOp, UPat, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu, spec # noqa F401
 from tinygrad.renderer import Program
-from tinygrad.engine.schedule import create_schedule, reduceop_fusor
+from tinygrad.engine.schedule import create_schedule, enumerate_bufs
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
-from tinygrad.codegen.uopgraph import linearize_uop, full_graph_rewrite, constant_folder
-from tinygrad.shape.symbolic import Variable
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
 from test.helpers import is_dtype_supported, assert_equiv_uops
 
 def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
@@ -349,6 +349,7 @@ class TestAssembly(unittest.TestCase):
     self.assertEqual(uops[-2].arg, BinaryOps.IDIV)
 
 class TestUOpMethod(unittest.TestCase):
+  @unittest.skip("uops lt no longer ordered")
   def test_compare_alu_same_src_different_arg(self):
     a = UOp(UOps.CONST, dtypes.float, (), 2.0)
     b = UOp(UOps.CONST, dtypes.float, (), 3.0)
@@ -358,7 +359,7 @@ class TestUOpMethod(unittest.TestCase):
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
 
   def test_uop_variables(self):
-    a = Variable("a", 1, 10)
+    a = UOp.variable("a", 1, 10)
     uop_var = UOp.const(dtypes.int, a)
     st_var = UOp(UOps.LOAD, dtypes.float, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0),
                                            ShapeTracker.from_shape((2, a)).to_uop()))
@@ -373,6 +374,11 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual((gidx0*3).const_factor(), 3)
     self.assertEqual((gidx0*3+6).const_factor(), 3)
     self.assertEqual((gidx0*3+1).const_factor(), 1)
+
+  def test_replace(self):
+    x = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.void), (), 0)
+    self.assertIs(x.replace(arg=None).arg, None)
+    with self.assertRaises(AssertionError): x.replace(field="a")
 
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
@@ -392,6 +398,7 @@ class TestUOpStr(unittest.TestCase):
     vec = UOp(UOps.VECTORIZE, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
     assert str(eval(str(vec))) == str(vec)
 
+@unittest.skip("uop no longer has order like this")
 class TestIndexingOrdering(unittest.TestCase):
   # NOTE: these tests skip type_verify since they add dtype to STORE
   @unittest.expectedFailure
@@ -433,8 +440,8 @@ class TestIndexingOrdering(unittest.TestCase):
 
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
-    self.assertEqual(constant_folder.patterns[0][0].location[0].split("/")[-1], "uopgraph.py")
-    self.assertEqual(reduceop_fusor.patterns[0][0].location[0].split("/")[-1], "schedule.py")
+    self.assertEqual(sym.patterns[-1][0].location[0].split("/")[-1], "uopgraph.py")
+    self.assertEqual(enumerate_bufs.patterns[0][0].location[0].split("/")[-1], "schedule.py")
     self.assertEqual(spec.patterns[0][0].location[0].split("/")[-1], "ops.py")
     with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?
       test_upat = UPat(UOps.CONST, dtypes.bool)

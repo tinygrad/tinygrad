@@ -129,6 +129,9 @@ class NVDriver(VirtDriver):
       self.object_by_handle[struct.hObjectNew] = NVGPFIFO(gpu, gpfifo_token)
     elif struct.hClass == nv_gpu.AMPERE_DMA_COPY_B or struct.hClass == nv_gpu.ADA_COMPUTE_A:
       assert struct.hObjectParent in self.object_by_handle and isinstance(self.object_by_handle[struct.hObjectParent], NVGPFIFO)
+      struct.hObjectNew = self._alloc_handle()
+    elif struct.hClass == nv_gpu.GT200_DEBUGGER:
+      struct.hObjectNew = self._alloc_handle()
     else: raise RuntimeError(f"Unknown {struct.hClass} to rm_alloc")
     return 0
 
