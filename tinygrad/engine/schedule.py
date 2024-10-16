@@ -183,12 +183,13 @@ def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], var_val
     ast.append(UOp(UOps.STORE, dtypes.void, (buf_uops[out.buffer], output_st.to_uop(), src)))
   sink = full_ast_rewrite(ast[0].sink(*ast[1:]), ctx:=tuple(buf_uops[x.buffer].arg[0] for x in outs+inputs), var_vals)
   # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
+  metadata = dedup([x.metadata for x in cache if x.metadata is not None and (x.base in outs or x.base.buffer not in buf_uops)])
   if len(assign_targets:=[x.src[0] for x in sink.sparents if x.op is UOps.ASSIGN]) != 0:
     if not all((s:=x.st_arg).contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \
         and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in sink.sparents if x.op is UOps.LOAD and x.src[0] in assign_targets):
-      raise RuntimeError(f"Can't load a non-contiguous view of and assign to the same buffer in one kernel. Consider using .contiguous() {sink} {ast} {ctx}")
+      raise RuntimeError(f"Can't load a non-contiguous view of and assign to the same buffer in one kernel. Consider using .contiguous() {sink} {ast} {ctx} {metadata}")
   return LBScheduleItem(sink, tuple(outs+inputs),
-                        tuple(dedup([x.metadata for x in cache if x.metadata is not None and (x.base in outs or x.base.buffer not in buf_uops)])))
+                        tuple(metadata))
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
