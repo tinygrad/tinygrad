@@ -146,7 +146,7 @@ class CapturedJit(Generic[ReturnType]):
     self._jit_cache: List[ExecItem] = self.jit_cache
     self._input_replace: Dict[Tuple[int, int], int] = self.input_replace
     self._graphed = False
-    input_buffers: List[List[Buffer]] = [[] for _ in range(max(self._input_replace.values())+1)]
+    input_buffers: List[List[Buffer]] = [[] for _ in range(max(self._input_replace.values())+1)] if len(self._input_replace) else []
     for (j,i),input_idx in self._input_replace.items(): input_buffers[input_idx].append(self._jit_cache[j].bufs[i])
     self._empty_buffers = [Buffer(b[0].device, b[0].size, b[0].dtype, fake=True) for b in input_buffers if all_same(b)]
     assert len(self._empty_buffers) == len(input_buffers), "some input buffers didn't match?"
