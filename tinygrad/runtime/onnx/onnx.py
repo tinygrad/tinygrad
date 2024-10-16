@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Dict, Union, Tuple, cast
+from typing import List, Dict, Union, Tuple
 import importlib
 from functools import lru_cache
 import numpy as np
@@ -29,6 +29,7 @@ def to_python_const(t) -> Union[List[ConstType], List[bytes], Union[ConstType, b
     cache_misses = info.misses
   return ret
 
+# ========== dtype
 # copied from helpers.py
 def is_dtype_supported(dtype, device: str = Device.DEFAULT):
   if dtype == dtypes.bfloat16: return False
@@ -48,51 +49,51 @@ DTYPE_MAP: Dict[int, DType] = {
   TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float
 }
 
-onnx_ops = importlib.import_module('tinygrad.runtime.onnx.onnx_ops')
+# ======= parsers
+def buffer_parse(inp: TensorProto) -> Tensor:
+  if inp.data_type not in DTYPE_MAP: raise NotImplementedError(f"data type not supported {inp.name} {inp.dims} {inp.data_type}")
+  dtype = DTYPE_MAP[inp.data_type] if is_dtype_supported(DTYPE_MAP[inp.data_type]) else dtypes.float32
+  if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
+    return Tensor(dat, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims))
+  if len(inp.raw_data) > 0:
+    # return Tensor(inp.raw_data, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims)) # TODO REINTRODUCES REGRESSION AGAIN
+    data = np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).astype(_to_np_dtype(dtype)).copy()
+    return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
+  return Tensor(None, requires_grad=False)
 
+# this is not complete, see onnx/onnx_ml_pb2.pyi for a complete list
+attrs = {AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i), AttributeProto.STRING: lambda a: a.s.decode("utf-8"),
+         AttributeProto.TENSOR: lambda a: buffer_parse(a.t), AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats),
+         AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints), AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)}
+def attribute_parse(a: AttributeProto) -> Union[float, int, str, Tensor, Tuple[int, ...], Tuple[float, ...], Tuple[str, ...]]:
+  if (ret := attrs.get(a.type, lambda _: None)(a)) is None: raise NotImplementedError(f"{a.type} not implemented")
+  return ret
+
+# TODO: I think this is only needed if buffer parse is incorrect? or if the maker of this ModelProto messed up somewhere? otherwise it should be right
+# I think we move this in extra tests to test for this kinda stuff?
+# have an independent test that checks proto parsing, instead of running it every run
+  # def type_parse(type_proto: TypeProto):
+  #   ret: Union[List[int], List[Union[int, Tuple[int]]]] = []
+  #   while True:
+  #     attr = type_proto.WhichOneof('value')
+  #     if attr == 'tensor_type':
+  #       if not hasattr(type_proto.tensor_type.shape.dim, 'dim_value'): return () # variable type, unable to determine shape
+  #       elif not ret: # tensor
+  #         return tuple([x.dim_value for x in type_proto.tensor_type.shape.dim])
+  #       else: # list of tensors
+  #         ret += [(x.dim_value,) for x in type_proto.tensor_type.shape.dim]
+  #         return tuple(ret)
+  #     elif attr == 'sequence_type':
+  #       type_proto = getattr(type_proto, 'sequence_type').elem_type
+  #       ret.append(1)
+  #     elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
+  #     else: NotImplementedError(f"{type_proto=} is not implemented")
+
+# ========== runner
+onnx_ops = importlib.import_module('tinygrad.runtime.onnx.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
-  def type_parse(type_proto: TypeProto):
-    ret: Union[List[int], List[Union[int, Tuple[int]]]] = []
-    while True:
-      attr = type_proto.WhichOneof('value')
-      if attr == 'tensor_type':
-        if not hasattr(type_proto.tensor_type.shape.dim, 'dim_value'): return () # variable type, unable to determine shape
-        elif not ret: # tensor
-          return tuple([x.dim_value for x in type_proto.tensor_type.shape.dim])
-        else: # list of tensors
-          ret += [(x.dim_value,) for x in type_proto.tensor_type.shape.dim]
-          return tuple(ret)
-      elif attr == 'sequence_type':
-        type_proto = getattr(type_proto, 'sequence_type').elem_type
-        ret.append(1)
-      elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
-      else: NotImplementedError(f"{type_proto=} is not implemented")
-
-  def buffer_parse(inp: TensorProto) -> Tensor:
-    if inp.data_type not in DTYPE_MAP: raise NotImplementedError(f"data type not supported {inp.name} {inp.dims} {inp.data_type}")
-    dtype = DTYPE_MAP[inp.data_type] if is_dtype_supported(DTYPE_MAP[inp.data_type]) else dtypes.float32
-    if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
-      return Tensor(dat, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims))
-    if len(inp.raw_data) > 0:
-      # return Tensor(inp.raw_data, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims)) # TODO REINTRODUCES REGRESSION AGAIN
-      data = np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).astype(_to_np_dtype(dtype)).copy()
-      return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
-    return Tensor(None, requires_grad=False)
-
-  def attribute_parse(a: AttributeProto):
-    # TODO: this is not complete, see onnx/onnx_ml_pb2.pyi for a complete list
-    if a.type == AttributeProto.FLOAT: return float(a.f)
-    elif a.type == AttributeProto.INT: return int(a.i)
-    elif a.type == AttributeProto.STRING: return a.s.decode("utf-8")
-    elif a.type == AttributeProto.TENSOR: return buffer_parse(a.t) # TENSOR
-    elif a.type == AttributeProto.FLOATS: return tuple(float(x) for x in a.floats)
-    elif a.type == AttributeProto.INTS: return tuple(int(x) for x in a.ints)
-    elif a.type == AttributeProto.STRINGS: return tuple(x.decode("utf-8") for x in a.strings)
-    elif a.type == AttributeProto.GRAPH: raise NotImplementedError(f"graph not implemented: {a.g}")
-    else: raise RuntimeError(f"can't parse {a.type} {a}")
-
   tensors: Dict[str, Tensor] = {}
 
   # get weights and biases
@@ -115,7 +116,6 @@ def get_run_onnx(onnx_model: ModelProto):
     for model_input in onnx_model.graph.input:
       name = model_input.name
       if name in tensors: continue
-      shape = type_parse(model_input.type)
       if name in inputs:
         if isinstance(inputs[name], Tensor): input_tensors[name] = inputs[name]
         elif isinstance(inputs[name], list): input_tensors[name] = [Tensor(i, requires_grad=False) for i in inputs[name]]
@@ -123,14 +123,7 @@ def get_run_onnx(onnx_model: ModelProto):
         # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
         elif domain == "ai.onnx.preview.training": input_tensors[name] = Tensor(inputs[name], requires_grad=True)
         else: input_tensors[name] = Tensor(inputs[name], requires_grad=False)
-        if shape: # if only input_tensor is not variable type
-          ts: Union[Tensor, List[Tensor]] = input_tensors[name]
-          if isinstance(ts, Tensor): input_shape: Union[Tuple[int, ...], Tuple[Union[int, Tuple[int, ...],]]] = cast(Tuple[int, ...], ts.shape)
-          # sequence type of list of tensors
-          elif isinstance(ts, list): input_shape = (1,) + tuple(i.shape for i in ts)  # type: ignore
-          else: assert False
-          assert input_shape == shape, f"wrong shape for input {name}, {input_shape} isn't {shape}"
-      else: raise RuntimeError(f"no data for {name} with shape {shape}")
+      else: raise RuntimeError(f"no data for {name}")
 
     def fetch_tensor(x: str):
       if x in tensors: return tensors[x]
@@ -151,25 +144,21 @@ def get_run_onnx(onnx_model: ModelProto):
     equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"}), "LeakyRelu": ("leakyrelu", {"alpha": "neg_slope"}),
       "Selu": ("selu", {"gamma": "scale"})}
 
-    # TODO what if we just don't buffer parse some inps or attributes so no need waste time to python const
-    # inputs we need to turn into a python const
+    # inputs we need to turn into a python const to compute
     to_python_const_inps: Dict[str, Tuple[int, ...]] = \
     {"Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
       "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
       "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4)}
 
     for num,n in enumerate(onnx_model.graph.node):
-      inp = []
-      if debug >= 3: print("inputs:")
-      for x in n.input:
-        t = fetch_tensor(x)
-        if debug >= 3: print(f"\t{x} - {t}")
-        inp.append(t)
-      opt: Dict = attribute_dict[num]
-      if debug >= 1: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
-
-      # to_python_consts
-      inp = [to_python_const(x) if i in to_python_const_inps.get(n.op_type, ()) else x for i,x in enumerate(inp)]
+      inp, opt = {x:fetch_tensor(x) for x in n.input}, attribute_dict[num]
+      if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp.values()]} opt {opt}")
+      # to python consts
+      # TODO what if we just don't buffer parse some inps into Tensor to start with so no need waste time to python const
+      inp = {x:to_python_const(t) if i in to_python_const_inps.get(n.op_type, ()) else t for i,(x,t) in enumerate(inp.items())}
+      if debug >= 3: print(f"\tinputs:\n\t\tto python const inputs: {to_python_const_inps.get(n.op_type,())}\n" +
+                           "\n".join(f"\t\t{x} - {t}" for x,t in inp.items()))
+      inp = list(inp.values())
 
       # tensor methods
       if n.op_type in exact_tensor_methods: ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
@@ -211,11 +200,8 @@ def get_run_onnx(onnx_model: ModelProto):
 
       if not isinstance(ret, tuple): ret = (ret, )
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
-      if debug >= 2: print([x.shape if isinstance(x, Tensor) else None for x in ret])
-      if debug >= 2: print("outputs:")
-      for i in range(len(n.output)):
-        if debug >= 2: print(f"\t{n.output[i]} - {ret[i]}")
-        intermediate_tensors[n.output[i]] = ret[i]
+      for i in range(len(n.output)): intermediate_tensors[n.output[i]] = ret[i]
+      if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{n.output[i]} - {ret[i]}" for i in range(len(n.output))))
       if num == ONNXLIMIT:
         output_tensor_names = n.output
         break
