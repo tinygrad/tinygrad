@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 281 50.31">
+  <g id="logo" shape-rendering="crispEdges">
+    <g>
+      <polygon points="10 40.31 10 20.31 0 20.31 0 10.31 10 10.31 10 .31 20 .31 20 10.31 30 10.31 30 20.31 20 20.31 20 30.31 30 30.31 30 40.31 10 40.31"/>
+      <polygon points="261 40.66 261 20.66 251 20.66 251 10.66 261 10.66 261 .66 271 .66 271 10.66 281 10.66 281 20.66 271 20.66 271 30.66 281 30.66 281 40.66 261 40.66"/>
+      <polygon points="40 40.31 40 20.31 50 20.31 50 40.31 40 40.31"/>
+      <polygon points="40 10.31 40 .31 50 .31 50 10.31 40 10.31"/>
+      <polygon points="60 40.31 60 10.31 80 10.31 80 40.31 90 40.31 90 20.31 70 20.31 70 40.31 60 40.31"/>
+      <polygon points="100 50.31 100 40.31 130 40.31 130 10.31 120 10.31 120 20.31 110 20.31 110 10.31 100 10.31 100 30.31 120 30.31 120 50.31 100 50.31"/>
+      <g>
+        <rect x="140" y="10.08" width="10" height="30"/>
+        <rect x="150" y=".08" width="10" height="30" transform="translate(139.92 170.08) rotate(-90)"/>
+        <rect x="150" y="20.08" width="10" height="30" transform="translate(119.92 190.08) rotate(-90)"/>
+      </g>
+      <g>
+        <rect x="215" y="23.07" width="10" height="16.78"/>
+        <rect x="225.65" y="-.81" width="8.7" height="30" transform="translate(215.81 244.19) rotate(-90)"/>
+        <rect x="225.65" y="9.19" width="8.7" height="30" transform="translate(205.81 254.19) rotate(-90)"/>
+        <rect x="215" y="31.45" width="20" height="8.7"/>
+        <rect x="235" y="9.86" width="10" height="21.6"/>
+      </g>
+      <g>
+        <polygon points="178 40 178 10 198 10 198 40 208 40 208 20 188 20 188 40 178 40"/>
+        <rect x="178" width="10" height="40"/>
+      </g>
+    </g>
+  </g>
+
+<style>
+  @media (prefers-color-scheme: dark) {
+    #logo {
+      fill: #fff;
+    }
+  }
+  @media (prefers-color-scheme: light) {
+    #logo {
+      fill: #000;
+    }
+  }
+  </style>
+</svg>

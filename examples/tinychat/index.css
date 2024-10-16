@@ -39,13 +39,14 @@ body {
 }
 
 .logo {
-  height: 150px;
+  height: 100px;
 }
 
 .centered {
   display: flex;
   justify-content: center;
   align-items: center;
+  gap: 20px;
 }
 
 main {
@@ -107,6 +108,9 @@ main {
 .histories-container {
   max-height: 60vh;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .history {
@@ -117,7 +121,7 @@ main {
   color: var(--text-color);
   border-radius: 10px;
   cursor: pointer;
-  width: 100%;
+  width: 90%;
   max-width: 600px;
 }
 
