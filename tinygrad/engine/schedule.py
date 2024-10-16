@@ -105,15 +105,15 @@ merge_views = PatternMatcher([(UPat(UOps.VIEW, src=(UPat(UOps.VIEW, name="s0"),)
 
 # push VIEW to loads
 view_left = merge_views+PatternMatcher([
-  # view on reduce
-  (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, src=UPat.var("rsrc"), name="r"),), name="view"), view_r),
-  # view on elementwise
+  # view before ALU
   (UPat(UOps.VIEW, src=(UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.CONTIGUOUS, *BUFFER_UOPS), name="e"),), name="v"),
    lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
 ])
 
 # push VIEW to stores
 view_right = merge_views+PatternMatcher([
+  # view on reduce creates a new VIEW
+  (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, src=UPat.var("rsrc"), name="r"),), name="view"), view_r),
   # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.VIEW, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
   # push SWIZZLE(s) down to STORE, through an elementwise op (ONLY reshapes)
