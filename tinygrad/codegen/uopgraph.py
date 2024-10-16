@@ -559,7 +559,7 @@ def int64_indexing(alu:UOp) -> Optional[UOp]:
   return None
 
 int64_idx = PatternMatcher([
-  (UPat(UOps.ALU, dtypes.int32, name="alu"), int64_indexing),
+  #(UPat(UOps.ALU, dtypes.int32, name="alu"), int64_indexing),
   (UPat((UOps.CONST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR), dtypes.int32, name="x"),
     lambda x: UOp(x.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in x.src), x.arg) if max(x._min_max, key=abs) > dtypes.max(x.dtype) else None)
 ])
@@ -588,6 +588,4 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
       sink = graph_rewrite(sink, sym+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
 
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, opts.extra_matcher)
-  print(sink)
-  print("\n")
   return sink
