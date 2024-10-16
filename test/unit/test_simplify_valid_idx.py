@@ -89,22 +89,30 @@ class TestValidIdxSimplification(unittest.TestCase):
     # TODO: simplify these
     val0 = get_gated_load_uop(alu17&(alu9.lt(7)), alu15+(alu5//10)+(alu9*9))
     self.assertEqual(render(val0),
-      "((((alu2<30)&(alu3<7))&(alu1<7))?data0[(((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+(((alu2//10)%3)*3)+(alu3*63)+(alu0//10)+(alu1*9)]:0.0f)")
+      "((((alu2<30)&(alu3<7))&(alu1<7))?data0[(((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+((alu2//10)*3)+(alu3*63)+(alu0//10)+(alu1*9)]:0.0f)")
 
     val1 = get_gated_load_uop(
       ((alu16&gidx0.lt(1))&alu13.lt(7))&alu7.lt(7),
       ((((((((((lidx1*10)+gidx0)//3)+3)//10)+alu10)//10)+lidx0)%4)*441)+((((alu6+alu12)//10)%3)*3)+(alu13*63)+(((alu3//10)+2)%3)+(alu7*9)
     )
     self.assertEqual(render(val1),
-      "(((((alu5<30)&(gidx0<1))&(alu6<7))&(alu3<7))?data0[((((((((((lidx1*10)+gidx0)//3)+3)//10)+gidx1+(ridx0*3))//10)+lidx0)%4)*441)+((((alu2+alu5)//10)%3)*3)+(alu6*63)+(((alu1//10)+2)%3)+(alu3*9)]:0.0f)")  # noqa: E501
+      "(((((alu2<30)&(gidx0<1))&(((((gidx0+9)//10)+alu0+lidx1+alu1)%10)<7))&((((gidx0*3)+lidx2+7)%10)<7))?data0[(lidx2*9)+(((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+((alu2//10)*3)+((alu2%10)*63)+65]:0.0f)")  # noqa: E501
 
     val2 = get_gated_load_uop(alu17&alu1.lt(7), alu15+(gidx0*27)+(lidx2*9))
     self.assertEqual(render(val2),
-      "((((alu0<30)&(alu1<7))&(((gidx0*3)+lidx2)<7))?data0[(((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+(((alu0//10)%3)*3)+(alu1*63)+(gidx0*27)+(lidx2*9)]:0.0f)")  # noqa: E501
+      "((((alu0<30)&(alu1<7))&(((gidx0*3)+lidx2)<7))?data0[(((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+((alu0//10)*3)+(alu1*63)+(gidx0*27)+(lidx2*9)]:0.0f)")  # noqa: E501
 
     val3 = get_gated_load_uop(alu17&alu8.lt(7), (alu4//10)+alu15+(alu8*9)+1)
     self.assertEqual(render(val3),
-      "((((alu2<30)&(alu3<7))&(alu1<7))?data0[(alu0//10)+(((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+(((alu2//10)%3)*3)+(alu3*63)+(alu1*9)+1]:0.0f)")
+      "((((alu2<30)&(alu3<7))&(alu1<7))?data0[(alu0//10)+(((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+((alu2//10)*3)+(alu3*63)+(alu1*9)+1]:0.0f)")
+
+  def test_cumsum(self):
+    gidx0 = Special("gidx0", 5)
+    lidx0 = Special("lidx0", 4)
+    gate = (gidx0*4+lidx0).lt(19).ne(True)
+    idx = gidx0*4+lidx0-19
+    load = get_gated_load_uop(gate, idx)
+    self.assertEqual(render(load), "(((((gidx0*4)+lidx0)<19)!=1)?data0[0]:0.0f)")
 
 class TestImageSimplification(unittest.TestCase):
   def test_idx_gt_c(self):

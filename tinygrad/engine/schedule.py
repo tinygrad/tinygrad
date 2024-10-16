@@ -103,12 +103,14 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert not any(x.op is UOps.REDUCE_AXIS for x in first_reduce.parents), "can't merge more than two reduceops at a time"
   return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
 
-reduceop_fusor = PatternMatcher([
-  # SWIZZLE on VALID merges the views
+view_left = PatternMatcher([
+  # view on reduce
+  (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
+  # view on valid
   (UPat(UOps.VIEW, src=(UPat(UOps.ALU, src=(UPat(UOps.VALID), UPat.var(), UPat.var()), name="alu", arg=TernaryOps.WHERE),), name="root"),
    lambda root,alu: UOp(UOps.VALID, dtypes.bool, (root.st.to_uop(),)).where(*alu.src[1:]) if root.st != alu.st else alu),
-  # push a SWIZZLE up to LOAD, through a reduce (eg. expands)
-  (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
+])
+view_right = PatternMatcher([
   # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.VIEW, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
   # push SWIZZLE(s) down to STORE, through an elementwise op (ONLY reshapes)
@@ -126,7 +128,7 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 @track_rewrites
 def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...]) -> UOp:
-  sink = graph_rewrite(base_sink, reduceop_fusor)
+  sink = graph_rewrite(graph_rewrite(base_sink, view_left), view_right)
   ret = graph_rewrite(sink, enumerate_bufs, bufs)
   PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
   return ret
