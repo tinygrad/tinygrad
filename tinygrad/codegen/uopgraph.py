@@ -538,17 +538,15 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), simplify_valid_image_load),
 ])
 
-def fixup_alus(alu:UOp) -> Optional[UOp]:
-  if alu.arg in (BinaryOps.ADD, BinaryOps.MUL) and (set(s.dtype for s in alu.src) == {dtypes.int32} or set(s.dtype for s in alu.src) == {dtypes.int32, dtypes.int64}):
-    return UOp(alu.op, alu.dtype, tuple(s.cast(alu.dtype) for s in alu.src), alu.arg)
+def fixup_alu(alu:UOp) -> Optional[UOp]:
+  # TODO: handle indexing alus with alu operands
+  # target just indexing alus
+  if alu.arg in (BinaryOps.ADD, BinaryOps.MUL) and all(s.op in (UOps.CONST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR) for s in alu.src):
+    if max(alu._min_max, key=abs) > dtypes.max(alu.dtype): return UOp(alu.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in alu.src), alu.arg)
   return None
 
 fixup_alus = PatternMatcher([
-  #(UPat(UOps.ALU, dtypes.int64, name="alu"), fixup_alus),
-  #(UPat(UOps.ALU, dtypes.int32, name="alu"), lambda alu: UOp(alu.op, alu.dtype, tuple(s.cast(alu.dtype) for s in alu.src), alu.arg)
-  #                            if any(s.dtype == dtypes.int64 for s in alu.src) else None)
-  (UPat(UOps.ALU, (dtypes.int32, dtypes.int64), name="alu"), lambda alu: UOp(alu.op, alu.dtype, tuple(s.cast(alu.dtype) for s in alu.src), alu.arg)
-                              if any(s.dtype != alu.dtype for s in alu.src) and isinstance(alu.arg, BinaryOps) else None)
+  (UPat(UOps.ALU, dtypes.int32, name="alu"), fixup_alu),
 ])
 
 # *** uop graph ***
