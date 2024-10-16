@@ -3193,7 +3193,6 @@ class Tensor:
     ```
     """
     return self.sub(Y).pow(2)._do_reduction(reduction)
-  
   def binary_crossentropy(self, Y:Tensor, reduction:ReductionStr="mean") -> Tensor:
     """
     Computes the binary cross-entropy loss between `self` and `Y`.
