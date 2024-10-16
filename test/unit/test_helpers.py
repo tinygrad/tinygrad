@@ -2,7 +2,7 @@ import gzip, unittest
 from PIL import Image
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar
-from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv
+from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, left_encode, right_encode
 from tinygrad.tensor import get_shape
 from tinygrad.codegen.lowerer import get_contraction
 import numpy as np
@@ -290,6 +290,27 @@ class TestGetShape(unittest.TestCase):
   def test_inhomogeneous_shape(self):
     with self.assertRaises(ValueError): get_shape([[], [1]])
     with self.assertRaises(ValueError): get_shape([[1, [2]], [1]])
+    
+class TestByteStringsEncode(unittest.TestCase):
+  def test_encode_literal_0(self) :
+    self.assertEqual(left_encode(0), b'\x01\x00')
+    self.assertEqual(right_encode(0), b'\x00\x01')
+
+  @unittest.expectedFailure
+  def test_left_encode_subceed_validity_range(self) :
+    left_encode(-1)
+  
+  @unittest.expectedFailure
+  def test_right_encode_subceed_validity_range(self) :
+    right_encode(-1)
+
+  @unittest.expectedFailure
+  def test_left_encode_exceed_validity_range(self) :
+    left_encode(22040)
+  
+  @unittest.expectedFailure
+  def test_right_encode_exceed_validity_range(self) :
+    right_encode(22040)
 
 if __name__ == '__main__':
   unittest.main()

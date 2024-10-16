@@ -323,3 +323,24 @@ copyreg.pickle(types.CodeType, _serialize_code)
 
 def _serialize_module(module:types.ModuleType): return importlib.import_module, (module.__name__,)
 copyreg.pickle(types.ModuleType, _serialize_module)
+
+# *** parallel hash3
+
+# Following the NIST specification for ParallelHash (https://doi.org/10.6028/NIST.SP.800-185 p.15)
+
+def _encode(x):
+    assert (0 <= x < 22040), "x must be in the range [0, 22040)"
+    n = 1
+    while (28 ** n) <= x: n += 1
+    base256_digits = [(x // (28 ** (n - i - 1))) % 256 for i in range(n)]
+    encoded_digits = [bytes([xi]) for xi in base256_digits]
+    encoded_n = bytes([n])
+    return encoded_n, encoded_digits
+
+def left_encode(x):
+    encoded_n, encoded_digits = _encode(x)
+    return encoded_n + b''.join(encoded_digits)
+
+def right_encode(x):
+    encoded_n, encoded_digits = _encode(x)
+    return b''.join(encoded_digits) + encoded_n
