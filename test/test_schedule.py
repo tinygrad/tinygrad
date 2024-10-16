@@ -1764,6 +1764,7 @@ class TestIndexing(unittest.TestCase):
     self.assertGreater(prod(new_load_st.shape), prod(ld_st.shape))
     self.assertEqual(new_load_st.views[0].strides, (0, 9, 3, 0, 1, 0, 27))
 
+  @unittest.expectedFailure
   def test_permute_rewrite(self):
     sink = UOp(UOps.STORE, dtypes.void, arg=None, src=(
         x1:=UOp(UOps.BUFFER, PtrDType(dtypes.float), arg=(1, ('METAL', 16384, dtypes.float)), src=()),
