@@ -49,6 +49,10 @@
     color: #f0f0f5;
     overflow-y: auto;
   }
+  ul > ul.active {
+    background-color: #7c7d85;
+    margin-left: -20%;
+  }
   svg {
     width: 100%;
     height: 100%;
@@ -101,6 +105,7 @@
   .kernel-list {
     width: 10%;
     overflow-y: auto;
+    direction: rtl;
   }
   .kernel-list > ul > ul {
     padding-left: 4px;
@@ -110,10 +115,9 @@
   }
   .metadata {
     width: 20%;
-    padding-left: 20px;
     overflow-y: auto;
   }
-  #resize-handle {
+  .resize-handle {
     position: absolute;
     left: 0;
     top: 0;
@@ -122,6 +126,10 @@
     height: 100%;
     cursor: col-resize;
     background-color: transparent;
+  }
+  #kernel-list-resize {
+    position: relative;
+    float: right;
   }
   .rewrite-list {
     display: flex;
@@ -144,13 +152,13 @@
 </head>
 <body>
   <div class="main-container">
-    <div class="container kernel-list"></div>
+    <div class="container kernel-list resizeable" id="kernel-list"></div>
     <div class="container graph">
       <svg>
         <g id="render"></g>
       </svg>
     </div>
-    <div class="container metadata"></div>
+    <div class="container metadata resizeable" id="metadata"></div>
   </div>
   <script>
   /* global hljs, dagreD3, d3, DOMPurify */
@@ -230,6 +238,7 @@
     }
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
+    kernelList.appendChild(Object.assign(document.createElement("div"), { className: "resize-handle", id: "kernel-list-resize" }));
     kernels.forEach((k, i) => {
       const kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "",
         style: "overflow-x: auto; cursor: initial;" });
@@ -240,10 +249,10 @@
         const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.upats.length}`, key: `uop-rewrite-${j}`,
           className: "" })
         if (j === currentUOp && i == currentKernel) {
-            rwUl.className = "active";
-            setTimeout(() => {
-                rwUl.scrollIntoView({ behavior: "smooth", block: "end" });
-            }, [100])
+          rwUl.className = "active";
+          setTimeout(() => {
+              rwUl.scrollIntoView({ behavior: "smooth", block: "end" });
+          }, [100])
         }
         rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
@@ -288,34 +297,54 @@
     metadata.appendChild(pre);
     hljs.highlightElement(pre);
     // ** resizer
-    metadata.appendChild(Object.assign(document.createElement("div"), { id: "resize-handle" }));
-    const resizeHandle = document.getElementById("resize-handle");
-    let startX;
-    let containerWidth;
-    let metadataWidth;
-    resizeHandle.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      metadata.style.userSelect = "none";
-      document.documentElement.style.cursor = "col-resize";
-      startX = e.clientX;
-      containerWidth = document.querySelector(".main-container").getBoundingClientRect().width;
-      metadataWidth = metadata.getBoundingClientRect().width;
-      document.documentElement.addEventListener("mousemove", resize, false);
-      document.documentElement.addEventListener("mouseup", stopResize, false);
-    });
-    function resize(e) {
-      const change = e.clientX - startX;
-      const newWidth = ((metadataWidth-change) / containerWidth) * 100;
-      if (newWidth >= 20 && newWidth <= 50) {
-        metadata.style.width = `${newWidth}%`;
-        document.querySelector(".graph").style.width = `${100-newWidth-10}%`;
+    metadata.appendChild(Object.assign(document.createElement("div"), { className: "resize-handle", id: "metadata-resize"}));
+    const resizableElements = Array.from(document.getElementsByClassName("resizeable"));
+    // instances of eventhandles mapped by id
+    const resizeListeners = {}
+    const stopResizeListeners = {};
+    resizableElements.forEach((element) => {
+      element.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        element.style.userSelect = "none";
+        document.documentElement.style.cursor = "col-resize";
+        const startX = event.clientX;   
+        const containerWidth = document.querySelector(".main-container").getBoundingClientRect().width;
+        const elementWidth = element.getBoundingClientRect().width;
+        resizeListeners[element.id] = (event) => {resize(event, element, startX, containerWidth, elementWidth)};
+        stopResizeListeners[element.id] = () => {stopResize(element)};
+        document.documentElement.addEventListener("mousemove", resizeListeners[element.id], false);
+        document.documentElement.addEventListener("mouseup", stopResizeListeners[element.id], false);
+      })
+    })
+    function resize(event, element, startX, containerWidth, elementWidth) {
+      switch (element.id) {
+        case "metadata": {
+          const change = event.clientX - startX;
+          const newWidth = ((elementWidth-change) / containerWidth) * 100;
+          if (newWidth >= 0 && newWidth <= 50) {
+            element.style.width = `${newWidth}%`;
+            document.querySelector(".graph").style.width = change > 0 ? `${100-newWidth}%` : `${100+newWidth}%`;
+          }
+          break;
+        } 
+        case "kernel-list": {
+          const change = event.clientX - startX;
+          const newWidth = ((elementWidth+change) / containerWidth) * 100;
+          if (newWidth >= 0 && newWidth <= 20) {
+            element.style.width = `${newWidth}%`;
+            document.querySelector(".graph").style.width = change > 0 ? `${100-newWidth}%` : `${100+newWidth}%`;
+          }            
+          break;
+        }
       }
     }
-    function stopResize() {
-      document.documentElement.removeEventListener("mousemove", resize, false);
-      document.documentElement.removeEventListener("mouseup", stopResize, false);
+    function stopResize(element) {
+      const resizeL = resizeListeners[element.id];
+      const stopResizeL = stopResizeListeners[element.id];
+      document.documentElement.removeEventListener("mousemove", resizeL, false);
+      document.documentElement.removeEventListener("mouseup", stopResizeL, false);
       document.documentElement.style.cursor = "initial";
-      metadata.style.userSelect = "initial";
+      element.style.userSelect = "initial";
     }
     // ** code blocks
     if (ret.kernel_code != null) {
