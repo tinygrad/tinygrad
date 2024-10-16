@@ -151,14 +151,13 @@ def get_run_onnx(onnx_model: ModelProto):
       "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4)}
 
     for num,n in enumerate(onnx_model.graph.node):
-      inp, opt = {x:fetch_tensor(x) for x in n.input}, attribute_dict[num]
-      if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp.values()]} opt {opt}")
+      inp, opt = [fetch_tensor(x) for x in n.input], attribute_dict[num]
+      if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
       # to python consts
       # TODO what if we just don't buffer parse some inps into Tensor to start with so no need waste time to python const
-      inp = {x:to_python_const(t) if i in to_python_const_inps.get(n.op_type, ()) else t for i,(x,t) in enumerate(inp.items())}
+      inp = [to_python_const(x) if i in to_python_const_inps.get(n.op_type, ()) else x for i,x in enumerate(inp)]
       if debug >= 3: print(f"\tinputs:\n\t\tto python const inputs: {to_python_const_inps.get(n.op_type,())}\n" +
-                           "\n".join(f"\t\t{x} - {t}" for x,t in inp.items()))
-      inp = list(inp.values())
+                           "\n".join(f"\t\t{x} - {t}" for x,t in zip(n.input, inp)))
 
       # tensor methods
       if n.op_type in exact_tensor_methods: ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)

@@ -120,8 +120,7 @@ def CumSum(X:Tensor, axis:int, exclusive=0, reverse=0):
   if reverse: X = X.flip(axis)
   if exclusive: X = X.pad(tuple((1,0) if i == axis else None for i in range(X.ndim)))\
                      .shrink(tuple((0,X.shape[axis]) if i == axis else None for i in range(X.ndim)))
-  if reverse: return X.cumsum(axis).flip(axis)
-  return X.cumsum(axis)
+  return X.cumsum(axis).flip(axis) if reverse else X.cumsum(axis)
 
 # TODO: this is copied from tinygrad/nn/__init__.py
 # spatial is from opset 7 and has since been removed
@@ -159,13 +158,14 @@ def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
   return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
          [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
 
-# only for pool ops, they only works with symmetrical padding
+# only for pool ops
 def _validate_pads(pads):
   if isinstance(pads, (tuple, list)):
     if not all(start==end for start,end in zip(pads, pads[len(pads)//2:])): raise ValueError(f"asymmetrical {pads=} not supported")
     pads = pads[:-len(pads)//2]
   return 0 if pads is None else pads
 
+# resolve auto_pad
 def _resolve_pool_pad(i_, k_, d_, s_, p_, auto_pad):
   s_, d_, p_ = (make_pair(x, len(k_)) for x in (s_, d_, p_))
   if auto_pad == "NOTSET": return p_
@@ -205,10 +205,10 @@ def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilat
   pads = _resolve_pool_pad(X.shape[-len(kernel_shape):], kernel_shape, dilations, strides, _validate_pads(pads), auto_pad)
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads)
 
-# TODO: their reference implementation and their documentation has different information
+# TODO: their reference implementation and their documentation have different information
 # ref: https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_conv_transpose.py
 # doc: https://github.com/onnx/onnx/blob/main/docs/Operators.md#ConvTranspose
-# the current implementation makes sense to geohotstan and pass tests, but differs from both ref and doc
+# the current implementation makes sense to geohotstan and passes tests, but differs from both ref and doc
 def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None,
                   output_shape=None, output_padding=0, strides=1):
   input_shape, kernel_shape = X.shape[2:], (kernel_shape or W.shape[2:])
@@ -337,11 +337,9 @@ def CenterCropPad(t: Tensor, shape, axes=None):
   return t.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
 def OneHot(indices: Tensor, depth, values, axis=-1):
-  indices, rank = (indices < 0).where(indices+depth, indices), indices.ndim
-  if axis < 0: axis += rank + 1
-  ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
-  cond = indices[:,None] == Tensor.arange(int(depth)).reshape((1,) * len(ls) + (int(depth),) + (1,) * len(rs))
-  return cond.where(values[1], values[0])
+    axis = axis if axis >= 0 else axis + indices.ndim + 1
+    cond = (indices.unsqueeze(axis) == Tensor.arange(depth).reshape((1,) * axis + (depth,) + (1,) * (indices.ndim - axis)))
+    return cond.where(values[1], values[0])
 
 def Erf(x: Tensor):
   t = 1.0 / (1.0 + 0.3275911 * x.abs())
