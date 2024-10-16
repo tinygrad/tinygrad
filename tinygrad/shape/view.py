@@ -97,7 +97,6 @@ class View:
     iexpr = variable_to_uop(self.offset)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else [None]*len(self.shape)):
       if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
-
       if m is not None:
         if resolve(m[0] != 0): vexpr = vexpr * idx.ge(m[0])
         if resolve(m[1] != sh): vexpr = vexpr * idx.lt(m[1])

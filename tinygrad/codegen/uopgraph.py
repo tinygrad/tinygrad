@@ -548,7 +548,8 @@ reducer = PatternMatcher([
 def fixup_alu(alu:UOp) -> Optional[UOp]:
   # TODO: handle indexing alus with alu operands
   # target just indexing alus
-  if alu.arg in (BinaryOps.ADD, BinaryOps.MUL) and all(s.op in (UOps.CONST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR) for s in alu.src):
+  if alu.arg in (BinaryOps.ADD, BinaryOps.MUL) and \
+  all(s.op in (UOps.CONST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR) for s in alu.src):
     if max(alu._min_max, key=abs) > dtypes.max(alu.dtype): return UOp(alu.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in alu.src), alu.arg)
   return None
 
