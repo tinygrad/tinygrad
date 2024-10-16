@@ -65,13 +65,15 @@ if __name__ == "__main__":
   def get_test_acc() -> Tensor: return (model(X_test).argmax(axis=1) == Y_test).mean()*100
 
   test_acc = float('nan')
-  for i in (t:=trange(getenv("STEPS", 10))):
-    GlobalCounters.reset()   # NOTE: this makes it nice for DEBUG=2 timing
+  for t in range(10):
     loss = train_step()
-    # if i%10 == 9: test_acc = get_test_acc().item()
-    t.set_description(f"loss: {loss.item():6.2f}%")
+  # for i in (t:=trange(getenv("STEPS", 10))):
+  #   GlobalCounters.reset()   # NOTE: this makes it nice for DEBUG=2 timing
+  #   loss = train_step()
+  #   # if i%10 == 9: test_acc = get_test_acc().item()
+  #   t.set_description(f"loss: {loss.item():6.2f}%")
 
-  # verify eval acc
-  if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):
-    if test_acc >= target and test_acc != 100.0: print(colored(f"{test_acc=} >= {target}", "green"))
-    else: raise ValueError(colored(f"{test_acc=} < {target}", "red"))
+  # # verify eval acc
+  # if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):
+  #   if test_acc >= target and test_acc != 100.0: print(colored(f"{test_acc=} >= {target}", "green"))
+  #   else: raise ValueError(colored(f"{test_acc=} < {target}", "red"))

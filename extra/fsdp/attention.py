@@ -34,10 +34,10 @@ class Linear:
 
 class Model:
   def __init__(self):
-    self.q = Linear(6, 6)
-    self.k = Linear(6, 6)
-    self.v = Linear(6, 6)
-    self.bias = Tensor.ones(1, 12, 12).tril()
+    self.q = Linear(48, 48)
+    self.k = Linear(48, 48)
+    self.v = Linear(48, 48)
+    self.bias = Tensor.ones(1, 48, 48).tril()
     self.bias.requires_grad = False
 
   def __call__(self, x):

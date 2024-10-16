@@ -57,7 +57,7 @@ opt = nn.optim.SGD(nn.state.get_parameters(model))
 print_size("model", *nn.state.get_parameters(model))
 print_size("model with optimizer", *nn.state.get_parameters(opt))
 
-SHARD = int(os.environ.get("SHARD"))
+SHARD = int(os.environ.get("SHARD", 0))
 if SHARD > 1:
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
   print("SHARDING ON", GPUS)
