@@ -16,7 +16,7 @@ OSX = platform.system() == "Darwin"
 WIN = platform.system() == "Windows"
 CI = os.getenv("CI", "") != ""
 
-# fix colors on Windows
+# fix colors on Windows, https://stackoverflow.com/questions/12492810/python-how-can-i-make-the-ansi-escape-codes-to-work-also-in-windows
 if WIN: os.system("")
 
 def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
