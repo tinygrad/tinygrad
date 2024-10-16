@@ -1,11 +1,11 @@
-import sys, pickle, atexit
+import sys, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
 from tinygrad.ops import BUFFER_UOPS, UNSAFE_PAD_OPS, MetaOps, ReduceOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, Variable, resolve, \
     graph_rewrite, track_rewrites, sint
-from tinygrad.helpers import DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, Metadata, all_same, \
-    colored, diskcache_put, prod, dedup, all_int, merge_dicts, getenv, unwrap
+from tinygrad.helpers import DEBUG, MULTIOUTPUT, FUSE_CONV_BW, FUSE_ARANGE, Metadata, all_same, colored, diskcache_put, prod, dedup, all_int, \
+    merge_dicts, getenv, unwrap
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -274,7 +274,6 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
 def _graph_schedule(outs:List[LazyBuffer]) -> \
   Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
         DefaultDict[LBScheduleItem, int], # this is the in-degree of the graph
@@ -396,13 +395,6 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
     for assign in parents_assigns:
       graph[lsi].append(assign)
       in_degree[assign] += 1
-
-  if SAVE_SCHEDULE:
-    def _save():
-      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
-      with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
-    if len(SCHEDULES) == 0: atexit.register(_save)
-    SCHEDULES.append((graph, in_degree))
   return graph, in_degree, var_vals
 
 # *** DAG ordering: breadth first search ***

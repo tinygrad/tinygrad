@@ -38,7 +38,7 @@ class BenchmarkBertTrain(unittest.TestCase):
 
   def _test_layer(self, name, layer, input_shapes):
     optim = LAMB(get_parameters(layer))
-    with Context(SAVE_SCHEDULE=0): Tensor.realize(*[t.assign(t.detach().contiguous()) for t in get_parameters(optim)])
+    with Context(TRACK_MATCH_STATS=0): Tensor.realize(*[t.assign(t.detach().contiguous()) for t in get_parameters(optim)])
 
     JITCNT = getenv("JITCNT", 1)
     Tensor.training = True
@@ -59,7 +59,7 @@ class BenchmarkBertTrain(unittest.TestCase):
     best_tm = None
     flops, mem_used, mem, kernels = None, None, None, None
     for _ in range(CNT):
-      with Context(SAVE_SCHEDULE=0): inputs = [Tensor.randn(*shape, requires_grad=False).realize() for shape in input_shapes]
+      with Context(TRACK_MATCH_STATS=0): inputs = [Tensor.randn(*shape, requires_grad=False).realize() for shape in input_shapes]
       GlobalCounters.reset()
 
       st = time.perf_counter()
