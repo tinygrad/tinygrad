@@ -370,6 +370,7 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
           buf.buffer.dtype = dtypes.float32
           buf.buffer.options = None
     if buf.op is MetaOps.CONST:
+      if isinstance(val:=buf.arg, UOp): var_vals.update([val.unbind()])
       uop = UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(buf.dtype.scalar(), buf.arg), v.const_like(0))
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
     else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
