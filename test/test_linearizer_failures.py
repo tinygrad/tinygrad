@@ -1244,6 +1244,14 @@ class TestLinearizerFailures(unittest.TestCase):
     # resnet beam.
     # NV also fails with a pf.
     # CUDA Error 700, an illegal memory access was encountered
+    # CUDA:
+    # ========= Invalid __global__ read of size 2 bytes
+    # =========     at r_16_2_112_7_2_2_2_2_2_16_3_7_8_2_2_2_4+0x940
+    # =========     by thread (5,0,14) in block (780,1,0)
+    # =========     Address 0x7b7927e9117e is out of bounds
+    # =========     and is 1,502,850 bytes before the nearest allocation at 0x7b7928000000 of size 77,071,686 bytes
+    # /*0940*/              @!P3 LDG.E.U16 R35, [R20.64] ;
+    # half val0 = ((alu27&((alu33<3)!=1))?data1[alu35+-675]:cast0);
     ast = UOp(UOps.SINK, dtypes.void, arg=None, src=(
       UOp(UOps.STORE, dtypes.void, arg=None, src=(
         UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=0, src=()),
