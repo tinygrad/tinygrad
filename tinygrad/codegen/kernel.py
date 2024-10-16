@@ -640,7 +640,7 @@ class Kernel:
             new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
             permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in pattern_1] + list(range(wd+len(warp_dims), tcd)) + \
                                          [y + (wd if x == 0 else tcd) for x,y in pattern_2] + list(range(tcd+len(tcd_expand), len(new_shape)))
-            return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
+            return st1.reshape(new_shape).permute(tuple(permaxis)).reshape(st1.shape)
 
           warp_dims = tuple(sz for _, sz in tc.threads)
           tcd_dims =  tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
