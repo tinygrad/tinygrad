@@ -84,6 +84,16 @@ class TestViz(unittest.TestCase):
     ret = get_metadata(contexts)
     self.assertEqual(len(ret), 1)
 
+  def test_track_rewrites_with_exception_alt(self):
+    def fxn(x:UOp): raise Exception("test")
+    simple = PatternMatcher([(UPat.var("x")*1, fxn)])
+    @track_rewrites
+    def do_rewrite(key:str, x:UOp): return graph_rewrite(x, simple) # NOTE: viz tracks this
+    ld = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1), UOp.const(dtypes.int, 0)))
+    with self.assertRaises(Exception): do_rewrite("uop_0", ld*1)
+    ret = get_metadata(contexts)
+    self.assertEqual(len(ret), 1)
+
   def test_fold_const(self):
     a = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0), UOp.const(dtypes.int, 0)))
     graph = uop_to_json(a)
