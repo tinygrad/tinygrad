@@ -102,17 +102,19 @@ class CStyleLanguage(Renderer):
   def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
-    buftypes = [(name,f"{'write_only' if mutable else 'read_only'} image2d_t" if dtype.name.startswith('image') else
-                ("" if mutable else "const ")+self.render_dtype(dtype)+self.buffer_suffix if isinstance(dtype, PtrDType) else
+    buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
     prg = ''.join([f"{self.kernel_prefix}void {self.get_kernel_modifier(uops)}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
-  def render_dtype(self, dt:DType) -> str:
+  def render_dtype(self, dt:DType, mutable=True) -> str:
+    if isinstance(dt, ImageDType):
+      return f"{'write_only' if mutable else 'read_only'} image2d_t"
     if isinstance(dt, PtrDType):
-      return (self.smem_prefix if dt.local else self.buffer_prefix) + self.render_dtype(dt.base) + ("*" if isinstance(dt, PtrDType) else "")
+      return ("" if mutable else "const ") + (self.smem_prefix if dt.local else self.buffer_prefix) +\
+          self.render_dtype(dt.base) + ("*" if isinstance(dt, PtrDType) else "")
     return self.type_map.get(scalar:=dt.scalar(), scalar.name) + (str(dt.count) if (dt.count) > 1 else "")
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
@@ -126,12 +128,8 @@ class CStyleLanguage(Renderer):
     depth = 1
     c: DefaultDict[str, int] = defaultdict(int)
     for u in uops:
-      if u.op is UOps.DEFINE_GLOBAL:
-        r[u] = f"data{u.arg}"
-        bufs[u] = (r[u], (u.dtype, False))
-        continue
-      if u.op is UOps.DEFINE_VAR:
-        r[u] = u.arg[0]
+      if u.op in (UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR):
+        r[u] = f"data{u.arg}" if u.op is UOps.DEFINE_GLOBAL else u.arg[0]
         bufs[u] = (r[u], (u.dtype, False))
         continue
 
