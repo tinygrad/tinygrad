@@ -152,7 +152,7 @@ class CStyleLanguage(Renderer):
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {UOps.ENDIF, UOps.ENDRANGE}: depth -= 1
-      if u.op in {UOps.CONST, UOps.GEP} or (u.op in {UOps.VECTORIZE, UOps.ALU, UOps.CAST, UOps.BITCAST}
+      if u.op in {UOps.CONST, UOps.GEP} or (u.op in {UOps.VECTORIZE, UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.INDEX}
                                             and child_count[u] == 1 and not getenv("EXPAND_SSA")):
         r[u] = l
       else:

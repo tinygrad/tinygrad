@@ -72,8 +72,8 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), load.const_like(float('nan')))
 
 float4_folding = PatternMatcher([
-  (UPat(UOps.VECTORIZE, src=UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
-  (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  #(UPat(UOps.VECTORIZE, src=UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  #(UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
 ])
 
 # ***** image load valid simplification *****
@@ -496,11 +496,11 @@ expander = PatternMatcher([
 
 def no_vectorized_load_store(ls:UOp):
   idx = ls.src[0]
-  if idx.dtype.count == 1: return None
+  if idx.dtype.v == 1: return None
   # ugh, the meaning of a dtype.count idx is overloaded
-  if ls.op is UOps.LOAD and idx.dtype.count != ls.dtype.count: return None
-  if ls.op is UOps.STORE and idx.dtype.count != ls.src[1].dtype.count: return None
-  tv = [UOp(ls.op, ls.dtype.scalar(), tuple(j.gep(i) for j in ls.src)) for i in range(idx.dtype.count)]
+  if ls.op is UOps.LOAD and idx.dtype.v != ls.dtype.count: return None
+  if ls.op is UOps.STORE and idx.dtype.v != ls.src[1].dtype.count: return None
+  tv = [UOp(ls.op, ls.dtype.scalar(), tuple(j.gep(i) for j in ls.src)) for i in range(idx.dtype.v)]
   return UOp(UOps.VECTORIZE, ls.dtype, tuple(tv))
 
 def no_vectorized_acc(acc:UOp):
@@ -508,6 +508,11 @@ def no_vectorized_acc(acc:UOp):
   alus = tuple(UOp(acc.op, acc.dtype.scalar(),
     tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
   return UOp(UOps.VECTORIZE, acc.dtype, alus)
+
+def no_vectorized_index(idx:UOp):
+  if idx.dtype.v == 1: return None
+  tv = [UOp(idx.op, idx.dtype.scalar(), (idx.src[0], idx.src[1].gep(i))) for i in range(idx.src[1].dtype.count)]
+  return UOp(UOps.VECTORIZE, idx.dtype, tuple(tv))
 
 def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   @functools.lru_cache(None)
@@ -525,6 +530,7 @@ just_reduce = PatternMatcher([
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
   (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
+  (UPat(UOps.INDEX, name="idx"), no_vectorized_index),
   (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),

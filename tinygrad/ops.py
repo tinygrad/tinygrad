@@ -105,7 +105,6 @@ class UOps(FastEnum):
   EMPTY = auto()
   BUFFER_VIEW = auto()
 
-  INDEX = auto()
   EXPAND = auto()
   CONTRACT = auto()
   VIEW = auto()
@@ -139,6 +138,9 @@ class UOps(FastEnum):
   STORE = auto()
   ASSIGN = auto()
   BIND = auto()
+
+  # late INDEX
+  INDEX = auto()
 
   # control flow ops
   BARRIER = auto()
@@ -717,7 +719,7 @@ spec = PatternMatcher([
 
   # STORE takes a <bufidx, val, gate?>
   (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat(UOps.INDEX), UPat())), lambda: True),
-  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat(UOps.INDEX), UPat(dtype=dtypes.bool))), lambda: True),
+  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat(UOps.INDEX), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
   (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat(UOps.INDEX), UPat(), UPat(UOps.IF))), lambda: True),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
@@ -763,7 +765,9 @@ spec = PatternMatcher([
 def type_verify(uops:List[UOp]):
   for i,u in enumerate(uops):
     chk = cast(bool, spec.rewrite(u))
-    assert chk is True, f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
+    if chk is not True:
+      print_uops(uops)
+      raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
 
 # *** most of symbolic lives here now ***
 

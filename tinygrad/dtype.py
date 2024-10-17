@@ -33,13 +33,19 @@ class ImageDType(DType):
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
 class PtrDType(DType):
-  def __init__(self, dt:DType, local=False):
-    self.base, self.local = dt, local
+  def __init__(self, dt:DType, local=False, v=1):
+    self.base, self.local, self.v = dt, local, v
     super().__init__(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
   def __hash__(self): return super().__hash__()
+  def scalar(self) -> DType: return PtrDType(self.base, self.local, 1)
+  def vec(self, sz:int): return PtrDType(self.base, self.local, sz)
   def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.count==dt.count
   def __ne__(self, dt): return not (self == dt)
-  def __repr__(self): return f"{super().__repr__()}.ptr(local=True)" if self.local else f"{super().__repr__()}.ptr()"
+  def __repr__(self):
+    args = []
+    if self.local: args.append("local=True")
+    if self.v > 1: args.append(f"v={self.v}")
+    return f"{super().__repr__()}.ptr({','.join(args)})"
 
 class dtypes:
   @staticmethod
