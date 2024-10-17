@@ -26,6 +26,13 @@ if getenv("VALIDATE_HCQ"):
     on_linearizer_will_run = extra.nv_gpu_driver.nv_ioctl.before_launch
     on_linearizer_did_run = extra.nv_gpu_driver.nv_ioctl.collect_last_launch_state
     compare_states = extra.nv_gpu_driver.nv_ioctl.compare_launch_state
+  elif Device.DEFAULT == "QCOM":
+    print("VALIDATE_HCQ: Comparing QCOM to GPU")
+    import extra.qcom_gpu_driver.opencl_ioctl
+    validate_device = Device["GPU"]
+    on_linearizer_will_run = extra.qcom_gpu_driver.opencl_ioctl.before_launch
+    on_linearizer_did_run = extra.qcom_gpu_driver.opencl_ioctl.collect_last_launch_state
+    compare_states = extra.qcom_gpu_driver.opencl_ioctl.compare_launch_state
   else:
     print(colored("VALIDATE_HCQ options is ignored", 'red'))
 
@@ -282,7 +289,8 @@ if __name__ == "__main__":
   try:
     for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
       if (nth := getenv("FUZZ_NTH", -1)) != -1 and i != nth: continue
-      if "dtypes.image" in ast and Device.DEFAULT != "GPU": continue  # IMAGE is only for GPU
+      if getenv("FUZZ_IMAGEONLY") and "dtypes.image" not in ast: continue
+      if "dtypes.image" in ast and Device.DEFAULT not in {"GPU", "QCOM"}: continue  # IMAGE is only for GPU
       if ast in seen_ast_strs: continue
       seen_ast_strs.add(ast)
 
