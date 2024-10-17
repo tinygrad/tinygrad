@@ -18,7 +18,7 @@ class DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self.name == 'void': return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
-  def ptr(self) -> Union[PtrDType, ImageDType]: return PtrDType(self)
+  def ptr(self, local=False) -> Union[PtrDType, ImageDType]: return PtrDType(self, local)
   def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
 
 # dependent typing?
@@ -29,10 +29,9 @@ class ImageDType(DType):
   local: bool = False  # images are never local
   def scalar(self) -> DType: return self.base
   def vec(self, sz:int): return self.base.vec(sz)
-  def ptr(self) -> Union[PtrDType, ImageDType]: return self
+  def ptr(self, local=False) -> Union[PtrDType, ImageDType]: return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
-# @dataclass(frozen=True, init=False, repr=False, eq=False)
 class PtrDType(DType):
   def __init__(self, dt:DType, local=False):
     self.base, self.local = dt, local
@@ -40,7 +39,7 @@ class PtrDType(DType):
   def __hash__(self): return super().__hash__()
   def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.count==dt.count
   def __ne__(self, dt): return not (self == dt)
-  def __repr__(self): return f"PtrDType({super().__repr__()}, local=True)" if self.local else f"PtrDType({super().__repr__()})"
+  def __repr__(self): return f"{super().__repr__()}.ptr(local=True)" if self.local else f"{super().__repr__()}.ptr()"
 
 class dtypes:
   @staticmethod
