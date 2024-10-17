@@ -12,6 +12,7 @@ def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType) -> str:
   if dtype.count > 1 and isinstance(buf.dtype, PtrDType):
     return f"(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
   return f"({r[buf]}+{sidx})"
+
 base_rewrite = PatternMatcher([
   (UPat(UOps.DEFINE_ACC, name="x"), lambda r,x: r[x.src[0]]),
   (UPat(UOps.ASSIGN, name="x"), lambda r,x: f"{r[x.src[0]]} = {r[x.src[1]]};"),
