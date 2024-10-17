@@ -312,15 +312,15 @@ class TestEqStrDType(unittest.TestCase):
   def test_ptr_ne(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     # TODO: is this the wrong behavior?
-    assert PtrDType(dtypes.float32) == dtypes.float32
-    assert not (PtrDType(dtypes.float32) != dtypes.float32)
-    assert PtrDType(dtypes.float32) == PtrDType(dtypes.float32)
-    assert not (PtrDType(dtypes.float32) != PtrDType(dtypes.float32))
-    #assert PtrDType(dtypes.float32) != dtypes.float32
+    assert dtypes.float32.ptr() == dtypes.float32
+    assert not (dtypes.float32.ptr() != dtypes.float32)
+    assert dtypes.float32.ptr() == dtypes.float32.ptr()
+    assert not (dtypes.float32.ptr() != dtypes.float32.ptr())
+    #assert dtypes.float32.ptr() != dtypes.float32
   def test_strs(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
-    self.assertEqual(str(PtrDType(dtypes.float32)), "PtrDType(dtypes.float)")
+    self.assertEqual(str(dtypes.float32.ptr()), "dtypes.float.ptr()")
 
 class TestHelpers(unittest.TestCase):
   signed_ints = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)

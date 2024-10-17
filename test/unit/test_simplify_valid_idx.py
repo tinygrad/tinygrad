@@ -3,12 +3,12 @@ from typing import Tuple
 
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite, is_increasing
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, UOps, BinaryOps
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(UOps.LOAD, dtypes.float, (
-    UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0),
+    UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0),
     idx,
     UOp.const(dtypes.float, 0.0),
     valid

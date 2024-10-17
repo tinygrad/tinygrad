@@ -4,7 +4,7 @@ import unittest
 from tinygrad import Device
 from tinygrad.ops import UOp, UOps, BinaryOps, UnaryOps
 from tinygrad.engine.search import Opt, OptOps
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.codegen.kernel import Kernel
@@ -31,7 +31,7 @@ class TestOpenpilotValidhack(unittest.TestCase):
                         UOp(UOps.DEFINE_GLOBAL, dtypes.imagef((8, 108, 4)), arg=2, src=()),
                         UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 64, 128, 1, 1, 8, 4, 3, 4, 3, 3), strides=(0, 0, 0, 0, 0, 432, 1, 48, 4, 144, 16), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),
               UOp(UOps.LOAD, dtypes.float, arg=None, src=(
-                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=3, src=()),
+                UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), arg=3, src=()),
                 UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 64, 128, 1, 1, 8, 4, 1, 1, 1, 1), strides=(0, 0, 0, 0, 0, 4, 1, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
             x19:=UOp(UOps.CONST, dtypes.float, arg=0.0, src=(
               x20:=UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 64, 128, 1, 1, 8, 4, 1, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
@@ -81,7 +81,7 @@ class TestOpenpilotValidhack(unittest.TestCase):
                           UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
                             UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
                               UOp(UOps.LOAD, dtypes.float, arg=None, src=(
-                                x18:=UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=2, src=()),
+                                x18:=UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), arg=2, src=()),
                                 UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 0, 1), offset=48128, mask=((0, 1), (1, 2), (0, 512)), contiguous=False),)), src=()),)),
                               UOp(UOps.LOAD, dtypes.float, arg=None, src=(
                                 x18,
