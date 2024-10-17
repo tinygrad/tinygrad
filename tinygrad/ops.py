@@ -350,6 +350,7 @@ class UOp(MathTrait):
     if self.op is UOps.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op is UOps.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     if self.op is UOps.BIND: return self.src[0].vmin, self.src[0].vmax  # ignore the bound value
+    #if self.op is UOps.CAST and self.dtype is dtypes.int64: return self.src[0].vmin, self.src[0].vmax
     if self.op is UOps.EXPAND: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is UOps.SPECIAL:
