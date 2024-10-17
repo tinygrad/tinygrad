@@ -18,7 +18,7 @@ class DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self.name == 'void': return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
-  def ptr(self) -> Union[PtrDType, ImageDType]: return PtrDType(self)
+  def ptr(self, local=False) -> Union[PtrDType, ImageDType]: return PtrDType(self, local)
   def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
 
 # dependent typing?
@@ -29,10 +29,9 @@ class ImageDType(DType):
   local: bool = False  # images are never local
   def scalar(self) -> DType: return self.base
   def vec(self, sz:int): return self.base.vec(sz)
-  def ptr(self) -> Union[PtrDType, ImageDType]: return self
+  def ptr(self, local=False) -> Union[PtrDType, ImageDType]: return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
-# @dataclass(frozen=True, init=False, repr=False, eq=False)
 class PtrDType(DType):
   def __init__(self, dt:DType, local=False):
     self.base, self.local = dt, local
@@ -40,7 +39,7 @@ class PtrDType(DType):
   def __hash__(self): return super().__hash__()
   def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.count==dt.count
   def __ne__(self, dt): return not (self == dt)
-  def __repr__(self): return f"PtrDType({super().__repr__()}, local=True)" if self.local else f"PtrDType({super().__repr__()})"
+  def __repr__(self): return f"{super().__repr__()}.ptr(local=True)" if self.local else f"{super().__repr__()}.ptr()"
 
 class dtypes:
   @staticmethod
@@ -91,8 +90,8 @@ class dtypes:
   uint16: Final[DType] = DType(4, 2, "unsigned short", 'H', 1)
   int32: Final[DType] = DType(5, 4, "int", 'i', 1)
   uint32: Final[DType] = DType(6, 4, "unsigned int", 'I', 1)
-  int64: Final[DType] = DType(7, 8, "long", 'l', 1)
-  uint64: Final[DType] = DType(8, 8, "unsigned long", 'L', 1)
+  int64: Final[DType] = DType(7, 8, "long", 'q', 1)
+  uint64: Final[DType] = DType(8, 8, "unsigned long", 'Q', 1)
   float16: Final[DType] = DType(9, 2, "half", 'e', 1)
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
   bfloat16: Final[DType] = DType(10, 2, "__bf16", None, 1)

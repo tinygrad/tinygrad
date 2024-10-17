@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser
+import multiprocessing, pickle, functools, difflib, os, threading, json, time, sys, webbrowser, socket
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
@@ -24,7 +24,7 @@ class GraphRewriteMetadata:
   """The Python line calling graph_rewrite"""
   kernel_name: Optional[str]
   """The kernel calling graph_rewrite"""
-  upats: List[Tuple[Tuple[str, int], str]]
+  upats: List[Tuple[Tuple[str, int], str, float]]
   """List of all the applied UPats"""
 
 @dataclass
@@ -47,7 +47,7 @@ def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List
     name = to_function_name(k.name) if isinstance(k, Kernel) else None
     for ctx in ctxs:
       if ctx.sink.op is UOps.CONST: continue
-      upats = [(upat.location, upat.printable()) for _,_,upat in ctx.matches if upat is not None]
+      upats = [(upat.location, upat.printable(), tm) for _,_,upat,tm in ctx.matches if upat is not None]
       if name not in kernels: kernels[name] = []
       kernels[name].append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
   return list(kernels.values())
@@ -72,7 +72,7 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
   g = GraphRewriteDetails(**asdict(metadata), graphs=[ctx.sink], diffs=[], changed_nodes=[], kernel_code=_prg(k))
   replaces: Dict[UOp, UOp] = {}
   sink = ctx.sink
-  for i,(u0,u1,upat) in enumerate(ctx.matches):
+  for i,(u0,u1,upat,_) in enumerate(ctx.matches):
     replaces[u0] = u0 if u1 is None else u1
     # if the match didn't result in a rewrite we move forward
     if u1 is None: continue
@@ -104,7 +104,7 @@ class Handler(BaseHTTPRequestHandler):
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
         g = get_details(*kernels[int(qkernel[0])][int(query["idx"][0])])
-        ret = json.dumps({**asdict(g), "graphs": list(map(uop_to_json, g.graphs))}).encode()
+        ret = json.dumps({**asdict(g), "graphs": list(map(uop_to_json, g.graphs)), "uops": list(map(str, g.graphs))}).encode()
       else: ret = json.dumps([list(map(lambda x:asdict(x[2]), v)) for v in kernels]).encode()
     else:
       self.send_response(404)
@@ -122,6 +122,9 @@ def reloader():
     time.sleep(0.1)
 
 if __name__ == "__main__":
+  with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    if s.connect_ex(((HOST:="http://127.0.0.1").replace("http://", ""), PORT:=getenv("PORT", 8000))) == 0:
+      raise RuntimeError(f"{HOST}:{PORT} is occupied! use PORT= to change.")
   stop_reloader = threading.Event()
   multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
   st = time.perf_counter()
@@ -133,12 +136,12 @@ if __name__ == "__main__":
     ret = [get_details(*args) for v in tqdm(kernels) for args in v]
     print(f"fuzzed {len(ret)} rewrite details")
   print("*** loaded kernels")
-  server = HTTPServer(('', PORT:=getenv("PORT", 8000)), Handler)
+  server = HTTPServer(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
-  print(f"*** started viz on http://127.0.0.1:{PORT}")
+  print(f"*** started viz on {HOST}:{PORT}")
   print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"))
-  if getenv("BROWSER", 0): webbrowser.open(f"http://127.0.0.1:{PORT}")
+  if getenv("BROWSER", 0): webbrowser.open(f"{HOST}:{PORT}")
   try: server.serve_forever()
   except KeyboardInterrupt:
     print("*** viz is shutting down...")
