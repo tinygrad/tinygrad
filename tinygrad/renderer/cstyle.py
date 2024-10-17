@@ -7,7 +7,7 @@ from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
 
-def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType):
+def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType) -> str:
   sidx = strip_parens(r[idx]) if idx.arg == BinaryOps.ADD else r[idx]
   if dtype.count > 1 and isinstance(buf.dtype, PtrDType):
     return f"(({r.smem_prefix if buf.dtype.local and r.smem_prefix_for_cast else r.buffer_prefix}{r.render_dtype(dtype)}*)({r[buf]}+{sidx}))"
@@ -40,13 +40,11 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda r,x: f"{x.arg}u"),
   (UPat(UOps.CONST, dtype=dtypes.bool, name="x"), lambda r,x: "1" if x.arg else "0"),
   (UPat(UOps.CONST, name="x"), lambda r,x: str(x.arg)),
-  # load/store
-  (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var"), UPat.var("gate")), name="load"),
-   lambda r,buf,idx,load,var,gate: f"({r[gate]}?*{_render_index(r, buf, idx, load.dtype)}:{r[var]})"),
-  (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('idx')), allow_any_len=True, name="load"),
-   lambda r,buf,idx,load: f"*{_render_index(r, buf, idx, load.dtype)}"),
-  (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
-   lambda r,buf,idx,var: f"*{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
+  # new load/store
+  (UPat(UOps.INDEX, src=(UPat.var("buf"), UPat.var('idx'))), lambda r,buf,idx: _render_index(r, buf, idx, buf.dtype.scalar())),
+  (UPat(UOps.LOAD, src=(UPat.var('bidx'), UPat.var("var"), UPat.var("gate"))), lambda r,bidx,var,gate: f"({r[gate]}?*{r[bidx]}:{r[var]})"),
+  (UPat(UOps.LOAD, src=(UPat.var('bidx'),), allow_any_len=True), lambda r,bidx: f"*{r[bidx]}"),
+  (UPat(UOps.STORE, src=(UPat.var('bidx'),UPat.var("var"))), lambda r,bidx,var: f"*{r[bidx]} = {r[var]};"),
   # alu/gep
   (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](
     *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]), x.dtype)),
@@ -113,7 +111,9 @@ class CStyleLanguage(Renderer):
     if isinstance(dt, ImageDType):
       return f"{'write_only' if mutable else 'read_only'} image2d_t"
     if isinstance(dt, PtrDType):
-      return ("" if mutable else "const ") + (self.smem_prefix if dt.local else self.buffer_prefix) +\
+      # NOTE: const doesn't improve performance
+      # ("" if mutable else "const ") +
+      return (self.smem_prefix if dt.local else self.buffer_prefix) +\
           self.render_dtype(dt.base) + ("*" if isinstance(dt, PtrDType) else "")
     return self.type_map.get(scalar:=dt.scalar(), scalar.name) + (str(dt.count) if (dt.count) > 1 else "")
 
@@ -134,7 +134,9 @@ class CStyleLanguage(Renderer):
         continue
 
       # mark buffers that we store to writable
-      if u.op is UOps.STORE and u.src[0].op is UOps.DEFINE_GLOBAL: bufs[u.src[0]] = (bufs[u.src[0]][0], (bufs[u.src[0]][1][0], True))
+      if u.op is UOps.STORE:
+        for up in u.src[0].sparents:
+          if up.op is UOps.DEFINE_GLOBAL: bufs[up] = (bufs[up][0], (bufs[up][1][0], True))
 
       # naming
       prefix = None
@@ -143,14 +145,14 @@ class CStyleLanguage(Renderer):
       else:
         prefix = {UOps.RANGE: "ridx", UOps.ALU: "alu", UOps.WMMA: "wmma", UOps.DEFINE_LOCAL: "temp", UOps.CONST: "const",
                   UOps.CAST: "cast", UOps.BITCAST: "cast", UOps.GEP: "gep", UOps.VECTORIZE: "cast", UOps.NOOP: "precast",
-                  UOps.DEFINE_ACC: "acc", UOps.LOAD: "val"}.get(u.op, "unk")
+                  UOps.INDEX: "bidx", UOps.DEFINE_ACC: "acc", UOps.LOAD: "val"}.get(u.op, "unk")
         r[u] = f"{prefix}{c[prefix]}"
 
       l = cast(str, self.string_rewrite.rewrite(u, ctx=self))
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {UOps.ENDIF, UOps.ENDRANGE}: depth -= 1
-      if u.op in {UOps.CONST, UOps.GEP} or (u.op in {UOps.VECTORIZE, UOps.ALU, UOps.CAST, UOps.BITCAST}
+      if u.op in {UOps.CONST, UOps.GEP} or (u.op in {UOps.VECTORIZE, UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.INDEX}
                                             and child_count[u] == 1 and not getenv("EXPAND_SSA")):
         r[u] = l
       else:

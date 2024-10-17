@@ -139,6 +139,9 @@ class UOps(FastEnum):
   ASSIGN = auto()
   BIND = auto()
 
+  # late INDEX
+  INDEX = auto()
+
   # control flow ops
   BARRIER = auto()
   IF = auto()
@@ -254,6 +257,7 @@ class UOp(MathTrait):
     assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
     return ret
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
+  def index(self, idx:UOp): return UOp(UOps.INDEX, self.dtype, (self,idx))
   def view(self, st:ShapeTracker): return UOp(UOps.VIEW, self.dtype, (self,), st)
   def const_like(self, b:ConstType|Variable|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
@@ -432,11 +436,11 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   if ignore_indexing:
     for u in uops:
       if u.op is UOps.LOAD:
-        dont_count = dont_count.union(u.src[1].sparents)
-        if len(u.src) > 3: dont_count = dont_count.union(u.src[2].sparents)
+        dont_count = dont_count.union(u.src[0].sparents)
+        if len(u.src) > 2: dont_count = dont_count.union(u.src[2].sparents)
       elif u.op is UOps.STORE:
-        dont_count = dont_count.union(u.src[1].sparents)
-        if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
+        dont_count = dont_count.union(u.src[0].sparents)
+        if len(u.src) > 2: dont_count = dont_count.union(u.src[2].sparents)
       elif u.op is UOps.IF:
         dont_count = dont_count.union(u.src[0].sparents)
   for u in uops:
@@ -450,7 +454,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
     elif u.op is UOps.LOAD:
       mem += u.dtype.itemsize * mults
     elif u.op is UOps.STORE:
-      mem += u.src[2].dtype.itemsize * mults
+      mem += u.src[1].dtype.itemsize * mults
     elif u.op is UOps.ALU and u not in dont_count:
       flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
     elif u.op is UOps.WMMA and u not in dont_count:
@@ -702,16 +706,21 @@ spec = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.VIEW))), lambda: True),
   (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.VIEW), UPat(UOps.STORE))), lambda: True),
 
-  # LOAD takes a <buf, idx, alt?, gate?, barrier?>
-  (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat())), lambda: True),
-  (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(), UPat((UOps.IF, UOps.BARRIER)))), lambda: True),
-  (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(), UPat(name="alt"), UPat(dtype=dtypes.bool)), name="ld"),
-   lambda ld,alt: ld.dtype == alt.dtype),
+  # early STORE has a <buf, shapetracker, val>
+  (UPat(UOps.STORE, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.VIEW), UPat())), lambda: True),
 
-  # STORE takes a <buf, idx, val, gate?>
-  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(), UPat())), lambda: True),
-  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
-  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(), UPat(), UPat(UOps.IF))), lambda: True),
+  # INDEX is used in new style load/store
+  (UPat(UOps.INDEX, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat())), lambda: True),
+
+  # LOAD takes a <bufidx, alt?, gate?, barrier?>
+  (UPat(UOps.LOAD, src=(UPat(UOps.INDEX),)), lambda: True),
+  (UPat(UOps.LOAD, src=(UPat(UOps.INDEX), UPat((UOps.IF, UOps.BARRIER)))), lambda: True),
+  (UPat(UOps.LOAD, src=(UPat(UOps.INDEX), UPat(name="alt"), UPat(dtype=dtypes.bool)), name="ld"), lambda ld,alt: ld.dtype == alt.dtype),
+
+  # STORE takes a <bufidx, val, gate?>
+  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat(UOps.INDEX), UPat())), lambda: True),
+  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat(UOps.INDEX), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
+  (UPat(UOps.STORE, dtype=dtypes.void, src=(UPat(UOps.INDEX), UPat(), UPat(UOps.IF))), lambda: True),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(UOps.ALU, name="w", src=(UPat(dtype=dtypes.bool), UPat(name="x"), UPat(name="y")), arg=TernaryOps.WHERE),
@@ -741,7 +750,7 @@ spec = PatternMatcher([
   (UPat(UOps.GEP, src=(UPat(name="src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
   (UPat(UOps.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.count and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat((UOps.BITCAST, UOps.CAST), src=(UPat(),), name="x"), lambda x: x.arg is None and x.dtype.count == 1),
-  (UPat(UOps.BARRIER, dtypes.void, src=UPat(UOps.STORE, src=(UPat(UOps.DEFINE_LOCAL),), allow_any_len=True)), lambda: True),
+  (UPat(UOps.BARRIER, dtypes.void, src=UPat(UOps.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
 
   # NOTE: for testing, we let sinks be anything
   #(UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
@@ -756,7 +765,9 @@ spec = PatternMatcher([
 def type_verify(uops:List[UOp]):
   for i,u in enumerate(uops):
     chk = cast(bool, spec.rewrite(u))
-    assert chk is True, f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
+    if chk is not True:
+      print_uops(uops)
+      raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
 
 # *** most of symbolic lives here now ***
 
