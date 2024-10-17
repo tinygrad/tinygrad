@@ -261,7 +261,7 @@ class NVProgram(HCQProgram):
                             cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3, constant_buffer_invalidate_0=1,
                             shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=smem_config,
                             max_sm_config_shared_mem_size=0x1a, register_count_v=self.registers_usage, target_sm_config_shared_mem_size=smem_config,
-                            barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.program_sz>>8,
+                            barrier_count=1, shader_local_memory_high_size=self.lcmem_usage, program_prefetch_size=self.program_sz>>8,
                             program_address=self.program_addr, sass_version=0x89,
                             program_prefetch_addr_lower_shifted=self.program_addr>>8, program_prefetch_addr_upper_shifted=self.program_addr>>40)
 
@@ -536,7 +536,8 @@ class NVDevice(HCQCompiled):
 
   def _alloc_local_memory(self, required):
     # if self.slm_per_thread >= required: return
-    if hasattr(self, 'shader_local_mem'): self.allocator.free(self.shader_local_mem, self.shader_local_mem.size) # type: ignore # pylint: disable=access-member-before-definition
+    self.synchronize()
+    if hasattr(self, 'shader_local_mem'): self.allocator.free(self.shader_local_mem, self.shader_local_mem.size)
 
     self.slm_per_thread, old_slm_per_thread = round_up(required, 32), self.slm_per_thread
     bytes_per_warp = round_up(self.slm_per_thread * 32, 0x200)
@@ -571,7 +572,8 @@ class NVDevice(HCQCompiled):
       for i in range(mmu_info.count):
         pfinfo = mmu_info.mmuFaultInfoList[i]
         report += [f"MMU fault: 0x{pfinfo.faultAddress:X} | {NV_PFAULT_FAULT_TYPE[pfinfo.faultType]} | {NV_PFAULT_ACCESS_TYPE[pfinfo.accessType]}"]
-        report += ["GPU mappings:\n"+"\n".join([f"\t0x{x:X} - 0x{x+y-1:X} | {self._debug_mappings[(x,y)]}" for x,y in sorted(self._debug_mappings)])]
+        if DEBUG >= 2:
+          report += ["GPU mappings:\n"+"\n".join([f"\t0x{x:X} - 0x{x+y-1:X} | {self._debug_mappings[(x,y)]}" for x,y in sorted(self._debug_mappings)])]
     else:
       for i, e in enumerate(sm_errors.smErrorStateArray):
         if e.hwwGlobalEsr or e.hwwWarpEsr: report += [f"SM{i} fault: esr={e.hwwGlobalEsr} warp_esr={e.hwwWarpEsr} warp_pc={e.hwwWarpEsrPc64}"]
