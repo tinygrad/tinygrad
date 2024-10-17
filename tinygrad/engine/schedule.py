@@ -131,7 +131,10 @@ def simplify_and_unbind(ctx, x:UOp) -> Optional[UOp]:
   ctx[2].add(st)
   return st.to_uop() if st != x.st else None
 append_vars = PatternMatcher([(UPat(UOps.VIEW, name="x"), simplify_and_unbind)])
-enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx[1].index(x.arg[0])))])
+to_ast = PatternMatcher([
+  (UPat(UOps.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
+])
+enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx[1].index(x.arg[0]))),])
 
 PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, Tuple[int, ...], UOp]] = []
 if getenv("RUN_PROCESS_REPLAY"):
@@ -142,7 +145,7 @@ if getenv("RUN_PROCESS_REPLAY"):
 @track_rewrites
 def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable, int]) -> UOp:
   sink = graph_rewrite(graph_rewrite(base_sink, view_left), view_right)
-  ret = graph_rewrite(sink, append_vars+enumerate_bufs, (var_vals, bufs, set()))
+  ret = graph_rewrite(graph_rewrite(sink, to_ast), append_vars+enumerate_bufs, (var_vals, bufs, set()))
   PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
   return ret
 
@@ -160,7 +163,7 @@ def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], inputs:List[LazyBuffer], bu
     return UOp.load(ubuf, buf.st.to_uop(), dtype=dtype)
   src = tuple(to_uop(x, outputs, inputs, buf_uops, cache) for x in buf.srcs)
   if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
-  elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, (buf_uops[buf.buffer], src[0]))
+  elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
   elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]), buf.arg)
   elif buf.op is UnaryOps.CAST: ret = UOp(UOps.CAST, dtype, src)
   elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
