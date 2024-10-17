@@ -211,7 +211,8 @@ generate_libc() {
 
   sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/libc.py
   sed -i "s\FIXME_STUB\libc\g" $BASE/libc.py
-  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(ctypes.util.find_library('c'))\g" $BASE/libc.py
+  sed -i "s\FunctionFactoryStub()\g" $BASE/libc.py
+  patch_dlopen $BASE/libc.py "c"
 
   fixup $BASE/libc.py
 }
