@@ -495,12 +495,12 @@ expander = PatternMatcher([
 ])
 
 def no_vectorized_load_store(ls:UOp):
-  idx = ls.src[1]
+  idx = ls.src[0]
   if idx.dtype.count == 1: return None
   # ugh, the meaning of a dtype.count idx is overloaded
   if ls.op is UOps.LOAD and idx.dtype.count != ls.dtype.count: return None
-  if ls.op is UOps.STORE and idx.dtype.count != ls.src[2].dtype.count: return None
-  tv = [UOp(ls.op, ls.dtype.scalar(), (ls.src[0],) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.dtype.count)]
+  if ls.op is UOps.STORE and idx.dtype.count != ls.src[1].dtype.count: return None
+  tv = [UOp(ls.op, ls.dtype.scalar(), tuple(j.gep(i) for j in ls.src)) for i in range(idx.dtype.count)]
   return UOp(UOps.VECTORIZE, ls.dtype, tuple(tv))
 
 def no_vectorized_acc(acc:UOp):
@@ -527,7 +527,7 @@ devectorize = PatternMatcher([
   (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
   (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
-  #(UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
+  (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
 ])
 
 reducer = PatternMatcher([
