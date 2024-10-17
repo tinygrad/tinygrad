@@ -113,8 +113,8 @@ view_left = merge_views+PatternMatcher([
 # push VIEW to stores
 view_right = merge_views+PatternMatcher([
   # ASSIGN can override st
-  (UPat(UOps.STORE, src=(UPat.var("b"), UPat(), UPat(UOps.ASSIGN, name="a"))),
-   lambda a,b: UOp.store(b, a.arg[0].to_uop(), a.replace(arg=())) if a.arg else None),
+  (UPat(UOps.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(UOps.ASSIGN, name="a"))),
+   lambda a,b,st: UOp.store(b, (a.arg[0]+st.arg).to_uop(), a.replace(arg=())) if a.arg else None),
   # view on reduce creates a new VIEW
   (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, src=UPat.var("rsrc"), name="r"),), name="view"), view_r),
   # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
