@@ -1,8 +1,22 @@
-import random, traceback, ctypes, argparse
+import random, traceback, ctypes, argparse, os
 from typing import List, Tuple, DefaultDict, Any
 import numpy as np
 from collections import defaultdict
 from extra.optimization.helpers import load_worlds, ast_str_to_lin, kern_str_to_lin
+
+# We need to insert ioctl before opening devices.
+if os.getenv("VALIDATE_HCQ", 0) != 0:
+  try:
+    import extra.nv_gpu_driver.nv_ioctl
+    from tinygrad import Device
+    _ = Device["NV"]
+  except: pass
+
+  try:
+    import extra.qcom_gpu_driver.opencl_ioctl
+    from tinygrad import Device
+    _ = Device["QCOM"]
+  except: pass
 
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
