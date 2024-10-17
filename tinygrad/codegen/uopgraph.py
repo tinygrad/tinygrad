@@ -41,9 +41,13 @@ def fold_expanded(ex, buf):
           load_1 = new_srcs[offsets[o]]
           new_src = list(load_1.src)
           if new_src[1].divides(fold_length) is None: continue
-          # for images, we rewrite the index. it must evenly divide 4 from the above check
           if is_image:
+            # for images, we rewrite the index. it must evenly divide 4 from the above check
             new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((new_src[1] // 4) % buf.dtype.shape[1], (new_src[1] // (4 * buf.dtype.shape[1]))))
+          else:
+            # cast and fold
+            new_src[0] = new_src[0].cast(new_src[0].dtype.vec(fold_length))
+            new_src[1] = new_src[1] // fold_length
           # vectorize the store/loadconst
           if not is_load or len(new_src) >= 4:
             new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
