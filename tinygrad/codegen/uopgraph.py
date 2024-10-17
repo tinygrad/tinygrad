@@ -472,7 +472,7 @@ expander = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
   # create gate MUST BE BEFORE expander
-  (UPat(UOps.STORE, name="root"), create_gate),
+  #(UPat(UOps.STORE, name="root"), create_gate),
   # double expand
   (UPat(UOps.EXPAND, name="outer", src=(UPat(UOps.EXPAND, name="inner"),)),
    lambda outer, inner: UOp(UOps.EXPAND, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
@@ -527,7 +527,7 @@ devectorize = PatternMatcher([
   (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
   (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
-  (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
+  #(UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
 ])
 
 reducer = PatternMatcher([

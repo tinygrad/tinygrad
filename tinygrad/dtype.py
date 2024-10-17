@@ -35,6 +35,7 @@ class ImageDType(DType):
 # @dataclass(frozen=True, init=False, repr=False, eq=False)
 class PtrDType(DType):
   def __init__(self, dt:DType, local=False):
+    # TODO: add mutable here
     self.base, self.local = dt, local
     super().__init__(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
   def __hash__(self): return super().__hash__()

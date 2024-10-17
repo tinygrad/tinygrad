@@ -105,6 +105,7 @@ class UOps(FastEnum):
   EMPTY = auto()
   BUFFER_VIEW = auto()
 
+  INDEX = auto()
   EXPAND = auto()
   CONTRACT = auto()
   VIEW = auto()
@@ -424,6 +425,8 @@ def print_uops(uops:List[UOp]):
     print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):25s} " f"{str(formatted_parents):32s} {u.arg}")
 
 def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
+  return 0,0
+
   flops: sint = 0
   mem: sint = 0
   mults: sint = 1
@@ -747,6 +750,11 @@ spec = PatternMatcher([
   #(UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
   (UPat(UOps.SINK, dtypes.void), lambda: True),
   (UPat(UOps.NOOP), lambda: True),
+
+  # TODO: fix this
+  (UPat(UOps.INDEX), lambda: True),
+  (UPat(UOps.LOAD, src=(UPat(UOps.INDEX),)), lambda: True),
+  (UPat(UOps.STORE, src=(UPat(UOps.INDEX), UPat())), lambda: True),
 
   # PTX LOAD/STORE
   (UPat((UOps.LOAD, UOps.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
