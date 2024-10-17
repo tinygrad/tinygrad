@@ -7,6 +7,11 @@ from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, R
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
 
+def all_gather(mlb: "MultiLazyBuffer") -> "MultiLazyBuffer":
+  if mlb.axis is None: return mlb
+  return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None, )
+
+
 def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
   assert all_same([lb.shape[0] for lb in lbs]), "allreduce with uneven shards is undefined"
@@ -157,7 +162,7 @@ class MultiLazyBuffer(MathTrait):
 
   def expand(self, arg:Tuple[sint, ...]):
     # NOTE: this assert isn't needed, sharded axis can have dim 1
-    assert self.axis is None or arg[self.axis] == self.shape[self.axis], f"expand not supported on sharded axis {arg=}"
+    # assert self.axis is None or arg[self.axis] == self.shape[self.axis], f"expand not supported on sharded axis {arg=}"
     return MultiLazyBuffer([x.expand(self._shape_to_single_shard(arg, x)) for x in self.lbs], self.axis, self.real)
 
   def permute(self, arg:Tuple[int, ...]):
