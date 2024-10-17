@@ -536,7 +536,7 @@ class NVDevice(HCQCompiled):
 
   def _alloc_local_memory(self, required):
     # if self.slm_per_thread >= required: return
-    if hasattr(self, 'shader_local_mem'): self.allocator.free(self.shader_local_mem) # type: ignore # pylint: disable=access-member-before-definition
+    if hasattr(self, 'shader_local_mem'): self.allocator.free(self.shader_local_mem, self.shader_local_mem.size) # type: ignore # pylint: disable=access-member-before-definition
 
     self.slm_per_thread, old_slm_per_thread = round_up(required, 32), self.slm_per_thread
     bytes_per_warp = round_up(self.slm_per_thread * 32, 0x200)
