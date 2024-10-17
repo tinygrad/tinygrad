@@ -433,7 +433,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
     for u in uops:
       if u.op is UOps.LOAD:
         dont_count = dont_count.union(u.src[1].sparents)
-        if len(u.src) > 3: dont_count = dont_count.union(u.src[2].sparents)
+        if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
       elif u.op is UOps.STORE:
         dont_count = dont_count.union(u.src[1].sparents)
         if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
@@ -755,8 +755,9 @@ spec = PatternMatcher([
 
 def type_verify(uops:List[UOp]):
   for i,u in enumerate(uops):
-    chk = cast(bool, spec.rewrite(u))
-    assert chk is True, f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
+    if cast(bool, spec.rewrite(u)) is not True:
+      print_uops(uops)
+      raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
 
 # *** most of symbolic lives here now ***
 
