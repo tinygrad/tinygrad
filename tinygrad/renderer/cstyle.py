@@ -42,17 +42,9 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.CONST, name="x"), lambda r,x: str(x.arg)),
   # new load/store
   (UPat(UOps.INDEX, src=(UPat.var("buf"), UPat.var('idx'))), lambda r,buf,idx: _render_index(r, buf, idx, buf.dtype.scalar())),
-  (UPat(UOps.LOAD, src=(UPat.var('bidx'), UPat.var("var"), UPat.var("gate"))),
-   lambda r,bidx,var,gate: f"({r[gate]}?*{r[bidx]}:{r[var]})"),
-  (UPat(UOps.LOAD, src=(UPat.var('bidx'),)), lambda r,bidx: f"*{r[bidx]}"),
+  (UPat(UOps.LOAD, src=(UPat.var('bidx'), UPat.var("var"), UPat.var("gate"))), lambda r,bidx,var,gate: f"({r[gate]}?*{r[bidx]}:{r[var]})"),
+  (UPat(UOps.LOAD, src=(UPat.var('bidx'),), allow_any_len=True), lambda r,bidx: f"*{r[bidx]}"),
   (UPat(UOps.STORE, src=(UPat.var('bidx'),UPat.var("var"))), lambda r,bidx,var: f"*{r[bidx]} = {r[var]};"),
-  # load/store
-  #(UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var"), UPat.var("gate")), name="load"),
-  # lambda r,buf,idx,load,var,gate: f"({r[gate]}?{_render_index(r, buf, idx, load.dtype)}:{r[var]})"),
-  #(UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('idx')), allow_any_len=True, name="load"),
-  # lambda r,buf,idx,load: _render_index(r, buf, idx, load.dtype)),
-  #(UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
-  # lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   # alu/gep
   (UPat(UOps.ALU, name="x"), lambda r,x: r.code_for_op[x.arg](
     *([strip_parens(r[v]) if v.arg == x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]), x.dtype)),
@@ -120,7 +112,7 @@ class CStyleLanguage(Renderer):
 
   def render_dtype(self, dt:DType) -> str:
     if isinstance(dt, PtrDType):
-      return self.buffer_prefix + self.render_dtype(dt.base) + ("*" if isinstance(dt, PtrDType) else "")
+      return (self.smem_prefix if dt.local else self.buffer_prefix) + self.render_dtype(dt.base) + ("*" if isinstance(dt, PtrDType) else "")
     return self.type_map.get(scalar:=dt.scalar(), scalar.name) + (str(dt.count) if (dt.count) > 1 else "")
 
   def __getitem__(self, key): return self.r[key]  # hacky helper

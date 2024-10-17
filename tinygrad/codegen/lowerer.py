@@ -114,7 +114,7 @@ def lower_load_store(ctx: IndexContext, x: UOp):
   buf = x.src[0]
   if x.op is UOps.LOAD:
     barrier = (UOp(UOps.BARRIER, dtypes.void, (x.src[2],)),) if x.src[0].op is UOps.DEFINE_LOCAL else ()
-    return UOp(UOps.LOAD, x.dtype, (UOp(UOps.INDEX, buf.dtype, (buf, idx)),) + ((x.const_like(0), valid) if has_valid else ()) + barrier)
+    return UOp(UOps.LOAD, x.dtype, (buf.index(idx),) + ((x.const_like(0), valid) if has_valid else ()) + barrier)
   # NOTE: only store the local reduceop in the threads that are actually doing the reduce
   store_back = x.src[0].op is UOps.DEFINE_LOCAL and x.src[2].op is UOps.REDUCE and \
     x.src[2].src[0].op is UOps.LOAD and x.src[2].src[0].src[0].op is UOps.DEFINE_LOCAL
@@ -124,7 +124,7 @@ def lower_load_store(ctx: IndexContext, x: UOp):
     for oidx, ridx in zip(ctx.idxs, ctx.ridxs):
       if oidx is not ridx: valid = valid * oidx.eq(0)
     has_valid = valid.op is not UOps.CONST or valid.arg is not True
-  return UOp(UOps.STORE, dtypes.void, (UOp(UOps.INDEX, buf.dtype, (buf, idx)), x.src[2]) + ((valid,) if has_valid else ()))
+  return UOp(UOps.STORE, dtypes.void, (buf.index(idx), x.src[2]) + ((valid,) if has_valid else ()))
 
 pm_lowerer = PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, name="x"), lower_reduce_axis),

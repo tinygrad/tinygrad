@@ -409,7 +409,7 @@ def do_expand(root:UOp):
         new_srcs.append(src.src[0].gep(tuple(lst)))
     else:
       # non-EXPAND input
-      if (root.op in {UOps.LOAD, UOps.STORE} and i == 0) or (root.op is UOps.REDUCE and i != 0):
+      if (root.op is UOps.INDEX and i == 0) or (root.op is UOps.REDUCE and i != 0):
         # for the first arg of LOAD/STORE and the RANGE args of REDUCE, just pass them through ignoring EXPANDS
         new_srcs.append(src)
       elif src.dtype.count > 1:
@@ -477,7 +477,7 @@ expander = PatternMatcher([
   (UPat(UOps.EXPAND, name="outer", src=(UPat(UOps.EXPAND, name="inner"),)),
    lambda outer, inner: UOp(UOps.EXPAND, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
   # do expansion
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE, UOps.INDEX,
          UOps.VECTORIZE, UOps.REDUCE, UOps.IF), name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
   (UPat(UOps.CONTRACT, name="con"), do_contract),
   # remove EXPANDs from SINK

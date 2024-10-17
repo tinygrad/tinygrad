@@ -255,6 +255,7 @@ class UOp(MathTrait):
     assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
     return ret
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
+  def index(self, idx:UOp): return UOp(UOps.INDEX, self.dtype, (self,idx))
   def view(self, st:ShapeTracker): return UOp(UOps.VIEW, self.dtype, (self,), st)
   def const_like(self, b:ConstType|Variable|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
@@ -703,6 +704,9 @@ spec = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.VIEW))), lambda: True),
   (UPat(UOps.LOAD, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.VIEW), UPat(UOps.STORE))), lambda: True),
 
+  # early STORE has a <buf, shapetracker, val>
+  (UPat(UOps.STORE, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(UOps.VIEW), UPat())), lambda: True),
+
   # INDEX is used in new style load/store
   (UPat(UOps.INDEX, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat())), lambda: True),
 
@@ -744,7 +748,7 @@ spec = PatternMatcher([
   (UPat(UOps.GEP, src=(UPat(name="src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
   (UPat(UOps.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.count and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat((UOps.BITCAST, UOps.CAST), src=(UPat(),), name="x"), lambda x: x.arg is None and x.dtype.count == 1),
-  (UPat(UOps.BARRIER, dtypes.void, src=UPat(UOps.STORE, src=(UPat(UOps.DEFINE_LOCAL),), allow_any_len=True)), lambda: True),
+  (UPat(UOps.BARRIER, dtypes.void, src=UPat(UOps.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
 
   # NOTE: for testing, we let sinks be anything
   #(UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
