@@ -131,20 +131,12 @@ def simplify_and_unbind(ctx, x:UOp) -> Optional[UOp]:
   ctx[2].add(st)
   return st.to_uop() if st != x.st else None
 append_vars = PatternMatcher([(UPat(UOps.VIEW, name="x"), simplify_and_unbind)])
-enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx[1].index(x.arg[0])))])
 
 PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, Tuple[int, ...], UOp]] = []
 if getenv("RUN_PROCESS_REPLAY"):
   @atexit.register
   def save_process_replay():
     for base_sink,ctx,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
-
-@track_rewrites
-def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable, int]) -> UOp:
-  sink = graph_rewrite(graph_rewrite(base_sink, view_left), view_right)
-  ret = graph_rewrite(sink, append_vars+enumerate_bufs, (var_vals, bufs, set()))
-  PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
-  return ret
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
 
@@ -426,18 +418,23 @@ lazy = PatternMatcher([
    UOp(UOps.LOAD, x.dtype, (b, st, UOp.store(b, ShapeTracker.from_shape(st.st.shape).to_uop(), x)))),
 ])
 
-def to_ptr(ubufs:List[UOp], x:UOp) -> UOp:
-  ubufs.append(x)
-  return UOp(UOps.DEFINE_GLOBAL, x.dtype, (), len(ubufs)-1)
+def to_ptr(ctx, x:UOp) -> UOp:
+  ctx[1].append(x)
+  return UOp(UOps.DEFINE_GLOBAL, x.dtype, (), len(ctx[1])-1)
 def panic(*args, **kwargs): raise Exception(f"explicit panic {kwargs}")
 
 # realize.py ast rules
-to_ast = PatternMatcher([
+astify = PatternMatcher([
   # sanity check...
   (UPat(UOps.LOAD, src=(UPat(), UPat(), UPat()), name="root"), panic),
   (UPat(UOps.BUFFER, name="x"), to_ptr),
   (UPat(UOps.SINK, src=UPat(UOps.STORE, src=(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")))), lambda _,x: x.replace(src=())),
 ])
+@track_rewrites
+def to_ast(base_sink:UOp, ubufs:List[UOp], var_vals:Dict[Variable, int]) -> UOp:
+  sink = graph_rewrite(graph_rewrite(base_sink, view_left), view_right)
+  ret = graph_rewrite(sink, append_vars+astify, (var_vals, ubufs, set()))
+  return ret
 
 break_sched = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat.var("b"), UPat.var("st"), UPat()), name="root"), lambda _,root,b,st:UOp(UOps.LOAD, root.dtype, (b, st))),
@@ -448,7 +445,7 @@ break_sched = PatternMatcher([
 def schedule_rewrite(k, sink:UOp, bufs:bufdict, realizes:Dict[UOp, None]) -> List[ScheduleItem]:
   sink = graph_rewrite(sink, lazy, realizes)
   graph_rewrite(sink, break_sched, kernels:=[])
-  return [ScheduleItem(graph_rewrite(k, to_ast, ubufs:=[]), tuple(bufs.uop_bufs[x] for x in ubufs), ()) for k in kernels]
+  return [ScheduleItem(to_ast(k, ubufs:=[], {}), tuple(bufs.uop_bufs[x] for x in ubufs), ()) for k in kernels]
 
 CALLS = []
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
@@ -456,7 +453,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   cache: Dict[LazyBuffer, UOp] = {}
   # start by just realizing the buffers passed in
   sink = UOp.sink(*(to_uop2(x, bufs, cache) for x in outs))
-  sched = schedule_rewrite(f"{len(CALLS)}:🥰", sink, bufs, {bufs.add(x):None for x in outs})
+  sched = schedule_rewrite(f"{len(CALLS)}:🥰", sink, bufs, {bufs.add(x.base):None for x in outs})
   for si in sched:
     for x in si.outputs:
       del bufs.lazybufs[x].srcs
