@@ -969,9 +969,6 @@ class Tensor:
     if all(x is None or x == (0,s) for x,s in zip(arg, self.shape)): return self
     return F.Shrink.apply(self, arg=tuple(x if x is not None else (0,s) for x,s in zip(arg, self.shape)))
 
-  # TODO: torch pads arg is different than our pad arg, not sure if we should match
-  # TODO: nasty circular implementation but it's done with only movement ops, still can be cleaned up
-  # TODO: reflect and replicate are also kinda nasty but bug free I think
   def pad(self, arg:Tuple[Optional[Tuple[sint, sint]], ...], value:float=0.0) -> Tensor:
     """
     Returns a tensor that pads the each axis based on input arg.
@@ -1360,6 +1357,8 @@ class Tensor:
     print(t.pad2d((2, 2, 2, 0), mode="reflect").numpy())
     ```
     """
+    # TODO: nasty circular implementation but it's done with only movement ops, still can be cleaned up
+    # TODO: reflect and replicate are also kinda nasty but bug free I think
     shrinks = reversed([(-min(pB,0), min(pA+s,s)) for pB,pA,s in zip(padding[::2],padding[1::2],self.shape[::-1])])
     x = self.shrink((None,) * (self.ndim-len(padding)//2) + tuple(shrinks))
     pads = ((0,0),) * (self.ndim-len(padding)//2) + tuple(reversed([(max(pB,0), max(pA,0)) for pB, pA in zip(padding[::2], padding[1::2])]))
@@ -2007,7 +2006,8 @@ class Tensor:
     """
     padding_, axis = self._padding2d(padding, len(k_ := make_pair(kernel_size))), tuple(range(-len(k_), 0))
     def pool(x:Tensor) -> Tensor: return x.pad2d(padding_)._pool(k_, stride if stride is not None else k_, dilation)
-    # if we have specified padding, that padded region is counted in denominator while the inferred pading for ceil_mode isn't
+    # TODO: clean this up
+    # the inferred padding from ceil_mode is not counted towards denominator
     if (padding != 0 and not all(p==0 for p in make_pair(padding))) and ceil_mode and count_include_pad:
       padding_ = self._ceil_mode_padding2d(dilation, k_, stride if stride is not None else k_, padding)
       inferred_pads = [after - before for after, before in zip(padding_, self._padding2d(padding, len(k_)))]

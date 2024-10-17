@@ -8,6 +8,9 @@ import numpy as np
 
 # TODO maybe don't cast hack things
 # TODO maybe implement meshgrid utility
+# TODO maybe write a helper function for patterns like
+  # axes, real_pads  = axes or list(range(x.ndim)), [0] * (x.ndim*2)
+  # for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
 
 # **************** Free Ops ****************
 
@@ -22,7 +25,6 @@ def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
 def Squeeze(data: Tensor, axes): return functools.reduce(lambda d, dim: d.squeeze(dim), sorted(axes, reverse=True), data)
 def Unsqueeze(data: Tensor, axes): return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(axes), data)
 def Mean(*data_0): return Sum(*data_0) / len(data_0)
-# NOTE: does not support saturate
 def Cast(x: Tensor, to: int, saturate=1): return x.cast(DTYPE_MAP[to])
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
@@ -218,8 +220,8 @@ def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSE
     X = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=0, output_padding=0)
     return X.pad((None, None, *((0, out-xs) for out, xs in zip(output_shape, X.shape[2:]))))  # TODO: unsure about this
   # NOTE the pads either from args or auto_pad have the format [x1_begin, x2_begin, ..., x1_end, x2_end, ...]
-  # this is asymmetrical padding and conv_transpose2d does not support it
-  # padding for conv_transpose2d effectively "shrinks" the padding that goes into conv2d, so we just shrink it after
+  # this is asymmetrical padding and conv_transpose2d does not support it natively
+  # padding for conv_transpose2d effectively "shrinks" the padding that goes into conv2d, so we can get around this asymmetry by shrinking it after
   if pads is None: # we generate asymmetrical pads
     output_shape = [X.shape[i+2] * strides[i] for i in range(len(strides))]
     pads = [strides[i]*(input_shape[i]-1) + output_padding[i] + ((kernel_shape[i]-1)*dilations[i]+1)-output_shape[i] for i in range(len(input_shape))]

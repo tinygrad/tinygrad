@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import List, Dict, Union, Tuple
-import importlib
-from functools import lru_cache
+import importlib, functools
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.tensor import _to_np_dtype
@@ -15,11 +14,11 @@ except ImportError:
   from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
   def tensor_dtype_to_np_dtype(tensor_dtype:int) -> np.dtype: return TENSOR_TYPE_TO_NP_TYPE[tensor_dtype]
 
+# ========== to_python_const cache
+# Tensor -> python value cache for arguments
 cache_misses = 0
-@lru_cache(None)
+@functools.lru_cache(None)
 def _cached_to_python_const(t:Tensor): return t.data().tobytes() if t.dtype is dtypes.uint8 else t.tolist()
-
-# Tensor -> python value cache for parameters
 def to_python_const(t) -> Union[List[ConstType], List[bytes], Union[ConstType, bytes]]:
   if not isinstance(t, Tensor): return t
   global cache_misses
@@ -39,15 +38,15 @@ def is_dtype_supported(dtype, device: str = Device.DEFAULT):
   return True
 
 # src: onnx/mapping.py  https://onnx.ai/onnx/api/mapping.html#l-mod-onnx-mapping
-# not supported: STRING = 8 COMPLEX64 = 14, COMPLEX128 = 15, UINT4 = 21, INT4 = 22
+# not supported: STRING = 8 COMPLEX64 = 14, COMPLEX128 = 15, UINT4 = 21, INT4 = 22, and ALL FLOAT8
+# TensorProto.FLOAT8E4M3FN:dtypes.float, TensorProto.FLOAT8E4M3FNUZ:dtypes.float,
+# TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float
 # TODO: use dtypes.float16 for FLOAT16
 DTYPE_MAP: Dict[int, DType] = {
   TensorProto.FLOAT:dtypes.float, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8, TensorProto.UINT16:dtypes.uint16,
   TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64, TensorProto.BOOL:dtypes.bool,
   TensorProto.FLOAT16:dtypes.float, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32, TensorProto.UINT64:dtypes.uint64,
-  TensorProto.BFLOAT16:dtypes.bfloat16, TensorProto.FLOAT8E4M3FN:dtypes.float, TensorProto.FLOAT8E4M3FNUZ:dtypes.float,
-  TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float
-}
+  TensorProto.BFLOAT16:dtypes.bfloat16}
 
 # ======= parsers
 def buffer_parse(inp: TensorProto) -> Tensor:
@@ -120,7 +119,7 @@ def get_run_onnx(onnx_model: ModelProto):
         if isinstance(inputs[name], Tensor): input_tensors[name] = inputs[name]
         elif isinstance(inputs[name], list): input_tensors[name] = [Tensor(i, requires_grad=False) for i in inputs[name]]
         # not sure if in real use the domain is "ai.onnx.preview.training"
-        # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
+        # TODO there isn't a good way to parse which inp requires_grad
         elif domain == "ai.onnx.preview.training": input_tensors[name] = Tensor(inputs[name], requires_grad=True)
         else: input_tensors[name] = Tensor(inputs[name], requires_grad=False)
       else: raise RuntimeError(f"no data for {name}")
@@ -144,6 +143,9 @@ def get_run_onnx(onnx_model: ModelProto):
     equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"}), "LeakyRelu": ("leakyrelu", {"alpha": "neg_slope"}),
       "Selu": ("selu", {"gamma": "scale"})}
 
+    # lambda methods
+    # lambda_methods = {"Identity": lambda x:x, "Sub": lambda x,y:x-y, }
+
     # inputs we need to turn into a python const to compute
     to_python_const_inps: Dict[str, Tuple[int, ...]] = \
     {"Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
@@ -155,9 +157,9 @@ def get_run_onnx(onnx_model: ModelProto):
       if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
       # to python consts
       # TODO what if we just don't buffer parse some inps into Tensor to start with so no need waste time to python const
+      if debug >= 3: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {t}" + (" -> *python const*" if i in to_python_const_inps.get(n.op_type,()) else "")
+                                                      for i,(x,t) in enumerate(zip(n.input, inp))))
       inp = [to_python_const(x) if i in to_python_const_inps.get(n.op_type, ()) else x for i,x in enumerate(inp)]
-      if debug >= 3: print(f"\tinputs:\n\t\tto python const inputs: {to_python_const_inps.get(n.op_type,())}\n" +
-                           "\n".join(f"\t\t{x} - {t}" for x,t in zip(n.input, inp)))
 
       # tensor methods
       if n.op_type in exact_tensor_methods: ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
@@ -203,7 +205,7 @@ def get_run_onnx(onnx_model: ModelProto):
       if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{n.output[i]} - {ret[i]}" for i in range(len(n.output))))
 
       # run hook
-      if hook: hook(num, n.op_type, tuple(inp), ret)
+      if hook: hook(num, n, tuple(inp), opt, ret)
 
       if num == ONNXLIMIT:
         output_tensor_names = n.output
