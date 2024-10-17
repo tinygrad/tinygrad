@@ -265,7 +265,7 @@ def compare_launch_state(states, good_states):
         f"Field target_sm_config_shared_mem_size mismatch: {state.target_sm_config_shared_mem_size}vs{good_state.target_sm_config_shared_mem_size}")
 
     for i in range(8):
-      if i in {1, 7}: continue # shaders doesn't use that. what's cuda put here?
+      if i in {1, 7}: continue # shaders don't use that. what's cuda put here?
       n = f"constant_buffer_valid_{i}"
       if getattr(state, n) != getattr(good_state, n):
         return False, f"Field {n} mismatch: {getattr(state, n)} vs {getattr(good_state, n)}"
