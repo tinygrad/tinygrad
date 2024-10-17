@@ -9,13 +9,13 @@ if os.getenv("VALIDATE_HCQ", 0) != 0:
   try:
     import extra.nv_gpu_driver.nv_ioctl
     from tinygrad import Device
-    _ = Device["NV"]
+    _, _ = Device["NV"], Device["CUDA"]
   except Exception: pass
 
   try:
     import extra.qcom_gpu_driver.opencl_ioctl
     from tinygrad import Device
-    _ = Device["QCOM"]
+    _, _ = Device["QCOM"], Device["GPU"]
   except Exception: pass
 
 from tinygrad import Tensor, Device, dtypes
