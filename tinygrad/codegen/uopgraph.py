@@ -563,8 +563,8 @@ int64_idx = PatternMatcher([
   #(UPat(UOps.RANGE, dtypes.int32, name="rng"),
   #  lambda rng: UOp(rng.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in rng.src), rng.arg) if max(rng._min_max, key=abs) > dtypes.max(rng.dtype) else None)
   # cast alu operands if needed (for int64 indexing)
-  (UPat(UOps.ALU, dtypes.int64, name="alu"),
-    lambda alu: UOp(alu.op, alu.dtype, tuple(s.cast(dtypes.int64) for s in alu.src), alu.arg) if any(s.dtype != alu.dtype for s in alu.src) else None)
+  (UPat(UOps.ALU, (dtypes.int32, dtypes.int64), name="alu"),
+    lambda alu: UOp(alu.op, alu.dtype, tuple(s.cast(alu.dtype) for s in alu.src), alu.arg) if any(s.dtype != alu.dtype for s in alu.src) else None)
   #(UPat((UOps.CONST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR), dtypes.int32, name="x"),
   #  lambda x: UOp(x.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in x.src), x.arg) if max(x._min_max, key=abs) > dtypes.max(x.dtype) else None)
 ])
