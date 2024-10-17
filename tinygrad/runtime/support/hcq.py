@@ -41,6 +41,14 @@ class HWCommandQueue:
     """
     return len(self) - 1
 
+  def _q(self, *data:int) -> int:
+    """
+    Adds commands words into the queue.
+    Should be called only within functions that enqueue commands and are decorated with `@hcq_command`.
+    """
+    self.q += data
+    return len(self.q) - self.cmds_offset[-1] - len(data)
+
   @hcq_command
   def signal(self, signal:HCQSignal, value:int):
     """
