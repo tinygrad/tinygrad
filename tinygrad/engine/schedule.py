@@ -389,7 +389,79 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
 
 # *** DAG ordering: breadth first search ***
 
+class bufdict:
+  def __init__(self):
+    self.buf_uops: Dict[Buffer, UOp] = {}
+    self.uop_bufs: Dict[UOp, Buffer] = {}
+    self.lazybufs: Dict[Buffer, LazyBuffer] = {}
+  def add(self, buf:LazyBuffer) -> UOp:
+    if (r:=self.buf_uops.get(b:=buf.buffer)) is not None: return r
+    self.buf_uops[b] = u = UOp(UOps.BUFFER, b.dtype.ptr(), (), (len(self.buf_uops), (b.device, b.size, b.dtype)))
+    self.uop_bufs[u] = b
+    self.lazybufs[b] = buf
+    return u
+
+def to_uop2(buf:LazyBuffer, bufs:bufdict, cache:Dict[LazyBuffer, UOp]) -> UOp:
+  if (r:=cache.get(buf)) is not None: return r
+  if buf is not buf.base:
+    cache[buf] = ret = to_uop2(buf.base, bufs, cache).view(buf.st)
+    return ret
+  dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
+  if buf.op is MetaOps.CONST: return UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(dtype, buf.arg), v.const_like(0))
+  if buf.is_realized(): return UOp(UOps.LOAD, dtype, (bufs.add(buf), buf.st.to_uop()))
+  src = tuple(to_uop2(x, bufs, cache) for x in buf.srcs)
+  if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
+  elif buf.op in METAOPS: ret = UOp(METAOPS[buf.op], buf.dtype, src, buf.arg)
+  elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
+  elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, src, buf.arg)
+  elif buf.op is UnaryOps.CAST: ret = UOp(UOps.CAST, dtype, src)
+  elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
+  else: ret = UOp(UOps.ALU, dtype, src, buf.op)
+  cache[buf] = ret = UOp(UOps.LOAD, dtype, (bufs.add(buf), buf.st.to_uop(), ret))
+  return ret
+
+# decide which global LOADs are removed
+lazy = PatternMatcher([
+  (UPat.load(UPat.var("b"), UPat.var("st"), UPat.var("x")), lambda realizes,b,st,x: None if x.op is UOps.STORE else x if x in realizes else
+   UOp(UOps.LOAD, x.dtype, (b, st, UOp.store(b, ShapeTracker.from_shape(st.st.shape).to_uop(), x)))),
+])
+
+def to_ptr(ubufs:List[UOp], x:UOp) -> UOp:
+  ubufs.append(x)
+  return UOp(UOps.DEFINE_GLOBAL, x.dtype, (), len(ubufs)-1)
+def panic(*args, **kwargs): raise Exception(f"explicit panic {kwargs}")
+
+# realize.py ast rules
+to_ast = PatternMatcher([
+  # sanity check...
+  (UPat(UOps.LOAD, src=(UPat(), UPat(), UPat()), name="root"), panic),
+  (UPat(UOps.BUFFER, name="x"), to_ptr),
+  (UPat(UOps.SINK, src=UPat(UOps.STORE, src=(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")))), lambda _,x: x.replace(src=())),
+])
+
+break_sched = PatternMatcher([
+  (UPat(UOps.LOAD, src=(UPat.var("b"), UPat.var("st"), UPat()), name="root"), lambda _,root,b,st:UOp(UOps.LOAD, root.dtype, (b, st))),
+  (UPat(UOps.STORE, src=(UPat(), UPat(), UPat()), name="x"), lambda k,x: k.append(x.sink())),
+])
+
+@track_rewrites
+def schedule_rewrite(k, sink:UOp, bufs:bufdict, realizes:Dict[UOp, None]) -> List[ScheduleItem]:
+  sink = graph_rewrite(sink, lazy, realizes)
+  graph_rewrite(sink, break_sched, kernels:=[])
+  return [ScheduleItem(graph_rewrite(k, to_ast, ubufs:=[]), tuple(bufs.uop_bufs[x] for x in ubufs), ()) for k in kernels]
+
+CALLS = []
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  bufs = bufdict()
+  cache: Dict[LazyBuffer, UOp] = {}
+  # start by just realizing the buffers passed in
+  sink = UOp.sink(*(to_uop2(x, bufs, cache) for x in outs))
+  sched = schedule_rewrite(f"{len(CALLS)}:🥰", sink, bufs, {bufs.add(x):None for x in outs})
+  for si in sched:
+    for x in si.outputs:
+      del bufs.lazybufs[x].srcs
+  CALLS.append({})
+  return sched, {}
   graph, in_degree, var_vals = _graph_schedule(outs)
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
