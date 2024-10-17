@@ -47,7 +47,7 @@ def _time_program(p:Program, lib:bytes, var_vals:Dict[Variable, int], rawbufs:Li
       if hasattr(dev:=Device[p.dname], 'invalidate_caches'): dev.invalidate_caches()
       else:
         with Context(DEBUG=0, BEAM=0, CAPTURING=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
-    tms.append(cast(float, car(input_bufs, var_vals, wait=True))*factor)
+    tms.append(cast(float, car(input_bufs, var_vals, wait=True, beam=True))*factor)
     if early_stop is not None and early_stop < min(tms): break
   return tms
 
