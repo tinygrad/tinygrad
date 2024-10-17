@@ -24,7 +24,7 @@ def render(self) -> Tuple[str, ConstType, ConstType]:
     code_for_op = {**CStyleLanguage.code_for_op, BinaryOps.IDIV: lambda a,b,dtype: f"({a}//{b})"}
   rewritten_uop = [uop for uop in uops if uop.op is UOps.STORE][0].src[-1]
   fxn = TestRenderer().render("", uops)
-  return fxn.split("data0[0] = ")[1].split(";")[0], rewritten_uop.vmin, rewritten_uop.vmax
+  return fxn.split("*(data0+0) = ")[1].split(";")[0], rewritten_uop.vmin, rewritten_uop.vmax
 
 def NumNode(val): return UOp.const(dtypes.int, val)
 class Node:

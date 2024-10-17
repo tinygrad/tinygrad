@@ -58,7 +58,7 @@
   }
   .node rect {
     stroke: #4a4b57;
-    stroke-width: 1.5px;
+    stroke-width: 1.4px;
     rx: 8px;
     ry: 8px;
   }
@@ -81,6 +81,9 @@
     width: 100%;
     height: 100%;
   }
+  .main-container > * + * {
+    margin-left: 8px;
+  }
   .container {
     background-color: #0f1018;
     height: 100%;
@@ -88,21 +91,12 @@
     padding: 8px;
     position: relative;
   }
-  .container > * + * {
+  .container > * + *, .rewrite-container > * + * {
     margin-top: 12px;
-  }
-  .rewrite-container > * + * {
-    margin-top: 12px;
-  }
-  .main-container > * + * {
-    margin-left: 8px;
   }
   .kernel-list {
     width: 10%;
     overflow-y: auto;
-  }
-  .kernel-list > ul > ul {
-    padding-left: 4px;
   }
   .kernel-list > ul > * + * {
     margin-top: 4px;
@@ -153,7 +147,8 @@
   </div>
   <script>
   /* global hljs, dagreD3, d3, DOMPurify */
-  // extra definitions for UOps
+
+  // **** hljs extra definitions for UOps and float4
   hljs.registerLanguage("python", (hljs) => ({
     ...hljs.getLanguage("python"),
     case_insensitive: false,
@@ -165,12 +160,12 @@
       ...hljs.getLanguage("python").contains,
     ]
   }));
-  // extra definitions for float4
   hljs.registerLanguage("cpp", (hljs) => ({
     ...hljs.getLanguage('cpp'),
     contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
   }));
 
+  // **** D3
   function recenterRects(svg, zoom) {
     const svgBounds = svg.node().getBoundingClientRect();
     for (const rect of svg.node().querySelectorAll("rect")) {
@@ -182,7 +177,6 @@
     }
     svg.call(zoom.transform, d3.zoomIdentity)
   }
-
   function renderGraph(graph, additions) {
     const g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
     g.setNode("addition", {label: "", clusterLabelPos: "top", style: additions.length !== 0 ? "fill: rgba(26, 27, 38, 0.5);" : "display: none;"});
@@ -209,11 +203,10 @@
     render(inner, g);
   }
 
-  function toPath(loc) {
-    const [fp, lineno] = loc;
-    return `${fp.split("/").pop()}:${lineno}`
-  }
+  // **** extra helpers
+  const toPath = ([fp, lineno]) => `${fp.split("/").pop()}:${lineno}`;
 
+  // **** main loop
   var ret = {};
   var cache = {};
   var kernels = null;
@@ -359,6 +352,8 @@
       metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(ret.loc)}.` }));
     }
   }
+
+  // **** keyboard shortcuts
   document.addEventListener("keydown", async function(event) {
     // up and down change the UOp or kernel from the list
     if (!expandKernel) {
