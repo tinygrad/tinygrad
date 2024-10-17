@@ -156,6 +156,34 @@ class TestBFloat16(unittest.TestCase):
     assert t.dtype == dtypes.bfloat16
     np.testing.assert_allclose(t.numpy(), np.eye(3))
 
+  def test_bf16_less_than(self):
+      t1 = Tensor([100, -1, 0, -100, 20, 100, -1, 0, -100, 20]).cast(dtypes.bfloat16)
+      t2 = Tensor([101, 0, 1, -99, 21, 99, -2, -1, -101, 19]).cast(dtypes.bfloat16)
+      t1.realize()
+      t2.realize()
+      assert (t1 < t2).numpy().tolist() == [True, True, True, True, True, False, False, False, False, False]
+
+  def test_bf16_not_equal(self):
+      t1 = Tensor([100, -1, -10, -100, 20, 100, -1, -10, -100, 20]).cast(dtypes.bfloat16)
+      t2 = Tensor([101, -2, -11, -99, 21, 100, -1, -10, -100, 20]).cast(dtypes.bfloat16)
+      t1.realize()
+      t2.realize()
+      assert (t1 != t2).numpy().tolist() == [True, True, True, True, True, False, False, False, False, False]
+
+  def test_bf16_equal(self):
+      t1 = Tensor([100, -1, 0, -100, 20, 100, -1, 0, -100, 20]).cast(dtypes.bfloat16)
+      t2 = Tensor([100, -1, 0, -100, 20, 101, 0, 1, -99, 21]).cast(dtypes.bfloat16)
+      t1.realize()
+      t2.realize()
+      assert (t1 == t2).numpy().tolist() == [True, True, True, True, True, False, False, False, False, False]
+
+  def test_bf16_greater_than(self):
+      t1 = Tensor([100, -1, 0, -100, 20, 100, -1, 0, -100, 20]).cast(dtypes.bfloat16)
+      t2 = Tensor([99, -2, -1, -101, 19, 101, 0, 1, -99, 21,]).cast(dtypes.bfloat16)
+      t1.realize()
+      t2.realize()
+      assert (t1 > t2).numpy().tolist() == [True, True, True, True, True, False, False, False, False, False]
+
 @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
 class TestBFloat16DType(unittest.TestCase):
   def test_bf16_to_float(self):
