@@ -235,7 +235,7 @@ class NVProgram(HCQProgram):
     for sh in sections:
       if sh.name == f".nv.shared.{self.name}": self.shmem_usage = sh.header.sh_size
       if sh.name == f".text.{self.name}":
-        self.program_addr, self.program_sz, self.registers_usage = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size, max(sh.header.sh_info>>24, 16)
+        self.program_addr, self.program_sz, self.registers_usage = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size, sh.header.sh_info>>24
       elif m:=re.match(r'\.nv\.constant(\d+)', sh.name): self.constbufs[int(m.group(1))] = (self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size)
       elif sh.name == ".nv.info":
         for off in range(0, sh.header.sh_size, 12):
