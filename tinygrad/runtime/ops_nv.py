@@ -6,7 +6,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import HCQArgsState, HCQProgram, HCQSignal
 from tinygrad.device import BufferOptions
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod
-from tinygrad.renderer.assembly import PTXRenderer
+from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler, nv_disassemble
 from tinygrad.runtime.autogen import nv_gpu, libc
