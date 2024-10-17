@@ -65,7 +65,7 @@ extern "C" __global__ void __launch_bounds__(128) wmma_example(float* data0, con
     size_t store_smem_a_off  = ((threads /  8) *  64) + (((threads * 8) ^ threads) & 56);               // r15
     size_t store_smem_b_off  = ((threads / 16) * 128) + (((threads / 16) * 8) ^ ((threads % 16) * 8));  // r19
 
-    // ldmatrix indices
+    // ldmatrix indices - 4x loads of 8x8 matrices by 32 threads
     // threads 0-7 are row starts for A, 8-15 for B, 16-23 for C, 24-31 for D
     // [ A | C ]
     // [ - + - ]

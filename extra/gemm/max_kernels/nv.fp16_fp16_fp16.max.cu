@@ -63,37 +63,13 @@ extern "C" __global__ void __launch_bounds__(256) wmma_example(half* data0, cons
     int threads = threadIdx.x + (threadIdx.y * 32) + (threadIdx.z * 128); /* 256 */
     int num_k_blocks = K / 32;
 
-    // ldmatrix indices
+    // ldmatrix indices - 4x loads of 8x8 matrices by 32 threads
     // threads 0-7 are row starts for A, 8-15 for B, 16-23 for C, 24-31 for D
     // [ A | C ]
     // [ - + - ]
     // [ B | D ]
 
-    // unswizzled A - SMEM_A is 256 rows x 32 cols
-    // size_t global_a_off = ((grid_m * 256) * K) + ((threads %  4) * 8) + ((threads /  4) * K);
-    // size_t store_smem_a_off = ((threads %  4) * 8) + ((threads /  4) * 32); // 64 rows /  32 cols per copy
-    // size_t load_smem_a_0_k_0 = (wg_m * 16 * 32) + ((wg_threads % 16) * 32) + ((wg_threads / 16) * 8);
-    // size_t load_smem_a_1_k_0 = load_smem_a_0_k_0 + ( 64 * 32);
-    // size_t load_smem_a_2_k_0 = load_smem_a_0_k_0 + (128 * 32);
-    // size_t load_smem_a_3_k_0 = load_smem_a_0_k_0 + (192 * 32);
-    // size_t load_smem_a_0_k_1 = load_smem_a_0_k_0 + 16;
-    // size_t load_smem_a_1_k_1 = load_smem_a_0_k_1 + ( 64 * 32);
-    // size_t load_smem_a_2_k_1 = load_smem_a_0_k_1 + (128 * 32);
-    // size_t load_smem_a_3_k_1 = load_smem_a_0_k_1 + (192 * 32);
-
-    // unswizzled reshaped A - SMEM_A is 128 rows x 64 cols, [ (M=0, K=0), (M=0, K=1), (M=8, K=0), (M=8, K=1) ], etc.
-    // size_t global_a_off = ((grid_m * 256) * K) + ((threads %  4) * 8) + (((threads /  4) % 2) * 8 * 16 * K) + ((threads / 8) * K);
-    // size_t store_smem_a_off = ((threads %  8) * 8) + ((threads /  8) * 64); // 32 rows / 64 cols per copy
-    // size_t load_smem_a_0_k_0 = (wg_m * 16 * 64) + ((wg_threads % 16) * 64) + ((wg_threads / 16) * 8);
-    // size_t load_smem_a_1_k_0 = load_smem_a_0_k_0 + (64 * 64);
-    // size_t load_smem_a_2_k_0 = load_smem_a_0_k_0 +           + 32;
-    // size_t load_smem_a_3_k_0 = load_smem_a_0_k_0 + (64 * 64) + 32;
-    // size_t load_smem_a_0_k_1 = load_smem_a_0_k_0 + 16;
-    // size_t load_smem_a_1_k_1 = load_smem_a_1_k_0 + 16;
-    // size_t load_smem_a_2_k_1 = load_smem_a_2_k_0 + 16;
-    // size_t load_smem_a_3_k_1 = load_smem_a_3_k_0 + 16;
-
-    // swizzled A
+    // swizzled A - SMEM_A is 128 rows x 64 cols
     size_t global_a_off = ((grid_m * 256) * K) + ((threads %  4) * 8) + (((threads /  4) % 2) * 8 * 16 * K) + ((threads / 8) * K);
     size_t store_smem_a_off  = ((threads /  8) *  64) + (((threads * 8) ^ threads) & 56); // 32 rows / 64 cols per copy
     size_t load_smem_a_row   = ((wg_m * 16) + (threads % 16)) * 64;
@@ -107,19 +83,7 @@ extern "C" __global__ void __launch_bounds__(256) wmma_example(half* data0, cons
     size_t load_smem_a_2_k_1 = load_smem_a_row + ( 0 * 64) + (((load_smem_a_phase + 6) ^ (threads % 8)) * 8);
     size_t load_smem_a_3_k_1 = load_smem_a_row + (64 * 64) + (((load_smem_a_phase + 6) ^ (threads % 8)) * 8);
 
-    // unswizzed B
-    // size_t global_b_off = (grid_n * 128) + ((threads % 16) * 8) + ((threads / 16) * N);
-    // size_t store_smem_b_off = ((threads % 16) * 8) + ((threads / 16) * 128); // 16 rows / 128 cols per copy
-    // size_t load_smem_b_0_k_0 = (wg_n * 16) + ((wg_threads % 16) * 128) + ((wg_threads / 16) * 8);
-    // size_t load_smem_b_1_k_0 = load_smem_b_0_k_0 + 32;
-    // size_t load_smem_b_2_k_0 = load_smem_b_0_k_0 + 64;
-    // size_t load_smem_b_3_k_0 = load_smem_b_0_k_0 + 96;
-    // size_t load_smem_b_0_k_1 = load_smem_b_0_k_0 + (16 * 128);
-    // size_t load_smem_b_1_k_1 = load_smem_b_0_k_1 + 32;
-    // size_t load_smem_b_2_k_1 = load_smem_b_0_k_1 + 64;
-    // size_t load_smem_b_3_k_1 = load_smem_b_0_k_1 + 96;
-
-    // swizzled B
+    // swizzled B - SMEM_B is 32 rows x 128 cols
     size_t global_b_off = (grid_n * 128) + ((threads % 16) * 8) + ((threads / 16) * N);
     size_t store_smem_b_off  = ((threads / 16) * 128) + ((((threads / 16) % 8) * 8) ^ ((threads % 16) * 8)); // 16 rows / 128 cols per copy
     size_t load_smem_b_row   = (threads % 16) * 128;
@@ -197,12 +161,7 @@ extern "C" __global__ void __launch_bounds__(256) wmma_example(half* data0, cons
 
     __syncthreads();
 
-    // load first tile - 256 x 32
-    // __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + (     0)], &data1[global_a_off + (    0)], 16);
-    // __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + ( 64*32)], &data1[global_a_off + ( 64*K)], 16);
-    // __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + (128*32)], &data1[global_a_off + (128*K)], 16);
-    // __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + (192*32)], &data1[global_a_off + (192*K)], 16);
-    // load first tile - 128 x 64
+    // load first tile
     __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + (     0)], &data1[global_a_off + (    0)], 16);
     __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + ( 32*64)], &data1[global_a_off + ( 32*K)], 16);
     __pipeline_memcpy_async(&smem_a_0[store_smem_a_off + ( 64*64)], &data1[global_a_off + ( 64*K)], 16);
@@ -213,12 +172,7 @@ extern "C" __global__ void __launch_bounds__(256) wmma_example(half* data0, cons
     global_a_off += 32;
     global_b_off += 32 * N;
 
-    // load second tile - 256 x 32
-    // __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + (     0)], &data1[global_a_off + (    0)], 16);
-    // __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + ( 64*32)], &data1[global_a_off + ( 64*K)], 16);
-    // __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + (128*32)], &data1[global_a_off + (128*K)], 16);
-    // __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + (192*32)], &data1[global_a_off + (192*K)], 16);
-    // load second tile - 128 x 64
+    // load second tile
     __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + (     0)], &data1[global_a_off + (    0)], 16);
     __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + ( 32*64)], &data1[global_a_off + ( 32*K)], 16);
     __pipeline_memcpy_async(&smem_a_1[store_smem_a_off + ( 64*64)], &data1[global_a_off + ( 64*K)], 16);
@@ -303,12 +257,6 @@ extern "C" __global__ void __launch_bounds__(256) wmma_example(half* data0, cons
 
         // load next tile if needed
         if (block_k < (num_k_blocks-2)) {
-            // load next tile - 256 x 32
-            // __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + (     0)], &data1[global_a_off + (    0)], 16);
-            // __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + ( 64*32)], &data1[global_a_off + ( 64*K)], 16);
-            // __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + (128*32)], &data1[global_a_off + (128*K)], 16);
-            // __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + (192*32)], &data1[global_a_off + (192*K)], 16);
-            // load next tile - 128 x 64
             __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + (     0)], &data1[global_a_off + (    0)], 16);
             __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + ( 32*64)], &data1[global_a_off + ( 32*K)], 16);
             __pipeline_memcpy_async(&smem_a_store[store_smem_a_off + ( 64*64)], &data1[global_a_off + ( 64*K)], 16);
@@ -373,7 +321,10 @@ extern "C" __global__ void __launch_bounds__(256) wmma_example(half* data0, cons
     __pipeline_wait_prior(0);
     __syncthreads();
 
-    // faster epilogue: write each 8x8 TC accs to SMEM first - use extra 8 padding to deconflict bank access
+    // faster epilogue: write each 8x8 TC accs to SMEM first
+    //   - SMEM_N_WIDTH 8 larger than 128 required to deconflict bank access
+    //   - around 14 micros
+    //   - check bank conflict with in sudo with: "PYTHONPATH=. CUDA=1 GEMM_VARIATION="max" DTYPE_IN=half DTYPE_OUT=half DTYPE_ACC=half CNT=8 INPUT=ONES /usr/local/cuda/bin/ncu --section MemoryWorkloadAnalysis --metrics l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum,l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_st.sum python3 ./extra/gemm/max_matmul.py"
 
     // epilogue chunk with 256 threads / WG_M=4 / WG_N=2: split into 8 chunks (hi/lo for each in TC M)
     //   1) write 32 rows of 128 cols (rows 0-7, 16-23, 32-39, 48-53 in acc_frag_0.lo, then acc_frag_0.hi, etc.)
