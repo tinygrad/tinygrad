@@ -100,11 +100,11 @@ class CStyleLanguage(Renderer):
   extra_matcher = extra_pm
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
-    tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
-    buftypes = [(name,f"{'write_only' if mutable else 'read_only'} image2d_t" if dtype.name.startswith('image') else
-                ("" if mutable else "const ")+self.render_dtype(dtype)+self.buffer_suffix if isinstance(dtype, PtrDType) else
-                self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str, DType]], uops:List[UOp], prefix=None) -> str:
+    tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
+    buftypes = [(name,"read_write image2d_t" if dtype.name.startswith('image') else
+                self.render_dtype(dtype)+self.buffer_suffix if isinstance(dtype, PtrDType) else
+                self.arg_int_prefix if dtype == dtypes.int else None) for name,dtype in bufs]
     prg = ''.join([f"{self.kernel_prefix}void {self.get_kernel_modifier(uops)}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
@@ -121,22 +121,15 @@ class CStyleLanguage(Renderer):
     self.r = r
 
     child_count = Counter(v for ru in uops for v in ru.src)
-    bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
+    bufs: Dict[UOp, Tuple[str, DType]] = {}
     kernel = []
     depth = 1
     c: DefaultDict[str, int] = defaultdict(int)
     for u in uops:
-      if u.op is UOps.DEFINE_GLOBAL:
-        r[u] = f"data{u.arg}"
-        bufs[u] = (r[u], (u.dtype, False))
+      if u.op in (UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR):
+        r[u] = f"data{u.arg}" if u.op is UOps.DEFINE_GLOBAL else u.arg[0]
+        bufs[u] = (r[u], u.dtype)
         continue
-      if u.op is UOps.DEFINE_VAR:
-        r[u] = u.arg[0]
-        bufs[u] = (r[u], (u.dtype, False))
-        continue
-
-      # mark buffers that we store to writable
-      if u.op is UOps.STORE and u.src[0].op is UOps.DEFINE_GLOBAL: bufs[u.src[0]] = (bufs[u.src[0]][0], (bufs[u.src[0]][1][0], True))
 
       # naming
       prefix = None
@@ -446,7 +439,7 @@ class DSPRenderer(ClangRenderer):
                  UnaryOps.LOG2: lambda x,dtype: f"__builtin_log2l({x})" if dtype == dtypes.float64 else f"__builtin_log2f({x})",
                  UnaryOps.EXP2: lambda x,dtype: f"__builtin_exp2l({x})" if dtype == dtypes.float64 else f"__builtin_exp2f({x})"}
 
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], uops:List[UOp], prefix=None) -> str:
     ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
     msrc = ['''struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency; _Bool set_dcvs_params;
                  short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3]; };''', 'int HAP_power_set(void*, void*);',
@@ -457,12 +450,12 @@ class DSPRenderer(ClangRenderer):
             'HAP_power_set((void*)handle, (void*)&req);']
     msrc += ['if ((sc>>24) != 2) return 0;']
     msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
-    msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
-    msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1], PtrDType)]
+    msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};' for i,b in enumerate(bufs) if isinstance(b[1], PtrDType)]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
-    msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0], PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
+    msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1], PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
-    msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1], PtrDType)]
     msrc += ["return 0; }"]
     return ret + '\n' + '\n'.join(msrc)
 
