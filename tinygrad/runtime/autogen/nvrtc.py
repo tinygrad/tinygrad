@@ -15,7 +15,7 @@ def _try_dlopen_nvJitLink():
   if library: return ctypes.CDLL(library)
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
-    except OSError: pass
+    except (OSError, AttributeError): pass
   raise RuntimeError("library nvJitLink not found")
 PATHS_TO_TRY = [
   ctypes.CDLL(ctypes.util.find_library('nvrtc64_120_0')),
@@ -25,7 +25,7 @@ def _try_dlopen_nvrtc():
   if library: return ctypes.CDLL(library)
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
-    except OSError: pass
+    except (OSError, AttributeError): pass
   raise RuntimeError("library nvrtc not found")
 
 

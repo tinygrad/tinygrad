@@ -34,7 +34,7 @@ def _try_dlopen_$name():
   if library: return ctypes.CDLL(library)
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
-    except OSError: pass
+    except (OSError, AttributeError): pass
   raise RuntimeError("library $name not found")
 EOF
 }
