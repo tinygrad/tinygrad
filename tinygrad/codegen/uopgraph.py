@@ -545,14 +545,12 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, name="load"), simplify_buffer_load),
 ])
 
-def int64_alu(alu:UOp) -> Optional[UOp]:
-  if all(s.op in (UOps.CONST, UOps.CAST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR) \
-          for s in split_uop(alu, (BinaryOps.ADD, BinaryOps.MUL, BinaryOps.IDIV))) and max(alu._min_max, key=abs) > dtypes.max(alu.dtype):
-    return UOp(alu.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in alu.src), alu.arg)
-  return None
-
 int64_idx = PatternMatcher([
-  (UPat(UOps.ALU, dtypes.int32, name="alu"), int64_alu),
+  # int64 indexing for all valid alus
+  (UPat(UOps.ALU, dtypes.int32, name="alu"), lambda alu: UOp(alu.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in alu.src), alu.arg) \
+  if all(s.op in (UOps.CONST, UOps.CAST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR) \
+          for s in split_uop(alu, (BinaryOps.ADD, BinaryOps.MUL, BinaryOps.IDIV))) and max(alu._min_max, key=abs) > dtypes.max(alu.dtype) else None),
+  # int64 indexing for range
   (UPat(UOps.RANGE, dtypes.int32, name="rng"), lambda rng: UOp(rng.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in rng.src), rng.arg) \
     if max(rng._min_max, key=abs) > dtypes.max(rng.dtype) else None)
 ])
