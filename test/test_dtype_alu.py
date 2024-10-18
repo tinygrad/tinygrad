@@ -11,6 +11,8 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import UnaryOps, UOps
 from tinygrad.tensor import _to_np_dtype
 from test.helpers import is_dtype_supported
+import pytest
+pytestmark = pytest.mark.filterwarnings("ignore")
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -94,7 +96,6 @@ def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   numpy_value = op2[1](op1[1](an, bn).astype(_to_np_dtype(d2)), cn)
   np.testing.assert_allclose(tensor_value, numpy_value, rtol=1e-6 if getenv("PTX") else 1e-7)
 
-@np.errstate(all='ignore')
 class TestDTypeALU(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT), f"no float64 on {Device.DEFAULT}")
   @given(ht.float64, ht.float64, strat.sampled_from(binary_operations))
@@ -192,7 +193,6 @@ class TestFromFuzzer(unittest.TestCase):
     _test_value(np.pi / 2)
      # worst case of ulp 1.5
     _test_value(np.pi * 2, unit=1.5)
-  @np.errstate(all='ignore')
   @given(strat.sampled_from(dtypes_float))
   def test_log2(self, dtype):
     if not is_dtype_supported(dtype): return
