@@ -84,6 +84,7 @@ class dtypes:
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType(-1, 0, "void", None, 1)
+  pyint: Final[DType] = DType(-1, 8, "pyint", None, 1)   # arbitrary precision integer, same itemsize to int64 so min/max works
   bool: Final[DType] = DType(0, 1, "bool", '?', 1)
   int8: Final[DType] = DType(1, 1, "char", 'b', 1)
   uint8: Final[DType] = DType(2, 1, "unsigned char", 'B', 1)
@@ -115,7 +116,7 @@ class dtypes:
 
   floats = (float16, bfloat16, float32, float64)
   uints = (uint8, uint16, uint32, uint64)
-  sints = (int8, int16, int32, int64)
+  sints = (int8, int16, int32, int64, pyint)
   ints = uints + sints
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
