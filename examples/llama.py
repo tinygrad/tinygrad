@@ -180,7 +180,7 @@ def concat_weights(models, device=None):
     return lazy_tensors[0].cat(*lazy_tensors[1:], dim=axis)
   return {name: convert(name) for name in {name: None for model in models for name in model}}
 
-def load(fn:str):
+def load(fn: str):
   if fn.endswith('.index.json'):
     with open(fn) as fp: weight_map = json.load(fp)['weight_map']
     parts = {n: load(str(Path(fn).parent / Path(n).name)) for n in set(weight_map.values())}
@@ -188,11 +188,13 @@ def load(fn:str):
   elif fn.endswith(".safetensors"):
     return safe_load(fn)
   else:
-    return torch_load(fn)
+    try: return torch_load(fn)
+    except Exception: return safe_load(fn)
 
 def fetch_tiny_llama():
-  fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.model", "tokenizer.model", subdir="tinyllama-1.1b")
-  return fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/model.safetensors", "model.safetensors", subdir="tinyllama-1.1b")
+  model = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/model.safetensors")
+  tokenizer = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.model")
+  return model, tokenizer
 
 class LLaMa:
   @staticmethod
@@ -345,12 +347,13 @@ if __name__ == "__main__":
   parser.add_argument("--size", type=str, default=None, help=f"""Size of model to use {", ".join([f"{list(v.keys())} for gen '{k}'" for k, v in MODEL_PARAMS.items()])}""")
   parser.add_argument("--quantize", type=str, default=None, help="Quantize the weights to int8 or nf4 in memory")
   parser.add_argument("--model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
+  parser.add_argument("--tokenizer", type=Path, default=None, help="Path to tokenizer.model if not in model directory.")
   parser.add_argument("--shard", type=int, default=1, help="number of devices to load the weights to")
 
   args = parser.parse_args()
   if args.model is None and args.gen == "tiny":
     print("No model specified. Fetching tiny LLaMA...")
-    args.model = fetch_tiny_llama()
+    args.model, args.tokenizer = fetch_tiny_llama()
   if args.gen not in MODEL_PARAMS: raise ValueError("Invalid model generation")
   if args.size is None: args.size = list(MODEL_PARAMS[args.gen].items())[0][0]
   chatbot = args.prompt == None
@@ -446,7 +449,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
   LLAMA_SUFFIX = {"1": "", "2": "-2", "3": "-3", "code": "-code", "tiny": "-tiny"}[args.gen]
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
-  TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
+  TOKENIZER_PATH = args.tokenizer or (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, device=device)
