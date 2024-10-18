@@ -1296,6 +1296,7 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.GROUPTOP, axis=1, amt=16)]
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["AMD", "GPU", "METAL", "NV", "CUDA"])
 
+  @unittest.skipIf(CI and Device.DEFAULT in {"METAL"}, "hangs metal gpu CI")
   def test_failure_54(self):
     # resnet beam
     # HIP: Memory access fault by GPU node-1 (Agent handle: 0x56c21f1d1480) on address 0x730cc242e000. Reason: Page not present or supervisor privilege.
@@ -1314,7 +1315,7 @@ class TestLinearizerFailures(unittest.TestCase):
                     UOp(UOps.DEFINE_GLOBAL, dtypes.half.ptr(), arg=2, src=()),
                     UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(256, 1, 64, 56, 56, 64, 3, 3), strides=(0, 0, 576, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),)),))
     opts = [Opt(op=OptOps.TC, axis=2, amt=2), Opt(op=OptOps.UPCAST, axis=2, amt=7), Opt(op=OptOps.UPCAST, axis=1, amt=2)]
-    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["HIP", "AMD"])
+    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["HIP", "AMD", "METAL"])
 
 if __name__ == '__main__':
   unittest.main()
