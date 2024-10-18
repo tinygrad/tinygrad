@@ -191,8 +191,8 @@ def load(fn:str):
     return torch_load(fn)
 
 def fetch_tiny_llama():
-  fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.model", name="tokenizer.model")
-  return fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/model.safetensors", name='model.safetensors')
+  fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.model", "tokenizer.model", subdir="tinyllama-1.1b")
+  return fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/model.safetensors", "model.safetensors", subdir="tinyllama-1.1b")
 
 class LLaMa:
   @staticmethod
