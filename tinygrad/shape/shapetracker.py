@@ -75,7 +75,7 @@ class ShapeTracker:
     ret: List[Optional[sint]] = [None] * len(self.shape)
     idx, valid = self.to_indexed_uops()
     idx = graph_rewrite(idx, symbolic_flat)
-    for c in split_uop(idx, BinaryOps.ADD):
+    for c in split_uop(idx, (BinaryOps.ADD,)):
       if c.op is UOps.RANGE: ret[c.arg] = 1
       if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[0].op is UOps.RANGE and c.src[1].op is UOps.CONST: ret[c.src[0].arg] = c.src[1].arg
       if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[1].op is UOps.RANGE and c.src[0].op is UOps.CONST: ret[c.src[1].arg] = c.src[0].arg

@@ -105,7 +105,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
 
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:DefaultDict[UOp, List[Optional[ConstType]]] = defaultdict(lambda: [None, None])
-  for stmt in split_uop(valid, BinaryOps.AND):
+  for stmt in split_uop(valid, (BinaryOps.AND,)):
     expr, is_upper, c = parse_valid(stmt)
     bounds[expr][int(is_upper)] = c
 
@@ -116,9 +116,9 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
 
     # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
     candidates = []
-    if expr.op is UOps.ALU and expr.arg is BinaryOps.ADD and all(is_irreducible(u) and u.vmin == 0 for u in split_uop(expr, BinaryOps.ADD)):
+    if expr.op is UOps.ALU and expr.arg is BinaryOps.ADD and all(is_irreducible(u) and u.vmin == 0 for u in split_uop(expr, (BinaryOps.ADD,))):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, BinaryOps.ADD)])
+      candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, (BinaryOps.ADD,))])
     # try checking the whole clause
     candidates.append([(expr, UOp.variable("fake", expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1], expr.dtype))])
 
@@ -147,12 +147,12 @@ def simplify_image_load(load:UOp) -> Optional[UOp]:
 
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
-  for stmt in split_uop(valid, BinaryOps.AND):
+  for stmt in split_uop(valid, (BinaryOps.AND,)):
     X, is_upper_bound, c = parse_valid(stmt)
 
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
-    if not is_upper_bound and c == 1 and all(is_irreducible(u) and u.vmin == 0 for u in split_uop(X, BinaryOps.ADD)):
-      testidx = functools.reduce(lambda nowidx,u: replace_uop(nowidx, u, u.const_like(0)), split_uop(X, BinaryOps.ADD), idx)
+    if not is_upper_bound and c == 1 and all(is_irreducible(u) and u.vmin == 0 for u in split_uop(X, (BinaryOps.ADD,))):
+      testidx = functools.reduce(lambda nowidx,u: replace_uop(nowidx, u, u.const_like(0)), split_uop(X, (BinaryOps.ADD,)), idx)
       testidx = graph_rewrite(testidx, sym)
       if testidx.src[0].vmax < 0 or testidx.src[1].vmax < 0:
         drop_stmt.append(stmt)
@@ -169,7 +169,7 @@ def simplify_image_load(load:UOp) -> Optional[UOp]:
           break
 
   if not drop_stmt and idx is start_idx: return None
-  new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in split_uop(valid, BinaryOps.AND) if s not in drop_stmt]) else None
+  new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in split_uop(valid, (BinaryOps.AND,)) if s not in drop_stmt]) else None
   return load.replace(src=((buf, idx, invalid_val, new_valid) if new_valid is not None else (buf, idx)))
 
 # ***** optional patterns *****
@@ -545,29 +545,16 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, name="load"), simplify_buffer_load),
 ])
 
-def split_uop2(x:UOp):
-  if x.op is UOps.ALU and x.arg in (BinaryOps.ADD, BinaryOps.MUL, BinaryOps.IDIV):
-    for s in x.src: yield from split_uop2(s)
-  else: yield x
-
 def int64_alu(alu:UOp) -> Optional[UOp]:
-  # TODO: need to add uops.cast to _min_max without tests breaking
-  # for alus we need to make sure all operands are valid, this is might be overkill though
-  operands = tuple(split_uop2(alu))
-  if any(o.op not in (UOps.CONST, UOps.CAST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR) for o in operands): return None
-  if max(alu._min_max, key=abs) > dtypes.max(alu.dtype): return UOp(alu.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in alu.src), alu.arg)
+  if all(s.op in (UOps.CONST, UOps.CAST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR) \
+          for s in split_uop(alu, (BinaryOps.ADD, BinaryOps.MUL, BinaryOps.IDIV))) and max(alu._min_max, key=abs) > dtypes.max(alu.dtype):
+    return UOp(alu.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in alu.src), alu.arg)
   return None
 
 int64_idx = PatternMatcher([
-  #(UPat(UOps.ALU, dtypes.int32, name="alu"), int64_alu),
-  #(UPat(UOps.RANGE, dtypes.int32, name="rng"),
-  #  lambda rng: UOp(rng.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in rng.src), rng.arg) if max(rng._min_max, key=abs) > dtypes.max(rng.dtype) else None)
-  # cast alu operands if needed (for int64 indexing)
-  (UPat(UOps.ALU, (dtypes.int32, dtypes.int64), name="alu"),
-    lambda alu: UOp(alu.op, alu.dtype, tuple(s.cast(alu.dtype) for s in alu.src), alu.arg) if any(s.dtype != alu.dtype for s in alu.src) and \
-    alu.arg in (BinaryOps.ADD, BinaryOps.MUL, BinaryOps.IDIV, BinaryOps.MOD) else None)
-  #(UPat((UOps.CONST, UOps.VCONST, UOps.SPECIAL, UOps.RANGE, UOps.EXPAND, UOps.VECTORIZE, UOps.DEFINE_VAR), dtypes.int32, name="x"),
-  #  lambda x: UOp(x.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in x.src), x.arg) if max(x._min_max, key=abs) > dtypes.max(x.dtype) else None)
+  (UPat(UOps.ALU, dtypes.int32, name="alu"), int64_alu),
+  (UPat(UOps.RANGE, dtypes.int32, name="rng"),
+    lambda rng: UOp(rng.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in rng.src), rng.arg) if max(rng._min_max, key=abs) > dtypes.max(rng.dtype) else None)
 ])
 
 # *** uop graph ***
