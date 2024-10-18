@@ -112,6 +112,9 @@ view_left = merge_views+PatternMatcher([
 
 # push VIEW to stores
 view_right = merge_views+PatternMatcher([
+  # ASSIGN can override st
+  (UPat(UOps.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(UOps.ASSIGN, name="a"))),
+   lambda a,b,st: UOp.store(b, (a.arg[0]+st.arg).to_uop(), a.replace(arg=())) if a.arg else None),
   # view on reduce creates a new VIEW
   (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, src=UPat.var("rsrc"), name="r"),), name="view"), view_r),
   # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
@@ -128,7 +131,11 @@ def simplify_and_unbind(ctx, x:UOp) -> Optional[UOp]:
   ctx[2].add(st)
   return st.to_uop() if st != x.st else None
 append_vars = PatternMatcher([(UPat(UOps.VIEW, name="x"), simplify_and_unbind)])
-enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx[1].index(x.arg[0])))])
+to_ast = PatternMatcher([
+  (UPat(UOps.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
+  (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda x: x.replace(src=())),
+])
+enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx[1].index(x.arg[0]))),])
 
 PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, Tuple[int, ...], UOp]] = []
 if getenv("RUN_PROCESS_REPLAY"):
@@ -139,7 +146,7 @@ if getenv("RUN_PROCESS_REPLAY"):
 @track_rewrites
 def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable, int]) -> UOp:
   sink = graph_rewrite(graph_rewrite(base_sink, view_left), view_right)
-  ret = graph_rewrite(sink, append_vars+enumerate_bufs, (var_vals, bufs, set()))
+  ret = graph_rewrite(graph_rewrite(sink, to_ast), append_vars+enumerate_bufs, (var_vals, bufs, set()))
   PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
   return ret
 
@@ -157,8 +164,9 @@ def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], inputs:List[LazyBuffer], bu
     return UOp.load(ubuf, buf.st.to_uop(), dtype=dtype)
   src = tuple(to_uop(x, outputs, inputs, buf_uops, cache) for x in buf.srcs)
   if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
-  elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, (buf_uops[buf.buffer], src[0]))
-  elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]))
+  elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
+  elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]), buf.arg)
+  elif buf.op in METAOPS: ret = UOp(METAOPS[cast(MetaOps, buf.op)], buf.dtype, src, buf.arg)
   elif buf.op is UnaryOps.CAST: ret = UOp(UOps.CAST, dtype, src)
   elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
   else: ret = UOp(UOps.ALU, dtype, src, buf.op)
@@ -167,21 +175,11 @@ def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], inputs:List[LazyBuffer], bu
 
 def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], var_vals:Dict[Variable, int]) -> LBScheduleItem:
   """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
-  if (out:=outs[0]).op in METAOPS:
-    return LBScheduleItem(UOp(METAOPS[cast(MetaOps, out.op)], out.dtype, (), out.arg), (out,)+tuple(x.base for x in out.srcs),
-                          (out.metadata,) if out.metadata is not None else None)
-  # create the stores
   cache: Dict[LazyBuffer, UOp] = {}
-  ast: List[UOp] = []
   inputs: List[LazyBuffer] = []
-  for out in outs:
-    src = to_uop(out, outs, inputs, buf_uops, cache)
-    if out.op is MetaOps.ASSIGN and out.arg:
-      assert out.arg[0].shape == out.shape, f"ASSIGN must not override output shape {out.arg[0].shape} != {out.shape}"
-      output_st = out.arg[0]
-    else: output_st = ShapeTracker.from_shape(out.shape)
-    ast.append(UOp(UOps.STORE, dtypes.void, (buf_uops[out.buffer], output_st.to_uop(), src)))
-  sink = full_ast_rewrite(ast[0].sink(*ast[1:]), tuple(buf_uops[x.buffer].arg[0] for x in outs+inputs), var_vals)
+  sink = UOp(UOps.SINK, src=tuple(UOp.store(buf_uops[out.buffer], ShapeTracker.from_shape(out.shape).to_uop(),
+                                            to_uop(out, outs, inputs, buf_uops, cache)) for out in outs))
+  sink = full_ast_rewrite(sink, tuple(buf_uops[x.buffer].arg[0] for x in outs+inputs), var_vals)
   # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
   if len(assign_targets:=[x.src[0] for x in sink.sparents if x.op is UOps.ASSIGN]) != 0:
     if not all((s:=x.st_arg).contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \
