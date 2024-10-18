@@ -8,7 +8,7 @@
 #
 import ctypes, ctypes.util
 PATHS_TO_TRY = [
-  ctypes.CDLL(ctypes.util.find_library('nvcuda')),
+  ctypes.util.find_library('nvcuda'),
 ]
 def _try_dlopen_cuda():
   library = ctypes.util.find_library("cuda")

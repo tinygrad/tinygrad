@@ -8,7 +8,7 @@
 #
 import ctypes, ctypes.util, platform
 PATHS_TO_TRY = [
-  ctypes.CDLL(ctypes.util.find_library('nvJitLink_120_0')),
+  ctypes.util.find_library('nvJitLink_120_0'),
 ]
 def _try_dlopen_nvJitLink():
   library = ctypes.util.find_library("nvJitLink")
@@ -18,7 +18,7 @@ def _try_dlopen_nvJitLink():
     except (OSError, AttributeError): pass
   raise RuntimeError("library nvJitLink not found")
 PATHS_TO_TRY = [
-  ctypes.CDLL(ctypes.util.find_library('nvrtc64_120_0')),
+  ctypes.util.find_library('nvrtc64_120_0'),
 ]
 def _try_dlopen_nvrtc():
   library = ctypes.util.find_library("nvrtc")
