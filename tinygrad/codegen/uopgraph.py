@@ -553,8 +553,8 @@ def int64_alu(alu:UOp) -> Optional[UOp]:
 
 int64_idx = PatternMatcher([
   (UPat(UOps.ALU, dtypes.int32, name="alu"), int64_alu),
-  (UPat(UOps.RANGE, dtypes.int32, name="rng"),
-    lambda rng: UOp(rng.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in rng.src), rng.arg) if max(rng._min_max, key=abs) > dtypes.max(rng.dtype) else None)
+  (UPat(UOps.RANGE, dtypes.int32, name="rng"), lambda rng: UOp(rng.op, dtypes.int64, tuple(s.cast(dtypes.int64) for s in rng.src), rng.arg) \
+    if max(rng._min_max, key=abs) > dtypes.max(rng.dtype) else None)
 ])
 
 # *** uop graph ***
