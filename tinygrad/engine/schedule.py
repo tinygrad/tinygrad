@@ -267,10 +267,7 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def _graph_schedule(outs:List[LazyBuffer]) -> \
-  Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
-        DefaultDict[LBScheduleItem, int], # this is the in-degree of the graph
-        Dict[Variable, int]]: # this has all the var values of the schedule
+def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
@@ -386,12 +383,7 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
     for assign in parents_assigns:
       graph[lsi].append(assign)
       in_degree[assign] += 1
-  return graph, in_degree, var_vals
 
-# *** DAG ordering: breadth first search ***
-
-def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  graph, in_degree, var_vals = _graph_schedule(outs)
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
   while queue:

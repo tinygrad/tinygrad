@@ -211,9 +211,6 @@ class Tensor:
 
     NOTE: A Tensor can only be scheduled once.
     """
-    if getenv("FUZZ_SCHEDULE"):
-      from test.external.fuzz_schedule import fuzz_schedule
-      fuzz_schedule(flatten([x.lazydata.lbs for x in (self,)+lst]))
     schedule, var_vals = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]))
     return memory_planner(schedule), var_vals
 
