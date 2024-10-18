@@ -54,6 +54,8 @@ class MathTrait:
   def __rsub__(self, x): return self.ufix(x).alu(BinaryOps.ADD, -self)
   def __mul__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x))
   def __rmul__(self, x): return self.ufix(x).alu(BinaryOps.MUL, self)
+  def __lshift__(self, x): return self.alu(BinaryOps.SHL, self.ufix(x))
+  def __rshift__(self, x): return self.alu(BinaryOps.SHR, self.ufix(x))
   def __floordiv__(self, x): return self.alu(BinaryOps.IDIV, self.ufix(x))
   def __rfloordiv__(self, x): return self.ufix(x).alu(BinaryOps.IDIV, self)
   def __truediv__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x).alu(UnaryOps.RECIP))
