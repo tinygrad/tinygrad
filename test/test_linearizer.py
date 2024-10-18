@@ -1356,7 +1356,7 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in k.uops if u.op is UOps.STORE]
 
     # the float4 value stores directly in lds and we skip upcast
-    assert stores[0].src[-1].dtype == dtypes.float.vec(4)
+    self.assertEqual(stores[0].src[-1].dtype, dtypes.float.vec(4))
     #assert stores[0].src[-1].op is not UOps.VECTORIZE
 
     # the global store doesn't change
