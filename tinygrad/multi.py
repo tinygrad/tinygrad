@@ -24,7 +24,7 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
   assert sum(splits) == shape[axis], "specified splits do not sum up to axis shape"
   boundaries = tuple(itertools.accumulate(splits))
   bounds = tuple(zip((0,) + boundaries, boundaries))
-  if not os.environ.get("RING_RESHARD"):
+  if RING < 2:
     print("NAIVE GATHER RESHARD")
     gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]
     sharded = to_sharded(gathered, axis, bounds)
