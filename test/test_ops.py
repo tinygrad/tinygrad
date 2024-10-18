@@ -2148,7 +2148,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
 class TestOpsUint8(unittest.TestCase):
-  @unittest.skip('this is broken for negative numbers')
   def test_cast(self):
     helper_test_op([(2,3,64,64)], lambda x: x.type(torch.uint8), lambda x: x.cast('uint8'), forward_only=True)
 
