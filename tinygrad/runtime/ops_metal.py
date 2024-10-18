@@ -128,6 +128,9 @@ class MetalAllocator(LRUAllocator):
     self.name = name
     self.mem_high = 0
     super().__init__()
+  def reset_mem_high(self):
+    self.mem_high = 0
+    print(f"{self.name:8} Mem high reset")
   def mem_changed(self, mem):
     self.mem += mem
     self.mem_high = max(self.mem, self.mem_high)
@@ -141,7 +144,7 @@ class MetalAllocator(LRUAllocator):
     mem_high, mem_high_unit = size_unit(self.mem_high)
     changed, changed_unit = size_unit(mem)
     if os.environ.get("DEBUG_MEM"):
-      print(f"\n{color}{self.name} ALLOC {changed:.2f} {changed_unit} current mem: {current_mem:.2f} {mem_unit}, highest: {mem_high:.2f} {mem_high_unit} {reset_color}")
+      print(f"\n{color}{self.name:8} ALLOC {changed:10.2f} {changed_unit} current mem: {current_mem:.2f} {mem_unit}, highest: {mem_high:.2f} {mem_high_unit} {reset_color}")
   def _alloc(self, size:int, options) -> MetalBuffer:
     self.mem_changed(size)
     # Buffer is explicitly released in _free() rather than garbage collected via reference count

@@ -1,22 +1,82 @@
 from __future__ import annotations
 from typing import Optional, Union, Tuple, List, Dict
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
+from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv, round_up
 from tinygrad.dtype import DType
 from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps, MathTrait
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
+import os
 
 def all_gather(mlb: "MultiLazyBuffer") -> "MultiLazyBuffer":
   if mlb.axis is None: return mlb
   return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None, )
 
+def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
+  assert isinstance(axis, int)
+  shape = mlb.shape
+  shards = len(mlb.lbs)
+  originalAxis = mlb.axis
+  if not isinstance(total:=shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {shape=}, {axis=}")
+  sz = round_up(total, shards) // shards
+  splits = tuple([max(0, min(sz, total - sz*i)) for i in range(shards)])
+  assert sum(splits) == shape[axis], "specified splits do not sum up to axis shape"
+  boundaries = tuple(itertools.accumulate(splits))
+  bounds = tuple(zip((0,) + boundaries, boundaries))
+  if not os.environ.get("RING_RESHARD"):
+    print("NAIVE GATHER RESHARD")
+    gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]
+    sharded = to_sharded(gathered, axis, bounds)
+    return MultiLazyBuffer(sharded, axis)
+  print("RING GATHER RESHARD")
+
+  chunks = [(0, 2), (2, 4), (4, 6), (6, 8)]
+  chunked_lbs: List[List[LazyBuffer]] = []
+  for i, lb in enumerate(mlb.lbs):
+    chunks_per_lb: List[LazyBuffer] = []
+    for s, e in chunks:
+      shrink_arg = [(0, s) for s in lb.shape]
+      shrink_arg[axis] = (s, e)
+      shrink_arg = tuple(shrink_arg)
+      chunked = lb.shrink(shrink_arg)
+      chunks_per_lb.append(chunked)
+    chunked_lbs.append(chunks_per_lb)
+
+  n_lbs = len(mlb.lbs)
+  reassembled_chunks = []
+  for i, lbs in enumerate(chunked_lbs):
+    reassembled_per_lb = [None] * n_lbs
+    reassembled_per_lb[i] = lbs[i]
+    reassembled_chunks.append(reassembled_per_lb)
+  for step in range(n_lbs - 1):
+    # print(f"{step=}")
+    for src_shard in range(n_lbs):
+      src_chunk = (step + src_shard + 1) % n_lbs
+      dst_shard = (src_shard + step + 1) % n_lbs
+      dst_chunk = (dst_shard - step - 1) % n_lbs
+      dst_shard_stationary_chunk = dst_shard
+      dst_device = chunked_lbs[dst_shard][dst_shard_stationary_chunk].device
+      dst_pad = [(0, 0)] * n_lbs
+      # print(f"{src_shard}:{src_chunk} --> {dst_shard}:{dst_chunk} {dst_device}")
+      copied = chunked_lbs[src_shard][src_chunk].copy_to_device(dst_device)
+      reassembled_chunks[dst_shard][dst_chunk] = copied
+  reassembled_lbs = []
+  for i, chunks in enumerate(reassembled_chunks):
+    cat_dims =  [s.shape[axis] for s in chunks]
+    cat_dim_cumsum = [0, *itertools.accumulate(cat_dims)]
+    slc:List[List[Optional[Tuple[sint, sint]]]] = [[(0,0) for _ in range(len(shape))] for _ in chunks]
+    for d,k,s in zip(cat_dims, cat_dim_cumsum[:-1], slc):
+      s[originalAxis] = (k, cat_dim_cumsum[-1] - k - d)
+    padded = [arg.pad(tuple(s)) for arg,s in zip(chunks, slc)]
+    assembled = functools.reduce(lambda x, y: x.alu(BinaryOps.ADD, y), padded)
+    print(assembled)
+    reassembled_lbs.append(assembled)
+  return MultiLazyBuffer(reassembled_lbs, axis)
 
 def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
   assert all_same([lb.shape[0] for lb in lbs]), "allreduce with uneven shards is undefined"
   bop = REDUCE_ALU[op]
-
   n_lbs, dim = len(lbs), prod(lbs[0].shape)
   # Ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
   # so just fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
@@ -29,12 +89,15 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   c_lens = [(base + 1) * factor if i < left else base * factor for i in range(n_lbs)]
   acc = 0
   chunks = [(acc, (acc := acc + i)) for i in c_lens if i > 0]
+  print(f"{chunks=}")
   chunked = [[lb.reshape((dim,)).shrink(((s,e),)) for s,e in chunks] for lb in lbs]
 
   # Scatter-reduce step
   for step in range(n_lbs - 1):
+    print(f"{step=}")
     for i in range(len(chunks)):
       s, r = (i+step)%n_lbs, (i+step+1)%n_lbs
+      print(f"{i=}, {s=}, {r=}")
       chunked[r][i] = chunked[r][i].alu(bop, chunked[s][i].copy_to_device(chunked[r][i].device, force=True))
 
   # Allgather step
