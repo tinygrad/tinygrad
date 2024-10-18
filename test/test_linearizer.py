@@ -989,10 +989,10 @@ class TestLinearizer(unittest.TestCase):
 
     # the first store is to lds and can be upcasted
     assert stores[0].src[-1].dtype == dtypes.float.vec(4)
-    assert stores[0].src[0].op is UOps.DEFINE_LOCAL
+    assert stores[0].src[0].dtype.local
     # the second store is to gds with no upcasts
     assert stores[1].src[2].dtype == dtypes.float
-    assert stores[1].src[0].op is UOps.DEFINE_GLOBAL
+    assert not stores[1].src[0].dtype.local
 
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
