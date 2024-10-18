@@ -4,7 +4,7 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from weakref import WeakValueDictionary
-from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
+from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType
 from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
@@ -414,7 +414,7 @@ python_alu: Dict[Op, Callable]  = {
 def exec_alu(op:Op, dtype:DType, operands):
   if dtype.count > 1:
     return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
-  return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
+  return python_alu[op](*operands)
 
 # ***** uop helpers *****
 
