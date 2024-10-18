@@ -146,8 +146,8 @@ class GPT2:
     return GPT2(model, tokenizer)
 
   @staticmethod
-  def build_gguf(model_size="gpt2_gguf_q4_0"):
-    q_type = model_size[model_size.find("gguf_") + len("gguf_"):].upper()
+  def build_gguf(model_size: str):
+    q_type = model_size[len("gpt2_gguf_"):].upper()
     fn = fetch(f"https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.{q_type}.gguf?download=true")
     gguf_tensor = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}").to(Device.DEFAULT)
     kv_data, state_dict = load_gguf(gguf_tensor)
@@ -221,7 +221,7 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
 
   print(f"using {args.model_size}")
-  gpt2 = GPT2.build_gguf(args.model_size) if "gguf" in args.model_size else GPT2.build(args.model_size)
+  gpt2 = GPT2.build_gguf(args.model_size) if args.model_size.startswith("gpt2_gguf_") else GPT2.build(args.model_size)
 
   if args.benchmark != -1:
     gpt2.model(Tensor.rand(args.batch_size, args.benchmark), Variable("a", 0, MAX_CONTEXT).bind(0)).realize()
