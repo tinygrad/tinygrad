@@ -56,6 +56,8 @@ if __name__ == "__main__":
       opt.zero_grad()
       samples = Tensor.randint(getenv("BS", 4), high=X_train.shape[0])
       Xt, Yt = X_train[samples], Y_train[samples]
+      Xt.to_(GPUS[0])
+      Yt.to_(GPUS[0])
       if SHARD > 1:
         Xt.shard_(GPUS)
         Yt.shard_(GPUS)
@@ -63,6 +65,7 @@ if __name__ == "__main__":
       # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
       loss = model(Xt)
       loss = loss.sparse_categorical_crossentropy(Yt)
+      loss = loss.sum(0).sum(0)
       loss.backward()
       opt.step()
       return loss
