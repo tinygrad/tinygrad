@@ -3,7 +3,7 @@ from typing import Union, Tuple, Optional, List, Any, cast, Literal
 from tinygrad.tensor import Tensor, _broadcast_shape, ConstType
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten, make_pair
-from tinygrad.runtime.onnx.onnx import DTYPE_MAP, to_python_const
+from tinygrad.runtime.onnx.onnx import to_python_const, dtype_parse
 import numpy as np
 
 # TODO maybe don't cast hack things
@@ -25,7 +25,7 @@ def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
 def Squeeze(data: Tensor, axes): return functools.reduce(lambda d, dim: d.squeeze(dim), sorted(axes, reverse=True), data)
 def Unsqueeze(data: Tensor, axes): return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(axes), data)
 def Mean(*data_0): return Sum(*data_0) / len(data_0)
-def Cast(x: Tensor, to: int, saturate=1): return x.cast(DTYPE_MAP[to])
+def Cast(x: Tensor, to: int, saturate=1): return x.cast(dtype_parse(to))
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
 # **************** Simple Ops ****************
@@ -181,7 +181,7 @@ def Pad(x:Tensor, pads:List[int], constant_value:Optional[ConstType]=None, axes:
   for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
   return x.pad2d(_onnx_pads_to_pad2d_pads(real_pads), constant_value, mode)
 
-# custom not count_include_pad because of pre-padding
+# custom count_include_pad=False because of pre-padding
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, count_include_pad=False, dilations=1, pads=None, strides=1):
   pads = _resolve_pool_pad(X.shape[-len(kernel_shape):], kernel_shape, dilations, strides, _validate_pads(pads), auto_pad)
   if auto_pad == "NOTSET": return X.avg_pool2d(kernel_shape, strides, dilations, pads, ceil_mode, count_include_pad)
@@ -325,8 +325,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       reshape[i] = expand[i] = sizes[i]
       low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
       X = X.gather(i, low).lerp(X.gather(i, high), perc)
-  if mode == "cubic":
-    raise NotImplementedError("cubic interpolation is not implemented")
+  if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
   return X.permute(*[perm.index(i) for i in range(len(perm))]) if perm else X
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 
@@ -357,11 +356,11 @@ def Compress(inp: Tensor, condition, axis=None):
     inp = inp.flatten()
     axis = 0
   if axis < 0: axis += inp.ndim
-  con = Tensor(np.arange(len(condition))[condition]) # TODO no boolean indexing in Tensor, pretty sure it's possible now...
+  con = Tensor(np.arange(len(condition))[condition]) # TODO no boolean indexing in Tensor, pretty sure it's possible maybe?
   return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
 def EyeLike(x: Tensor, dtype: Optional[int]=None, k=0):
-  tiny_dtype = x.dtype if dtype is None else DTYPE_MAP[dtype]
+  tiny_dtype = x.dtype if dtype is None else dtype_parse(dtype)
   dim = cast(int, min(x.shape))
   if x.size(0) == x.size(1): return Tensor.eye(dim, dtype=tiny_dtype)
   padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)
@@ -418,6 +417,7 @@ def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
   # this is tanh approximated
   return (x + bias).gelu()
 
+# TODO: how to simplify these haha, I don't actually understand ML, IM A FRAUD
 def EmbedLayerNormalization(input_ids: Tensor, segment_ids: Tensor, word_embedding:Tensor,
                             position_embedding:Tensor, segment_embedding:Tensor, gamma=None, beta=None,
                             mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):

@@ -6,7 +6,7 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import getenv, DEBUG, CI, OSX
 from tinygrad.dtype import ConstType, DType
-from onnx import AttributeProto, ModelProto, TensorProto
+from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -14,7 +14,12 @@ except ImportError:
   from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
   def tensor_dtype_to_np_dtype(tensor_dtype:int) -> np.dtype: return TENSOR_TYPE_TO_NP_TYPE[tensor_dtype]
 
-# ========== to_python_const cache
+# TODO: yeah idk
+# class TinyOnnx:
+#   def __init__(self, onnx_model, training=False) -> None:
+#     self.training = training
+
+# ========== helpers
 # Tensor -> python value cache for arguments
 cache_misses = 0
 @functools.lru_cache(None)
@@ -28,7 +33,6 @@ def to_python_const(t) -> Union[List[ConstType], List[bytes], Union[ConstType, b
     cache_misses = info.misses
   return ret
 
-# ========== dtype
 # copied from helpers.py
 def is_dtype_supported(dtype, device: str = Device.DEFAULT):
   if dtype == dtypes.bfloat16: return False
@@ -37,21 +41,24 @@ def is_dtype_supported(dtype, device: str = Device.DEFAULT):
   # if device in ["WEBGPU"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32] # lol
   return True
 
+# ======= parsers
 # src: onnx/mapping.py  https://onnx.ai/onnx/api/mapping.html#l-mod-onnx-mapping
-# not supported: STRING = 8 COMPLEX64 = 14, COMPLEX128 = 15, UINT4 = 21, INT4 = 22, and ALL FLOAT8
+# TODO: these float8 are kinda cursed. May run into subtle bugs passing them as float.....
 # TensorProto.FLOAT8E4M3FN:dtypes.float, TensorProto.FLOAT8E4M3FNUZ:dtypes.float,
 # TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float
 # TODO: use dtypes.float16 for FLOAT16
 DTYPE_MAP: Dict[int, DType] = {
   TensorProto.FLOAT:dtypes.float, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8, TensorProto.UINT16:dtypes.uint16,
   TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64, TensorProto.BOOL:dtypes.bool,
-  TensorProto.FLOAT16:dtypes.float, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32, TensorProto.UINT64:dtypes.uint64,
-  TensorProto.BFLOAT16:dtypes.bfloat16}
+  TensorProto.FLOAT16:dtypes.float16, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32, TensorProto.UINT64:dtypes.uint64,
+  TensorProto.BFLOAT16:dtypes.bfloat16, TensorProto.FLOAT8E4M3FN:dtypes.float, TensorProto.FLOAT8E4M3FNUZ:dtypes.float,
+  TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float}
+def dtype_parse(onnx_dtype: int) -> DType:
+  if (ret := DTYPE_MAP.get(onnx_dtype)) is None: raise RuntimeError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
+  return ret
 
-# ======= parsers
 def buffer_parse(inp: TensorProto) -> Tensor:
-  if inp.data_type not in DTYPE_MAP: raise NotImplementedError(f"data type not supported {inp.name} {inp.dims} {inp.data_type}")
-  dtype = DTYPE_MAP[inp.data_type] if is_dtype_supported(DTYPE_MAP[inp.data_type]) else dtypes.float32
+  dtype = dtype_parse(inp.data_type) if is_dtype_supported(DTYPE_MAP[inp.data_type]) else dtypes.float32
   if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
     return Tensor(dat, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims))
   if len(inp.raw_data) > 0:
@@ -60,91 +67,74 @@ def buffer_parse(inp: TensorProto) -> Tensor:
     return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
   return Tensor(None, requires_grad=False)
 
-# this is not complete, see onnx/onnx_ml_pb2.pyi for a complete list
-attrs = {AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i), AttributeProto.STRING: lambda a: a.s.decode("utf-8"),
+# src: onnx/onnx_ml_pb2.pyi
+# NOTE: this is not a complete list
+# torch's parser at onnx2torch/onnx_node.py: `OnnxNode._parse_attribute_value()`
+ATTRS_MAP = {AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i), AttributeProto.STRING: lambda a: a.s.decode("utf-8"),
          AttributeProto.TENSOR: lambda a: buffer_parse(a.t), AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats),
          AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints), AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)}
 def attribute_parse(a: AttributeProto):
-  if (ret := attrs.get(a.type, lambda _: None)(a)) is None: raise NotImplementedError(f"{a.type} not implemented")
+  if (ret := ATTRS_MAP.get(a.type, lambda _: None)(a)) is None: raise NotImplementedError(f"{a.type} not implemented")
   return ret
 
-# TODO: I think this is only needed if buffer parse is incorrect? or if the maker of this ModelProto messed up somewhere? otherwise it should be right
-# I think we move this in extra tests to test for this kinda stuff?
-# have an independent test that checks proto parsing, instead of running it every run
-  # def type_parse(type_proto: TypeProto):
-  #   ret: Union[List[int], List[Union[int, Tuple[int]]]] = []
-  #   while True:
-  #     attr = type_proto.WhichOneof('value')
-  #     if attr == 'tensor_type':
-  #       if not hasattr(type_proto.tensor_type.shape.dim, 'dim_value'): return () # variable type, unable to determine shape
-  #       elif not ret: # tensor
-  #         return tuple([x.dim_value for x in type_proto.tensor_type.shape.dim])
-  #       else: # list of tensors
-  #         ret += [(x.dim_value,) for x in type_proto.tensor_type.shape.dim]
-  #         return tuple(ret)
-  #     elif attr == 'sequence_type':
-  #       type_proto = getattr(type_proto, 'sequence_type').elem_type
-  #       ret.append(1)
-  #     elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
-  #     else: NotImplementedError(f"{type_proto=} is not implemented")
-
 # ========== runner
-onnx_ops = importlib.import_module('tinygrad.runtime.onnx.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
-def get_run_onnx(onnx_model: ModelProto):
-  tensors: Dict[str, Tensor] = {}
+# onnx_ops implemented methods
+onnx_ops = importlib.import_module('tinygrad.runtime.onnx.onnx_ops')
 
+# tensor methods
+exact_tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
+  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh", "Elu", "Celu", "Xor",
+  "Round", "Softmax"}
+
+# tensor methods with different names
+equivalent_tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual": "__le__", "GreaterOrEqual": "__ge__", "Equal": "__eq__",
+  "LogSoftmax": "log_softmax", "Not": "logical_not", "Tile":"repeat", "Range": "arange", "NegativeLogLikelihoodLoss": "nll_loss"}
+
+# tensor methods with different argument names
+equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"}), "LeakyRelu": ("leakyrelu", {"alpha": "neg_slope"}),
+  "Selu": ("selu", {"gamma": "scale"})}
+
+# lambda methods lol
+# lambda_methods = {"Identity": lambda x:x, "Sub": lambda x,y:x-y, }
+
+def get_run_onnx(onnx_model: ModelProto):
   # get weights and biases
-  for inp in onnx_model.graph.initializer: tensors[inp.name] = buffer_parse(inp)
+  tensors = {inp.name:buffer_parse(inp) for inp in onnx_model.graph.initializer}
 
   # preparse the attributes
-  attribute_dict = {}
-  domain = ""
-  for num,n in enumerate(onnx_model.graph.node):
-    attribute_dict[num] = {x.name:attribute_parse(x) for x in n.attribute}
-    if n.domain: domain = n.domain
+  attributes = {num:{x.name:attribute_parse(x) for x in n.attribute} for num,n in enumerate(onnx_model.graph.node)}
 
-  def run_onnx(inputs={}, debug=0, hook=None):
+  def run_onnx(inputs={}, debug=0, initialization_hook=None, op_hook=None):
+    if initialization_hook: initialization_hook(tensors, attributes)
     debug = getenv("DEBUGONNX") or debug
-    input_tensors: Dict[str,Union[Tensor, List[Tensor]]] = {}
-    intermediate_tensors: Dict[str,Tensor] = {}
-    output_tensor_names = [x.name for x in onnx_model.graph.output]
 
     # get inputs
-    for model_input in onnx_model.graph.input:
-      name = model_input.name
-      if name in tensors: continue
-      if name in inputs:
-        if isinstance(inputs[name], Tensor): input_tensors[name] = inputs[name]
-        elif isinstance(inputs[name], list): input_tensors[name] = [Tensor(i, requires_grad=False) for i in inputs[name]]
-        # not sure if in real use the domain is "ai.onnx.preview.training"
-        # TODO there isn't a good way to parse which inp requires_grad
-        elif domain == "ai.onnx.preview.training": input_tensors[name] = Tensor(inputs[name], requires_grad=True)
-        else: input_tensors[name] = Tensor(inputs[name], requires_grad=False)
-      else: raise RuntimeError(f"no data for {name}")
+    def parse_input(model_input:ValueInfoProto):
+      if model_input.name not in inputs: raise RuntimeError(f"no data for {model_input=}")
+      # NOTE: when elem_type is 0 which maps to UNDEFINED DataType, the type_proto does not provide enough information to verify input
+      if isinstance(inp := inputs[model_input.name], list):
+        ret = [Tensor(i, requires_grad=False) for i in inp]
+        if model_input.type.sequence_type.elem_type.tensor_type.elem_type != 0:
+          dtype = dtype_parse(model_input.type.sequence_type.elem_type.tensor_type.elem_type)
+          # TODO: there are tests (optional_*) with sequence_type type_proto that are inadequate to determine shapes
+          # the element_type of tensor_type of a sequence_type determines the dtype for all tensors in the sequence
+          assert all(t.dtype is dtype for t in ret)
+        return ret
+      inp = inp if isinstance(inp, Tensor) else Tensor(inp, requires_grad=False)
+      if model_input.type.tensor_type.elem_type != 0:
+        assert dtype_parse(model_input.type.tensor_type.elem_type) is inp.dtype
+        assert tuple(d.dim_value for d in model_input.type.tensor_type.shape.dim) == inp.shape
+      return inp
+    input_tensors = {model_input.name: parse_input(model_input) for model_input in onnx_model.graph.input if model_input.name not in tensors}
+    intermediate_tensors: Dict[str,Tensor] = {}
 
     def fetch_tensor(x: str):
       if x in tensors: return tensors[x]
       if x in intermediate_tensors: return intermediate_tensors[x]
       if x != "": return input_tensors[x]
       return None
-
-    # tensor methods
-    exact_tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
-      "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh", "Elu", "Celu", "Xor",
-      "Round", "Softmax"}
-
-    # tensor methods with different names
-    equivalent_tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual": "__le__", "GreaterOrEqual": "__ge__", "Equal": "__eq__",
-      "LogSoftmax": "log_softmax", "Not": "logical_not", "Tile":"repeat", "Range": "arange", "NegativeLogLikelihoodLoss": "nll_loss"}
-
-    # tensor methods with different argument names
-    equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"}), "LeakyRelu": ("leakyrelu", {"alpha": "neg_slope"}),
-      "Selu": ("selu", {"gamma": "scale"})}
-
-    # lambda methods
-    # lambda_methods = {"Identity": lambda x:x, "Sub": lambda x,y:x-y, }
 
     # inputs we need to turn into a python const to compute
     to_python_const_inps: Dict[str, Tuple[int, ...]] = \
@@ -153,13 +143,14 @@ def get_run_onnx(onnx_model: ModelProto):
       "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4)}
 
     for num,n in enumerate(onnx_model.graph.node):
-      inp, opt = [fetch_tensor(x) for x in n.input], attribute_dict[num]
-      if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
+      # prepare
+      tensor_inp, opt = [fetch_tensor(x) for x in n.input], attributes[num]
+      if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in tensor_inp]} opt {opt}")
       # to python consts
       # TODO what if we just don't buffer parse some inps into Tensor to start with so no need waste time to python const
       if debug >= 3: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {t}" + (" -> *python const*" if i in to_python_const_inps.get(n.op_type,()) else "")
-                                                      for i,(x,t) in enumerate(zip(n.input, inp))))
-      inp = [to_python_const(x) if i in to_python_const_inps.get(n.op_type, ()) else x for i,x in enumerate(inp)]
+                                                      for i,(x,t) in enumerate(zip(n.input, tensor_inp))))
+      inp = [to_python_const(x) if i in to_python_const_inps.get(n.op_type, ()) else x for i,x in enumerate(tensor_inp)]
 
       # tensor methods
       if n.op_type in exact_tensor_methods: ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
@@ -204,12 +195,9 @@ def get_run_onnx(onnx_model: ModelProto):
       for i in range(len(n.output)): intermediate_tensors[n.output[i]] = ret[i]
       if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{n.output[i]} - {ret[i]}" for i in range(len(n.output))))
 
-      # run hook
-      if hook: hook(num, n, tuple(inp), opt, ret)
+      if op_hook: op_hook(num, n, tuple(tensor_inp), opt, ret)
 
-      if num == ONNXLIMIT:
-        output_tensor_names = n.output
-        break
+      if num == ONNXLIMIT: return {name:intermediate_tensors[name] for name in n.output}
 
-    return {outp:intermediate_tensors[outp] for outp in output_tensor_names}
+    return {x.name:intermediate_tensors[x.name] for x in onnx_model.graph.output}
   return run_onnx
