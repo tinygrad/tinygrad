@@ -137,8 +137,7 @@ class LazyBuffer(MathTrait):
     # copy the base and apply the shapetracker on the new device
     return self.base._copy(device)._view(self.st)
 
-  def clone(self) -> LazyBuffer:
-    return self.copy_to_device(self.device, clone=True)
+  def clone(self) -> LazyBuffer: return self.copy_to_device(self.device, clone=True)
 
   def alu(self, op:Union[MetaOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer) -> LazyBuffer:
     srcs: List[LazyBuffer] = []

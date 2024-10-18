@@ -321,7 +321,7 @@ class Tensor:
     assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
-  
+
   def clone(self) -> Tensor:
     """
     Creates a clone of this tensor allocating a seperate buffer for the data.

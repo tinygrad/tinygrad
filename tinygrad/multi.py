@@ -88,8 +88,7 @@ class MultiLazyBuffer(MathTrait):
       llbs.append(lb.copy_to_device(device).pad(pad_arg))
     return functools.reduce(lambda x,y: x.alu(BinaryOps.ADD, y), llbs)
 
-  def clone(self) -> MultiLazyBuffer:
-    return MultiLazyBuffer([lb.clone() for lb in self.lbs], self.axis, self.real)
+  def clone(self) -> MultiLazyBuffer: return MultiLazyBuffer([lb.clone() for lb in self.lbs], self.axis, self.real)
 
   # passthroughs
   def is_realized(self) -> bool: return all(lb.base.realized is not None for lb, r in zip(self.lbs, self.real) if r is True)
