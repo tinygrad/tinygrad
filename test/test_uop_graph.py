@@ -2,7 +2,6 @@ from typing import List
 import unittest, time
 from test.helpers import assert_equiv_uops
 from tinygrad import dtypes, Device
-from tinygrad.dtype import PtrDType
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, UOps, UOp, KernelInfo
 from tinygrad.ops import UPat, PatternMatcher
@@ -32,7 +31,7 @@ class TestGraphRewriteEfficiency(unittest.TestCase):
   def test_expand_rewrite(self):
     sink = UOp(UOps.SINK, dtypes.void, arg=KernelInfo(local_dims=2, upcasted=4, dont_use_locals=False), src=(
       UOp(UOps.STORE, dtypes.void, arg=None, src=(
-        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
+        UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()),
         UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 4, 64, 8, 16, 1, 1, 3, 3, 4, 1),
                                                                   strides=(1179648, 9216, 1, 147456, 576, 0, 0, 64, 192, 36864, 0),
                                                                   offset=0, mask=None, contiguous=False),)), src=()),
@@ -40,14 +39,14 @@ class TestGraphRewriteEfficiency(unittest.TestCase):
           UOp(UOps.CAST, dtypes.float, arg=None, src=(
             UOp(UOps.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
               UOp(UOps.LOAD, dtypes.half, arg=None, src=(
-                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=1, src=()),
+                UOp(UOps.DEFINE_GLOBAL, dtypes.half.ptr(), arg=1, src=()),
                 UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(
                   View(shape=(1, 1024, 1, 64, 4, 17, 4, 17), strides=(0, 14400, 0, 225, 0, 15, 0, 1), offset=-16,
                        mask=((0, 1), (0, 1024), (0, 1), (0, 64), (0, 4), (1, 16), (0, 4), (1, 16)), contiguous=False),
                   View(shape=(2, 4, 64, 8, 16, 16, 15, 3, 3, 4, 15), strides=(0, 73984, 4734976, 0, 4624, 295936, 68, 18, 1224, 0, 1), offset=0,
                        mask=None, contiguous=False))), src=()),)),
               UOp(UOps.LOAD, dtypes.half, arg=None, src=(
-                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.half), arg=2, src=()),
+                UOp(UOps.DEFINE_GLOBAL, dtypes.half.ptr(), arg=2, src=()),
                 UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(
                   View(shape=(2, 4, 64, 8, 16, 16, 15, 3, 3, 4, 15), strides=(7200, 0, 230400, 900, 0, 14400, 15, 0, 0, 225, 1), offset=0,
                        mask=None, contiguous=False),)), src=()),)),)),)),)),)),))
@@ -225,7 +224,7 @@ class TestUOpGraph(unittest.TestCase):
 
   @unittest.skip("this test isn't valid uops")
   def test_noop_vectorize_fold(self):
-    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0)
+    d0 = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0)
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.float.vec(2), (d0, idx))
     vec = UOp(UOps.VECTORIZE, dtypes.float.vec(2), (ld,))
@@ -236,9 +235,9 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(len([x for x in uops if x.op is UOps.VECTORIZE]), 0)
 
   def test_gep_vec_fold(self):
-    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
-    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
-    d2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 2)
+    d0 = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
+    d1 = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
+    d2 = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 2)
     idx = UOp.const(dtypes.int, 0)
     def _test_vec(geps, count=4):
       vec = UOp(UOps.VECTORIZE, dtypes.float.vec(count), geps)
@@ -342,8 +341,8 @@ class TestUOpGraph(unittest.TestCase):
       assert_equiv_uops(uops[-1], wmma)
 
   def test_cast_alu_fold(self):
-    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.bool), arg=0)
-    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1)
+    d0 = UOp(UOps.DEFINE_GLOBAL, dtypes.bool.ptr(), arg=0)
+    d1 = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1)
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.int, (d1, idx))
     alu = ld.lt(1).cast(dtypes.bool)
@@ -352,8 +351,8 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(len([x for x in uops if x.op is UOps.CAST]), 0)
 
   def test_double_cast_fold(self):
-    d0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0)
-    d1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), arg=1)
+    d0 = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0)
+    d1 = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1)
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.int, (d1, idx))
     alu = ld.cast(dtypes.float).cast(dtypes.float)
@@ -376,9 +375,9 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(out.src[1].arg, 6)
 
   def test_fold_gated_load(self):
-    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
-    glbl1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 1)
-    glbl2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 2)
+    glbl0 = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
+    glbl1 = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
+    glbl2 = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 2)
     idx = UOp.const(dtypes.int, 0)
     ld0 = UOp(UOps.LOAD, dtypes.int, (glbl1, idx, UOp.const(dtypes.int, 2), UOp.const(dtypes.bool, False)))
     ld1 = UOp(UOps.LOAD, dtypes.int, (glbl2, idx, UOp.const(dtypes.int, 3), UOp.const(dtypes.bool, True)))
@@ -390,8 +389,8 @@ class TestUOpGraph(unittest.TestCase):
     assert_equiv_uops(ld0, UOp.load(glbl2, idx, dtype=dtypes.int))
 
   def test_fold_gated_load_local(self):
-    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
-    smem = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.int, local=True), (), ("temp", 1))
+    glbl0 = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
+    smem = UOp(UOps.DEFINE_LOCAL, dtypes.int.ptr(local=True), (), ("temp", 1))
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 16))
     st = UOp(UOps.STORE, dtypes.void, (smem, lidx, UOp.load(glbl0, lidx, dtype=dtypes.int)))
     barrier = UOp(UOps.BARRIER, dtypes.void, (st, ))
@@ -405,7 +404,7 @@ class TestUOpGraph(unittest.TestCase):
     assert_equiv_uops(ld0, UOp.load(smem, lidx+2, barrier, dtype=dtypes.int))
 
   def test_fold_gated_store(self):
-    glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
+    glbl = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     idx0 = UOp.const(dtypes.int, 0)
     idx1 = UOp.const(dtypes.int, 0)
     val = UOp.const(dtypes.int, 42)
@@ -418,13 +417,13 @@ class TestUOpGraph(unittest.TestCase):
 
   @unittest.skip("this is a uop type error")
   def test_asserts_bad_gate(self):
-    glbl0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
+    glbl0 = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     idx = UOp.const(dtypes.int, 0)
     bad_gate = UOp.const(dtypes.int, 1)
     with self.assertRaises(AssertionError): to_uops_list([UOp(UOps.STORE, dtypes.void, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
 
   def test_switched_range_order(self):
-    glbl = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
+    glbl = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     c0 = UOp.const(dtypes.int, 0)
     c2 = UOp.const(dtypes.int, 2)
     cf = UOp.const(dtypes.float, 0.0)
@@ -591,21 +590,21 @@ class TestExpander(unittest.TestCase):
 
 class TestLoadStoreFolder(unittest.TestCase):
   def test_simple_load_fold(self):
-    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
+    buf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr())
     load = [UOp(UOps.LOAD, dtypes.float, (buf, UOp.const(dtypes.int, i))) for i in range(4)]
     sink = UOp(UOps.VECTORIZE, dtypes.float.vec(len(load)), tuple(load))
     sink = float4_rewrite(sink)
     assert len([x for x in sink.sparents if x.op is UOps.LOAD]) == 1
 
   def test_two_load_fold(self):
-    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
+    buf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr())
     load = [UOp(UOps.LOAD, dtypes.float, (buf, UOp.const(dtypes.int, i))) for i in range(8)]
     sink = UOp(UOps.VECTORIZE, dtypes.float.vec(len(load)), tuple(load))
     sink = float4_rewrite(sink)
     assert len([x for x in sink.sparents if x.op is UOps.LOAD]) == 2
 
   def test_simple_load_fold_gated(self):
-    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
+    buf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr())
     gate = UOp(UOps.DEFINE_VAR, dtypes.bool)
     load = [UOp(UOps.LOAD, dtypes.float, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate)) for i in range(4)]
     sink = UOp(UOps.VECTORIZE, dtypes.float.vec(len(load)), tuple(load))
@@ -615,7 +614,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     self.assertListEqual(list(single_load.src[2].arg), [0.0, 1.0, 2.0, 3.0])
 
   def test_simple_load_dont_fold_different_gated(self):
-    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
+    buf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr())
     gate = UOp.variable("g1", False, True, dtypes.bool)
     gate2 = UOp.variable("g2", False, True, dtypes.bool)
     load = [UOp(UOps.LOAD, dtypes.float, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate if i == 0 else gate2)) for i in range(4)]
@@ -624,14 +623,14 @@ class TestLoadStoreFolder(unittest.TestCase):
     assert len([x for x in sink.sparents if x.op is UOps.LOAD]) == 3
 
   def test_simple_store_fold(self):
-    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
+    buf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr())
     load = [UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i))) for i in range(4)]
     sink = UOp(UOps.SINK, dtypes.void, tuple(load))
     sink = float4_rewrite(sink)
     assert len([x for x in sink.sparents if x.op is UOps.STORE]) == 1
 
   def test_simple_store_fold_gate(self):
-    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
+    buf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr())
     gate = UOp.variable("g1", False, True, dtypes.bool)
     load = [UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate)) for i in range(4)]
     sink = UOp(UOps.SINK, dtypes.void, tuple(load))
@@ -642,7 +641,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     assert str(one_store.src[3]) == str(gate)  # huh, why do i need str here?
 
   def test_simple_store_dont_fold(self):
-    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float))
+    buf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr())
     gate = UOp.variable("g1", False, True, dtypes.bool)
     gate2 = UOp.variable("g2", False, True, dtypes.bool)
     load = [UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate if i == 0 else gate2)) for i in range(4)]
@@ -655,8 +654,8 @@ def gate_rewrite(sink): return graph_rewrite(sink, sym + expander + reducer)
 
 class TestIFUOps(unittest.TestCase):
   def test_create_ifs(self):
-    gbuf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
-    sbuf = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.float, local=True), (), ("smem", 4))
+    gbuf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
+    sbuf = UOp(UOps.DEFINE_LOCAL, dtypes.float.ptr(local=True), (), ("smem", 4))
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 4))
     gate = valid&(lidx.ne(2))
@@ -674,8 +673,8 @@ class TestIFUOps(unittest.TestCase):
       self.assertEqual(len(st.src), 3)
 
   def test_expand_ifs_one_gate(self):
-    gbuf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
-    sbuf = UOp(UOps.DEFINE_LOCAL, PtrDType(dtypes.float, local=True), (), ("smem", 16))
+    gbuf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
+    sbuf = UOp(UOps.DEFINE_LOCAL, dtypes.float.ptr(local=True), (), ("smem", 16))
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 4)).lt(1)
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 16))
     gate = valid&(lidx.ne(2))
@@ -694,7 +693,7 @@ class TestIFUOps(unittest.TestCase):
   # this will be fixed with the merge gated stores bounty
   @unittest.expectedFailure
   def test_expand_ifs_dumb(self):
-    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    buf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     valid = UOp(UOps.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 4))
     gate = valid&(lidx.ne(2))
