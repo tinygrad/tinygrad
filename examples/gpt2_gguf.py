@@ -2,11 +2,10 @@ import argparse
 import os
 import tiktoken
 from examples.gpt2 import Transformer, GPT2
-from tinygrad.device import Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import fetch
 from tinygrad.nn.state import load_gguf, load_state_dict
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, Device
 
 def load_gpt2_gguf(fn: str):
   gguf_tensor = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}").to(Device.DEFAULT)
