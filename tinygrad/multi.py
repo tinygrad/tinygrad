@@ -56,7 +56,6 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
       dst_chunk = (dst_shard - step - 1) % n_lbs
       dst_shard_stationary_chunk = dst_shard
       dst_device = chunked_lbs[dst_shard][dst_shard_stationary_chunk].device
-      dst_pad = [(0, 0)] * n_lbs
       # print(f"{src_shard}:{src_chunk} --> {dst_shard}:{dst_chunk} {dst_device}")
       copied = chunked_lbs[src_shard][src_chunk].copy_to_device(dst_device)
       reassembled_chunks[dst_shard][dst_chunk] = copied
