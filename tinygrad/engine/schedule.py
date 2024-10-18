@@ -34,16 +34,6 @@ class ScheduleItem:
     """Read only buffers in the schedule."""
     return self.bufs[len(self.ast.src):] if self.ast.op is UOps.SINK else self.bufs[1:]
 
-@dataclass(frozen=True)
-class LBScheduleItem:
-  ast: UOp
-  bufs: Tuple[LazyBuffer, ...]
-  metadata: Optional[Tuple[Metadata, ...]]
-  @property
-  def outputs(self) -> Tuple[LazyBuffer, ...]: return self.bufs[:len(self.ast.src)] if self.ast.op is UOps.SINK else self.bufs[0:1]
-  @property
-  def inputs(self) -> Tuple[LazyBuffer, ...]: return self.bufs[len(self.ast.src):] if self.ast.op is UOps.SINK else self.bufs[1:]
-
 # *** UOp with VIEW (movementops) rewriting to UOp we can index ***
 
 # ** helpers for doing movementops on uops
@@ -133,61 +123,53 @@ def simplify_and_unbind(ctx, x:UOp) -> Optional[UOp]:
 append_vars = PatternMatcher([(UPat(UOps.VIEW, name="x"), simplify_and_unbind)])
 to_ast = PatternMatcher([
   (UPat(UOps.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
-  (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda x: x.replace(src=())),
+  (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda x: x),
+  #(UPat(tuple(METAOPS.values()), name="x"), lambda x: x.replace(src=x.src[:1]) if len(x.src) != 1 else None),
 ])
-enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx[1].index(x.arg[0]))),])
 
-PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, Tuple[int, ...], UOp]] = []
+def append_buf(ctx, x:UOp) -> UOp:
+  ctx[1].append(x)
+  return UOp(UOps.DEFINE_GLOBAL, x.dtype, (), len(ctx[1])-1)
+append_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), append_buf),])
+
+PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, UOp]] = []
 if getenv("RUN_PROCESS_REPLAY"):
   @atexit.register
   def save_process_replay():
-    for base_sink,ctx,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
+    for base_sink,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ret))
 
 @track_rewrites
-def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable, int]) -> UOp:
+def full_ast_rewrite(base_sink:UOp, bufs:List[UOp], var_vals:Dict[Variable, int]) -> UOp:
   sink = graph_rewrite(graph_rewrite(base_sink, view_left), view_right)
-  ret = graph_rewrite(graph_rewrite(sink, to_ast), append_vars+enumerate_bufs, (var_vals, bufs, set()))
-  PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
+  ret = graph_rewrite(graph_rewrite(sink, to_ast), append_vars+append_bufs, (var_vals, bufs, set()))
+  PROCESS_REPLAY_CAPTURE.append((base_sink, ret))
   return ret
 
-# *** List[LazyBuffer] lowering to ScheduleItem ***
+def ast_rewrite(sink:UOp, uop_bufs:Dict[UOp, Buffer], var_vals:Dict[Variable, int]) -> ScheduleItem:
+  bufs: List[UOp] = []
+  sink = full_ast_rewrite(sink, bufs, var_vals)
+  return ScheduleItem(sink, tuple(uop_bufs[x] for x in bufs), ())
 
-def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], inputs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], cache:Dict[LazyBuffer, UOp]) -> UOp:
+def to_uop(buf:LazyBuffer, buf_uops:Dict[Buffer, UOp], cache:Dict[LazyBuffer, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   if buf is not buf.base:
-    cache[buf] = ret = to_uop(buf.base, outputs, inputs, buf_uops, cache).view(buf.st)
+    cache[buf] = ret = to_uop(buf.base, buf_uops, cache).view(buf.st)
     return ret
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
-  if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs:
-    if buf.op is MetaOps.CONST: return ubuf
-    if not any(x.buffer is buf.buffer for x in outputs) and buf not in inputs: inputs.append(buf)
-    return UOp.load(ubuf, buf.st.to_uop(), dtype=dtype)
-  src = tuple(to_uop(x, outputs, inputs, buf_uops, cache) for x in buf.srcs)
+  if buf.op is MetaOps.CONST: return buf_uops[buf.buffer]
+  if buf.is_realized(): return UOp.load(buf_uops[buf.buffer], buf.st.to_uop(), dtype=dtype)
+  src = tuple(to_uop(x, buf_uops, cache) for x in buf.srcs)
   if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
   elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
   elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]), buf.arg)
-  elif buf.op in METAOPS: ret = UOp(METAOPS[cast(MetaOps, buf.op)], buf.dtype, src, buf.arg)
+  elif buf.op in METAOPS: ret = UOp(METAOPS[cast(MetaOps, buf.op)], buf.dtype, (buf_uops[buf.buffer], *src), buf.arg)
   elif buf.op is UnaryOps.CAST: ret = UOp(UOps.CAST, dtype, src)
   elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
   else: ret = UOp(UOps.ALU, dtype, src, buf.op)
+  if (ubuf:=buf_uops.get(buf.buffer)) is not None:
+    ret = UOp.load(ubuf, buf.st.to_uop(), UOp.store(ubuf, ShapeTracker.from_shape(buf.shape).to_uop(), ret), dtype=dtype)
   cache[buf] = ret
   return ret
-
-def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], var_vals:Dict[Variable, int]) -> LBScheduleItem:
-  """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
-  cache: Dict[LazyBuffer, UOp] = {}
-  inputs: List[LazyBuffer] = []
-  sink = UOp(UOps.SINK, src=tuple(UOp.store(buf_uops[out.buffer], ShapeTracker.from_shape(out.shape).to_uop(),
-                                            to_uop(out, outs, inputs, buf_uops, cache)) for out in outs))
-  sink = full_ast_rewrite(sink, tuple(buf_uops[x.buffer].arg[0] for x in outs+inputs), var_vals)
-  # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
-  if len(assign_targets:=[x.src[0] for x in sink.sparents if x.op is UOps.ASSIGN]) != 0:
-    if not all((s:=x.st_arg).contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \
-        and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in sink.sparents if x.op is UOps.LOAD and x.src[0] in assign_targets):
-      raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
-                         +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  return LBScheduleItem(sink, tuple(outs+inputs),
-                        tuple(dedup([x.metadata for x in cache if x.metadata is not None and (x.base in outs or x.base.buffer not in buf_uops)])))
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
@@ -267,6 +249,18 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
+
+def append_ast(uops:List[UOp], b:UOp, st:UOp, x:UOp, root:UOp) -> UOp:
+  uops.append(x)
+  return UOp(UOps.LOAD, root.dtype, (b, st))
+break_sched = PatternMatcher([(UPat(UOps.LOAD, src=(UPat.var("b"), UPat.var("st"), UPat.var("x")), name="root"), append_ast)])
+
+@track_rewrites
+def schedule_rewrite(sink:UOp) -> List[UOp]:
+  uops: List[UOp] = []
+  sink = graph_rewrite(sink, break_sched, uops)
+  return uops
+
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
@@ -343,6 +337,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   buf_uops: Dict[Buffer, UOp] = {}
+  uop_bufs: Dict[UOp, Buffer] = {}
+  lazybufs: Dict[Buffer, LazyBuffer] = {}
   var_vals: Dict[Variable, int] = {}
   for buf in realizes:
     if buf.realized is None and buf.op is not MetaOps.CONST:
@@ -363,43 +359,21 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       uop = UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(buf.dtype.scalar(), buf.arg), v.const_like(0))
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
     else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
-    buf_uops.setdefault(buf.buffer, uop)
+    uop_bufs.setdefault(buf_uops.setdefault(buf.buffer, uop), buf.buffer)
+    if buf.realized is None: lazybufs[buf.buffer] = buf
 
-  # preschedule all buffers in realizes
-  prescheduled = [_lower_lazybuffer(outs, buf_uops, var_vals) for outs in output_groups.values()]
-  schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
-
-  graph: DefaultDict[LBScheduleItem, List[LBScheduleItem]] = defaultdict(list)
-  in_degree: DefaultDict[LBScheduleItem, int] = defaultdict(int)
-  for lsi in prescheduled:
-    if lsi not in in_degree: in_degree[lsi] = 0
-    # realize outputs after all parents are realized
-    scheduled_parents = dedup(schedule_targets[x] for x in lsi.inputs if x in schedule_targets)
-    for x in scheduled_parents:
-      graph[x].append(lsi)
-      in_degree[lsi] += 1
-    # realize outputs before a parent is assigned to
-    parents_assigns = dedup(schedule_targets[assign_targets[x]] for x in lsi.inputs if x in assign_targets)
-    for assign in parents_assigns:
-      graph[lsi].append(assign)
-      in_degree[assign] += 1
-
-  queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
+  # this is the big graph sink
+  cache: Dict[LazyBuffer, UOp] = {}
+  uops = schedule_rewrite(UOp(UOps.SINK, src=tuple(UOp.store(buf_uops[x.base.buffer], ShapeTracker.from_shape(x.base.shape).to_uop(),
+                                                             to_uop(x.base, buf_uops, cache)) for x in outs)))
   schedule: List[ScheduleItem] = []
-  while queue:
-    lsi = queue.popleft()
-    for out in lsi.outputs: del out.srcs  # can only schedule once
-    schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.bufs if x.size != 0), lsi.metadata))
+  for u in uops:
+    schedule.append(si:=ast_rewrite(u.sink(), uop_bufs, var_vals))
+    for x in si.outputs: del lazybufs[x].srcs  # can only schedule once
     if (m:=BUF_LIMIT.get(device:=si.outputs[0].device)) and len(si.bufs) >= m:
       if DEBUG >= 3: print(si)
       raise RuntimeError(f"Kernel for {si.metadata} exceeded the {m} buffer count limit for {device} with {len(si.bufs)} buffers.")
-    for x in graph[lsi]:
-      in_degree[x] -= 1
-      if in_degree[x] == 0: queue.append(x)
-
-  # confirm everything was scheduled correctly
-  if any(degree != 0 for degree in in_degree.values()) or len(in_degree) != len(schedule):
-    raise RuntimeError(f"cycle detected in graph, prescheduled {len(in_degree)} but only scheduled {len(schedule)}")
+  assert len(output_groups) == len(uops), f"grouped {len(output_groups)} sinks but scheduled {len(uops)}"
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, var_vals
 
