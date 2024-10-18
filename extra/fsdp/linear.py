@@ -34,8 +34,14 @@ class Optimizer:
 
   def step(self):
     for t in self.params:
-      if isinstance(t.grad.lazydata, MultiLazyBuffer) and t.grad.lazydata.axis != t.lazydata.axis:
-        t.grad.gather_()
+      if isinstance(t.grad.lazydata, MultiLazyBuffer) and isinstance(t.lazydata, MultiLazyBuffer) \
+        and t.lazydata.axis is not None and t.grad.lazydata.axis != t.lazydata.axis:
+        if t.lazydata.axis is None:
+          print("Gather")
+          t.grad.gather_()
+        else:
+          print("Reshard")
+          t.grad.reshard_(t.lazydata.axis)
       t.assign(t.detach() - t.grad)
     Tensor.realize(*self.params)
 

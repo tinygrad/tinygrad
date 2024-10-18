@@ -8,12 +8,13 @@ from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
 import os
 
-def all_gather(mlb: "MultiLazyBuffer") -> "MultiLazyBuffer":
+def gather(mlb: "MultiLazyBuffer") -> "MultiLazyBuffer":
   if mlb.axis is None: return mlb
   return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None, )
 
 def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
   assert isinstance(axis, int)
+  assert mlb.axis is not None
   shape = mlb.shape
   shards = len(mlb.lbs)
   originalAxis = mlb.axis
@@ -30,7 +31,11 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
     return MultiLazyBuffer(sharded, axis)
   print("RING GATHER RESHARD")
 
-  chunks = [(0, 2), (2, 4), (4, 6), (6, 8)]
+  chunks: List[Tuple[int, int]] = []
+  steps = shape[originalAxis] // shards
+  for i in range(shards):
+    chunks.append((i * steps, (i+1) * steps))
+
   chunked_lbs: List[List[LazyBuffer]] = []
   for i, lb in enumerate(mlb.lbs):
     chunks_per_lb: List[LazyBuffer] = []
