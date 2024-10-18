@@ -5,6 +5,12 @@ from tinygrad.nn.datasets import mnist
 import os
 from extra.fsdp.utils import print_size
 
+SHARD = int(os.environ.get("SHARD", 1))
+GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
+def reset_mem_high():
+  for gpu in GPUS:
+    Device[gpu].allocator.reset_mem_high()
+
 class Model:
   def __init__(self):
     self.layers: List[Callable[[Tensor], Tensor]] = [
@@ -32,8 +38,6 @@ if __name__ == "__main__":
   opt = nn.optim.AdamW(nn.state.get_parameters(model))
   print_size("model", *nn.state.get_parameters(model))
   print_size("model with optimizer", *nn.state.get_parameters(opt))
-  SHARD = int(os.environ.get("SHARD"))
-  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
   if SHARD > 1:
     print("SHARDING ON", GPUS)
     X_test.shard_(GPUS)
@@ -55,6 +59,7 @@ if __name__ == "__main__":
       if SHARD > 1:
         Xt.shard_(GPUS)
         Yt.shard_(GPUS)
+      reset_mem_high()
       # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
       loss = model(Xt)
       loss = loss.sparse_categorical_crossentropy(Yt)

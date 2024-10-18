@@ -181,7 +181,11 @@ class MultiLazyBuffer(MathTrait):
     for mlb in msrcs:
       if (mlb.axis == axis and (mlb.axis is None or mlb.bounds == bounds)) or not_all_real: srcs.append(mlb.lbs)
       elif mlb.axis is None and axis is not None: srcs.append(to_sharded(mlb.lbs, axis, bounds))
-      else: srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis, bounds))
+      else:
+        # srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis, bounds))
+        resharded = reshard(mlb, axis)
+        print("reshard in alu")
+        srcs.append(resharded.lbs)
     new_real_lbs:Dict[int,LazyBuffer] = {i:lsrcs[0].alu(op, *lsrcs[1:]) for i,(lsrcs,r) in enumerate(zip(zip(*srcs), new_real)) if r}
     # NOTE: const dtype should match real
     real_dtype = next(iter(new_real_lbs.values())).dtype
