@@ -14,7 +14,7 @@ pytestmark = pytest.mark.filterwarnings("ignore")
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
-core_dtypes = list(DTYPES_DICT.values())
+core_dtypes = list([v for k,v in DTYPES_DICT.items() if k != 'pyint'])
 if Device.DEFAULT == "CPU": core_dtypes.remove(dtypes.bfloat16)  # NOTE: this is for teenygrad, don't remove
 dtype_ints = [dt for dt in core_dtypes if dtypes.is_int(dt) and is_dtype_supported(dt)]
 dtype_floats = [dt for dt in core_dtypes if dtypes.is_float(dt) and is_dtype_supported(dt)]
@@ -22,7 +22,7 @@ dtype_floats = [dt for dt in core_dtypes if dtypes.is_float(dt) and is_dtype_sup
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
   if not is_dtype_supported(dtype): return []
   # dont cast internal dtypes
-  return [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")]
+  return [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_") and k != 'pyint']
 
 def _test_to_np(a:Tensor, np_dtype, target):
   if DEBUG >= 2: print(a)
@@ -806,7 +806,7 @@ class TestTensorMethod(unittest.TestCase):
 
 class TestDtypeUsage(unittest.TestCase):
   def test_max_w_alu(self):
-    for d in dtypes.ints:
+    for d in dtype_ints:
       t = Tensor([[1, 2], [3, 4]], dtype=d)
       (t*t).max().item()
 
