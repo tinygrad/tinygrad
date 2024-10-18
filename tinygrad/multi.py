@@ -29,7 +29,6 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
     gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]
     sharded = to_sharded(gathered, axis, bounds)
     return MultiLazyBuffer(sharded, axis)
-  print("RING GATHER RESHARD")
 
   chunks: List[Tuple[int, int]] = []
   steps = shape[originalAxis] // shards
@@ -73,7 +72,6 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
       s[originalAxis] = (k, cat_dim_cumsum[-1] - k - d)
     padded = [arg.pad(tuple(s)) for arg,s in zip(chunks, slc)]
     assembled = functools.reduce(lambda x, y: x.alu(BinaryOps.ADD, y), padded)
-    print(assembled)
     reassembled_lbs.append(assembled)
   return MultiLazyBuffer(reassembled_lbs, axis)
 

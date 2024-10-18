@@ -9,7 +9,11 @@ from extra.fsdp.utils import print_size, print_lb
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.helpers import prod
 
-
+SHARD = int(os.environ.get("SHARD", 1))
+GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
+def reset_mem_high():
+  for gpu in GPUS:
+    Device[gpu].allocator.reset_mem_high()
 
 class Linear:
   def __init__(self, in_features, out_features, bias=True):
@@ -35,12 +39,10 @@ class Optimizer:
   def step(self):
     for t in self.params:
       if isinstance(t.grad.lazydata, MultiLazyBuffer) and isinstance(t.lazydata, MultiLazyBuffer) \
-        and t.lazydata.axis is not None and t.grad.lazydata.axis != t.lazydata.axis:
+        and t.grad.lazydata.axis is not None and t.grad.lazydata.axis != t.lazydata.axis:
         if t.lazydata.axis is None:
-          print("Gather")
           t.grad.gather_()
         else:
-          print("Reshard")
           t.grad.reshard_(t.lazydata.axis)
       t.assign(t.detach() - t.grad)
     Tensor.realize(*self.params)
@@ -49,7 +51,7 @@ class Model:
   def __init__(self):
     self.layers = [
       nn.Linear(8, 12, bias=False),
-      nn.Linear(12, 10, bias=False),
+      nn.Linear(12, 12, bias=False),
     ]
 
   def __call__(self, x):
@@ -58,14 +60,14 @@ class Model:
     return x
 
 x = Tensor.empty(2, 8)
+x.realize()
 model = Model()
-opt = nn.optim.SGD(nn.state.get_parameters(model))
+opt = Optimizer(nn.state.get_parameters(model))
 print_size("model", *nn.state.get_parameters(model))
 print_size("model with optimizer", *nn.state.get_parameters(opt))
 
 SHARD = int(os.environ.get("SHARD", 0))
 if SHARD > 1:
-  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
   print("SHARDING ON", GPUS)
   x.shard_(GPUS)
   for k, p in nn.state.get_state_dict(opt).items():
@@ -85,5 +87,6 @@ def train():
   opt.zero_grad()
 
 with Tensor.train():
+  reset_mem_high()
   for i in range(10):
     train()
