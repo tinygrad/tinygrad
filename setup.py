@@ -57,6 +57,7 @@ setup(name='tinygrad',
             "hypothesis",
             "nibabel",
             "bottle",
+            "ggml-python"
         ],
         'docs': [
             "mkdocs",
