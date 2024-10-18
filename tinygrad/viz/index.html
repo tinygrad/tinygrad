@@ -77,8 +77,8 @@
     stroke-width: 1.4px;
   }
   .graph {
-    width: 70%;
-    position: relative;
+    width: 100%;
+    /* position: relative; */
   }
   .main-container {
     display: flex;
@@ -100,7 +100,8 @@
     margin-top: 12px;
   }
   .kernel-list {
-    width: 10%;
+    width: 15%;
+    max-width: 15%;
     overflow-y: auto;
     direction: rtl;
   }
@@ -124,6 +125,23 @@
   #kernel-list-resize {
     position: relative;
     float: right;
+  }
+  .collapse-but {
+    all: unset;
+    color: #7c7d85;
+  }
+  .collapse-but:hover {
+    cursor: pointer;
+  }
+  #kernel-list-collapse {
+    position: absolute;
+    top: 1%;
+    left: 1%;
+  }
+  #metadata-collapse {
+    position: absolute;
+    top: 1%;
+    right: 1%;
   }
   .rewrite-list {
     display: flex;
@@ -232,6 +250,10 @@
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
     kernelList.appendChild(Object.assign(document.createElement("div"), { className: "resize-handle", id: "kernel-list-resize" }));
+    const kCollapseBut = Object.assign(document.createElement("button"), { className: "collapse-but", id: "kernel-list-collapse"});
+    kCollapseBut.innerHTML = "<"
+    document.querySelector(".graph").appendChild(kCollapseBut);
+
     kernels.forEach((k, i) => {
       const kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "",
         style: "overflow-x: auto; cursor: initial;" });
@@ -291,6 +313,10 @@
     hljs.highlightElement(pre);
     // ** resizer
     metadata.appendChild(Object.assign(document.createElement("div"), { className: "resize-handle", id: "metadata-resize"}));
+    const collapseBut = Object.assign(document.createElement("button"), { className: "collapse-but", id: "metadata-collapse"});
+    collapseBut.innerText = ">";
+    document.querySelector(".graph").appendChild(collapseBut);
+
     const resizableElements = Array.from(document.getElementsByClassName("resizeable"));
     // instances of eventhandles mapped by id
     const resizeListeners = {}
@@ -308,24 +334,24 @@
         document.documentElement.addEventListener("mousemove", resizeListeners[element.id], false);
         document.documentElement.addEventListener("mouseup", stopResizeListeners[element.id], false);
       })
+      const curCollapse = document.getElementById(`${element.id}-collapse`);
+      curCollapse.addEventListener("click", (event) => {handleCollapse(curCollapse, element)});
     })
     function resize(event, element, startX, containerWidth, elementWidth) {
+      let change = event.clientX - startX;
+      change *= 2;
       switch (element.id) {
         case "metadata": {
-          const change = event.clientX - startX;
           const newWidth = ((elementWidth-change) / containerWidth) * 100;
-          if (newWidth >= 0 && newWidth <= 50) {
+          if (newWidth >= 20 && newWidth <= 90) {
             element.style.width = `${newWidth}%`;
-            document.querySelector(".graph").style.width = change > 0 ? `${100-newWidth}%` : `${100+newWidth}%`;
           }
           break;
         } 
         case "kernel-list": {
-          const change = event.clientX - startX;
           const newWidth = ((elementWidth+change) / containerWidth) * 100;
-          if (newWidth >= 0 && newWidth <= 20) {
+          if (newWidth >= 15 && newWidth <= 25) {
             element.style.width = `${newWidth}%`;
-            document.querySelector(".graph").style.width = change > 0 ? `${100-newWidth}%` : `${100+newWidth}%`;
           }            
           break;
         }
@@ -338,6 +364,31 @@
       document.documentElement.removeEventListener("mouseup", stopResizeL, false);
       document.documentElement.style.cursor = "initial";
       element.style.userSelect = "initial";
+    }
+    function handleCollapse(element, resizeable) {
+      const mode = element.innerText;
+      switch (resizeable.id) {
+        case "metadata": {
+          if (mode === ">") {
+            resizeable.style.display = "none"
+            element.innerText = "<";
+          } else {
+            resizeable.style.display = "block";
+            element.innerText = ">"; 
+          }
+          break;
+        }
+        case "kernel-list": {
+          if (mode === "<") {
+            resizeable.style.display = "none"
+            element.innerText = ">";
+          } else {
+            resizeable.style.display = "block";
+            element.innerText = "<"; 
+          }
+          break;
+        }
+      }
     }
     // ** code blocks
     let code = ret.uops[currentRewrite];
