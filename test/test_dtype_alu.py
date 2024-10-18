@@ -94,7 +94,7 @@ def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   numpy_value = op2[1](op1[1](an, bn).astype(_to_np_dtype(d2)), cn)
   np.testing.assert_allclose(tensor_value, numpy_value, rtol=1e-6 if getenv("PTX") else 1e-7)
 
-@np.errstate(all='ignore')
+# @np.errstate(all='ignore')
 class TestDTypeALU(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT), f"no float64 on {Device.DEFAULT}")
   @given(ht.float64, ht.float64, strat.sampled_from(binary_operations))
