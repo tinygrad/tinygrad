@@ -3,7 +3,7 @@ from typing import Union, Tuple, Optional, List, Any, cast, Literal
 from tinygrad.tensor import Tensor, _broadcast_shape, ConstType
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten, make_pair
-from tinygrad.runtime.onnx.onnx import to_python_const, dtype_parse
+from tinygrad.runtime.onnx.onnx import to_python_const, parse_dtype
 import numpy as np
 
 # TODO maybe don't cast hack things
@@ -25,7 +25,7 @@ def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
 def Squeeze(data: Tensor, axes): return functools.reduce(lambda d, dim: d.squeeze(dim), sorted(axes, reverse=True), data)
 def Unsqueeze(data: Tensor, axes): return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(axes), data)
 def Mean(*data_0): return Sum(*data_0) / len(data_0)
-def Cast(x: Tensor, to: int, saturate=1): return x.cast(dtype_parse(to))
+def Cast(x: Tensor, to: int, saturate=1): return x.cast(parse_dtype(to))
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
 # **************** Simple Ops ****************
@@ -360,7 +360,7 @@ def Compress(inp: Tensor, condition, axis=None):
   return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
 def EyeLike(x: Tensor, dtype: Optional[int]=None, k=0):
-  tiny_dtype = x.dtype if dtype is None else dtype_parse(dtype)
+  tiny_dtype = x.dtype if dtype is None else parse_dtype(dtype)
   dim = cast(int, min(x.shape))
   if x.size(0) == x.size(1): return Tensor.eye(dim, dtype=tiny_dtype)
   padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)

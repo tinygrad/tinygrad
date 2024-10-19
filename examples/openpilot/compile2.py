@@ -19,7 +19,7 @@ from tinygrad.engine.realize import run_schedule, lower_schedule, ExecItem, Comp
 from tinygrad.engine.schedule import ScheduleItem, create_schedule
 from tinygrad.ops import UOps
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.runtime.onnx.onnx import get_run_onnx, dtype_parse
+from tinygrad.runtime.onnx.onnx import get_run_onnx, parse_dtype
 Device.DEFAULT = "GPU"
 
 def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
@@ -29,7 +29,7 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   # load the model
   onnx_model = onnx.load(io.BytesIO(onnx_data))
   run_onnx = get_run_onnx(onnx_model)
-  input_metadata = {inp.name:(tuple(x.dim_value for x in inp.type.tensor_type.shape.dim), dtype_parse(inp.type.tensor_type.elem_type))
+  input_metadata = {inp.name:(tuple(x.dim_value for x in inp.type.tensor_type.shape.dim), parse_dtype(inp.type.tensor_type.elem_type))
                     for inp in onnx_model.graph.input}
 
   # run the model
