@@ -1,6 +1,6 @@
 from tinygrad import Tensor, nn, dtypes
 from tinygrad import Device
-from typing import Optional
+from typing import Optional, List
 
 
 class Sponge:
@@ -16,10 +16,40 @@ class Sponge:
 
         if self.r + self.c != self.b:
             raise ValueError("Rate + Capacity != 1600")
-        if self.rc != self.out_len * 2:
+        if self.c != self.out_len * 2:
             raise ValueError("Capacity must equal 2 * Output Len.")
 
         self.message = ""
 
-    def to_binary(self, message: str):
-        pass
+    def to_binary(self, message: str) -> Tensor:
+        int_string: List[int] = [ord(x) for x in message]
+        message_tens: Tensor = Tensor(int_string, dtype='uint').detach()
+        temp_list: List[List[int]] = []
+
+        for bit in reversed(range(8)):
+            temp = message_tens.rshift(bit).bitwise_and(1)
+            temp_list.append(temp.tolist())
+
+        bit_tensor: Tensor = Tensor(temp_list).permute(1, 0).flatten()
+
+        return bit_tensor
+
+
+def main():
+    sp = Sponge()
+    message = """
+            If you ever get annoyed, look at me I'm self-employed
+            I love to work at nothing all day
+            And I'll be taking care of business (every day)
+            Taking care of business (every way)
+            I've been taking care of business (it's all mine)
+            Taking care of business and working overtime, work out
+        """
+
+    bt = sp.to_binary(message)
+
+    print(bt.numpy()[:10])
+    # print(bt)
+
+
+main()
