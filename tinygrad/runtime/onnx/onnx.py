@@ -34,12 +34,12 @@ def to_python_const(t) -> Union[List[ConstType], List[bytes], Union[ConstType, b
   return ret
 
 # copied from helpers.py
-def is_dtype_supported(dtype, device: str = Device.DEFAULT):
-  if dtype == dtypes.bfloat16: return False
-  if dtype == dtypes.half: return not (CI and device in {"GPU", "LLVM", "CUDA"})
-  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
+def supported_device_dtypes(dtype, device: str = Device.DEFAULT):
+  if dtype is dtypes.bfloat16: return dtypes.default_float
+  if dtype is dtypes.half and not (CI and device in {"GPU", "LLVM", "CUDA"}): return dtypes.default_float
+  if dtype is dtypes.float64 and device != "METAL" and not (OSX and device == "GPU"): return dtypes.default_float
   # if device in ["WEBGPU"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32] # lol
-  return True
+  return dtype
 
 # ======= parsers
 # src: onnx/mapping.py  https://onnx.ai/onnx/api/mapping.html#l-mod-onnx-mapping
@@ -55,7 +55,7 @@ DTYPE_MAP: Dict[int, DType] = {
   TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float, TensorProto.UNDEFINED:dtypes.void}
 def parse_dtype(onnx_dtype: int) -> DType:
   if (ret := DTYPE_MAP.get(onnx_dtype)) is None: raise RuntimeError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
-  return ret if is_dtype_supported(ret) else dtypes.float32
+  return supported_device_dtypes(ret)
 
 def parse_buffer(inp: TensorProto) -> Tensor:
   dtype = parse_dtype(inp.data_type)
@@ -110,6 +110,7 @@ def get_run_onnx(onnx_model: ModelProto):
     if initialization_hook: initialization_hook(tensors, attributes)
     debug = getenv("DEBUGONNX") or debug
 
+    # TODO may be possible to clean this up lol
     # get inputs and validate inputs
     def parse_input(model_input:ValueInfoProto):
       if model_input.name not in inputs: raise RuntimeError(f"no data for {model_input=}")
