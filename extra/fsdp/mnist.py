@@ -14,15 +14,17 @@ def reset_mem_high():
 class Model:
   def __init__(self):
     self.layers: List[Callable[[Tensor], Tensor]] = [
-      nn.Conv2d(1, 32, 3), Tensor.relu,
-      nn.Conv2d(32, 64, 3), Tensor.relu,
+      nn.Conv2d(1, 32, 3, bias=False),
+      Tensor.relu,
+      nn.Conv2d(32, 64, 3, bias=False),
+      Tensor.relu,
       Tensor.max_pool2d,
       lambda x: x.dropout(0.25),
       lambda x: x.flatten(1),
-      nn.Linear(9216, 128),
+      nn.Linear(9216, 128, bias=False),
       Tensor.relu,
       lambda x: x.dropout(0.5),
-      nn.Linear(128, 10),
+      nn.Linear(128, 10, bias=False),
       lambda x: x.log_softmax(1),
   ]
     
@@ -35,14 +37,30 @@ if __name__ == "__main__":
 
 
   model = Model()
-  opt = nn.optim.AdamW(nn.state.get_parameters(model))
+  opt = nn.optim.SGD(nn.state.get_parameters(model))
   print_size("model", *nn.state.get_parameters(model))
   print_size("model with optimizer", *nn.state.get_parameters(opt))
   if SHARD > 1:
     print("SHARDING ON", GPUS)
     X_test.shard_(GPUS)
     Y_test.shard_(GPUS)
+    seen = set()
+    for k, p in nn.state.get_state_dict(model).items():
+      if p in seen: continue
+      seen.add(p)
+      axis = 0
+      if prod(p.shape) <= 1:
+        axis = 1
+      elif k == "layers.0.weight":
+        axis = None
+      elif k == "layers.2.weight":
+        axis = 1
+      
+      print(f"{k}, {axis=}")
+      p.shard_(GPUS, axis)
     for k, p in nn.state.get_state_dict(opt).items():
+      if p in seen: continue
+      seen.add(p)
       p.shard_(GPUS, axis=None if prod(p.shape) <= 1 else 0)
       p.realize()
   else:
@@ -61,10 +79,12 @@ if __name__ == "__main__":
       if SHARD > 1:
         Xt.shard_(GPUS)
         Yt.shard_(GPUS)
+      Xt.realize()
+      Yt.realize()
       reset_mem_high()
       # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
       loss = model(Xt)
-      loss = loss.sparse_categorical_crossentropy(Yt)
+      # loss = loss.sparse_categorical_crossentropy(Yt)
       loss = loss.sum(0).sum(0)
       loss.backward()
       opt.step()
