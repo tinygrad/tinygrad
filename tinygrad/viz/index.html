@@ -231,7 +231,14 @@
     const render = new dagreD3.render();
     render(inner, g);
   }
-
+  function vsCodeOpener(parts, name="") {
+    const link = `vscode://file${parts.join("/")}`;
+    const content = parts[parts.length-1]+"\n\n";
+    const elementObj = Object.assign(document.createElement("a"), { textContent: name === "" ? content : name, 
+      href: link, style: "font-family: monospace; margin: 4px 0;" });
+    if (name !== "") elementObj.id = "filename";
+    return elementObj;
+  }
   // **** extra helpers
   const toPath = ([fp, lineno]) => `${fp.split("/").pop()}:${lineno}`;
 
@@ -320,14 +327,14 @@
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
-    metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: toPath(ret.loc) }));
+    const filenameText = toPath(ret.loc);
+    metadata.appendChild(vsCodeOpener(ret.loc.join(":").split("/"), toPath(ret.loc)));
     const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(ret.code_line)}</code>`,
       className: "wrap code-block language-python" });
     metadata.appendChild(pre);
     hljs.highlightElement(pre);
     // ** resizer
     metadata.appendChild(Object.assign(document.createElement("div"), { className: "resize-handle", id: "metadata-resize"}));
-
 
     const resizableElements = Array.from(document.getElementsByClassName("resizeable"));
     // instances of eventhandles mapped by id
@@ -427,8 +434,7 @@
             const [loc, pattern] = ret.upats[i-1];
             const parts = loc.join(":").split("/");
             const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
-            const link = Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
-              href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" })
+            const link = vsCodeOpener(parts);
             div.appendChild(link);
             const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
             pre.appendChild(Object.assign(document.createElement("code"), { textContent: DOMPurify.sanitize(pattern), className: "language-python" }));
