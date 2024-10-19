@@ -88,15 +88,12 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   c_lens = [(base + 1) * factor if i < left else base * factor for i in range(n_lbs)]
   acc = 0
   chunks = [(acc, (acc := acc + i)) for i in c_lens if i > 0]
-  print(f"{chunks=}")
   chunked = [[lb.reshape((dim,)).shrink(((s,e),)) for s,e in chunks] for lb in lbs]
 
   # Scatter-reduce step
   for step in range(n_lbs - 1):
-    print(f"{step=}")
     for i in range(len(chunks)):
       s, r = (i+step)%n_lbs, (i+step+1)%n_lbs
-      print(f"{i=}, {s=}, {r=}")
       chunked[r][i] = chunked[r][i].alu(bop, chunked[s][i].copy_to_device(chunked[r][i].device, force=True))
 
   # Allgather step
@@ -181,7 +178,6 @@ class MultiLazyBuffer(MathTrait):
       else:
         # srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis, bounds))
         resharded = reshard(mlb, axis)
-        print("reshard in alu", f"{axis=} {bounds=} {resharded.shape=} {resharded.axis=}")
         srcs.append(resharded.lbs)
     new_real_lbs:Dict[int,LazyBuffer] = {i:lsrcs[0].alu(op, *lsrcs[1:]) for i,(lsrcs,r) in enumerate(zip(zip(*srcs), new_real)) if r}
     # NOTE: const dtype should match real
