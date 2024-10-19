@@ -3,7 +3,7 @@ from typing import List
 from tinygrad.helpers import dedup, flatten, getenv
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes, least_upper_dtype
-from tinygrad.multi import MultiLazyBuffer
+
 class Optimizer:
   """
   Base class for all optimizers.
@@ -91,18 +91,11 @@ class LARS(Optimizer):
       # classic momentum does post learning rate update
       if self.classic: g = g * r * self.lr
       if self.momentum:
-        bi = self.momentum * self.b[i] + g  # NOTE: self.b[i] is zero on the first run, no if required
-        g = (g + self.momentum * bi) if self.nesterov else bi
+        self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
+        g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
-      new_t = (t.detach() - g).cast(t.dtype)
-
-      if isinstance(t.lazydata, MultiLazyBuffer):
-        new_t.reshard_(t.lazydata.axis)
-        bi.reshard_(self.b[i].lazydata.axis)
-
-      self.b[i].assign(bi)
-      t.assign(new_t)
+      t.assign((t.detach() - g).cast(t.dtype))
     return self.b
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
@@ -142,11 +135,10 @@ class LAMB(Optimizer):
     self.b2_t *= self.b2
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      mi = (self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
-      vi = (self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
-
-      m_hat = self.mi / (1.0 - self.b1_t)
-      v_hat = self.vi / (1.0 - self.b2_t)
+      self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
+      self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
+      m_hat = self.m[i] / (1.0 - self.b1_t)
+      v_hat = self.v[i] / (1.0 - self.b2_t)
       up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
       if not self.adam:
         r1 = t.detach().square().sum().sqrt()
@@ -154,12 +146,5 @@ class LAMB(Optimizer):
         r = Tensor.where(r1 > 0, Tensor.where(r2 > 0, r1 / r2, 1.0), 1.0)
       else:
         r = 1.0
-      new_t = (t.detach() - self.lr * r * up).cast(t.dtype)
-      if isinstance(new_t.lazydata, MultiLazyBuffer):
-        new_t.reshard_(t.lazydata.axis)
-        mi.reshard_(self.m[i].lazydata.axis)
-        vi.reshard_(self.v[i].lazydata.axis)
-      self.m[i].assign(mi)
-      self.v[i].assign(vi)
-      t.assign(new_t)
+      t.assign((t.detach() - self.lr * r * up).cast(t.dtype))
     return [self.b1_t, self.b2_t] + self.m + self.v
