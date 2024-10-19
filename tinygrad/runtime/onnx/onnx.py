@@ -34,9 +34,9 @@ def to_python_const(t) -> Union[List[ConstType], List[bytes], Union[ConstType, b
   return ret
 
 # copied from helpers.py
-def supported_device_dtypes(dtype, device: str = Device.DEFAULT):
+def supported_device_dtypes(dtype, device):
   if dtype is dtypes.bfloat16: return dtypes.default_float
-  if dtype is dtypes.half and not (CI and device in {"GPU", "LLVM", "CUDA"}): return dtypes.default_float
+  if dtype is dtypes.half and CI and device in {"GPU", "LLVM", "CUDA"}: return dtypes.default_float
   if dtype is dtypes.float64 and device != "METAL" and not (OSX and device == "GPU"): return dtypes.default_float
   # if device in ["WEBGPU"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32] # lol
   return dtype
@@ -55,14 +55,14 @@ DTYPE_MAP: Dict[int, DType] = {
   TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float, TensorProto.UNDEFINED:dtypes.void}
 def parse_dtype(onnx_dtype: int) -> DType:
   if (ret := DTYPE_MAP.get(onnx_dtype)) is None: raise RuntimeError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
-  return supported_device_dtypes(ret)
+  return supported_device_dtypes(ret, Device.DEFAULT)
 
 def parse_buffer(inp: TensorProto) -> Tensor:
   dtype = parse_dtype(inp.data_type)
   if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
     return Tensor(dat, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims))
   if len(inp.raw_data) > 0:
-    # return Tensor(inp.raw_data, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims)) # TODO REINTRODUCES REGRESSION AGAIN
+    # return Tensor(inp.raw_data, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims)) # TODO REINTRODUCES REGRESSION AGAIN, nvm doesn't work
     data = np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).astype(_to_np_dtype(dtype)).copy()
     return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
   return Tensor(None, requires_grad=False)
@@ -110,7 +110,8 @@ def get_run_onnx(onnx_model: ModelProto):
     if initialization_hook: initialization_hook(tensors, attributes)
     debug = getenv("DEBUGONNX") or debug
 
-    # TODO may be possible to clean this up lol
+    # TODO may be possible to clean this up lol, also maybe move this into external_model_verify and use init took?
+    # or do we want runtimeerrors like this
     # get inputs and validate inputs
     def parse_input(model_input:ValueInfoProto):
       if model_input.name not in inputs: raise RuntimeError(f"no data for {model_input=}")
@@ -143,7 +144,7 @@ def get_run_onnx(onnx_model: ModelProto):
       "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4)}
 
     for num,n in enumerate(onnx_model.graph.node):
-      # prepare
+      # preperation
       tensor_inp, opt = [fetch_tensor(x) for x in n.input], attributes[num]
       if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in tensor_inp]} opt {opt}")
       # to python consts
@@ -152,14 +153,14 @@ def get_run_onnx(onnx_model: ModelProto):
                                                       for i,(x,t) in enumerate(zip(n.input, tensor_inp))))
       inp = [to_python_const(x) if i in to_python_const_inps.get(n.op_type, ()) else x for i,x in enumerate(tensor_inp)]
 
+      # running the op
       # tensor methods
       if n.op_type in exact_tensor_methods: ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
       elif n.op_type in equivalent_tensor_methods: ret = getattr(Tensor, equivalent_tensor_methods[n.op_type])(*inp, **opt)
       elif n.op_type in equivalent_tensor_methods_exceptions:
         rewrite = equivalent_tensor_methods_exceptions[n.op_type]
         ret = getattr(Tensor, rewrite[0])(*inp, **{rewrite[1].get(k, k):v for k,v in opt.items()})
-
-      # NOTE some ops live here because they require access to some local variables
+      # NOTE some ops live here because they require access to local variables
       # have to use n.output for cases when num_outputs is absent
       elif n.op_type == "Split":
         axis, outputs, split = opt.get("axis", 0), opt.get("num_outputs") or len(n.output), opt.get("split")
@@ -169,7 +170,6 @@ def get_run_onnx(onnx_model: ModelProto):
         # split has to be inferred
         size = inp[0].shape[axis]
         if len(inp) == 1 and split is None: ret = inp[0].split([size // outputs + (1 if i < size % outputs else 0) for i in range(outputs)], axis)
-
       # need to check onnx_model_version
       elif n.op_type == "Slice":
         # only onnx_model_version < 10 has opt, we just unload the opt into inp to match other versions
@@ -178,26 +178,21 @@ def get_run_onnx(onnx_model: ModelProto):
         slices = [slice(0,x,1) for x in data.shape]
         for i, axis in enumerate(axes): slices[axis] = slice(starts[i], ends[i], steps[i])
         ret = data[slices]
-
       # need to call backward on intermediate_tensors
       elif n.op_type == "Gradient":
         intermediate_tensors[opt["y"]].backward()
         ret = tuple([t.grad for t in inp])
-
       # onnx_ops.py
       elif hasattr(onnx_ops, n.op_type): ret = getattr(onnx_ops, n.op_type)(*inp, **opt)
-      else:
-        print("UNSUPPORTED", n.op_type, n.input, n.output)
-        raise NotImplementedError(f"op_type {n.op_type} not supported")
+      else: raise NotImplementedError(f"op_type {n.op_type} not supported")
 
-      if not isinstance(ret, tuple): ret = (ret, )
-      assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
+      # finalization after finishing running the op
+      if not isinstance(ret, tuple): ret = (ret,)
+      if len(n.output) > len(ret): raise RuntimeError(f"expected output size must be less than {len(ret)}, it's {n.output}")
       for i in range(len(n.output)): intermediate_tensors[n.output[i]] = ret[i]
       if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{n.output[i]} - {ret[i]}" for i in range(len(n.output))))
-
       if op_hook: op_hook(num, n, tuple(tensor_inp), opt, ret)
 
       if num == ONNXLIMIT: return {name:intermediate_tensors[name] for name in n.output}
-
     return {x.name:intermediate_tensors[x.name] for x in onnx_model.graph.output}
   return run_onnx
