@@ -50,8 +50,7 @@
     overflow-y: auto;
   }
   ul > ul.active {
-    background-color: #7c7d85;
-    margin-left: -20%;
+    margin-left: -10%;
   }
   svg {
     width: 100%;
@@ -104,6 +103,7 @@
     max-width: 15%;
     overflow-y: auto;
     direction: rtl;
+    scroll-behavior: smooth;
   }
   .kernel-list > ul > * + * {
     margin-top: 4px;
@@ -166,9 +166,11 @@
   <div class="main-container">
     <div class="container kernel-list resizeable" id="kernel-list"></div>
     <div class="container graph">
+      <button class="collapse-but" id="kernel-list-collapse">&lt;</button>
       <svg>
         <g id="render"></g>
       </svg>
+      <button class="collapse-but" id="metadata-collapse">&gt;</button>
     </div>
     <div class="container metadata resizeable" id="metadata"></div>
   </div>
@@ -241,7 +243,20 @@
   var currentKernel = 0;
   var currentRewrite = 0;
   var expandKernel = true;
+  let lastPress = 0;
+  let prevUOp = 0;
+
+  const kernelListChildren = document.querySelector(".container.kernel-list").childNodes;
+
   async function main() {
+    if (currentUOp !== prevUOp) {
+      kernelListChildren[prevUOp].style.className = "";
+      kernelListChildren[currentUOp].style.className = "active";
+      prevUOp = currentUOp;
+    }
+    // reduce scroll lag
+    if (Date.now() - lastPress > 300) lastPress = Date.now();
+    else return;
     // ***** LHS kernels list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
@@ -250,9 +265,6 @@
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
     kernelList.appendChild(Object.assign(document.createElement("div"), { className: "resize-handle", id: "kernel-list-resize" }));
-    const kCollapseBut = Object.assign(document.createElement("button"), { className: "collapse-but", id: "kernel-list-collapse"});
-    kCollapseBut.innerHTML = "<"
-    document.querySelector(".graph").appendChild(kCollapseBut);
 
     kernels.forEach((k, i) => {
       const kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "",
@@ -267,7 +279,7 @@
           rwUl.className = "active";
           setTimeout(() => {
               rwUl.scrollIntoView({ behavior: "smooth", block: "end" });
-          }, [100])
+          }, [50])
         }
         rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
@@ -293,6 +305,7 @@
       }
       kernelList.appendChild(kernelUl);
     });
+
     // ***** UOp graph
     const cacheKey = `${currentKernel}-${currentUOp}`;
     if (cacheKey in cache) {
@@ -302,6 +315,7 @@
       ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`)).json();
       cache[cacheKey] = ret;
     }
+
     renderGraph(ret.graphs[currentRewrite], currentRewrite == 0 ? [] : ret.changed_nodes[currentRewrite-1]);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
@@ -313,9 +327,7 @@
     hljs.highlightElement(pre);
     // ** resizer
     metadata.appendChild(Object.assign(document.createElement("div"), { className: "resize-handle", id: "metadata-resize"}));
-    const collapseBut = Object.assign(document.createElement("button"), { className: "collapse-but", id: "metadata-collapse"});
-    collapseBut.innerText = ">";
-    document.querySelector(".graph").appendChild(collapseBut);
+
 
     const resizableElements = Array.from(document.getElementsByClassName("resizeable"));
     // instances of eventhandles mapped by id
@@ -440,8 +452,7 @@
     }
   }
 
-  // **** keyboard shortcuts
-  document.addEventListener("keydown", async function(event) {
+  const checkFunc = async event => {
     // up and down change the UOp or kernel from the list
     if (!expandKernel) {
       if (event.key == "ArrowUp") {
@@ -449,14 +460,14 @@
         currentUOp = 0;
         currentRewrite = 0;
         currentKernel = Math.max(0, currentKernel-1)
-       return main()
+        main();
       }
       if (event.key == "ArrowDown") {
         event.preventDefault()
         currentUOp = 0;
         currentRewrite = 0;
         currentKernel = Math.min(Array.from(Object.keys(kernels)).length-1, currentKernel+1)
-       return main()
+        main();
       }
     }
     if (event.key == "Enter") {
@@ -469,6 +480,7 @@
     if (event.key == "ArrowUp") {
       event.preventDefault()
       currentRewrite = 0;
+      prevUOp = currentUOp
       currentUOp = Math.max(0, currentUOp-1)
       main()
     }
@@ -476,6 +488,7 @@
       event.preventDefault()
       currentRewrite = 0;
       const totalUOps = kernels[currentKernel].length-1;
+      prevUOp = currentUOp
       currentUOp = Math.min(totalUOps, currentUOp+1)
       main()
     }
@@ -491,7 +504,10 @@
       currentRewrite = Math.min(totalRewrites, currentRewrite+1)
       main()
     }
-  })
+  }
+  // **** keyboard shortcuts
+  document.addEventListener("keydown", (event) => checkFunc(event));
+
   main()
   </script>
   </body>
