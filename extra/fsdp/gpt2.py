@@ -1,8 +1,37 @@
 #!/usr/bin/env python3
 import os, math, time
+os.environ["TRACEMETA"] = "0"
 import numpy as np
 from tinygrad import Tensor, nn, fetch, Device, TinyJit, GlobalCounters
 from dataclasses import dataclass
+from typing import List
+import pathlib
+import re
+from tinygrad.helpers import prod
+
+SHARD = int(os.environ.get("SHARD", 1))
+GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
+def reset_mem_high():
+  for gpu in GPUS:
+    Device[gpu].allocator.reset_mem_high()
+
+def shard_model(model, opt):
+  seen = set()
+  for k, p in nn.state.get_state_dict(model).items():
+    print(f"{k=}")
+    if p in seen: continue
+    seen.add(p)
+    axis = 0
+    if re.match(r"h\.\d+\.attn\.bias", k) or re.match(r"vocab_pad", k):
+      axis = None
+    p.shard_(GPUS, axis)
+  for k, p in nn.state.get_state_dict(model).items():
+    if p in seen: continue
+    seen.add(p)
+    p.shard_(GPUS, axis=None if prod(p.shape) <= 1 else 0)
+  for p in seen:
+    p.realize()
+
 
 @dataclass
 class GPTConfig:
@@ -17,7 +46,9 @@ class CausalSelfAttention:
   def __init__(self, config:GPTConfig):
     assert config.n_embd % config.n_head == 0
     # key, query, value projections for all heads, but in a batch
-    self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
+    self.q = nn.Linear(config.n_embd, config.n_embd)
+    self.k = nn.Linear(config.n_embd, config.n_embd)
+    self.v = nn.Linear(config.n_embd, config.n_embd)
     # output projection
     self.c_proj = nn.Linear(config.n_embd, config.n_embd)
     # regularization
@@ -29,8 +60,9 @@ class CausalSelfAttention:
 
   def __call__(self, x:Tensor):
     B, T, C = x.shape
-    qkv = self.c_attn(x)
-    q, k, v = qkv.split(self.n_embd, dim=2)
+    q = self.q(x)
+    k = self.k(x)
+    v = self.v(x)
     k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
     v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -75,6 +107,10 @@ class GPT:
     self.ln_f = nn.LayerNorm(config.n_embd)
     self.lm_head = nn.Linear(config.n_embd, config.padded_vocab_size, bias=False)
     self.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
+    vocab_pad = Tensor.ones(1, 1, config.padded_vocab_size).contiguous()
+    vocab_pad.requires_grad = False
+    vocab_pad[:, :, config.vocab_size:] = 0
+    self.vocab_pad = vocab_pad
 
   def load_pretrained(self):
     weights = nn.state.torch_load(fetch(f'https://huggingface.co/gpt2/resolve/main/pytorch_model.bin'))
@@ -92,6 +128,9 @@ class GPT:
     for _ in range(max_new_tokens):
       idx_cond = idx if idx.shape[1] <= self.config.block_size else idx[:, -self.config.block_size:]
       logits, _ = self(idx_cond)
+      if len(GPUS) > 1:
+        logits = logits.to(Device.DEFAULT)
+        logits.shard_(GPUS)
       logits = logits[:, -1, :] / temperature
       idx_next = logits.softmax().multinomial()
       idx = Tensor.cat(idx, idx_next, dim=1)
@@ -100,36 +139,51 @@ class GPT:
   def __call__(self, idx:Tensor, targets=None):
     b, t = idx.shape
     pos = Tensor.arange(0, t)
+    
+    if len(GPUS) > 1:
+      pos.shard_(GPUS)
 
     tok_emb = self.wte(idx) # token embeddings of shape (b, t, n_embd)
     pos_emb = self.wpe(pos) # position embeddings of shape (t, n_embd)
     x = tok_emb + pos_emb
-
-    x = self.ln_f(x.sequential(self.h))
-
+    x = x.sequential(self.h)
+    x = self.ln_f(x)
     if targets is not None:
-      logits = self.lm_head(x)[:, :, :self.config.vocab_size]
+      logits = self.lm_head(x)
+      logits = logits.masked_fill(self.vocab_pad == 0, 0)
       loss = logits.sparse_categorical_crossentropy(targets)
     else:
-      logits = self.lm_head(x[:, [-1], :])[:, :, :self.config.vocab_size]
+      logits = self.lm_head(x[:, [-1], :])
+      logits = logits.masked_fill(self.vocab_pad == 0, 0)
       loss = None
-
     return logits, loss
+
+def g_sz(tensors: List[Tensor]): return sum([t.nbytes() if isinstance(t, Tensor) else t.size for t in tensors])
+def p_sz(name, *tensors: Tensor): print(f'{name} size: {g_sz(tensors) / 1e9:.2f} GB')
 
 if __name__ == "__main__":
   import tiktoken, argparse
 
   parser = argparse.ArgumentParser()
   parser.add_argument("--num_iterations", type=int, default=10, help="number of iterations to run")
-  parser.add_argument("--batch_size", type=int, default=4, help="batch size")
-  parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
+  parser.add_argument("--batch_size", type=int, default=2, help="batch size")
+  parser.add_argument("--sequence_length", type=int, default=4, help="sequence length")
   parser.add_argument("--skip_test", action="store_true", help="skip test")
   args = parser.parse_args()
+
   B, T = args.batch_size, args.sequence_length
   assert 1 <= T <= 1024
-
-  model = GPT(GPTConfig(n_layer=12, n_head=12, n_embd=768))
-  model.load_pretrained()
+  n_head = 1
+  model = GPT(GPTConfig(
+    block_size=32,
+    n_layer=4,
+    n_head=n_head,
+    n_embd=n_head * 32))
+  optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
+  p_sz("model", *nn.state.get_parameters(model))
+  seen = set()
+  if len(GPUS) > 1:
+    shard_model(model, optimizer)
 
   # init the tokenizer
   enc = tiktoken.get_encoding("gpt2")
@@ -139,7 +193,7 @@ if __name__ == "__main__":
   # load the tokens
   # prefer to use tiny_shakespeare if it's available, otherwise use tiny_stories
   # we're using val instead of train split just because it is smaller/faster
-  tokens_bin = fetch("https://huggingface.co/datasets/karpathy/llmc-starter-pack/resolve/main/tiny_shakespeare_val.bin")
+  tokens_bin = pathlib.Path("tmp/tiny_shakespeare_val.bin")
   assert os.path.isfile(tokens_bin)
   print(f"loading cached tokens in {tokens_bin}")
   with open(tokens_bin, "rb") as f:
@@ -155,6 +209,9 @@ if __name__ == "__main__":
     while True:
       x = tokens[i:i+B*T].view(B, T)
       y = tokens[i+1:i+B*T+1].view(B, T)
+      if len(GPUS) > 1:
+        x.shard_(GPUS)
+        y.shard_(GPUS)
       yield x, y
       i += B*T
       if i + B*T + 1 >= len(tokens):
@@ -163,8 +220,8 @@ if __name__ == "__main__":
   # forward backward for a few iterations
   data_iter = iter(get_batch())
   x, y = next(data_iter) # we'll overfit this batch below
-  optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
-
+  optimizer = nn.optim.SGD(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
+  p_sz("optimizer", *nn.state.get_parameters(optimizer))
   @TinyJit
   def step(x, y):
     _, loss = model(x, y)
@@ -172,8 +229,12 @@ if __name__ == "__main__":
     loss.backward()
     return loss.realize(*optimizer.schedule_step())
 
+  x.realize()
+  y.realize()
+  reset_mem_high()
   with Tensor.train():
     for i in range(args.num_iterations):
+   
       GlobalCounters.reset()
       t0 = time.time()
       loss = step(x.contiguous(), y.contiguous())
@@ -185,6 +246,8 @@ if __name__ == "__main__":
     start = "<|endoftext|>"
     start_ids = encode(start)
     x = (Tensor(start_ids)[None, ...])
+    if len(GPUS) > 1:
+      x.shard_(GPUS)
     max_new_tokens = 16
     temperature = 1.0
     top_k = 40
