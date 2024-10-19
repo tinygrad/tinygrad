@@ -47,8 +47,8 @@ class Optimizer:
 class Model:
   def __init__(self):
     self.layers = [
-      nn.Linear(8, 12, bias=False),
-      nn.Linear(12, 12, bias=False),
+      nn.Linear(8, 12),
+      nn.Linear(12, 12),
     ]
 
   def __call__(self, x):
@@ -70,10 +70,12 @@ def shard_model(model, opt):
     print(f"{k=}")
     if p in seen: continue
     seen.add(p)
-    if k.endswith("layers.0.weight"):
+    if k == "layers.0.weight":
       p.shard_(GPUS, 0)
-    else:
+    elif k == "layers.1.weight":
       p.shard_(GPUS, 1)
+    else:
+      p.shard_(GPUS, 0)
   for k, p in nn.state.get_state_dict(model).items():
     if p in seen: continue
     seen.add(p)

@@ -32,7 +32,6 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
     gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]
     sharded = to_sharded(gathered, axis, bounds)
     return MultiLazyBuffer(sharded, axis)
-  print("RING RESHARD")
   chunks: List[Tuple[int, int]] = []
   steps = shape[axis] // shards
   for i in range(shards):
@@ -86,7 +85,6 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   if DEBUG >= 2: print(f"{'RING ALLREDUCE' if use_ring else 'NAIVE ALLREDUCE'} {n_lbs}x{dim} | {lbs[0].dtype}")
   if not use_ring:
     return [functools.reduce(lambda x,y: x.alu(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
-  print("RING REDUCE")
   factor = max(f for f in [32, 16, 8, 4, 2, 1] if dim % f == 0)
   base, left = (dim // factor) // n_lbs, (dim // factor) % n_lbs
   c_lens = [(base + 1) * factor if i < left else base * factor for i in range(n_lbs)]

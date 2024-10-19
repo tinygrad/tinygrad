@@ -32,65 +32,77 @@ class Linear:
   def __call__(self, x:Tensor):
     return x.linear(self.weight.transpose(), self.bias)
 
+n_embd = 48
+block_size = 12
+n_head = 2
 class Model:
   def __init__(self):
-    self.q = Linear(48, 48)
-    self.k = Linear(48, 48)
-    self.v = Linear(48, 48)
-    self.bias = Tensor.ones(1, 48, 48).tril()
+    self.q = Linear(n_embd, n_embd)
+    self.k = Linear(n_embd, n_embd)
+    self.v = Linear(n_embd, n_embd)
+    self.bias = Tensor.ones(1, block_size, block_size).tril()
     self.bias.requires_grad = False
 
   def __call__(self, x):
+    B, T, C = x.shape
     k = self.k(x)
     q = self.q(x)
     v = self.v(x)
-    k = k.view(3, 2, 3).transpose(0, 1)
-    q = q.view(3, 2, 3).transpose(0, 1)
-    v = v.view(3, 2, 3).transpose(0, 1)
+    k = k.view(B, T, 1, C).transpose(1, 2)
+    q = q.view(B, T, 1, C).transpose(1, 2)
+    v = v.view(B, T, 1, C).transpose(1, 2)
 
-    att = (q @ k.transpose(1, 2))
-    mask = self.bias[:, :3, :3]
+    att = (q @ k.transpose(-2, -1)) # B C T @ B 
+    mask = self.bias[:, :T, :T]
     mask_zero = mask == 0
     att = att.masked_fill(mask_zero, float('-inf'))
     att = att.softmax()
     y = att @v
-    y = y.transpose(0, 1).view(3, 6)
+    y = y.transpose(1, 2).view(B, T, C)
     return y
-
-model = Model()
-opt = Optimizer(nn.state.get_parameters(model))
-x = Tensor.empty(3, 6)
-
-print_size("model", *nn.state.get_parameters(model))
-print_size("model with optimizer", *nn.state.get_parameters(opt))
-SHARD = int(os.environ.get("SHARD"))
+  
+SHARD = int(os.environ.get("SHARD", 1))
 GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
-if SHARD > 1:
-  print("SHARDING ON", GPUS)
-  x.shard_(GPUS)
+def reset_mem_high():
+  for gpu in GPUS:
+    Device[gpu].allocator.reset_mem_high()
+
+def shard_model(model, opt):
   seen = set()
-  for k, p in nn.state.get_state_dict(opt).items():
+  for k, p in nn.state.get_state_dict(model).items():
+    print(f"{k=}")
     if p in seen: continue
     seen.add(p)
-    p.shard_(GPUS, axis=None if prod(p.shape) <= 1 else 0)
-    p.realize()
+    axis = 0
+    print(f"{k=}")
+    p.shard_(GPUS, axis)
   for k, p in nn.state.get_state_dict(model).items():
     if p in seen: continue
     seen.add(p)
-    if k == "bias":
-      p.shard_(GPUS)
-    else:
-      p.shard_(GPUS, axis=None if prod(p.shape) <= 1 else 0)
+    p.shard_(GPUS, axis=None if prod(p.shape) <= 1 else 0)
+  for p in seen:
     p.realize()
+
+model = Model()
+opt = Optimizer(nn.state.get_parameters(model))
+x = Tensor.empty(4, 3, n_embd)
+
+if SHARD > 1:
+  print("SHARDING ON", GPUS)
+  x.shard_(GPUS)
+  shard_model(model, opt)
 else:
   print("NO SHARD")
   for p in nn.state.get_parameters(opt):
     p.realize()
 
+print_size("model", *nn.state.get_parameters(model))
+print_size("model with optimizer", *nn.state.get_parameters(opt))
 
+reset_mem_high()
 def train():
   y = model(x)
-  loss = y.sum(0).sum(0)
+  loss = y.sum([0,1,2])
   loss.backward()
   opt.step()
   opt.zero()

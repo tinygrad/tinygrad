@@ -7,9 +7,31 @@ from dataclasses import dataclass
 from typing import List
 import pathlib
 import re
+from tinygrad.helpers import prod
 
-SHARD_MODEL = True
-GPUS = [f'{Device.DEFAULT}:{i}' for i in range(2)]
+SHARD = int(os.environ.get("SHARD", 1))
+GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
+def reset_mem_high():
+  for gpu in GPUS:
+    Device[gpu].allocator.reset_mem_high()
+
+def shard_model(model, opt):
+  seen = set()
+  for k, p in nn.state.get_state_dict(model).items():
+    print(f"{k=}")
+    if p in seen: continue
+    seen.add(p)
+    axis = 0
+    if re.match(r"h\.\d+\.attn\.bias", k) or re.match(r"vocab_pad", k):
+      axis = None
+    p.shard_(GPUS, axis)
+  for k, p in nn.state.get_state_dict(model).items():
+    if p in seen: continue
+    seen.add(p)
+    p.shard_(GPUS, axis=None if prod(p.shape) <= 1 else 0)
+  for p in seen:
+    p.realize()
+
 
 @dataclass
 class GPTConfig:
@@ -106,7 +128,7 @@ class GPT:
     for _ in range(max_new_tokens):
       idx_cond = idx if idx.shape[1] <= self.config.block_size else idx[:, -self.config.block_size:]
       logits, _ = self(idx_cond)
-      if SHARD_MODEL:
+      if len(GPUS) > 1:
         logits = logits.to(Device.DEFAULT)
         logits.shard_(GPUS)
       logits = logits[:, -1, :] / temperature
@@ -118,7 +140,7 @@ class GPT:
     b, t = idx.shape
     pos = Tensor.arange(0, t)
     
-    if SHARD_MODEL:
+    if len(GPUS) > 1:
       pos.shard_(GPUS)
 
     tok_emb = self.wte(idx) # token embeddings of shape (b, t, n_embd)
@@ -144,26 +166,24 @@ if __name__ == "__main__":
 
   parser = argparse.ArgumentParser()
   parser.add_argument("--num_iterations", type=int, default=10, help="number of iterations to run")
-  parser.add_argument("--batch_size", type=int, default=4, help="batch size")
-  parser.add_argument("--sequence_length", type=int, default=64, help="sequence length")
+  parser.add_argument("--batch_size", type=int, default=2, help="batch size")
+  parser.add_argument("--sequence_length", type=int, default=4, help="sequence length")
   parser.add_argument("--skip_test", action="store_true", help="skip test")
   args = parser.parse_args()
 
   B, T = args.batch_size, args.sequence_length
   assert 1 <= T <= 1024
-  n_head = 24
-  model = GPT(GPTConfig(n_layer=64, n_head=n_head, n_embd=n_head * 64))
+  n_head = 1
+  model = GPT(GPTConfig(
+    block_size=32,
+    n_layer=4,
+    n_head=n_head,
+    n_embd=n_head * 32))
+  optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
   p_sz("model", *nn.state.get_parameters(model))
   seen = set()
-  if SHARD_MODEL:
-    GPUS = [f'{Device.DEFAULT}:{i}' for i in range(2)]
-    for k, p in nn.state.get_state_dict(model).items():
-      if p in seen: continue
-      seen.add(p)
-      if re.match(r"h\.\d+\.attn\.bias", k) or re.match(r"vocab_pad", k):
-        p.shard_(GPUS)
-      else:
-        p.shard_(GPUS, axis=0)
+  if len(GPUS) > 1:
+    shard_model(model, optimizer)
 
   # init the tokenizer
   enc = tiktoken.get_encoding("gpt2")
@@ -173,7 +193,7 @@ if __name__ == "__main__":
   # load the tokens
   # prefer to use tiny_shakespeare if it's available, otherwise use tiny_stories
   # we're using val instead of train split just because it is smaller/faster
-  tokens_bin = pathlib.Path("/root/tinygrad/tmp/tiny_shakespeare_val.bin")
+  tokens_bin = pathlib.Path("tmp/tiny_shakespeare_val.bin")
   assert os.path.isfile(tokens_bin)
   print(f"loading cached tokens in {tokens_bin}")
   with open(tokens_bin, "rb") as f:
@@ -189,7 +209,7 @@ if __name__ == "__main__":
     while True:
       x = tokens[i:i+B*T].view(B, T)
       y = tokens[i+1:i+B*T+1].view(B, T)
-      if SHARD_MODEL:
+      if len(GPUS) > 1:
         x.shard_(GPUS)
         y.shard_(GPUS)
       yield x, y
@@ -200,7 +220,7 @@ if __name__ == "__main__":
   # forward backward for a few iterations
   data_iter = iter(get_batch())
   x, y = next(data_iter) # we'll overfit this batch below
-  optimizer = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0, shard_axis=0)
+  optimizer = nn.optim.SGD(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
   p_sz("optimizer", *nn.state.get_parameters(optimizer))
   @TinyJit
   def step(x, y):
@@ -209,8 +229,12 @@ if __name__ == "__main__":
     loss.backward()
     return loss.realize(*optimizer.schedule_step())
 
+  x.realize()
+  y.realize()
+  reset_mem_high()
   with Tensor.train():
     for i in range(args.num_iterations):
+   
       GlobalCounters.reset()
       t0 = time.time()
       loss = step(x.contiguous(), y.contiguous())
@@ -222,7 +246,7 @@ if __name__ == "__main__":
     start = "<|endoftext|>"
     start_ids = encode(start)
     x = (Tensor(start_ids)[None, ...])
-    if SHARD_MODEL:
+    if len(GPUS) > 1:
       x.shard_(GPUS)
     max_new_tokens = 16
     temperature = 1.0
