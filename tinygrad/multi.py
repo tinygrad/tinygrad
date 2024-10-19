@@ -13,6 +13,8 @@ def gather(mlb: "MultiLazyBuffer") -> "MultiLazyBuffer":
   return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None, )
 
 def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
+  if mlb.axis is None:
+    return mlb
   if axis is None:
     return gather(mlb)
 
@@ -25,9 +27,6 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
   assert sum(splits) == shape[axis], "specified splits do not sum up to axis shape"
   boundaries = tuple(itertools.accumulate(splits))
   bounds = tuple(zip((0,) + boundaries, boundaries))
-  if mlb.axis is None:
-    devices = [lb.device for lb in mlb.lbs]
-    return MultiLazyBuffer.from_sharded(mlb.lbs[0], devices, axis, bounds)
   if RING < 2:
     print("NAIVE GATHER RESHARD")
     gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]

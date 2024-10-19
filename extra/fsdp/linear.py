@@ -40,12 +40,7 @@ class Optimizer:
     for t in self.params:
       if isinstance(t.grad.lazydata, MultiLazyBuffer) and isinstance(t.lazydata, MultiLazyBuffer) \
         and t.grad.lazydata.axis is not None and t.grad.lazydata.axis != t.lazydata.axis:
-        if t.lazydata.axis is None:
-          print("gather")
-          t.grad.gather_()
-        else:
-          print("reshard")
-          t.grad.reshard_(t.lazydata.axis)
+        t.grad.reshard_(t.lazydata.axis)
       t.assign(t.detach() - t.grad)
     Tensor.realize(*self.params)
 
@@ -69,13 +64,28 @@ print(list(nn.state.get_parameters(opt)))
 print_size("model", *nn.state.get_parameters(model))
 print_size("model with optimizer", *nn.state.get_parameters(opt))
 
+def shard_model(model, opt):
+  seen = set()
+  for k, p in nn.state.get_state_dict(model).items():
+    print(f"{k=}")
+    if p in seen: continue
+    seen.add(p)
+    if k.endswith("layers.0.weight"):
+      p.shard_(GPUS, 0)
+    else:
+      p.shard_(GPUS, 1)
+  for k, p in nn.state.get_state_dict(model).items():
+    if p in seen: continue
+    seen.add(p)
+    p.shard_(GPUS, axis=None if prod(p.shape) <= 1 else 0)
+  for p in seen:
+    p.realize()
+
 SHARD = int(os.environ.get("SHARD", 0))
 if SHARD > 1:
   print("SHARDING ON", GPUS)
   x.shard_(GPUS)
-  for k, p in nn.state.get_state_dict(opt).items():
-    p.shard_(GPUS, axis=None if prod(p.shape) <= 1 else 0)
-    p.realize()
+  shard_model(model, opt)
 else:
   print("NO SHARD")
   for p in nn.state.get_parameters(opt):
@@ -85,10 +95,9 @@ else:
 def train():
   y = model(x)
   loss = y.sum(0).sum(0)
-  loss.realize()
-  # loss.backward()
-  # opt.step()
-  # opt.zero_grad()
+  loss.backward()
+  opt.step()
+  opt.zero_grad()
 
 with Tensor.train():
   reset_mem_high()
