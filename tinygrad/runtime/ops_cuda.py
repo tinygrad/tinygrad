@@ -4,7 +4,7 @@ from typing import Tuple, Optional, List
 from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, init_c_struct_t
 from tinygrad.device import Compiled, BufferOptions, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.renderer.assembly import PTXRenderer
+from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
 from tinygrad.runtime.support.compiler_cuda import cuda_disassemble, pretty_ptx, CUDACompiler, PTXCompiler, PTX
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
@@ -87,7 +87,7 @@ class CUDAAllocator(LRUAllocator):
     check(cuda.cuEventRecord(sync_event, None))
     check(cuda.cuCtxSetCurrent(dest_dev.context))
     check(cuda.cuStreamWaitEvent(None, sync_event, 0)) # sync the default stream on the dest dev
-  def offset(self, buf, size:int, offset:int): return ctypes.c_ulong(buf.value + offset)
+  def offset(self, buf, size:int, offset:int): return cuda.CUdeviceptr_v2(buf.value + offset)
 
 class CUDADevice(Compiled):
   devices: List[CUDADevice] = []

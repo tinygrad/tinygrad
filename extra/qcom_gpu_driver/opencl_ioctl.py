@@ -19,6 +19,8 @@ for child in xml.getroot():
 #print(ops)
 #exit(0)
 
+CAPTURED_STATE = {}
+
 REGS = {}
 for k, v in adreno.__dict__.items():
   if k.startswith("REG_") and isinstance(v, int) and v > 1024: REGS[v] = k
@@ -71,6 +73,8 @@ SB6_CS_TEX = 5
 SB6_CS_SHADER = 13
 
 def parse_cmd_buf(dat):
+  global CAPTURED_STATE
+
   ptr = 0
   while ptr < len(dat):
     cmd = struct.unpack("I", dat[ptr:ptr+4])[0]
@@ -78,14 +82,14 @@ def parse_cmd_buf(dat):
       # packet with opcode and opcode specific payload (replace pkt3 starting with a5xx)
       opcode, size = ((cmd>>16)&0x7F), cmd&0x3FFF
       vals = struct.unpack("I"*size, dat[ptr+4:ptr+4+4*size])
-      print(f"{ptr:3X} -- typ 7: {size=:3d}, {opcode=:#x} {ops[opcode]}", hprint(vals))
+      if IOCTL > 0: print(f"{ptr:3X} -- typ 7: {size=:3d}, {opcode=:#x} {ops[opcode]}", hprint(vals))
       if ops[opcode] == "CP_LOAD_STATE6_FRAG": # for compute shaders CP_LOAD_STATE6_FRAG is used
         dst_off = vals[0] & 0x3FFF
         state_type = (vals[0]>>14) & 0x3
         state_src = (vals[0]>>16) & 0x3
         state_block = (vals[0]>>18) & 0xF  # 13 = SB4_CS_SHADER
         num_unit = vals[0]>>22
-        print(f"{num_unit=} {state_block=} {state_src=} {state_type=} {dst_off=}")
+        if IOCTL > 0: print(f"{num_unit=} {state_block=} {state_src=} {state_type=} {dst_off=}")
 
         if state_block == SB6_CS_SHADER and IOCTL > 2:
           from extra.disassemblers.adreno import disasm_raw
@@ -93,48 +97,59 @@ def parse_cmd_buf(dat):
           if state_type == ST6_CONSTANTS: hexdump(get_mem(((vals[2] << 32) | vals[1]), min(0x180, num_unit*4)))
           if state_type == ST6_IBO:
             ibos_bytes = get_mem((vals[2] << 32) | vals[1], num_unit * 16 * 4)
-            print('texture ibos')
-            hexdump(ibos_bytes)
+            CAPTURED_STATE['ibos'] = ibos_bytes[:]
+            if IOCTL > 0:
+              print('texture ibos')
+              hexdump(ibos_bytes)
         elif state_block == SB6_CS_TEX and IOCTL > 2:
           if state_type == ST6_SHADER:
             samplers_bytes = get_mem((vals[2] << 32) | vals[1], num_unit * 4 * 4)
-            print('texture samplers')
-            hexdump(samplers_bytes)
+            CAPTURED_STATE['samplers'] = ibos_bytes[:]
+            if IOCTL > 0:
+              print('texture samplers')
+              hexdump(samplers_bytes)
           if state_type == ST6_CONSTANTS:
             descriptors_bytes = get_mem((vals[2] << 32) | vals[1], num_unit * 16 * 4)
-            print('texture descriptors')
-            hexdump(descriptors_bytes)
+            CAPTURED_STATE['descriptors'] = ibos_bytes[:]
+            if IOCTL > 0:
+              print('texture descriptors')
+              hexdump(descriptors_bytes)
 
       elif ops[opcode] == "CP_REG_TO_MEM":
         reg, cnt, b64, accum = vals[0] & 0x3FFFF, (vals[0] >> 18) & 0xFFF, (vals[0] >> 30) & 0x1, (vals[0] >> 31) & 0x1
         dest = vals[1] | (vals[2] << 32)
-        print(f"{reg=} {cnt=} {b64=} {accum=} {dest=:#x}")
+        if IOCTL > 0: print(f"{reg=} {cnt=} {b64=} {accum=} {dest=:#x}")
       ptr += 4*size
     elif (cmd>>28) == 0x4:
       # write one or more registers (replace pkt0 starting with a5xx)
       offset, size = ((cmd>>8)&0x7FFFF), cmd&0x7F
       reg_name = REGS.get(offset, f"reg {offset=:#x}")
       vals = struct.unpack("I"*size, dat[ptr+4:ptr+4+4*size])
-      print(f"{ptr:3X} -- typ 4: {size=:3d}, {reg_name}", hprint(vals))
+      if IOCTL > 0: print(f"{ptr:3X} -- typ 4: {size=:3d}, {reg_name}", hprint(vals))
+      for vi,v in enumerate(vals): CAPTURED_STATE[offset+vi] = v
       if offset == adreno.REG_A6XX_SP_CS_CONFIG:
         val = vals[0]
-        print(f"\tBINDLESS_TEX={(val >> 0) & 0b1}")
-        print(f"\tBINDLESS_SAMP={(val >> 1) & 0b1}")
-        print(f"\tBINDLESS_IBO={(val >> 2) & 0b1}")
-        print(f"\tBINDLESS_UBO={(val >> 3) & 0b1}")
-        print(f"\tEN={(val >> 8) & 0b1}")
-        print(f"\tNTEX={(val >> 9) & 0b11111111}")
-        print(f"\tNSAMP={(val >> 17) & 0b11111}")
-        print(f"\tNIBO={(val >> 22) & 0b1111111}")
+        if IOCTL > 0:
+          print(f"\tBINDLESS_TEX={(val >> 0) & 0b1}")
+          print(f"\tBINDLESS_SAMP={(val >> 1) & 0b1}")
+          print(f"\tBINDLESS_IBO={(val >> 2) & 0b1}")
+          print(f"\tBINDLESS_UBO={(val >> 3) & 0b1}")
+          print(f"\tEN={(val >> 8) & 0b1}")
+          print(f"\tNTEX={(val >> 9) & 0b11111111}")
+          print(f"\tNSAMP={(val >> 17) & 0b11111}")
+          print(f"\tNIBO={(val >> 22) & 0b1111111}")
       if offset == 0xa9b0:
-        print(f'THREADSIZE-{(vals[0] >> 20)&0x1}\nEARLYPREAMBLE-{(vals[0] >> 23) & 0x1}\nMERGEDREGS-{(vals[0] >> 3) & 0x1}\nTHREADMODE-{vals[0] & 0x1}\nHALFREGFOOTPRINT-{(vals[0] >> 1) & 0x3f}\nFULLREGFOOTPRINT-{(vals[0] >> 7) & 0x3f}\nBRANCHSTACK-{(vals[0] >> 14) & 0x3f}\n')
-        print(f'SP_CS_UNKNOWN_A9B1-{vals[1]}\nSP_CS_BRANCH_COND-{vals[2]}\nSP_CS_OBJ_FIRST_EXEC_OFFSET-{vals[3]}\nSP_CS_OBJ_START-{vals[4] | (vals[5] << 32)}\nSP_CS_PVT_MEM_PARAM-{vals[6]}\nSP_CS_PVT_MEM_ADDR-{vals[7] | (vals[8] << 32)}\nSP_CS_PVT_MEM_SIZE-{vals[9]}')
+        if IOCTL > 0:
+          print(f'THREADSIZE-{(vals[0] >> 20)&0x1}\nEARLYPREAMBLE-{(vals[0] >> 23) & 0x1}\nMERGEDREGS-{(vals[0] >> 3) & 0x1}\nTHREADMODE-{vals[0] & 0x1}\nHALFREGFOOTPRINT-{(vals[0] >> 1) & 0x3f}\nFULLREGFOOTPRINT-{(vals[0] >> 7) & 0x3f}\nBRANCHSTACK-{(vals[0] >> 14) & 0x3f}\n')
+          print(f'SP_CS_UNKNOWN_A9B1-{vals[1]}\nSP_CS_BRANCH_COND-{vals[2]}\nSP_CS_OBJ_FIRST_EXEC_OFFSET-{vals[3]}\nSP_CS_OBJ_START-{vals[4] | (vals[5] << 32)}\nSP_CS_PVT_MEM_PARAM-{vals[6]}\nSP_CS_PVT_MEM_ADDR-{vals[7] | (vals[8] << 32)}\nSP_CS_PVT_MEM_SIZE-{vals[9]}')
       if offset == 0xb180:
-        print('border color offset', hex(vals[1] << 32 | vals[0]))
-        hexdump(get_mem(vals[1] << 32 | vals[0], 0x200))
+        if IOCTL > 0:
+          print('border color offset', hex(vals[1] << 32 | vals[0]))
+          hexdump(get_mem(vals[1] << 32 | vals[0], 0x200))
       ptr += 4*size
     else:
-      print("unk", hex(cmd))
+      if IOCTL > 0:
+        print("unk", hex(cmd))
     ptr += 4
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)
@@ -145,19 +160,19 @@ def ioctl(fd, request, argp):
   if nr in nrs and itype == 9:
     name, stype = nrs[nr]
     s = get_struct(argp, stype)
-    print(f"{ret:2d} = {name:40s}", ' '.join(format_struct(s)))
+    if IOCTL > 0: print(f"{ret:2d} = {name:40s}", ' '.join(format_struct(s)))
     if name == "IOCTL_KGSL_GPUOBJ_INFO": pass
       # mmaped[s.gpuaddr] = mmap.mmap(fd, s.size, offset=s.id*0x1000)
     if name == "IOCTL_KGSL_GPU_COMMAND":
       for i in range(s.numcmds):
         cmd = get_struct(s.cmdlist+ctypes.sizeof(msm_kgsl.struct_kgsl_command_object)*i, msm_kgsl.struct_kgsl_command_object)
-        print(f"cmd {i}:", format_struct(cmd))
-        #hexdump(get_mem(cmd.gpuaddr, cmd.size))
-        if IOCTL > 1: parse_cmd_buf(get_mem(cmd.gpuaddr, cmd.size))
+        if IOCTL > 0: print(f"cmd {i}:", format_struct(cmd))
+        parse_cmd_buf(get_mem(cmd.gpuaddr, cmd.size))
       for i in range(s.numobjs):
         obj = get_struct(s.objlist+s.objsize*i, msm_kgsl.struct_kgsl_command_object)
-        print(f"obj {i}:", format_struct(obj))
-        print(format_struct(msm_kgsl.struct_kgsl_cmdbatch_profiling_buffer.from_buffer_copy(get_mem(obj.gpuaddr, obj.size))))
+        if IOCTL > 0:
+          print(f"obj {i}:", format_struct(obj))
+          print(format_struct(msm_kgsl.struct_kgsl_cmdbatch_profiling_buffer.from_buffer_copy(get_mem(obj.gpuaddr, obj.size))))
         #hexdump(get_mem(obj.gpuaddr, obj.size))
   else:
     #print(f"ioctl({fd=}, (dir:{idir}, size:0x{size:3X}, type:{itype:d}, nr:0x{nr:2X}), {argp=:X}) = {ret=}")
@@ -181,3 +196,37 @@ def install_hook(c_function, python_function):
 
 libc = ctypes.CDLL(ctypes.util.find_library("libc"))
 install_hook(libc.ioctl, ioctl)
+
+def before_launch():
+  global CAPTURED_STATE
+  CAPTURED_STATE.clear()
+def collect_last_launch_state(): return CAPTURED_STATE
+def compare_launch_state(state, good_state):
+  cmp = [
+    (adreno.REG_A6XX_SP_CS_CONFIG, 0xffffffff),
+
+    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__MASK),
+    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__MASK),
+    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_BRANCHSTACK__MASK),
+    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__MASK),
+    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_THREADMODE__MASK),
+    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_EARLYPREAMBLE),
+    (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_MERGEDREGS),
+
+    (adreno.REG_A6XX_SP_CS_UNKNOWN_A9B1, adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK5),
+    (adreno.REG_A6XX_SP_CS_UNKNOWN_A9B1, adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK6),
+
+    (adreno.REG_A6XX_SP_CS_BRANCH_COND, 0xffffffff),
+  ]
+
+  for x,m in cmp:
+    if state.get(x, 0) & m != good_state.get(x, 0) & m:
+      return False, f"Field {REGS[x]}, mask: {x:X} mismatch: {state.get(x, 0) & m} vs {good_state.get(x, 0) & m}"
+
+  for n in ['ibos', 'samplers', 'descriptors']:
+    if n not in good_state: continue
+    mv1, mv2 = state.get(n), good_state.get(n)
+    if len(mv1) != len(mv2): return False, f"{n}: len mismatch"
+    if any(mv1[i]!=mv2[i] for i in range(len(mv1))): return False, f"{n}: content mismatch"
+
+  return True, "PASS"
