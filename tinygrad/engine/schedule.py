@@ -157,16 +157,16 @@ def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], inputs:List[LazyBuffer], bu
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, outputs, inputs, buf_uops, cache).view(buf.st)
     return ret
+  if buf.op is MetaOps.CONST: return buf_uops[buf.buffer]
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
   if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs:
-    if buf.op is MetaOps.CONST: return ubuf
     if not any(x.buffer is buf.buffer for x in outputs) and buf not in inputs: inputs.append(buf)
     return UOp.load(ubuf, buf.st.to_uop(), dtype=dtype)
   src = tuple(to_uop(x, outputs, inputs, buf_uops, cache) for x in buf.srcs)
   if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
   elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
   elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]), buf.arg)
-  elif buf.op in METAOPS: ret = UOp(METAOPS[cast(MetaOps, buf.op)], buf.dtype, src, buf.arg)
+  elif buf.op in METAOPS: ret = UOp(METAOPS[cast(MetaOps, buf.op)], buf.dtype, (buf_uops[buf.buffer], *src), buf.arg)
   elif buf.op is UnaryOps.CAST: ret = UOp(UOps.CAST, dtype, src)
   elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
   else: ret = UOp(UOps.ALU, dtype, src, buf.op)
