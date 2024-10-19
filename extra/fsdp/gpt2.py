@@ -18,7 +18,6 @@ def reset_mem_high():
 def shard_model(model, opt):
   seen = set()
   for k, p in nn.state.get_state_dict(model).items():
-    print(f"{k=}")
     if p in seen: continue
     seen.add(p)
     axis = 0
@@ -158,8 +157,16 @@ class GPT:
       loss = None
     return logits, loss
 
+def size_unit(size: str):
+  for unit in ['bytes', 'KB', 'MB', 'GB']:
+    if size < 1000 or unit == 'GB': break
+    size /= 1000
+  return float(size), unit
+
 def g_sz(tensors: List[Tensor]): return sum([t.nbytes() if isinstance(t, Tensor) else t.size for t in tensors])
-def p_sz(name, *tensors: Tensor): print(f'{name} size: {g_sz(tensors) / 1e9:.2f} GB')
+def p_sz(name, *tensors: Tensor):
+  size, unit = size_unit(g_sz(tensors))
+  print(f'{name} size: {size:.2f} {unit}')
 
 if __name__ == "__main__":
   import tiktoken, argparse
