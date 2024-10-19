@@ -603,9 +603,11 @@ class TrackedRewriteContext:
 
 rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
 contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
-def track_rewrites(func):
+_cnt: Dict[str, int] = {}
+def track_rewrites(func, named=False):
   def __wrapper(self, *args, **kwargs):
-    if TRACK_MATCH_STATS >= 2: rewrite_stack.append((self, []))
+    k = f"{(n:=func.__name__)}_{_cnt.setdefault(n, _cnt.get(n, 0)+1)}" if named else self
+    if TRACK_MATCH_STATS >= 2: rewrite_stack.append((k, []))
     try: ret = func(self, *args, **kwargs)
     finally: # NOTE: save everything in the stack
       if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
