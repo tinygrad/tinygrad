@@ -19,7 +19,8 @@ from tinygrad.engine.realize import run_schedule, lower_schedule, ExecItem, Comp
 from tinygrad.engine.schedule import ScheduleItem, create_schedule
 from tinygrad.ops import UOps
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.runtime.onnx.onnx import get_run_onnx, parse_dtype
+from tinygrad.runtime.onnx.onnx import get_run_onnx
+
 Device.DEFAULT = "GPU"
 
 def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
@@ -30,10 +31,9 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   onnx_model = onnx.load(io.BytesIO(onnx_data))
   run_onnx = get_run_onnx(onnx_model)
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
-  input_types = {inp.name:parse_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input}
 
   # run the model
-  inputs = {k:Tensor.empty(*shp, dtype=input_types[k]) for k,shp in input_shapes.items()}
+  inputs = {k:Tensor.empty(*shp, dtype=dtypes.float) for k,shp in input_shapes.items()}
   ret: Tensor = next(iter(run_onnx(inputs).values())).cast(dtypes.float32).contiguous()
   schedule = create_schedule([ret.lazydata])
 
@@ -61,9 +61,8 @@ def test_vs_onnx(onnx_data, eis:Optional[List[ExecItem]], inputs:Dict[str, Tenso
   onnx_model = onnx.load(io.BytesIO(onnx_data))
 
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
-  input_types = {inp.name:parse_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input}
   Tensor.manual_seed(1337)
-  new_inputs = {k:Tensor.randn(*shp, dtype=input_types[k], requires_grad=False)*8 for k,shp in input_shapes.items()}
+  new_inputs = {k:Tensor.randn(*shp, requires_grad=False)*8 for k,shp in input_shapes.items()}
   new_np_inputs = {k:v.realize().numpy() for k,v in new_inputs.items()}
 
   if getenv("ORT"):
@@ -75,8 +74,10 @@ def test_vs_onnx(onnx_data, eis:Optional[List[ExecItem]], inputs:Dict[str, Tenso
     print("got ort outputs")
   else:
     # test with torch
-    from test.models.test_onnx import run_onnx_torch
-    new_torch_out = run_onnx_torch(onnx_model, new_np_inputs).numpy()
+    import torch
+    from onnx2torch import convert
+    torch_model = convert(onnx_model).float()
+    with torch.no_grad(): new_torch_out = torch_model(*[torch.tensor(x) for x in new_np_inputs.values()])
     print("got torch outputs")
 
   # if you don't have a schedule
@@ -96,8 +97,7 @@ def test_vs_onnx(onnx_data, eis:Optional[List[ExecItem]], inputs:Dict[str, Tenso
   for ei in eis: ei.run()
 
   new_tinygrad_out = np.frombuffer(output.as_buffer(), dtype=_to_np_dtype(output.dtype))
-  # HACK dunno about these atol rtols
-  np.testing.assert_allclose(new_torch_out.reshape(new_tinygrad_out.shape), new_tinygrad_out, atol=4e-2, rtol=4e-2)
+  np.testing.assert_allclose(new_torch_out.reshape(new_tinygrad_out.shape), new_tinygrad_out, atol=1e-4, rtol=1e-2)
   print("semi-thneed self-test passed!")
 
 if __name__ == "__main__":

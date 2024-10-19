@@ -10,7 +10,7 @@ from tinygrad.helpers import fetch
 from tinygrad.runtime.onnx.onnx import get_run_onnx
 from onnx.helper import tensor_dtype_to_np_dtype
 from onnx2torch import convert
-from onnx2torch.onnx_graph import OnnxGraph
+from onnx2torch.onnx_graph import OnnxGraph, OnnxTensor
 import torch
 import numpy as np
 
@@ -73,8 +73,13 @@ def verify(model_name):
     for i, (name, node) in enumerate(torch_onnx_graph.nodes.items()):
       # torch's onnx parser returns lists when floats, ints, or strings, we return tuple
       # see onnx2torch/onnx_node.py: `OnnxNode._parse_attribute_value()`
-      tuple_attributes = {k:tuple(v) if isinstance(v, list) else v for k,v in node.attributes.items()}
-      assert attributes[i] == tuple_attributes, f"{attributes[i]}, {i}, {tuple_attributes}"
+      tinygrad_attributes = attributes[i]
+      for k,v in node.attributes.items():
+        if isinstance(v, list): v = tuple(v)
+        if isinstance(v, OnnxTensor): v = tuple(v.to_numpy().tolist())
+        tinygrad_value = tinygrad_attributes[k]
+        if isinstance(tinygrad_value, Tensor): tinygrad_value = tuple(tinygrad_value.tolist())
+        assert v == tinygrad_value, f"{name}, {k}, {v}, {tinygrad_value}"
       print(f"\tverified {name}")
     print("Attributes Verified")
 
@@ -114,9 +119,8 @@ def verify(model_name):
       else: print(f"\t\toutput WARNING: {output_name} does not match any torch outputs")
 
   tiny_model = get_run_onnx(onnx_model)
-  inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
+  tiny_out = tiny_model(inputs=np_inputs, debug=3, initialization_hook=tinygrad_init_verify, op_hook=tinygrad_intermediate_result_verify)
 
-  tiny_out = tiny_model(inputs=inputs, debug=3, initialization_hook=tinygrad_init_verify, op_hook=tinygrad_intermediate_result_verify)
   np.testing.assert_allclose(list(tiny_out.values())[0].numpy(), torch_out.detach().numpy(), atol=atol, rtol=rtol,)
   print("Final output validated!")
 
