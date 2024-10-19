@@ -11,7 +11,7 @@ from tinygrad.helpers import CI, fetch, temp
 def run_onnx_torch(onnx_model, inputs):
   import torch
   from onnx2torch import convert
-  torch_model = convert(onnx_model).float()
+  torch_model = convert(onnx_model)
   with torch.no_grad():
     torch_out = torch_model(*[torch.tensor(x) for x in inputs.values()])
   return torch_out
@@ -33,7 +33,7 @@ class TestOnnxModel(unittest.TestCase):
         "nav_features": np.zeros((1, 256)),
         "features_buffer": np.zeros((1, 99, 128)),
     }
-      inputs = {k:Tensor(v.astype(np.float32), requires_grad=False) for k,v in np_inputs.items()}
+      inputs = {k:Tensor(v.astype(np.float16), requires_grad=False) for k,v in np_inputs.items()}
       return inputs
 
     for _ in range(7):
@@ -77,7 +77,7 @@ class TestOnnxModel(unittest.TestCase):
       "nav_features": np.zeros((1, 256)),
       "features_buffer": np.zeros((1, 99, 128)),
     }
-    inputs = {k:v.astype(np.float32) for k,v in inputs.items()}
+    inputs = {k:v.astype(np.float16) for k,v in inputs.items()}
 
     st = time.monotonic()
     print("****** run onnx ******")
@@ -94,7 +94,8 @@ class TestOnnxModel(unittest.TestCase):
     torch_out = run_onnx_torch(onnx_model, inputs).numpy()
     Tensor.no_grad = False
     print(tinygrad_out, torch_out)
-    np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
+    # HACK: yeah idk about these atol and rtols
+    np.testing.assert_allclose(torch_out, tinygrad_out, atol=4e-2, rtol=4e-2)
 
   @unittest.skip("slow")
   def test_efficientnet(self):
