@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
 from tinygrad.ops import BUFFER_UOPS, UNSAFE_PAD_OPS, MetaOps, ReduceOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, Variable, resolve, \
     graph_rewrite, track_rewrites, sint
-from tinygrad.helpers import DEBUG, MULTIOUTPUT, FUSE_CONV_BW, FUSE_ARANGE, Metadata, all_same, colored, diskcache_put, prod, dedup, all_int, \
-    merge_dicts, getenv, unwrap
+from tinygrad.helpers import DEBUG, FUSE_CONV_BW, FUSE_ARANGE, Metadata, all_same, colored, diskcache_put, prod, dedup, all_int, merge_dicts, \
+    getenv, unwrap
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -346,7 +346,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   var_vals: Dict[Variable, int] = {}
   for buf in realizes:
     if buf.realized is None and buf.op is not MetaOps.CONST:
-      output_groups[reduce_for_op[buf] if buf in reduce_for_op and MULTIOUTPUT else buf].append(buf)
+      output_groups[reduce_for_op.get(buf, buf)].append(buf)
 
       # make things that can't be images not images
       if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
