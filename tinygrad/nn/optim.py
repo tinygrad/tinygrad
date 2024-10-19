@@ -81,9 +81,6 @@ class LARS(Optimizer):
       assert t.grad is not None
       # contiguous is needed since the grads can allegedly form a "diamond"
       # TODO: fix this in lazy.py
-      if isinstance(t.grad.lazydata, MultiLazyBuffer) and isinstance(t.lazydata, MultiLazyBuffer) \
-        and t.grad.lazydata.axis != t.lazydata.axis:
-        t.grad.reshard_(t.lazydata.axis)
 
       g = t.grad.contiguous()
 
@@ -96,11 +93,18 @@ class LARS(Optimizer):
       # classic momentum does post learning rate update
       if self.classic: g = g * r * self.lr
       if self.momentum:
-        self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
-        g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
+        bi = self.momentum * self.b[i] + g  # NOTE: self.b[i] is zero on the first run, no if required
+        g = (g + self.momentum * bi) if self.nesterov else bi
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
-      t.assign((t.detach() - g).cast(t.dtype))
+      new_t = (t.detach() - g).cast(t.dtype)
+
+      if isinstance(t.lazydata, MultiLazyBuffer):
+        new_t.reshard_(t.lazydata.axis)
+        bi.reshard_(self.b[i].lazydata.axis)
+
+      self.b[i].assign(bi)
+      t.assign(new_t)
     return self.b
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
@@ -156,12 +160,12 @@ class LAMB(Optimizer):
         r = Tensor.where(r1 > 0, Tensor.where(r2 > 0, r1 / r2, 1.0), 1.0)
       else:
         r = 1.0
-      new_t = t.detach() - self.lr * r * up
+      new_t = (t.detach() - self.lr * r * up).cast(t.dtype)
       if isinstance(new_t.lazydata, MultiLazyBuffer):
         new_t.reshard_(t.lazydata.axis)
         mi.reshard_(self.m[i].lazydata.axis)
         vi.reshard_(self.v[i].lazydata.axis)
       self.m[i].assign(mi)
       self.v[i].assign(vi)
-      t.assign(new_t).cast(t.dtype)
+      t.assign(new_t)
     return [self.b1_t, self.b2_t] + self.m + self.v
