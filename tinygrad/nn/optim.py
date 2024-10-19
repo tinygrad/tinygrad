@@ -144,10 +144,11 @@ class LAMB(Optimizer):
         and t.grad.lazydata.axis != t.lazydata.axis:
         t.grad.reshard_(t.lazydata.axis)
 
-      self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
-      self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
-      m_hat = self.m[i] / (1.0 - self.b1_t)
-      v_hat = self.v[i] / (1.0 - self.b2_t)
+      mi = (self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
+      vi = (self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
+
+      m_hat = self.mi / (1.0 - self.b1_t)
+      v_hat = self.vi / (1.0 - self.b2_t)
       up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
       if not self.adam:
         r1 = t.detach().square().sum().sqrt()
@@ -155,5 +156,12 @@ class LAMB(Optimizer):
         r = Tensor.where(r1 > 0, Tensor.where(r2 > 0, r1 / r2, 1.0), 1.0)
       else:
         r = 1.0
-      t.assign((t.detach() - self.lr * r * up).cast(t.dtype))
+      new_t = t.detach() - self.lr * r * up
+      if isinstance(new_t.lazydata, MultiLazyBuffer):
+        new_t.reshard_(t.lazydata.axis)
+        mi.reshard_(self.m[i].lazydata.axis)
+        vi.reshard_(self.v[i].lazydata.axis)
+      self.m[i].assign(mi)
+      self.v[i].assign(vi)
+      t.assign(new_t).cast(t.dtype)
     return [self.b1_t, self.b2_t] + self.m + self.v
