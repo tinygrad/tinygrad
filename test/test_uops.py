@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context
-from tinygrad.dtype import dtypes, DType, PtrDType
+from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import UOps, UOp, UPat, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu, spec # noqa F401
 from tinygrad.renderer import Program
@@ -30,8 +30,8 @@ def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], src:Tuple[UOp, ...], ar
 def _test_single_value(vals, op, dts):
   uops = []
   output_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dts[-1]
-  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
-  buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), i+1) for i,dtype in enumerate(dts)]
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
+  buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, dtype.ptr(), (), i+1) for i,dtype in enumerate(dts)]
   loads = (uop(uops, UOps.LOAD, dtype, [buf_loads[i], uop(uops, UOps.CONST, dtypes.int32, (), 0)]) for i,dtype in enumerate(dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   out = uop(uops, UOps.STORE, dtypes.void, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
@@ -46,7 +46,7 @@ def _test_single_value(vals, op, dts):
 def _test_single_value_const(vals, op, dts):
   uops = []
   output_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dts[-1]
-  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   loads = (uop(uops, UOps.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   out = uop(uops, UOps.STORE, dtypes.void, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
@@ -59,7 +59,7 @@ def _test_single_value_const(vals, op, dts):
 
 def _test_uops_result(output_dtype, uops, res):
   # uops = []
-  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 0)
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   # res = output_fn(uops)
   out = uop(uops, UOps.STORE, dtypes.void, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
@@ -246,7 +246,7 @@ class TestConstantFolding(unittest.TestCase):
 class TestGatedStoreRewrite(unittest.TestCase):
   @unittest.expectedFailure
   def test_tiny_gate_store(self):
-    gmem = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    gmem = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
     idx = gidx0 * UOp.const(dtypes.int, 2)
     val = UOp.const(dtypes.float, 42.0)
@@ -263,8 +263,8 @@ class TestGatedStoreRewrite(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_gate_some_stores(self):
-    gmem0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
-    gmem1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
+    gmem0 = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
+    gmem1 = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
     gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
     idx = gidx0*UOp.const(dtypes.int, 2)
     val = UOp.const(dtypes.float, 42.0)
@@ -282,8 +282,8 @@ class TestGatedStoreRewrite(unittest.TestCase):
   # scaled down version of TestLinearizerDumb.test_unmerged_ifs
   @unittest.expectedFailure
   def test_merge_ifs_alt(self):
-    gmem0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
-    gmem1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
+    gmem0 = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
+    gmem1 = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
     gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
     idx = gidx0*UOp.const(dtypes.int, 2)
     val = UOp.const(dtypes.float, 42.0)
@@ -305,7 +305,7 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_basic(self):
     uops = []
-    smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.float32, local=True), (), ('smem', 16))
+    smem = uop(uops, UOps.DEFINE_LOCAL, dtypes.float32.ptr(local=True), (), ('smem', 16))
     st = uop(uops, UOps.STORE, dtypes.void, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), uop(uops, UOps.CONST, dtypes.float32, (), 42.0)))
     barr = uop(uops, UOps.BARRIER, dtypes.void, (st,))
     sres = uop(uops, UOps.LOAD, dtypes.float32, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 0), barr))
@@ -314,7 +314,7 @@ class TestLocalAccess(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_indirect(self):
     uops = []
-    smem = uop(uops, UOps.DEFINE_LOCAL, PtrDType(dtypes.int32, local=True), (), ('smem', 16))
+    smem = uop(uops, UOps.DEFINE_LOCAL, dtypes.int32.ptr(local=True), (), ('smem', 16))
     st1 = uop(uops, UOps.STORE, dtypes.void, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 1), uop(uops, UOps.CONST, dtypes.int32, (), 2)))
     st2 = uop(uops, UOps.STORE, dtypes.void, (smem, uop(uops, UOps.CONST, dtypes.int32, (), 2), uop(uops, UOps.CONST, dtypes.int32, (), 42)))
     barr = uop(uops, UOps.BARRIER, dtypes.void, (st1,st2))
@@ -325,7 +325,7 @@ class TestLocalAccess(unittest.TestCase):
 @unittest.skipUnless(getenv("PTX"), "This only tests assembly backends")
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
-    g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), 0)
+    g1 = UOp(UOps.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
     c1 = UOp(UOps.CONST, dtypes.int, (), 2)
     c2 = UOp(UOps.CONST, dtypes.int, (), 3)
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
@@ -337,7 +337,7 @@ class TestAssembly(unittest.TestCase):
     self.assertEqual(uops[-2].arg, BinaryOps.MUL)
 
   def test_bitshift_right(self):
-    g1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), 0)
+    g1 = UOp(UOps.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
     c1 = UOp(UOps.CONST, dtypes.int, (), 2)
     c2 = UOp(UOps.CONST, dtypes.int, (), 3)
     l1 = UOp(UOps.LOAD, dtypes.int, (g1, c1))
@@ -361,7 +361,7 @@ class TestUOpMethod(unittest.TestCase):
   def test_uop_variables(self):
     a = UOp.variable("a", 1, 10)
     uop_var = UOp.const(dtypes.int, a)
-    st_var = UOp(UOps.LOAD, dtypes.float, (UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0),
+    st_var = UOp(UOps.LOAD, dtypes.float, (UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0),
                                            ShapeTracker.from_shape((2, a)).to_uop()))
     ast_vars = (st_var+uop_var).variables()
     self.assertEqual(len(ast_vars), 1)
@@ -376,7 +376,7 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual((gidx0*3+1).const_factor(), 1)
 
   def test_replace(self):
-    x = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.void), (), 0)
+    x = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     self.assertIs(x.replace(arg=None).arg, None)
     with self.assertRaises(AssertionError): x.replace(field="a")
 
@@ -403,7 +403,7 @@ class TestIndexingOrdering(unittest.TestCase):
   # NOTE: these tests skip type_verify since they add dtype to STORE
   @unittest.expectedFailure
   def test_simple_order(self):
-    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    buf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     st0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1 = UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
     uops = to_uops_list([st1, st0], skip_check=True)
@@ -412,8 +412,8 @@ class TestIndexingOrdering(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_ordering_multi_output(self):
-    buf0 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
-    buf1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 1)
+    buf0 = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
+    buf1 = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
     st0_0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf0, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1_0 = UOp(UOps.STORE, dtypes.float, (buf0, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))
     st0_1 = UOp(UOps.STORE, dtypes.float.vec(4), (buf1, UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
@@ -430,7 +430,7 @@ class TestIndexingOrdering(unittest.TestCase):
     assert stores[2].src[1] < stores[3].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
   def test_simple_order_with_special(self):
-    buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), (), 0)
+    buf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     gidx0 = UOp(UOps.SPECIAL, dtypes.int, (), ('gidx0', 4))
     st0 = UOp(UOps.STORE, dtypes.float.vec(4), (buf, gidx0+UOp.const(dtypes.int, 0), UOp.const(dtypes.float.vec(4), 42)))
     st1 = UOp(UOps.STORE, dtypes.float, (buf, UOp.const(dtypes.int, 4), UOp.const(dtypes.float, 10)))

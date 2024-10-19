@@ -211,7 +211,7 @@ class TestNN(unittest.TestCase):
 
   def test_conv2d_same_padding_odd_input(self):
     BS, C1, H, W = 16, 16, 29, 31
-    C2, K, S, P = 32, 4, 1, 'same'
+    C2, K, S, P = 32, 5, 1, 'same'
     self._run_conv2d_same_padding_test(BS, C1, C2, H, W, K, S, P)
 
   def test_conv2d_same_padding_large_kernel(self):
