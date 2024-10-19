@@ -31,10 +31,9 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
     return MultiLazyBuffer(sharded, axis)
 
   chunks: List[Tuple[int, int]] = []
-  steps = shape[originalAxis] // shards
+  steps = shape[axis] // shards
   for i in range(shards):
     chunks.append((i * steps, (i+1) * steps))
-
   chunked_lbs: List[List[LazyBuffer]] = []
   for i, lb in enumerate(mlb.lbs):
     chunks_per_lb: List[LazyBuffer] = []
@@ -53,19 +52,17 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
     reassembled_per_lb[i] = lbs[i]
     reassembled_chunks.append(reassembled_per_lb)
   for step in range(n_lbs - 1):
-    # print(f"{step=}")
     for src_shard in range(n_lbs):
       src_chunk = (step + src_shard + 1) % n_lbs
       dst_shard = (src_shard + step + 1) % n_lbs
       dst_chunk = (dst_shard - step - 1) % n_lbs
       dst_shard_stationary_chunk = dst_shard
       dst_device = chunked_lbs[dst_shard][dst_shard_stationary_chunk].device
-      # print(f"{src_shard}:{src_chunk} --> {dst_shard}:{dst_chunk} {dst_device}")
       copied = chunked_lbs[src_shard][src_chunk].copy_to_device(dst_device)
       reassembled_chunks[dst_shard][dst_chunk] = copied
   reassembled_lbs = []
   for i, chunks in enumerate(reassembled_chunks):
-    cat_dims =  [s.shape[axis] for s in chunks]
+    cat_dims =  [s.shape[originalAxis] for s in chunks]
     cat_dim_cumsum = [0, *itertools.accumulate(cat_dims)]
     slc:List[List[Optional[Tuple[sint, sint]]]] = [[(0,0) for _ in range(len(shape))] for _ in chunks]
     for d,k,s in zip(cat_dims, cat_dim_cumsum[:-1], slc):
@@ -184,7 +181,7 @@ class MultiLazyBuffer(MathTrait):
       else:
         # srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis, bounds))
         resharded = reshard(mlb, axis)
-        print("reshard in alu")
+        print("reshard in alu", f"{axis=} {bounds=} {resharded.shape=} {resharded.axis=}")
         srcs.append(resharded.lbs)
     new_real_lbs:Dict[int,LazyBuffer] = {i:lsrcs[0].alu(op, *lsrcs[1:]) for i,(lsrcs,r) in enumerate(zip(zip(*srcs), new_real)) if r}
     # NOTE: const dtype should match real
