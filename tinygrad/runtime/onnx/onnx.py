@@ -37,7 +37,7 @@ def to_python_const(t) -> Union[List[ConstType], List[bytes], Union[ConstType, b
 # copied from helpers.py
 def supported_device_dtypes(dtype, device):
   if dtype is dtypes.bfloat16: return dtypes.default_float
-  if dtype is dtypes.half and (CI or device in {"GPU", "LLVM", "CUDA"}): return dtypes.default_float
+  if dtype is dtypes.half and (CI and device in {"GPU", "LLVM", "CUDA"}): return dtypes.default_float
   if dtype is dtypes.float64 and (device == "METAL" or (OSX and device == "GPU")): return dtypes.default_float
   # if device in ["WEBGPU"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32] # lol
   return dtype
