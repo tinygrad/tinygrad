@@ -1,13 +1,22 @@
-from tinygrad import Tensor, nn, dtypes
+from tinygrad import Tensor, dtypes
 from tinygrad import Device
 from typing import Optional, List
 import numpy as np
 
+'''
+WORK IN PROGRESS
+'''
+
 
 class Sponge:
     def __init__(self, output_sz: int = 256, rate: Optional[int] = None, capacity: Optional[int] = None):
+        # Bitrate/State length
         self.b = 1600
+
+        # Size of digest, e.g. SHA256 -> out_len = 256
         self.out_len = output_sz
+
+        # Default
         if rate is None:
             self.c = output_sz * 2
             self.r = self.b - self.c
@@ -17,37 +26,42 @@ class Sponge:
 
         if self.r + self.c != self.b:
             raise ValueError("Rate + Capacity != 1600")
+
         if self.c != self.out_len * 2:
             raise ValueError("Capacity must equal 2 * Output Len.")
 
-        self.message = ""
-
+    # str -> uint Tensor
+    # Not very robust; Will refine once base implementation is complete
     def to_binary(self, message: str) -> Tensor:
+        # char -> uint (utf-8)
         int_string: List[int] = [ord(x) for x in message]
-        message_tens: Tensor = Tensor(int_string, dtype='uint').detach()
+
+        message_tnsr: Tensor = Tensor(int_string, dtype='uint').detach()
         temp_list: List[List[int]] = []
 
+        # uint -> "binary" (still uint)
         for bit in reversed(range(8)):
-            temp = message_tens.rshift(bit).bitwise_and(1)
+            temp = message_tnsr.rshift(bit).bitwise_and(1)
             temp_list.append(temp.tolist())
 
         bit_tensor: Tensor = Tensor(temp_list).permute(1, 0).flatten()
 
         return bit_tensor
 
+    # To-Do; May not need to be separate fn
     def pad(self, data):
         pass
 
+    # First part of Sponge fns
     def absorb(self, data: Tensor, suffix=None):
         state: Tensor = Tensor.zeros(self.b)
         block_i = 0
         blocks = data.split(self.r)
 
         while block_i < blocks.numel():
-            if blocks[block_i].numel() == state.numel():
+            if blocks[block_i].numel() == state.numel():  # i.e. complete block
                 state = state.xor(blocks[block_i])
             block_i += 1
-        pass
 
 
 def main():
@@ -65,7 +79,6 @@ def main():
 
     print(bt.numpy())
 
-    # print(bt)
 
-
-main()
+if __name__ == "__main__":
+    main()
