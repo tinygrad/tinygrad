@@ -46,13 +46,13 @@ def is_dtype_supported(dtype, device: str = Device.DEFAULT):
 # TODO: these float8 are kinda cursed. May run into subtle bugs passing them as float.....
 # TensorProto.FLOAT8E4M3FN:dtypes.float, TensorProto.FLOAT8E4M3FNUZ:dtypes.float,
 # TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float
-# TODO: use dtypes.float16 for FLOAT16
+# TODO: check if dtypes.void can be used like this
 DTYPE_MAP: Dict[int, DType] = {
   TensorProto.FLOAT:dtypes.float, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8, TensorProto.UINT16:dtypes.uint16,
   TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64, TensorProto.BOOL:dtypes.bool,
   TensorProto.FLOAT16:dtypes.float16, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32, TensorProto.UINT64:dtypes.uint64,
   TensorProto.BFLOAT16:dtypes.bfloat16, TensorProto.FLOAT8E4M3FN:dtypes.float, TensorProto.FLOAT8E4M3FNUZ:dtypes.float,
-  TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float}
+  TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float, TensorProto.UNDEFINED:dtypes.void}
 def dtype_parse(onnx_dtype: int) -> DType:
   if (ret := DTYPE_MAP.get(onnx_dtype)) is None: raise RuntimeError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
   return ret
@@ -113,19 +113,17 @@ def get_run_onnx(onnx_model: ModelProto):
     # get inputs
     def parse_input(model_input:ValueInfoProto):
       if model_input.name not in inputs: raise RuntimeError(f"no data for {model_input=}")
-      # NOTE: when elem_type is 0 which maps to UNDEFINED DataType, the type_proto does not provide enough information to verify input
+      # NOTE: when elem_type is 0 which maps to UNDEFINED DataType (void), the type_proto does not provide enough information to verify input shape
       if isinstance(inp := inputs[model_input.name], list):
         ret = [Tensor(i, requires_grad=False) for i in inp]
-        if model_input.type.sequence_type.elem_type.tensor_type.elem_type != 0:
-          dtype = dtype_parse(model_input.type.sequence_type.elem_type.tensor_type.elem_type)
-          # TODO: there are tests (optional_*) with sequence_type type_proto that are inadequate to determine shapes
+        if (dtype := dtype_parse(model_input.type.sequence_type.elem_type.tensor_type.elem_type)) is not dtypes.void:
           # the element_type of tensor_type of a sequence_type determines the dtype for all tensors in the sequence
-          assert all(t.dtype is dtype for t in ret)
+          assert all(t.dtype is dtype for t in ret), f"parsed dtype {dtype}, input dtype {[t.dtype for t in ret]}"
         return ret
       inp = inp if isinstance(inp, Tensor) else Tensor(inp, requires_grad=False)
-      if model_input.type.tensor_type.elem_type != 0:
-        assert dtype_parse(model_input.type.tensor_type.elem_type) is inp.dtype
-        assert tuple(d.dim_value for d in model_input.type.tensor_type.shape.dim) == inp.shape
+      if (dtype := dtype_parse(model_input.type.tensor_type.elem_type)) is not dtypes.void:
+        assert dtype is inp.dtype, f"parsed dtype {dtype} input dtype {inp.dtype}"
+        assert (shape:=tuple(d.dim_value for d in model_input.type.tensor_type.shape.dim))==inp.shape, f"parsed shape {shape} input shape{inp.shape}"
       return inp
     input_tensors = {model_input.name: parse_input(model_input) for model_input in onnx_model.graph.input if model_input.name not in tensors}
     intermediate_tensors: Dict[str,Tensor] = {}
