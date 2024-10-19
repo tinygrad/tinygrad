@@ -6,17 +6,12 @@ from tinygrad.dtype import DType
 from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps, MathTrait
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
-import os
-
-def gather(mlb: "MultiLazyBuffer") -> "MultiLazyBuffer":
-  if mlb.axis is None: return mlb
-  return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None, )
 
 def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
   if mlb.axis is None:
     return mlb
   if axis is None:
-    return gather(mlb)
+    return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None, )
 
   shape = mlb.shape
   shards = len(mlb.lbs)
@@ -78,6 +73,7 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
   assert all_same([lb.shape[0] for lb in lbs]), "allreduce with uneven shards is undefined"
   bop = REDUCE_ALU[op]
+
   n_lbs, dim = len(lbs), prod(lbs[0].shape)
   # Ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
   # so just fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
@@ -177,10 +173,7 @@ class MultiLazyBuffer(MathTrait):
     for mlb in msrcs:
       if (mlb.axis == axis and (mlb.axis is None or mlb.bounds == bounds)) or not_all_real: srcs.append(mlb.lbs)
       elif mlb.axis is None and axis is not None: srcs.append(to_sharded(mlb.lbs, axis, bounds))
-      else:
-        # srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis, bounds))
-        resharded = reshard(mlb, axis)
-        srcs.append(resharded.lbs)
+      else: srcs.append(reshard(mlb, axis).lbs)
     new_real_lbs:Dict[int,LazyBuffer] = {i:lsrcs[0].alu(op, *lsrcs[1:]) for i,(lsrcs,r) in enumerate(zip(zip(*srcs), new_real)) if r}
     # NOTE: const dtype should match real
     real_dtype = next(iter(new_real_lbs.values())).dtype

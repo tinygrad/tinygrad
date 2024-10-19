@@ -81,9 +81,7 @@ class LARS(Optimizer):
       assert t.grad is not None
       # contiguous is needed since the grads can allegedly form a "diamond"
       # TODO: fix this in lazy.py
-
       g = t.grad.contiguous()
-
       if self.tcoef != 0:
         r1 = t.detach().square().sum().sqrt()
         r2 = g.square().sum().sqrt()
@@ -144,10 +142,6 @@ class LAMB(Optimizer):
     self.b2_t *= self.b2
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      if isinstance(t.grad.lazydata, MultiLazyBuffer) and isinstance(t.lazydata, MultiLazyBuffer) \
-        and t.grad.lazydata.axis != t.lazydata.axis:
-        t.grad.reshard_(t.lazydata.axis)
-
       mi = (self.b1 * self.m[i] + (1.0 - self.b1) * t.grad)
       vi = (self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
 
