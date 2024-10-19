@@ -4,6 +4,7 @@ import time
 import unittest
 import numpy as np
 import onnx
+from onnx.helper import tensor_dtype_to_np_dtype
 from tinygrad.runtime.onnx.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI, fetch, temp
@@ -25,6 +26,7 @@ class TestOnnxModel(unittest.TestCase):
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
     run_onnx = get_run_onnx(onnx_model)
     def get_inputs():
+      input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input}
       np_inputs = {
         "input_imgs": np.random.randn(*(1, 12, 128, 256)),
         "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
@@ -33,7 +35,8 @@ class TestOnnxModel(unittest.TestCase):
         "nav_features": np.zeros((1, 256)),
         "features_buffer": np.zeros((1, 99, 128)),
       }
-      return np_inputs
+      inputs = {name:tensor.astype(input_types[name]) for name, tensor in np_inputs.items()}
+      return inputs
 
     for _ in range(7):
       inputs = get_inputs()
@@ -68,6 +71,7 @@ class TestOnnxModel(unittest.TestCase):
     onnx_model = onnx.load(fetch(OPENPILOT_MODEL))
     run_onnx = get_run_onnx(onnx_model)
     print("got run_onnx")
+    input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input}
     inputs = {
       "input_imgs": np.random.randn(*(1, 12, 128, 256)),
       "big_input_imgs": np.random.randn(*(1, 12, 128, 256)),
@@ -76,6 +80,7 @@ class TestOnnxModel(unittest.TestCase):
       "nav_features": np.zeros((1, 256)),
       "features_buffer": np.zeros((1, 99, 128)),
     }
+    inputs = {name:tensor.astype(input_types[name]) for name, tensor in inputs.items()}
 
     st = time.monotonic()
     print("****** run onnx ******")

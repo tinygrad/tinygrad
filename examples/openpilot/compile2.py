@@ -29,11 +29,11 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   # load the model
   onnx_model = onnx.load(io.BytesIO(onnx_data))
   run_onnx = get_run_onnx(onnx_model)
-  input_metadata = {inp.name:(tuple(x.dim_value for x in inp.type.tensor_type.shape.dim), parse_dtype(inp.type.tensor_type.elem_type))
-                    for inp in onnx_model.graph.input}
+  input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
+  input_types = {inp.name:parse_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input}
 
   # run the model
-  inputs = {k:Tensor.empty(*shp, dtype=dt) for k,(shp, dt) in input_metadata.items()}
+  inputs = {k:Tensor.empty(*shp, dtype=input_types[k]) for k,shp in input_shapes.items()}
   ret: Tensor = next(iter(run_onnx(inputs).values())).cast(dtypes.float32).contiguous()
   schedule = create_schedule([ret.lazydata])
 
@@ -60,10 +60,10 @@ def test_vs_onnx(onnx_data, eis:Optional[List[ExecItem]], inputs:Dict[str, Tenso
   import numpy as np
   onnx_model = onnx.load(io.BytesIO(onnx_data))
 
-  input_metadata = {inp.name:(tuple(x.dim_value for x in inp.type.tensor_type.shape.dim), parse_dtype(inp.type.tensor_type.elem_type))
-                    for inp in onnx_model.graph.input}
+  input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
+  input_types = {inp.name:parse_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input}
   Tensor.manual_seed(1337)
-  new_inputs = {k:Tensor.randn(*shp, dtype=dt, requires_grad=False)*8 for k,(shp, dt) in input_metadata.items()}
+  new_inputs = {k:Tensor.randn(*shp, dtype=input_types[k], requires_grad=False)*8 for k,shp in input_shapes.items()}
   new_np_inputs = {k:v.realize().numpy() for k,v in new_inputs.items()}
 
   if getenv("ORT"):
@@ -96,7 +96,7 @@ def test_vs_onnx(onnx_data, eis:Optional[List[ExecItem]], inputs:Dict[str, Tenso
   for ei in eis: ei.run()
 
   new_tinygrad_out = np.frombuffer(output.as_buffer(), dtype=_to_np_dtype(output.dtype))
-  # HACK: yeah idk about these atol and rtols
+  # HACK dunno about these atol rtols
   np.testing.assert_allclose(new_torch_out.reshape(new_tinygrad_out.shape), new_tinygrad_out, atol=4e-2, rtol=4e-2)
   print("semi-thneed self-test passed!")
 
