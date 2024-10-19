@@ -50,18 +50,24 @@ class Sponge:
     def pad(self, data):
         pass
 
+    # Permutation Function
+    def keccak_fn(self, state: Tensor):
+        pass
+
     # First part of Sponge fns
-    def absorb(self, data: Tensor, suffix=None):
+    def absorb(self, data: Tensor, suffix: int = 0x06):
         state: Tensor = Tensor.zeros(self.b)
-        block_i = 0
 
-        # m_0, m_1,..., m_n
-        blocks = data.split(self.r)
+        offset = 0
+        while offset < data.numel():
+            blockSize = min(data.numel() - offset, self.r)
 
-        while block_i < len(blocks):
-            if blocks[block_i].numel() == state.numel():  # i.e. complete block
-                state = state.xor(blocks[block_i])
-            block_i += 1
+            state = state[:blockSize].xor(data[offset:offset+blockSize])
+            offset = offset + blockSize
+            if blockSize == self.r:  # i.e. complete block
+                # state = Keccak
+                pass
+
         # Next step: Handle incomplete blocks
 
     def squeeze(self):
