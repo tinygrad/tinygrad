@@ -15,7 +15,6 @@ class Sponge:
         self.w = int(self.b / 25)
 
         if self.b % self.w != 0:
-            print(self.w % self.b)
             raise ValueError(
                 f"Permutation width ({self.b}) must divide by lane width ({self.w})!")
 
@@ -38,8 +37,6 @@ class Sponge:
 
         if self.c != self.out_len * 2:
             raise ValueError("Capacity must equal 2 * Output Len.")
-
-        self.rot_offsets = []
 
     # str -> uint Tensor
     # Not very robust; Will refine once base implementation is complete
@@ -66,21 +63,28 @@ class Sponge:
 
     def round(self, lanes: Tensor):
         # Theta step
-        lanes[0]
-        pass
+        sum_x = lanes.sum(axis=1)
+        quotient_x = sum_x / 2
+        C = sum_x - 2*quotient_x.trunc().cast(dtypes.uint)
+
+        print(C.tolist())
     # Permutation Function
     # Implementing Keccak-f1600 to start; generalizing later
 
-    def keccak_fn(self, state: Tensor, w):
+    def keccak_fn(self, state: Tensor):
         # lanes = Tensor.zeros((5, 5, self.w), dtype='uint')
-        try:
-            lanes = state.reshape((5, 5, self.w))
-        except:
-            print("ruh roh raggy")
+        lanes = state.reshape((5, 5, self.w))
+        A = self.round(lanes)
+        return A
+        # try:
+        #     lanes = state.reshape((5, 5, self.w))
+        #     A = round(lanes)
 
-        for i in range(0, self.rounds):
-            pass
-        pass
+        # except:
+        #     print("ruh roh raggy")
+
+        # for i in range(0, self.rounds):
+        #     A = round(lanes)
 
     # First part of Sponge fns
 
@@ -101,13 +105,16 @@ class Sponge:
                 blockSize = 0
 
         # Next step: Handle incomplete blocks
-        print(blockSize+suffix.numel())
+
+        # print(blockSize+suffix.numel())
+
         state[blockSize:blockSize+suffix.numel()] = state[blockSize:blockSize +
                                                           suffix.numel()].xor(suffix)
-
+        k = self.keccak_fn(state)
         return state
 
     def squeeze(self):
+
         pass
 
     def digest(self):
@@ -125,11 +132,12 @@ def main():
             Taking care of business and working overtime, work out
         """
 
-    bt = sp.to_binary(message)
+    m2 = "Laid back swervin' like I'm George Jones \
+        Smoke rollin' out the window \
+        An ice cold beer sittin' in the console"
+
+    bt = sp.to_binary(m2)
     state = sp.absorb(bt)
-    lanes = state.reshape((5, 5, 64))
-    print(lanes[4][3][61].item())
-    print(state[64*(19)+61].item())
 
 
 if __name__ == "__main__":
