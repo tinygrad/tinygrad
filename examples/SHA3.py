@@ -12,14 +12,15 @@ class Sponge:
         self.b = 1600
 
         # Lane length
-        self.w = self.b / 25
+        self.w = int(self.b / 25)
 
         if self.b % self.w != 0:
             print(self.w % self.b)
             raise ValueError(
                 f"Permutation width ({self.b}) must divide by lane width ({self.w})!")
-        # Number of rounds
-        self.n: int = int(12 + (2*log2(self.w)))
+
+        # Number of rounds in permutation fn
+        self.rounds: int = int(12 + (2*log2(self.w)))
 
         # Size of digest, e.g. SHA256 -> out_len = 256
         self.out_len = output_sz
@@ -37,6 +38,8 @@ class Sponge:
 
         if self.c != self.out_len * 2:
             raise ValueError("Capacity must equal 2 * Output Len.")
+
+        self.rot_offsets = []
 
     # str -> uint Tensor
     # Not very robust; Will refine once base implementation is complete
@@ -61,13 +64,26 @@ class Sponge:
     def pad(self, data):
         pass
 
+    def round(self, lanes: Tensor):
+        # Theta step
+        lanes[0]
+        pass
     # Permutation Function
     # Implementing Keccak-f1600 to start; generalizing later
-    def keccak_fn(self, state: Tensor, w):
 
+    def keccak_fn(self, state: Tensor, w):
+        # lanes = Tensor.zeros((5, 5, self.w), dtype='uint')
+        try:
+            lanes = state.reshape((5, 5, self.w))
+        except:
+            print("ruh roh raggy")
+
+        for i in range(0, self.rounds):
+            pass
         pass
 
     # First part of Sponge fns
+
     def absorb(self, data: Tensor, suff: int = 0x06) -> Tensor:
         state: Tensor = Tensor.zeros(
             self.b, dtype="uint").contiguous()
@@ -111,8 +127,9 @@ def main():
 
     bt = sp.to_binary(message)
     state = sp.absorb(bt)
-
-    print(state.numpy())
+    lanes = state.reshape((5, 5, 64))
+    print(lanes[4][3][61].item())
+    print(state[64*(19)+61].item())
 
 
 if __name__ == "__main__":
