@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
 from typing import List, Any, Tuple, Optional, cast, TypeVar
-from tinygrad.helpers import prod, getenv, DEBUG, size_unit
+from tinygrad.helpers import prod, getenv, DEBUG
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -120,6 +120,13 @@ class MetalProgram:
 
 class MetalBuffer:
   def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
+
+
+def size_unit(size: str):
+  for unit in ['bytes', 'KB', 'MB', 'GB']:
+    if size < 1000 or unit == 'GB': break
+    size /= 1000
+  return float(size), unit
 
 class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice, name: str):

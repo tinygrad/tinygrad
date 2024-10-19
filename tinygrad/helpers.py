@@ -329,9 +329,3 @@ copyreg.pickle(types.CodeType, _serialize_code)
 
 def _serialize_module(module:types.ModuleType): return importlib.import_module, (module.__name__,)
 copyreg.pickle(types.ModuleType, _serialize_module)
-
-def size_unit(size: str):
-  for unit in ['bytes', 'KB', 'MB', 'GB']:
-    if size < 1000 or unit == 'GB': break
-    size /= 1000
-  return float(size), unit
