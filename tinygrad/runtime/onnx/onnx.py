@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Dict, Union, Tuple
+from typing import List, Dict, Union, Tuple, Sequence
 import importlib, functools
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
@@ -15,7 +15,7 @@ except ImportError:
   from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
   def tensor_dtype_to_np_dtype(tensor_dtype:int) -> np.dtype: return TENSOR_TYPE_TO_NP_TYPE[tensor_dtype]
 
-# TODO: yeah idk
+# TODO: hmmmmmm
 # class TinyOnnx:
 #   def __init__(self, onnx_model, training=False) -> None:
 #     self.training = training
@@ -42,18 +42,24 @@ def supported_device_dtypes(dtype, device):
   # if device in ["WEBGPU"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32] # lol
   return dtype
 
+# TODO: hmmmmmmm
+# we do this at the setup part of all the tests. some tests don't even get the dtype. maybe good utility function
+# def get_input_metadata(onnx_model: ModelProto):
+#   return {(tuple(x.dim_param or x.dim_value for x in inp.type.tensor_type.shape.dim), parse_dtype(inp.type.tensor_type.elem_type))
+#           if inp.type.HasField("tensor_type") else None for inp in onnx_model.graph.input
+#           if inp.name not in {i.name for i in onnx_model.graph.initializer}}
+
 # ======= parsers
 # src: onnx/mapping.py  https://onnx.ai/onnx/api/mapping.html#l-mod-onnx-mapping
 # TODO: these float8 are kinda cursed. May run into subtle bugs passing them as float.....
 # TensorProto.FLOAT8E4M3FN:dtypes.float, TensorProto.FLOAT8E4M3FNUZ:dtypes.float,
 # TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float
-# TODO: check if dtypes.void can be used like this
 DTYPE_MAP: Dict[int, DType] = {
   TensorProto.FLOAT:dtypes.float, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8, TensorProto.UINT16:dtypes.uint16,
   TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64, TensorProto.BOOL:dtypes.bool,
   TensorProto.FLOAT16:dtypes.float16, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32, TensorProto.UINT64:dtypes.uint64,
   TensorProto.BFLOAT16:dtypes.bfloat16, TensorProto.FLOAT8E4M3FN:dtypes.float, TensorProto.FLOAT8E4M3FNUZ:dtypes.float,
-  TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float, TensorProto.UNDEFINED:dtypes.void}
+  TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float}
 def parse_dtype(onnx_dtype: int) -> DType:
   if (ret := DTYPE_MAP.get(onnx_dtype)) is None: raise RuntimeError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
   return supported_device_dtypes(ret, Device.DEFAULT)
@@ -111,26 +117,34 @@ def get_run_onnx(onnx_model: ModelProto):
     if initialization_hook: initialization_hook(tensors, attributes)
     debug = getenv("DEBUGONNX") or debug
 
-    # TODO may be possible to clean this up lol, also maybe move this into external_model_verify and use init took?
-    # or do we want runtimeerrors like this
-    # get inputs and validate inputs
+    # TODO: we can also infer output data types and verify that too. Torch does this, not sure we should
+    # src: https://onnx.ai/onnx/repo-docs/IR.html#input-output-data-types
+    # we're doing a get_input_metadata like thing when we prep onnx inputs and then we check inputs again using a get_input_metadata like thing ....
+    # dynamically load inputs to correct dtype and validate shape when possible
     def parse_input(model_input:ValueInfoProto):
       if model_input.name not in inputs: raise RuntimeError(f"no data for {model_input=}")
-      # NOTE: when elem_type is 0 which maps to UNDEFINED DataType (void), the type_proto does not provide enough information to verify input shape
-      if isinstance(inp := inputs[model_input.name], list):
-        ret = [Tensor(i, requires_grad=False) for i in inp]
+      inp, type_proto = inputs[model_input.name], model_input.type
+      if type_proto.HasField("map_type"): raise NotImplementedError(f"model input {model_input.name} has map type")
+      if type_proto.HasField("optional_type"):
+        if inp is None: return Tensor(None)
+        type_proto = type_proto.optional_type.elem_type
+      if type_proto.HasField("sequence_type"):
+        if not isinstance(inp, Sequence): raise RuntimeError(f"model input has to be a sequence type {model_input.name}: {inp}")
         # the element_type of tensor_type of a sequence_type determines the dtype for all tensors in the sequence
-        if (dtype := parse_dtype(model_input.type.sequence_type.elem_type.tensor_type.elem_type)) is not dtypes.void and\
-          not all(t.dtype is dtype for t in ret): raise RuntimeError(f"{model_input.name}: parsed dtype {dtype} input dtype {[t.dtype for t in ret]}")
+        dtype = parse_dtype(type_proto.sequence_type.elem_type.tensor_type.elem_type)
+        ret = [Tensor(i, dtype=dtype, requires_grad=False) if not isinstance(i, Tensor) else i for i in inp]
+        if not all(t.dtype is dtype for t in ret): raise RuntimeError(f"{model_input.name}: parsed dtype {dtype} input {ret}")
         return ret
-      if (dtype := parse_dtype(model_input.type.tensor_type.elem_type)) is not dtypes.void:
-        if not isinstance(inp, Tensor): inp = Tensor(inp, dtype=dtype, requires_grad=False)
-        if dtype is not inp.dtype: raise RuntimeError(f"{model_input.name}: parsed dtype {dtype} input dtype {inp.dtype}")
-        # if dim_value is missing, it's likely it's a variable dim_value, e.g. dim {dim_param: "N"}
-        # don't know a principled way to treat variable dim_values............ assign 1 for now
-        if (shape := tuple(1 if not d.dim_value else d.dim_value for d in model_input.type.tensor_type.shape.dim)) != inp.shape:
-          raise RuntimeError(f"{model_input.name}: parsed shape {shape} input shape {inp.shape}")
-      return inp if isinstance(inp, Tensor) else Tensor(inp, requires_grad=False)
+      assert type_proto.HasField("tensor_type"), f"{model_input=}"
+      dtype = parse_dtype(type_proto.tensor_type.elem_type)
+      inp = Tensor(inp, dtype=dtype, requires_grad=False) if not isinstance(inp, Tensor) else inp
+      if dtype is not inp.dtype: raise RuntimeError(f"{model_input.name}: has wrong input dtype, parsed dtype {dtype} input dtype {inp.dtype}")
+      # if dim_value is missing, it's a variable dim_value, e.g. dim {dim_param: "N"}, so we skip validation for those
+      for i,d in enumerate(type_proto.tensor_type.shape.dim):
+        if not d.dim_param and inp.shape[i] != d.dim_value:
+          raise RuntimeError(f"{model_input.name}: tensor proto shape {type_proto.tensor_type.shape} input shape {inp.shape}")
+      return inp
+
     input_tensors = {model_input.name: parse_input(model_input) for model_input in onnx_model.graph.input if model_input.name not in tensors}
     intermediate_tensors: Dict[str,Tensor] = {}
 
@@ -189,7 +203,7 @@ def get_run_onnx(onnx_model: ModelProto):
       elif hasattr(onnx_ops, n.op_type): ret = getattr(onnx_ops, n.op_type)(*inp, **opt)
       else: raise NotImplementedError(f"op_type {n.op_type} not supported")
 
-      # finalization after finishing running the op
+      # finalization after the op finishes running
       if not isinstance(ret, tuple): ret = (ret,)
       if len(n.output) > len(ret): raise RuntimeError(f"expected output size must be less than {len(ret)}, it's {n.output}")
       for i in range(len(n.output)): intermediate_tensors[n.output[i]] = ret[i]

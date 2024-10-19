@@ -1,4 +1,3 @@
-# TODO: can the TypeProto validation stuff be replaced by this?
 # this uses external models and torch's onnx runner to validate tinygrad's onnx
 # we validate both initialization data and both input and output per op
 # I think this is useful as a debug tool to see which exact op it started to mismatch if external_model_benchmark raises error

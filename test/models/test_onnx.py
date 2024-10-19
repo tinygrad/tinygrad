@@ -32,9 +32,8 @@ class TestOnnxModel(unittest.TestCase):
         "traffic_convention": np.array([[1., 0.]]),
         "nav_features": np.zeros((1, 256)),
         "features_buffer": np.zeros((1, 99, 128)),
-    }
-      inputs = {k:Tensor(v.astype(np.float16), requires_grad=False) for k,v in np_inputs.items()}
-      return inputs
+      }
+      return np_inputs
 
     for _ in range(7):
       inputs = get_inputs()
@@ -77,7 +76,6 @@ class TestOnnxModel(unittest.TestCase):
       "nav_features": np.zeros((1, 256)),
       "features_buffer": np.zeros((1, 99, 128)),
     }
-    inputs = {k:v.astype(np.float16) for k,v in inputs.items()}
 
     st = time.monotonic()
     print("****** run onnx ******")
