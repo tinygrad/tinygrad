@@ -7,6 +7,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import getenv, DEBUG, CI, OSX
 from tinygrad.dtype import ConstType, DType
 from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
+# TODO try to remove this np stuff later
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -36,8 +37,8 @@ def to_python_const(t) -> Union[List[ConstType], List[bytes], Union[ConstType, b
 # copied from helpers.py
 def supported_device_dtypes(dtype, device):
   if dtype is dtypes.bfloat16: return dtypes.default_float
-  if dtype is dtypes.half and CI and device in {"GPU", "LLVM", "CUDA"}: return dtypes.default_float
-  if dtype is dtypes.float64 and device != "METAL" and not (OSX and device == "GPU"): return dtypes.default_float
+  if dtype is dtypes.half and (CI or device in {"GPU", "LLVM", "CUDA"}): return dtypes.default_float
+  if dtype is dtypes.float64 and (device == "METAL" or (OSX and device == "GPU")): return dtypes.default_float
   # if device in ["WEBGPU"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32] # lol
   return dtype
 
