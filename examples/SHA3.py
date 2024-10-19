@@ -1,7 +1,5 @@
 from tinygrad import Tensor, dtypes
-from tinygrad import Device
 from typing import Optional, List
-import numpy as np
 
 '''
 WORK IN PROGRESS
@@ -56,12 +54,21 @@ class Sponge:
     def absorb(self, data: Tensor, suffix=None):
         state: Tensor = Tensor.zeros(self.b)
         block_i = 0
+
+        # m_0, m_1,..., m_n
         blocks = data.split(self.r)
 
         while block_i < blocks.numel():
             if blocks[block_i].numel() == state.numel():  # i.e. complete block
                 state = state.xor(blocks[block_i])
             block_i += 1
+        # Next step: Handle incomplete blocks
+
+    def squeeze(self):
+        pass
+
+    def digest(self):
+        pass
 
 
 def main():
