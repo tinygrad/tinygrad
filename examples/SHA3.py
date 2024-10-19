@@ -58,7 +58,7 @@ class Sponge:
         # m_0, m_1,..., m_n
         blocks = data.split(self.r)
 
-        while block_i < blocks.numel():
+        while block_i < len(blocks):
             if blocks[block_i].numel() == state.numel():  # i.e. complete block
                 state = state.xor(blocks[block_i])
             block_i += 1
