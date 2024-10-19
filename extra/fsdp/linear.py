@@ -74,9 +74,7 @@ if SHARD > 1:
   print("SHARDING ON", GPUS)
   x.shard_(GPUS)
   for k, p in nn.state.get_state_dict(opt).items():
-    print(f"{k=} {p.shape=}")
     p.shard_(GPUS, axis=None if prod(p.shape) <= 1 else 0)
-    print(f"{p.lazydata=}")
     p.realize()
 else:
   print("NO SHARD")

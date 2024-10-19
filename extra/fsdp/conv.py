@@ -67,9 +67,7 @@ if SHARD > 1:
   print("SHARDING ON", GPUS)
   x.shard_(GPUS)
   for k, p in nn.state.get_state_dict(opt).items():
-    print(f"{k=} {p.shape=}")
     p.shard_(GPUS, axis=None if prod(p.shape) <= 1 else 0)
-    print(f"{p.lazydata=}")
     p.realize()
 else:
   print("NO SHARD")
@@ -81,9 +79,9 @@ def train():
   y = model(x)
   loss = y.sum(0).sum(0)
   loss.realize()
-  # loss.backward()
-  # opt.step()
-  # opt.zero_grad()
+  loss.backward()
+  opt.step()
+  opt.zero_grad()
 
 with Tensor.train():
   reset_mem_high()
