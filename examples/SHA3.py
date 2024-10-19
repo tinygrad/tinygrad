@@ -1,6 +1,6 @@
 from tinygrad import Tensor, dtypes
 from typing import Optional, List
-
+from math import log2
 '''
 WORK IN PROGRESS
 '''
@@ -8,8 +8,18 @@ WORK IN PROGRESS
 
 class Sponge:
     def __init__(self, output_sz: int = 256, rate: Optional[int] = None, capacity: Optional[int] = None):
-        # Bitrate/State length
+        # Permutation length
         self.b = 1600
+
+        # Lane length
+        self.w = self.b / 25
+
+        if self.b % self.w != 0:
+            print(self.w % self.b)
+            raise ValueError(
+                f"Permutation width ({self.b}) must divide by lane width ({self.w})!")
+        # Number of rounds
+        self.n: int = int(12 + (2*log2(self.w)))
 
         # Size of digest, e.g. SHA256 -> out_len = 256
         self.out_len = output_sz
@@ -34,7 +44,7 @@ class Sponge:
         # char -> uint (utf-8)
         int_string: List[int] = [ord(x) for x in message]
 
-        message_tnsr: Tensor = Tensor(int_string, dtype='uint').detach()
+        message_tnsr: Tensor = Tensor(int_string, dtype='uint')
         temp_list: List[List[int]] = []
 
         # uint -> "binary" (still uint)
@@ -42,33 +52,44 @@ class Sponge:
             temp = message_tnsr.rshift(bit).bitwise_and(1)
             temp_list.append(temp.tolist())
 
-        bit_tensor: Tensor = Tensor(temp_list).permute(1, 0).flatten()
+        bit_tensor: Tensor = Tensor(
+            temp_list, dtype='uint').permute(1, 0).flatten()
 
-        return bit_tensor
+        return bit_tensor.contiguous()
 
     # To-Do; May not need to be separate fn
     def pad(self, data):
         pass
 
     # Permutation Function
-    def keccak_fn(self, state: Tensor):
+    # Implementing Keccak-f1600 to start; generalizing later
+    def keccak_fn(self, state: Tensor, w):
+
         pass
 
     # First part of Sponge fns
-    def absorb(self, data: Tensor, suffix: int = 0x06):
-        state: Tensor = Tensor.zeros(self.b)
+    def absorb(self, data: Tensor, suff: int = 0x06) -> Tensor:
+        state: Tensor = Tensor.zeros(
+            self.b, dtype="uint").contiguous()
+        suffix: Tensor = Tensor([int(x)
+                                for x in bin(suff)[2:]], dtype="uint")
 
         offset = 0
         while offset < data.numel():
-            blockSize = min(data.numel() - offset, self.r)
-
-            state = state[:blockSize].xor(data[offset:offset+blockSize])
+            blockSize: int = min(data.numel() - offset, self.r)
+            state[:blockSize] = state[:blockSize].xor(data[offset:offset +
+                                                           blockSize])
             offset = offset + blockSize
             if blockSize == self.r:  # i.e. complete block
                 # state = Keccak
-                pass
+                blockSize = 0
 
         # Next step: Handle incomplete blocks
+        print(blockSize+suffix.numel())
+        state[blockSize:blockSize+suffix.numel()] = state[blockSize:blockSize +
+                                                          suffix.numel()].xor(suffix)
+
+        return state
 
     def squeeze(self):
         pass
@@ -89,8 +110,9 @@ def main():
         """
 
     bt = sp.to_binary(message)
+    state = sp.absorb(bt)
 
-    print(bt.numpy())
+    print(state.numpy())
 
 
 if __name__ == "__main__":
