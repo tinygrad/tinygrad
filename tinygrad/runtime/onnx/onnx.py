@@ -126,7 +126,9 @@ def get_run_onnx(onnx_model: ModelProto):
       if (dtype := parse_dtype(model_input.type.tensor_type.elem_type)) is not dtypes.void:
         if not isinstance(inp, Tensor): inp = Tensor(inp, dtype=dtype, requires_grad=False)
         if dtype is not inp.dtype: raise RuntimeError(f"{model_input.name}: parsed dtype {dtype} input dtype {inp.dtype}")
-        if (shape := tuple(d.dim_value for d in model_input.type.tensor_type.shape.dim)) != inp.shape:
+        # if dim_value is missing, it's likely it's a variable dim_value, e.g. dim {dim_param: "N"}
+        # don't know a principled way to treat variable dim_values............ assign 1 for now
+        if (shape := tuple(1 if not d.dim_value else d.dim_value for d in model_input.type.tensor_type.shape.dim)) != inp.shape:
           raise RuntimeError(f"{model_input.name}: parsed shape {shape} input shape {inp.shape}")
       return inp if isinstance(inp, Tensor) else Tensor(inp, requires_grad=False)
     input_tensors = {model_input.name: parse_input(model_input) for model_input in onnx_model.graph.input if model_input.name not in tensors}

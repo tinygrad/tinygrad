@@ -15,23 +15,6 @@ from onnx2torch.onnx_graph import OnnxGraph
 import torch
 import numpy as np
 
-# def type_parse(type_proto: onnx.TypeProto):
-#   ret = []
-#   while True:
-#     attr = type_proto.WhichOneof('value')
-#     if attr == 'tensor_type':
-#       if not hasattr(type_proto.tensor_type.shape.dim, 'dim_value'): return () # variable type, unable to determine shape
-#       elif not ret: # tensor
-#         return tuple([x.dim_value for x in type_proto.tensor_type.shape.dim])
-#       else: # list of tensors
-#         ret += [(x.dim_value,) for x in type_proto.tensor_type.shape.dim]
-#         return tuple(ret)
-#     elif attr == 'sequence_type':
-#       type_proto = getattr(type_proto, 'sequence_type').elem_type
-#       ret.append(1)
-#     elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
-#     else: NotImplementedError(f"{type_proto=} is not implemented")
-
 def verify(model_name):
   fn = fetch(MODELS[model_name])
   onnx_model = onnx.load(fn)
