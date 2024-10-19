@@ -24,7 +24,7 @@ METAOPS = {MetaOps.COPY:UOps.COPY, MetaOps.EMPTY:UOps.EMPTY, MetaOps.VIEW:UOps.B
 class ScheduleItem:
   ast: UOp
   bufs: Tuple[Buffer, ...]
-  metadata: Optional[Tuple[Metadata, ...]]
+  metadata: Tuple[Metadata, ...]
   @property
   def outputs(self) -> Tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
@@ -38,7 +38,7 @@ class ScheduleItem:
 class LBScheduleItem:
   ast: UOp
   bufs: Tuple[LazyBuffer, ...]
-  metadata: Optional[Tuple[Metadata, ...]]
+  metadata: Tuple[Metadata, ...]
   @property
   def outputs(self) -> Tuple[LazyBuffer, ...]: return self.bufs[:len(self.ast.src)] if self.ast.op is UOps.SINK else self.bufs[0:1]
   @property

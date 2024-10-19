@@ -125,9 +125,9 @@ if __name__ == "__main__":
       print(lin.to_program().src)
     total_tm += tm
     running_gflops += gflops * tm
-    if (key := str([str(m) for m in si.metadata] if si.metadata is not None else None)) not in usage: usage[key] = (0, 0)
+    if (key := str([str(m) for m in si.metadata])) not in usage: usage[key] = (0, 0)
     usage[key] = (usage[key][0] + tm, usage[key][1] + 1)
-    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(prg.global_size):18s} {str(prg.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS {[repr(m) if TRACEMETA >= 2 else str(m) for m in si.metadata] if si.metadata is not None else ''}")
+    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(prg.global_size):18s} {str(prg.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS {[repr(m) if TRACEMETA >= 2 else str(m) for m in si.metadata]}")
   print(f"******* total {total_tm*1000:.2f} ms, {running_gflops/total_tm:6.0f} GFLOPS")
   print("usage:")
   for k in sorted(usage, key=lambda x: -usage[x][0])[:10]:
