@@ -1,6 +1,7 @@
 from tinygrad import Tensor, nn, dtypes
 from tinygrad import Device
 from typing import Optional, List
+import numpy as np
 
 
 class Sponge:
@@ -34,6 +35,20 @@ class Sponge:
 
         return bit_tensor
 
+    def pad(self, data):
+        pass
+
+    def absorb(self, data: Tensor, suffix=None):
+        state: Tensor = Tensor.zeros(self.b)
+        block_i = 0
+        blocks = data.split(self.r)
+
+        while block_i < blocks.numel():
+            if blocks[block_i].numel() == state.numel():
+                state = state.xor(blocks[block_i])
+            block_i += 1
+        pass
+
 
 def main():
     sp = Sponge()
@@ -48,7 +63,8 @@ def main():
 
     bt = sp.to_binary(message)
 
-    print(bt.numpy()[:10])
+    print(bt.numpy())
+
     # print(bt)
 
 
