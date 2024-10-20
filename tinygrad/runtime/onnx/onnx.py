@@ -1,19 +1,10 @@
 from __future__ import annotations
 from typing import List, Dict, Union, Tuple, Sequence
 import importlib, functools
-import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import getenv, DEBUG, CI, OSX
 from tinygrad.dtype import ConstType, DType
 from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
-# TODO try to remove this np stuff later
-try:
-  from onnx.helper import tensor_dtype_to_np_dtype
-except ImportError:
-  # for onnx < 1.13
-  from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
-  def tensor_dtype_to_np_dtype(tensor_dtype:int) -> np.dtype: return TENSOR_TYPE_TO_NP_TYPE[tensor_dtype]
 
 # TODO: hmmmmmm
 # class TinyOnnx:
@@ -52,8 +43,6 @@ def supported_device_dtypes(dtype, device):
 # ======= parsers
 # src: onnx/mapping.py  https://onnx.ai/onnx/api/mapping.html#l-mod-onnx-mapping
 # TODO: these float8 are kinda cursed. May run into subtle bugs passing them as float.....
-# TensorProto.FLOAT8E4M3FN:dtypes.float, TensorProto.FLOAT8E4M3FNUZ:dtypes.float,
-# TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float
 DTYPE_MAP: Dict[int, DType] = {
   TensorProto.FLOAT:dtypes.float, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8, TensorProto.UINT16:dtypes.uint16,
   TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64, TensorProto.BOOL:dtypes.bool,
@@ -65,13 +54,11 @@ def parse_dtype(onnx_dtype: int) -> DType:
   return supported_device_dtypes(ret, Device.DEFAULT)
 
 def parse_buffer(inp: TensorProto) -> Tensor:
-  dtype = parse_dtype(inp.data_type)
-  if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
-    return Tensor(dat, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims))
-  if len(inp.raw_data) > 0:
-    # return Tensor(inp.raw_data, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims)) # TODO REINTRODUCES REGRESSION AGAIN, nvm doesn't work
-    data = np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).astype(_to_np_dtype(dtype)).copy()
-    return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
+  if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data) or inp.raw_data:
+    # we early realize here to realize buffer during setup
+    # parse_buffer is only ran during initialization so it doesn't affect the graph for op execution
+    # TODO: maybe reshape -> realize is not the best way to do this. Maybe we gotta realize fake buffer.
+    return Tensor(dat, dtype=parse_dtype(inp.data_type), requires_grad=False).reshape(tuple(inp.dims)).realize()
   return Tensor(None, requires_grad=False)
 
 # src: onnx/onnx_ml_pb2.pyi
@@ -134,7 +121,7 @@ def get_run_onnx(onnx_model: ModelProto):
         dtype = parse_dtype(type_proto.sequence_type.elem_type.tensor_type.elem_type)
         ret = [Tensor(i, dtype=dtype, requires_grad=False) if not isinstance(i, Tensor) else i for i in inp]
         # TODO: compile2.py is in conflict with dtype verification for input
-        # either we compile2.py test half or we don't verify dtype for input
+        # either we compile2.py test half or we don't verify dtype for input, orrrr maybe add a strict parameter to enable tighter checking
         # if not all(t.dtype is dtype for t in ret): raise RuntimeError(f"{model_input.name}: parsed dtype {dtype} input {ret}")
         return ret
       assert type_proto.HasField("tensor_type"), f"{model_input=}"
