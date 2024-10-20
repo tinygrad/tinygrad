@@ -81,17 +81,18 @@
   }
   .main-container {
     display: flex;
-    padding: 12px;
+    padding: 8px;
     width: 100%;
     height: 100%;
   }
   .main-container > * + * {
-    margin-left: 8px;
+    margin-left: 4px;
   }
   .container {
     background-color: #0f1018;
+    border: solid #08090e;
+    border-width: 0 8px;
     height: 100%;
-    border-radius: 8px;
     padding: 8px;
     position: relative;
   }
@@ -99,11 +100,12 @@
     margin-top: 12px;
   }
   .kernel-list {
-    width: 15%;
-    max-width: 15%;
-    overflow-y: auto;
+    width: 12%;
+    overflow:auto; /* something other than visible */
     direction: rtl;
     scroll-behavior: smooth;
+    position: absolute;
+    z-index: 2;
   }
   .kernel-list > ul > * + * {
     margin-top: 4px;
@@ -111,6 +113,10 @@
   .metadata {
     width: 20%;
     overflow-y: auto;
+    position: absolute;
+    right: 0;
+    z-index: 3;
+
   }
   .resize-handle {
     position: absolute;
@@ -120,17 +126,28 @@
     width: 20px;
     height: 100%;
     cursor: col-resize;
-    background-color: transparent;
+    /* background-color: transparent; */
+    z-index: 3;
+
+  }
+  .resize-handle:active {
+    color: white;
   }
   #kernel-list-resize {
     position: relative;
     float: right;
   }
-  .collapse-but {
+  #collapse-button {
     all: unset;
     color: #7c7d85;
+    position: absolute;
+    left: 2%;
+    z-index: 5;
+    font-size: medium;
+    background-color: rgb(31, 32, 32);
+    border-radius: 5px;
   }
-  .collapse-but:hover {
+  #collapse-button:hover {
     cursor: pointer;
   }
   #kernel-list-collapse {
@@ -161,16 +178,17 @@
     padding: 8px;
   }
   </style>
-</head>
-<body>
+  </head>
+  <body>
   <div class="main-container">
     <div class="container kernel-list resizeable" id="kernel-list"></div>
     <div class="container graph">
-      <button class="collapse-but" id="kernel-list-collapse">&lt;</button>
+        <button id="collapse-button">&lt;&gt;</button>
+
       <svg>
+
         <g id="render"></g>
       </svg>
-      <button class="collapse-but" id="metadata-collapse">&gt;</button>
     </div>
     <div class="container metadata resizeable" id="metadata"></div>
   </div>
@@ -342,6 +360,7 @@
     const stopResizeListeners = {};
     resizableElements.forEach((element) => {
       element.addEventListener("mousedown", (event) => {
+        event.stopPropagation();
         event.preventDefault();
         element.style.userSelect = "none";
         document.documentElement.style.cursor = "col-resize";
@@ -353,12 +372,14 @@
         document.documentElement.addEventListener("mousemove", resizeListeners[element.id], false);
         document.documentElement.addEventListener("mouseup", stopResizeListeners[element.id], false);
       })
-      const curCollapse = document.getElementById(`${element.id}-collapse`);
-      curCollapse.addEventListener("click", (event) => {handleCollapse(curCollapse, element)});
     })
+    const curCollapse = document.querySelector("#collapse-button");
+    curCollapse.addEventListener("click", (event) => { 
+      event.stopImmediatePropagation();
+      handleCollapse(event);
+    }, true);
     function resize(event, element, startX, containerWidth, elementWidth) {
       let change = event.clientX - startX;
-      change *= 2;
       switch (element.id) {
         case "metadata": {
           const newWidth = ((elementWidth-change) / containerWidth) * 100;
@@ -369,7 +390,7 @@
         } 
         case "kernel-list": {
           const newWidth = ((elementWidth+change) / containerWidth) * 100;
-          if (newWidth >= 15 && newWidth <= 25) {
+          if (newWidth >= 10 && newWidth <= 25) {
             element.style.width = `${newWidth}%`;
           }            
           break;
@@ -384,29 +405,21 @@
       document.documentElement.style.cursor = "initial";
       element.style.userSelect = "initial";
     }
-    function handleCollapse(element, resizeable) {
+
+    function handleCollapse(event) {
+      console.log("hello");
+      event.stopPropagation();
+      event.preventDefault();
+      const element = event.srcElement;
       const mode = element.innerText;
-      switch (resizeable.id) {
-        case "metadata": {
-          if (mode === ">") {
-            resizeable.style.display = "none"
-            element.innerText = "<";
-          } else {
-            resizeable.style.display = "block";
-            element.innerText = ">"; 
-          }
-          break;
-        }
-        case "kernel-list": {
-          if (mode === "<") {
-            resizeable.style.display = "none"
-            element.innerText = ">";
-          } else {
-            resizeable.style.display = "block";
-            element.innerText = "<"; 
-          }
-          break;
-        }
+      if (mode === "<>") {
+        document.querySelector("#metadata").style.display  = "none"
+        document.querySelector("#kernel-list").style.display  = "none"
+        element.innerText = "><";
+      } else {
+        document.querySelector("#metadata").style.display  = "block"
+        document.querySelector("#kernel-list").style.display  = "block"
+        element.innerText = "<>";
       }
     }
     // ** code blocks
