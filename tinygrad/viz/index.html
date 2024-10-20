@@ -106,6 +106,7 @@
     scroll-behavior: smooth;
     position: absolute;
     z-index: 2;
+    max-width: 15%;
   }
   .kernel-list > ul > * + * {
     margin-top: 4px;
@@ -116,6 +117,7 @@
     position: absolute;
     right: 0;
     z-index: 3;
+    max-width: 85%;
 
   }
   .resize-handle {
@@ -274,11 +276,6 @@
   const kernelListChildren = document.querySelector(".container.kernel-list").childNodes;
 
   async function main() {
-    if (currentUOp !== prevUOp) {
-      kernelListChildren[prevUOp].style.className = "";
-      kernelListChildren[currentUOp].style.className = "active";
-      prevUOp = currentUOp;
-    }
     // reduce scroll lag
     if (Date.now() - lastPress > 300) lastPress = Date.now();
     else return;
@@ -379,20 +376,16 @@
       handleCollapse(event);
     }, true);
     function resize(event, element, startX, containerWidth, elementWidth) {
-      let change = event.clientX - startX;
+      const change = event.clientX - startX;
       switch (element.id) {
         case "metadata": {
           const newWidth = ((elementWidth-change) / containerWidth) * 100;
-          if (newWidth >= 20 && newWidth <= 90) {
-            element.style.width = `${newWidth}%`;
-          }
+          if (newWidth >= 20) element.style.width = `${newWidth}%`;
           break;
         } 
         case "kernel-list": {
           const newWidth = ((elementWidth+change) / containerWidth) * 100;
-          if (newWidth >= 10 && newWidth <= 25) {
-            element.style.width = `${newWidth}%`;
-          }            
+          if (newWidth >= 10) element.style.width = `${newWidth}%`;
           break;
         }
       }
@@ -407,7 +400,6 @@
     }
 
     function handleCollapse(event) {
-      console.log("hello");
       event.stopPropagation();
       event.preventDefault();
       const element = event.srcElement;
