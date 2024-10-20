@@ -705,7 +705,7 @@ class Kernel:
 
   # **** this is the lowerer ****
 
-  @track_rewrites
+  @track_rewrites()
   def linearize(self) -> Kernel:
     modified_ast = self.get_optimized_ast()
 
