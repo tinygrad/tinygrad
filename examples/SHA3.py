@@ -44,33 +44,36 @@ class Sponge:
         # char -> uint (utf-8)
         int_string: List[int] = [ord(x) for x in message]
 
-        message_tnsr: Tensor = Tensor(int_string, dtype='uint')
-        temp_list: List[List[int]] = []
+        message_tnsr: Tensor = Tensor(
+            int_string, dtype='uint').unsqueeze(0).detach()
 
-        # uint -> "binary" (still uint)
-        for bit in reversed(range(8)):
-            temp = message_tnsr.rshift(bit).bitwise_and(1)
-            temp_list.append(temp.tolist())
+        em = Tensor.empty(0, message_tnsr.shape[1], dtype='uint')
 
-        bit_tensor: Tensor = Tensor(
-            temp_list, dtype='uint').permute(1, 0).flatten()
+        # Messy but more efficient than looping
+        em = em.cat(message_tnsr.rshift(7)).cat(
+            message_tnsr.rshift(6)).cat(message_tnsr.rshift(5)).cat(message_tnsr.rshift(4)).cat(message_tnsr.rshift(3))\
+            .cat(message_tnsr.rshift(2)).cat(message_tnsr.rshift(1)).cat(message_tnsr.rshift(0)).bitwise_and(1)
 
-        return bit_tensor.contiguous()
+        return em.T
 
     # To-Do; May not need to be separate fn
     def pad(self, data):
         pass
 
+    # Permutation round
     def round(self, lanes: Tensor):
         # Theta step
+
+        # C[x] = A[x,0] xor A[x,1] xor A[x,2] xor A[x,3] xor A[x,4],   for x in 0…4
+        # (a + b + c) % 2 = a XOR b XOR c
         sum_x = lanes.sum(axis=1)
         quotient_x = sum_x / 2
         C = sum_x - 2*quotient_x.trunc().cast(dtypes.uint)
 
-        print(C.tolist())
+        print(C.shape)
+
     # Permutation Function
     # Implementing Keccak-f1600 to start; generalizing later
-
     def keccak_fn(self, state: Tensor):
         # lanes = Tensor.zeros((5, 5, self.w), dtype='uint')
         lanes = state.reshape((5, 5, self.w))
@@ -121,23 +124,33 @@ class Sponge:
         pass
 
 
+def rot_left_tensor(a, n):
+    mask = (1 << 64) - 1
+    x = a.lshift(n).bitwise_and(mask).bitwise_or(a.rshift(63))
+    print(x.tolist())
+    q = x / 2
+    r = x - 2*q.cast(dtypes.uint)
+    return r
+# def rot_left_tensor(tensor, shift):
+#     # Assuming the last dimension is the 64-bit word
+#     mask = (1 << 64) - 1  # To mask the 64-bit value and prevent overflow
+#     shifted: Tensor = ((tensor << shift) & mask) | (tensor >> (63))
+#     q: Tensor = shifted / 2
+#     rotated = shifted - 2*q.trunc().cast(dtypes.uint)
+#     return rotated
+
+
 def main():
     sp = Sponge()
-    message = """
-            If you ever get annoyed, look at me I'm self-employed
-            I love to work at nothing all day
-            And I'll be taking care of business (every day)
-            Taking care of business (every way)
-            I've been taking care of business (it's all mine)
-            Taking care of business and working overtime, work out
-        """
+    message = "If you ever get annoyed, look at me I'm self-employed I love to work at nothing all day\
+            And I'll be taking care of business (every day)\
+            Taking care of business (every way)\
+            I've been taking care of business (it's all mine)\
+            Taking care of business and working overtime, work out"
 
-    m2 = "Laid back swervin' like I'm George Jones \
-        Smoke rollin' out the window \
-        An ice cold beer sittin' in the console"
-
-    bt = sp.to_binary(m2)
-    state = sp.absorb(bt)
+    bt = sp.to_binary(message)
+    print(bt[1].numpy())
+    print(bin(ord('f')))
 
 
 if __name__ == "__main__":
