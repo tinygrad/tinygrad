@@ -67,9 +67,6 @@ backend_test.exclude('FLOAT8')
 backend_test.exclude('INT4')
 backend_test.exclude('UINT4')
 backend_test.exclude('BFLOAT16')  # not supported in numpy
-# TODO: fix these with true onnx float16
-backend_test.exclude('to_FLOAT16')
-backend_test.exclude('cast_no_saturate')
 # how the hell did these two pass before LOL
 backend_test.exclude('test_dequantizelinear_int4_cpu')
 backend_test.exclude('test_dequantizelinear_uint4_cpu')
@@ -85,6 +82,7 @@ backend_test.exclude('test_nonzero_*')
 backend_test.exclude('test_mod_*')
 
 # no boolean ops (2d, 3d, 4d)
+# TODO: this can be supported with tensor.py added support
 backend_test.exclude('test_bitshift_*')
 
 # no string ops

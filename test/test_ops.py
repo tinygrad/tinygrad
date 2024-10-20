@@ -2167,7 +2167,7 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([(32,10), (32)], lambda x,y: torch.nn.functional.nll_loss(x, torch.clip(y,0).type(torch.long), reduction="typo"),
                                                    lambda x,y: x.nll_loss(y.clip(0).cast(dtypes.long), reduction="typo"), expected=ValueError)
 
-  def test_nll_loss_weight(self): # weight loss? instead of developing self control, just buy drugs!
+  def test_nll_loss_weight(self):
     for r in ("mean", "sum", "none"):
       helper_test_op([(32,10), (32), (10)], lambda x,y,z: torch.nn.functional.nll_loss(x, torch.clip(y,0).type(torch.long), z, reduction=r),
                                          lambda x,y,z: x.nll_loss(y.clip(0).cast(dtypes.long), z, reduction=r), forward_only=True)
