@@ -130,9 +130,8 @@ class TestOpenImagesDataset(ExternalTestDatasets):
     for ((tinygrad_img, tinygrad_boxes, tinygrad_labels, _), (ref_img, ref_tgt)) in zip(tinygrad_dataloader, ref_dataloader):
       self._set_seed()
       ref_tgt = [ref_tgt]
-      print(f"{ref_img=} {ref_tgt=}")
 
-      ref_img, ref_tgt = transform(ref_img, [ref_tgt])
+      ref_img, ref_tgt = transform(ref_img.unsqueeze(0), ref_tgt)
       ref_tgt = postprocess_targets(ref_tgt, anchors.unsqueeze(0))
       ref_boxes, ref_labels = ref_tgt[0]["boxes"], ref_tgt[0]["labels"]
       
