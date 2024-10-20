@@ -13,7 +13,7 @@ def tiny_keccak(self: Tensor, cfg: Union[str, Tuple[int, int]] = "sha3_256"):
   rot_offsets = [44, 43, 21, 14, 28, 20, 3, 45, 61, 1, 6, 25, 8, 18, 27, 36, 10, 15, 56, 62, 55, 39, 41, 2]
   rot_offsets_vecs = Tensor([[0, 1]] + [ [1<<v, 1<<(64-v)] for v in rot_offsets ], **tkwargs).transpose()
   reorder_matrix = Tensor([0, 6, 12, 18, 24, 3, 9, 10, 16, 22, 1, 7, 13, 19, 20, 4, 5, 11, 17, 23, 2, 8, 14, 15, 21], **tkwargs).one_hot(25)
-  round_consts = [ 1, 0x8082, 0x800000000000808a, 0x8000000080008000, 0x808b, 0x80000001, 0x8000000080008081, 0x8000000000008009, 0x8a, 0x88, 
+  round_consts = [ 1, 0x8082, 0x800000000000808a, 0x8000000080008000, 0x808b, 0x80000001, 0x8000000080008081, 0x8000000000008009, 0x8a, 0x88,
   0x80008009, 0x8000000a, 0x8000808b, 0x800000000000008b, 0x8000000000008089, 0x8000000000008003, 0x8000000000008002, 0x8000000000000080, 0x800a,
   0x800000008000000a, 0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008 ]
 
@@ -28,7 +28,7 @@ def tiny_keccak(self: Tensor, cfg: Union[str, Tuple[int, int]] = "sha3_256"):
   if data_pad == 1: p = [(lbe, 0), (1, dsbyte^0x80), (data.shape[-1] - lbe - 1, 0)]
   else: p = [(lbe, 0), (1, dsbyte), (data.shape[-1] + rate - 202 - lbe, 0), (1, 0x80), (200 - rate, 0)]
   pad_mask = Tensor.cat(*(Tensor(v, dtype=dtypes.uint8, device=data.device).expand(l) for l, v in p))
-  
+
   data = (data ^ pad_mask).reshape(data.shape[0], -1, 200).bitcast(dtypes.uint64)
 
   state = Tensor.zeros((data.shape[0], 25), **tkwargs)
