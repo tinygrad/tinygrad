@@ -44,7 +44,7 @@ class GraphRewriteDetails(GraphRewriteMetadata):
 def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List[List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]]:
   kernels: Dict[Optional[str], List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]] = {}
   for k,ctxs in contexts:
-    name = to_function_name(k.name) if isinstance(k, Kernel) else None
+    name = to_function_name(k.name) if isinstance(k, Kernel) else k
     for ctx in ctxs:
       if ctx.sink.op is UOps.CONST: continue
       upats = [(upat.location, upat.printable(), tm) for _,_,upat,tm in ctx.matches if upat is not None]
