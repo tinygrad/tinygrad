@@ -26,13 +26,15 @@ class ScheduleItem:
   bufs: Tuple[Buffer, ...]
   metadata: Tuple[Metadata, ...]
   @property
+  def out_idxs(self) -> List[int]: return [x.src[0].arg for x in (self.ast.src if self.ast.op is UOps.SINK else [self.ast])]
+  @property
   def outputs(self) -> Tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
-    return self.bufs[:len(self.ast.src)] if self.ast.op is UOps.SINK else self.bufs[0:1]
+    return tuple(self.bufs[i] for i in self.out_idxs)
   @property
   def inputs(self) -> Tuple[Buffer, ...]:
     """Read only buffers in the schedule."""
-    return self.bufs[len(self.ast.src):] if self.ast.op is UOps.SINK else self.bufs[1:]
+    return tuple(b for i,b in enumerate(self.bufs) if i not in self.out_idxs)
 
 # *** UOp with VIEW (movementops) rewriting to UOp we can index ***
 
@@ -154,7 +156,7 @@ def rewrite_ast(sink:UOp, uop_bufs:Dict[UOp, Buffer], var_vals:Dict[Variable, in
   bufs: List[UOp] = []
   if len(sink.src) > 1: sink = graph_rewrite(sink, fold_store, {x.src[0]:x for x in sink.src})
   sink = full_ast_rewrite(sink, bufs, var_vals)
-  return ScheduleItem(sink if sink.op is UOps.SINK else sink.replace(src=()), tuple(uop_bufs[x] for x in bufs), ())
+  return ScheduleItem(sink, tuple(uop_bufs[x] for x in bufs), ())
 
 # *** LazyBuffer lowering to UOp ***
 
