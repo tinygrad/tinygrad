@@ -7,12 +7,16 @@ from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, R
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
 
-def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
+def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[Tuple[Tuple[sint, sint], ...]]=None):
   if mlb.axis is None:
     return mlb
   if axis is None:
-    return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None, )
+    return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None)
 
+  if RING < 2:
+    gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]
+    sharded = to_sharded(gathered, axis, bounds)
+    return MultiLazyBuffer(sharded, axis)
   shape = mlb.shape
   shards = len(mlb.lbs)
   originalAxis = mlb.axis
@@ -22,10 +26,7 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
   assert sum(splits) == shape[axis], "specified splits do not sum up to axis shape"
   boundaries = tuple(itertools.accumulate(splits))
   bounds = tuple(zip((0,) + boundaries, boundaries))
-  if RING < 2:
-    gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]
-    sharded = to_sharded(gathered, axis, bounds)
-    return MultiLazyBuffer(sharded, axis)
+
   chunks: List[Tuple[int, int]] = []
   steps = shape[axis] // shards
   for i in range(shards):
@@ -172,7 +173,7 @@ class MultiLazyBuffer(MathTrait):
     for mlb in msrcs:
       if (mlb.axis == axis and (mlb.axis is None or mlb.bounds == bounds)) or not_all_real: srcs.append(mlb.lbs)
       elif mlb.axis is None and axis is not None: srcs.append(to_sharded(mlb.lbs, axis, bounds))
-      else: srcs.append(reshard(mlb, axis).lbs)
+      else: srcs.append(reshard(mlb, axis, bounds).lbs)
     new_real_lbs:Dict[int,LazyBuffer] = {i:lsrcs[0].alu(op, *lsrcs[1:]) for i,(lsrcs,r) in enumerate(zip(zip(*srcs), new_real)) if r}
     # NOTE: const dtype should match real
     real_dtype = next(iter(new_real_lbs.values())).dtype
