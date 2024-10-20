@@ -259,10 +259,10 @@ group_stores = PatternMatcher([
   (UPat(UOps.STORE, src=(UPat.var("b"), UPat(), UPat()), name="x"), sink_store),
 ])
 
-def append_ast(uops:List[UOp], b:UOp, st:UOp, x:UOp, root:UOp) -> UOp:
-  uops.append(x)
+def append_ast(stores:Dict[UOp, UOp], b:UOp, st:UOp, x:UOp, root:UOp) -> UOp:
+  stores[b] = x
   return UOp(UOps.LOAD, root.dtype, (b, st))
-break_sched = PatternMatcher([(UPat(UOps.LOAD, src=(UPat.var("b"), UPat.var("st"), UPat.var("x")), name="root"), append_ast)])
+break_sched = PatternMatcher([(UPat(UOps.LOAD, src=(UPat.var("b"), UPat.var("st"), UPat(UOps.STORE, name="x")), name="root"), append_ast)])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
@@ -339,11 +339,10 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     if DEBUG_ARANGE: print(colored(f"folding {r}", "green"))
     for tr in group: del realizes[tr]
 
-  buf_groups: Dict[UOp, UOp] = {}
+  buf_groups: DefaultDict[LazyBuffer, List[UOp]] = defaultdict(list)
   buf_uops: Dict[Buffer, UOp] = {}
   uop_bufs: Dict[UOp, Buffer] = {}
   var_vals: Dict[Variable, int] = {}
-  sink_groups: Dict[LazyBuffer, UOp] = {}
   lazybufs: Dict[Buffer, LazyBuffer] = {}
   for buf in realizes:
     if buf.realized is None and buf.op is not MetaOps.CONST:
@@ -364,15 +363,18 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
     else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
     buf_uops.setdefault(uop_bufs.setdefault(uop, buf.buffer), uop)
-    if (r:=reduce_for_op.get(buf)): buf_groups[uop] = sink_groups.setdefault(r, UOp(UOps.SINK))
+    if (r:=reduce_for_op.get(buf)): buf_groups[r].append(uop)
 
   _cache: Dict[LazyBuffer, UOp] = {}
-  sink = UOp(UOps.SINK, dtypes.void, tuple(to_uop(x.base, buf_uops, _cache) for x in outs))
-  sink = graph_rewrite(sink, group_stores, buf_groups)
-  graph_rewrite(sink, break_sched, sinks:=[])
+  graph_rewrite(UOp(UOps.SINK, src=tuple(to_uop(x.base, buf_uops, _cache) for x in outs)), break_sched, stores:={})
+  group_for_buf = {ubuf:v for v in buf_groups.values() for ubuf in v if len(v) > 1}
+  sinks = {s:s.sink() if (ug:=group_for_buf.get(ubuf)) is None else UOp(UOps.SINK, src=tuple(stores[u] for u in ug)) for ubuf,s in stores.items()}
   schedule: List[ScheduleItem] = []
-  for sink in sinks:
+  for sink in dedup(sinks.values()):
     schedule.append(si:=rewrite_ast(sink, uop_bufs, var_vals))
+    print("-----------------")
+    print(si.ast)
+    print(si.outputs)
     for out in si.outputs: del lazybufs[out].srcs
   return schedule, var_vals
 
