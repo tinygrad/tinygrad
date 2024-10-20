@@ -147,7 +147,7 @@ def full_ast_rewrite(base_sink:UOp, bufs:List[UOp], var_vals:Dict[Variable, int]
   return ret
 
 def do_replace(ctx:Dict[UOp, UOp], b:UOp) -> Optional[UOp]:
-  if (store:=ctx.get(b)) is None: return None
+  if (store:=ctx.get(b)) is None or store.src[2].op is UOps.ASSIGN: return None
   return store.src[2]
 fold_store = PatternMatcher([
   (UPat(UOps.LOAD, src=(UPat.var("b"), UPat())), do_replace),
@@ -372,16 +372,17 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
     else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
     buf_uops.setdefault(uop_bufs.setdefault(uop, buf.buffer), uop)
-    if (r:=reduce_for_op.get(buf)): buf_groups[r].append(uop)
+    if (k:=reduce_for_op.get(buf)): buf_groups[k].append(uop)
 
   _cache: Dict[LazyBuffer, UOp] = {}
-  graph_rewrite(UOp(UOps.SINK, src=tuple(to_uop(x.base, buf_uops, _cache) for x in outs)), break_sched, stores:={})
+  stores: Dict[UOp, UOp] = {}
+  graph_rewrite(UOp(UOps.SINK, src=tuple(to_uop(x.base, buf_uops, _cache) for x in outs)), break_sched, stores)
   group_for_buf = {ubuf:v for v in buf_groups.values() for ubuf in v if len(v) > 1}
   sinks = {s:s.sink() if (ug:=group_for_buf.get(ubuf)) is None else UOp(UOps.SINK, src=tuple(stores[u] for u in ug)) for ubuf,s in stores.items()}
   schedule: List[ScheduleItem] = []
   for sink in dedup(sinks.values()):
     schedule.append(si:=rewrite_ast(sink, uop_bufs, var_vals))
-    for out in si.outputs: del lazybufs[out].srcs
+    for b in si.outputs: del lazybufs[b].srcs
   return schedule, var_vals
 
 def create_schedule(outs:List[LazyBuffer]) -> List[ScheduleItem]:
