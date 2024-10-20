@@ -121,24 +121,33 @@ def simplify_and_unbind(ctx, x:UOp) -> Optional[UOp]:
   ctx[2].add(st)
   return st.to_uop() if st != x.st else None
 append_vars = PatternMatcher([(UPat(UOps.VIEW, name="x"), simplify_and_unbind)])
+
+def append_buf(ctx, x:UOp) -> UOp:
+  ctx[1].append(x)
+  return UOp(UOps.DEFINE_GLOBAL, x.dtype, (), len(ctx[1])-1)
+append_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), append_buf),])
+
 to_ast = PatternMatcher([
   (UPat(UOps.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
-  (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda x: x.replace(src=())),
+  (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda x: x),
 ])
-enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx[1].index(x.arg[0]))),])
 
-PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, Tuple[int, ...], UOp]] = []
+PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, UOp]] = []
 if getenv("RUN_PROCESS_REPLAY"):
   @atexit.register
   def save_process_replay():
-    for base_sink,ctx,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
+    for base_sink,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ret))
 
-@track_rewrites(named=True)
-def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable, int]) -> UOp:
+def full_ast_rewrite(base_sink:UOp, bufs:List[UOp], var_vals:Dict[Variable, int]) -> UOp:
   sink = graph_rewrite(graph_rewrite(base_sink, view_left), view_right)
-  ret = graph_rewrite(graph_rewrite(sink, to_ast), append_vars+enumerate_bufs, (var_vals, bufs, set()))
-  PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
+  ret = graph_rewrite(graph_rewrite(sink, to_ast), append_vars+append_bufs, (var_vals, bufs, set()))
+  PROCESS_REPLAY_CAPTURE.append((base_sink, ret))
   return ret
+
+def rewrite_ast(sink:UOp, uop_bufs:Dict[UOp, Buffer], var_vals:Dict[Variable, int]) -> ScheduleItem:
+  bufs: List[UOp] = []
+  sink = full_ast_rewrite(sink, bufs, var_vals)
+  return ScheduleItem(sink if sink.op is UOps.SINK else sink.replace(src=()), tuple(uop_bufs[x] for x in bufs), ())
 
 # *** LazyBuffer lowering to UOp ***
 
@@ -241,6 +250,21 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
+def sink_store(ctx:Dict[UOp, UOp], x:UOp, b:UOp) -> Optional[UOp]:
+  if (sink:=ctx.get(b)) is not None and x in sink.src: return None
+  ctx[b] = ret = x.sink() if sink is None else sink.replace(src=sink.src+(x,))
+  return ret
+
+group_stores = PatternMatcher([
+  (UPat(UOps.STORE, src=(UPat.var("b"), UPat(), UPat()), name="x"), sink_store),
+])
+
+def append_ast(uops:List[UOp], b:UOp, st:UOp, x:UOp, root:UOp) -> UOp:
+  uops.append(x)
+  return UOp(UOps.LOAD, root.dtype, (b, st))
+break_sched = PatternMatcher([(UPat(UOps.LOAD, src=(UPat.var("b"), UPat.var("st"), UPat.var("x")), name="root"), append_ast)])
+
+@track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
@@ -317,11 +341,13 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
 
   buf_groups: Dict[UOp, UOp] = {}
   buf_uops: Dict[Buffer, UOp] = {}
+  uop_bufs: Dict[UOp, Buffer] = {}
   var_vals: Dict[Variable, int] = {}
   sink_groups: Dict[LazyBuffer, UOp] = {}
+  lazybufs: Dict[Buffer, LazyBuffer] = {}
   for buf in realizes:
     if buf.realized is None and buf.op is not MetaOps.CONST:
-
+      lazybufs[buf.buffer] = buf
       # make things that can't be images not images
       if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
                                                 not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
@@ -337,29 +363,18 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       uop = UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(buf.dtype.scalar(), buf.arg), v.const_like(0))
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
     else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
-    buf_uops.setdefault(buf.buffer, uop)
+    buf_uops.setdefault(uop_bufs.setdefault(uop, buf.buffer), uop)
     if (r:=reduce_for_op.get(buf)): buf_groups[uop] = sink_groups.setdefault(r, UOp(UOps.SINK))
 
   _cache: Dict[LazyBuffer, UOp] = {}
   sink = UOp(UOps.SINK, dtypes.void, tuple(to_uop(x.base, buf_uops, _cache) for x in outs))
-  sink = rewrite_schedule(sink, buf_groups)
-
-  schedule: List[ScheduleItem] = []
-  return schedule, var_vals
-
-def sink_store(ctx:Dict[UOp, UOp], x:UOp, b:UOp) -> Optional[UOp]:
-  if (sink:=ctx.get(b)) is not None and x in sink.src: return None
-  ctx[b] = ret = x.sink() if sink is None else sink.replace(src=sink.src+(x,))
-  return ret
-
-group_stores = PatternMatcher([
-  (UPat(UOps.STORE, src=(UPat.var("b"), UPat(), UPat()), name="x"), sink_store),
-])
-
-@track_rewrites(named=True)
-def rewrite_schedule(sink:UOp, buf_groups:Dict[UOp, UOp]) -> UOp:
   sink = graph_rewrite(sink, group_stores, buf_groups)
-  raise Exception(sink)
+  graph_rewrite(sink, break_sched, sinks:=[])
+  schedule: List[ScheduleItem] = []
+  for sink in sinks:
+    schedule.append(si:=rewrite_ast(sink, uop_bufs, var_vals))
+    for out in si.outputs: del lazybufs[out].srcs
+  return schedule, var_vals
 
 def create_schedule(outs:List[LazyBuffer]) -> List[ScheduleItem]:
   schedule, var_vals = create_schedule_with_vars(outs)
