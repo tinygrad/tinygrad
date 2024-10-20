@@ -341,6 +341,8 @@ sym = symbolic_flat+PatternMatcher([
          name="ld"), UPat.const(None, 0.0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
   # GEP/CAST const rules
   (UPat(UOps.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
+  # where simplify true branch based on gate
+  (UPat.var("g").where(UPat.var("t"), UPat.var("f")), lambda g,t,f: g.where(n, f) if (n:=uop_given_valid(g, t)) is not None and n is not t else None),
   # ** self folding **
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
