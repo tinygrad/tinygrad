@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Dict, Union, Tuple, Sequence
+from typing import List, Dict, Union, Tuple, Sequence, Callable, Any
 import importlib, functools
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv, DEBUG, CI, OSX
@@ -50,8 +50,8 @@ DTYPE_MAP: Dict[int, DType] = {
   TensorProto.BFLOAT16:dtypes.bfloat16, TensorProto.FLOAT8E4M3FN:dtypes.float, TensorProto.FLOAT8E4M3FNUZ:dtypes.float,
   TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float}
 def parse_dtype(onnx_dtype: int) -> DType:
-  if (ret := DTYPE_MAP.get(onnx_dtype)) is None: raise RuntimeError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
-  return supported_device_dtypes(ret, Device.DEFAULT)
+  if onnx_dtype in DTYPE_MAP: return supported_device_dtypes(DTYPE_MAP[onnx_dtype], Device.DEFAULT)
+  raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
 
 def parse_buffer(inp: TensorProto) -> Tensor:
   if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data) or inp.raw_data:
@@ -59,7 +59,7 @@ def parse_buffer(inp: TensorProto) -> Tensor:
     # parse_buffer is only ran during initialization so it doesn't affect the graph for op execution
     # TODO: maybe reshape -> realize is not the best way to do this. Maybe we gotta realize fake buffer.
     return Tensor(dat, dtype=parse_dtype(inp.data_type), requires_grad=False).reshape(tuple(inp.dims)).realize()
-  return Tensor(None, requires_grad=False)
+  raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
 
 # src: onnx/onnx_ml_pb2.pyi
 # NOTE: this is not a complete list
@@ -68,8 +68,8 @@ ATTRS_MAP = {AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lam
          AttributeProto.TENSOR: lambda a: parse_buffer(a.t), AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats),
          AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints), AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)}
 def parse_attribute(a: AttributeProto):
-  if (ret := ATTRS_MAP.get(a.type, lambda _: None)(a)) is None: raise NotImplementedError(f"{a.type} not implemented")
-  return ret
+  if a.type in ATTRS_MAP: return ATTRS_MAP[a.type](a)
+  raise NotImplementedError(f"attribute with type {a.type} is not supported")
 
 # ========== runner
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
@@ -90,8 +90,9 @@ equivalent_tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual
 equivalent_tensor_methods_exceptions = {"Concat": ("cat", {"axis": "dim"}), "LeakyRelu": ("leakyrelu", {"alpha": "neg_slope"}),
   "Selu": ("selu", {"gamma": "scale"})}
 
-# lambda methods lol
-# lambda_methods = {"Identity": lambda x:x, "Sub": lambda x,y:x-y, }
+# simple lambda methods lol
+# used to trigger things like __add__ and __iadd__
+lambda_methods: Dict[str, Callable[..., Any]] = {"Identity": lambda x:x, "Add": lambda x,y,*_,**__: x+y, "Sub": lambda x,y,*_:x-y}
 
 def get_run_onnx(onnx_model: ModelProto):
   # get weights and biases
@@ -101,6 +102,15 @@ def get_run_onnx(onnx_model: ModelProto):
   attributes = {num:{x.name:parse_attribute(x) for x in n.attribute} for num,n in enumerate(onnx_model.graph.node)}
 
   def run_onnx(inputs={}, debug=0, initialization_hook=None, op_hook=None):
+    """
+    Run the ONNX model with the provided inputs and optional hooks for debugging and initialization.
+
+    `debug` parameter can be set to control the verbosity of the logging:
+      - 0: No debug output (default).
+      - 1: Logs each operation with input shapes.
+      - 2: Logs intermediate outputs after each operation.
+      - 3: Logs inputs for each operation
+    """
     if initialization_hook: initialization_hook(tensors, attributes)
     debug = getenv("DEBUGONNX") or debug
 
@@ -154,7 +164,6 @@ def get_run_onnx(onnx_model: ModelProto):
       tensor_inp, opt = [fetch_tensor(x) for x in n.input], attributes[num]
       if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in tensor_inp]} opt {opt}")
       # to python consts
-      # TODO what if we just don't buffer parse some inps into Tensor to start with so no need waste time to python const
       if debug >= 3: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {t}" + (" -> *python const*" if i in to_python_const_inps.get(n.op_type,()) else "")
                                                       for i,(x,t) in enumerate(zip(n.input, tensor_inp))))
       inp = [to_python_const(x) if i in to_python_const_inps.get(n.op_type, ()) else x for i,x in enumerate(tensor_inp)]
@@ -166,6 +175,7 @@ def get_run_onnx(onnx_model: ModelProto):
       elif n.op_type in equivalent_tensor_methods_exceptions:
         rewrite = equivalent_tensor_methods_exceptions[n.op_type]
         ret = getattr(Tensor, rewrite[0])(*inp, **{rewrite[1].get(k, k):v for k,v in opt.items()})
+      elif n.op_type in lambda_methods: ret = lambda_methods[n.op_type](*inp, **opt)
       # NOTE some ops live here because they require access to local variables
       # have to use n.output for cases when num_outputs is absent
       elif n.op_type == "Split":

@@ -1,7 +1,7 @@
 import functools, io, math
-from typing import Union, Tuple, Optional, List, Any, cast, Literal
+from typing import Union, Tuple, Optional, List, cast, Literal
 from tinygrad.tensor import Tensor, _broadcast_shape, ConstType
-from tinygrad.dtype import ImageDType, dtypes
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, flatten, make_pair
 from tinygrad.runtime.onnx.onnx import to_python_const, parse_dtype
 import numpy as np
@@ -14,17 +14,14 @@ import numpy as np
 
 # **************** Free Ops ****************
 
-def Identity(x: Tensor): return x
-# TODO: fix buffer_parse
-def Add(x: Tensor, other: Tensor, broadcast=None, axis=None): return x + other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) \
-  else (x + other).cast(x.dtype)
-def Sub(x: Union[Tensor, Any], other: Tensor): return x - other # some test has input as int
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
 def Squeeze(data: Tensor, axes): return functools.reduce(lambda d, dim: d.squeeze(dim), sorted(axes, reverse=True), data)
 def Unsqueeze(data: Tensor, axes): return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(axes), data)
 def Mean(*data_0): return Sum(*data_0) / len(data_0)
+
+# TODO: saturate controls float8 casting behavior
 def Cast(x: Tensor, to: int, saturate=1): return x.cast(parse_dtype(to))
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
