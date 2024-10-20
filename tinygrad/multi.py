@@ -23,7 +23,6 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None):
   boundaries = tuple(itertools.accumulate(splits))
   bounds = tuple(zip((0,) + boundaries, boundaries))
   if RING < 2:
-    print("NAIVE GATHER RESHARD")
     gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]
     sharded = to_sharded(gathered, axis, bounds)
     return MultiLazyBuffer(sharded, axis)

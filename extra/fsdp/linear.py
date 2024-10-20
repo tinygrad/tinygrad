@@ -10,7 +10,8 @@ from tinygrad.multi import MultiLazyBuffer
 from tinygrad.helpers import prod
 
 SHARD = int(os.environ.get("SHARD", 1))
-GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
+Device.DEFAULT = "CLANG"
+GPUS = [f"METAL:{i}" for i in range(SHARD)]
 def reset_mem_high():
   for gpu in GPUS:
     Device[gpu].allocator.reset_mem_high()
@@ -57,7 +58,6 @@ class Model:
     return x
 
 x = Tensor.empty(8, 8)
-x.realize()
 model = Model()
 opt = Optimizer(nn.state.get_parameters(model))
 print(list(nn.state.get_parameters(opt)))
@@ -90,10 +90,12 @@ if SHARD > 1:
   shard_model(model, opt)
 else:
   print("NO SHARD")
+  x.to_(GPUS[0])
   for p in nn.state.get_parameters(opt):
+    p.to_(GPUS[0])
     p.realize()
 
-# @TinyJit
+@TinyJit
 def train():
   y = model(x)
   loss = y.sum(0).sum(0)
@@ -102,6 +104,5 @@ def train():
   opt.zero_grad()
 
 with Tensor.train():
-  reset_mem_high()
-  for i in range(1):
+  for i in range(5):
     train()

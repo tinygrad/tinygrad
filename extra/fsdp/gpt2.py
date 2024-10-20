@@ -9,11 +9,12 @@ import pathlib
 import re
 from tinygrad.helpers import prod
 
+
 SHARD = int(os.environ.get("SHARD", 1))
 GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
-def reset_mem_high():
-  for gpu in GPUS:
-    Device[gpu].allocator.reset_mem_high()
+GPU_NAME = Device.DEFAULT
+if len(GPUS) > 1:
+  Device.DEFAULT = "CLANG"
 
 def shard_model(model, opt):
   seen = set()
@@ -236,10 +237,8 @@ if __name__ == "__main__":
     loss.backward()
     return loss.realize(*optimizer.schedule_step())
 
-  x.realize()
-  y.realize()
-  reset_mem_high()
   with Tensor.train():
+    Device.DEFAULT = GPU_NAME
     for i in range(args.num_iterations):
    
       GlobalCounters.reset()

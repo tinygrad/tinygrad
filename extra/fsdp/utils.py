@@ -12,6 +12,7 @@ def print_size(name, *tensors: Tensor):
     print(f'{name} size: {size:.2f} {unit}')
 
 def print_lb(lb):
+  assert isinstance(lb, MultiLazyBuffer)
   seen = set()
   def repr_lb(lb, indent=0):
     text = "\u001b[2m" if lb in seen else "\u001b[0m"
