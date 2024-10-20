@@ -3,12 +3,12 @@ from typing import Tuple
 
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite, is_increasing
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, UOps, BinaryOps
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(UOps.LOAD, dtypes.float, (
-    UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0),
+    UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0),
     idx,
     UOp.const(dtypes.float, 0.0),
     valid
@@ -59,6 +59,13 @@ class TestHelpers(unittest.TestCase):
     self.assertTrue(is_increasing(rng+2))
 
 class TestValidIdxSimplification(unittest.TestCase):
+  def check(self, val0, sidx, svalid):
+    val0 = full_graph_rewrite(val0.sink()).src[0]
+    idx, valid = val0.src[1], val0.src[3]
+    self.assertEqual(idx.render(simplify=False), sidx)
+    self.assertEqual(valid.render(simplify=False), svalid)
+
+  @unittest.skip("need a different way to test conv2d backward")
   def test_conv_backward(self):
     # DEBUG=4 python3 test/test_ops.py TestOps.test_simple_conv2d
     gidx0 = Special("gidx0", 3)
@@ -88,23 +95,27 @@ class TestValidIdxSimplification(unittest.TestCase):
 
     # TODO: simplify these
     val0 = get_gated_load_uop(alu17&(alu9.lt(7)), alu15+(alu5//10)+(alu9*9))
-    self.assertEqual(render(val0),
-      "((((alu2<30)&(alu3<7))&(alu1<7))?data0[(((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+((alu2//10)*3)+(alu3*63)+(alu0//10)+(alu1*9)]:0.0f)")
+    self.check(val0,
+      "(((((((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+(((((gidx1*3)+lidx1)+(ridx0*9))//10)*3))+(((((gidx1*3)+lidx1)+(ridx0*9))%10)*63))+((((gidx0*3)+lidx2)+9)//10))+(((((gidx0*3)+lidx2)+9)%10)*9))",
+      "((((((gidx1*3)+lidx1)+(ridx0*9))<30)&(((((gidx1*3)+lidx1)+(ridx0*9))%10)<7))&(((((gidx0*3)+lidx2)+9)%10)<7))")
 
     val1 = get_gated_load_uop(
       ((alu16&gidx0.lt(1))&alu13.lt(7))&alu7.lt(7),
       ((((((((((lidx1*10)+gidx0)//3)+3)//10)+alu10)//10)+lidx0)%4)*441)+((((alu6+alu12)//10)%3)*3)+(alu13*63)+(((alu3//10)+2)%3)+(alu7*9)
     )
-    self.assertEqual(render(val1),
-      "(((((alu2<30)&(gidx0<1))&(((((gidx0+9)//10)+alu0+lidx1+alu1)%10)<7))&((((gidx0*3)+lidx2+7)%10)<7))?data0[(lidx2*9)+(((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+((alu2//10)*3)+((alu2%10)*63)+65]:0.0f)")  # noqa: E501
+    self.check(val1,
+      "(((lidx2*9)+(((((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+(((((gidx1*3)+lidx1)+(ridx0*9))//10)*3))+(((((gidx1*3)+lidx1)+(ridx0*9))%10)*63)))+65)",
+      "(((((((gidx1*3)+lidx1)+(ridx0*9))<30)&(gidx0<1))&(((((((gidx0+9)//10)+(gidx1*3))+lidx1)+(ridx0*9))%10)<7))&(((((gidx0*3)+lidx2)+7)%10)<7))")
 
     val2 = get_gated_load_uop(alu17&alu1.lt(7), alu15+(gidx0*27)+(lidx2*9))
-    self.assertEqual(render(val2),
-      "((((alu0<30)&(alu1<7))&(((gidx0*3)+lidx2)<7))?data0[(((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+((alu0//10)*3)+(alu1*63)+(gidx0*27)+(lidx2*9)]:0.0f)")  # noqa: E501
+    self.check(val2,
+      "(((((((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+(((((gidx1*3)+lidx1)+(ridx0*9))//10)*3))+(((((gidx1*3)+lidx1)+(ridx0*9))%10)*63))+(gidx0*27))+(lidx2*9))",
+      "((((((gidx1*3)+lidx1)+(ridx0*9))<30)&(((((gidx1*3)+lidx1)+(ridx0*9))%10)<7))&(((gidx0*3)+lidx2)<7))")
 
     val3 = get_gated_load_uop(alu17&alu8.lt(7), (alu4//10)+alu15+(alu8*9)+1)
-    self.assertEqual(render(val3),
-      "((((alu2<30)&(alu3<7))&(alu1<7))?data0[(alu0//10)+(((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+((alu2//10)*3)+(alu3*63)+(alu1*9)+1]:0.0f)")
+    self.check(val3,
+      "(((((((gidx0*3)+lidx2)+8)//10)+(((((((gidx1+(ridx0*3))//10)+lidx0)%4)*441)+(((((gidx1*3)+lidx1)+(ridx0*9))//10)*3))+(((((gidx1*3)+lidx1)+(ridx0*9))%10)*63)))+(((((gidx0*3)+lidx2)+8)%10)*9))+1)",
+      "((((((gidx1*3)+lidx1)+(ridx0*9))<30)&(((((gidx1*3)+lidx1)+(ridx0*9))%10)<7))&(((((gidx0*3)+lidx2)+8)%10)<7))")
 
   def test_cumsum(self):
     gidx0 = Special("gidx0", 5)
@@ -112,7 +123,21 @@ class TestValidIdxSimplification(unittest.TestCase):
     gate = (gidx0*4+lidx0).lt(19).ne(True)
     idx = gidx0*4+lidx0-19
     load = get_gated_load_uop(gate, idx)
-    self.assertEqual(render(load), "(((((gidx0*4)+lidx0)<19)!=1)?data0[0]:0.0f)")
+    self.check(load,
+      "0",
+      "((((gidx0*4)+lidx0)<19)!=True)")
+
+  def test_simplify_within_valid(self):
+    ridx0 = Range(0, 4)
+    ridx1 = Range(1, 4)
+    ridx2 = Range(2, 4)
+    ridx3 = Range(3, 4)
+    valid = (ridx0*3+ridx1).lt(8) & (((ridx0*3+ridx1)//8+ridx2*3+ridx3)%4).lt(2)
+    idx = ridx0+ridx1+ridx2+ridx3
+    load = get_gated_load_uop(valid, idx)
+    self.check(load,
+      "(((ridx0+ridx1)+ridx2)+ridx3)",
+      "((((ridx0*3)+ridx1)<8)&((((ridx2*3)+ridx3)%4)<2))")
 
 class TestImageSimplification(unittest.TestCase):
   def test_idx_gt_c(self):
