@@ -604,14 +604,19 @@ class TrackedRewriteContext:
 
 rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
 contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
-def track_rewrites(func):
-  def __wrapper(self, *args, **kwargs):
-    if TRACK_MATCH_STATS >= 2: rewrite_stack.append((self, []))
-    try: ret = func(self, *args, **kwargs)
-    finally: # NOTE: save everything in the stack
-      if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
-    return ret
-  return __wrapper
+_rewrite_cnt: Dict[str, int] = {}
+def track_rewrites(named=False):
+  def _decorator(func):
+    def __wrapper(self, *args, **kwargs):
+      if TRACK_MATCH_STATS >= 2:
+        if named: _rewrite_cnt[func.__name__] = _rewrite_cnt.setdefault(func.__name__, 0)+1
+        rewrite_stack.append((f"{(n:=func.__name__)}_{_rewrite_cnt[n]}" if named else self, []))
+      try: ret = func(self, *args, **kwargs)
+      finally: # NOTE: save everything in the stack
+        if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
+      return ret
+    return __wrapper
+  return _decorator
 
 class TrackedPatternMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
