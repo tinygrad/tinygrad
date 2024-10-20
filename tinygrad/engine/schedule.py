@@ -144,8 +144,15 @@ def full_ast_rewrite(base_sink:UOp, bufs:List[UOp], var_vals:Dict[Variable, int]
   PROCESS_REPLAY_CAPTURE.append((base_sink, ret))
   return ret
 
+def do_replace(ctx:Dict[UOp, UOp], b:UOp) -> Optional[UOp]:
+  if (store:=ctx.get(b)) is None: return None
+  return store.src[2]
+fold_store = PatternMatcher([
+  (UPat(UOps.LOAD, src=(UPat.var("b"), UPat())), do_replace),
+])
 def rewrite_ast(sink:UOp, uop_bufs:Dict[UOp, Buffer], var_vals:Dict[Variable, int]) -> ScheduleItem:
   bufs: List[UOp] = []
+  if len(sink.src) > 1: sink = graph_rewrite(sink, fold_store, {x.src[0]:x for x in sink.src})
   sink = full_ast_rewrite(sink, bufs, var_vals)
   return ScheduleItem(sink if sink.op is UOps.SINK else sink.replace(src=()), tuple(uop_bufs[x] for x in bufs), ())
 
@@ -372,9 +379,6 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   schedule: List[ScheduleItem] = []
   for sink in dedup(sinks.values()):
     schedule.append(si:=rewrite_ast(sink, uop_bufs, var_vals))
-    print("-----------------")
-    print(si.ast)
-    print(si.outputs)
     for out in si.outputs: del lazybufs[out].srcs
   return schedule, var_vals
 
