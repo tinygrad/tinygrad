@@ -165,7 +165,7 @@ def _resolve_pool_pad(i_, k_, d_, s_, p_, auto_pad):
   p_ = _auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad)
   return p_
 
-def Pad(x:Tensor, pads:List[int], constant_value:Optional[ConstType]=None, axes:Optional[List[int]]=None, mode="constant",value:float=0.):
+def Pad(x:Tensor, pads:List[int], constant_value:Optional[ConstType]=None, axes:Optional[List[int]]=None, mode="constant", value:float=0.):
   constant_value, mode = value if constant_value is None else float(constant_value), {"edge": "replicate", "wrap":"circular"}.get(mode, mode)
   axes, real_pads  = axes or list(range(x.ndim)), [0] * (x.ndim*2)
   for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
@@ -190,8 +190,8 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
     ret = ret.pad2d(_onnx_pads_to_pad2d_pads(_auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
   return ret
 
-def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
-  pads = _resolve_pool_pad(X.shape[-len(kernel_shape):], kernel_shape, dilations, strides, 0 if pads is None else pads, auto_pad)
+def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=0, strides=1):
+  pads = _resolve_pool_pad(X.shape[-len(kernel_shape):], kernel_shape, dilations, strides, pads, auto_pad)
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=_onnx_pads_to_pad2d_pads(pads))
 
 # TODO: their reference implementation and their documentation have different information
@@ -325,6 +325,8 @@ def CenterCropPad(t: Tensor, shape, axes=None):
   return t.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
 def OneHot(indices: Tensor, depth, values, axis=-1):
+  # Scalar or Rank 1 tensor containing exactly one element
+  depth = depth[0] if isinstance(depth, list) else depth
   indices, rank = (indices < 0).where(indices+depth, indices), indices.ndim
   if axis < 0: axis += rank + 1
   ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
@@ -433,6 +435,7 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids: Tensor, word_embeddi
   out = embedding_sum.layernorm(eps=epsilon) * gamma + beta
   return out, None, embedding_sum
 
+# TODO I gotta learn this
 def Attention(x:Tensor, weights, bias:Tensor, mask_index:Optional[Tensor]=None, past:Optional[Tensor]=None,
               relative_position_bias:Optional[Tensor]=None, past_sequence_length:Optional[Tensor]=None, do_rotary=None, mask_filter_value=None,
               num_heads=None, past_present_share_buffer=None, qkv_hidden_sizes=None, scale=None, unidirectional=None):

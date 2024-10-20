@@ -59,6 +59,8 @@ def parse_buffer(inp: TensorProto) -> Tensor:
     # parse_buffer is only ran during initialization so it doesn't affect the graph for op execution
     # TODO: maybe reshape -> realize is not the best way to do this. Maybe we gotta realize fake buffer.
     return Tensor(dat, dtype=parse_dtype(inp.data_type), requires_grad=False).reshape(tuple(inp.dims)).realize()
+  # TODO this is hacked for yolov4. Tensor(None).tolist() doesn't work.
+  if inp.dims == [0] and inp.raw_data == b"": return None
   raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
 
 # src: onnx/onnx_ml_pb2.pyi
@@ -69,7 +71,7 @@ ATTRS_MAP = {AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lam
          AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints), AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)}
 def parse_attribute(a: AttributeProto):
   if a.type in ATTRS_MAP: return ATTRS_MAP[a.type](a)
-  raise NotImplementedError(f"attribute with type {a.type} is not supported")
+  raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(a.type)} is not supported")
 
 # ========== runner
 ONNXLIMIT = getenv("ONNXLIMIT", -1)

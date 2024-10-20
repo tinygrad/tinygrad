@@ -186,7 +186,7 @@ else:
   backend_test.include('test_inception_v2')
   backend_test.include('test_densenet121')
   backend_test.include('test_shufflenet')
-  backend_test.include('test_squeezenet')
+  # backend_test.include('test_squeezenet') see external_model_benchmark
   backend_test.include('test_bvlc_alexnet')
   backend_test.include('test_zfnet512')
   backend_test.include('test_vgg19')

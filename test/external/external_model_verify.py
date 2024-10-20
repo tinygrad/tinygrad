@@ -126,5 +126,7 @@ def verify(model_name):
 
 if __name__ == "__main__":
   model_name = getenv("MODEL")
-  assert model_name in MODELS, f"please specify a model with MODEL={tuple(MODELS.keys())}"
+  broken_on_torch = ("squeezenet", "commavq")
+  available_models = tuple(m for m in MODELS.keys() if m not in broken_on_torch)
+  assert model_name in MODELS, f"please specify a model with MODEL={available_models}"
   verify(model_name)
