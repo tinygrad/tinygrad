@@ -315,12 +315,12 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     if DEBUG_ARANGE: print(colored(f"folding {r}", "green"))
     for tr in group: del realizes[tr]
 
-  output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
+  buf_groups: Dict[UOp, UOp] = {}
   buf_uops: Dict[Buffer, UOp] = {}
   var_vals: Dict[Variable, int] = {}
+  sink_groups: Dict[LazyBuffer, UOp] = {}
   for buf in realizes:
     if buf.realized is None and buf.op is not MetaOps.CONST:
-      output_groups[reduce_for_op.get(buf, buf)].append(buf)
 
       # make things that can't be images not images
       if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
@@ -338,9 +338,28 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
     else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
     buf_uops.setdefault(buf.buffer, uop)
+    if (r:=reduce_for_op.get(buf)): buf_groups[uop] = sink_groups.setdefault(r, UOp(UOps.SINK))
+
+  _cache: Dict[LazyBuffer, UOp] = {}
+  sink = UOp(UOps.SINK, dtypes.void, tuple(to_uop(x.base, buf_uops, _cache) for x in outs))
+  sink = rewrite_schedule(sink, buf_groups)
 
   schedule: List[ScheduleItem] = []
   return schedule, var_vals
+
+def sink_store(ctx:Dict[UOp, UOp], x:UOp, b:UOp) -> Optional[UOp]:
+  if (sink:=ctx.get(b)) is not None and x in sink.src: return None
+  ctx[b] = ret = x.sink() if sink is None else sink.replace(src=sink.src+(x,))
+  return ret
+
+group_stores = PatternMatcher([
+  (UPat(UOps.STORE, src=(UPat.var("b"), UPat(), UPat()), name="x"), sink_store),
+])
+
+@track_rewrites(named=True)
+def rewrite_schedule(sink:UOp, buf_groups:Dict[UOp, UOp]) -> UOp:
+  sink = graph_rewrite(sink, group_stores, buf_groups)
+  raise Exception(sink)
 
 def create_schedule(outs:List[LazyBuffer]) -> List[ScheduleItem]:
   schedule, var_vals = create_schedule_with_vars(outs)
