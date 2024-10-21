@@ -1679,7 +1679,7 @@ class Tensor:
 
   def keccak(self: Tensor, cfg: Union[str, Tuple[int, int]] = "sha3_256"):
     """
-    Calculates a specified keccak hash over the last dimension. Uses "sha3_256" by default.
+    Calculates a Keccak hash over the last dimension. Uses "sha3_256" by default.
 
     ```python exec="false" source="above" session="tensor" result="python"
     t = Tensor(b"Hello World!").keccak()
