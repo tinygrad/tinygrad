@@ -413,10 +413,11 @@ python_alu: Dict[Op, Callable]  = {
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else x*math.inf,
   TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
-def exec_alu(op:Op, dtype:DType, operands):
+def exec_alu(op:Op, dtype:DType, operands, truncate_output=True):
   if dtype.count > 1:
     return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
-  return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
+  alu = python_alu[op](*operands)
+  return truncate.get(dtype, lambda x: x)(alu) if truncate_output else alu
 
 # ***** uop helpers *****
 
@@ -605,14 +606,19 @@ class TrackedRewriteContext:
 
 rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
 contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
-def track_rewrites(func):
-  def __wrapper(self, *args, **kwargs):
-    if TRACK_MATCH_STATS >= 2: rewrite_stack.append((self, []))
-    try: ret = func(self, *args, **kwargs)
-    finally: # NOTE: save everything in the stack
-      if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
-    return ret
-  return __wrapper
+_rewrite_cnt: Dict[str, int] = {}
+def track_rewrites(named=False):
+  def _decorator(func):
+    def __wrapper(self, *args, **kwargs):
+      if TRACK_MATCH_STATS >= 2:
+        if named: _rewrite_cnt[func.__name__] = _rewrite_cnt.setdefault(func.__name__, 0)+1
+        rewrite_stack.append((f"{(n:=func.__name__)}_{_rewrite_cnt[n]}" if named else self, []))
+      try: ret = func(self, *args, **kwargs)
+      finally: # NOTE: save everything in the stack
+        if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
+      return ret
+    return __wrapper
+  return _decorator
 
 class TrackedPatternMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
@@ -905,7 +911,7 @@ symbolic = PatternMatcher([
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat((UOps.VCONST, UOps.CONST))),
-   lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
+   lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src], truncate_output=False))),
   # ALU min==max -> CONST (slow!)
   (UPat(UOps.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
