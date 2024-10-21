@@ -139,7 +139,13 @@ def simplify_valid(valid:UOp) -> Optional[UOp]:
   for stmt in split_uop(valid, BinaryOps.AND):
     ret.append(stmt if not ret else uop_given_valid(functools.reduce(operator.and_, ret), stmt))
     if ret[-1] is not stmt: something_changed = True
-  return functools.reduce(operator.and_, ret) if something_changed else None
+
+  ret2:List[UOp] = []
+  for stmt in ret[::-1]:
+    ret2.append(stmt if not ret2 else uop_given_valid(functools.reduce(operator.and_, ret2), stmt))
+    if ret2[-1] is not stmt: something_changed = True
+
+  return functools.reduce(operator.and_, ret2[::-1]) if something_changed else None
 
 def simplify_buffer_load(load:UOp) -> Optional[UOp]:
   if not isinstance(load.src[0].dtype, PtrDType) or len(load.src) != 4: return None
