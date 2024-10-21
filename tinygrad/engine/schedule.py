@@ -114,7 +114,7 @@ view_right = merge_views+PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
-def _append_st_vars(ctx:Tuple[Dict[Variable, int], Set[ShapeTracker], Tuple[int, ...]], x:UOp) -> Optional[UOp]:
+def _append_st_vars(ctx:Tuple[Dict[Variable, int], Set[ShapeTracker], List[UOp]], x:UOp) -> Optional[UOp]:
   if (st:=unwrap(x.st)) in ctx[1]: return None
   st, var_vals = st.simplify().unbind()
   ctx[0].update(var_vals)
@@ -122,8 +122,9 @@ def _append_st_vars(ctx:Tuple[Dict[Variable, int], Set[ShapeTracker], Tuple[int,
   return st.to_uop() if st != x.st else None
 append_st_vars = PatternMatcher([(UPat(UOps.VIEW, name="x"), _append_st_vars)])
 
-def _append_buf(ctx:Tuple[Dict[Variable, int], Set[ShapeTracker], Tuple[int, ...]], x:UOp) -> UOp:
-  return UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx[2].index(x.arg[0]))
+def _append_buf(ctx:Tuple[Dict[Variable, int], Set[ShapeTracker], List[UOp]], x:UOp) -> UOp:
+  ctx[2].append(x)
+  return UOp(UOps.DEFINE_GLOBAL, x.dtype, (), len(ctx[2])-1)
 append_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), _append_buf),])
 
 to_ast = PatternMatcher([
@@ -131,17 +132,25 @@ to_ast = PatternMatcher([
   (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda x: x),
 ])
 
-PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, Tuple[int, ...], UOp]] = []
-def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable, int]) -> UOp:
-  sink = graph_rewrite(graph_rewrite(base_sink, view_left), view_right)
+def do_replace(outputs:Tuple[UOp, ...], b:UOp, op:UOp, st:UOp) -> UOp:
+  return op if b in outputs else UOp(UOps.LOAD, op.dtype, (b, st))
+replace_load_store = PatternMatcher([
+  (UPat(UOps.LOAD, src=(UPat.var("b"), UPat.var("st"), UPat(UOps.STORE, src=(UPat.var("b"), UPat(), UPat.var("op"))))), do_replace),
+])
+
+PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, UOp]] = []
+def full_ast_rewrite(base_sink:UOp, bufs:List[UOp], var_vals:Dict[Variable, int]) -> UOp:
+  outputs = tuple(x.src[0] for x in base_sink.src)
+  sink = graph_rewrite(base_sink, replace_load_store, outputs)
+  sink = graph_rewrite(graph_rewrite(sink, view_left), view_right)
   ret = graph_rewrite(graph_rewrite(sink, to_ast), append_st_vars+append_bufs, (var_vals, set(), bufs))
-  PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
+  PROCESS_REPLAY_CAPTURE.append((base_sink, ret))
   return ret
 
 if getenv("RUN_PROCESS_REPLAY"):
   @atexit.register
   def save_process_replay():
-    for base_sink,ctx,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
+    for base_sink,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ret))
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
 
@@ -320,6 +329,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   buf_uops: Dict[Buffer, UOp] = {}
+  uop_bufs: Dict[UOp, Buffer] = {}
   var_vals: Dict[Variable, int] = {}
   lazybufs: Dict[Buffer, LazyBuffer] = {}
   for buf in realizes:
@@ -342,7 +352,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       uop = UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(buf.dtype.scalar(), buf.arg), v.const_like(0))
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
     else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
-    buf_uops.setdefault(buf.buffer, uop)
+    uop_bufs.setdefault(buf_uops.setdefault(buf.buffer, uop), buf.buffer)
 
   # preschedule all buffers in realizes
   cache: Dict[LazyBuffer, UOp] = {}
@@ -377,6 +387,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   while queue:
     si = queue.popleft()
     schedule.append(si)
+    print(si.ast)
     for b in si.outputs: del lazybufs[b].srcs  # can only schedule once
     if (m:=BUF_LIMIT.get(device:=si.outputs[0].device)) and len(si.bufs) >= m:
       if DEBUG >= 3: print(si)
@@ -392,7 +403,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   return schedule, var_vals
 
 break_sched = PatternMatcher([
-  (UPat(UOps.LOAD, ))
+  (UPat(UOps.SINK, name="x"), lambda sinks,x:sinks.append(x)),
 ])
 
 def create_schedule(outs:List[LazyBuffer]) -> List[ScheduleItem]:
