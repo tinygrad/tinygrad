@@ -46,7 +46,7 @@ torch_dtypes_map = { dtypes.bfloat16: torch.bfloat16 }
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
 # TODO: CI CUDA segfaults on sin
-if getenv("MOCKGPU") and Device.DEFAULT == "NV": unary_operations.remove((Tensor.sin, np.sin))
+if getenv("MOCKGPU") and Device.DEFAULT == "NV": unary_operations.remove((Tensor.sin, np.sin, torch.sin))
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
