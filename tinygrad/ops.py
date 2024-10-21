@@ -390,7 +390,8 @@ class UOp(MathTrait):
   def _sym_fxn(self):
     sself = self.simplify()
     varnames = tuple(x.arg[0] for x in sself.sparents if x.op is UOps.DEFINE_VAR)
-    return eval("lambda "+','.join(varnames)+": "+sself.render()), varnames
+    # TODO: sanitize varnames, or don't use naked eval while staying fast
+    return eval("lambda "+','.join(varnames)+": "+sself.render()), varnames  # pylint: disable=eval-used
 
   def sym_infer(self, var_vals:Dict[UOp, int]):
     fxn, varnames = self._sym_fxn
