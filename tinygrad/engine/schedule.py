@@ -138,7 +138,7 @@ append_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), _append_buf),])
 
 to_ast = PatternMatcher([
   (UPat(UOps.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
-  (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda x: x.replace(src=())),
+  (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda x: x),
 ])
 
 PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, Tuple[int, ...], UOp]] = []
