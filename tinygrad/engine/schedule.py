@@ -348,9 +348,13 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   buf_uops: Dict[Buffer, UOp] = {}
   var_vals: Dict[Variable, int] = {}
+  lazybufs_to_realize: Dict[Buffer, LazyBuffer] = {}
   for buf in realizes:
     if buf.realized is None and buf.op is not MetaOps.CONST:
       output_groups[reduce_for_op.get(buf, buf)].append(buf)
+      if (dup:=lazybufs_to_realize.get(buf.buffer)) is not None:
+        raise RuntimeError(f"can't double realize in one schedule, Buffer is realizing both {dup} and {buf}")
+      lazybufs_to_realize[buf.buffer] = buf
 
       # make things that can't be images not images
       if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
