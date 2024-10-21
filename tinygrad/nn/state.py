@@ -158,8 +158,8 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad=None, backward_hooks=None, metadata=None):
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
-    if storage[2] not in offsets: return None
-    byte_offset = offsets[storage[2]]+storage_offset*storage[1].itemsize
+    if str(storage[2]) not in offsets: return None
+    byte_offset = offsets[str(storage[2])]+storage_offset*storage[1].itemsize
     ret = t[byte_offset:byte_offset+prod(size)*storage[1].itemsize].bitcast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
@@ -201,8 +201,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
     for n in myzip.namelist():
       if n.startswith(f'{base_name}/data/'):
         with myzip.open(n) as myfile:
-          if (key := n.split("/")[-1]).isnumeric(): key = int(key)
-          offsets[key] = myfile._orig_compress_start # type: ignore
+          offsets[n.split("/")[-1]] = myfile._orig_compress_start # type: ignore
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       return TorchPickle(myfile).load()
   elif tarfile.is_tarfile(fn):
