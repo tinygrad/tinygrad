@@ -9,7 +9,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp
 from tinygrad.helpers import Timing, DEBUG, JIT, getenv, fetch, colored, trange
 from tinygrad.nn import Embedding, Linear, LayerNorm
-from tinygrad.nn.state import load_gguf, torch_load, load_state_dict, get_state_dict
+from tinygrad.nn.state import gguf_load, torch_load, load_state_dict, get_state_dict
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 HALF = getenv("HALF")
@@ -150,7 +150,7 @@ class GPT2:
     q_type = model_size[len("gpt2_gguf_"):].upper()
     fn = fetch(f"https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.{q_type}.gguf?download=true")
     gguf_tensor = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}").to(Device.DEFAULT)
-    kv_data, state_dict = load_gguf(gguf_tensor)
+    kv_data, state_dict = gguf_load(gguf_tensor)
 
     gpt2_params = {
       "dim": kv_data["gpt2.embedding_length"], "n_heads": kv_data["gpt2.attention.head_count"],
