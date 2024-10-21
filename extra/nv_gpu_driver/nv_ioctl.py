@@ -177,7 +177,7 @@ def _dump_gpfifo(mark):
   launches = []
 
   # print("_dump_gpfifo:", mark)
-  for start,size in gpus_fifo:
+  for start, size in gpus_fifo:
     gpfifo_controls = nv_gpu.AmpereAControlGPFifo.from_address(start+size*8)
     gpfifo = to_mv(start, size * 8).cast("Q")
     while old_gpputs[start] != gpfifo_controls.GPPut:
@@ -235,32 +235,40 @@ def _dump_qmd(address, packets):
 def before_launch(): _dump_gpfifo("before launch")
 def collect_last_launch_state(): return _dump_gpfifo("after launch")
 
-def compare_launch_state(states1, states2):
-  states1 = states1 or list()
-  states2 = states2 or list()
-  if len(states1) != 1 or len(states2) != 1:
-    return False, f"Some states not captured. {len(states1)}!=1 || {len(states2)}!=1"
+def compare_launch_state(states, good_states):
+  states = states or list()
+  good_states = good_states or list()
+  if len(states) != 1 or len(good_states) != 1:
+    return False, f"Some states not captured. {len(states)}!=1 || {len(good_states)}!=1"
 
-  for i in range(len(states1)):
-    state1, state2 = states1[i], states2[i]
+  for i in range(len(states)):
+    state, good_state = states[i], good_states[i]
 
     for n in ['qmd_major_version', 'invalidate_shader_data_cache', 'invalidate_shader_data_cache',
               'sm_global_caching_enable', 'invalidate_texture_header_cache', 'invalidate_texture_sampler_cache',
               'barrier_count', 'sampler_index', 'api_visible_call_limit', 'cwd_membar_type', 'sass_version',
-              'min_sm_config_shared_mem_size', 'max_sm_config_shared_mem_size', 'register_count_v',
-              'target_sm_config_shared_mem_size', 'shared_memory_size']:
-      if getattr(state1, n) != getattr(state1, n):
-        return False, f"Field {n} mismatch: {getattr(state1, n)} vs {getattr(state2, n)}"
+              'max_sm_config_shared_mem_size', 'register_count_v']:
+      if getattr(state, n) != getattr(good_state, n):
+        return False, f"Field {n} mismatch: {getattr(state, n)} vs {getattr(good_state, n)}"
 
     # Allow NV to allocate more, at least this is not exact problem, so ignore it here.
     # Hmm, CUDA minimum is 0x640, is this hw-required minimum (will check)?
-    if state1.shader_local_memory_high_size < state2.shader_local_memory_high_size and state2.shader_local_memory_high_size > 0x640:
-      return False, f"Field shader_local_memory_high_size mismatch: {state1.shader_local_memory_high_size} vs {state2.shader_local_memory_high_size}"
+    if state.shader_local_memory_high_size < good_state.shader_local_memory_high_size and good_state.shader_local_memory_high_size > 0x640:
+      return False, f"Field shader_local_memory_high_size mismatch: {state.shader_local_memory_high_size}vs{good_state.shader_local_memory_high_size}"
+
+    # TODO: Can't request more, since it might not be optimal, but need to investigate their formula for this.. #7133
+    if state.min_sm_config_shared_mem_size > good_state.min_sm_config_shared_mem_size and good_state.min_sm_config_shared_mem_size > 5:
+      return (False,
+        f"Field min_sm_config_shared_mem_size mismatch: {state.min_sm_config_shared_mem_size}vs{good_state.min_sm_config_shared_mem_size}")
+    if state.target_sm_config_shared_mem_size > good_state.target_sm_config_shared_mem_size and good_state.target_sm_config_shared_mem_size > 5:
+      return (False,
+        f"Field target_sm_config_shared_mem_size mismatch: {state.target_sm_config_shared_mem_size}vs{good_state.target_sm_config_shared_mem_size}")
 
     for i in range(8):
+      if i in {1, 7}: continue # shaders don't use that. what's cuda put here?
       n = f"constant_buffer_valid_{i}"
-      if getattr(state1, n) != getattr(state1, n):
-        return False, f"Field {n} mismatch: {getattr(state1, n)} vs {getattr(state2, n)}"
+      if getattr(state, n) != getattr(good_state, n):
+        return False, f"Field {n} mismatch: {getattr(state, n)} vs {getattr(good_state, n)}"
 
   return True, "PASS"
 
