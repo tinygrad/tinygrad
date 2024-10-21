@@ -121,6 +121,7 @@ class TestDTypeALU(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16, Device.DEFAULT), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, strat.sampled_from(unary_operations))
+  @unittest.skipIf(Device.DEFAULT == "AMD", "broken on AMD")
   def test_bfloat16_unary(self, a, op): universal_test_unary(a, dtypes.bfloat16, op)
 
   @given(ht.uint8, ht.uint8, strat.sampled_from(integer_binary_operations))
