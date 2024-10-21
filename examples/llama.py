@@ -9,7 +9,7 @@ import argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
 from tinygrad import Tensor, Device, GlobalCounters, nn
-from tinygrad.helpers import Context, Timing, Profiling, DEBUG, JIT, getenv, colored
+from tinygrad.helpers import Context, Timing, Profiling, DEBUG, JIT, getenv, colored, fetch
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from sentencepiece import SentencePieceProcessor
@@ -337,7 +337,7 @@ if __name__ == "__main__":
   parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data to out.prof")
-  parser.add_argument("--gen", default="1", help=f"""Generation of the model to use {list(MODEL_PARAMS.keys())}""")
+  parser.add_argument("--gen", default="tiny", help=f"""Generation of the model to use {list(MODEL_PARAMS.keys())}""")
   parser.add_argument("--size", type=str, default=None, help=f"""Size of model to use {", ".join([f"{list(v.keys())} for gen '{k}'" for k, v in MODEL_PARAMS.items()])}""")
   parser.add_argument("--quantize", type=str, default=None, help="Quantize the weights to int8 or nf4 in memory")
   parser.add_argument("--model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
@@ -441,6 +441,14 @@ After you are done speaking, output [EOS]. You are not Chad.
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
+
+  # download weights for tiny
+  if args.gen == "tiny" and args.size == "1B":
+    model_url = "https://huggingface.co/TinyLlama/TinyLlama_v1.1/resolve/main/pytorch_model.bin"
+    tokenizer_url = "https://huggingface.co/TinyLlama/TinyLlama_v1.1/resolve/main/tokenizer.model"
+    fetch(model_url, name=MODEL_PATH)
+    fetch(tokenizer_url, name=TOKENIZER_PATH)
+
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, device=device)
   param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(llama.model))

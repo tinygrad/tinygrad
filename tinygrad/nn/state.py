@@ -158,8 +158,8 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad=None, backward_hooks=None, metadata=None):
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
-    if storage[2] not in offsets: return None
-    byte_offset = offsets[storage[2]]+storage_offset*storage[1].itemsize
+    if str(storage[2]) not in offsets: return None
+    byte_offset = offsets[str(storage[2])]+storage_offset*storage[1].itemsize
     ret = t[byte_offset:byte_offset+prod(size)*storage[1].itemsize].bitcast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
@@ -172,15 +172,17 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       assert storage[1] != dtypes.bfloat16, "can't CLANG permute BF16"
       # TODO: find a nice way to support all shapetracker on disktensors
       ret = ret.to(None).reshape(intermediate_shape).permute(permute_indexes)
-
     return ret.reshape(size)
+
+  def _rebuild_from_type_v2(func, new_type, args, state):
+    return _rebuild_tensor_v2(*args)
 
   class Parameter:
     def __setstate__(self, state): self.tensor = state[0]
 
   deserialized_objects: Dict[str, Any] = {}
   intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16,
-               "IntStorage": dtypes.int32, "BoolStorage": dtypes.bool,
+               "IntStorage": dtypes.int32, "BoolStorage": dtypes.bool, "_rebuild_from_type_v2": _rebuild_from_type_v2, "Tensor": Tensor,
                "LongStorage": dtypes.int64, "_rebuild_tensor_v2": _rebuild_tensor_v2, "FloatTensor": None, "Parameter": Parameter}
   whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed
   class Dummy: pass
