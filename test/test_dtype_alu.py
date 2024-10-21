@@ -28,16 +28,13 @@ binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, oper
 if Device.DEFAULT == "LLVM":
   binary_operations.remove(operator.lt)
 
-# if is_dtype_supported(dtypes.bfloat16, Device.DEFAULT):
-#   dtypes_float.remove(dtypes.bfloat16)
-
 integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor, torch.bitwise_xor), 
                                                  (Tensor.bitwise_and, np.bitwise_and, torch.bitwise_and), 
                                                  (Tensor.bitwise_or, np.bitwise_or, torch.bitwise_or)]
 unary_operations = [(Tensor.exp, np.exp, torch.exp), (Tensor.log, np.log, torch.log), (Tensor.sin, np.sin, torch.sin),
                     (Tensor.sqrt, np.sqrt, torch.sqrt), (Tensor.reciprocal, np.reciprocal, torch.reciprocal)]
 
-torch_dtypes = { dtypes.bfloat16: torch.bfloat16 }
+torch_dtypes_map = { dtypes.bfloat16: torch.bfloat16 }
 
 # TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
@@ -69,8 +66,8 @@ class ht:
 def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
-  if dtype in torch_dtypes.keys(): 
-    compare_value = (op[2](torch.tensor([a], dtype=torch_dtypes[dtype]), torch.tensor([b], dtype=torch_dtypes[dtype]))).float().numpy()
+  if dtype in torch_dtypes_map.keys():
+    compare_value = (op[2](torch.tensor([a], dtype=torch_dtypes_map[dtype]), torch.tensor([b], dtype=torch_dtypes_map[dtype]))).float().numpy()
   else:
     compare_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)), np.array([b]).astype(_to_np_dtype(dtype)))
   if dtype in (*dtypes_float, dtypes.bfloat16): np.testing.assert_allclose(tensor_value, compare_value, atol=1e-10)
@@ -83,8 +80,8 @@ def universal_test_unary(a, dtype, op):
   ast = sched[-1].ast
   run_schedule(sched)
   tensor_value = out.numpy()
-  if dtype in torch_dtypes.keys():
-    compare_value = op[2](torch.tensor([a], dtype=torch_dtypes[dtype])).float().numpy()
+  if dtype in torch_dtypes_map.keys():
+    compare_value = op[2](torch.tensor([a], dtype=torch_dtypes_map[dtype])).float().numpy()
   else:
     compare_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
   if dtype in (*dtypes_float, dtypes.bfloat16): np.testing.assert_allclose(tensor_value, compare_value, atol=1e-3, rtol=1e-2)
@@ -132,7 +129,6 @@ class TestDTypeALU(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16, Device.DEFAULT), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, strat.sampled_from(unary_operations))
-  @unittest.skipIf(Device.DEFAULT == "AMD", "broken on AMD")
   def test_bfloat16_unary(self, a, op): universal_test_unary(a, dtypes.bfloat16, op)
 
   @given(ht.uint8, ht.uint8, strat.sampled_from(integer_binary_operations))
