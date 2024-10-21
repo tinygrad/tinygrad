@@ -9,7 +9,7 @@ import argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
 from tinygrad import Tensor, Device, GlobalCounters, nn
-from tinygrad.helpers import Context, Timing, Profiling, DEBUG, JIT, getenv, colored
+from tinygrad.helpers import Context, Timing, Profiling, DEBUG, JIT, getenv, colored, fetch
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from sentencepiece import SentencePieceProcessor
@@ -185,10 +185,10 @@ def load(fn:str):
     with open(fn) as fp: weight_map = json.load(fp)['weight_map']
     parts = {n: load(str(Path(fn).parent / Path(n).name)) for n in set(weight_map.values())}
     return {k: parts[n][k] for k, n in weight_map.items()}
-  elif fn.endswith(".safetensors"):
-    return safe_load(fn)
   else:
-    return torch_load(fn)
+    # NOTE: we try safe_Load first, since it's safe
+    try: return safe_load(fn)
+    except Exception: return torch_load(fn)
 
 class LLaMa:
   @staticmethod
@@ -337,7 +337,7 @@ if __name__ == "__main__":
   parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data to out.prof")
-  parser.add_argument("--gen", default="1", help=f"""Generation of the model to use {list(MODEL_PARAMS.keys())}""")
+  parser.add_argument("--gen", default="tiny", help=f"""Generation of the model to use {list(MODEL_PARAMS.keys())}""")
   parser.add_argument("--size", type=str, default=None, help=f"""Size of model to use {", ".join([f"{list(v.keys())} for gen '{k}'" for k, v in MODEL_PARAMS.items()])}""")
   parser.add_argument("--quantize", type=str, default=None, help="Quantize the weights to int8 or nf4 in memory")
   parser.add_argument("--model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
@@ -440,6 +440,10 @@ After you are done speaking, output [EOS]. You are not Chad.
   LLAMA_SUFFIX = {"1": "", "2": "-2", "3": "-3", "code": "-code", "tiny": "-tiny"}[args.gen]
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
+  if not TOKENIZER_PATH.is_file() and args.gen == "tiny":
+    print("model not found, fetching tiny llama")
+    MODEL_PATH = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/model.safetensors")
+    TOKENIZER_PATH = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.model")
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, device=device)
