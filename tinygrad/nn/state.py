@@ -267,7 +267,7 @@ def gguf_load(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
   ```python
   fn = "Meta-Llama-3-8B-Instruct.Q4_0.gguf"
   gguf_tensor = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}").to(Device.DEFAULT)
-  kv_data, state_dict = load_gguf(gguf_tensor)
+  kv_data, state_dict = gguf_load(gguf_tensor)
   ```
   """
   if tensor.dtype != dtypes.uint8 or len(tensor.shape) != 1: raise ValueError("GGUF tensor must be 1d and of dtype uint8!")
