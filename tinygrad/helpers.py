@@ -61,10 +61,6 @@ def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> Tuple[List[T], List[T]
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
-def unwrap2(x:Tuple[T,Any]) -> T:
-  ret, err = x
-  assert err is None, str(err)
-  return ret
 def get_child(obj, key):
   for k in key.split('.'):
     if k.isnumeric(): obj = obj[int(k)]
