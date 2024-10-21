@@ -28,6 +28,10 @@ To understand what training looks like in tinygrad, you should read `beautiful_m
 
 We have a [quickstart guide](quickstart.md) and a [showcase](showcase.md)
 
+## tinygrad Stack
+
+<img src="./tinygrad_vs_others.png" alt="Tinygrad vs others" style="max-width: 1000px; height: auto;" />
+
 ## Differences from PyTorch
 
 If you are migrating from PyTorch, welcome. Most of the API is the same. We hope you will find tinygrad both familiar and somehow more "correct feeling"

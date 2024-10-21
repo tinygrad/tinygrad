@@ -2,8 +2,7 @@ from typing import Optional, List, Tuple, Dict, Callable, Any
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.ops import Op, UOps, UOp, flops_mem
-from tinygrad.shape.symbolic import sym_infer, sint, Variable
+from tinygrad.ops import Op, UOps, UOp, flops_mem, sym_infer, sint, Variable
 from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
@@ -43,7 +42,7 @@ class Program:
     if not self._ran_post_init and self.uops is not None:
       # single pass through the uops
       for u in self.uops:
-        if u.op is UOps.DEFINE_VAR: self.vars.append(Variable(u.arg[0], u.arg[1], u.arg[2]))
+        if u.op is UOps.DEFINE_VAR: self.vars.append(u)
         if u.op is UOps.DEFINE_GLOBAL: self.globals.append(u.arg)
         if u.op is UOps.STORE: self.outs.extend([x.arg for x in u.src[0].sparents if x.op is UOps.DEFINE_GLOBAL])
         if u.op is UOps.SPECIAL:
@@ -89,4 +88,5 @@ class Renderer:
   extra_matcher: Any = None
   code_for_op: Dict[Op, Callable] = {}
 
+  def __reduce__(self): return self.__class__, ()
   def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")

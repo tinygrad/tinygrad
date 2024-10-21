@@ -1,4 +1,3 @@
-# TODO: move the GRAPH and DEBUG stuff to here
 import gc
 from tinygrad.helpers import prod
 from tinygrad.engine.lazy import LazyBuffer

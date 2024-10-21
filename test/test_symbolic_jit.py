@@ -1,9 +1,7 @@
 import unittest
 
 from test.helpers import assert_jit_cache_len
-from tinygrad.engine.jit import TinyJit
-from tinygrad.shape.symbolic import Variable
-from tinygrad.tensor import Tensor
+from tinygrad import Variable, Tensor, TinyJit
 import numpy as np
 
 class TestSymbolicJit(unittest.TestCase):

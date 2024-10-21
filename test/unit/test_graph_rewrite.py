@@ -94,20 +94,20 @@ class TestFoldingAndReduction(unittest.TestCase):
 
 class TestModuloAndDivisionFolding(unittest.TestCase):
   def test_full_graph_rewrite_modulo_folding_with_define_var(self):
-    x_var_uop = UOp.define_var('x', dtypes.int32, 0, 100)
+    x_var_uop = UOp.variable('x', 0, 100)
     optimized_mod_uop = apply_rewrite(((x_var_uop * 4) + 2) % 4)
     self.assertEqual(optimized_mod_uop.op, UOps.CONST)
     self.assertEqual(optimized_mod_uop.arg, 2)
 
   def test_full_graph_rewrite_division_folding_with_define_var(self):
-    n_var_uop = UOp.define_var('n', dtypes.int32, 1, 1000)
+    n_var_uop = UOp.variable('n', 1, 1000)
     optimized_div_uop = apply_rewrite((n_var_uop * 6) // 3)
     self.assertEqual(optimized_div_uop.op, UOps.ALU)
     self.assertEqual(optimized_div_uop.arg, BinaryOps.MUL)
     self.assertEqual(optimized_div_uop.src[1].arg, 2)
 
   def test_full_graph_rewrite_complex_mod_div_folding(self):
-    k_var_uop = UOp.define_var('k', dtypes.int32, 0, 50)
+    k_var_uop = UOp.variable('k', 0, 50)
     optimized_div_uop = apply_rewrite(((k_var_uop * 12 + 8) % 6) // 2)
     self.assertEqual(optimized_div_uop.op, UOps.CONST)
     self.assertEqual(optimized_div_uop.arg, 1)
@@ -124,17 +124,17 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
     if opt.op is UOps.VECTORIZE: self.assertFalse(all_same(opt.src))
 
   def test_full_graph_rewrite_modulo_large_divisor(self):
-    x_var_uop = UOp.define_var('x', dtypes.int32, 1, 5)
+    x_var_uop = UOp.variable('x', 1, 5)
     self.assertIs(apply_rewrite(x_var_uop % 10), x_var_uop)
 
   def test_full_graph_rewrite_division_with_remainder(self):
-    x_var_uop = UOp.define_var('x', dtypes.int32, 7, 9)
+    x_var_uop = UOp.variable('x', 7, 9)
     optimized_sink = apply_rewrite(x_var_uop // 2)
     for x_value in range(7, 10):
       self.assertEqual(x_value // 2, evaluate_uop(optimized_sink, {'x': x_value}))
 
   def test_full_graph_rewrite_complex_mod_div_expression(self):
-    x_var_uop = UOp.define_var('x', dtypes.int32, 1, 10)
+    x_var_uop = UOp.variable('x', 1, 10)
     optimized_sink = apply_rewrite(((x_var_uop * 5) % 3) // 2)
     for x_value in range(1, 11):
       original_result = ((x_value * 5) % 3) // 2
@@ -152,14 +152,14 @@ class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
 
   @unittest.skip("broken")
   def test_full_graph_rewrite_modulo_negative_dividend(self):
-    x_var_uop = UOp.define_var('x', dtypes.int32, -5, -1)
+    x_var_uop = UOp.variable('x', -5, -1)
     optimized_sink = full_graph_rewrite((x_var_uop % 3).sink())
     for x_value in range(-5, 0):
       self.assertEqual(x_value % 3, evaluate_uop(optimized_sink.src[0], {'x': x_value}))
 
   @unittest.skip("broken")
   def test_full_graph_rewrite_division_negative_divisor(self):
-    x_var_uop = UOp.define_var('x', dtypes.int32, 1, 5)
+    x_var_uop = UOp.variable('x', 1, 5)
     optimized_sink = full_graph_rewrite((x_var_uop // -2).sink())
     for x_value in range(1, 6):
       self.assertEqual(x_value // -2, evaluate_uop(optimized_sink.src[0], {'x': x_value}))

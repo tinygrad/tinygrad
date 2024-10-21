@@ -1,23 +1,22 @@
-import sys, pickle, atexit
+import sys, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
-from tinygrad.ops import REDUCE_ALU, UNSAFE_PAD_OPS, MetaOps, ReduceOps, TernaryOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, resolve, \
-    graph_rewrite, track_rewrites
-from tinygrad.helpers import GRAPH, DEBUG, MULTIOUTPUT, SAVE_SCHEDULE, FUSE_CONV_BW, FUSE_ARANGE, AST_REWRITE, GlobalCounters, all_same, \
-    colored, diskcache_put, prod, dedup, all_int, merge_dicts, getenv, Metadata, unwrap
-from tinygrad.shape.symbolic import Variable, sint
+from typing import Callable, Set, Tuple, List, Dict, Optional, DefaultDict, cast
+from tinygrad.ops import BUFFER_UOPS, UNSAFE_PAD_OPS, MetaOps, ReduceOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, Variable, resolve, \
+    graph_rewrite, track_rewrites, sint
+from tinygrad.helpers import DEBUG, FUSE_CONV_BW, FUSE_ARANGE, Metadata, all_same, colored, diskcache_put, prod, dedup, all_int, merge_dicts, \
+    getenv, unwrap
 from tinygrad.dtype import ImageDType, dtypes
-from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer
 from tinygrad.shape.view import View, strides_for_shape
+from tinygrad.engine.lazy import LazyBuffer
+from tinygrad.device import Buffer
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
 
-BUF_LIMIT = {"METAL": 32}
-METAOPS = {MetaOps.CUSTOM:UOps.CUSTOM, MetaOps.COPY:UOps.COPY, MetaOps.EMPTY:UOps.EMPTY, MetaOps.VIEW:UOps.BUFFER_VIEW}
+BUF_LIMIT = {"METAL":32}
+METAOPS = {MetaOps.COPY:UOps.COPY, MetaOps.EMPTY:UOps.EMPTY, MetaOps.VIEW:UOps.BUFFER_VIEW}
 
 # *** ScheduleItem return type ***
 
@@ -25,7 +24,7 @@ METAOPS = {MetaOps.CUSTOM:UOps.CUSTOM, MetaOps.COPY:UOps.COPY, MetaOps.EMPTY:UOp
 class ScheduleItem:
   ast: UOp
   bufs: Tuple[Buffer, ...]
-  metadata: Optional[Tuple[Metadata, ...]]
+  metadata: Tuple[Metadata, ...]
   @property
   def outputs(self) -> Tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
@@ -39,28 +38,21 @@ class ScheduleItem:
 class LBScheduleItem:
   ast: UOp
   bufs: Tuple[LazyBuffer, ...]
-  metadata: Optional[Tuple[Metadata, ...]]
+  metadata: Tuple[Metadata, ...]
   @property
   def outputs(self) -> Tuple[LazyBuffer, ...]: return self.bufs[:len(self.ast.src)] if self.ast.op is UOps.SINK else self.bufs[0:1]
   @property
   def inputs(self) -> Tuple[LazyBuffer, ...]: return self.bufs[len(self.ast.src):] if self.ast.op is UOps.SINK else self.bufs[1:]
 
-@dataclass(frozen=True)
-class ScheduleItemContext:
-  bufs: Tuple[int, ...]
-
-# *** UOp with SWIZZLE (movementops) rewriting to UOp we can index ***
+# *** UOp with VIEW (movementops) rewriting to UOp we can index ***
 
 # ** helpers for doing movementops on uops
 
 def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], cache:Dict[UOp, UOp]) -> UOp:
   if (n:=cache.get(u)) is not None: return n
-  if u.op is UOps.VIEW:
-    new_st = apply_to_st(u.arg)
-    return u if u.arg == new_st else UOp(UOps.VIEW, dtypes.void, (), new_st)
+  if u.op is UOps.VIEW: return u.replace(arg=apply_to_st(u.arg))
   if len(u.src) == 0 or (u.st is not None and u.st == apply_to_st(u.st)): return u
-  new_srcs = tuple(st_fixup(x, apply_to_st, cache) for x in u.src)
-  cache[u] = ret = u if new_srcs == u.src else UOp(u.op, u.dtype, new_srcs, u.arg)
+  cache[u] = ret = u.replace(src=tuple(st_fixup(x, apply_to_st, cache) for x in u.src))
   return ret
 
 def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:
@@ -70,22 +62,20 @@ def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTr
 
 # ** reduceop fusor
 
-def push_swizzle_up_through_reduce(swizzle:UOp, reduceop:UOp) -> Optional[UOp]:
-  if (swizzle_st:=unwrap(swizzle.st)).contiguous: return None
-  rsrc = reduceop.src[0]
-  tmp, rshape = permute_reduce(ShapeTracker.from_shape(unwrap(rsrc.st).shape), reduceop.axis_arg)
+def view_r(view:UOp, r:UOp, rsrc:UOp) -> Optional[UOp]:
+  if (st:=unwrap(view.st)).contiguous: return None
+  tmp, rshape = permute_reduce(ShapeTracker.from_shape(unwrap(rsrc.st).shape), r.axis_arg)
   prshape = prod(rshape)
   strides = strides_for_shape(rshape)
   nv: List[View] = []
-  for v in swizzle_st.views:
+  for v in st.views:
     nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
                           v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
   # update input_st and axis
   new_input_st = tmp + ShapeTracker(tuple(nv))
-  _, new_rshape = permute_reduce(new_input_st, reduceop.axis_arg)
+  _, new_rshape = permute_reduce(new_input_st, r.axis_arg)
   new_axis = tuple(range(len(new_input_st.shape)-len(new_rshape), len(new_input_st.shape)))
-  return UOp(UOps.REDUCE_AXIS, reduceop.dtype, (st_fixup(rsrc, lambda st:st+new_input_st, {}),),
-             (reduceop.arg[0], new_axis)).view(ShapeTracker.from_shape(swizzle_st.shape))
+  return st_fixup(rsrc, lambda st:st+new_input_st, {}).r(r.arg[0], new_axis).view(ShapeTracker.from_shape(st.shape))
 
 def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:
   swizzle_st, src_st = unwrap(swizzle.st), unwrap(swizzle.src[0].st)
@@ -93,7 +83,7 @@ def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:
   assert prod(swizzle_st.shape) == prod(src_st.shape), "can't push expands down to STORE"
   output_shape = swizzle_st.reduce(root.axis_arg)
   new_axis = tuple(i for i,(s,u) in enumerate(zip(src_st.shape, output_shape)) if s != u)
-  return UOp(UOps.REDUCE_AXIS, root.dtype, swizzle.src, (root.arg[0], new_axis)).view(ShapeTracker.from_shape(output_shape))
+  return swizzle.src[0].r(root.arg[0], new_axis).view(ShapeTracker.from_shape(output_shape))
 
 def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   swizzles = [x for x in root.src if x.op is UOps.VIEW and len(x.src) != 0]
@@ -109,94 +99,98 @@ def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
   assert not any(x.op is UOps.REDUCE_AXIS for x in first_reduce.parents), "can't merge more than two reduceops at a time"
-  return UOp(UOps.REDUCE_AXIS, first_reduce.dtype, first_reduce.src, (first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg))
+  return first_reduce.src[0].r(first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg)
 
-reduceop_fusor = PatternMatcher([
-  # SWIZZLE on VALID merges the views
-  (UPat(UOps.VIEW, src=(UPat(UOps.ALU, src=(UPat(UOps.VALID), UPat.var(), UPat.var()), name="alu", arg=TernaryOps.WHERE),), name="root"),
-   lambda root,alu: UOp(UOps.VALID, dtypes.bool, (root.st.to_uop(),)).where(*alu.src[1:]) if root.st != alu.st else alu),
-  # push a SWIZZLE up to LOAD, through a reduce (eg. expands)
-  (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, name="reduceop"),), name="swizzle"), push_swizzle_up_through_reduce),
+merge_views = PatternMatcher([(UPat(UOps.VIEW, src=(UPat(UOps.VIEW, name="s0"),), name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st))])
+
+# push VIEW to loads
+view_left = merge_views+PatternMatcher([
+  # view before ALU
+  (UPat(UOps.VIEW, src=(UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.CONTIGUOUS, *BUFFER_UOPS), name="e"),), name="v"),
+   lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
+])
+
+# push VIEW to stores
+view_right = merge_views+PatternMatcher([
+  # ASSIGN can override st
+  (UPat(UOps.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(UOps.ASSIGN, name="a"))),
+   lambda a,b,st: UOp.store(b, (a.arg[0]+st.arg).to_uop(), a.replace(arg=())) if a.arg else None),
+  # view on reduce creates a new VIEW
+  (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, src=UPat.var("rsrc"), name="r"),), name="view"), view_r),
   # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.VIEW, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
   # push SWIZZLE(s) down to STORE, through an elementwise op (ONLY reshapes)
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.STORE), name="root"), push_swizzle_down_through_elementwise),
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.CONTIGUOUS, UOps.STORE), name="root"), push_swizzle_down_through_elementwise),
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
-enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx.bufs.index(x.arg[0])))])
+def _append_st_vars(ctx:Tuple[Dict[Variable, int], Set[ShapeTracker], Tuple[int, ...]], x:UOp) -> Optional[UOp]:
+  if (st:=unwrap(x.st)) in ctx[1]: return None
+  st, var_vals = st.simplify().unbind()
+  ctx[0].update(var_vals)
+  ctx[1].add(st)
+  return st.to_uop() if st != x.st else None
+append_st_vars = PatternMatcher([(UPat(UOps.VIEW, name="x"), _append_st_vars)])
 
-@track_rewrites
-def full_ast_rewrite(base_sink:UOp, ctx:ScheduleItemContext) -> UOp:
-  if not AST_REWRITE: return base_sink
-  sink = graph_rewrite(base_sink, reduceop_fusor)
-  ret = graph_rewrite(sink, enumerate_bufs, ctx)
-  if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
+def _append_buf(ctx:Tuple[Dict[Variable, int], Set[ShapeTracker], Tuple[int, ...]], x:UOp) -> UOp:
+  return UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx[2].index(x.arg[0]))
+append_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), _append_buf),])
+
+to_ast = PatternMatcher([
+  (UPat(UOps.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
+  (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda x: x.replace(src=())),
+])
+
+PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, Tuple[int, ...], UOp]] = []
+def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable, int]) -> UOp:
+  sink = graph_rewrite(graph_rewrite(base_sink, view_left), view_right)
+  ret = graph_rewrite(graph_rewrite(sink, to_ast), append_st_vars+append_bufs, (var_vals, set(), bufs))
+  PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
   return ret
+
+if getenv("RUN_PROCESS_REPLAY"):
+  @atexit.register
+  def save_process_replay():
+    for base_sink,ctx,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
 
-def _recursive_uop(buf:LazyBuffer, st:ShapeTracker, outputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], inputs:List[LazyBuffer],
-                      buf_uops:Dict[Buffer, UOp], assign_targets:Dict[LazyBuffer, LazyBuffer],
-                      cache:Dict[Tuple[LazyBuffer, ShapeTracker], UOp]) -> UOp:
-  """recursively create a UOp"""
-  if buf is not buf.base: st, buf = buf.st+st, buf.base
-  if (buf, st) in cache: return cache[(buf, st)]
-  assert buf.op is not None, "base must be a base itself"
+def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], inputs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], cache:Dict[LazyBuffer, UOp]) -> UOp:
+  if (r:=cache.get(buf)) is not None: return r
+  if buf is not buf.base:
+    cache[buf] = ret = to_uop(buf.base, outputs, inputs, buf_uops, cache).view(buf.st)
+    return ret
+  if buf.op is MetaOps.CONST: return buf_uops[buf.buffer]
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
-
-  # buffer ops define ShapeTracker
-  # if it's realized, it's a load and we add it to the inputs
   if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs:
-    unbound_st, st_var_vals = st.simplify().unbind()
-    var_vals.update(st_var_vals)
-    if buf.op is MetaOps.CONST:
-      if isinstance(val:=buf.arg, UOp): var_vals.update([val.unbind()])
-      return ubuf.view(unbound_st)
-    if buf in assign_targets and not (unbound_st.contiguous or (len(unbound_st.views) == 1 and unbound_st.views[0].mask is not None and \
-        ShapeTracker.from_shape(unbound_st.shape).shrink(unbound_st.views[0].mask) == unbound_st.shrink(unbound_st.views[0].mask))):
-      # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
-      raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
-                           +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-    if buf not in assign_targets and buf not in inputs: inputs.append(buf)
-    return UOp(UOps.LOAD, dtype, (ubuf, unbound_st.to_uop()))
+    if not any(x.buffer is buf.buffer for x in outputs) and buf not in inputs: inputs.append(buf)
+    return UOp.load(ubuf, buf.st.to_uop(), dtype=dtype)
+  src = tuple(to_uop(x, outputs, inputs, buf_uops, cache) for x in buf.srcs)
+  if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
+  elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
+  elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]), buf.arg)
+  elif buf.op in METAOPS: ret = UOp(METAOPS[cast(MetaOps, buf.op)], buf.dtype, (buf_uops[buf.buffer], *src), buf.arg)
+  elif buf.op is UnaryOps.CAST: ret = UOp(UOps.CAST, dtype, src)
+  elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
+  else: ret = UOp(UOps.ALU, dtype, src, buf.op)
+  cache[buf] = ret
+  return ret
 
-  # reduce ops change ShapeTracker
-  if buf.op in ReduceOps:
-    rsrc = _recursive_uop(buf.srcs[0], ShapeTracker.from_shape(buf.srcs[0].shape), outputs, var_vals, inputs, buf_uops, assign_targets, cache)
-    return cache.setdefault((buf, st), UOp(UOps.REDUCE_AXIS, dtype, (rsrc,), (REDUCE_ALU[cast(ReduceOps, buf.op)], buf.arg)).view(st))
-
-  # elementwise ops pass shapetracker
-  in_uops = tuple(_recursive_uop(x, st, outputs, var_vals, inputs, buf_uops, assign_targets, cache) for x in buf.srcs)
-  if buf.op is MetaOps.CONTIGUOUS:
-    assert buf in outputs, f"{buf.op} must be writable"
-    return in_uops[0]
-  if buf.op is MetaOps.ASSIGN: return cache.setdefault((buf, st), UOp(UOps.ASSIGN, dtype, (in_uops[1].src[0], in_uops[0])))
-  if buf.op is UnaryOps.CAST: return cache.setdefault((buf, st), UOp(UOps.CAST, dtype, in_uops))
-  if buf.op is UnaryOps.BITCAST: return cache.setdefault((buf, st), UOp(UOps.BITCAST, dtype, in_uops))
-  return cache.setdefault((buf, st), UOp(UOps.ALU, dtype, in_uops, buf.op))
-
-def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp]) -> Tuple[LBScheduleItem, Dict[Variable, int]]:
+def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], var_vals:Dict[Variable, int]) -> LBScheduleItem:
   """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
-  if (out:=outs[0]).op in METAOPS:
-    return LBScheduleItem(UOp(METAOPS[cast(MetaOps, out.op)], out.dtype, (), out.arg), (out,)+tuple(x.base for x in out.srcs),
-                          (out.metadata,) if out.metadata is not None else None), {}
-  # create the stores
-  var_vals = merge_dicts([out.st.var_vals.copy() for out in outs])
-  assign_targets = {x.srcs[1]:x for x in outs if x.op is MetaOps.ASSIGN}
-  cache: Dict[Tuple[LazyBuffer, ShapeTracker], UOp] = {}
-  ast: List[UOp] = []
+  cache: Dict[LazyBuffer, UOp] = {}
   inputs: List[LazyBuffer] = []
-  for out in outs:
-    src = _recursive_uop(out, output_st:=ShapeTracker.from_shape(out.shape), tuple(outs), var_vals, inputs, buf_uops, assign_targets, cache=cache)
-    if out.op is MetaOps.ASSIGN and out.arg:
-      assert out.arg[0].shape == out.shape, f"ASSIGN must not override output shape {out.arg[0].shape} != {out.shape}"
-      output_st = out.arg[0]
-    output_st, vv = output_st.simplify().unbind()
-    var_vals.update(vv)
-    ast.append(UOp(UOps.STORE, dtypes.void, (buf_uops[out.buffer], output_st.to_uop(), src)))
-  sink = full_ast_rewrite(ast[0].sink(*ast[1:]), ScheduleItemContext(bufs=tuple(buf_uops[x.buffer].arg[0] for x in outs+inputs)))
-  return LBScheduleItem(sink, tuple(outs+inputs), tuple(dedup([x[0].metadata for x in cache if x[0].metadata and x[0] not in inputs]))), var_vals
+  sink = UOp(UOps.SINK, src=tuple(UOp.store(buf_uops[out.buffer], ShapeTracker.from_shape(out.shape).to_uop(),
+                                            to_uop(out, outs, inputs, buf_uops, cache)) for out in outs))
+  sink = full_ast_rewrite(sink, tuple(buf_uops[x.buffer].arg[0] for x in outs+inputs), var_vals)
+  # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
+  if len(assign_targets:=[x.src[0] for x in sink.sparents if x.op is UOps.ASSIGN]) != 0:
+    if not all((s:=x.st_arg).contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \
+        and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in sink.sparents if x.op is UOps.LOAD and x.src[0] in assign_targets):
+      raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
+                         +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
+  return LBScheduleItem(sink, tuple(outs+inputs),
+                        tuple(dedup([x.metadata for x in cache if x.metadata is not None and (x.base in outs or x.base.buffer not in buf_uops)])))
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
@@ -206,9 +200,6 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs: return None
   if buf.base.realized is not None: return realizes.setdefault(buf.base)
-  if GRAPH:
-    from tinygrad.engine.graph import log_lazybuffer
-    log_lazybuffer(buf, scheduled)
   # check if we need to realize views
   if buf is not buf.base:
     # fuse some pads
@@ -228,9 +219,9 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   allbufs[buf] = None
   if buf.forced_realize or buf.op in MetaOps: realizes[buf] = None
   if buf.op is MetaOps.ASSIGN:
-    assert buf.srcs[1].base is buf.srcs[1], f"assign must be to base {buf.srcs[1]}"
-    assert buf.srcs[1].realized is not None, f"assign must be already realized to schedule {buf.srcs[1]}"
-    assign_targets[buf.srcs[1]] = buf
+    assign_targets[(target:=buf.srcs[0])] = buf
+    assert target._base is None, f"assign must be to base {target}"
+    assert target.is_realized(), f"assign must be already realized to schedule {target}"
   if buf.op is MetaOps.COPY:
     assert buf.srcs[0].st.contiguous and buf.srcs[0].size == buf.srcs[0].base.size, "can only copy contig"
     realizes[buf.srcs[0].base] = None
@@ -239,11 +230,13 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     if x.base.realized is None: children[x.base][buf] = None
     _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
 
-def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None]) -> bool:
+def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict[LazyBuffer, bool]) -> bool:
+  if (n:=cache.get(buf)) is not None: return n
   if buf in realizes: return True
   # NOTE: this broke to_image_idx and coder with JIT
   if buf.op in UNSAFE_PAD_OPS: return False
-  return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
+  cache[buf] = ret = all(_is_padding_okay(x.base, realizes, cache) for x in buf.srcs)
+  return ret
 
 def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
                      realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Dict[LazyBuffer, None],
@@ -277,11 +270,9 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def _get_output_groups(outs:List[LazyBuffer]) -> \
-  Tuple[DefaultDict[LazyBuffer, List[LazyBuffer]],  # these are the output groups
-        Dict[Buffer, UOp],                          # this is a map of realized Buffers to UOps.BUFFER
-        Dict[LazyBuffer, LazyBuffer]]:              # these are the buffers we ASSIGN to in this schedule
-  """find all the realizes in the graph, group the output LazyBuffers into kernels."""
+@track_rewrites(named=True)
+def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
   allbufs: Dict[LazyBuffer, None] = {}
@@ -293,7 +284,7 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
 
   # check if we have to realize pads
   for p in simple_pads:
-    if not _is_padding_okay(p, realizes):
+    if not _is_padding_okay(p, realizes, {}):
       realizes[p] = None
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
@@ -356,9 +347,10 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
 
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   buf_uops: Dict[Buffer, UOp] = {}
+  var_vals: Dict[Variable, int] = {}
   for buf in realizes:
     if buf.realized is None and buf.op is not MetaOps.CONST:
-      output_groups[reduce_for_op[buf] if buf in reduce_for_op and MULTIOUTPUT else buf].append(buf)
+      output_groups[reduce_for_op.get(buf, buf)].append(buf)
 
       # make things that can't be images not images
       if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
@@ -371,25 +363,14 @@ def _get_output_groups(outs:List[LazyBuffer]) -> \
           buf.buffer.dtype = dtypes.float32
           buf.buffer.options = None
     if buf.op is MetaOps.CONST:
+      if isinstance(val:=buf.arg, UOp): var_vals.update([val.unbind()])
       uop = UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(buf.dtype.scalar(), buf.arg), v.const_like(0))
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
     else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
     buf_uops.setdefault(buf.buffer, uop)
-  return output_groups, buf_uops, assign_targets
 
-SCHEDULES: List[Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]], DefaultDict[LBScheduleItem, int]]] = []
-def _graph_schedule(outs:List[LazyBuffer]) -> \
-  Tuple[DefaultDict[LBScheduleItem, List[LBScheduleItem]],  # this is the graph
-        DefaultDict[LBScheduleItem, int], # this is the in-degree of the graph
-        Dict[Variable, int]]: # this has all the var values of the schedule
-  """create a graph for realizing the outputs"""
-  output_groups, buf_uops, assign_targets = _get_output_groups(outs)
   # preschedule all buffers in realizes
-  prescheduled: List[LBScheduleItem] = []
-  var_vals: Dict[Variable, int] = {}
-  for group in output_groups.values():
-    prescheduled.append((ret:=_lower_lazybuffer(group, buf_uops))[0])
-    var_vals = merge_dicts([var_vals, ret[1]])
+  prescheduled = [_lower_lazybuffer(outs, buf_uops, var_vals) for outs in output_groups.values()]
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
   graph: DefaultDict[LBScheduleItem, List[LBScheduleItem]] = defaultdict(list)
@@ -407,27 +388,10 @@ def _graph_schedule(outs:List[LazyBuffer]) -> \
       graph[lsi].append(assign)
       in_degree[assign] += 1
 
-  if SAVE_SCHEDULE:
-    def _save():
-      print(f"saving {len(SCHEDULES)} schedule graphs to", fp:=getenv("SAVE_SCHEDULE_PATH", "schedule.pkl"))
-      with open(fp, "wb") as f: pickle.dump(SCHEDULES, f)
-    if len(SCHEDULES) == 0: atexit.register(_save)
-    SCHEDULES.append((graph, in_degree))
-  return graph, in_degree, var_vals
-
-# *** DAG ordering: breadth first search ***
-
-def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  graph, in_degree, var_vals = _graph_schedule(outs)
   queue = deque(lsi for lsi,deg in in_degree.items() if deg == 0)
   schedule: List[ScheduleItem] = []
-  kernel_number = GlobalCounters.kernel_count
   while queue:
     lsi = queue.popleft()
-    if GRAPH:
-      kernel_number += 1
-      from tinygrad.engine.graph import realized_lazybuffer
-      for out in lsi.outputs: realized_lazybuffer(out, kernel_number)
     for out in lsi.outputs: del out.srcs  # can only schedule once
     schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.bufs if x.size != 0), lsi.metadata))
     if (m:=BUF_LIMIT.get(device:=si.outputs[0].device)) and len(si.bufs) >= m:

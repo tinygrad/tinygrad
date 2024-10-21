@@ -2,9 +2,9 @@ from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Union
-from tinygrad.ops import resolve, UOp
+from tinygrad.dtype import dtypes
+from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer
 from tinygrad.helpers import prod, all_int, argsort
-from tinygrad.shape.symbolic import NumNode, Variable, sint, sym_infer
 
 @functools.lru_cache(maxsize=None)
 def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:
@@ -82,6 +82,8 @@ def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
     offs -= here * stride
   return result
 
+def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.int, x) if isinstance(x, int) else x
+
 @dataclass(frozen=True)
 class View:
   shape:Tuple[sint, ...]
@@ -90,9 +92,18 @@ class View:
   mask:Optional[Tuple[Tuple[sint, sint], ...]]
   contiguous:bool
 
+  def to_indexed_uops(self:View, _idxs:Optional[List[UOp]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> Tuple[UOp, UOp]:
+    idxs = [UOp.range(dtypes.int, 0, s, i) for i,s in enumerate(self.shape)] if _idxs is None else _idxs
+    iexpr = variable_to_uop(self.offset)
+    for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else [None]*len(self.shape)):
+      if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
+      if m is not None:
+        if resolve(m[0] != 0): vexpr = vexpr * idx.ge(m[0])
+        if resolve(m[1] != sh): vexpr = vexpr * idx.lt(m[1])
+    return iexpr, vexpr
+
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def size(self) -> int:
-    # NOTE: Variable and the Node derived from it in symbolic shapes can only have int as max.
     ret = prod([x.vmax if isinstance(x, UOp) else x for x in self.shape])
     assert isinstance(ret, int), f"{ret=} is not int"
     return ret
@@ -108,7 +119,6 @@ class View:
     if mask is not None and all(m == (0,s) for m,s in zip(mask, shape)): mask = None
     # if any dimension has size >1, but is masked such that only one index in the dimension is unmasked
     # then its stride can also be set to 0, albeit with a corresponding adjustment required to the offset
-    # TODO: assert comparison with LtNode to avoid mis-using symbolic
     if mask and any(elim := [not resolve(b+1 < e) for b,e in mask]):
       if any(not resolve(b < e) for b,e in mask):
         strides, offset, mask = (0,) * len(shape), 0, ((0,0),) * len(shape)
@@ -148,7 +158,7 @@ class View:
     if vm1.contiguous and vm1.size() == vm2.size() and (ret := vm2.reshape(vm1.shape)) is not None: return ret
     if vm1.mask:
       for b,e in vm1.mask:
-        if not (b < e): return View.create(vm1.shape, (0,) * len(vm1.shape), 0, ((0,0),) * len(vm1.shape))
+        if resolve(b >= e, False): return View.create(vm1.shape, (0,) * len(vm1.shape), 0, ((0,0),) * len(vm1.shape))
       return (merged := vm2 + vm1.shrink(vm1.mask)) and merged.pad(tuple((b,s-e) for (b,e),s in zip(vm1.mask, vm1.shape)))
 
     # Project vm1's offset and strides on to vm2.
@@ -164,15 +174,15 @@ class View:
 
     # Merge dimensions in vm2 if required.
     # NB: Merging too many dimensions can make it difficult to project vm2's mask, hence only combining when required.
-    idxs: List[UOp] = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(vm1.shape)]
-    merged_size, merged_term = 1, NumNode(0)
+    idxs: List[UOp] = [UOp.variable(f"idx{i}", 0, s-1) for i,s in enumerate(vm1.shape)]
+    merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
     extents: List[Tuple[sint, UOp]] = []
     for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
       merged_term += sum([idxs[d1] * (s1 * merged_size) for d1, s1 in term]) + o * merged_size
       merged_size *= s
       if not resolve(merged_term >= merged_size) and not resolve(merged_term < 0):
         extents.append((merged_size, merged_term))
-        merged_size, merged_term = 1, NumNode(0)
+        merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
     if resolve(merged_term != 0): return None
     if (vm2_shape := tuple(s for s,_ in reversed(extents))) != vm2.shape:
       return (reshaped_vm2 := vm2.reshape(vm2_shape)) and reshaped_vm2 + vm1
@@ -181,7 +191,7 @@ class View:
       # Try to project vm2's mask on to vm1.
       newb, newe, bad = [0] * len(vm1.shape), list(vm1.shape), False
       for d2, ((b, e), o, (_, t)) in enumerate(zip(vm2.mask, origin, reversed(extents))):
-        if not (t.vmin < b or t.vmax >= e): continue
+        if resolve(b <= t.vmin and t.vmax < e, False): continue
         if not isinstance(o, int) or not isinstance(b, int) or not isinstance(e, int):
           bad = True
           continue
@@ -312,7 +322,6 @@ class View:
     strides, r_new_shape = [], reversed(new_shape)
     for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
       acc = 1
-      # TODO: this <= and != is for symbolic!?
       while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and (new_dim := next(r_new_shape, 0)) > 0:
         strides.append(new_stride)
         if resolve(new_dim != 1): new_stride *= (new_dim if resolve((acc := acc * new_dim) < real_dim) else 0)

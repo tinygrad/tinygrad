@@ -19,36 +19,36 @@ class TestVminVmaxProperties(unittest.TestCase):
 
   def test_vmin_vmax_addition_with_variable(self):
     # vmin and vmax for addition with a variable
-    x = UOp.define_var('x', dtypes.int32, 10, 20)
+    x = UOp.variable('x', 10, 20)
     uop = x + 5
     self.assertEqual(uop.vmin, 15)
     self.assertEqual(uop.vmax, 25)
 
   def test_vmin_vmax_multiplication_with_variable(self):
     # vmin and vmax for multiplication with a variable
-    x = UOp.define_var('x', dtypes.int32, -3, 4)
+    x = UOp.variable('x', -3, 4)
     uop = x * 2
     self.assertEqual(uop.vmin, -6)
     self.assertEqual(uop.vmax, 8)
 
   def test_vmin_vmax_with_negative_multiplication(self):
     # vmin and vmax when multiplying by a negative number
-    x = UOp.define_var('x', dtypes.int32, 2, 5)
+    x = UOp.variable('x', 2, 5)
     uop = x * -3
     self.assertEqual(uop.vmin, -15)
     self.assertEqual(uop.vmax, -6)
 
   def test_vmin_vmax_nested_min_max(self):
     # vmin and vmax with nested min/max operations
-    x = UOp.define_var('x', dtypes.int32, 0, 10)
+    x = UOp.variable('x', 0, 10)
     uop = x.max(5).min(8)
     self.assertEqual(uop.vmin, 5)
     self.assertEqual(uop.vmax, 8)
 
   def test_vmin_vmax_where(self):
-    x = UOp.define_var('x', dtypes.int, 0, 10)
-    y = UOp.define_var('y', dtypes.int, 1, 11)
-    z = UOp.define_var('z', dtypes.int, 2, 12)
+    x = UOp.variable('x', 0, 10)
+    y = UOp.variable('y', 1, 11)
+    z = UOp.variable('z', 2, 12)
     uop = x.lt(5).where(y, z)
     self.assertEqual(uop.vmin, 1)
     self.assertEqual(uop.vmax, 12)
@@ -56,21 +56,21 @@ class TestVminVmaxProperties(unittest.TestCase):
 class TestVminVmaxDivMod(unittest.TestCase):
   def test_vmin_vmax_division_positive(self):
     # vmin and vmax for division of a variable by a positive constant
-    x = UOp.define_var('x', dtypes.int32, 10, 20)
+    x = UOp.variable('x', 10, 20)
     uop = x // 2
     self.assertEqual(uop.vmin, 5)
     self.assertEqual(uop.vmax, 10)
 
   def test_vmin_vmax_division_negative(self):
     # vmin and vmax for division of a variable by a negative constant
-    x = UOp.define_var('x', dtypes.int32, 10, 20)
+    x = UOp.variable('x', 10, 20)
     uop = x // -2
     self.assertEqual(uop.vmin, -10)
     self.assertEqual(uop.vmax, -5)
 
   def test_vmin_vmax_mod_positive(self):
     # vmin and vmax for modulo of a variable by a positive constant
-    x = UOp.define_var('x', dtypes.int32, 10, 20)
+    x = UOp.variable('x', 10, 20)
     uop = x % 3
     self.assertEqual(uop.vmin, 0)
     self.assertEqual(uop.vmax, 2)
@@ -78,21 +78,21 @@ class TestVminVmaxDivMod(unittest.TestCase):
   @unittest.skip("broken")
   def test_vmin_vmax_mod_negative(self):
     # vmin and vmax for modulo of a variable by a negative constant
-    x = UOp.define_var('x', dtypes.int32, 10, 20)
+    x = UOp.variable('x', 10, 20)
     uop = x % -3
     self.assertEqual(uop.vmin, -2)
     self.assertEqual(uop.vmax, 0)
 
   def test_vmin_vmax_division_with_mixed_range(self):
     # vmin and vmax for division of a variable with a range crossing zero
-    x = UOp.define_var('x', dtypes.int32, -10, 10)
+    x = UOp.variable('x', -10, 10)
     uop = x // 3
     self.assertEqual(uop.vmin, -4)  # -10//3 = -4
     self.assertEqual(uop.vmax, 3)   # 10//3 = 3
 
   def test_vmin_vmax_mod_with_mixed_range(self):
     # vmin and vmax for modulo of a variable with a range crossing zero
-    x = UOp.define_var('x', dtypes.int32, -10, 10)
+    x = UOp.variable('x', -10, 10)
     uop = x % 4
     self.assertEqual(uop.vmin, 0)   # modulo always positive or zero when divisor is positive
     self.assertEqual(uop.vmax, 3)   # max possible mod is 3 when dividing by 4
@@ -146,26 +146,26 @@ class TestConstFactor(unittest.TestCase):
 
   def test_const_factor_with_variable(self):
     # const_factor for an expression involving a variable
-    x = UOp.define_var('x', dtypes.int32, 10, 20)
+    x = UOp.variable('x', 10, 20)
     uop = x * 3
     self.assertEqual(uop.const_factor(), 3)
 
   def test_const_factor_division(self):
     # const_factor for an expression with division
-    x = UOp.define_var('x', dtypes.int32, 10, 20)
+    x = UOp.variable('x', 10, 20)
     uop = x // 4
     self.assertEqual(uop.const_factor(), 1)  # Division reduces the const_factor to 1
 
   def test_const_factor_multiplication_of_var_and_const(self):
     # const_factor for multiplication of a variable and a constant
-    x = UOp.define_var('x', dtypes.int32, 6, 18)
+    x = UOp.variable('x', 6, 18)
     uop = x * 4
     self.assertEqual(uop.const_factor(), 4)  # Constant factor 4
 
   @unittest.skip("broken")
   def test_const_factor_multiplication_of_consts_and_vars(self):
     # Multiplying constants and variables
-    x = UOp.define_var('x', dtypes.int32, 10, 20)
+    x = UOp.variable('x', 10, 20)
     uop = (x * 3) * 5
     self.assertEqual(uop.const_factor(), 15)  # Constant multipliers are combined (3 * 5 = 15)
 
@@ -186,7 +186,7 @@ class TestDivides(unittest.TestCase):
   @unittest.skip("broken")
   def test_divides_variable_and_constant(self):
     # Multiplying a variable by a constant, then dividing by the same constant
-    x = UOp.define_var('x', dtypes.int32, 10, 20)
+    x = UOp.variable('x', 10, 20)
     uop = x * 6
     result = uop.divides(6)
     self.assertIsNotNone(result)
@@ -194,7 +194,7 @@ class TestDivides(unittest.TestCase):
 
   def test_divides_complex_expression(self):
     # Dividing a more complex expression
-    x = UOp.define_var('x', dtypes.int32, 10, 20)
+    x = UOp.variable('x', 10, 20)
     uop = (x * 6) + 18
     result = uop.divides(6)
     self.assertIsNotNone(result)
@@ -202,7 +202,7 @@ class TestDivides(unittest.TestCase):
 
   def test_divides_with_inexact_factors(self):
     # Multiplying by a constant but dividing by a non-exact divisor
-    x = UOp.define_var('x', dtypes.int32, 15, 45)
+    x = UOp.variable('x', 15, 45)
     uop = x * 4
     result = uop.divides(3)
     self.assertIsNone(result)  # Cannot divide by 3, since 4 is not divisible by 3

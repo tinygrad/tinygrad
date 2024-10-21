@@ -2,8 +2,7 @@ import unittest
 import numpy as np
 
 from tinygrad.helpers import BEAM, Timing, CI
-from tinygrad.shape.symbolic import Variable
-from tinygrad.tensor import Tensor
+from tinygrad import Variable, Tensor
 from tinygrad.nn import Conv2d
 
 def rand(*shape):
