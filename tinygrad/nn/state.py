@@ -228,6 +228,13 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       return TorchPickle(f).load()
 
 def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int):
+  """
+  Converts ggml tensor data to a tinygrad tensor.
+
+  Supported native types: float32 (id: 0), float16 (id: 1), int8 (id: 16), int16 (id: 17), int32 (id: 18)
+  Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q6_K (id: 14), Q8_0 (id: 8)
+  """
+
   bc_dtype = { 0: dtypes.float32, 1: dtypes.float16, 16: dtypes.int8, 17: dtypes.int16, 18: dtypes.int32 }.get(ggml_type, None)
   if bc_dtype is not None: return t[:bc_dtype.itemsize * n].bitcast(bc_dtype)
 
@@ -248,7 +255,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int):
     d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
     return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
 
-def load_gguf(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
+def gguf_load(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
   """
   Loads a gguf file from a tensor.
 
