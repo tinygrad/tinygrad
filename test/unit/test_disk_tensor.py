@@ -5,7 +5,7 @@ import tarfile, ggml, ctypes
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
-from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load, tar_extract, ggml_data_to_tensor, load_gguf
+from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load, tar_extract, ggml_data_to_tensor, gguf_load
 from tinygrad.helpers import Timing, fetch, temp, CI
 from test.helpers import is_dtype_supported
 
@@ -514,7 +514,7 @@ class TestGGUF(unittest.TestCase):
     fp = fetch(url)
     model_size = os.stat(fp).st_size
     gguf_tensor = Tensor.empty(model_size, dtype=dtypes.uint8, device=f"disk:{fp}").to(Device.DEFAULT)
-    kv_data, tensors = load_gguf(gguf_tensor)
+    kv_data, tensors = gguf_load(gguf_tensor)
 
     gguf_params = ggml.gguf_init_params(ctx=self.ctx, no_alloc=False)
     gguf_ctx = ggml.gguf_init_from_file(str(fp).encode("utf8"), gguf_params)
