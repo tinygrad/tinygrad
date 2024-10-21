@@ -3,6 +3,7 @@ import unittest
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
+from ml_dtypes import bfloat16
 from hypothesis import given, strategies as strat, settings
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
@@ -62,9 +63,9 @@ class ht:
 def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
-  numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)), np.array([b]).astype(_to_np_dtype(dtype)))
-  if dtype is dtypes.bfloat16: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
-  elif dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
+  np_dtype =_to_np_dtype(dtype) if dtype != dtypes.bfloat16 else bfloat16
+  numpy_value = op[1](np.array([a]).astype(np_dtype), np.array([b]).astype(np_dtype))
+  if dtype in (*dtypes_float, dtypes.bfloat16): np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
 def universal_test_unary(a, dtype, op):
@@ -74,9 +75,8 @@ def universal_test_unary(a, dtype, op):
   ast = sched[-1].ast
   run_schedule(sched)
   tensor_value = out.numpy()
-  numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
-  if dtype in (*dtypes_float, dtypes.bfloat16):
-    np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
+  numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype) if dtype != dtypes.bfloat16 else bfloat16))
+  if dtype in (*dtypes_float, dtypes.bfloat16): np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
     op = [x for x in ast.parents if x.op is UOps.ALU and x.arg in UnaryOps][0]
