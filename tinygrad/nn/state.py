@@ -174,8 +174,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       ret = ret.to(None).reshape(intermediate_shape).permute(permute_indexes)
     return ret.reshape(size)
 
-  def _rebuild_from_type_v2(func, new_type, args, state):
-    return func(*args)
+  def _rebuild_from_type_v2(func, new_type, args, state): return func(*args)
 
   class Parameter:
     def __setstate__(self, state): self.tensor = state[0]
