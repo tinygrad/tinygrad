@@ -175,6 +175,16 @@ if __name__ == "__main__":
         'wait': True,
         'vals': (N, K),
       }
+    elif GEMM_VARIATION == "no_xor" and (M%256)== 0 and (N%128)==0 and (K%32)==0 and DTYPE_IN == dtypes.half and DTYPE_OUT == dtypes.half and DTYPE_ACC == dtypes.half:
+      print("Using CUDA and 3-stage (interleave global copies and ldmatrix), swizzled SMEM inputs and epilogue")
+      prog = CUDAProgram(device, "wmma_example", compiler.compile(open(os.path.join(script_dir, 'max_kernels/nv.fp16_fp16_fp16.no_xor.cu')).read()), 73728)
+      args = (c, a, b)
+      kwargs = {
+        'global_size': [M//256, N//128, 1],
+        'local_size': [32, 4, 2], # 8 warpgroups, WG_M=4 and WG_N=2
+        'wait': True,
+        'vals': (N, K),
+      }
     else:
       raise RuntimeError(f"invalid gemm variation: {GEMM_VARIATION=} {M=} {N=} {K=} {DTYPE_IN=} {DTYPE_OUT=} {DTYPE_ACC=}")
 
