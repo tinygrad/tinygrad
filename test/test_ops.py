@@ -866,6 +866,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3)
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y))
+  def test_gemm_fp16_image(self):
+    with Context(IMAGE=2): helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3)
+  def test_gemm_image(self):
+    with Context(IMAGE=2): helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y))
   def test_big_gemm(self):
     helper_test_op([(256,256), (256,256)], lambda x,y: x.matmul(y), atol=1e-4)
   @unittest.skipIf(IMAGE>0, "no 0 in shape matmul on images")
