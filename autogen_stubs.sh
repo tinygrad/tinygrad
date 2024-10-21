@@ -34,7 +34,7 @@ def _try_dlopen_$name():
   if library: return ctypes.CDLL(library)
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
-    except OSError: pass
+    except (OSError, AttributeError): pass
   raise RuntimeError("library $name not found")
 EOF
 }
@@ -83,18 +83,25 @@ generate_kfd() {
 }
 
 generate_cuda() {
-  clang2py /usr/include/cuda.h -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so
+  clang2py /usr/local/cuda/include/cuda.h -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/cuda.py
-  sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libcuda.so')\ctypes.CDLL(ctypes.util.find_library('cuda'))\g" $BASE/cuda.py
+  patch_dlopen $BASE/cuda.py cuda "ctypes.util.find_library('nvcuda')"
+  sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libcuda.so')\_try_dlopen_cuda()\g" $BASE/cuda.py
   fixup $BASE/cuda.py
   python3 -c "import tinygrad.runtime.autogen.cuda"
 }
 
 generate_nvrtc() {
   clang2py /usr/local/cuda/include/nvrtc.h /usr/local/cuda/include/nvJitLink.h -o $BASE/nvrtc.py -l /usr/local/cuda/lib64/libnvrtc.so -l /usr/local/cuda/lib64/libnvJitLink.so
-  sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/nvrtc.py
-  sed -i "s\ctypes.CDLL('/usr/local/cuda/lib64/libnvrtc.so')\ctypes.CDLL(ctypes.util.find_library('nvrtc'))\g" $BASE/nvrtc.py
-  sed -i "s\ctypes.CDLL('/usr/local/cuda/lib64/libnvJitLink.so')\ctypes.CDLL(ctypes.util.find_library('nvJitLink'))\g" $BASE/nvrtc.py
+  sed -i "s\import ctypes\import ctypes, ctypes.util, platform\g" $BASE/nvrtc.py
+
+  patch_dlopen $BASE/nvrtc.py nvrtc "ctypes.util.find_library('nvrtc64_120_0')"
+  sed -i "s\ctypes.CDLL('/usr/local/cuda/lib64/libnvrtc.so')\_try_dlopen_nvrtc()\g" $BASE/nvrtc.py
+  echo "if platform.system() == 'Windows': ctypes.CDLL(ctypes.util.find_library('nvrtc-builtins64_126'))" >> $BASE/nvrtc.py
+
+  patch_dlopen $BASE/nvrtc.py nvJitLink "ctypes.util.find_library('nvJitLink_120_0')"
+  sed -i "s\ctypes.CDLL('/usr/local/cuda/lib64/libnvJitLink.so')\_try_dlopen_nvJitLink()\g" $BASE/nvrtc.py
+
   fixup $BASE/nvrtc.py
   python3 -c "import tinygrad.runtime.autogen.nvrtc"
 }

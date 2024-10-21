@@ -7,6 +7,16 @@
 # LONGDOUBLE_SIZE is: 16
 #
 import ctypes, ctypes.util
+PATHS_TO_TRY = [
+  ctypes.util.find_library('nvcuda'),
+]
+def _try_dlopen_cuda():
+  library = ctypes.util.find_library("cuda")
+  if library: return ctypes.CDLL(library)
+  for candidate in PATHS_TO_TRY:
+    try: return ctypes.CDLL(candidate)
+    except (OSError, AttributeError): pass
+  raise RuntimeError("library cuda not found")
 
 
 class AsDictMixin:
@@ -145,7 +155,7 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 
 _libraries = {}
-_libraries['libcuda.so'] = ctypes.CDLL(ctypes.util.find_library('cuda'))
+_libraries['libcuda.so'] = _try_dlopen_cuda()
 
 
 cuuint32_t = ctypes.c_uint32

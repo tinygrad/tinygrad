@@ -6,11 +6,31 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes, ctypes.util
+import ctypes, ctypes.util, platform
+PATHS_TO_TRY = [
+  ctypes.util.find_library('nvJitLink_120_0'),
+]
+def _try_dlopen_nvJitLink():
+  library = ctypes.util.find_library("nvJitLink")
+  if library: return ctypes.CDLL(library)
+  for candidate in PATHS_TO_TRY:
+    try: return ctypes.CDLL(candidate)
+    except (OSError, AttributeError): pass
+  raise RuntimeError("library nvJitLink not found")
+PATHS_TO_TRY = [
+  ctypes.util.find_library('nvrtc64_120_0'),
+]
+def _try_dlopen_nvrtc():
+  library = ctypes.util.find_library("nvrtc")
+  if library: return ctypes.CDLL(library)
+  for candidate in PATHS_TO_TRY:
+    try: return ctypes.CDLL(candidate)
+    except (OSError, AttributeError): pass
+  raise RuntimeError("library nvrtc not found")
 
 
 _libraries = {}
-_libraries['libnvrtc.so'] = ctypes.CDLL(ctypes.util.find_library('nvrtc'))
+_libraries['libnvrtc.so'] = _try_dlopen_nvrtc()
 def string_cast(char_pointer, encoding='utf-8', errors='strict'):
     value = ctypes.cast(char_pointer, ctypes.c_char_p).value
     if value is not None and encoding is not None:
@@ -138,7 +158,7 @@ class Union(ctypes.Union, AsDictMixin):
 
 
 
-_libraries['libnvJitLink.so'] = ctypes.CDLL(ctypes.util.find_library('nvJitLink'))
+_libraries['libnvJitLink.so'] = _try_dlopen_nvJitLink()
 c_int128 = ctypes.c_ubyte*16
 c_uint128 = c_int128
 void = None
@@ -577,3 +597,4 @@ __all__ = \
     'nvrtcGetSupportedArchs', 'nvrtcProgram', 'nvrtcResult',
     'nvrtcResult__enumvalues', 'nvrtcVersion', 'size_t',
     'struct__nvrtcProgram', 'struct_nvJitLink', 'uint32_t']
+if platform.system() == 'Windows': ctypes.CDLL(ctypes.util.find_library('nvrtc-builtins64_126'))
