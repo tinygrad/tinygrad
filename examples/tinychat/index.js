@@ -1,182 +1,12 @@
-document.addEventListener("alpine:init", () => {
-  Alpine.data("state", () => ({
-    // current state
-    cstate: {
-      time: null,
-      messages: [],
-    },
-
-    // historical state
-    histories: JSON.parse(localStorage.getItem("histories")) || [],
-
-    home: 0,
-    generating: false,
-    endpoint: `${window.location.origin}/v1`,
-
-    // performance tracking
-    time_till_first: 0,
-    tokens_per_second: 0,
-    total_tokens: 0,
-
-    removeHistory(cstate) {
-      const index = this.histories.findIndex((state) => {
-        return state.time === cstate.time;
-      });
-      if (index !== -1) {
-        this.histories.splice(index, 1);
-        localStorage.setItem("histories", JSON.stringify(this.histories));
-      }
-    },
-
-    async handleSend() {
-      const el = document.getElementById("input-form");
-      const value = el.value.trim();
-      if (!value) return;
-
-      if (this.generating) return;
-      this.generating = true;
-      if (this.home === 0) this.home = 1;
-
-      // ensure that going back in history will go back to home
-      window.history.pushState({}, "", "/");
-
-      // add message to list
-      this.cstate.messages.push({ role: "user", content: value });
-
-      // clear textarea
-      el.value = "";
-      el.style.height = "auto";
-      el.style.height = el.scrollHeight + "px";
-
-      // reset performance tracking
-      const prefill_start = Date.now();
-      let start_time = 0;
-      let tokens = 0;
-      this.tokens_per_second = 0;
-
-      // start receiving server sent events
-      let gottenFirstChunk = false;
-      for await (
-        const chunk of this.openaiChatCompletion(this.cstate.messages)
-      ) {
-        if (!gottenFirstChunk) {
-          this.cstate.messages.push({ role: "assistant", content: "" });
-          gottenFirstChunk = true;
-        }
-
-        // add chunk to the last message
-        this.cstate.messages[this.cstate.messages.length - 1].content += chunk;
-
-        // calculate performance tracking
-        tokens += 1;
-        this.total_tokens += 1;
-        if (start_time === 0) {
-          start_time = Date.now();
-          this.time_till_first = start_time - prefill_start;
-        } else {
-          const diff = Date.now() - start_time;
-          if (diff > 0) {
-            this.tokens_per_second = tokens / (diff / 1000);
-          }
-        }
-      }
-
-      // update the state in histories or add it if it doesn't exist
-      const index = this.histories.findIndex((cstate) => {
-        return cstate.time === this.cstate.time;
-      });
-      this.cstate.time = Date.now();
-      if (index !== -1) {
-        // update the time
-        this.histories[index] = this.cstate;
-      } else {
-        this.histories.push(this.cstate);
-      }
-      // update in local storage
-      localStorage.setItem("histories", JSON.stringify(this.histories));
-
-      this.generating = false;
-    },
-
-    async handleEnter(event) {
-      // if shift is not pressed
-      if (!event.shiftKey) {
-        event.preventDefault();
-        await this.handleSend();
-      }
-    },
-
-    updateTotalTokens(messages) {
-      fetch(`${this.endpoint}/chat/token/encode`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages }),
-      }).then((response) => response.json()).then((data) => {
-        this.total_tokens = data.length;
-      }).catch(console.error);
-    },
-
-    async *openaiChatCompletion(messages) {
-      // stream response
-      const response = await fetch(`${this.endpoint}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          "messages": messages,
-          "stream": true,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error("Failed to fetch");
-      }
-
-      const reader = response.body.pipeThrough(new TextDecoderStream())
-        .pipeThrough(new EventSourceParserStream()).getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-        if (value.type === "event") {
-          const json = JSON.parse(value.data);
-          if (json.choices) {
-            const choice = json.choices[0];
-            if (choice.finish_reason === "stop") {
-              break;
-            }
-            yield choice.delta.content;
-          }
-        }
-      }
-    },
-  }));
-});
-
-const { markedHighlight } = globalThis.markedHighlight;
-marked.use(markedHighlight({
-  langPrefix: "hljs language-",
-  highlight(code, lang, _info) {
-    const language = hljs.getLanguage(lang) ? lang : "plaintext";
-    return hljs.highlight(code, { language }).value;
-  },
-}));
-
-// **** eventsource-parser ****
 class EventSourceParserStream extends TransformStream {
   constructor() {
     let parser;
-
     super({
       start(controller) {
         parser = createParser((event) => {
-          if (event.type === "event") {
-            controller.enqueue(event);
-          }
+          if (event.type === "event") controller.enqueue(event);
         });
       },
-
       transform(chunk) {
         parser.feed(chunk);
       },
@@ -185,129 +15,228 @@ class EventSourceParserStream extends TransformStream {
 }
 
 function createParser(onParse) {
-  let isFirstChunk;
-  let buffer;
-  let startingPosition;
-  let startingFieldLength;
-  let eventId;
-  let eventName;
-  let data;
-  reset();
-  return {
-    feed,
-    reset,
-  };
+  let isFirstChunk = true,
+    buffer = "",
+    startingPosition = 0,
+    startingFieldLength = -1,
+    eventId,
+    eventName,
+    data = "";
+
   function reset() {
     isFirstChunk = true;
     buffer = "";
     startingPosition = 0;
     startingFieldLength = -1;
-    eventId = void 0;
-    eventName = void 0;
+    eventId = undefined;
+    eventName = undefined;
     data = "";
   }
+
   function feed(chunk) {
-    buffer = buffer ? buffer + chunk : chunk;
-    if (isFirstChunk && hasBom(buffer)) {
-      buffer = buffer.slice(BOM.length);
-    }
+    buffer += chunk;
+    if (isFirstChunk && hasBom(buffer)) buffer = buffer.slice(BOM.length);
     isFirstChunk = false;
-    const length = buffer.length;
-    let position = 0;
-    let discardTrailingNewline = false;
-    while (position < length) {
+    let position = 0,
+      discardTrailingNewline = false;
+
+    while (position < buffer.length) {
       if (discardTrailingNewline) {
-        if (buffer[position] === "\n") {
-          ++position;
-        }
+        if (buffer[position] === "\n") position++;
         discardTrailingNewline = false;
       }
-      let lineLength = -1;
-      let fieldLength = startingFieldLength;
-      let character;
-      for (
-        let index = startingPosition;
-        lineLength < 0 && index < length;
-        ++index
-      ) {
-        character = buffer[index];
-        if (character === ":" && fieldLength < 0) {
-          fieldLength = index - position;
-        } else if (character === "\r") {
+
+      let lineLength = -1,
+        fieldLength = startingFieldLength;
+
+      for (let i = startingPosition; lineLength < 0 && i < buffer.length; ++i) {
+        const char = buffer[i];
+        if (char === ":" && fieldLength < 0) fieldLength = i - position;
+        else if (char === "\r") {
           discardTrailingNewline = true;
-          lineLength = index - position;
-        } else if (character === "\n") {
-          lineLength = index - position;
-        }
+          lineLength = i - position;
+        } else if (char === "\n") lineLength = i - position;
       }
+
       if (lineLength < 0) {
-        startingPosition = length - position;
+        startingPosition = buffer.length - position;
         startingFieldLength = fieldLength;
         break;
       } else {
         startingPosition = 0;
         startingFieldLength = -1;
       }
+
       parseEventStreamLine(buffer, position, fieldLength, lineLength);
       position += lineLength + 1;
     }
-    if (position === length) {
-      buffer = "";
-    } else if (position > 0) {
-      buffer = buffer.slice(position);
-    }
+    buffer = buffer.slice(position);
   }
+
   function parseEventStreamLine(lineBuffer, index, fieldLength, lineLength) {
     if (lineLength === 0) {
-      if (data.length > 0) {
-        onParse({
-          type: "event",
-          id: eventId,
-          event: eventName || void 0,
-          data: data.slice(0, -1),
-          // remove trailing newline
-        });
-
+      if (data) {
+        onParse({ type: "event", id: eventId, event: eventName, data: data.slice(0, -1) });
         data = "";
-        eventId = void 0;
+        eventId = undefined;
       }
-      eventName = void 0;
+      eventName = undefined;
       return;
     }
+
     const noValue = fieldLength < 0;
-    const field = lineBuffer.slice(
-      index,
-      index + (noValue ? lineLength : fieldLength),
-    );
-    let step = 0;
-    if (noValue) {
-      step = lineLength;
-    } else if (lineBuffer[index + fieldLength + 1] === " ") {
-      step = fieldLength + 2;
-    } else {
-      step = fieldLength + 1;
-    }
-    const position = index + step;
-    const valueLength = lineLength - step;
-    const value = lineBuffer.slice(position, position + valueLength).toString();
-    if (field === "data") {
-      data += value ? "".concat(value, "\n") : "\n";
-    } else if (field === "event") {
-      eventName = value;
-    } else if (field === "id" && !value.includes("\0")) {
-      eventId = value;
-    } else if (field === "retry") {
+    const field = lineBuffer.slice(index, index + (noValue ? lineLength : fieldLength));
+    const step = noValue
+      ? lineLength
+      : lineBuffer[index + fieldLength + 1] === " "
+      ? fieldLength + 2
+      : fieldLength + 1;
+    const value = lineBuffer.slice(index + step, index + lineLength).toString();
+
+    if (field === "data") data += value ? `${value}\n` : "\n";
+    else if (field === "event") eventName = value;
+    else if (field === "id" && !value.includes("\0")) eventId = value;
+    else if (field === "retry") {
       const retry = parseInt(value, 10);
-      if (!Number.isNaN(retry)) {
-        onParse({
-          type: "reconnect-interval",
-          value: retry,
-        });
-      }
+      if (!isNaN(retry)) onParse({ type: "reconnect-interval", value: retry });
     }
   }
+
+  return { feed, reset };
 }
+
 const BOM = [239, 187, 191];
-function hasBom(buffer) {
-  return BOM.every((charCode, index) => buffer.charCodeAt(index) === charCode);
-}
+const hasBom = (buffer) => BOM.every((charCode, index) => buffer.charCodeAt(index) === charCode);
+
+document.addEventListener("alpine:init", () => {
+  Alpine.data("state", () => ({
+    cstate: { time: null, messages: [] },
+    histories: JSON.parse(localStorage.getItem("histories")) || [],
+    home: 0,
+    generating: false,
+    showHistoryModal: false,
+    endpoint: `${window.location.origin}/v1`,
+    time_till_first: 0,
+    tokens_per_second: 0,
+    total_tokens: 0,
+
+    removeHistory(cstate) {
+      const index = this.histories.findIndex((state) => state.time === cstate.time);
+      if (index !== -1) {
+        this.histories.splice(index, 1);
+        localStorage.setItem("histories", JSON.stringify(this.histories));
+        if (this.cstate.time === cstate.time) {
+          this.cstate = { time: null, messages: [] };
+        }
+      }
+    },
+
+    async handleSend() {
+      const el = document.getElementById("input-form");
+      const value = el.value.trim();
+      if (!value || this.generating) return;
+      this.generating = true;
+      if (this.home === 0) this.home = 1;
+      window.history.pushState({}, "", "/");
+      this.cstate.messages.push({ role: "user", content: value });
+      el.value = "";
+      const prefill_start = Date.now();
+      let start_time = 0,
+        tokens = 0;
+
+      for await (const chunk of this.openaiChatCompletion(this.cstate.messages)) {
+        let lastMsg = this.cstate.messages[this.cstate.messages.length - 1];
+        if (lastMsg.role !== "assistant") {
+          lastMsg = { role: "assistant", content: "" };
+          this.cstate.messages.push(lastMsg);
+        }
+        lastMsg.content += chunk;
+        tokens++;
+        this.total_tokens++;
+        if (start_time === 0) {
+          start_time = Date.now();
+          this.time_till_first = start_time - prefill_start;
+        } else {
+          const diff = Date.now() - start_time;
+          if (diff > 0) this.tokens_per_second = tokens / (diff / 1000);
+        }
+      }
+
+      // Update or add the current state in histories
+      if (!this.cstate.time) {
+        // If cstate.time is not set, set it and push to histories
+        this.cstate.time = Date.now();
+        this.histories.push(JSON.parse(JSON.stringify(this.cstate)));
+      } else {
+        // Find the index of the existing cstate in histories
+        const index = this.histories.findIndex(
+          (state) => state.time === this.cstate.time
+        );
+        if (index !== -1) {
+          // Update the existing history entry
+          this.histories[index] = JSON.parse(JSON.stringify(this.cstate));
+        } else {
+          // If not found, push the new cstate
+          this.histories.push(JSON.parse(JSON.stringify(this.cstate)));
+        }
+      }
+
+      localStorage.setItem("histories", JSON.stringify(this.histories));
+      this.generating = false;
+    },
+
+
+    handleEnter(event) {
+      if (!event.shiftKey) {
+        event.preventDefault();
+        this.handleSend();
+      }
+    },
+
+    updateTotalTokens(messages) {
+      fetch(`${this.endpoint}/chat/token/encode`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages }),
+      })
+        .then((response) => response.json())
+        .then((data) => (this.total_tokens = data.length))
+        .catch(console.error);
+    },
+
+    async *openaiChatCompletion(messages) {
+      const response = await fetch(`${this.endpoint}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages, stream: true }),
+      });
+      if (!response.ok) throw new Error("Failed to fetch");
+
+      const reader = response.body
+        .pipeThrough(new TextDecoderStream())
+        .pipeThrough(new EventSourceParserStream())
+        .getReader();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value.type === "event") {
+          const json = JSON.parse(value.data);
+          const choice = json.choices?.[0];
+          if (choice?.finish_reason === "stop") break;
+          if (choice?.delta?.content) yield choice.delta.content;
+        }
+      }
+    },
+  }));
+});
+
+marked.use(
+  markedHighlight({
+    langPrefix: "hljs language-",
+    highlight(code, lang) {
+      const language = hljs.getLanguage(lang) ? lang : "plaintext";
+      return hljs.highlight(code, { language }).value;
+    },
+  })
+);
