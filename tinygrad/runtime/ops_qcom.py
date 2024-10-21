@@ -376,7 +376,7 @@ class QCOMDevice(HCQCompiled):
     alloc = kgsl.IOCTL_KGSL_GPUOBJ_ALLOC(self.fd, size=(bosz:=round_up(size, 1<<alignment_hint)), flags=flags, mmapsize=bosz)
     va_addr = libc.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, self.fd, alloc.id * 0x1000)
 
-    if fill_zeroes: ctypes.memset(va_addr, 0, va_len)
+    if fill_zeroes: ctypes.memset(va_addr, 0, size)
     return QCOMBuffer(va_addr=va_addr, size=size, info=alloc)
 
   def _gpu_free(self, mem):
