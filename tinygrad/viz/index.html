@@ -47,6 +47,10 @@
   }
   ul.active {
     color: #f0f0f5;
+    overflow-y: auto;
+  }
+  ul > ul.active {
+    margin-left: -10%;
   }
   svg {
     width: 100%;
@@ -72,22 +76,23 @@
     stroke-width: 1.4px;
   }
   .graph {
-    width: 70%;
-    position: relative;
+    width: 100%;
+    /* position: relative; */
   }
   .main-container {
     display: flex;
-    padding: 12px;
+    padding: 8px;
     width: 100%;
     height: 100%;
   }
   .main-container > * + * {
-    margin-left: 8px;
+    margin-left: 4px;
   }
   .container {
     background-color: #0f1018;
+    border: solid #08090e;
+    border-width: 0 8px;
     height: 100%;
-    border-radius: 8px;
     padding: 8px;
     position: relative;
   }
@@ -95,18 +100,27 @@
     margin-top: 12px;
   }
   .kernel-list {
-    width: 10%;
-    overflow-y: auto;
+    width: 12%;
+    overflow:auto; /* something other than visible */
+    direction: rtl;
+    scroll-behavior: smooth;
+    position: absolute;
+    z-index: 2;
+    max-width: 15%;
   }
   .kernel-list > ul > * + * {
     margin-top: 4px;
   }
   .metadata {
     width: 20%;
-    padding-left: 20px;
     overflow-y: auto;
+    position: absolute;
+    right: 0;
+    z-index: 3;
+    max-width: 85%;
+
   }
-  #resize-handle {
+  .resize-handle {
     position: absolute;
     left: 0;
     top: 0;
@@ -114,7 +128,39 @@
     width: 20px;
     height: 100%;
     cursor: col-resize;
-    background-color: transparent;
+    /* background-color: transparent; */
+    z-index: 3;
+
+  }
+  .resize-handle:active {
+    color: white;
+  }
+  #kernel-list-resize {
+    position: relative;
+    float: right;
+  }
+  #collapse-button {
+    all: unset;
+    color: #7c7d85;
+    position: absolute;
+    left: 2%;
+    z-index: 5;
+    font-size: medium;
+    background-color: rgb(31, 32, 32);
+    border-radius: 5px;
+  }
+  #collapse-button:hover {
+    cursor: pointer;
+  }
+  #kernel-list-collapse {
+    position: absolute;
+    top: 1%;
+    left: 1%;
+  }
+  #metadata-collapse {
+    position: absolute;
+    top: 1%;
+    right: 1%;
   }
   .rewrite-list {
     display: flex;
@@ -134,16 +180,19 @@
     padding: 8px;
   }
   </style>
-</head>
-<body>
+  </head>
+  <body>
   <div class="main-container">
-    <div class="container kernel-list"></div>
+    <div class="container kernel-list resizeable" id="kernel-list"></div>
     <div class="container graph">
+        <button id="collapse-button">&lt;&gt;</button>
+
       <svg>
+
         <g id="render"></g>
       </svg>
     </div>
-    <div class="container metadata"></div>
+    <div class="container metadata resizeable" id="metadata"></div>
   </div>
   <script>
   /* global hljs, dagreD3, d3, DOMPurify */
@@ -202,7 +251,14 @@
     const render = new dagreD3.render();
     render(inner, g);
   }
-
+  function vsCodeOpener(parts, name="") {
+    const link = `vscode://file${parts.join("/")}`;
+    const content = parts[parts.length-1]+"\n\n";
+    const elementObj = Object.assign(document.createElement("a"), { textContent: name === "" ? content : name, 
+      href: link, style: "font-family: monospace; margin: 4px 0;" });
+    if (name !== "") elementObj.id = "filename";
+    return elementObj;
+  }
   // **** extra helpers
   const toPath = ([fp, lineno]) => `${fp.split("/").pop()}:${lineno}`;
 
@@ -214,7 +270,15 @@
   var currentKernel = 0;
   var currentRewrite = 0;
   var expandKernel = true;
+  let lastPress = 0;
+  let prevUOp = 0;
+
+  const kernelListChildren = document.querySelector(".container.kernel-list").childNodes;
+
   async function main() {
+    // reduce scroll lag
+    if (Date.now() - lastPress > 300) lastPress = Date.now();
+    else return;
     // ***** LHS kernels list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
@@ -222,6 +286,8 @@
     }
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
+    kernelList.appendChild(Object.assign(document.createElement("div"), { className: "resize-handle", id: "kernel-list-resize" }));
+
     kernels.forEach((k, i) => {
       const kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "",
         style: "overflow-x: auto; cursor: initial;" });
@@ -230,7 +296,13 @@
       kernelUl.appendChild(p)
       k.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.upats.length}`, key: `uop-rewrite-${j}`,
-          className: (j === currentUOp && i == currentKernel) ? "active" : "" })
+          className: "" })
+        if (j === currentUOp && i == currentKernel) {
+          rwUl.className = "active";
+          setTimeout(() => {
+              rwUl.scrollIntoView({ behavior: "smooth", block: "end" });
+          }, [50])
+        }
         rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
           e.stopPropagation();
@@ -255,6 +327,7 @@
       }
       kernelList.appendChild(kernelUl);
     });
+
     // ***** UOp graph
     const cacheKey = `${currentKernel}-${currentUOp}`;
     if (cacheKey in cache) {
@@ -264,44 +337,82 @@
       ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`)).json();
       cache[cacheKey] = ret;
     }
+
     renderGraph(ret.graphs[currentRewrite], currentRewrite == 0 ? [] : ret.changed_nodes[currentRewrite-1]);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
-    metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: toPath(ret.loc) }));
+    const filenameText = toPath(ret.loc);
+    metadata.appendChild(vsCodeOpener(ret.loc.join(":").split("/"), toPath(ret.loc)));
     const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(ret.code_line)}</code>`,
       className: "wrap code-block language-python" });
     metadata.appendChild(pre);
     hljs.highlightElement(pre);
     // ** resizer
-    metadata.appendChild(Object.assign(document.createElement("div"), { id: "resize-handle" }));
-    const resizeHandle = document.getElementById("resize-handle");
-    let startX;
-    let containerWidth;
-    let metadataWidth;
-    resizeHandle.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      metadata.style.userSelect = "none";
-      document.documentElement.style.cursor = "col-resize";
-      startX = e.clientX;
-      containerWidth = document.querySelector(".main-container").getBoundingClientRect().width;
-      metadataWidth = metadata.getBoundingClientRect().width;
-      document.documentElement.addEventListener("mousemove", resize, false);
-      document.documentElement.addEventListener("mouseup", stopResize, false);
-    });
-    function resize(e) {
-      const change = e.clientX - startX;
-      const newWidth = ((metadataWidth-change) / containerWidth) * 100;
-      if (newWidth >= 20 && newWidth <= 50) {
-        metadata.style.width = `${newWidth}%`;
-        document.querySelector(".graph").style.width = `${100-newWidth-10}%`;
+    metadata.appendChild(Object.assign(document.createElement("div"), { className: "resize-handle", id: "metadata-resize"}));
+
+    const resizableElements = Array.from(document.getElementsByClassName("resizeable"));
+    // instances of eventhandles mapped by id
+    const resizeListeners = {}
+    const stopResizeListeners = {};
+    resizableElements.forEach((element) => {
+      element.addEventListener("mousedown", (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        element.style.userSelect = "none";
+        document.documentElement.style.cursor = "col-resize";
+        const startX = event.clientX;   
+        const containerWidth = document.querySelector(".main-container").getBoundingClientRect().width;
+        const elementWidth = element.getBoundingClientRect().width;
+        resizeListeners[element.id] = (event) => {resize(event, element, startX, containerWidth, elementWidth)};
+        stopResizeListeners[element.id] = () => {stopResize(element)};
+        document.documentElement.addEventListener("mousemove", resizeListeners[element.id], false);
+        document.documentElement.addEventListener("mouseup", stopResizeListeners[element.id], false);
+      })
+    })
+    const curCollapse = document.querySelector("#collapse-button");
+    curCollapse.addEventListener("click", (event) => { 
+      event.stopImmediatePropagation();
+      handleCollapse(event);
+    }, true);
+    function resize(event, element, startX, containerWidth, elementWidth) {
+      const change = event.clientX - startX;
+      switch (element.id) {
+        case "metadata": {
+          const newWidth = ((elementWidth-change) / containerWidth) * 100;
+          if (newWidth >= 20) element.style.width = `${newWidth}%`;
+          break;
+        } 
+        case "kernel-list": {
+          const newWidth = ((elementWidth+change) / containerWidth) * 100;
+          if (newWidth >= 10) element.style.width = `${newWidth}%`;
+          break;
+        }
       }
     }
-    function stopResize() {
-      document.documentElement.removeEventListener("mousemove", resize, false);
-      document.documentElement.removeEventListener("mouseup", stopResize, false);
+    function stopResize(element) {
+      const resizeL = resizeListeners[element.id];
+      const stopResizeL = stopResizeListeners[element.id];
+      document.documentElement.removeEventListener("mousemove", resizeL, false);
+      document.documentElement.removeEventListener("mouseup", stopResizeL, false);
       document.documentElement.style.cursor = "initial";
-      metadata.style.userSelect = "initial";
+      element.style.userSelect = "initial";
+    }
+
+    function handleCollapse(event) {
+      event.stopPropagation();
+      event.preventDefault();
+      const element = event.srcElement;
+      const mode = element.innerText;
+      if (mode === "<>") {
+        document.querySelector("#metadata").style.display  = "none"
+        document.querySelector("#kernel-list").style.display  = "none"
+        element.innerText = "><";
+      } else {
+        document.querySelector("#metadata").style.display  = "block"
+        document.querySelector("#kernel-list").style.display  = "block"
+        element.innerText = "<>";
+      }
     }
     // ** code blocks
     let code = ret.uops[currentRewrite];
@@ -328,8 +439,7 @@
             const [loc, pattern] = ret.upats[i-1];
             const parts = loc.join(":").split("/");
             const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
-            const link = Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
-              href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" })
+            const link = vsCodeOpener(parts);
             div.appendChild(link);
             const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
             pre.appendChild(Object.assign(document.createElement("code"), { textContent: DOMPurify.sanitize(pattern), className: "language-python" }));
@@ -353,8 +463,7 @@
     }
   }
 
-  // **** keyboard shortcuts
-  document.addEventListener("keydown", async function(event) {
+  const checkFunc = async event => {
     // up and down change the UOp or kernel from the list
     if (!expandKernel) {
       if (event.key == "ArrowUp") {
@@ -362,14 +471,14 @@
         currentUOp = 0;
         currentRewrite = 0;
         currentKernel = Math.max(0, currentKernel-1)
-       return main()
+        main();
       }
       if (event.key == "ArrowDown") {
         event.preventDefault()
         currentUOp = 0;
         currentRewrite = 0;
         currentKernel = Math.min(Array.from(Object.keys(kernels)).length-1, currentKernel+1)
-       return main()
+        main();
       }
     }
     if (event.key == "Enter") {
@@ -382,6 +491,7 @@
     if (event.key == "ArrowUp") {
       event.preventDefault()
       currentRewrite = 0;
+      prevUOp = currentUOp
       currentUOp = Math.max(0, currentUOp-1)
       main()
     }
@@ -389,6 +499,7 @@
       event.preventDefault()
       currentRewrite = 0;
       const totalUOps = kernels[currentKernel].length-1;
+      prevUOp = currentUOp
       currentUOp = Math.min(totalUOps, currentUOp+1)
       main()
     }
@@ -404,7 +515,10 @@
       currentRewrite = Math.min(totalRewrites, currentRewrite+1)
       main()
     }
-  })
+  }
+  // **** keyboard shortcuts
+  document.addEventListener("keydown", (event) => checkFunc(event));
+
   main()
   </script>
   </body>
