@@ -227,7 +227,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       f.seek(rwd)
       return TorchPickle(f).load()
 
-def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int):
+def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """
   Converts ggml tensor data to a tinygrad tensor.
 
@@ -246,9 +246,8 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int):
     return t.unsqueeze(-1).expand((*t.shape,8//b)).div(shift_tensor, upcast=False).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
   # map to (number of elements, number of bytes)
-  try: nelements, nbytes = { 2: (32, 18), 3: (32, 20), 8: (32, 34), 14: (256, 210) }[ggml_type]
-  except KeyError as e: raise ValueError(f"GGML type '{ggml_type}' is not supported!") from e
-  blocks = t[:(n//nelements)*nbytes].reshape((-1, nbytes))
+  nelements_nbytes = { 2: (32, 18), 3: (32, 20), 14: (256, 210), 8: (32, 34) }.get(ggml_type)
+  if nelements_nbytes is not None: blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1]))
 
   if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
   if ggml_type == 3:
@@ -260,6 +259,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int):
     scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((-1, 16, 16)).reshape((-1, 256))
     d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
     return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
+  raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
 def gguf_load(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
   """
