@@ -162,7 +162,7 @@ def resolve(x, default:bool=True):
   return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
 def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.vmax)
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
-def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int: return uop if isinstance(uop, int) else uop.sym_infer(var_vals)
+def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
 # used for UOp and UPat
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
