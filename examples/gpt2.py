@@ -155,7 +155,7 @@ class GPT2:
     gpt2_params = {
       "dim": kv_data["gpt2.embedding_length"], "n_heads": kv_data["gpt2.attention.head_count"],
       "n_layers": kv_data["gpt2.block_count"], "norm_eps": kv_data["gpt2.attention.layer_norm_epsilon"],
-      "vocab_size": 50257, "max_seq_len": kv_data["gpt2.context_length"],
+      "vocab_size": VOCAB_SIZE, "max_seq_len": kv_data["gpt2.context_length"],
     }
     def _remap_gguf_key(key: str):
       replaces = [
