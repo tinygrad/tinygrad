@@ -8,7 +8,7 @@ from collections import defaultdict
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv
-from tinygrad.multi import MultiLazyBuffer
+from tinygrad.multi import MultiLazyBuffer, reshard
 from tinygrad.ops import MetaOps, smax, resolve, UOp, UOps, BinaryOps, sint, Variable
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.engine.lazy import LazyBuffer
@@ -249,6 +249,8 @@ class Tensor:
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
     assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
+    if isinstance(self.lazydata, MultiLazyBuffer) and self.lazydata.axis != x.lazydata.axis:
+      x.reshard_(self.lazydata.axis)
     assert not x.requires_grad  # self requires_grad is okay?
     if not self.lazydata.is_realized(): return self.replace(x)
     self.lazydata = self.lazydata.assign(x.lazydata)
@@ -371,6 +373,10 @@ class Tensor:
     Shards the tensor across the given devices in place.
     """
     self.lazydata = self.shard(devices, axis, splits).lazydata
+    return self
+  
+  def reshard_(self, axis: Optional[int]=None):
+    self.lazydata = reshard(self.lazydata, axis)
     return self
 
   @staticmethod
