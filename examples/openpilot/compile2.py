@@ -11,7 +11,6 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/mod
 
 import onnx
 from typing import Tuple, List, Optional, Dict, cast
-from extra.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.device import Buffer
@@ -21,6 +20,8 @@ from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule
 from tinygrad.ops import UOps
 from tinygrad.tensor import _to_np_dtype
+from tinygrad.runtime.onnx.onnx import get_run_onnx
+
 Device.DEFAULT = "GPU"
 
 def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
@@ -33,7 +34,7 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
 
   # run the model
-  inputs = {k:Tensor.empty(*shp) for k,shp in input_shapes.items()}
+  inputs = {k:Tensor.empty(*shp, dtype=dtypes.float) for k,shp in input_shapes.items()}
   ret: Tensor = next(iter(run_onnx(inputs).values())).cast(dtypes.float32).contiguous()
   schedule = create_schedule([ret.lazydata])
 
@@ -74,8 +75,10 @@ def test_vs_onnx(onnx_data, eis:Optional[List[ExecItem]], inputs:Dict[str, Tenso
     print("got ort outputs")
   else:
     # test with torch
-    from test.models.test_onnx import run_onnx_torch
-    new_torch_out = run_onnx_torch(onnx_model, new_np_inputs).numpy()
+    import torch
+    from onnx2torch import convert
+    torch_model = convert(onnx_model).float()
+    with torch.no_grad(): new_torch_out = torch_model(*[torch.tensor(x) for x in new_np_inputs.values()])
     print("got torch outputs")
 
   # if you don't have a schedule
