@@ -1,11 +1,11 @@
 import sys, atexit
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Callable, Tuple, List, Dict, Optional, DefaultDict, cast
+from typing import Callable, Set, Tuple, List, Dict, Optional, DefaultDict, cast
 from tinygrad.ops import BUFFER_UOPS, UNSAFE_PAD_OPS, MetaOps, ReduceOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, Variable, resolve, \
     graph_rewrite, track_rewrites, sint
-from tinygrad.helpers import DEBUG, MULTIOUTPUT, FUSE_CONV_BW, FUSE_ARANGE, Metadata, all_same, colored, diskcache_put, prod, dedup, all_int, \
-    merge_dicts, getenv, unwrap
+from tinygrad.helpers import DEBUG, FUSE_CONV_BW, FUSE_ARANGE, Metadata, all_same, colored, diskcache_put, prod, dedup, all_int, merge_dicts, \
+    getenv, unwrap
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -24,7 +24,7 @@ METAOPS = {MetaOps.COPY:UOps.COPY, MetaOps.EMPTY:UOps.EMPTY, MetaOps.VIEW:UOps.B
 class ScheduleItem:
   ast: UOp
   bufs: Tuple[Buffer, ...]
-  metadata: Optional[Tuple[Metadata, ...]]
+  metadata: Tuple[Metadata, ...]
   @property
   def outputs(self) -> Tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""
@@ -38,7 +38,7 @@ class ScheduleItem:
 class LBScheduleItem:
   ast: UOp
   bufs: Tuple[LazyBuffer, ...]
-  metadata: Optional[Tuple[Metadata, ...]]
+  metadata: Tuple[Metadata, ...]
   @property
   def outputs(self) -> Tuple[LazyBuffer, ...]: return self.bufs[:len(self.ast.src)] if self.ast.op is UOps.SINK else self.bufs[0:1]
   @property
@@ -124,31 +124,34 @@ view_right = merge_views+PatternMatcher([
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
-def simplify_and_unbind(ctx, x:UOp) -> Optional[UOp]:
-  if (st:=unwrap(x.st)) in ctx[2]: return None
+def _append_st_vars(ctx:Tuple[Dict[Variable, int], Set[ShapeTracker], Tuple[int, ...]], x:UOp) -> Optional[UOp]:
+  if (st:=unwrap(x.st)) in ctx[1]: return None
   st, var_vals = st.simplify().unbind()
   ctx[0].update(var_vals)
-  ctx[2].add(st)
+  ctx[1].add(st)
   return st.to_uop() if st != x.st else None
-append_vars = PatternMatcher([(UPat(UOps.VIEW, name="x"), simplify_and_unbind)])
+append_st_vars = PatternMatcher([(UPat(UOps.VIEW, name="x"), _append_st_vars)])
+
+def _append_buf(ctx:Tuple[Dict[Variable, int], Set[ShapeTracker], Tuple[int, ...]], x:UOp) -> UOp:
+  return UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx[2].index(x.arg[0]))
+append_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), _append_buf),])
+
 to_ast = PatternMatcher([
   (UPat(UOps.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
   (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda x: x.replace(src=())),
 ])
-enumerate_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), lambda ctx,x: UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx[1].index(x.arg[0]))),])
 
 PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, Tuple[int, ...], UOp]] = []
+def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable, int]) -> UOp:
+  sink = graph_rewrite(graph_rewrite(base_sink, view_left), view_right)
+  ret = graph_rewrite(graph_rewrite(sink, to_ast), append_st_vars+append_bufs, (var_vals, set(), bufs))
+  PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
+  return ret
+
 if getenv("RUN_PROCESS_REPLAY"):
   @atexit.register
   def save_process_replay():
     for base_sink,ctx,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
-
-@track_rewrites
-def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable, int]) -> UOp:
-  sink = graph_rewrite(graph_rewrite(base_sink, view_left), view_right)
-  ret = graph_rewrite(graph_rewrite(sink, to_ast), append_vars+enumerate_bufs, (var_vals, bufs, set()))
-  PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
-  return ret
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
 
@@ -157,16 +160,16 @@ def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], inputs:List[LazyBuffer], bu
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, outputs, inputs, buf_uops, cache).view(buf.st)
     return ret
+  if buf.op is MetaOps.CONST: return buf_uops[buf.buffer]
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
   if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs:
-    if buf.op is MetaOps.CONST: return ubuf
     if not any(x.buffer is buf.buffer for x in outputs) and buf not in inputs: inputs.append(buf)
     return UOp.load(ubuf, buf.st.to_uop(), dtype=dtype)
   src = tuple(to_uop(x, outputs, inputs, buf_uops, cache) for x in buf.srcs)
   if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
   elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
   elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]), buf.arg)
-  elif buf.op in METAOPS: ret = UOp(METAOPS[cast(MetaOps, buf.op)], buf.dtype, src, buf.arg)
+  elif buf.op in METAOPS: ret = UOp(METAOPS[cast(MetaOps, buf.op)], buf.dtype, (buf_uops[buf.buffer], *src), buf.arg)
   elif buf.op is UnaryOps.CAST: ret = UOp(UOps.CAST, dtype, src)
   elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
   else: ret = UOp(UOps.ALU, dtype, src, buf.op)
@@ -267,6 +270,7 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
+@track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   """create a graph for realizing the outputs"""
   # start by just realizing the buffers passed in
@@ -346,7 +350,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   var_vals: Dict[Variable, int] = {}
   for buf in realizes:
     if buf.realized is None and buf.op is not MetaOps.CONST:
-      output_groups[reduce_for_op[buf] if buf in reduce_for_op and MULTIOUTPUT else buf].append(buf)
+      output_groups[reduce_for_op.get(buf, buf)].append(buf)
 
       # make things that can't be images not images
       if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or

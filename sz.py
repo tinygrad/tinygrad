@@ -15,9 +15,9 @@ def gen_stats(base_path="."):
   for path, _, files in os.walk(os.path.join(base_path, "tinygrad")):
     for name in files:
       if not name.endswith(".py"): continue
-      if 'tinygrad/runtime/autogen' in path: continue
+      if 'tinygrad/runtime/autogen' in path.replace('\\', '/'): continue
       filepath = os.path.join(path, name)
-      relfilepath = os.path.relpath(filepath, base_path)
+      relfilepath = os.path.relpath(filepath, base_path).replace('\\', '/')
       with tokenize.open(filepath) as file_:
         tokens = [t for t in tokenize.generate_tokens(file_.readline) if t.type in TOKEN_WHITELIST and not is_docstring(t)]
         token_count, line_count = len(tokens), len(set([x for t in tokens for x in range(t.start[0], t.end[0]+1)]))
