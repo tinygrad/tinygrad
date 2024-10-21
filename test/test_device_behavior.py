@@ -14,4 +14,5 @@ class TestDeviceBehavior(unittest.TestCase):
     replace = buffered.shape[0]
     queue[replace:] = queue[:-replace]
     queue[:replace] = buffered
-    assert (res := queue.tolist()) == [[4.0], [3.0], [1.0]], res
+    res = queue.tolist()
+    assert res == [[4.0], [3.0], [1.0]], res
