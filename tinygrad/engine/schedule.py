@@ -348,9 +348,13 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   output_groups: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   buf_uops: Dict[Buffer, UOp] = {}
   var_vals: Dict[Variable, int] = {}
+  lazybufs_to_realize: Dict[Buffer, LazyBuffer] = {}
   for buf in realizes:
     if buf.realized is None and buf.op is not MetaOps.CONST:
       output_groups[reduce_for_op.get(buf, buf)].append(buf)
+      if (dup:=lazybufs_to_realize.get(buf.buffer)) is not None:
+        raise RuntimeError(f"can't double realize in one schedule, Buffer is realizing both {dup} and {buf}")
+      lazybufs_to_realize[buf.buffer] = buf
 
       # make things that can't be images not images
       if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
@@ -392,8 +396,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   schedule: List[ScheduleItem] = []
   while queue:
     lsi = queue.popleft()
-    for out in lsi.outputs: del out.srcs  # can only schedule once
     schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.bufs if x.size != 0), lsi.metadata))
+    for b in si.outputs: del lazybufs_to_realize[b].srcs  # can only schedule once
     if (m:=BUF_LIMIT.get(device:=si.outputs[0].device)) and len(si.bufs) >= m:
       if DEBUG >= 3: print(si)
       raise RuntimeError(f"Kernel for {si.metadata} exceeded the {m} buffer count limit for {device} with {len(si.bufs)} buffers.")
