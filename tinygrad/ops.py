@@ -532,9 +532,9 @@ class UPat(MathTrait):
   def bitcast(self, dtype=None): return UPat(UOps.BITCAST, dtype, (self,))
   def gep(self, i:int): return UPat(UOps.GEP, None, (self,), (i,))
   @staticmethod
-  def load(*src:UPat, dtype:Optional[DType]=None): return UPat(UOps.LOAD, dtype, src)
+  def load(*src:UPat, **kwargs): return UPat(UOps.LOAD, **kwargs, src=src)
   @staticmethod
-  def store(*src:UPat): return UPat(UOps.STORE, dtypes.void, src)
+  def store(*src:UPat, **kwargs): return UPat(UOps.STORE, **kwargs, src=src)
 
   def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return UPat.const(self.dtype, b)
   def alu(self, arg, *src:UPat):
