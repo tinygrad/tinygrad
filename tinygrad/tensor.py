@@ -1696,8 +1696,8 @@ class Tensor:
     0x800a, 0x800000008000000a, 0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008 ], **tkwargs).unsqueeze(1).pad((None, (0, 24)))
 
     rate, dsbyte = { "sha3_224": (144, 0x06), "sha3_256": (136, 0x06), "sha3_384": (104, 0x06), "sha3_512": (72, 0x06) }.get(cfg, cfg)
-    data, lower_shape, nb_out = self.bitcast(dtypes.uint8).reshape(prod(self.shape[:-1]), -1), self.shape[:-1], (200-rate)//2
-    data_pad = rate - (data.shape[-1] % rate)
+    data = self.bitcast(dtypes.uint8).reshape(prod(self.shape[:-1]), -1)
+    data_pad, lower_shape, nb_out = rate - (data.shape[-1] % rate), self.shape[:-1], (200-rate)//2
     # pad batches then pad blocks
     data = data.pad((None, (0, data_pad))).reshape(data.shape[0], -1, rate).pad((None, None, (0, 200 - rate))).flatten(1)
 
