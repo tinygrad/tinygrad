@@ -28,8 +28,8 @@ binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, oper
 if Device.DEFAULT == "LLVM":
   binary_operations.remove(operator.lt)
 
-integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor, torch.bitwise_xor), 
-                                                 (Tensor.bitwise_and, np.bitwise_and, torch.bitwise_and), 
+integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor, torch.bitwise_xor),
+                                                 (Tensor.bitwise_and, np.bitwise_and, torch.bitwise_and),
                                                  (Tensor.bitwise_or, np.bitwise_or, torch.bitwise_or)]
 unary_operations = [(Tensor.exp, np.exp, torch.exp), (Tensor.log, np.log, torch.log), (Tensor.sin, np.sin, torch.sin),
                     (Tensor.sqrt, np.sqrt, torch.sqrt), (Tensor.reciprocal, np.reciprocal, torch.reciprocal)]
