@@ -496,6 +496,10 @@ class TestGGUF(unittest.TestCase):
   def test_dequantization_q8_0(self): self._test_dequantization(ggml.GGML_TYPE_Q8_0)
   def test_dequantization_q6_k(self): self._test_dequantization(ggml.GGML_TYPE_Q6_K)
 
+  def test_expected_failure_unknown_type(self):
+    with self.assertRaises(ValueError):
+      ggml_data_to_tensor(Tensor.empty(512, dtype=dtypes.uint8), 256, 1337)
+
   def _test_dequantization(self, ttype: int):
     type_traits = ggml.ggml_internal_get_type_traits(ttype)
     n_el, n_bytes = ggml_test_block_count * type_traits.blck_size, ggml_test_block_count * type_traits.type_size
