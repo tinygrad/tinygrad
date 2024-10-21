@@ -5,7 +5,7 @@ import tarfile, ggml, ctypes
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
-from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load, tar_extract, ggml_data_to_tensor, load_gguf
+from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load, tar_extract, ggml_data_to_tensor, gguf_load
 from tinygrad.helpers import Timing, fetch, temp, CI
 from test.helpers import is_dtype_supported
 
@@ -486,15 +486,19 @@ class TestGGUF(unittest.TestCase):
     self.ctx = ctypes.cast(ggml.ggml_init(params), ctypes.POINTER(ctypes.c_void_p))
   def tearDown(self) -> None: ggml.ggml_free(self.ctx)
 
-  def test_load_tinyllama_q8_0(self): self._test_load_gguf("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q8_0.gguf?download=true")
-  def test_load_tinyllama_q4_0(self): self._test_load_gguf("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true")
-  def test_load_gpt2_q4_1(self): self._test_load_gguf("https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.Q4_1.gguf?download=true")
-  def test_load_sample_q6_k(self): self._test_load_gguf("https://huggingface.co/Isotr0py/test-gguf-sample/resolve/main/Quant_Q6_K_1024.gguf?download=true")
+  def test_load_tinyllama_q8_0(self): self._test_gguf_load("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q8_0.gguf?download=true")
+  def test_load_tinyllama_q4_0(self): self._test_gguf_load("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true")
+  def test_load_gpt2_q4_1(self): self._test_gguf_load("https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.Q4_1.gguf?download=true")
+  def test_load_sample_q6_k(self): self._test_gguf_load("https://huggingface.co/Isotr0py/test-gguf-sample/resolve/main/Quant_Q6_K_1024.gguf?download=true")
 
   def test_dequantization_q4_0(self): self._test_dequantization(ggml.GGML_TYPE_Q4_0)
   def test_dequantization_q4_1(self): self._test_dequantization(ggml.GGML_TYPE_Q4_1)
   def test_dequantization_q8_0(self): self._test_dequantization(ggml.GGML_TYPE_Q8_0)
   def test_dequantization_q6_k(self): self._test_dequantization(ggml.GGML_TYPE_Q6_K)
+
+  def test_expected_failure_unknown_type(self):
+    with self.assertRaises(ValueError):
+      ggml_data_to_tensor(Tensor.empty(512, dtype=dtypes.uint8), 256, 1337)
 
   def _test_dequantization(self, ttype: int):
     type_traits = ggml.ggml_internal_get_type_traits(ttype)
@@ -510,11 +514,12 @@ class TestGGUF(unittest.TestCase):
     dq_tensor = ggml_data_to_tensor(q_tensor, n_el, ttype).reshape(n_el)
 
     np.testing.assert_equal(dq_tensor.numpy(), np.frombuffer(c_dq_data, dtype=np.float32))
-  def _test_load_gguf(self, url: str):
+
+  def _test_gguf_load(self, url: str):
     fp = fetch(url)
     model_size = os.stat(fp).st_size
     gguf_tensor = Tensor.empty(model_size, dtype=dtypes.uint8, device=f"disk:{fp}").to(Device.DEFAULT)
-    kv_data, tensors = load_gguf(gguf_tensor)
+    kv_data, tensors = gguf_load(gguf_tensor)
 
     gguf_params = ggml.gguf_init_params(ctx=self.ctx, no_alloc=False)
     gguf_ctx = ggml.gguf_init_from_file(str(fp).encode("utf8"), gguf_params)
