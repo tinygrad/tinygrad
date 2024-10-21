@@ -9,7 +9,7 @@ from typing import Tuple
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
-from tinygrad.ops import UOp, UOps, graph_rewrite
+from tinygrad.ops import UOp, UOps, graph_rewrite, sym_infer
 from tinygrad import Variable
 import functools
 
@@ -509,18 +509,6 @@ class TestSymbolicVars(unittest.TestCase):
     assert (a * a).vars() == {a}
     assert (a//4 + a//6).vars() == {a}
 
-"""
-@unittest.skip("not supported on uops yet")
-class TestSymRender(unittest.TestCase):
-  def test_sym_render(self):
-    a = Variable("a", 1, 8)
-    b = Variable("b", 1, 10)
-    assert sym_render(a) == "a"
-    assert sym_render(1) == "1"
-    assert sym_render(a+1) == "(1+a)"
-    assert sym_render(a*b) == "(a*b)"
-
-@unittest.skip("not supported on uops yet")
 class TestSymInfer(unittest.TestCase):
   def test_sym_infer(self):
     a = Variable("a", 0, 10)
@@ -535,6 +523,17 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(a+b+c, var_vals) == 9
     assert sym_infer(a*b, var_vals) == 6
     assert sym_infer(a*b+c, var_vals) == 10
+
+"""
+@unittest.skip("not supported on uops yet")
+class TestSymRender(unittest.TestCase):
+  def test_sym_render(self):
+    a = Variable("a", 1, 8)
+    b = Variable("b", 1, 10)
+    assert sym_render(a) == "a"
+    assert sym_render(1) == "1"
+    assert sym_render(a+1) == "(1+a)"
+    assert sym_render(a*b) == "(a*b)"
 
 @unittest.skip("not supported on uops yet")
 class TestSymbolicSymbolicOps(unittest.TestCase):

@@ -162,6 +162,7 @@ def resolve(x, default:bool=True):
   return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
 def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.vmax)
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
+def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int: return uop if isinstance(uop, int) else uop.sym_infer(var_vals)
 
 # used for UOp and UPat
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
@@ -384,6 +385,18 @@ class UOp(MathTrait):
         if self.arg is BinaryOps.OR: return s0.vmin or s1.vmin, s0.vmax or s1.vmax
         if self.arg is BinaryOps.AND: return s0.vmin and s1.vmin, s0.vmax and s1.vmax
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
+
+  @functools.cached_property
+  def _sym_fxn(self):
+    sself = self.simplify()
+    varnames = tuple(x.arg[0] for x in sself.sparents if x.op is UOps.DEFINE_VAR)
+    # TODO: sanitize varnames, or don't use naked eval while staying fast
+    return eval("lambda "+','.join(varnames)+": "+sself.render()), varnames  # pylint: disable=eval-used
+
+  def sym_infer(self, var_vals:Dict[UOp, int]):
+    fxn, varnames = self._sym_fxn
+    return fxn(**{k.arg[0]:v for k,v in var_vals.items() if k.arg[0] in varnames})
+
   def render(self, simplify=True) -> str:
     ret = graph_rewrite(self.simplify() if simplify else self, renderer)
     return ret.arg if ret.op is UOps.NOOP else str(ret)
@@ -986,6 +999,3 @@ renderer = PatternMatcher([
 
 sint = Union[int, UOp]
 Variable = UOp
-
-def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int:
-  return int(uop.substitute({k:k.const_like(v) for k,v in var_vals.items()})) if isinstance(uop, UOp) else uop
