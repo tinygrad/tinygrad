@@ -370,8 +370,8 @@ class QCOMDevice(HCQCompiled):
     return info
 
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False):
-    flags |= kgsl.KGSL_MEMALIGN(alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP | kgsl.KGSL_CACHEMODE(kgsl.KGSL_CACHEMODE_WRITEBACK)
-    if uncached: flags |= kgsl.KGSL_CACHEMODE(kgsl.KGSL_CACHEMODE_UNCACHED)
+    flags |= kgsl.KGSL_MEMALIGN(alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP
+    flags |= kgsl.KGSL_CACHEMODE(kgsl.KGSL_CACHEMODE_UNCACHED if uncached else kgsl.KGSL_CACHEMODE_WRITEBACK)
 
     alloc = kgsl.IOCTL_KGSL_GPUOBJ_ALLOC(self.fd, size=(bosz:=round_up(size, 1<<alignment_hint)), flags=flags, mmapsize=bosz)
     va_addr = libc.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, self.fd, alloc.id * 0x1000)
