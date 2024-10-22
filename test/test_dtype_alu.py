@@ -99,7 +99,7 @@ def universal_test_unary_torch(a, dtype, op):
   run_schedule(sched)
   tensor_value = out.numpy()
   reference_value = op[2](torch.tensor([a]).to(torch_dtypes_map[dtype])).item()
-  np.testing.assert_allclose(tensor_value, reference_value, atol=1e-3, rtol=1e-2)
+  np.testing.assert_allclose(tensor_value, reference_value, atol=1e-4, rtol=3e-2)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
     op = [x for x in ast.parents if x.op is UOps.ALU and x.arg in UnaryOps][0]
     assert op.dtype == dtype
