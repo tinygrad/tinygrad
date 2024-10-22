@@ -7,7 +7,7 @@ from collections import defaultdict
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv
+from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import MetaOps, smax, resolve, UOp, UOps, BinaryOps, sint, Variable
 from tinygrad.device import Device, Buffer, BufferOptions
@@ -421,6 +421,19 @@ class Tensor:
     r.lazydata.buffer.allocate(external_ptr=ptr)
     del r.lazydata.srcs # fake realize
     return r
+
+  @staticmethod
+  def fetch(url:str, gunzip:bool=False, **kwargs) -> Tensor:
+    """
+    Fetch a URL from the Internet.
+
+    This is the preferred way to access Internet resources.
+    It currently returns a DISK Tensor, but in the future it may return an HTTP Tensor.
+    This also will soon become lazy (when possible) and not print progress without DEBUG.
+
+    THe `gunzip` flag will gzip extract the resource and return an extracted Tensor.
+    """
+    return Tensor(fetch(url, gunzip=gunzip), **kwargs)
 
   _seed: int = int(time.time())
   _device_seeds: Dict[str, Tensor] = {}
