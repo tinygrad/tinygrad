@@ -3,7 +3,7 @@ from typing import Union, Tuple, Optional, List, cast, Literal
 from tinygrad.tensor import Tensor, _broadcast_shape, ConstType
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, flatten, make_pair
-from tinygrad.runtime.onnx.onnx import to_python_const, parse_dtype
+from tinygrad.nn.onnx import to_python_const, parse_dtype
 import numpy as np
 
 # TODO maybe don't cast hack things
@@ -47,7 +47,8 @@ def PRelu(X:Tensor, slope:Tensor):
   slope = slope[0] if slope.size(-1) != X.size(-1) else slope
   return (X > 0).where(X, X * slope)
 def ThresholdedRelu(X: Tensor, alpha=1.0): return (X > alpha).where(X, 0)
-def Clip(x: Tensor, min=None, max=None): # noqa: A002  cuz onnx just uses min and max as attribute names
+# cuz onnx just uses min and max as attribute names
+def Clip(x: Tensor, min=None, max=None): # noqa: A002 # pylint: disable=redefined-builtin
   return x.clip(float('-inf') if min is None else min,float('inf') if max is None else max).cast(x.dtype)
 
 def _axes(axes, noop_with_empty_axes):
@@ -456,6 +457,7 @@ def Attention(x:Tensor, weights, bias:Tensor, mask_index:Optional[Tensor]=None, 
     xq, xk, xv = [x.linear(w, b) for w, b in zip((wq, wk, wv), (bq, bk, bv))]
   xq, xk, xv = [x.reshape(x.shape[0], x.shape[1], num_heads, -1).transpose(1, 2) for x in (xq, xk, xv)]
 
+  present = None
   if past is not None:
     xk, xv = Tensor.cat(past[0], xk, dim=-2), Tensor.cat(past[1], xv, dim=-2)
     present = Tensor.cat(xk.unsqueeze(0), xv.unsqueeze(0))

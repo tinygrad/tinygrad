@@ -4,7 +4,7 @@ from ultralytics import YOLO
 import onnx
 from pathlib import Path
 from tinygrad.tensor import Tensor
-from tinygrad.runtime.onnx.onnx import get_run_onnx
+from tinygrad.nn.onnx import get_run_onnx
 
 os.chdir("/tmp")
 if not Path("yolov8n-seg.onnx").is_file():

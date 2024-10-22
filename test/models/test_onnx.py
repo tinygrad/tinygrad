@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
-from tinygrad.runtime.onnx.onnx import get_run_onnx
+from tinygrad.nn.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI, fetch, temp
 

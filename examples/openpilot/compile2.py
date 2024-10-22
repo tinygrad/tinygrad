@@ -20,7 +20,7 @@ from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule
 from tinygrad.ops import UOps
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.runtime.onnx.onnx import get_run_onnx
+from tinygrad.nn.onnx import get_run_onnx
 
 Device.DEFAULT = "GPU"
 

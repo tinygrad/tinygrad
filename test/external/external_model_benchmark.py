@@ -6,7 +6,7 @@ import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
 import onnxruntime as ort
 from onnx2torch import convert
-from tinygrad.runtime.onnx.onnx import get_run_onnx
+from tinygrad.nn.onnx import get_run_onnx
 from tinygrad.helpers import OSX, DEBUG, fetch
 from tinygrad import Tensor, Device
 
@@ -23,7 +23,8 @@ MODELS = {
   "efficientnet": "https://github.com/onnx/models/raw/main/validated/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
   "shufflenet": "https://github.com/onnx/models/raw/main/validated/vision/classification/shufflenet/model/shufflenet-9.onnx",
   "bert": "https://github.com/onnx/models/raw/main/validated/text/machine_comprehension/bert-squad/model/bertsquad-12.onnx",
-  "yolov4": "https://github.com/onnx/models/raw/refs/heads/main/validated/vision/object_detection_segmentation/yolov4/model/yolov4.onnx",
+  # make Tensor(None).item() work
+  # "yolov4": "https://github.com/onnx/models/raw/refs/heads/main/validated/vision/object_detection_segmentation/yolov4/model/yolov4.onnx",
   # op top_k not supported
   # "mask-rcnn": "https://github.com/onnx/models/raw/refs/heads/main/validated/vision/object_detection_segmentation/mask-rcnn/model/MaskRCNN-12.onnx",
   # op NonZero is not supported
