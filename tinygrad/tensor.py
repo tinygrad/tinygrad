@@ -423,9 +423,9 @@ class Tensor:
     return r
 
   @staticmethod
-  def fetch(url:str, gunzip:bool=False, **kwargs) -> Tensor:
+  def from_url(url:str, gunzip:bool=False, **kwargs) -> Tensor:
     """
-    Fetch a URL from the Internet.
+    Create a Tensor from a URL.
 
     This is the preferred way to access Internet resources.
     It currently returns a DISK Tensor, but in the future it may return an HTTP Tensor.

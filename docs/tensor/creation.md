@@ -13,7 +13,7 @@
 ## Creation (external)
 
 ::: tinygrad.Tensor.from_blob
-::: tinygrad.Tensor.fetch
+::: tinygrad.Tensor.from_url
 
 ## Creation (random)
 
