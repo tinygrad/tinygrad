@@ -95,6 +95,7 @@
     height: 100%;
     padding: 8px;
     position: relative;
+
   }
   .container > * + *, .rewrite-container > * + * {
     margin-top: 12px;
@@ -194,7 +195,8 @@
     </div>
     <div class="container metadata resizeable" id="metadata"></div>
   </div>
-  <script>
+  </body>
+  <script defer async>
   /* global hljs, dagreD3, d3, DOMPurify */
 
   // **** hljs extra definitions for UOps and float4
@@ -273,12 +275,7 @@
   let lastPress = 0;
   let prevUOp = 0;
 
-  const kernelListChildren = document.querySelector(".container.kernel-list").childNodes;
-
   async function main() {
-    // reduce scroll lag
-    if (Date.now() - lastPress > 300) lastPress = Date.now();
-    else return;
     // ***** LHS kernels list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
@@ -327,7 +324,6 @@
       }
       kernelList.appendChild(kernelUl);
     });
-
     // ***** UOp graph
     const cacheKey = `${currentKernel}-${currentUOp}`;
     if (cacheKey in cache) {
@@ -463,7 +459,7 @@
     }
   }
 
-  const checkFunc = async event => {
+  const checkFunc = event => {
     // up and down change the UOp or kernel from the list
     if (!expandKernel) {
       if (event.key == "ArrowUp") {
@@ -477,7 +473,7 @@
         event.preventDefault()
         currentUOp = 0;
         currentRewrite = 0;
-        currentKernel = Math.min(Array.from(Object.keys(kernels)).length-1, currentKernel+1)
+        currentKernel = Math.min(kernelLength-1, currentKernel+1)
         main();
       }
     }
@@ -490,17 +486,22 @@
     }
     if (event.key == "ArrowUp") {
       event.preventDefault()
+      if (Date.now() - lastPress > 500) lastPress = Date.now();
+      else return;
       currentRewrite = 0;
       prevUOp = currentUOp
       currentUOp = Math.max(0, currentUOp-1)
+      currentKernel = Math.max(0, currentKernel-1)
       main()
     }
     if (event.key == "ArrowDown") {
       event.preventDefault()
+      if (Date.now() - lastPress > 500) lastPress = Date.now();
+      else return;
       currentRewrite = 0;
       const totalUOps = kernels[currentKernel].length-1;
-      prevUOp = currentUOp
-      currentUOp = Math.min(totalUOps, currentUOp+1)
+      console.log(kernels[currentKernel]);
+      currentUOp = Math.min(totalUOps, currentUOp+1);
       main()
     }
     // left and right go through rewrites in a single UOp
@@ -520,6 +521,6 @@
   document.addEventListener("keydown", (event) => checkFunc(event));
 
   main()
+
   </script>
-  </body>
 </html>
