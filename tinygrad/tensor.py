@@ -1725,14 +1725,17 @@ class Tensor:
     data = (data ^ pad_mask).reshape(data.shape[0], -1, 200).bitcast(dtypes.uint64)
 
     state = Tensor.zeros((data.shape[0], 25), **tkwargs)
-    for k in range(int(data.shape[-2])):
+    for k in range(int(data.shape[1])):
       state = state.xor(data[:,k].reshape(-1, 25))
       for i in range(24): # f1600
+        # θ step
         p = state.reshape((-1, 5, 5)).transpose(2, 1)
         t1 = p[:,:,0].xor(p[:,:,1]).xor(p[:,:,2]).xor(p[:,:,3]).xor(p[:,:,4]).roll(-1, 1) # xor reduce
         state = state.xor(t1.roll(2, 1).xor((t1 << 1) ^ (t1 >> 63)).unsqueeze(2).expand((-1, -1, 5)).transpose(2, 1).flatten(1))
+        # ρ and π steps
         state = reorder_matrix.where(state.unsqueeze(-1).expand((-1, -1, 25)).transpose(2, 1), Tensor.zeros(*state.shape, 25, **tkwargs)).sum(2)
         state = state.mul(rot_offsets_vecs[0]).xor(state.div(rot_offsets_vecs[1], upcast=False)).reshape((-1, 5, 5))
+        # χ and ι step
         state = state.xor(state.roll(shifts=-1, dims=2).xor(-1).bitwise_and(state.roll(shifts=-2, dims=2))).flatten(1) ^ round_const_masks[i]
     return state.bitcast(dtypes.uint8)[:,:(200 - rate) // 2].reshape(*self.shape[:-1], -1)
 

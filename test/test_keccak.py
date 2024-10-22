@@ -22,7 +22,7 @@ class TestKeccak(unittest.TestCase):
   def _test_preset(self, name: str, special_sizes: list[int]):
     hasher: type[hashlib._Hash] = getattr(hashlib, name)
 
-    for n in (special_sizes + [1, 128]):
+    for n in (special_sizes + [special_sizes[0] - 1]):
       a, b = random.randbytes(n), random.randbytes(n)
 
       ha_ref, hb_ref = hasher(a).digest(), hasher(b).digest()
