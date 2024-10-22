@@ -52,7 +52,7 @@ class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
   float32 = strat.floats(width=32, allow_subnormal=False)
   float16 = strat.floats(width=16, allow_subnormal=False)
-  bfloat16 = strat.floats(width=16, allow_subnormal=False)
+  bfloat16 = strat.floats(width=32, allow_subnormal=False).map(lambda x: torch.tensor([x]).to(torch.bfloat16).item())
   uint8 = strat.integers(0, 255)
   uint16 = strat.integers(0, 65535)
   uint32 = strat.integers(0, 2**32-1)
@@ -73,7 +73,7 @@ def universal_test(a, b, dtype, op):
 def universal_test_torch(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
-  reference_value = op[2](torch.tensor([a]).to(torch_dtypes_map[dtype]), torch.tensor([b]).to(torch_dtypes_map[dtype])).item()
+  reference_value = op[2](torch.tensor([a], dtype=torch_dtypes_map[dtype]), torch.tensor([b], dtype=torch_dtypes_map[dtype])).item()
   np.testing.assert_allclose(tensor_value, reference_value, atol=1e-10)
 
 def universal_test_unary(a, dtype, op):
@@ -98,7 +98,7 @@ def universal_test_unary_torch(a, dtype, op):
   ast = sched[-1].ast
   run_schedule(sched)
   tensor_value = out.numpy()
-  reference_value = op[2](torch.tensor([a]).to(torch_dtypes_map[dtype])).item()
+  reference_value = op[2](torch.tensor([a], dtype=torch_dtypes_map[dtype])).item()
   np.testing.assert_allclose(tensor_value, reference_value, atol=1e-4, rtol=3e-2)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
     op = [x for x in ast.parents if x.op is UOps.ALU and x.arg in UnaryOps][0]
