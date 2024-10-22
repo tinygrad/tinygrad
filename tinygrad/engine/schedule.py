@@ -140,21 +140,21 @@ def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
   ctx.var_vals.update(var_vals)
   ctx.sts.add(st)
   return st.to_uop() if st != x.st else None
-append_st_vars = PatternMatcher([(UPat(UOps.VIEW, name="x"), _append_st_vars)])
 
 def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
   return UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx.bufs.index(x.arg[0]))
-append_bufs = PatternMatcher([(UPat(UOps.BUFFER, name="x"), _append_buf),])
 
-to_ast = PatternMatcher([
-  (UPat(UOps.CONTIGUOUS, src=(UPat.var("x"),)), lambda x: x),
-  (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda x: x),
+to_si = PatternMatcher([
+  (UPat(UOps.BUFFER, name="x"), _append_buf),
+  (UPat(UOps.VIEW, name="x"), _append_st_vars),
+  (UPat(UOps.CONTIGUOUS, src=(UPat.var("x"),)), lambda _,x: x),
+  (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda _,x: x),
 ])
 
 PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, Tuple[int, ...], UOp]] = []
 def full_ast_rewrite(base_sink:UOp, bufs:Tuple[int, ...], var_vals:Dict[Variable, int]) -> UOp:
   sink = graph_rewrite(graph_rewrite(base_sink, view_left), view_right)
-  ret = graph_rewrite(graph_rewrite(sink, to_ast), append_st_vars+append_bufs, ScheduleItemContext(var_vals, set(), bufs))
+  ret = graph_rewrite(sink, to_si, ScheduleItemContext(var_vals, set(), bufs))
   PROCESS_REPLAY_CAPTURE.append((base_sink, bufs, ret))
   return ret
 
