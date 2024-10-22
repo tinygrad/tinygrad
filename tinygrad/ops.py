@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, TypeVar
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from weakref import WeakValueDictionary
@@ -477,15 +477,14 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
 
 # ***** pattern matcher *****
 
-def get_location() -> Tuple[str, int]:
+def get_location() -> Tuple[pathlib.Path, int]:
   frm = sys._getframe(1)
   # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
-  while frm.f_back is not None and frm.f_back.f_code.co_filename.split("/")[-1] in {"ops.py", "uopgraph.py", "schedule.py", "lowerer.py"}:
+  while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "uopgraph.py", "schedule.py", "lowerer.py"}:
     frm = frm.f_back
-  return frm.f_code.co_filename, frm.f_lineno
+  return pathlib.Path(frm.f_code.co_filename), frm.f_lineno
 @functools.lru_cache(None)
-def lines(fn) -> List[str]:
-  with open(fn) as f: return f.readlines()
+def lines(fn:pathlib.Path) -> List[str]: return fn.read_text().splitlines()
 
 class UPat(MathTrait):
   __slots__ = ["op", "dtype", "arg", "name", "src", "_any"]
