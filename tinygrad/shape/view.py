@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools, operator, itertools, math
+import functools, operator, itertools
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Sequence
 from tinygrad.dtype import dtypes
@@ -199,31 +199,7 @@ class View:
       if reshaped_vm2 is None: return None
       if reshaped_vm2.shape != vm2.shape: return reshaped_vm2 + vm1
 
-    if vm2.mask:
-      # Try to project vm2's mask on to vm1.
-      newb, newe, bad = [0] * len(vm1.shape), list(vm1.shape), False
-      for (b, e), o, term, (_, t) in zip(vm2.mask, origin, terms, reversed(extents)):
-        if resolve(b <= t.vmin and t.vmax < e, False): continue
-        if not all_int([o, b, e]):
-          bad = True
-          continue
-        if len(term) != 1:
-          if not term and newe: newe[0] = 0
-          else: bad = True
-          continue
-        d1, s1 = term[0]
-        if not isinstance(s1, int) or not isinstance(newe[d1], int):
-          bad = True
-          continue
-        newb[d1] = max(newb[d1], math.ceil((b - o if s1 > 0 else e - o - 1) / s1))
-        newe[d1] = min(newe[d1], (b - o if s1 < 0 else e - o - 1) // s1 + 1)
-
-      # If any of vm1 was masked off, try again with that mask in place.
-      for b, e, s in zip(newb, newe, vm1.shape):
-        if (b, e) != (0, s):
-          return vm2 + View.create(vm1.shape, vm1.strides, vm1.offset, tuple(zip(newb, newe)))
-      # Otherwise if vm2's mask was violated, then cannot merge.
-      if bad: return None
+    if vm2.mask: return None
 
     return View.create(vm1.shape, tuple(strides), sum(o * s for o, s in zip(origin, vm2.strides)) + vm2.offset)
 
