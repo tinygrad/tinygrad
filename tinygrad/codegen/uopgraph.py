@@ -133,7 +133,7 @@ def simplify_valid(valid:UOp) -> Optional[UOp]:
   ret:List[UOp] = []
   something_changed = False
   for stmt in split_uop(valid, BinaryOps.AND):
-    ret.append(stmt if not ret else uop_given_valid(functools.reduce(operator.and_, ret), stmt))
+    ret.append(newstmt if ret and (newstmt:=uop_given_valid(functools.reduce(operator.and_, ret), stmt)) is not None else stmt)
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
 
