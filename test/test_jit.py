@@ -419,6 +419,17 @@ class TestJit(unittest.TestCase):
       a = Tensor.randn(10, 1000, device=d0).realize()
       xc = jf(a)
       np.testing.assert_allclose((a.numpy().sum(axis=(1,)) + 5).view(np.int32), xc.numpy(), atol=1e-4, rtol=1e-5)
+  
+  def test_jit_output_clone(self):
+    @TinyJit
+    def f(x:Tensor) -> Tensor: return (x + 1).realize()
+
+    f(Tensor([0.0]))
+    f(Tensor([0.0]))
+
+    a = f(Tensor([1.0])).clone().realize()
+    b = f(Tensor([2.0]))
+    assert abs((a - b).item()) > 0.5
 
 @unittest.skip("Pending multioutput implementation #3607")
 class TestMultioutputJit(unittest.TestCase):

@@ -649,6 +649,21 @@ class TestZeroShapeTensor(unittest.TestCase):
     a = Tensor.ones(3, 2, 0).sum(axis=2, keepdim=True)
     assert a.shape == (3, 2, 1)
     np.testing.assert_equal(a.numpy(), np.sum(np.zeros((3, 2, 0)), axis=2, keepdims=True))
+  
+  def test_clone(self):
+    a = Tensor.rand(16, 16).realize()
+    np.testing.assert_allclose(a.numpy(), a.clone().numpy())
+
+    a = Tensor.rand(16, 16).mul(5.0).add(5.0)
+    np.testing.assert_allclose(a.numpy(), a.clone().numpy())
+
+  def test_clone_with_grad(self):
+    a = Tensor.rand(16, 16, requires_grad=True)
+    a.mul(5.0).add(5.0).mean().backward()
+    b = a.clone()
+    assert a.grad is not None
+    assert b.grad is not None
+    np.testing.assert_allclose(a.grad.numpy(), b.grad.numpy())
 
   def test_reduce_default(self):
     np.testing.assert_equal(Tensor([]).max().numpy(), -float("inf"))

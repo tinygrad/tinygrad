@@ -327,7 +327,7 @@ class Tensor:
     Creates a clone of this tensor allocating a seperate buffer for the data.
     """
     ret = Tensor(self.lazydata.clone(), self.device, requires_grad=self.requires_grad)
-    if self.grad is not None: ret.grad = self.grad.to(self.device)
+    if self.grad is not None: ret.grad = self.grad.clone()
     if hasattr(self, '_ctx'): ret._ctx = self._ctx
     return ret
 
