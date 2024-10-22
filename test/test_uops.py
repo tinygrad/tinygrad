@@ -1,5 +1,5 @@
 from typing import Optional, Tuple, Any, List
-import unittest, math, pathlib
+import unittest, math
 import numpy as np
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import Tensor, _to_np_dtype
@@ -443,12 +443,12 @@ class TestIndexingOrdering(unittest.TestCase):
 
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
-    self.assertEqual(sym.patterns[-1][0].location[0].name, "uopgraph.py")
-    self.assertEqual(append_bufs.patterns[0][0].location[0].name, "schedule.py")
-    self.assertEqual(spec.patterns[0][0].location[0].name, "ops.py")
+    self.assertEqual(sym.patterns[-1][0].location[0].split("/")[-1], "uopgraph.py")
+    self.assertEqual(append_bufs.patterns[0][0].location[0].split("/")[-1], "schedule.py")
+    self.assertEqual(spec.patterns[0][0].location[0].split("/")[-1], "ops.py")
     with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?
       test_upat = UPat(UOps.CONST, dtypes.bool)
-      self.assertEqual(test_upat.location[0].name, pathlib.Path(__file__).name)
+      self.assertEqual(test_upat.location[0].split("/")[-1], __file__.split("/")[-1])
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
