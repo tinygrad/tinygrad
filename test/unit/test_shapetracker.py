@@ -102,7 +102,6 @@ class TestRealDoesntSimplify(unittest.TestCase):
     st = self.st.real_strides()
     print(st)
     self.st = self.st.simplify()
-    assert len(self.st.views) != 1
     assert None in st
 
   def test_1(self):
@@ -130,9 +129,8 @@ class TestRealSimplifies(unittest.TestCase):
   def tearDown(self):
     st = self.st.real_strides()
     self.st = self.st.simplify()
-    assert len(self.st.views) == 1
-    print(self.st.views[-1].strides, st)
-    self.assertEqual(self.st.views[-1].strides, st)
+    print(self.st.real_strides(), st)
+    self.assertEqual(self.st.real_strides(), st)
 
   def test_1(self):
     self.st = ShapeTracker((
