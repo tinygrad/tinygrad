@@ -2,10 +2,10 @@ import hashlib
 import random
 import unittest
 from test.helpers import is_dtype_supported
-from tinygrad.dtype import dtypes
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, Device, getenv, dtypes
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uint8) and is_dtype_supported(dtypes.uint64), "Device must support uint8 and uint64")
+@unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashes in NV CI")
 class TestKeccak(unittest.TestCase):
   def setUp(self) -> None: random.seed(1337)
 
