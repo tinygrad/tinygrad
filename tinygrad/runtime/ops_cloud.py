@@ -42,7 +42,9 @@ class CloudHandler(BaseHTTPRequestHandler):
     return 0
 
   def _do(self, method):
-    session = CloudHandler.sessions[unwrap(self.headers.get("Cookie")).split("session=")[1]]
+    header_val: str | None = self.headers.get("Cookie")
+    if header_val is None: return self._fail()
+    session = CloudHandler.sessions[unwrap(header_val).split("session=")[1]]
     ret = b""
     if self.path == "/renderer" and method == "GET":
       cls, args = Device[CloudHandler.dname].renderer.__reduce__()
