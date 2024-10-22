@@ -5,11 +5,11 @@ from contextlib import ContextDecorator
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Literal
 from collections import defaultdict
 
-from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv
+from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch
 from tinygrad.multi import MultiLazyBuffer
-from tinygrad.ops import MetaOps, truncate, smax, resolve, UOp, UOps, BinaryOps, sint, Variable
+from tinygrad.ops import MetaOps, smax, resolve, UOp, UOps, BinaryOps, sint, Variable
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule
@@ -211,9 +211,6 @@ class Tensor:
 
     NOTE: A Tensor can only be scheduled once.
     """
-    if getenv("FUZZ_SCHEDULE"):
-      from test.external.fuzz_schedule import fuzz_schedule
-      fuzz_schedule(flatten([x.lazydata.lbs for x in (self,)+lst]))
     schedule, var_vals = create_schedule_with_vars(flatten([x.lazydata.lbs for x in (self,)+lst]))
     return memory_planner(schedule), var_vals
 
@@ -424,6 +421,19 @@ class Tensor:
     r.lazydata.buffer.allocate(external_ptr=ptr)
     del r.lazydata.srcs # fake realize
     return r
+
+  @staticmethod
+  def from_url(url:str, gunzip:bool=False, **kwargs) -> Tensor:
+    """
+    Create a Tensor from a URL.
+
+    This is the preferred way to access Internet resources.
+    It currently returns a DISK Tensor, but in the future it may return an HTTP Tensor.
+    This also will soon become lazy (when possible) and not print progress without DEBUG.
+
+    THe `gunzip` flag will gzip extract the resource and return an extracted Tensor.
+    """
+    return Tensor(fetch(url, gunzip=gunzip), **kwargs)
 
   _seed: int = int(time.time())
   _device_seeds: Dict[str, Tensor] = {}

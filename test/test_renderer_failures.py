@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.device import Buffer, Device
-from tinygrad.dtype import PtrDType, dtypes
+from tinygrad.dtype import dtypes
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import dedup, flatten, getenv, prod
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -30,8 +30,8 @@ def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "uops are for cstyle")
 class TestCStyleFailures(unittest.TestCase):
   def test_inline_const_alu(self):
-    a = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
-    b = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 1)
+    a = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
+    b = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(UOps.LOAD, dtypes.int, (b, idx))
     alu = ld.alu(BinaryOps.MAX, UOp.const(dtypes.int, dtypes.min(dtypes.int)+1))
@@ -45,7 +45,7 @@ class TestCStyleFailures(unittest.TestCase):
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
 class TestPTXFailures(unittest.TestCase):
   def test_gated_store_with_alu(self):
-    a = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
+    a = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     gate_alu = (lidx0:=UOp(UOps.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
     gated_alu_store = UOp(UOps.STORE, dtypes.void, (a, lidx0, UOp.const(dtypes.int, 1), gate_alu))
     sink = UOp(UOps.SINK, dtypes.void, (gated_alu_store,))
@@ -55,7 +55,7 @@ class TestPTXFailures(unittest.TestCase):
 
   @unittest.skip("not still valid?")
   def test_gated_store_with_if(self):
-    a = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int), (), 0)
+    a = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     gate_alu = (lidx0:=UOp(UOps.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
     val = UOp.const(dtypes.int, 1)
     if_uop = UOp(UOps.IF, dtypes.void, (gate_alu, val))

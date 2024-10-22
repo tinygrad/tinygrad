@@ -5,7 +5,7 @@ from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context
+from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -54,6 +54,10 @@ class MathTrait:
   def __rsub__(self, x): return self.ufix(x).alu(BinaryOps.ADD, -self)
   def __mul__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x))
   def __rmul__(self, x): return self.ufix(x).alu(BinaryOps.MUL, self)
+  def __lshift__(self, x): return self.alu(BinaryOps.SHL, self.ufix(x))
+  def __rlshift__(self, x): return self.ufix(x).alu(BinaryOps.SHL, self)
+  def __rshift__(self, x): return self.alu(BinaryOps.SHR, self.ufix(x))
+  def __rrshift__(self, x): return self.ufix(x).alu(BinaryOps.SHR, self)
   def __floordiv__(self, x): return self.alu(BinaryOps.IDIV, self.ufix(x))
   def __rfloordiv__(self, x): return self.ufix(x).alu(BinaryOps.IDIV, self)
   def __truediv__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x).alu(UnaryOps.RECIP))
@@ -160,6 +164,7 @@ def resolve(x, default:bool=True):
   return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
 def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.vmax)
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
+def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
 # used for UOp and UPat
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
@@ -382,6 +387,18 @@ class UOp(MathTrait):
         if self.arg is BinaryOps.OR: return s0.vmin or s1.vmin, s0.vmax or s1.vmax
         if self.arg is BinaryOps.AND: return s0.vmin and s1.vmin, s0.vmax and s1.vmax
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
+
+  @functools.cached_property
+  def _sym_fxn(self):
+    sself = self.simplify()
+    varnames = tuple(x.arg[0] for x in sself.sparents if x.op is UOps.DEFINE_VAR)
+    # TODO: sanitize varnames, or don't use naked eval while staying fast
+    return eval("lambda "+','.join(varnames)+": "+sself.render()), varnames  # pylint: disable=eval-used
+
+  def sym_infer(self, var_vals:Dict[UOp, int]):
+    fxn, varnames = self._sym_fxn
+    return fxn(**{k.arg[0]:v for k,v in var_vals.items() if k.arg[0] in varnames})
+
   def render(self, simplify=True) -> str:
     ret = graph_rewrite(self.simplify() if simplify else self, renderer)
     return ret.arg if ret.op is UOps.NOOP else str(ret)
@@ -411,10 +428,11 @@ python_alu: Dict[Op, Callable]  = {
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else x*math.inf,
   TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
-def exec_alu(op:Op, dtype:DType, operands):
+def exec_alu(op:Op, dtype:DType, operands, truncate_output=True):
   if dtype.count > 1:
     return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
-  return truncate.get(dtype, lambda x: x)(python_alu[op](*operands))
+  alu = python_alu[op](*operands)
+  return truncate.get(dtype, lambda x: x)(alu) if truncate_output else alu
 
 # ***** uop helpers *****
 
@@ -433,7 +451,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
     for u in uops:
       if u.op is UOps.LOAD:
         dont_count = dont_count.union(u.src[1].sparents)
-        if len(u.src) > 3: dont_count = dont_count.union(u.src[2].sparents)
+        if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
       elif u.op is UOps.STORE:
         dont_count = dont_count.union(u.src[1].sparents)
         if len(u.src) > 3: dont_count = dont_count.union(u.src[3].sparents)
@@ -603,14 +621,19 @@ class TrackedRewriteContext:
 
 rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
 contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
-def track_rewrites(func):
-  def __wrapper(self, *args, **kwargs):
-    if TRACK_MATCH_STATS >= 2: rewrite_stack.append((self, []))
-    try: ret = func(self, *args, **kwargs)
-    finally: # NOTE: save everything in the stack
-      if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
-    return ret
-  return __wrapper
+_rewrite_cnt: Dict[str, int] = {}
+def track_rewrites(named=False):
+  def _decorator(func):
+    def __wrapper(self, *args, **kwargs):
+      if TRACK_MATCH_STATS >= 2:
+        if named: _rewrite_cnt[func.__name__] = _rewrite_cnt.setdefault(func.__name__, 0)+1
+        rewrite_stack.append((f"{(n:=func.__name__)}_{_rewrite_cnt[n]}" if named else self, []))
+      try: ret = func(self, *args, **kwargs)
+      finally: # NOTE: save everything in the stack
+        if TRACK_MATCH_STATS >= 2: contexts.append(rewrite_stack.pop())
+      return ret
+    return __wrapper
+  return _decorator
 
 class TrackedPatternMatcher(PatternMatcher):
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
@@ -724,7 +747,7 @@ spec = PatternMatcher([
   (UPat(UOps.ALU, arg=BinaryOps.IDIV, name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(UOps.ALU, name="x"), lambda x: all(x.dtype == y.dtype for y in x.src)),
 
-  (UPat((UOps.ASSIGN, UOps.CONTIGUOUS), src=(UPat((UOps.DEFINE_ACC, UOps.DEFINE_GLOBAL)), UPat())), lambda: True),
+  (UPat(UOps.ASSIGN, src=(UPat((UOps.DEFINE_ACC, UOps.DEFINE_GLOBAL)), UPat())), lambda: True),
   (UPat(UOps.ENDRANGE, dtype=dtypes.void, src=(UPat(UOps.RANGE),)), lambda: True),
 
   # all WMMA has 3 args, <x, w, acc>
@@ -755,8 +778,9 @@ spec = PatternMatcher([
 
 def type_verify(uops:List[UOp]):
   for i,u in enumerate(uops):
-    chk = cast(bool, spec.rewrite(u))
-    assert chk is True, f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}"
+    if cast(bool, spec.rewrite(u)) is not True:
+      print_uops(uops)
+      raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
 
 # *** most of symbolic lives here now ***
 
@@ -826,7 +850,10 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   return quo if rem is None else cast(UOp, div_folding(rem, div))//(c//div)+quo
 
 def lt_folding(x:UOp, c:int) -> Optional[UOp]:
-  return cast(UOp, x.divides(g)).lt(c//g) if ((g:=math.gcd(x.const_factor(), c)) > 1) else None
+  p, np = partition(split_uop(x, BinaryOps.ADD), lambda u: u.const_factor() == 1)
+  if np and (d:=functools.reduce(math.gcd, [u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
+    return cast(UOp, functools.reduce(operator.add, np).divides(d)).lt(c//d)
+  return None
 
 def fold_unrolled_divs(divs:UOp):
   # div pattern in unrolled arange
@@ -902,7 +929,7 @@ symbolic = PatternMatcher([
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat((UOps.VCONST, UOps.CONST))),
-   lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src]))),
+   lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src], truncate_output=False))),
   # ALU min==max -> CONST (slow!)
   (UPat(UOps.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
@@ -961,22 +988,19 @@ symbolic_flat = symbolic+PatternMatcher([
 _substitute = PatternMatcher([(UPat(tuple(UOps), name="x"), lambda ctx,x: ctx.get(x,None))])
 
 # for debug
+syms = { BinaryOps.ADD: "+", BinaryOps.MUL: "*", BinaryOps.IDIV: "//", BinaryOps.MOD: "%",
+         BinaryOps.CMPLT: "<", BinaryOps.CMPNE: "!=", BinaryOps.AND: "&", BinaryOps.OR: "|", BinaryOps.XOR: "^"}
 renderer = PatternMatcher([
-  (UPat(UOps.DEFINE_VAR, name="x"), lambda x: UOp(UOps.NOOP, arg=x.arg[0])),
+  (UPat((UOps.DEFINE_VAR, UOps.SPECIAL), name="x"), lambda x: UOp(UOps.NOOP, arg=x.arg[0])),
+  (UPat(UOps.RANGE, name="x"), lambda x: UOp(UOps.NOOP, arg=f"ridx{x.arg[0]}")),
   (UPat(UOps.CONST, name="x"), lambda x: UOp(UOps.NOOP, arg=str(x.arg))),
   (UPat(UOps.BIND, src=UPat(UOps.NOOP), name="x"), lambda x: x.src[0]),
-  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.ADD, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}+{x.src[1].arg})")),
-  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.MUL, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}*{x.src[1].arg})")),
-  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.IDIV, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}//{x.src[1].arg})")),
-  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.MOD, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}%{x.src[1].arg})")),
-  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.CMPLT, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}<{x.src[1].arg})")),
-  (UPat(UOps.ALU, src=UPat(UOps.NOOP), arg=BinaryOps.CMPNE, name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}!={x.src[1].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), name="x", arg=TernaryOps.WHERE),
+   lambda x: UOp(UOps.NOOP, arg=f"({x.src[1].arg} if {x.src[0].arg} else {x.src[2].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}{syms[x.arg]}{x.src[1].arg})")),
 ])
 
 # *** what was symbolic.py ***
 
 sint = Union[int, UOp]
 Variable = UOp
-
-def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int:
-  return int(uop.substitute({k:k.const_like(v) for k,v in var_vals.items()})) if isinstance(uop, UOp) else uop
