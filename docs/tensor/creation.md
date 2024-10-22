@@ -9,7 +9,11 @@
 ::: tinygrad.Tensor.full_like
 ::: tinygrad.Tensor.zeros_like
 ::: tinygrad.Tensor.ones_like
+
+## Creation (external)
+
 ::: tinygrad.Tensor.from_blob
+::: tinygrad.Tensor.fetch
 
 ## Creation (random)
 
