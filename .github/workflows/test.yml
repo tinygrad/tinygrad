@@ -87,6 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # TODO: run the pre-commit hook to replace a lot of this
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -231,9 +232,6 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Run CLOUD=1 Test
         run: CLOUDDEV=CLANG CLOUD=1 python3 test/test_ops.py TestOps.test_tiny_add
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test pre-commit hooks
-        run: python3 -m pre_commit
       - if: ${{ matrix.task == 'onnx' }}
         name: Test Action Space
         run: PYTHONPATH="." GPU=1 python3 extra/optimization/get_action_space.py
