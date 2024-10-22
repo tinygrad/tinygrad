@@ -25,7 +25,7 @@ torch.onnx.export(torch_model, torch.randn(N, N), onnx_path)
 """
 import onnx
 from tinygrad.tensor import Tensor
-from extra.onnx import get_run_onnx
+from tinygrad.nn.onnx import get_run_onnx
 out = get_run_onnx(onnx.load(onnx_path))({"onnx::MatMul_0": Tensor.zeros(N, N)})
 for x in out.values(): x.realize()
 """

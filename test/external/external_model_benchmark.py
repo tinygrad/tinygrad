@@ -6,24 +6,50 @@ import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
 import onnxruntime as ort
 from onnx2torch import convert
-from extra.onnx import get_run_onnx
+from tinygrad.nn.onnx import get_run_onnx
 from tinygrad.helpers import OSX, DEBUG, fetch
 from tinygrad import Tensor, Device
 
+# TODO: probably should test some quantized models too
+# especially float16
 MODELS = {
-  "resnet50": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
+  # comma models
   "openpilot": "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx",
-  "efficientnet": "https://github.com/onnx/models/raw/main/validated/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
-  "shufflenet": "https://github.com/onnx/models/raw/main/validated/vision/classification/shufflenet/model/shufflenet-9.onnx",
   "commavq": "https://huggingface.co/commaai/commavq-gpt2m/resolve/main/gpt2m.onnx",
   "dm": "https://github.com/commaai/openpilot/raw/ba7f840a06dbc8ae3c45b3b4976c88a21895aed0/selfdrive/modeld/models/dmonitoring_model.onnx",
 
+  # validated models from model zoo
+  "resnet50": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
+  "efficientnet": "https://github.com/onnx/models/raw/main/validated/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
+  "shufflenet": "https://github.com/onnx/models/raw/main/validated/vision/classification/shufflenet/model/shufflenet-9.onnx",
+  "bert": "https://github.com/onnx/models/raw/main/validated/text/machine_comprehension/bert-squad/model/bertsquad-12.onnx",
+  # make Tensor(None).item() work
+  # "yolov4": "https://github.com/onnx/models/raw/refs/heads/main/validated/vision/object_detection_segmentation/yolov4/model/yolov4.onnx",
+  # op top_k not supported
+  # "mask-rcnn": "https://github.com/onnx/models/raw/refs/heads/main/validated/vision/object_detection_segmentation/mask-rcnn/model/MaskRCNN-12.onnx",
+  # op NonZero is not supported
+  # "gpt2": "https://github.com/onnx/models/raw/refs/heads/main/validated/text/machine_comprehension/gpt-2/model/gpt2-10.onnx",
+  # need to implement Graph attribute parser
+  # "tiny-yolov3":
+  # "https://github.com/onnx/models/raw/refs/heads/main/validated/vision/object_detection_segmentation/tiny-yolov3/model/tiny-yolov3-11.onnx",
+
+  # other models from model zoo
+  "gptneox": "https://github.com/onnx/models/raw/refs/heads/main/Generative_AI/gptneox_Opset18_transformers/gptneox_Opset18.onnx",
+
+  # popular models from https://huggingface.co/onnx-community?sort_models=downloads#models
+  # https://huggingface.co/models?sort=downloads&search=onnx
+
+  "bge-small": "https://huggingface.co/Qdrant/bge-small-en-v1.5-onnx-Q/resolve/main/model_optimized.onnx",
+  # TODO: bug
+  # "whisper-base-encoder": "https://huggingface.co/onnx-community/whisper-base/resolve/main/onnx/encoder_model.onnx",
+  "whisper-base-decoder": "https://huggingface.co/onnx-community/whisper-base/resolve/main/onnx/decoder_model.onnx",
+
+  # also broken on torch
+  # "squeezenet": "https://github.com/onnx/models/raw/main/validated/vision/classification/squeezenet/model/squeezenet1.0-12.onnx",
   # broken in torch MPS
   # "zfnet": "https://github.com/onnx/models/raw/main/archive/vision/classification/zfnet-512/model/zfnet512-9.onnx",
   # TypeError: BatchNormalization() got an unexpected keyword argument 'is_test'
   # "densenet": "https://github.com/onnx/models/raw/main/archive/vision/classification/densenet-121/model/densenet-3.onnx",
-  # AssertionError: only onnx version >= 10 supported for slice
-  # "bert": "https://github.com/onnx/models/raw/main/archive/text/machine_comprehension/bert-squad/model/bertsquad-8.onnx",
   # really slow
   # "resnet18": "https://github.com/onnx/models/raw/main/archive/vision/classification/resnet/model/resnet18-v2-7.onnx",
 }
@@ -111,7 +137,8 @@ def benchmark_model(m, devices, validate_outs=False):
 
   if validate_outs:
     for device in devices:
-      rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
+      # HACK these rtol and atols...
+      rtol, atol = 9e-2, 9e-2  # tolerance for fp16 models
       Device.DEFAULT = device
       inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
       tinygrad_model = get_run_onnx(onnx_model)

@@ -1338,10 +1338,11 @@ class Tensor:
     dim = self._resolve_dim(dim, outer=True)
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
-  def pad2d(self, padding:Sequence[int], value:float=0.0) -> Tensor:
+  def pad2d(self, padding:Sequence[int], value:float=0.0, mode:str="constant") -> Tensor:
     """
     Returns a tensor that pads the last two axes specified by `padding` (padding_left, padding_right, padding_top, padding_bottom).
-    If `value` is specified, the tensor is padded with `value` instead of `0.0`.
+    The padding modes is selected with `mode` which supports 'constant', 'reflect', 'replicate' and 'circular'
+    If 'constant' is selected as `mode` and `value` is specified, the tensor is padded with `value` instead of `0.0`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(9).reshape(1, 1, 3, 3)
@@ -1350,11 +1351,30 @@ class Tensor:
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.pad2d((1, 1, 2, 0), value=-float("inf")).numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.pad2d((2, 2, 2, 0), mode="reflect").numpy())
+    ```
     """
-    pads = tuple((max(p0, 0), max(p1, 0)) for p0, p1 in zip(padding[::2], padding[1::2]))[::-1]
-    padded = self.pad((None,) * (self.ndim - len(padding) // 2) + tuple(pads), value=value)
-    shrink = tuple((-min(p0, 0), min(p1 + s, s)) for p0, p1, s in zip(padding[::2], padding[1::2], padded.shape[::-1]))[::-1]
-    return padded.shrink((None,) * (self.ndim - len(padding) // 2) + shrink)
+    # TODO: nasty circular implementation but it's done with only movement ops, still can be cleaned up
+    # TODO: reflect and replicate are also kinda nasty but bug free I think
+    shrinks = reversed([(-min(pB,0), min(pA+s,s)) for pB,pA,s in zip(padding[::2],padding[1::2],self.shape[::-1])])
+    x = self.shrink((None,) * (self.ndim-len(padding)//2) + tuple(shrinks))
+    pads = ((0,0),) * (self.ndim-len(padding)//2) + tuple(reversed([(max(pB,0), max(pA,0)) for pB, pA in zip(padding[::2], padding[1::2])]))
+    if mode == "constant": return x.pad(pads, value)
+    if mode == "circular":
+      repeat_args = [math.ceil(pB/sh) + math.ceil(pA/sh) + 1 for (pB,pA), sh in zip(pads, x.shape)]
+      shrink_args = [(sh-pB%sh if pB%sh != 0 else 0, sh*rarg-(sh-pA%sh if pA%sh != 0 else 0)) for (pB,pA),sh,rarg in zip(pads, x.shape, repeat_args)]
+      return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
+    for d,(pB,pA) in enumerate(pads):
+      if mode == "reflect":
+        if pB > (s:=x.shape[d]) or pA > s: raise RuntimeError(f"padding ({pB},{pA}) cannot be more than the corresponding input dimension {s}")
+        xB = x[[slice(pB,0,-1) if i == d else slice(None) for i in range(x.ndim)]] if pB else None
+        xA = x[[slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1) if i==d else slice(None) for i in range(x.ndim)]] if pA else None
+      if mode == "replicate":
+        xB = x[[slice(None,1) if i==d else slice(None) for i in range(x.ndim)]].expand([pB if i==d else None for i in range(x.ndim)]) if pB else None
+        xA = x[[slice(-1,None) if i==d else slice(None) for i in range(x.ndim)]].expand([pA if i==d else None for i in range(x.ndim)]) if pA else None
+      x = Tensor.cat(*(x_ for x_ in (xB, x, xA) if x_ is not None), dim=d)
+    return x
 
   @property
   def T(self) -> Tensor:
@@ -1417,10 +1437,11 @@ class Tensor:
     The rolling operation is circular, meaning that elements that go beyond the edge are wrapped around to the beginning of the dimension.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.rand(3, 4, 1).roll(shifts=1, dims=0))
+    t = Tensor.arange(4)
+    print(t.roll(shifts=1, dims=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.rand(3, 4, 1).roll(shifts=-1, dims=0))
+    print(t.roll(shifts=-1, dims=0).numpy())
     ```
     """
     dims, rolled = tuple(self._resolve_dim(d) for d in make_pair(dims, 1)), self
@@ -1946,10 +1967,26 @@ class Tensor:
     return xup.permute(*range(len(noop_)), *[len(noop_)+i*2 for i in range(len(i_))], *[len(noop_)+i*2+1 for i in range(len(i_))])
 
   def _padding2d(self, padding:Union[int, Sequence[int]], dims:int) -> Sequence[int]:
+    if isinstance(padding, (tuple,list)): assert len(padding) == 2*dims or len(padding) == dims, f"Expected padding of length {2*dims} or {dims}, but got {len(padding)} for tensor of shape {self.shape}"  # noqa: E501
     return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
 
+  # :D:D:D:D:D:D:D:D:D:D:D:D:D:D:D, yes this is unreadable gibberish I know
+  def _ceil_mode_padding2d(self,d_,k_,s_,p_) -> List[int]:
+    (d_,k_,s_,p_) = (make_pair(x, len(i_ := self.shape[-len(k_):])) for x in (d_,k_,s_,p_))
+    o_ = [ceildiv(i+2*p-d*(k-1)-1,s)+1 for i,d,k,s,p in zip(i_,d_,k_,s_,p_)]
+    pads = list(self._padding2d(p_, len(k_)))
+    # we have to pre-pad before _pool so that o_ in _pool is calculated correctly
+    for j, (o,i,s,p,k,d) in enumerate(zip(o_, i_, s_, p_, k_, d_)):
+      # pad so that sliding windows inside the input shape is _pool-ed with full kernel shape
+      pads[-1-j*2] += ((o-1)*s+d*(k-1)+1)-(i+2*p)
+      # remove extra end pads that result in sliding windows starting in the padded region outside input shape
+      pads[-1-j*2] -= max(0, s*(o-1)+1-i-p)
+    # print(f"{i_=}, {o_=}, {k_=}, {d_=}, {s_=}, {p=}")
+    # print(pads)
+    return pads
+
   # NOTE: these work for more than 2D
-  def avg_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, count_include_pad=True):
+  def avg_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False, count_include_pad=True):
     """
     Applies average pooling over a tensor.
 
@@ -1967,9 +2004,17 @@ class Tensor:
     """
     padding_, axis = self._padding2d(padding, len(k_ := make_pair(kernel_size))), tuple(range(-len(k_), 0))
     def pool(x:Tensor) -> Tensor: return x.pad2d(padding_)._pool(k_, stride if stride is not None else k_, dilation)
+    # TODO: clean this up
+    # the inferred padding from ceil_mode is not counted towards denominator
+    if (padding != 0 and not all(p==0 for p in make_pair(padding))) and ceil_mode and count_include_pad:
+      padding_ = self._ceil_mode_padding2d(dilation, k_, stride if stride is not None else k_, padding)
+      inferred_pads = [after - before for after, before in zip(padding_, self._padding2d(padding, len(k_)))]
+      return pool(self).sum(axis=axis) / self.pad2d(self._padding2d(padding, len(k_))).ones_like().pad2d(inferred_pads)\
+                                             ._pool(k_, stride if stride is not None else k_, dilation).sum(axis=axis)
+    if ceil_mode: padding_ = self._ceil_mode_padding2d(dilation, k_, stride if stride is not None else k_, padding)
     return pool(self).mean(axis=axis) if count_include_pad else pool(self).sum(axis=axis) / pool(self.ones_like()).sum(axis=axis)
 
-  def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0):
+  def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False):
     """
     Applies max pooling over a tensor.
 
@@ -1986,6 +2031,7 @@ class Tensor:
     ```
     """
     padding_ = self._padding2d(padding, len(k_ := make_pair(kernel_size)))
+    if ceil_mode: padding_ = self._ceil_mode_padding2d(dilation, k_, stride if stride is not None else k_, padding)
     return self.pad2d(padding_, value=float('-inf'))._pool(k_, stride if stride is not None else k_, dilation).max(axis=tuple(range(-len(k_), 0)))
 
   def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, acc_dtype:DTypeLike|None=None) -> Tensor:
@@ -2004,7 +2050,6 @@ class Tensor:
     """
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"  # noqa: E501
-    if isinstance(padding, (tuple,list)): assert len(padding) == 2*len(HW) or len(padding) == len(HW), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {self.shape}"  # noqa: E501
     padding_ = self._padding2d(padding, len(HW))
 
     # conv2d is a pooling op (with padding)
@@ -2323,6 +2368,17 @@ class Tensor:
     ```
     """
     return F.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
+  def hardsigmoid(self, alpha:float=1/6, beta:float=0.5):
+    """
+    Applies the Hardsigmoid function element-wise.
+
+    - Described: https://paperswithcode.com/method/hard-sigmoid
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).hardsigmoid().numpy())
+    ```
+    """
+    return (alpha * self + beta).clip(0, 1)
   def sqrt(self):
     """
     Computes the square root of the tensor element-wise.
@@ -2715,6 +2771,18 @@ class Tensor:
     ```
     """
     return self / (1 + self.abs())
+
+  def selu(self, alpha=1.6732632423543772848170429916717, scale=1.0507009873554804934193349852946):
+    """
+    Applies the Selu function element-wise.
+
+    - Described: https://paperswithcode.com/method/selu
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softsign().numpy())
+    ```
+    """
+    return scale * (self.relu() - (-alpha*self.exp()+alpha).relu())
 
   # ***** broadcasted elementwise ops *****
   def _broadcast_to(self, shape:Tuple[sint, ...]) -> Tensor:
@@ -3253,6 +3321,32 @@ class Tensor:
     Y = Y.one_hot(num_classes=cast(int, self.shape[1])) if Y.ndim < 2 else Y
     Y = (1 - label_smoothing)*Y + label_smoothing / cast(int, Y.shape[1])
     ret = -self.log_softmax(axis=1).mul(Y).sum(axis=1)
+    return ret._do_reduction(reduction)
+
+  def nll_loss(self, Y:Tensor, weight:Optional[Tensor]=None, ignore_index:Optional[int]=None, reduction:ReductionStr="mean") -> Tensor:
+    """
+    Compute the negative log likelihood loss between input logits and target.
+
+    NOTE: `self` are logits and `Y` are the Y labels or class probabilities.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.nll_loss.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.nll_loss(Y).item())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.nll_loss(Y, reduction='none').numpy())
+    ```
+    """
+    x, Y, target_shape = self.reshape(self.size(0), self.size(1), -1), Y.reshape(self.size(0), -1), Y.shape
+    mask = Tensor.ones_like(Y) if ignore_index is None else (Y != ignore_index)
+    masked_weight = mask if weight is None else weight[Y] * mask
+    ret = (-x.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight).reshape(target_shape)
+    if reduction == "mean": return ret.sum() / (masked_weight.sum())
     return ret._do_reduction(reduction)
 
   # ***** Tensor Properties *****

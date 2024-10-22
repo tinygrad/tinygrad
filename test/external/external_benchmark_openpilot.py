@@ -2,7 +2,7 @@ import time, sys, hashlib
 from pathlib import Path
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
-from extra.onnx import get_run_onnx
+from tinygrad.nn.onnx import get_run_onnx
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import IMAGE, GlobalCounters, fetch, colored, getenv, trange
 from tinygrad.tensor import _from_np_dtype
