@@ -67,9 +67,10 @@ def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
   if dtype in torch_dtypes_map.keys():
-    reference_value = (op[2](torch.tensor([a], dtype=torch_dtypes_map[dtype]), torch.tensor([b], dtype=torch_dtypes_map[dtype]))).float().numpy()
+    reference_value = op[2](torch.tensor([a]).to(torch_dtypes_map[dtype]), torch.tensor([b]).to(torch_dtypes_map[dtype])).float().numpy()
   else:
     reference_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)), np.array([b]).astype(_to_np_dtype(dtype)))
+
   if dtype in (*dtypes_float, dtypes.bfloat16): np.testing.assert_allclose(tensor_value, reference_value, atol=1e-10)
   else: np.testing.assert_equal(tensor_value, reference_value)
 
@@ -80,10 +81,9 @@ def universal_test_unary(a, dtype, op):
   ast = sched[-1].ast
   run_schedule(sched)
   tensor_value = out.numpy()
-  if dtype in torch_dtypes_map.keys():
-    reference_value = op[2](torch.tensor([a], dtype=torch_dtypes_map[dtype])).float().numpy()
-  else:
-    reference_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
+  if dtype in torch_dtypes_map.keys(): reference_value = op[2](torch.tensor([a]).to(torch_dtypes_map[dtype])).float().numpy()
+  else: reference_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
+
   if dtype in (*dtypes_float, dtypes.bfloat16): np.testing.assert_allclose(tensor_value, reference_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, reference_value)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
