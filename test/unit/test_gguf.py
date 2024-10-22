@@ -1,9 +1,12 @@
-import os, unittest
+import os, unittest, ctypes
 from tinygrad import dtypes, Tensor, fetch, Device
 import numpy as np
-import ggml, ctypes
 from tinygrad.nn.state import ggml_data_to_tensor, gguf_load
 from test.helpers import is_dtype_supported
+try:
+  import ggml
+except ModuleNotFoundError:
+  raise unittest.SkipTest("ggml not installed, skipping gguf test")
 
 ggml_test_block_count = 4
 ggml_type_to_np_dtype = {
