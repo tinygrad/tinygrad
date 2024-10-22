@@ -64,28 +64,42 @@ class ht:
   bool = strat.booleans()
 
 def universal_test(a, b, dtype, op):
+  if not isinstance(op, tuple): op = (op, op)
+  tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
+  numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)), np.array([b]).astype(_to_np_dtype(dtype)))
+  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
+  else: np.testing.assert_equal(tensor_value, numpy_value)
+
+def universal_test_torch(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
-  if dtype in torch_dtypes_map.keys():
-    reference_value = op[2](torch.tensor([a]).to(torch_dtypes_map[dtype]), torch.tensor([b]).to(torch_dtypes_map[dtype])).item()
-  else:
-    reference_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)), np.array([b]).astype(_to_np_dtype(dtype)))
-
-  if dtype in (*dtypes_float, dtypes.bfloat16): np.testing.assert_allclose(tensor_value, reference_value, atol=1e-10)
-  else: np.testing.assert_equal(tensor_value, reference_value)
+  reference_value = op[2](torch.tensor([a]).to(torch_dtypes_map[dtype]), torch.tensor([b]).to(torch_dtypes_map[dtype])).item()
+  np.testing.assert_allclose(tensor_value, reference_value, atol=1e-10)
 
 def universal_test_unary(a, dtype, op):
+  if not isinstance(op, tuple): op = (op, op)
+  out: Tensor = op[0](Tensor([a], dtype=dtype))
+  sched = create_schedule([out.lazydata])
+  ast = sched[-1].ast
+  run_schedule(sched)
+  tensor_value = out.numpy()
+  numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
+  if dtype in dtypes_float:
+    np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
+  else: np.testing.assert_equal(tensor_value, numpy_value)
+  if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
+    op = [x for x in ast.parents if x.op is UOps.ALU and x.arg in UnaryOps][0]
+    assert op.dtype == dtype
+
+def universal_test_unary_torch(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op, op)
   out: Tensor = op[0](Tensor([a], dtype=dtype))
   sched = create_schedule([out.lazydata])
   ast = sched[-1].ast
   run_schedule(sched)
   tensor_value = out.numpy()
-  if dtype in torch_dtypes_map.keys(): reference_value = op[2](torch.tensor([a]).to(torch_dtypes_map[dtype])).item()
-  else: reference_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
-
-  if dtype in (*dtypes_float, dtypes.bfloat16): np.testing.assert_allclose(tensor_value, reference_value, atol=1e-3, rtol=1e-2)
-  else: np.testing.assert_equal(tensor_value, reference_value)
+  reference_value = op[2](torch.tensor([a]).to(torch_dtypes_map[dtype])).item()
+  np.testing.assert_allclose(tensor_value, reference_value, atol=1e-3, rtol=1e-2)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
     op = [x for x in ast.parents if x.op is UOps.ALU and x.arg in UnaryOps][0]
     assert op.dtype == dtype
@@ -118,7 +132,7 @@ class TestDTypeALU(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16, Device.DEFAULT), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
-  def test_bfloat16(self, a, b, op): universal_test(a, b, dtypes.bfloat16, op)
+  def test_bfloat16(self, a, b, op): universal_test_torch(a, b, dtypes.bfloat16, op)
 
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
@@ -129,7 +143,7 @@ class TestDTypeALU(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16, Device.DEFAULT), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, strat.sampled_from(unary_operations))
-  def test_bfloat16_unary(self, a, op): universal_test_unary(a, dtypes.bfloat16, op)
+  def test_bfloat16_unary(self, a, op): universal_test_unary_torch(a, dtypes.bfloat16, op)
 
   @given(ht.uint8, ht.uint8, strat.sampled_from(integer_binary_operations))
   def test_uint8(self, a, b, op): universal_test(a, b, dtypes.uint8, op)
