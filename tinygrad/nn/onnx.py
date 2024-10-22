@@ -5,6 +5,15 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv, CI, OSX
 from tinygrad.dtype import DType
 from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
+# TODO try to remove this np stuff later
+import numpy as np
+from tinygrad.tensor import _to_np_dtype
+try:
+  from onnx.helper import tensor_dtype_to_np_dtype
+except ImportError:
+  # for onnx < 1.13
+  from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
+  def tensor_dtype_to_np_dtype(tensor_dtype:int) -> np.dtype: return TENSOR_TYPE_TO_NP_TYPE[tensor_dtype]
 
 # ========== helpers
 # Tensor -> python value cache for arguments
@@ -31,11 +40,11 @@ def parse_dtype(onnx_dtype: int) -> DType:
   raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
 
 def parse_buffer(inp: TensorProto) -> Tensor:
-  if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data) or inp.raw_data:
-    # we early realize here to realize buffer during setup
-    # parse_buffer is only ran during initialization so it doesn't affect the graph for op execution
-    # TODO: maybe reshape -> realize is not the best way to do this. Maybe we gotta realize fake buffer.
-    return Tensor(dat, dtype=parse_dtype(inp.data_type), requires_grad=False).expand(tuple(inp.dims)).realize()
+  if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
+    return Tensor(dat, dtype=parse_dtype(inp.data_type), requires_grad=False).reshape(tuple(inp.dims))
+  if len(inp.raw_data) > 0:
+    data = np.frombuffer(inp.raw_data, dtype=(dt:=tensor_dtype_to_np_dtype(inp.data_type))).astype(_to_np_dtype(dt)).copy()
+    return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
   raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
 
 # src: onnx/onnx_ml_pb2.pyi
