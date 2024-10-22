@@ -2,7 +2,7 @@
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, functools
 from typing import Callable, List, Tuple, Union, cast
-from tinygrad.engine.schedule import full_ast_rewrite
+from tinygrad.engine.schedule import ScheduleItemContext, full_ast_rewrite
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 from tinygrad.codegen.kernel import Kernel, Opt
 from tinygrad.ops import UOp
@@ -30,7 +30,7 @@ if REF == "master": SKIP_PROCESS_REPLAY = True
 
 # *** recreators
 
-def recreate_sched(sink:UOp, ctx, _) -> UOp: return full_ast_rewrite(sink, ctx, {})
+def recreate_sched(sink:UOp, ctx:ScheduleItemContext, _) -> UOp: return full_ast_rewrite(sink, ctx)
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str, ctx:ProcessReplayContext, _) -> str:
   with Context(**{k:v for k,v in ctx.ctx_vars.items() if k in ContextVar._cache and k != "DEBUG"}):
     k = Kernel(ast, opts=opts)
