@@ -1689,11 +1689,11 @@ class Tensor:
 
     # https://keccak.team/keccak_specs_summary.html
 
-    tkwargs, targs = dict(device=self.device, dtype=dtypes.uint64), (self.device, dtypes.uint64) # make linters happy
+    tkwargs, targs = dict(device=self.device, dtype=dtypes.uint64, requires_grad=False), (self.device, dtypes.uint64, False) # make linters happy
     rot_offsets = [44, 43, 21, 14, 28, 20, 3, 45, 61, 1, 6, 25, 8, 18, 27, 36, 10, 15, 56, 62, 55, 39, 41, 2]
     rot_offsets_vecs = Tensor([[0, 1]] + [[1 << v, 1 << (64 - v)] for v in rot_offsets ], *targs).transpose()
     # calculated from pi
-    reorder_matrix = Tensor([0, 6, 12, 18, 24, 3, 9, 10, 16, 22, 1, 7, 13, 19, 20, 4, 5, 11, 17, 23, 2, 8, 14, 15, 21], *targs).one_hot(25)
+    reorder_matrix = Tensor([0,6,12,18,24,3,9,10,16,22,1,7,13,19,20,4,5,11,17,23,2,8,14,15,21], *targs)[..., None] == Tensor.arange(25, **tkwargs)
     round_const_masks = Tensor([ 1, 0x8082, 0x800000000000808a, 0x8000000080008000, 0x808b, 0x80000001, 0x8000000080008081, 0x8000000000008009, 0x8a,
     0x88, 0x80008009, 0x8000000a, 0x8000808b, 0x800000000000008b, 0x8000000000008089, 0x8000000000008003, 0x8000000000008002, 0x8000000000000080,
     0x800a, 0x800000008000000a, 0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008 ], *targs).unsqueeze(1).pad((None, (0, 24)))
