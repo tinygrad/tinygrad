@@ -1,6 +1,6 @@
 from __future__ import annotations
 import math
-from typing import Optional, Union, Tuple, List
+from typing import Optional, Union, Tuple, List, cast
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, make_pair
 from tinygrad.nn import optim, state, datasets  # noqa: F401
@@ -258,7 +258,8 @@ class LayerNorm:
   def __init__(self, normalized_shape:Union[int, Tuple[int, ...]], eps=1e-5, elementwise_affine=True):
     self.normalized_shape: Tuple[int, ...] = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
     self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(self.normalized_shape))), eps, elementwise_affine
-    self.weight, self.bias = (Tensor.ones(*self.normalized_shape), Tensor.zeros(*self.normalized_shape)) if elementwise_affine else (None, None)
+    self.weight, self.bias = cast(Tuple[Tensor|None, Tensor|None],
+                                  (Tensor.ones(*self.normalized_shape), Tensor.zeros(*self.normalized_shape)) if elementwise_affine else (None, None))
 
   def __call__(self, x:Tensor) -> Tensor:
     assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"last dimensions of {x.shape} must match {self.normalized_shape}"
@@ -340,7 +341,8 @@ class LSTMCell:
     stdv = 1.0 / math.sqrt(hidden_size)
     self.weight_ih = Tensor.uniform(hidden_size*4, input_size, low=-stdv, high=stdv)
     self.weight_hh = Tensor.uniform(hidden_size*4, hidden_size, low=-stdv, high=stdv)
-    self.bias_ih, self.bias_hh = (Tensor.zeros(hidden_size*4), Tensor.zeros(hidden_size*4)) if bias else (None, None)
+    self.bias_ih, self.bias_hh = cast(Tuple[Tensor|None, Tensor|None],
+                                      (Tensor.zeros(hidden_size*4), Tensor.zeros(hidden_size*4)) if bias else (None, None))
 
   def __call__(self, x:Tensor, hc:Optional[Tuple[Tensor, Tensor]]=None) -> Tuple[Tensor, Tensor]:
     if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, device=x.device),)*2
