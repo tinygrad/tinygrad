@@ -59,9 +59,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
   @functools.lru_cache(None)
   def tuplize(u:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
-    # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
-    if u.op is UOps.DEFINE_VAR: arg = u.arg[0]
-    elif u.op is UOps.ALU: arg = u.arg.value
+    if u.op is UOps.ALU: arg = u.arg.value
     else: arg = u.arg
     return (u.op.value, arg, u.dtype, tuple(tuplize(x) for x in u.src))
 
