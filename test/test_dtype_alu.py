@@ -31,8 +31,12 @@ if Device.DEFAULT == "LLVM":
 integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor, torch.bitwise_xor),
                                                  (Tensor.bitwise_and, np.bitwise_and, torch.bitwise_and),
                                                  (Tensor.bitwise_or, np.bitwise_or, torch.bitwise_or)]
-unary_operations = [(Tensor.exp, np.exp, torch.exp), (Tensor.log, np.log, torch.log), (Tensor.sin, np.sin, torch.sin),
-                    (Tensor.sqrt, np.sqrt, torch.sqrt), (Tensor.reciprocal, np.reciprocal, torch.reciprocal)]
+
+unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin),
+                    (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
+
+unary_operations_bf16 = [(Tensor.exp2, torch.exp2), (Tensor.log2, torch.log2), (Tensor.sin, torch.sin),
+                         (Tensor.sqrt, torch.sqrt), (Tensor.reciprocal, torch.reciprocal)]
 
 torch_dtypes_map = { dtypes.bfloat16: torch.bfloat16 }
 
@@ -98,8 +102,8 @@ def universal_test_unary_torch(a, dtype, op):
   ast = sched[-1].ast
   run_schedule(sched)
   tensor_value = out.numpy()
-  reference_value = op[2](torch.tensor([a], dtype=torch_dtypes_map[dtype])).item()
-  np.testing.assert_allclose(tensor_value, reference_value, atol=1e-4, rtol=3e-2)
+  reference_value = op[1](torch.tensor([a], dtype=torch_dtypes_map[dtype])).item()
+  np.testing.assert_allclose(tensor_value, reference_value, atol=1e-3, rtol=1e-2)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
     op = [x for x in ast.parents if x.op is UOps.ALU and x.arg in UnaryOps][0]
     assert op.dtype == dtype
@@ -144,7 +148,7 @@ class TestDTypeALU(unittest.TestCase):
 
   # use torch as reference as numpy does not support bfloat16
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16, Device.DEFAULT), f"no bfloat16 on {Device.DEFAULT}")
-  @given(ht.bfloat16, strat.sampled_from(unary_operations))
+  @given(ht.bfloat16, strat.sampled_from(unary_operations_bf16))
   def test_bfloat16_unary(self, a, op): universal_test_unary_torch(a, dtypes.bfloat16, op)
 
   @given(ht.uint8, ht.uint8, strat.sampled_from(integer_binary_operations))
