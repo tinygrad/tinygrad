@@ -640,7 +640,7 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor.zeros(16, 16).contiguous()
     t.shard_(devices, axis=0)
     assert all([lb is lb.base and lb.buffer.base.size == 4 * 16 for lb in t.lazydata.lbs])
-  
+
   def test_clone(self):
     t = Tensor.rand(16, 16).shard(devices_2, axis=None)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
