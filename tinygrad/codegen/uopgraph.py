@@ -85,10 +85,6 @@ def is_increasing(f:UOp) -> bool:
   if f.op is UOps.ALU and f.arg in (BinaryOps.MUL, BinaryOps.IDIV) and f.src[1].op is UOps.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
   return False  # False if not sure
 
-def replace_uop(uop:UOp, old:UOp, new:UOp) -> UOp:
-  # replace all `old` in `uop` to `new`
-  return new if uop is old else uop.replace(src=tuple(replace_uop(s, old, new) for s in uop.src))
-
 def parse_valid(valid:UOp) -> Tuple[UOp, bool, int]:
   # if it's X <= c, returns X, True, c
   # if it's X >= c, returns X, False, c
@@ -125,7 +121,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
 
     for candidate in candidates:
       # if every branch in candidate gives the same simplified uop, we can rewrite the uop
-      newuops = [replace_uop(graph_rewrite(replace_uop(uop, X, newX), sym), newX, X) for X,newX in candidate]
+      newuops = [graph_rewrite(uop.substitute({X:newX}), sym).substitute({newX:X}) for X,newX in candidate]
       if uop.op is UOps.VECTORIZE and len(uop.src) == 2:
         if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
         if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
@@ -159,7 +155,7 @@ def simplify_image_load(load:UOp) -> Optional[UOp]:
 
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
     if not is_upper_bound and c == 1 and all(is_irreducible(u) and u.vmin == 0 for u in split_uop(X, BinaryOps.ADD)):
-      testidx = functools.reduce(lambda nowidx,u: replace_uop(nowidx, u, u.const_like(0)), split_uop(X, BinaryOps.ADD), idx)
+      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), split_uop(X, BinaryOps.ADD), idx)
       testidx = graph_rewrite(testidx, sym)
       if testidx.src[0].vmax < 0 or testidx.src[1].vmax < 0:
         drop_stmt.append(stmt)
@@ -170,7 +166,7 @@ def simplify_image_load(load:UOp) -> Optional[UOp]:
     test_value = c + 1 if is_upper_bound else c - 1
     for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
       if is_increasing(i):
-        rw = graph_rewrite(replace_uop(i, X, X.const_like(test_value)), sym)
+        rw = graph_rewrite(i.substitute({X:X.const_like(test_value)}), sym)
         if rw.vmin >= b or rw.vmax < 0:
           drop_stmt.append(stmt)
           break
