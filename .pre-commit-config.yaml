@@ -21,7 +21,7 @@ repos:
         pass_filenames: false
       - id: devicetests
         name: select GPU tests
-        entry: env GPU=1 PYTHONPATH="." pytest test/test_uops.py test/test_search.py
+        entry: env GPU=1 PYTHONPATH="." python3 -m pytest test/test_uops.py test/test_search.py
         language: system
         always_run: true
         pass_filenames: false
@@ -39,7 +39,7 @@ repos:
         pass_filenames: false
       - id: pylint
         name: pylint
-        entry: env PYTHONPATH="." python3 -m pylint tinygrad/
+        entry: python3 -m pylint tinygrad/
         language: system
         always_run: true
         pass_filenames: false
