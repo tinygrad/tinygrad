@@ -35,7 +35,7 @@ def parse_buffer(inp: TensorProto) -> Tensor:
     # we early realize here to realize buffer during setup
     # parse_buffer is only ran during initialization so it doesn't affect the graph for op execution
     # TODO: maybe reshape -> realize is not the best way to do this. Maybe we gotta realize fake buffer.
-    return Tensor(dat, dtype=parse_dtype(inp.data_type), requires_grad=False).reshape(tuple(inp.dims)).realize()
+    return Tensor(dat, dtype=parse_dtype(inp.data_type), requires_grad=False).expand(tuple(inp.dims)).realize()
   raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
 
 # src: onnx/onnx_ml_pb2.pyi
