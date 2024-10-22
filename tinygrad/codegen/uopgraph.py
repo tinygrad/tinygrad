@@ -106,7 +106,8 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:DefaultDict[UOp, List[Optional[ConstType]]] = defaultdict(lambda: [None, None])
   for stmt in split_uop(valid, BinaryOps.AND):
-    expr, is_upper, c = parse_valid(stmt)
+    try: expr, is_upper, c = parse_valid(stmt)
+    except ValueError: return uop  # give up if we cannot parse the valid
     bounds[expr][int(is_upper)] = c
 
   # simplify uop given that valid is True
@@ -132,12 +133,18 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
 
   return uop
 
+def simplify_valid(valid:UOp) -> Optional[UOp]:
+  ret:List[UOp] = []
+  something_changed = False
+  for stmt in split_uop(valid, BinaryOps.AND):
+    ret.append(stmt if not ret else uop_given_valid(functools.reduce(operator.and_, ret), stmt))
+    if ret[-1] is not stmt: something_changed = True
+  return functools.reduce(operator.and_, ret) if something_changed else None
+
 def simplify_buffer_load(load:UOp) -> Optional[UOp]:
   if not isinstance(load.src[0].dtype, PtrDType) or len(load.src) != 4: return None
   buf, start_idx, invalid_val, valid = load.src
-  try:
-    if (idx:=uop_given_valid(valid, start_idx)) is None: return load.replace(src=(buf, start_idx, invalid_val, valid.const_like(False)))
-  except ValueError: return None
+  if (idx:=uop_given_valid(valid, start_idx)) is None: return load.replace(src=(buf, start_idx, invalid_val, valid.const_like(False)))
   return None if idx is start_idx else load.replace(src=((buf, idx, invalid_val, valid)))
 
 def simplify_image_load(load:UOp) -> Optional[UOp]:
@@ -539,6 +546,8 @@ reducer = PatternMatcher([
   (UPat(UOps.STORE, name="root"), delete_redundant_gates),
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
+  # simplify valid
+  (UPat(UOps.ALU, name="valid", arg=BinaryOps.AND), simplify_valid),
   # image load valid idx simplification
   (UPat(UOps.LOAD, name="load"), simplify_image_load),
   # buffer load valid idx simplification
