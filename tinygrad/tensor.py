@@ -1705,8 +1705,8 @@ class Tensor:
     tkwargs, targs = dict(device=self.device, dtype=dtypes.uint64, requires_grad=False), (self.device, dtypes.uint64, False) # make linters happy
     rot_offsets = [44, 43, 21, 14, 28, 20, 3, 45, 61, 1, 6, 25, 8, 18, 27, 36, 10, 15, 56, 62, 55, 39, 41, 2]
     rot_offsets_vecs = Tensor([[0, 1]] + [[1 << v, 1 << (64 - v)] for v in rot_offsets ], *targs).transpose()
-    # calculated from pi
-    reorder_matrix = Tensor([0,6,12,18,24,3,9,10,16,22,1,7,13,19,20,4,5,11,17,23,2,8,14,15,21], *targs)[..., None] == Tensor.arange(25, **tkwargs)
+    # calculated from π step
+    reorder_indexes = Tensor([0,6,12,18,24,3,9,10,16,22,1,7,13,19,20,4,5,11,17,23,2,8,14,15,21], device=self.device, dtype=dtypes.int32)
     round_const_masks = Tensor([ 1, 0x8082, 0x800000000000808a, 0x8000000080008000, 0x808b, 0x80000001, 0x8000000080008081, 0x8000000000008009, 0x8a,
     0x88, 0x80008009, 0x8000000a, 0x8000808b, 0x800000000000008b, 0x8000000000008089, 0x8000000000008003, 0x8000000000008002, 0x8000000000000080,
     0x800a, 0x800000008000000a, 0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008 ], *targs).unsqueeze(1).pad((None, (0, 24)))
@@ -1730,10 +1730,10 @@ class Tensor:
       for i in range(24): # f1600
         # θ step
         p = state.reshape((-1, 5, 5)).transpose(2, 1)
-        t1 = p[:,:,0].xor(p[:,:,1]).xor(p[:,:,2]).xor(p[:,:,3]).xor(p[:,:,4]).roll(-1, 1) # xor reduce
-        state = state.xor(t1.roll(2, 1).xor((t1 << 1) ^ (t1 >> 63)).unsqueeze(2).expand((-1, -1, 5)).transpose(2, 1).flatten(1))
+        t1 = (p[:,:,0] ^ p[:,:,1] ^ p[:,:,2] ^ p[:,:,3] ^ p[:,:,4]).roll(-1, 1) # xor reduce
+        state = state ^ (t1.roll(2, 1).xor((t1 << 1) ^ (t1 >> 63)).unsqueeze(2).expand((-1, -1, 5)).transpose(2, 1).flatten(1))
         # ρ and π steps
-        state = reorder_matrix.where(state.unsqueeze(-1).expand((-1, -1, 25)).transpose(2, 1), Tensor.zeros(*state.shape, 25, **tkwargs)).sum(2)
+        state = state[:,reorder_indexes]
         state = state.mul(rot_offsets_vecs[0]).xor(state.div(rot_offsets_vecs[1], upcast=False)).reshape((-1, 5, 5))
         # χ and ι step
         state = state.xor(state.roll(shifts=-1, dims=2).xor(-1).bitwise_and(state.roll(shifts=-2, dims=2))).flatten(1) ^ round_const_masks[i]
