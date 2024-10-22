@@ -1,21 +1,15 @@
 repos:
   - repo: local
     hooks:
-      - id: whitespace
-        name: strip whitespace
-        entry: find tinygrad -type f -name "*.py" -exec sed -i '' 's/ *$//' '{}' ';'
-        language: system
-        always_run: true
-        pass_filenames: false
       - id: ruff
         name: ruff
-        entry: ruff check .
+        entry: python3 -m ruff check .
         language: system
         always_run: true
         pass_filenames: false
       - id: mypy
         name: mypy
-        entry: mypy tinygrad/ --strict-equality
+        entry: python3 -m mypy tinygrad/ --strict-equality
         language: system
         always_run: true
         pass_filenames: false
