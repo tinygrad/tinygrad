@@ -28,7 +28,7 @@ wgsl_matcher = PatternMatcher([
   (UPat(UOps.ALU, name="m", arg=BinaryOps.MAX), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
 ])
 
-type_map = {dtypes.float: "f32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
+type_map = {dtypes.float: "f32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.ulong: "vec2<u32>"}
 
 class WGSLRenderer(CStyleLanguage):
   device = "WEBGPU"
@@ -47,12 +47,17 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(UOps.CONST, dtype=dtypes.bool, name="x"), lambda r,x: "true" if x.arg else "false"),
     # cstyle uint initialization
     (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda r,x: f"bitcast<u32>({x.arg}i)" if x.arg < 0 else f"{x.arg}u"),
+    (UPat(UOps.CONST, dtype=dtypes.ulong, name="x"), lambda r,x: f"vec2<u32>({x.arg}, 0u)" if x.arg < 4294967296 else f"vec2<u32>({x.arg&4294967295}, {x.arg>>32})"),
     (UPat(UOps.DEFINE_LOCAL, name="x"), lambda r,x: f"var<workgroup> {r[x]}: array<{type_map[x.dtype.base]}, {x.arg[1]}>;"),
-    (UPat(UOps.CAST, name="x"), lambda r,x: f"{type_map[x.dtype]}({r[x.src[0]]})"),
+    (UPat(UOps.CAST, name="x"), lambda r,x: f"vec2<u32>(({r[x.src[0]]})&4294967295, 0u)" if x.dtype == dtypes.ulong \
+      else f"{type_map[x.dtype]}({r[x.src[0]]}.x)" if x.src[0].dtype == dtypes.ulong else f"{type_map[x.dtype]}({r[x.src[0]]})"),
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"bitcast<{type_map[x.dtype]}>({r[x.src[0]]})"),
     (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var"), UPat.var("gate")), name="load"),
      lambda r,buf,idx,load,var,gate: f"select({r[var]}, {_render_index(r, buf, idx, load.dtype)},{r[gate]})"),
-  ]) + base_rewrite
+  ]) + base_rewrite + PatternMatcher([
+    (UPat(UOps.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHL), lambda r,x: f"ushl({r[x.src[0]]},u32({r[x.src[1]]}))"),
+    (UPat(UOps.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHR), lambda r,x: f"ushr({r[x.src[0]]},u32({r[x.src[1]]}))")
+  ])
 
   def render_dtype(self, var_dtype): return "var"
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
@@ -60,6 +65,24 @@ class WGSLRenderer(CStyleLanguage):
     if not local_size: local_size = [1]
     bind_it = iter(range(len(bufs)))
     prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
+    prg += """
+      fn ushl(v: vec2<u32>, shift: u32) -> vec2<u32> {
+        if (shift >= 32u) { return vec2<u32>(0u, v.x << (shift - 32u)); }
+        else {
+          let high_part = (v.y << shift) | (v.x >> (32u - shift));
+          let low_part = v.x << shift;
+          return vec2<u32>(low_part, high_part);
+        }
+      }
+      fn ushr(v: vec2<u32>, shift: u32) -> vec2<u32> {
+        if (shift >= 32u) { return vec2<u32>(v.y >> (shift - 32u), 0u); }
+        else {
+          let high_part = v.y >> shift;
+          let low_part = (v.x >> shift) | (v.y << (32u - shift));
+          return vec2<u32>(low_part, high_part);
+        }
+      }
+    """
     prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
     prg += "\n".join((prefix or [])+[f"@group(0) @binding({next(bind_it)+1}) {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}: {f'array<{self.type_map[dtype]}>' if isinstance(dtype, PtrDType) else 'i32'};" for name,(dtype,rw) in bufs])  # noqa: E501
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501
