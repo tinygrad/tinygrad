@@ -147,6 +147,7 @@ def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
 to_si = PatternMatcher([
   (UPat(UOps.BUFFER, name="x"), _append_buf),
   (UPat(UOps.VIEW, name="x"), _append_st_vars),
+  (UPat(UOps.PRELOAD, name="x"), lambda _,x: x.replace(op=UOps.LOAD)),
   (UPat(UOps.CONTIGUOUS, src=(UPat.var("x"),)), lambda _,x: x),
   (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda _,x: x),
 ])
@@ -175,7 +176,7 @@ def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], inputs:List[LazyBuffer], bu
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
   if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs:
     if not any(x.buffer is buf.buffer for x in outputs) and buf not in inputs: inputs.append(buf)
-    return UOp.load(ubuf, buf.st.to_uop(), dtype=dtype)
+    return UOp(UOps.PRELOAD if buf.is_realized() else UOps.LOAD, dtype, (ubuf, buf.st.to_uop()))
   src = tuple(to_uop(x, outputs, inputs, buf_uops, metadata, cache) for x in buf.srcs)
   if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
   elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)

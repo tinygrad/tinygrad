@@ -104,6 +104,7 @@ class UOps(FastEnum):
   # uops that aren't rendered
   SINK = auto()
   CONTIGUOUS = auto()
+  PRELOAD = auto()
 
   # metaops
   COPY = auto()
@@ -153,7 +154,7 @@ class UOps(FastEnum):
   ENDRANGE = auto()
   ENDIF = auto()
 
-BUFFER_UOPS = {UOps.LOAD, UOps.STORE, UOps.VALID}
+BUFFER_UOPS = {UOps.LOAD, UOps.PRELOAD, UOps.STORE, UOps.VALID}
 COMMUTATIVE = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR}
 END_FOR_UOP = {UOps.IF:(UOps.STORE, UOps.ENDIF), UOps.RANGE:(UOps.ASSIGN, UOps.ENDRANGE)}
 
