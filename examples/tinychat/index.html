@@ -20,8 +20,10 @@
   <script src="index.js"></script>
 
   <!-- Font Awesome -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-  
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+    integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A=="
+    crossorigin="anonymous" referrerpolicy="no-referrer" />
+
   <!-- Highlight.js CSS -->
   <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/styles/vs2015.min.css" />
 
@@ -63,7 +65,9 @@
               window.history.pushState({}, '', '/');
             ">
               <h3 x-text="new Date(_state.time).toLocaleString()"></h3>
-              <p x-text="_state.messages[0].content.length > 80 ? _state.messages[0].content.slice(0, 80) + '...' : _state.messages[0].content"></p>
+              <p
+                x-text="_state.messages[0].content.length > 80 ? _state.messages[0].content.slice(0, 80) + '...' : _state.messages[0].content">
+              </p>
               <button class="history-delete-button" @click.stop="removeHistory(_state);">
                 <i class="fas fa-trash"></i>
               </button>
@@ -132,11 +136,16 @@
           <p>Tokens/s:</p>
           <p class="monospace" x-text="tokens_per_second.toFixed(1)"></p>
         </span>
+        <span class="input-performance-point">
+          <p>Tokens:</p>
+          <p class="monospace" x-text="total_tokens"></p>
+        </span>
       </div>
 
       <!-- Input box -->
       <div class="input">
-        <textarea x-ref="inputForm" id="input-form" class="input-form" autofocus rows="1" x-autosize :placeholder="generating ? 'Generating...' : 'Say something'" :disabled="generating" @input="
+        <textarea x-ref="inputForm" id="input-form" class="input-form" autofocus rows="1" x-autosize
+          :placeholder="generating ? 'Generating...' : 'Say something'" :disabled="generating" @input="
           if (cstate.messages.length === 0 && $el.value === '') home = -1;
           if ($el.value !== '') {
             const messages = [...cstate.messages];
