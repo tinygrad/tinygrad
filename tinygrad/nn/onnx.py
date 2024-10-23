@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Dict, Tuple, Sequence, Callable, Any, Union, Optional, List, cast, Literal
-import functools, io, math
+import functools, io, math, inspect
 from tinygrad.tensor import Tensor, Device, _broadcast_shape, ConstType
 from tinygrad.helpers import getenv, CI, OSX, prod, flatten, make_pair
 from tinygrad.dtype import dtypes, DType
@@ -123,7 +123,7 @@ def get_run_onnx(onnx_model: ModelProto):
       if x in model_parameters: return model_parameters[x]
       if x in intermediate_tensors: return intermediate_tensors[x]
       if x != "": return input_tensors[x]
-      return None
+      return None # TODO idk is returning none here the best way
 
     # inputs we need to turn into a python const to compute
     to_python_const_inps: Dict[str, Tuple[int, ...]] = \
@@ -143,10 +143,13 @@ def get_run_onnx(onnx_model: ModelProto):
       inp = [to_python_const(x) if i in to_python_const_inps.get(n.op_type, ()) else x for i,x in enumerate(tensor_inp)]
 
       # running the op
-      if debug >= 4: print(f"\tbefore `handle_arguments`: {inp=}, {opt=}")
+      if debug >= 4: print(f"\texecution:\n\t\tbefore `handle_arguments`: {inp=}, {opt=}")
       inp, opt = handle_arguments(n.op_type, inp, opt, n=n, intermediate_tensors=intermediate_tensors)
-      if debug >= 4: print(f"\tafter `handle_arguments`: {inp=}, {opt=}")
-      ret = dispatch(n.op_type, inp, opt)
+      if debug >= 4: print(f"\t\tafter `handle_arguments`: {inp=}, {opt=}")
+      fxn, fxn_name = dispatch(n.op_type)
+      if debug >= 4:
+        print(f"\t\tcalling: {fxn_name}({', '.join(f'{k}={v}' for k,v in inspect.signature(fxn).bind(*inp, **opt).arguments.items())})")
+      ret = fxn(*inp, **opt)
 
       # finalization after the op finishes running
       if not isinstance(ret, tuple): ret = (ret,)
@@ -166,56 +169,73 @@ def get_run_onnx(onnx_model: ModelProto):
 # actually maybe readability also suffers, crap.
 
 # https://github.com/onnx/onnx/blob/main/docs/Operators.md
+# transforms the arguments so that it can be easily dispatched
 def handle_arguments(op:str, inps, opts, **kwargs):
+  # helpful functions
   def set_defaults(inps, opts, defaults, **_): return inps, {**defaults, **opts}
   def rewrite_opt_names(inps, opts, mapping, **_): return inps, {mapping.get(k, k): v for k, v in opts.items()}
-  # TODO: k wtf is this
-  def reduce(inps, opts): return [inps[0], inps[1] if len(inps) == 2 and inps[1] else opts.get('axes') or ([] if opts['noop_with_empty_axes'] else None)],\
-                                  {k:v for k,v in opts.items() if k not in ("noop_with_empty_axes","axes")}
+  # TODO: k this axis thing is out of control
+  def reduce(inps,opts): return [inps[0]], \
+    {'axis': inps[1] if len(inps)==2 and inps[1] else opts.get('axes') or ([] if opts['noop_with_empty_axes'] else None), 'keepdim': opts['keepdims']}
+
+  # non lambda functions
+  # terrible
+  def _split(inps,opts,n,**_):
+    size, num_outputs = inps[0].shape[opts.get('axis', 0)], opts.get('num_outputs') or len(n.output)
+    return [inps[0], inps[1] if len(inps) == 2 else [size // num_outputs + (1 if i < size % num_outputs else 0) for i in range(num_outputs)]],\
+            {k:v for k,v in opts.items() if k not in ('num_outputs', 'split')}
 
   op_handler = {
     **{op: functools.partial(set_defaults, defaults=d) for op, d in {"HardSigmoid": {"alpha": 0.2, "beta": 0.5}}.items()},
     **{op: functools.partial(rewrite_opt_names, mapping=amap) for op, amap in
        {"Concat": {"axis": "dim"}, "LeakyRelu": {"alpha": "neg_slope"}, "Selu": {"gamma": "scale"}}.items()},
-    **{"Reduce"+op:lambda inps, opts, **_:
-       reduce(*rewrite_opt_names(*set_defaults(inps, opts, defaults={"noop_with_empty_axes":0, "keepdims":1}), {'keepdims': 'keepdim'}))
+    # reduce ops
+    **{"Reduce"+op:lambda inps, opts, **_: reduce(*set_defaults(inps, opts, {"noop_with_empty_axes":0, "keepdims":1}))
        for op in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
+    "Split": lambda inps, opts, n, **_: rewrite_opt_names(*_split(inps, opts, n), mapping={'axis': 'dim'}),
     # -> opts y: Tensor
     "Gradient": lambda inps, opts, intermediate_tensor, **_: (inps, {"y": intermediate_tensor[opts["y"]]}),
-    # -> inp: List[int, int | None], opt[]
-    "Split": lambda inps, opts, n, **_: (inps + ([opts["split"]] if "split" in opts else []), {**{"num_outputs": len(n.output)},
-                                                                                               **{k:v for k,v in opts.items() if k != "split"}}),
     # only onnx_model_version < 10 has opt, we just unload the opt into inp to match other versions
     "Slice": lambda inps, opts, **_: (inps + [list(v) for v in reversed(opts.values())], {}), # axes, ends, starts -> starts, ends, axes
     # cast and castlike currently doesn't support staturate for float8
     "Einsum": lambda inps, opts, **_: ([opts['equation']] + inps, {}), "Cast": lambda inps, opts, **_: (inps, {'dtype': parse_dtype(opts['to'])}),
-    "CastLike": lambda inps, _, **__: ([inps[0]], {'dtype': inps[1].dtype})
+    "CastLike": lambda inps, _, **__: ([inps[0]], {'dtype': inps[1].dtype}),
+    # TODO: this is crazy
+    "Clip": lambda inps, _, **__: ([inps[0], inps[1] if len(inps)>1 and inps[1] is not None else opts.get('min') or dtypes.min(inps[0].dtype),
+                                    inps[2] if len(inps)>2 and inps[2] is not None else opts.get('max') or dtypes.max(inps[0].dtype)], {}),
     }
   return op_handler.get(op, lambda inps, opts, **_: (inps, opts))(inps, opts, **kwargs)
 
-def dispatch(op:str, inps: List, opts: Dict):
+# dispatches the op to Tensor.py methods
+def dispatch(op:str):
   # tensor methods
   tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual": "__le__", "GreaterOrEqual": "__ge__", "Equal": "__eq__", "CastLike": "cast",
     "LogSoftmax": "log_softmax", "Not": "logical_not", "Tile": "repeat", "Range": "arange", "NegativeLogLikelihoodLoss": "nll_loss", "Concat": "cat",
     "ReduceMax": "max", "ReduceMin": "min", "ReduceSum": "sum", "ReduceMean": "mean", "ReduceProd": "prod",
     **{n:n.lower() for n in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu",
     "Sigmoid", "MatMul", "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-    "Elu", "Celu", "Xor", "Round", "Softmax", "LeakyRelu", "Selu", "HardSigmoid", "Einsum", "Cast")}}
+    "Elu", "Celu", "Xor", "Round", "Softmax", "LeakyRelu", "Selu", "HardSigmoid", "Einsum", "Cast", "Split", "Clip")}}
 
   # easy lambdas
+  # TODO: some of these easy lambdas can go in Tensor.py
+  # TODO: hmmm maybe lambdas like this is also not the right idea lol
+  # IsNaN
   lambda_methods: Dict[str, Callable[..., Any]] = {"Identity": lambda x:x, "Add": lambda x,y,**_: x+y, "Sub": lambda x,y:x-y,
-  "IsNaN": lambda x: x != x, "Binarizer": lambda x, threshold: (x>threshold).float(), "ArrayFeatureExtractor": lambda x,indices: x[..., indices],
-  "ReduceSumSquare": lambda x,axes,keepdim: x.square().sum(axes, keepdim), "ReduceL1": lambda x,axes,keepdim: x.abs().sum(axes, keepdim),
-  "ReduceL2": lambda x,axes,keepdim: x.square().sum(axes, keepdim).sqrt(), "ReduceLogSum": lambda x,axes,keepdim: x.sum(axes, keepdim).log(),
-  "ReduceLogSumExp": lambda x,axes,keepdim: x.exp().sum(axes, keepdim).log()}
+  "Div": lambda x,y:(x/y).cast(x.dtype), "ArrayFeatureExtractor": lambda x,indices: x[..., indices],
+  "ReduceSumSquare": lambda x,axis,keepdim: x.square().sum(axis, keepdim), "ReduceL1": lambda x,axis,keepdim: x.abs().sum(axis, keepdim),
+  "ReduceL2": lambda x,axis,keepdim: x.square().sum(axis, keepdim).sqrt(), "ReduceLogSum": lambda x,axis,keepdim: x.sum(axis, keepdim).log(),
+  "ReduceLogSumExp": lambda x,axis,keepdim: x.exp().sum(axis, keepdim).log(), "And": lambda x,y: (x==y).where(x,False),
+  "Or": lambda x,y: (x==y).where(x,True), "IsNaN": lambda x: x != x, "Binarizer": lambda x, threshold: (x>threshold).float(),
+  "Mean": lambda *data: functools.reduce(Tensor.add, data) / len(data), "Min": lambda *data: functools.reduce(Tensor.minimum, data),
+  "Max": lambda *data: functools.reduce(Tensor.maximum, data), "Sum": lambda *data: functools.reduce(Tensor.add, data), }
 
   # dispatch!
-  # op rewrite
-  if op in tensor_methods: return getattr(Tensor, tensor_methods[op])(*inps, **opts)
+  # op name rewrite
+  if op in tensor_methods: return (fxn := getattr(Tensor, tensor_methods[op])), fxn.__qualname__
   # lambda
-  if op in lambda_methods: return lambda_methods[op](*inps, **opts)
+  if op in lambda_methods: return lambda_methods[op], op + ".lambda"
   # implemented
-  if hasattr(OnnxOps, op): return getattr(OnnxOps, op)(*inps, **opts)
+  if hasattr(OnnxOps, op): return (fxn := getattr(OnnxOps, op)), fxn.__qualname__
 
   raise NotImplementedError(f"Operation '{op}' is not implemented.")
 
@@ -225,12 +245,6 @@ class OnnxOps:
   def Gradient(x, y):
     y.backward()
     return tuple([t.grad for t in x])
-
-  def Split(x, split=None, num_outputs=None, axis=0):
-    if split is not None: return x.split(split, axis)
-    # otherwise split has to be inferred
-    size = x.shape[axis]
-    return x.split([size // num_outputs + (1 if i < size % num_outputs else 0) for i in range(num_outputs)], axis)
 
   def Slice(data, starts, ends, axes=None, steps=None):
     axes, steps = axes or list(range(data.ndim)), steps or [1]*data.ndim
@@ -245,17 +259,12 @@ class OnnxOps:
   # for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
   # **************** Free Ops ****************
 
-  def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
-  def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
-  def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
   def Squeeze(data: Tensor, axes): return functools.reduce(lambda d, dim: d.squeeze(dim), sorted(axes, reverse=True), data)
   def Unsqueeze(data: Tensor, axes): return functools.reduce(lambda d, dim: d.unsqueeze(dim), sorted(axes), data)
-  def Mean(*data_0): return OnnxOps.Sum(*data_0) / len(data_0)
 
   # **************** Simple Ops ****************
 
   # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_div.py
-  def Div(x: Tensor, other: Tensor): return (x/other).cast(x.dtype)
 
   def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, value_int=None,value_ints=None,value_string=None,value_strings=None):
     if value is not None: return value
@@ -263,19 +272,15 @@ class OnnxOps:
     if value_floats is not None: return Tensor(list(value_floats), dtype=dtypes.float32, requires_grad=False)
     if value_int is not None: return Tensor(value_int, dtype=dtypes.int64, requires_grad=False)
     if value_ints is not None: return Tensor(list(value_ints), dtype=dtypes.int64, requires_grad=False)
-    if value_string is not None or value_strings is not None: raise NotImplementedError('value_string or value_strings not implemented for Constant op') # noqa: E501
+    if value_string is not None or value_strings is not None: raise NotImplementedError('value_string or value_strings not implemented')
   def ConstantOfShape(shape:List[ConstType], value:Tensor): return Tensor.ones(*shape, dtype=value.dtype) * (value if shape != [0] else 1)
 
-  # need default values for hardsigmoid
   def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + OnnxOps.Erf(x/math.sqrt(2)))
   def PRelu(X:Tensor, slope:Tensor):
     # HACK OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
     slope = slope[0] if slope.size(-1) != X.size(-1) else slope
     return (X > 0).where(X, X * slope)
   def ThresholdedRelu(X: Tensor, alpha=1.0): return (X > alpha).where(X, 0)
-  # cuz onnx just uses min and max as attribute names
-  def Clip(x: Tensor, min=None, max=None): # noqa: A002 # pylint: disable=redefined-builtin
-    return x.clip(float('-inf') if min is None else min,float('inf') if max is None else max).cast(x.dtype)
 
   def GlobalAveragePool(X: Tensor): return X.mean(axis=tuple(range(2, X.ndim)), keepdim=True)
   def GlobalMaxPool(X: Tensor): return X.max(axis=tuple(range(2, X.ndim)), keepdim=True)
@@ -288,8 +293,6 @@ class OnnxOps:
   def Reshape(data: Tensor, shape, allowzero=0): return data.reshape([int(x) or (0 if allowzero else data.size(i)) for i, x in enumerate(shape)])
   def Expand(x: Tensor, shape:List): return x.expand(_broadcast_shape(x.shape, tuple(shape)))
   def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
-  def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
-  def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
 
   def Asin(x): return OnnxOps.Atan(x / (1 - x * x).sqrt())
   def Acos(x: Tensor):
@@ -602,7 +605,7 @@ class OnnxOps:
 
   # **************** com.microsoft Ops ****************
 
-  def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=None):
+  def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=None, bias:Optional[Tensor]=None, epsilon=1e-12):
     if epsilon is None: epsilon=1e-12
     x = x + skip + bias
     return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
@@ -614,7 +617,7 @@ class OnnxOps:
   # TODO: how to simplify these haha, I don't actually understand ML, IM A FRAUD
   def EmbedLayerNormalization(input_ids: Tensor, segment_ids: Tensor, word_embedding:Tensor,
                               position_embedding:Tensor, segment_embedding:Tensor, gamma=None, beta=None,
-                              mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
+                              mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=1e-12, mask_index_type=None):
     # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.EmbedLayerNormalization
     assert (segment_ids is None) is (segment_embedding is None)
     assert (mask is None) is (mask_index_type is None)
@@ -630,7 +633,6 @@ class OnnxOps:
       return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
 
     # bert embedding layer
-    if epsilon is None: epsilon = 1e-12
     if position_ids is None: position_ids = Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
     wrd_embedding_res = embedding(input_ids, vocab_size, word_embedding)
     pos_embedding_res = embedding(position_ids, max_position_embeddings, position_embedding)
