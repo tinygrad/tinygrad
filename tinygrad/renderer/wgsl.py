@@ -26,9 +26,15 @@ wgsl_matcher = PatternMatcher([
    lambda buf,idx,val,gate: UOp.store(buf, idx, val.cast(dtypes.int), gate)),
   (UPat.store(UPat.var("buf"), UPat.var("idx"), UPat.var("val", dtype=dtypes.bool)), lambda buf,idx,val: UOp.store(buf, idx, val.cast(dtypes.int))),
   (UPat(UOps.ALU, name="m", arg=BinaryOps.MAX), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
+  # This has to be constrained to just the "a * 2 ** 32", and "a // 2 ** 32" cases
+  (UPat(UOps.ALU, name="x", dtype=dtypes.ulong,  arg=BinaryOps.MUL), lambda x: UOp(x.op, x.dtype, (x.src[0], UOp(UOps.CONST, dtypes.uint32, arg=32)), BinaryOps.SHL)),
+  (UPat(UOps.ALU, name="x", dtype=dtypes.ulong,  arg=BinaryOps.IDIV), lambda x: UOp(x.op, x.dtype, (x.src[0], UOp(UOps.CONST, dtypes.uint32, arg=32)), BinaryOps.SHR)),
 ])
 
 type_map = {dtypes.float: "f32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.ulong: "vec2<u32>"}
+
+def gep_ulong(r, val):
+  return f"{r[val]}.x" if val.dtype == dtypes.ulong else f"{r[val]}"
 
 class WGSLRenderer(CStyleLanguage):
   device = "WEBGPU"
@@ -49,14 +55,14 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda r,x: f"bitcast<u32>({x.arg}i)" if x.arg < 0 else f"{x.arg}u"),
     (UPat(UOps.CONST, dtype=dtypes.ulong, name="x"), lambda r,x: f"vec2<u32>({x.arg}, 0u)" if x.arg < 4294967296 else f"vec2<u32>({x.arg&4294967295}, {x.arg>>32})"),
     (UPat(UOps.DEFINE_LOCAL, name="x"), lambda r,x: f"var<workgroup> {r[x]}: array<{type_map[x.dtype.base]}, {x.arg[1]}>;"),
-    (UPat(UOps.CAST, name="x"), lambda r,x: f"vec2<u32>(({r[x.src[0]]})&4294967295, 0u)" if x.dtype == dtypes.ulong \
-      else f"{type_map[x.dtype]}({r[x.src[0]]}.x)" if x.src[0].dtype == dtypes.ulong else f"{type_map[x.dtype]}({r[x.src[0]]})"),
+    (UPat(UOps.CAST, name="x"), lambda r,x: f"vec2<u32>(({r[x.src[0]]})&4294967295, 0u)" if x.dtype == dtypes.uint64 \
+      else f"{type_map[x.dtype]}({r[x.src[0]]}.x)" if x.src[0].dtype == dtypes.uint64 else f"{type_map[x.dtype]}({r[x.src[0]]})"),
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"bitcast<{type_map[x.dtype]}>({r[x.src[0]]})"),
     (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var"), UPat.var("gate")), name="load"),
      lambda r,buf,idx,load,var,gate: f"select({r[var]}, {_render_index(r, buf, idx, load.dtype)},{r[gate]})"),
   ]) + base_rewrite + PatternMatcher([
-    (UPat(UOps.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHL), lambda r,x: f"ushl({r[x.src[0]]},u32({r[x.src[1]]}))"),
-    (UPat(UOps.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHR), lambda r,x: f"ushr({r[x.src[0]]},u32({r[x.src[1]]}))")
+    (UPat(UOps.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHL), lambda r,x: f"ushl({r[x.src[0]]},u32({gep_ulong(r, x.src[1])}))"),
+    (UPat(UOps.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHR), lambda r,x: f"ushr({r[x.src[0]]},u32({gep_ulong(r, x.src[1])}))"),
   ])
 
   def render_dtype(self, var_dtype): return "var"
