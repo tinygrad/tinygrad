@@ -232,7 +232,7 @@ class OpenCLRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype == dtypes.half for uop in uops):
-      if 'cl_khr_fp16' not in self.device_exts: raise RuntimeError("cl_khr_fp16 is not supported on this device")
+      if 'cl_khr_fp16' not in self.device_exts: raise RuntimeError("cl_khr_fp16 is not supported on this device. Unable to use half precision")
       prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or [])
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 

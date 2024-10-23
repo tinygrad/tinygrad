@@ -98,7 +98,7 @@ class TestLinearizerDumb(unittest.TestCase):
     self.assertLessEqual(len(conditions), 9)
 
   # this was a bug in embedding, someday we should fold this anyway
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "float16 not supported on this device")
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "half not supported on this device")
   def test_llama_embedding(self):
     ast = UOp(UOps.SINK, dtypes.void, arg=None, src=(
       UOp(UOps.STORE, dtypes.void, arg=None, src=(
