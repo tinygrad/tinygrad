@@ -28,14 +28,14 @@ class CUDAGraph(MultiGraphRunner):
         deps = self._access_resources([x.base for x in ji.bufs if x is not None], ji.prg.p.outs, new_dependency=new_node)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
 
-        c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.bufs], [var_vals[x] for x in ji.prg.p.vars])
+        c_args, vargs = encode_args([x._buf for x in ji.bufs], [var_vals[x] for x in ji.prg.p.vars])
         kern_params = cuda.CUDA_KERNEL_NODE_PARAMS(ji.prg.clprg.prg, *global_size, *local_size, 0, None, vargs)
         check(cuda.cuGraphAddKernelNode(ctypes.byref(new_node), self.graph, c_deps, len(deps), ctypes.byref(kern_params)))
 
         if j in self.launch_dims_replace or j in self.var_vals_replace or j in self.jc_idx_with_updatable_rawbufs:
           self.updatable_nodes[j] = (new_node, kern_params, c_args, False)
       elif isinstance(ji.prg, BufferXfer):
-        dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
+        dest, src = ji.bufs[0:2]
         src_dev = cast(CUDADevice, Device[src.device])
         node_from = cuda.CUgraphNode()
         deps = self._access_resources(rawbufs=[dest.base, src.base], write=[0], new_dependency=node_from)
