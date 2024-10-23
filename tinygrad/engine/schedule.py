@@ -40,6 +40,7 @@ class ScheduleItem:
 class LBScheduleItem:
   ast: UOp
   bufs: Tuple[LazyBuffer, ...]
+  ubufs: Tuple[UOp, ...]
   metadata: Tuple[Metadata, ...]
   @property
   def outputs(self) -> Tuple[LazyBuffer, ...]: return self.bufs[:len(self.ast.src)] if self.ast.op is UOps.SINK else self.bufs[0:1]
@@ -132,7 +133,7 @@ view_right = merge_views+PatternMatcher([
 class ScheduleItemContext:
   var_vals: Dict[Variable, int]
   sts: Set[ShapeTracker]
-  bufs: Tuple[int, ...]
+  bufs: List[UOp]
 
 def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
   if (st:=unwrap(x.st)) in ctx.sts: return None
@@ -142,7 +143,8 @@ def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
   return st.to_uop() if st != x.st else None
 
 def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
-  return UOp(UOps.DEFINE_GLOBAL, x.dtype, (), ctx.bufs.index(x.arg[0]))
+  ctx.bufs.append(x)
+  return UOp(UOps.DEFINE_GLOBAL, x.dtype, (), len(ctx.bufs)-1)
 
 to_si = PatternMatcher([
   (UPat(UOps.BUFFER, name="x"), _append_buf),
@@ -196,14 +198,14 @@ def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], var_val
   metadata: Dict[UOp, Metadata] = {}
   sink = UOp(UOps.SINK, src=tuple(UOp.store(buf_uops[out.buffer], ShapeTracker.from_shape(out.shape).to_uop(),
                                             to_uop(out, outs, inputs, buf_uops, metadata, cache)) for out in outs))
-  sink = full_ast_rewrite(sink, ScheduleItemContext(var_vals, set(), tuple(buf_uops[x.buffer].arg[0] for x in outs+inputs)))
+  sink = full_ast_rewrite(sink, ctx:=ScheduleItemContext(var_vals, set(), []))
   # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
   if len(assign_targets:=[x.src[0] for x in sink.sparents if x.op is UOps.ASSIGN]) != 0:
     if not all((s:=x.st_arg).contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \
         and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in sink.sparents if x.op is UOps.LOAD and x.src[0] in assign_targets):
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  return LBScheduleItem(sink, tuple(outs+inputs), tuple(dedup(metadata.values())))
+  return LBScheduleItem(sink, tuple(outs+inputs), tuple(ctx.bufs), tuple(dedup(metadata.values())))
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
@@ -418,7 +420,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   schedule: List[ScheduleItem] = []
   while queue:
     lsi = queue.popleft()
-    schedule.append(si:=ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.bufs if x.size != 0), lsi.metadata))
+    schedule.append(si:=ScheduleItem(lsi.ast, tuple(b for u in lsi.ubufs if (b:=uop_bufs[u]).size != 0), lsi.metadata))
     for b in si.outputs: del lazybufs_to_realize[b].srcs  # can only schedule once
     if (m:=BUF_LIMIT.get(device:=si.outputs[0].device)) and len(si.bufs) >= m:
       if DEBUG >= 3: print(si)
