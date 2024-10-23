@@ -3,7 +3,7 @@
 # like test_linearizer_failures, but they don't have to fail
 
 import unittest
-from test.helpers import ast_const
+from test.helpers import ast_const, is_dtype_supported
 from tinygrad import Device, dtypes
 from tinygrad.ops import UOp, UOps, BinaryOps, TernaryOps
 from tinygrad.helpers import getenv
@@ -98,6 +98,7 @@ class TestLinearizerDumb(unittest.TestCase):
     self.assertLessEqual(len(conditions), 9)
 
   # this was a bug in embedding, someday we should fold this anyway
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "float16 not supported on this device")
   def test_llama_embedding(self):
     ast = UOp(UOps.SINK, dtypes.void, arg=None, src=(
       UOp(UOps.STORE, dtypes.void, arg=None, src=(
