@@ -119,12 +119,51 @@ class TestRealDoesntSimplify(unittest.TestCase):
 
 class TestRealStrides(unittest.TestCase):
   def test_1(self):
-    self.st = ShapeTracker((
+    st = ShapeTracker((
       View.create((2048,), (1,), 0, ((0, 512),)),
-      View.create((16, 32, 4), (128, 4, 1), 0, None)))
-    st = self.st.real_strides()
-    print(self.st, st)
-    assert st == (None, 4, 1)
+      View.create((16, 32, 4), (128, 4, 1), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (None, 4, 1))
+
+  @unittest.expectedFailure  # FIXME
+  def test_2(self):
+    # test/test_ops.py::TestOps::test_simple_padding_conv1d
+    st = ShapeTracker((
+      View.create((6, 2, 5, 14), (90, 45, 1, 5), 0, ((0, 6), (0, 2), (0, 5), (0, 9))),
+      View.create((6, 2, 78), (140, 70, 1), 0, ((0, 6), (0, 2), (0, 70))),
+      View.create((6, 2, 13, 6), (156, 78, 1, 13), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (90, 45, None, None))
+
+  @unittest.expectedFailure  # FIXME
+  def test_3(self):
+    # test/test_ops.py::TestOps::test_simple_cumsum
+    st = ShapeTracker((
+      View.create((4, 256, 512), (256, 0, 1), 0, ((0, 4), (0, 256), (0, 256))),
+      View.create((4, 131327), (131072, 1), 0, ((0, 4), (0, 131072))),
+      View.create((4, 511, 257), (131327, 1, 511), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (256, None, None))
+
+  @unittest.expectedFailure  # FIXME
+  def test_4(self):
+    # test/test_nn.py::TestNN::test_conv_transpose1d
+    st = ShapeTracker((
+      View.create((4, 16, 56, 2), (896, 56, 1, 0), 0, ((0, 4), (0, 16), (0, 56), (0, 1))),
+      View.create((1, 4, 1, 16, 8, 121), (0, 1792, 0, 112, 0, 1), -5, ((0, 1), (0, 4), (0, 1), (0, 16), (0, 8), (5, 116))),
+      View.create((4, 64, 115, 16, 7), (15488, 0, 1, 968, 122), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (896, 0, None, 56, None))
+
+  @unittest.expectedFailure  # FIXME
+  def test_5(self):
+    # test/test_ops.py::TestOps::test_conv2d
+    st = ShapeTracker((
+      View.create((1, 3, 1, 12, 2, 8), (0, 132, 0, 12, 1, 2), 0, ((0, 1), (0, 3), (0, 1), (0, 11), (0, 2), (0, 6))),
+      View.create((1, 3, 22, 21), (0, 192, 16, 1), 0, ((0, 1), (0, 3), (0, 12), (0, 16))),
+      View.create((3, 11, 7, 2, 3), (462, 21, 1, 231, 7), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (132, None, None, None, None))
 
 class TestRealSimplifies(unittest.TestCase):
   def tearDown(self):
