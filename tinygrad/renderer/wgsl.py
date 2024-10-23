@@ -75,17 +75,13 @@ class WGSLRenderer(CStyleLanguage):
       fn ushl(v: vec2<u32>, shift: u32) -> vec2<u32> {
         if (shift >= 32u) { return vec2<u32>(0u, v.x << (shift - 32u)); }
         else {
-          let high_part = (v.y << shift) | (v.x >> (32u - shift));
-          let low_part = v.x << shift;
-          return vec2<u32>(low_part, high_part);
+          return vec2<u32>(v.x << shift, (v.y << shift) | (v.x >> (32u - shift)));
         }
       }
       fn ushr(v: vec2<u32>, shift: u32) -> vec2<u32> {
         if (shift >= 32u) { return vec2<u32>(v.y >> (shift - 32u), 0u); }
         else {
-          let high_part = v.y >> shift;
-          let low_part = (v.x >> shift) | (v.y << (32u - shift));
-          return vec2<u32>(low_part, high_part);
+          return vec2<u32>((v.x >> shift) | (v.y << (32u - shift)), v.y >> shift);
         }
       }
     """
