@@ -169,8 +169,8 @@ def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
 # def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 def sym_infer(uop: Union[UOp, int, float], var_vals: Dict[UOp, int]) -> int:
   if isinstance(uop, UOp): return uop.sym_infer(var_vals)
-  elif isinstance(uop, float): return int(uop)  
-  else: return uop 
+  elif isinstance(uop, float): return int(uop)
+  else: return uop
 
 # used for UOp and UPat
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
