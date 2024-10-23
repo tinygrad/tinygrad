@@ -5,7 +5,7 @@ from typing import Tuple, List, Optional, Dict, Set
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, Ops, BinaryOps, graph_rewrite, split_uop, symbolic_flat, Variable, sint
+from tinygrad.ops import UOp, Ops, BinaryOps, graph_rewrite, split_uop, symbolic_flat, Variable, sint, uop_given_valid
 
 @dataclass(frozen=True, order=True)
 class ShapeTracker:
@@ -74,6 +74,7 @@ class ShapeTracker:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     ret: List[Optional[sint]] = [None] * len(self.shape)
     idx, valid = (graph_rewrite(u, symbolic_flat) for u in self.to_indexed_uops())
+    if (newidx:=uop_given_valid(valid, idx)) is not None: idx = newidx
     for c in split_uop(idx, BinaryOps.ADD):
       if c.op is Ops.RANGE: ret[c.arg] = 1
       if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg] = c.src[1].arg
