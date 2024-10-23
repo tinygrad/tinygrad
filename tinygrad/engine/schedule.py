@@ -149,6 +149,7 @@ def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
 to_si = PatternMatcher([
   (UPat(UOps.BUFFER, name="x"), _append_buf),
   (UPat(UOps.VIEW, name="x"), _append_st_vars),
+  (UPat(UOps.PRELOAD, name="x"), lambda _,x: x.replace(op=UOps.LOAD)),
   (UPat(UOps.CONTIGUOUS, src=(UPat.var("x"),)), lambda _,x: x),
   (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda _,x: x),
 ])
@@ -177,7 +178,7 @@ def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], inputs:List[LazyBuffer], bu
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
   if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs:
     if not any(x.buffer is buf.buffer for x in outputs) and buf not in inputs: inputs.append(buf)
-    return UOp.load(ubuf, buf.st.to_uop(), dtype=dtype)
+    return UOp(UOps.PRELOAD if buf.is_realized() else UOps.LOAD, dtype, (ubuf, buf.st.to_uop()))
   src = tuple(to_uop(x, outputs, inputs, buf_uops, metadata, cache) for x in buf.srcs)
   if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
   elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
@@ -284,9 +285,8 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-@track_rewrites(named=True)
-def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  """create a graph for realizing the outputs"""
+def get_realizes(outs:List[LazyBuffer]) -> Tuple[Dict[LazyBuffer, None], Dict[LazyBuffer, LazyBuffer]]:
+  """search the graph for all the LazyBuffers that need to realize"""
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
   allbufs: Dict[LazyBuffer, None] = {}
@@ -358,11 +358,16 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     if len(kernel_children) == 0: continue
     if DEBUG_ARANGE: print(colored(f"folding {r}", "green"))
     for tr in group: del realizes[tr]
+  return realizes, reduce_for_op
 
+@track_rewrites(named=True)
+def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  realizes, reduce_for_op = get_realizes(outs)
   output_groups: DefaultDict[LazyBuffer, List[UOp]] = defaultdict(list)
   buf_uops: Dict[Buffer, UOp] = {}
   uop_bufs: Dict[UOp, Buffer] = {}
   var_vals: Dict[Variable, int] = {}
+  assign_targets: Dict[LazyBuffer, LazyBuffer] = {}
   lazybufs_to_realize: Dict[Buffer, LazyBuffer] = {}
   for buf in realizes:
     if buf.realized is None and buf.op is not MetaOps.CONST:
@@ -388,7 +393,9 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     if buf.buffer not in buf_uops:
       buf_uops[buf.buffer] = uop
       uop_bufs[uop] = buf.buffer
-    if buf.realized is None and buf.op is not MetaOps.CONST: output_groups[reduce_for_op.get(buf, buf)].append(buf_uops[buf.buffer])
+    if buf.realized is None:
+      if buf.op is MetaOps.ASSIGN: assign_targets[buf.srcs[0]] = buf
+      if buf.op is not MetaOps.CONST:output_groups[reduce_for_op.get(buf, buf)].append(buf_uops[buf.buffer])
 
   # preschedule all buffers in realizes
   prescheduled = [_lower_lazybuffer([lazybufs_to_realize[uop_bufs[b]] for b in outs], buf_uops, var_vals) for outs in output_groups.values()]
