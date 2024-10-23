@@ -302,7 +302,4 @@ You can find a full list and their descriptions in [env_vars.md](env_vars.md).
 
 ### Visualizing the Computation Graph
 
-It is possible to visualize the computation graph of a neural network using [graphviz](https://graphviz.org/).
-
-This is easily done by running a single pass (forward or backward!) of the neural network with the environment variable `GRAPH` set to `1`.
-The graph will be saved to `/tmp/net.svg` by default.
+It is possible to visualize the computation graph of a neural network using VIZ=1.

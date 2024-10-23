@@ -66,8 +66,8 @@ class PTXRenderer(Renderer):
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
   def __init__(self, arch:str, device="CUDA"):
-    self.device = device
-    self.tensor_cores = PTXRenderer.tensor_cores if int(arch[3:])>=80 else CUDARenderer.tensor_cores_75 if int(arch[3:])>=75 else []
+    self.device, self.tensor_cores, self.arch = device, PTXRenderer.tensor_cores if int(arch[3:]) >= 80 else [], arch
+  def __reduce__(self): return self.__class__, (self.arch, self.device)
 
   # language options
   kernel_prefix = """.version VERSION
@@ -145,7 +145,7 @@ class PTXRenderer(Renderer):
 
     def _cast(a, dtype:DType, atype:DType, bitcast=False, u=None, pred=False):
       if atype == dtype or isinstance(atype, PtrDType):
-        if u: r[u] = a
+        if u is not None: r[u] = a
         return a
       kk(*self.render_cast((ret:=ssa('cast', u, self.types[dtype])), a, dtype, atype, bitcast))
       return ret
@@ -228,14 +228,15 @@ class PTXRenderer(Renderer):
           kk(*self.render_load(nm, ssa('dat', u, self.types[dt]), dt, ss=".param"))
         elif uop is UOps.WMMA:
           _, (N, M, K), dtype_in, _, _, _, upcast_axes, _ = args
-          wmma, sza = [], prod(sz for _, sz in upcast_axes[0]) * dtype_in.itemsize // 4
+          wmma, n_operands = [], tuple(prod(sz for _, sz in upc)*dtype_in.itemsize//4 for upc in upcast_axes[:2])
+          dt_map = { dtypes.half: "f16" }
           for vv in src[:2]:
             for i in range(0, len(r[vv]), 2):
               wmma.append(ssa("wmma", dtype="b32"))
               kk(f'mov.b32 {wmma[-1]}, {{{", ".join(r[vv][i:i+2])}}};')
           r[u] = [ssa("wmma", dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
-          kk(f'mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.f16.f16.f32\
-            {{{", ".join(r[u])}}}, {{{", ".join(wmma[:sza])}}}, {{{", ".join(wmma[sza:])}}}, {{{", ".join(r[src[2]])}}};')
+          kk(f'mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_map[dtype_in]}.{dt_map[dtype_in]}.f32\
+            {{{", ".join(r[u])}}}, {{{", ".join(wmma[:n_operands[0]])}}}, {{{", ".join(wmma[-n_operands[1]:])}}}, {{{", ".join(r[src[2]])}}};')
         else: raise NotImplementedError(f"no code for {uop}")
 
     return self.render_kernel(kernel, name, bufs, c.items())

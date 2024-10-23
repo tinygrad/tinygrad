@@ -1,22 +1,19 @@
-import sys, time
+import sys, time, logging, difflib
 from typing import Callable, Optional, Tuple, TypeVar
 import numpy as np
-from test.external.process_replay.helpers import print_diff
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.ops import UOp, UOps
+from tinygrad.ops import UOp, UOps, sint
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
 from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import Context, CI, OSX, getenv
-from tinygrad.shape.symbolic import sint
+from tinygrad.helpers import CI, OSX, getenv, colored
 
 def derandomize_model(model):
-  with Context(GRAPH=0):
-    for p in get_parameters(model):
-      p.lazydata = Tensor.empty(p.shape, device=p.device, dtype=p.dtype).lazydata
-      p.realize()
+  for p in get_parameters(model):
+    p.lazydata = Tensor.empty(p.shape, device=p.device, dtype=p.dtype).lazydata
+    p.realize()
 
 def assert_jit_cache_len(fxn, expected_len):
   if not fxn.jit_cache:
@@ -32,7 +29,6 @@ def assert_jit_cache_len(fxn, expected_len):
     assert len(fxn.jit_cache[0].prg.jit_cache) == expected_len
 
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
-  if dtype == dtypes.pyint and device != "PYTHON": return False
   if dtype == dtypes.bfloat16:
     # NOTE: this requires bf16 buffer support
     return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
@@ -57,8 +53,18 @@ def rand_for_dtype(dt:DType, size:int):
     return np.random.choice([True, False], size=size)
   return np.random.uniform(-10, 10, size=size).astype(_to_np_dtype(dt))
 
+def print_diff(s0, s1, unified=getenv("UNIFIED_DIFF",1)):
+  if not logging.getLogger().hasHandlers(): logging.basicConfig(level=logging.INFO, format="%(message)s")
+  if unified:
+    lines = list(difflib.unified_diff(str(s0).splitlines(), str(s1).splitlines()))
+    diff = "\n".join(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None) for line in lines)
+  else:
+    import ocdiff
+    diff = ocdiff.console_diff(str(s0), str(s1))
+  logging.info(diff)
+
 def assert_equiv_uops(u1:UOp, u2:UOp) -> None:
-  if u1.key != u2.key:
+  if u1 is not u2:
     print_diff(u1, u2)
     raise AssertionError("uops aren't equal.")
 

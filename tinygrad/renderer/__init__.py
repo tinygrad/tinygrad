@@ -2,8 +2,7 @@ from typing import Optional, List, Tuple, Dict, Callable, Any
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.ops import Op, UOps, UOp, flops_mem
-from tinygrad.shape.symbolic import sym_infer, sint, Variable
+from tinygrad.ops import Op, UOps, UOp, flops_mem, sym_infer, sint, Variable
 from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
@@ -43,7 +42,7 @@ class Program:
     if not self._ran_post_init and self.uops is not None:
       # single pass through the uops
       for u in self.uops:
-        if u.op is UOps.DEFINE_VAR: self.vars.append(Variable(u.arg[0], u.arg[1], u.arg[2]))
+        if u.op is UOps.DEFINE_VAR: self.vars.append(u)
         if u.op is UOps.DEFINE_GLOBAL: self.globals.append(u.arg)
         if u.op is UOps.STORE: self.outs.extend([x.arg for x in u.src[0].sparents if x.op is UOps.DEFINE_GLOBAL])
         if u.op is UOps.SPECIAL:
@@ -52,7 +51,7 @@ class Program:
           special_size = self.local_size if u.arg[0][0] == 'l' else self.global_size
           assert special_size is not None
           special_size[int(u.arg[0][-1])] = u.arg[1]
-      self.vars = sorted(self.vars, key=lambda v: v.expr)
+      self.vars = sorted(self.vars, key=lambda v: v.arg)
       self.outs = sorted(dedup(self.outs))
       self._ran_post_init = True
 
@@ -85,9 +84,9 @@ class Renderer:
   global_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   local_max: Optional[Tuple[int, ...]] = (0x8FFFFFFF,) * (3) # TODO: UOps.SPECIAL int32 indexes right now
   shared_max: int = 32768
-  buf_max: Optional[int] = None
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
   code_for_op: Dict[Op, Callable] = {}
 
+  def __reduce__(self): return self.__class__, ()
   def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")
