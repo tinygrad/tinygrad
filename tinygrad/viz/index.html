@@ -204,7 +204,7 @@
   }
 
   // **** extra helpers
-  const toPath = ([fp, lineno]) => `${fp.split("/").pop()}:${lineno}`;
+  const toPath = ([fp, lineno]) => `${fp.replaceAll("\\", "/").split("/").pop()}:${lineno}`;
 
   // **** main loop
   var ret = {};
