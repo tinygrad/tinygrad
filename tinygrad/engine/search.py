@@ -52,14 +52,8 @@ def _time_program(p:Program, lib:bytes, var_vals:Dict[Variable, int], rawbufs:Li
     if early_stop is not None and early_stop < min(tms): break
   return tms
 
-class TimeoutException(Exception): pass
-def timeout_handler(signum, frame): raise TimeoutException()
-
 def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tuple[int, Optional[Tuple[Program, bytes, float]]]:
-  if hasattr(signal, "SIGALRM"):
-    signal.signal(signal.SIGALRM, timeout_handler)
-    # set timeout
-    signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
+  ret = None
   try:
     p = x[1].to_program(name_override="test")
     assert p.uops is not None, "uop list wasn't generated?"
@@ -70,14 +64,8 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tup
     ret = (p, prog, et)
   except RuntimeError:
     if DEBUG >= 4: traceback.print_exc()
-    ret = None
-  except TimeoutException:
-    ret = None
   except Exception as e:
     if getenv("BEAM_STRICT_MODE"): raise e
-    ret = None
-  finally:
-    if hasattr(signal, "SIGALRM"): signal.alarm(0)
   return x[0], ret
 
 # workers should ignore ctrl c
