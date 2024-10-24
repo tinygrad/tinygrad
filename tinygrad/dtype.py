@@ -1,17 +1,18 @@
 from __future__ import annotations
-from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable
+from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable, TypeVar, Generic
 import math, struct, ctypes, functools
 from dataclasses import dataclass
 from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
+DtypeFmtType = TypeVar('DtypeFmtType', bound=str)
 
 @dataclass(frozen=True, order=True)
-class DType:
+class DType(Generic[DtypeFmtType]):
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
-  fmt: Optional[str]
+  fmt: Optional[DtypeFmtType]
   count: int
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
   def vec(self, sz:int):
