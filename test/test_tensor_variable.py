@@ -59,8 +59,9 @@ class TestTensorVariable(unittest.TestCase):
     vv = Variable("a", 1, 10).bind(2)
     t = Tensor.ones(2, 2).contiguous()
     t = t.pad2d([vv, vv, vv, vv]).mean()
-    lst = t.tolist()
-    print(lst)
+    ones = 4
+    zeros = 6+6+4+4+6+6
+    self.assertAlmostEqual(t.item(), ones/(ones+zeros))
 
   @unittest.skip("symbolic arange isn't supported")
   def test_symbolic_arange(self):
