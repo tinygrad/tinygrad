@@ -1,5 +1,6 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal
+import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal, sys
+assert sys.platform != 'win32'
 from typing import Tuple, List, Any, cast, Union, Dict, Type
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command

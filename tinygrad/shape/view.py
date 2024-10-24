@@ -1,9 +1,9 @@
 from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast, Union
+from typing import Tuple, List, Optional, Dict, Set, cast
 from tinygrad.dtype import dtypes
-from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer
+from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin
 from tinygrad.helpers import prod, all_int, argsort
 
 @functools.lru_cache(maxsize=None)
@@ -125,9 +125,10 @@ class View:
       offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
       strides = tuple(0 if e else st for st,e in zip(strides, elim))
     # simplify as we go
-    if isinstance(offset, UOp): offset = cast(Union[UOp, int], offset.ssimplify())
+    if isinstance(offset, UOp): offset = cast(sint, offset.ssimplify())
+    shape = tuple(cast(sint, x.ssimplify()) if isinstance(x, UOp) else x for x in shape)
+    # TODO: enabling stride simplification breaks it
     """
-    shape = tuple(x.ssimplify() if isinstance(x, UOp) else x for x in shape)
     strides = tuple(x.ssimplify() if isinstance(x, UOp) else x for x in strides)
     if mask: mask = tuple((s.ssimplify() if isinstance(s, UOp) else s, e.ssimplify() if isinstance(e, UOp) else e) for s,e in mask)
     """
@@ -174,6 +175,7 @@ class View:
 
     # Merge dimensions in vm2 if required.
     # NB: Merging too many dimensions can make it difficult to project vm2's mask, hence only combining when required.
+    if not all_int(vm1.shape): return None
     idxs: List[UOp] = [UOp.variable(f"idx{i}", 0, s-1) for i,s in enumerate(vm1.shape)]
     merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
     extents: List[Tuple[sint, UOp]] = []
@@ -232,9 +234,9 @@ class View:
     offset = sum([s * x[0] for s, x in zip(self.strides,arg)])
     if self.mask:
       # move the old mask
-      nmask = tuple([(max(0, min(mx-ax,ay-ax)), max(0, min(my-ax,ay-ax))) for (mx,my),(ax,ay) in zip(self.mask, arg)])
+      nmask = tuple([(smax(0, smin(mx-ax,ay-ax)), smax(0, smin(my-ax,ay-ax))) for (mx,my),(ax,ay) in zip(self.mask, arg)])
       # merge the masks if we have two
-      mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
+      mask = tuple([(smax(mx1, mx2), smin(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     shape = [y-x for x,y in arg]
     if mask is not None and all(m[0] == 0 and m[1] == s for m,s in zip(mask, shape)): mask = None
     return View.create(tuple(s.ssimplify() if isinstance(s, UOp) else s for s in shape), self.strides, self.offset+offset, mask)
