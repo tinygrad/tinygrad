@@ -183,8 +183,8 @@ def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp],
     return ret
   if buf.op is MetaOps.CONST: return buf_uops[buf.buffer]
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
-  if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs:
-    return UOp(UOps.PRELOAD if buf.is_realized() else UOps.LOAD, dtype, (ubuf, buf.st.to_uop()))
+  if buf.is_realized(): return UOp(UOps.PRELOAD, dtype, (buf_uops[buf.buffer], buf.st.to_uop()))
+  if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs: return UOp(UOps.LOAD, dtype, (ubuf, buf.st.to_uop()))
   src = tuple(to_uop(x, outputs, buf_uops, metadata, cache) for x in buf.srcs)
   if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
   elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
