@@ -43,7 +43,7 @@ def shard_model(model, opt):
 
 MODEL_PARAMS = {
   "sm": {
-    "args": {"dim": 24, "n_heads": 1, "n_kv_heads": 1, "n_layers": 2, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 128256, "hidden_dim": 48},
+    "args": {"dim": 4, "n_heads": 1, "n_kv_heads": 1, "n_layers": 1, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 128, "hidden_dim": 48},
     "files": 1
   },
   "8B": {
@@ -65,11 +65,6 @@ print_size("adamW", *nn.state.get_parameters(opt))
 if len(GPUS) > 1:
   shard_model(model, opt)
 
-for k, p in nn.state.get_state_dict(model).items():
-  print(k, p.shape, f"Axis {p.lazydata.axis}" if isinstance(p.lazydata, MultiLazyBuffer) else "")
-
-for k, p in nn.state.get_state_dict(opt).items():
-  print(f"{k=}")
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
   def __init__(self, model_path: str):
@@ -121,7 +116,6 @@ def tokenize_data():
 
 train, val = tokenize_data()
 tokens = train
-print(f"{tokens.shape=}")
 B = 4
 T = 16
 # lightweight dataloader
@@ -143,11 +137,6 @@ x, y = next(data_iter)
 
 # @TinyJit
 def step(x, y):
-  print(f"{x.shape=} {y.shape=}")
-  print("x")
-  print(x.numpy())
-  print("y")
-  print(y.numpy())
   loss = model(x, 0, target=y)
   print("loss")
   print(loss.numpy())
@@ -157,11 +146,11 @@ def step(x, y):
 
 with Tensor.train():
   Device.DEFAULT = GPU_NAME
-  for i in range(20):
+  for i in range(2):
   
     GlobalCounters.reset()
     t0 = time.time()
     loss = step(x.contiguous(), y.contiguous())
     Device[Device.DEFAULT].synchronize()
     t1 = time.time()
-    print(f"iteration {i}, loss: {loss.item():.6f}, time: {(t1-t0)*1000:.3f}ms, {int(B*T/(t1-t0))} tok/s")
+    # print(f"iteration {i}, loss: {loss.item():.6f}, time: {(t1-t0)*1000:.3f}ms, {int(B*T/(t1-t0))} tok/s")

@@ -46,6 +46,11 @@ class Attention:
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
+    print("x", x.lazydata.shape, x.lazydata)
+    print(x.numpy())
+    print("wq weight", self.wq.weight.shape, self.wq.weight.lazydata)
+    print(self.wq.weight.numpy())
+    print
     if getenv("WQKV"):
       if not hasattr(self, 'wqkv'): self.wqkv = Tensor.cat(self.wq.weight, self.wk.weight, self.wv.weight)
       xqkv = x @ self.wqkv.T
@@ -53,10 +58,12 @@ class Attention:
     else:
       xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
+    print("xq", xq.shape, xq.lazydata)
+    print(xq.numpy())
+    
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
-    print(f"{xq.shape=} {xk.shape=} {xv.shape=}")
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     bsz, seqlen, _, _ = xq.shape
 
@@ -152,9 +159,10 @@ class Transformer:
     print(f"shrinekd freqs cis {freqs_cis.shape=}")
     h = self.tok_embeddings(tokens)
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1).realize() if seqlen > 1 else None
-    for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
+    for layer in self.layers:
+      h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h)).float()
-
+    print("logits")
     print(f"{logits.shape=}")
     loss = logits.sparse_categorical_crossentropy(target)
     return loss
