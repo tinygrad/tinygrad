@@ -1,5 +1,6 @@
 from __future__ import annotations
-import os, ctypes, functools, mmap, struct, array, decimal, math
+import os, ctypes, functools, mmap, struct, array, decimal, math, sys
+assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Tuple, List, Any, cast
 from tinygrad.device import BufferOptions
