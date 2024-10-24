@@ -181,9 +181,9 @@ class View:
     merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
     extents: List[Tuple[sint, UOp]] = []
     for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
-      merged_term += sum([idxs[d1] * (s1 * merged_size) for d1, s1 in term]) + o * merged_size
+      merged_term += (sum([idxs[d1] * s1 for d1, s1 in term]) + o) * merged_size
       merged_size *= s
-      if not resolve(merged_term >= merged_size) and not resolve(merged_term < 0):
+      if resolve(merged_term < merged_size, False) and resolve(0 <= merged_term, False):
         extents.append((merged_size, merged_term))
         merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
     if resolve(merged_term != 0): return None
@@ -193,12 +193,11 @@ class View:
     if vm2.mask:
       # Try to project vm2's mask on to vm1.
       newb, newe, bad = [0] * len(vm1.shape), list(vm1.shape), False
-      for d2, ((b, e), o, (_, t)) in enumerate(zip(vm2.mask, origin, reversed(extents))):
+      for (b, e), o, term, (_, t) in zip(vm2.mask, origin, terms, reversed(extents)):
         if resolve(b <= t.vmin and t.vmax < e, False): continue
-        if not isinstance(o, int) or not isinstance(b, int) or not isinstance(e, int):
+        if not all_int([o, b, e]):
           bad = True
           continue
-        term = terms[d2]
         if len(term) != 1:
           if not term and newe: newe[0] = 0
           else: bad = True
@@ -212,7 +211,7 @@ class View:
 
       # If any of vm1 was masked off, try again with that mask in place.
       for b, e, s in zip(newb, newe, vm1.shape):
-        if b != 0 or e != s:
+        if (b, e) != (0, s):
           return vm2 + View.create(vm1.shape, vm1.strides, vm1.offset, tuple(zip(newb, newe)))
       # Otherwise if vm2's mask was violated, then cannot merge.
       if bad: return None
