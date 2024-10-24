@@ -1,6 +1,7 @@
 name: Benchmarks
 env:
   # TODO: this rescheduling makes gpt2, mixtral and llama unjitted slower
+  # TODO: very slow for llama 70B and resnet training 6 GPU
   RUN_PROCESS_REPLAY: "1"
   ASSERT_PROCESS_REPLAY: "0"
   PYTHONPATH: .
@@ -24,6 +25,7 @@ jobs:
   testmacbenchmark:
     name: Mac Benchmark
     runs-on: [self-hosted, macOS]
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -126,6 +128,7 @@ jobs:
   testnvidiabenchmark:
     name: tinybox green Benchmark
     runs-on: [self-hosted, Linux, tinyboxgreen]
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -190,7 +193,7 @@ jobs:
     - name: Run LLaMA-3 8B on 6 GPUs
       run: NV=1 python3 examples/llama3.py --shard 6 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_six_gpu.txt
     - name: Run LLaMA-2 70B
-      run: NV=1 MAX_CONTEXT=256 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
+      run: NV=1 RUN_PROCESS_REPLAY=0 MAX_CONTEXT=256 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
     - name: Run Mixtral 8x7B
       run: time NV=1 python3 examples/mixtral.py --temperature 0 --count 10 --timing | tee mixtral.txt
     - name: Run GPT2
@@ -233,6 +236,7 @@ jobs:
   testmorenvidiabenchmark:
     name: tinybox green Training Benchmark
     runs-on: [self-hosted, Linux, tinyboxgreen]
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -280,7 +284,7 @@ jobs:
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
       run: NV=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
     - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
-      run: NV=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
+      run: NV=1 RUN_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA Training)
@@ -300,6 +304,7 @@ jobs:
   testamdbenchmark:
     name: tinybox red Benchmark
     runs-on: [self-hosted, Linux, tinybox]
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -364,7 +369,7 @@ jobs:
     - name: Run LLaMA-3 8B on 6 GPUs
       run: AMD=1 python3 examples/llama3.py --shard 6 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_six_gpu.txt
     - name: Run LLaMA-2 70B
-      run: AMD=1 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
+      run: AMD=1 RUN_PROCESS_REPLAY=0 python3 examples/llama.py --gen 2 --size 70B --shard 6 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_2_70B.txt
     - name: Run Mixtral 8x7B
       run: time AMD=1 python3 examples/mixtral.py --temperature 0 --count 10 --timing | tee mixtral.txt
     - name: Run GPT2
@@ -405,6 +410,7 @@ jobs:
   testmoreamdbenchmark:
     name: tinybox red Training Benchmark
     runs-on: [self-hosted, Linux, tinybox]
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -448,7 +454,7 @@ jobs:
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
       run: AMD=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
     - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
-      run: AMD=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
+      run: AMD=1 RUN_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD Training)
@@ -468,6 +474,7 @@ jobs:
   testqualcommbenchmark:
     name: comma Benchmark
     runs-on: [self-hosted, Linux, comma]
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash -o pipefail {0}
