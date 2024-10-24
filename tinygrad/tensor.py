@@ -2151,6 +2151,39 @@ class Tensor:
     def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
     return fix(ret) + fix(base_add)
 
+  def _cummax(self, axis:int=0, _first_zero=False) -> Tuple[Tensor, Tensor]:
+    assert self.shape[axis] != 0
+    pl_sz = self.shape[axis] - 1
+    min_value = float('-inf')
+    # min_value = self.min().item()
+    # min_value = dtypes.min(self.dtype)
+    # min_value = 0
+    values = self.transpose(axis,-1).pad2d((pl_sz, 0), min_value)._pool((self.shape[axis],)).max(-1).transpose(axis,-1)
+    idxs = Tensor.arange(self.shape[axis], dtype=dtypes.int64, device=self.device)
+    idxs = idxs.reshape(*[1 if i != axis else -1 for i in range(self.ndim)]).expand(self.shape)
+    idx_mask = (self == values) * idxs # index is turned on if values[i] = cummax[i]
+    max_idxs =  idx_mask.transpose(axis,-1).pad2d((self.shape[axis]-1, 0))._pool((self.shape[axis],)).max(-1).transpose(axis,-1)
+
+    return values, max_idxs.detach()
+
+  def cummax(self, axis:int=0) -> Tuple[Tensor, Tensor]:
+    """
+    Computes the cumulative maximum of the tensor along the specified axis.
+
+    You can pass in the `axis` keyword argument to control the axis along which the cumulative maximum is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2, 3], [4, 5, 6]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.cummax(1).numpy())
+    ```
+    """
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape: return self, self.cast(dtypes.int64)
+    return self._cummax(axis)
+
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, **kwargs) -> Tensor:
     assert isinstance(r, int) and isinstance(c, int), f"does not support symbolic, getting {r=}, {c=}"
