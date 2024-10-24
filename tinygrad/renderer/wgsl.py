@@ -2,6 +2,7 @@ from typing import List, Tuple
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import UOp, UOps, UnaryOps, TernaryOps, BinaryOps, PatternMatcher, UPat
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, _render_index
+from tinygrad.helpers import strip_parens
 
 def fixup_binops(c,a,b):
   if c.arg == BinaryOps.CMPLT and a.dtype == dtypes.bool: return UOp(c.op, c.dtype, (a.cast(dtypes.int), b.cast(dtypes.int)), c.arg)
@@ -12,7 +13,7 @@ def fixup_binops(c,a,b):
     return UOp(c.op, dtypes.float, (a.cast(dtypes.float), b.cast(dtypes.float)), c.arg).cast(dtypes.int)
 
 wgsl_matcher = PatternMatcher([
-  (UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL), dtype=PtrDType(dtypes.bool), name="a"), lambda a: UOp(a.op, PtrDType(dtypes.int32), a.src, a.arg)),
+  (UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL), dtype=dtypes.bool.ptr(), name="a"), lambda a: UOp(a.op, dtypes.int32.ptr(), a.src, a.arg)),
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, src=(UPat.var("x"),UPat.var("y"),UPat.var("z"),UPat.var("g", dtype=dtypes.bool))),
     lambda root,x,y,z,g: UOp(root.op, dtypes.int, (x,y,z.cast(dtypes.int), g), root.arg).cast(dtypes.bool)),
   (UPat(UOps.LOAD, name="root", dtype=dtypes.bool, src=(UPat.var(),UPat.var(),UPat.var(),UPat(UOps.BARRIER))),
@@ -36,6 +37,10 @@ type_map = {dtypes.float: "f32", dtypes.int32: "i32", dtypes.uint32: "u32", dtyp
 def gep_ulong(r, val):
   return f"{r[val]}.x" if val.dtype == dtypes.ulong else f"{r[val]}"
 
+def _render_index(r:CStyleLanguage, buf:UOp, idx:UOp, dtype:DType) -> str:
+  sidx = strip_parens(r[idx]) if idx.arg == BinaryOps.ADD else r[idx]
+  return f"{r[buf]}[{sidx}]"
+
 class WGSLRenderer(CStyleLanguage):
   device = "WEBGPU"
   global_max = (65535, 65535, 65535)
@@ -51,7 +56,6 @@ class WGSLRenderer(CStyleLanguage):
 
   string_rewrite = PatternMatcher([
     (UPat(UOps.CONST, dtype=dtypes.bool, name="x"), lambda r,x: "true" if x.arg else "false"),
-    # cstyle uint initialization
     (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda r,x: f"bitcast<u32>({x.arg}i)" if x.arg < 0 else f"{x.arg}u"),
     (UPat(UOps.CONST, dtype=dtypes.ulong, name="x"), lambda r,x: f"vec2<u32>({x.arg}, 0u)" if x.arg < 4294967296 else f"vec2<u32>({x.arg&4294967295}, {x.arg>>32})"),
     (UPat(UOps.DEFINE_LOCAL, name="x"), lambda r,x: f"var<workgroup> {r[x]}: array<{type_map[x.dtype.base]}, {x.arg[1]}>;"),
@@ -60,6 +64,10 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"bitcast<{type_map[x.dtype]}>({r[x.src[0]]})"),
     (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var"), UPat.var("gate")), name="load"),
      lambda r,buf,idx,load,var,gate: f"select({r[var]}, {_render_index(r, buf, idx, load.dtype)},{r[gate]})"),
+    (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat.var('idx')), allow_any_len=True, name="load"),
+    lambda r,buf,idx,load: f"{_render_index(r, buf, idx, load.dtype)}"),
+    (UPat(UOps.STORE, src=(UPat.var("buf"), UPat.var('idx'), UPat.var("var")), allow_any_len=True),
+    lambda r,buf,idx,var: f"{_render_index(r, buf, idx, var.dtype)} = {r[var]};"),
   ]) + base_rewrite + PatternMatcher([
     (UPat(UOps.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHL), lambda r,x: f"ushl({r[x.src[0]]},u32({gep_ulong(r, x.src[1])}))"),
     (UPat(UOps.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHR), lambda r,x: f"ushr({r[x.src[0]]},u32({gep_ulong(r, x.src[1])}))"),
