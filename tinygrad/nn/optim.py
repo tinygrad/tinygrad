@@ -79,9 +79,7 @@ class LARS(Optimizer):
   def _step(self) -> List[Tensor]:
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      # contiguous is needed since the grads can allegedly form a "diamond"
-      # TODO: fix this in lazy.py
-      g = t.grad.contiguous()
+      g = t.grad
       if self.tcoef != 0:
         r1 = t.detach().square().sum().sqrt()
         r2 = g.square().sum().sqrt()
