@@ -198,7 +198,6 @@ class UOp(MathTrait):
 
   __slots__ = ["op", "dtype", "src", "arg"]
   def __init__(self, op:UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
-    if getattr(self, 'op', None) is not None: return
     # TODO: instant check rules here make debugging easier
     #assert op in UOps and isinstance(dtype, DType), f"bad UOp creation with {op} {dtype}"
     #if op is UOps.ALU and arg is BinaryOps.CMPNE: assert dtype.scalar() == dtypes.bool
