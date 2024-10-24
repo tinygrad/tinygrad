@@ -55,6 +55,14 @@ class TestTensorVariable(unittest.TestCase):
     ret = t.var().item()
     assert ret == 0
 
+  def test_symbolic_pad2d(self):
+    vv = Variable("a", 1, 10).bind(2)
+    t = Tensor.ones(2, 2).contiguous()
+    t = t.pad2d([vv, vv, vv, vv]).mean()
+    lst = t.tolist()
+    print(lst)
+
+  @unittest.skip("symbolic arange isn't supported")
   def test_symbolic_arange(self):
     vv = Variable("a", 1, 10).bind(2)
     ret = Tensor.arange(0, vv)

@@ -111,8 +111,7 @@ class View:
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
-    # TODO: this shouldn't need a resolve
-    if not all(resolve(s >= 0) for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
+    if not all(s >= 0 for s in shape): raise ValueError(f"Trying to create View with negative dimension: {shape=}")
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
     # canonicalize 0 in shape
     if 0 in shape: return View(shape, (0,) * len(shape), offset=0, mask=None, contiguous=True)
@@ -293,8 +292,7 @@ class View:
   def reshape(self, new_shape: Tuple[sint, ...]) -> Optional[View]:
     if self.shape == new_shape: return self
 
-    # TODO: this shouldn't need a resolve
-    assert all(resolve(x >= 0) for x in new_shape), f"shape can't contain negative numbers {new_shape}"
+    assert all(x >= 0 for x in new_shape), f"shape can't contain negative numbers {new_shape}"
     if 0 in self.shape:
       assert 0 in new_shape, f"cannot reshape 0 size to {new_shape}"
       return View.create(new_shape)
@@ -324,8 +322,7 @@ class View:
     strides, r_new_shape = [], reversed(new_shape)
     for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
       acc = 1
-      # TODO: does this need resolve?
-      while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and resolve((new_dim := next(r_new_shape, 0)) > 0):
+      while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and (new_dim := next(r_new_shape, 0)) > 0:
         strides.append(new_stride)
         if resolve(new_dim != 1): new_stride *= (new_dim if resolve((acc := acc * new_dim) < real_dim) else 0)
       if resolve(acc != merged_dim): break
