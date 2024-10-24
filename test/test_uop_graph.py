@@ -174,7 +174,7 @@ class TestGraphRewrite(unittest.TestCase):
     outs = [2+a, 2+a+d+3+b+c+4, UOp(UOps.ALU, a.dtype, src=(a.const_like(2), a), arg=BinaryOps.ADD), (4+d)+c+(2+a)+b]
     for out in outs:
       sink = graph_rewrite(out, sym)
-      print(sink)
+      print(sink.render())
       self.assertEqual(sink.op, UOps.ALU)
       self.assertEqual(sink.src[1].op, UOps.CONST)
       self.assertEqual(len([x for x in sink.sparents if x.op is UOps.CONST]), 1)

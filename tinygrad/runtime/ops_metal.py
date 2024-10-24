@@ -172,8 +172,8 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(device, MetalAllocator(self), MetalRenderer(os.uname().machine == "arm64"),
-                     MetalCompiler(None if getenv("METAL_XCODE") else self), functools.partial(MetalProgram, self), MetalGraph)
+    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler(None if getenv("METAL_XCODE") else self),
+                     functools.partial(MetalProgram, self), MetalGraph)
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
     self.mv_in_metal.clear()
