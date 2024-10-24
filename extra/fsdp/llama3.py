@@ -18,8 +18,8 @@ from tinygrad.multi import MultiLazyBuffer
 SHARD = int(os.environ.get("SHARD", 1))
 GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
 GPU_NAME = Device.DEFAULT
-if len(GPUS) > 1:
-  Device.DEFAULT = "CLANG"
+# if len(GPUS) > 1:
+#   Device.DEFAULT = "PYTHON"
 
 def shard_model(model, opt):
   seen = set()
@@ -56,7 +56,7 @@ MODEL_PARAMS = {
 model_size = "sm"
 linear = nn.Linear
 model = Transformer(**MODEL_PARAMS[model_size]["args"], linear=linear, max_context=8192, jit=True)
-opt = nn.optim.SGD(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
+opt = nn.optim.AdamW(nn.state.get_parameters(model), lr=1e-4, weight_decay=0)
 print_size("model", *nn.state.get_parameters(model))
 print_size("adamW", *nn.state.get_parameters(opt))
 if len(GPUS) > 1:
@@ -65,6 +65,8 @@ if len(GPUS) > 1:
 for k, p in nn.state.get_state_dict(model).items():
   print(k, p.shape, f"Axis {p.lazydata.axis}" if isinstance(p.lazydata, MultiLazyBuffer) else "")
 
+for k, p in nn.state.get_state_dict(opt).items():
+  print(f"{k=}")
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
   def __init__(self, model_path: str):
@@ -146,7 +148,7 @@ def step(x, y):
 
 with Tensor.train():
   Device.DEFAULT = GPU_NAME
-  for i in range(4):
+  for i in range(2):
   
     GlobalCounters.reset()
     t0 = time.time()
