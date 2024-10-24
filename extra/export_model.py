@@ -250,7 +250,9 @@ def export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names,
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
   kernel_names = ', '.join([name for (name, _args, _global_size, _local_size) in statements])
   create_bind_group_layouts = ",".join([
-    f"device.createBindGroupLayout({{entries: [{{binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {{ type: 'uniform' }}}}, {','.join([f'{{binding: {argIdx+1}, visibility: GPUShaderStage.COMPUTE, buffer: {{ type: \'storage\' }} }}' for argIdx, _ in enumerate(args)])}]}})"
+    "device.createBindGroupLayout({{entries: [{{binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {{ type: 'uniform' }}}}, {}]}})".format(
+        ",".join([f"{{binding: {argIdx+1}, visibility: GPUShaderStage.COMPUTE, buffer: {{ type: 'storage' }} }}" for argIdx, _ in enumerate(args)])
+    )
     for i, (_name, args, global_size, _local_size) in enumerate(statements)
   ])
   layouts = f"const layouts=[{create_bind_group_layouts}]"
