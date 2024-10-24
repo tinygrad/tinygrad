@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition
+from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -678,12 +678,12 @@ if TRACK_MATCH_STATS:
   @atexit.register
   def print_match_stats():
     if TRACK_MATCH_STATS >= 2:
-      with open("/tmp/rewrites.pkl", "wb") as f:
-        print(f"rewrote {len(contexts)} graphs and matched {sum(len(r.matches) for _,x in contexts for r in x)} times, saved to /tmp/rewrites.pkl")
+      with open(fn:=temp("rewrites.pkl"), "wb") as f:
+        print(f"rewrote {len(contexts)} graphs and matched {sum(len(r.matches) for _,x in contexts for r in x)} times, saved to {fn}")
         pickle.dump(contexts, f)
     if getenv("VIZ"):
       os.environ["VIZ"] = "0"
-      os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py")])
+      os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py"), temp("rewrites.pkl")])
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
@@ -1009,6 +1009,8 @@ symbolic = PatternMatcher([
   (UPat(UOps.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
   (UPat.max(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
+  # TODO: why does this rule break beautiful_mnist?
+  #((UPat.var("x")+UPat.var("z")).max(UPat.var("y")+UPat.var("z")), lambda x,y,z: x.max(y) + z),
   ((UPat.var("x")*UPat.cvar("c1")).max(UPat.var("x")*UPat.cvar("c2")), max_var_const),
   # ** two stage ALU folding **
   ((UPat.var("x") + UPat.cvar("c1")) + UPat.cvar("c2"), lambda x,c1,c2: x+(c1+c2)),
