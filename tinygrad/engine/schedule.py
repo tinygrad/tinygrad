@@ -352,19 +352,14 @@ def get_realizes(outs:List[LazyBuffer]) -> Tuple[Dict[LazyBuffer, None], Dict[La
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  realizes, reduce_for_op = get_realizes(outs)
-  output_groups: DefaultDict[LazyBuffer, List[UOp]] = defaultdict(list)
+  realbufs, reduce_for_op = get_realizes(outs)
+  to_realize: DefaultDict[LazyBuffer, List[LazyBuffer]] = defaultdict(list)
   buf_uops: Dict[Buffer, UOp] = {}
   uop_bufs: Dict[UOp, Buffer] = {}
   var_vals: Dict[Variable, int] = {}
   assigned: Set[UOp] = set()
-  lazybufs_to_realize: Dict[Buffer, LazyBuffer] = {}
-  for buf in realizes:
+  for buf in realbufs:
     if buf.realized is None and buf.op is not MetaOps.CONST:
-      if (dup:=lazybufs_to_realize.get(buf.buffer)) is not None:
-        raise RuntimeError(f"can't double realize in one schedule, Buffer is realizing both {dup} and {buf}")
-      lazybufs_to_realize[buf.buffer] = buf
-
       # make things that can't be images not images
       if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
                                                 not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
@@ -385,18 +380,18 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       uop_bufs[uop] = buf.buffer
     if buf.realized is None:
       if buf.op is MetaOps.ASSIGN: assigned.add(buf_uops[buf.buffer])
-      if buf.op is not MetaOps.CONST:output_groups[reduce_for_op.get(buf, buf)].append(buf_uops[buf.buffer])
+      if buf.op is not MetaOps.CONST: to_realize[reduce_for_op.get(buf, buf)].append(buf)
 
   # preschedule all buffers in realizes
   prescheduled: List[ScheduleItem] = []
-  for stores in output_groups.values():
-    outs = [lazybufs_to_realize[uop_bufs[b]] for b in stores]
+  for realizes in to_realize.values():
     cache: Dict[LazyBuffer, UOp] = {}
     metadata: Dict[UOp, Metadata] = {}
     sink = UOp(UOps.SINK, src=tuple(UOp.store(buf_uops[out.buffer], ShapeTracker.from_shape(out.shape).to_uop(),
-                                              to_uop(out, outs, buf_uops, metadata, cache)) for out in outs))
+                                              to_uop(out, realizes, buf_uops, metadata, cache)) for out in realizes))
     prescheduled.append(ScheduleItem(full_ast_rewrite(sink, ctx:=ScheduleItemContext(var_vals, assigned)), \
         tuple(b for u in ctx.bufs if (b:=uop_bufs[u]).size != 0), tuple(dedup(metadata.values())), tuple(ctx.assign_preloads)))
+    for out in realizes: del out.srcs  # can only schedule once
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
@@ -417,7 +412,6 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   schedule: List[ScheduleItem] = []
   while queue:
     schedule.append(si:=queue.popleft())
-    for b in si.outputs: del lazybufs_to_realize[b].srcs  # can only schedule once
     if (m:=BUF_LIMIT.get(device:=si.outputs[0].device)) and len(si.bufs) >= m:
       if DEBUG >= 3: print(si)
       raise RuntimeError(f"Kernel for {si.metadata} exceeded the {m} buffer count limit for {device} with {len(si.bufs)} buffers.")
