@@ -534,7 +534,7 @@ class NVDevice(HCQCompiled):
     self.timeline_value += 2
 
   def _ensure_has_local_memory(self, required):
-    if self.slm_per_thread >= required: return
+    if self.slm_per_thread >= required or ((maxlm:=getenv("NV_MAX_LOCAL_MEMORY_PER_THREAD")) > 0 and required >= maxlm): return
 
     if self.shader_local_mem is not None: self.allocator.free(self.shader_local_mem, self.shader_local_mem.size)
 
