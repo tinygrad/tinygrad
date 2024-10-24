@@ -116,7 +116,6 @@ class TestUOpResolve(unittest.TestCase):
       u = UOp.variable("i", 1, 10) < 5
       self.assertFalse(u)
 
-  @unittest.expectedFailure
   def test_plus_ordering_lt(self):
     i = UOp.variable("i", 1, 10)
     j = UOp.variable("j", 1, 10)
