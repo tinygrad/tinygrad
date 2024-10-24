@@ -281,6 +281,8 @@ jobs:
       run: NV=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet_one_gpu.txt
     - name: Run 10 MLPerf ResNet50 training steps (6 gpu)
       run: NV=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=1536 GPUS=6 MODEL=resnet python3 examples/mlperf/model_train.py | tee train_resnet.txt
+    - name: Fuzz NV vs CUDA
+      run: NV=1 PYTHONPATH=. VALIDATE_HCQ=1 DEPTH=4 FUZZ_N=64 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py | tee fuzz_nv.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA Training)
@@ -294,6 +296,7 @@ jobs:
           train_resnet.txt
           train_resnet_one_gpu.txt
           train_cifar_six_gpu.txt
+          fuzz_nv.txt
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
