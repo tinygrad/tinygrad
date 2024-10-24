@@ -126,8 +126,9 @@ class View:
       strides = tuple(0 if e else st for st,e in zip(strides, elim))
     # simplify as we go
     if isinstance(offset, UOp): offset = cast(Union[UOp, int], offset.ssimplify())
-    """
     shape = tuple(x.ssimplify() if isinstance(x, UOp) else x for x in shape)
+    # TODO: enabling stride simplification breaks it
+    """
     strides = tuple(x.ssimplify() if isinstance(x, UOp) else x for x in strides)
     if mask: mask = tuple((s.ssimplify() if isinstance(s, UOp) else s, e.ssimplify() if isinstance(e, UOp) else e) for s,e in mask)
     """
