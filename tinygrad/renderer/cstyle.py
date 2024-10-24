@@ -79,7 +79,6 @@ class CStyleLanguage(Renderer):
   code_for_workitem: Dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
   extra_args: List[str] = []
   float4: Optional[str] = None
-  uses_ptr_arithmetic: bool = False
   type_map: Dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"

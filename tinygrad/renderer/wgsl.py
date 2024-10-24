@@ -56,7 +56,7 @@ class WGSLRenderer(CStyleLanguage):
 
   string_rewrite = PatternMatcher([
     (UPat(UOps.CONST, dtype=dtypes.bool, name="x"), lambda r,x: "true" if x.arg else "false"),
-    (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda r,x: f"bitcast<u32>({x.arg}i)" if x.arg < 0 else f"{x.arg}u"),
+    (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda r,x: f"bitcast<u32>({x.arg}i)" if x.arg < 0 else f"{x.arg&0xFFFFFFFF}u" if x.arg >=4294967296 else f"{x.arg}u"),
     (UPat(UOps.CONST, dtype=dtypes.ulong, name="x"), lambda r,x: f"vec2<u32>({x.arg}, 0u)" if x.arg < 4294967296 else f"vec2<u32>({x.arg&4294967295}, {x.arg>>32})"),
     (UPat(UOps.DEFINE_LOCAL, name="x"), lambda r,x: f"var<workgroup> {r[x]}: array<{type_map[x.dtype.base]}, {x.arg[1]}>;"),
     (UPat(UOps.CAST, name="x"), lambda r,x: f"vec2<u32>(({r[x.src[0]]})&4294967295, 0u)" if x.dtype == dtypes.uint64 \
