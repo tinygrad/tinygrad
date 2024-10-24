@@ -1,5 +1,4 @@
-# on Windows:
-# $env:SKIP="devicetests,tests,example"
+# on Windows -- $env:SKIP="devicetests,tests,example"
 repos:
   - repo: local
     hooks:
