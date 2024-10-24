@@ -184,15 +184,12 @@ class UOp(MathTrait):
   def __reduce__(self): return UOp, (self.op, self.dtype, self.src, self.arg)
   def __new__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
     if (ret:=ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
-    if op is UOps.ALU and arg in COMMUTATIVE and (ret:=ucache.get(key:=(op, dtype, src[::-1], arg), None)) is not None: return ret
+    if op is UOps.ALU and arg in COMMUTATIVE and (ret:=ucache.get((op, dtype, src[::-1], arg), None)) is not None: return ret
     ucache[key] = ret = super().__new__(cls)
     return ret
 
   __slots__ = ["op", "dtype", "src", "arg"]
-  def __init__(self, op: UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
-    # NOTE: this has to be done early now because the COMMUTATIVE op can only be created one way
-    if op is UOps.ALU and arg in (BinaryOps.ADD, BinaryOps.MUL) and src[0].op is UOps.CONST and src[1].op is not UOps.CONST: src = src[::-1]
-    # TODO: add more "instant" rules for simple patterns
+  def __init__(self, op:UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
     # TODO: instant check rules here make debugging easier
     #assert op in UOps and isinstance(dtype, DType), f"bad UOp creation with {op} {dtype}"
     #if op is UOps.ALU and arg is BinaryOps.CMPNE: assert dtype.scalar() == dtypes.bool
@@ -200,6 +197,9 @@ class UOp(MathTrait):
     #if op is UOps.ALU and arg not in (BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE): assert all_same([dtype] + [x.dtype for x in src])
     #if op is UOps.CAST: assert dtype.count == src[0].dtype.count, f"cast can't change vectorization {src[0].dtype} --> {dtype}"
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
+    # NOTE: this has to be done early now because the COMMUTATIVE op can only be created one way
+    if op is UOps.ALU and arg in (BinaryOps.ADD, BinaryOps.MUL) and src[0].op is UOps.CONST and src[1].op is not UOps.CONST:
+      self.src = self.src[::-1]
   def replace(self, **kwargs) -> UOp:
     for k in kwargs: assert k in self.__slots__, f"unkown replace arg, expected one of {self.__slots__}, got {k}"
     new_args = (kwargs.get("op", self.op), kwargs.get("dtype", self.dtype), kwargs.get("src", self.src), kwargs.get("arg", self.arg))
