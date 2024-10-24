@@ -248,7 +248,6 @@ class Tensor:
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
-    assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
     if isinstance(self.lazydata, MultiLazyBuffer) and self.lazydata.axis != x.lazydata.axis:
       x.reshard_(self.lazydata.axis)
     assert not x.requires_grad  # self requires_grad is okay?
