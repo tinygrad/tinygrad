@@ -151,11 +151,23 @@ to_si = PatternMatcher([
 ])
 
 PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, ScheduleItemContext, UOp]] = []
-def full_ast_rewrite(base_sink:UOp, ctx:ScheduleItemContext) -> UOp:
-  sink = graph_rewrite(graph_rewrite(base_sink, view_left), view_right)
-  ret = graph_rewrite(graph_rewrite(sink, to_si, ctx), append_bufs, ctx)
-  PROCESS_REPLAY_CAPTURE.append((base_sink, ScheduleItemContext(ctx.var_vals, ctx.assigned), ret))
-  return ret
+def full_ast_rewrite(pre:UOp, ctx:ScheduleItemContext) -> UOp:
+  # assert cyclic dependency
+  for b,reads in itertools.groupby((x for x in pre.sparents if x.op in {UOps.PRELOAD,UOps.LOAD} and x.src[0] in ctx.assigned), key=lambda x:x.src[0]):
+    if not all_same([x.op for x in reads]):
+      raise RuntimeError(f"cycle detected in kernel.\nhelp: use .contiguous() to break the part loading pre-assign {b} into a different kernel.")
+  # do movementops
+  sink = graph_rewrite(graph_rewrite(pre, view_left), view_right)
+  # convert to AST
+  sink = graph_rewrite(graph_rewrite(sink, to_si, ctx), append_bufs, ctx)
+  # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
+  if len(assign_targets:=[x.src[0] for x in sink.sparents if x.op is UOps.ASSIGN]) != 0:
+    if not all((s:=x.st_arg).contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \
+        and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in sink.sparents if x.op is UOps.LOAD and x.src[0] in assign_targets):
+      raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
+                         +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
+  PROCESS_REPLAY_CAPTURE.append((pre, ScheduleItemContext(ctx.var_vals, ctx.assigned), sink))
+  return sink
 
 if getenv("RUN_PROCESS_REPLAY"):
   @atexit.register
@@ -184,26 +196,6 @@ def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp],
   cache[buf] = ret
   if buf.metadata is not None: metadata[ret] = buf.metadata
   return ret
-
-def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], uop_bufs:Dict[UOp, Buffer], assigned:Set[UOp],
-                      var_vals:Dict[Variable, int]) -> ScheduleItem:
-  """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
-  cache: Dict[LazyBuffer, UOp] = {}
-  metadata: Dict[UOp, Metadata] = {}
-  sink = UOp(UOps.SINK, src=tuple(UOp.store(buf_uops[out.buffer], ShapeTracker.from_shape(out.shape).to_uop(),
-                                            to_uop(out, outs, buf_uops, metadata, cache)) for out in outs))
-  # assert cyclic dependency
-  for b,reads in itertools.groupby((x for x in sink.sparents if x.op in {UOps.PRELOAD, UOps.LOAD} and x.src[0] in assigned), key=lambda x:x.src[0]):
-    if not all_same([x.op for x in reads]):
-      raise RuntimeError(f"cycle detected in kernel.\nhelp: consider using .contiguous() to load the pre-assign version of {uop_bufs[b]}.")
-  sink = full_ast_rewrite(sink, ctx:=ScheduleItemContext(var_vals, assigned))
-  # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
-  if len(assign_targets:=[x.src[0] for x in sink.sparents if x.op is UOps.ASSIGN]) != 0:
-    if not all((s:=x.st_arg).contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \
-        and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in sink.sparents if x.op is UOps.LOAD and x.src[0] in assign_targets):
-      raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
-                         +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  return ScheduleItem(sink, tuple(b for u in ctx.bufs if (b:=uop_bufs[u]).size != 0), tuple(dedup(metadata.values())), tuple(ctx.assign_preloads))
 
 # *** DAG creation: decide which LazyBuffers should realize ***
 
@@ -396,8 +388,15 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       if buf.op is not MetaOps.CONST:output_groups[reduce_for_op.get(buf, buf)].append(buf_uops[buf.buffer])
 
   # preschedule all buffers in realizes
-  prescheduled = [_lower_lazybuffer([lazybufs_to_realize[uop_bufs[b]] for b in outs], buf_uops, uop_bufs, assigned,
-                                    var_vals) for outs in output_groups.values()]
+  prescheduled: List[ScheduleItem] = []
+  for stores in output_groups.values():
+    outs = [lazybufs_to_realize[uop_bufs[b]] for b in stores]
+    cache: Dict[LazyBuffer, UOp] = {}
+    metadata: Dict[UOp, Metadata] = {}
+    sink = UOp(UOps.SINK, src=tuple(UOp.store(buf_uops[out.buffer], ShapeTracker.from_shape(out.shape).to_uop(),
+                                              to_uop(out, outs, buf_uops, metadata, cache)) for out in outs))
+    prescheduled.append(ScheduleItem(full_ast_rewrite(sink, ctx:=ScheduleItemContext(var_vals, assigned)), \
+        tuple(b for u in ctx.bufs if (b:=uop_bufs[u]).size != 0), tuple(dedup(metadata.values())), tuple(ctx.assign_preloads)))
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
