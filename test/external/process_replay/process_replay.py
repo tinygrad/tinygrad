@@ -22,8 +22,7 @@ early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 # user config
-ASSERT_FLAGS = {"[pr]", "[run_process_replay]"}
-ASSERT_DIFF = int(any(flag in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag) for flag in ASSERT_FLAGS))
+ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
 if not getenv("ASSERT_PROCESS_REPLAY", 1): ASSERT_DIFF = 0
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
 if REF == "master": SKIP_PROCESS_REPLAY = True
