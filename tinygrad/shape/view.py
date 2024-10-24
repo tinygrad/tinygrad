@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast, Union
+from typing import Tuple, List, Optional, Dict, Set, cast
 from tinygrad.dtype import dtypes
 from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin
 from tinygrad.helpers import prod, all_int, argsort
