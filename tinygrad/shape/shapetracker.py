@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set
-from tinygrad.helpers import merge_dicts, getenv
+from tinygrad.helpers import merge_dicts, getenv, prod
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite, split_uop, symbolic_flat, Variable, sint
@@ -27,10 +27,12 @@ class ShapeTracker:
   def from_shape(shape:Tuple[sint, ...]) -> ShapeTracker: return ShapeTracker((View.create(shape),))
 
   @property
-  def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
+  def contiguous(self) -> bool:
+    idx, valid = self.to_indexed_uops()
+    return self.consecutive and valid.vmin and 0 == idx.vmin and prod(self.shape) == idx.vmax + 1
 
   @property
-  def consecutive(self) -> bool: return len(self.views) == 1 and (v:=self.views[0]).mask is None and v.strides == strides_for_shape(v.shape)
+  def consecutive(self) -> bool: return self.real_strides() == strides_for_shape(self.shape)
 
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
