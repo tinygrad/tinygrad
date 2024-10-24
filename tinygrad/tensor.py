@@ -1340,7 +1340,7 @@ class Tensor:
 
   def pad2d(self, padding:Sequence[int], value:float=0.0, mode:str="constant") -> Tensor:
     """
-    Returns a tensor that pads the last two axes specified by `padding` (padding_left, padding_right, padding_top, padding_bottom).
+    Returns a tensor that pads from the last axis specified by `padding` (padding_left, padding_right, padding_top, padding_bottom, ...).
     The padding modes is selected with `mode` which supports 'constant', 'reflect', 'replicate' and 'circular'
     If 'constant' is selected as `mode` and `value` is specified, the tensor is padded with `value` instead of `0.0`.
 
@@ -1355,26 +1355,29 @@ class Tensor:
     print(t.pad2d((2, 2, 2, 0), mode="reflect").numpy())
     ```
     """
-    # TODO: nasty circular implementation but it's done with only movement ops, still can be cleaned up
-    # TODO: reflect and replicate are also kinda nasty but bug free I think
-    shrinks = reversed([(-min(pB,0), min(pA+s,s)) for pB,pA,s in zip(padding[::2],padding[1::2],self.shape[::-1])])
-    x = self.shrink((None,) * (self.ndim-len(padding)//2) + tuple(shrinks))
-    pads = ((0,0),) * (self.ndim-len(padding)//2) + tuple(reversed([(max(pB,0), max(pA,0)) for pB, pA in zip(padding[::2], padding[1::2])]))
-    if mode == "constant": return x.pad(pads, value)
+    if mode not in {"constant", "reflect", "replicate", "circular"}: raise ValueError(f"{mode=} is not supported")
+    # padding (left, right, top, bottom) -> padding ((top, bottom), (left, right))
+    x, padding = self, ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2]))
+    pads, shrinks = tuple((max(pB,0), max(pA,0)) for pB,pA in padding), tuple((-min(pB,0),min(pA+s,s)) for (pB,pA),s in zip(padding, x.shape))
+    if mode == "constant": return x.shrink(shrinks).pad(pads, value)
     if mode == "circular":
-      repeat_args = [math.ceil(pB/sh) + math.ceil(pA/sh) + 1 for (pB,pA), sh in zip(pads, x.shape)]
-      shrink_args = [(sh-pB%sh if pB%sh != 0 else 0, sh*rarg-(sh-pA%sh if pA%sh != 0 else 0)) for (pB,pA),sh,rarg in zip(pads, x.shape, repeat_args)]
-      return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
+      if any(pB>sh or pA>sh for (pB,pA),sh in zip(padding, x.shape)): raise RuntimeError('Padding value causes wrapping around more than once.')
+      # first crop
+      x = x.shrink(shrinks)
+      cropped, x = x.shape, x.repeat(tuple(int(pB > 0) + int(pA > 0) + 1 for pB, pA in pads))
+      # shrink to circular padded shape if repeated shape is larger than circular padded shape else pad 0 to get to padded shape
+      x = x.shrink([(max(csh-pB, 0) if pB > 0 else 0, xsh - max(csh-pA, 0) if pA > 0 else xsh) for (pB,pA),csh,xsh in zip(padding, cropped, x.shape)])
+      return x.pad(tuple((max(pB-csh, 0), max(pA-csh, 0)) for (pB,pA),csh in zip(pads,cropped)))
     for d,(pB,pA) in enumerate(pads):
       if mode == "reflect":
-        if pB > (s:=x.shape[d]) or pA > s: raise RuntimeError(f"padding ({pB},{pA}) cannot be more than the corresponding input dimension {s}")
+        if pB >= (s:=x.shape[d]) or pA>=s: raise RuntimeError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
         xB = x[[slice(pB,0,-1) if i == d else slice(None) for i in range(x.ndim)]] if pB else None
         xA = x[[slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1) if i==d else slice(None) for i in range(x.ndim)]] if pA else None
       if mode == "replicate":
         xB = x[[slice(None,1) if i==d else slice(None) for i in range(x.ndim)]].expand([pB if i==d else None for i in range(x.ndim)]) if pB else None
         xA = x[[slice(-1,None) if i==d else slice(None) for i in range(x.ndim)]].expand([pA if i==d else None for i in range(x.ndim)]) if pA else None
       x = Tensor.cat(*(x_ for x_ in (xB, x, xA) if x_ is not None), dim=d)
-    return x
+    return x.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(padding, x.shape)))
 
   @property
   def T(self) -> Tensor:
@@ -2034,7 +2037,8 @@ class Tensor:
     if ceil_mode: padding_ = self._ceil_mode_padding2d(dilation, k_, stride if stride is not None else k_, padding)
     return self.pad2d(padding_, value=float('-inf'))._pool(k_, stride if stride is not None else k_, dilation).max(axis=tuple(range(-len(k_), 0)))
 
-  def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, acc_dtype:DTypeLike|None=None) -> Tensor:
+  def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, acc_dtype:DTypeLike|None=None,
+             padding_mode:str="zeros") -> Tensor:
     """
     Applies a convolution over a tensor with a given `weight` and optional `bias`.
 
@@ -2053,7 +2057,7 @@ class Tensor:
     padding_ = self._padding2d(padding, len(HW))
 
     # conv2d is a pooling op (with padding)
-    x = self.pad2d(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
+    x = self.pad2d(padding_, padding_mode=padding_mode)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout//groups, x.shape[2:-len(HW)]
     if not all(x == 3 for x in HW) or stride != 1 or dilation != 1 or not WINO:
       # normal conv
