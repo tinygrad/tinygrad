@@ -1086,3 +1086,4 @@ renderer = PatternMatcher([
 
 sint = Union[int, UOp]
 Variable = UOp
+
