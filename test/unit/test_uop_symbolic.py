@@ -154,12 +154,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 7) // 20, 0, 0, "0")
 
   def test_div_min_max(self):
-    self.helper_test_variable(Variable("a", 0, 7) // 2, 0, 3, "(a//2)")
+    self.helper_test_variable(Variable("a", 1, 7) // 2, 0, 3, "(a//2)")
+    self.helper_test_variable(Variable("a", 0, 6) // 2, 0, 3, "(a//2)")
 
-  @unittest.expectedFailure
   def test_div_neg_min_max(self):
-    self.helper_test_variable(Variable("a", 0, 7) // -2, -4, 0, "((((a*-1)+8)//2)+-4)")
-    self.helper_test_variable(Variable("a", 0, 6) // -2, -3, 0, "((((a*-1)+6)//2)+-3)")
+    self.helper_test_variable(Variable("a", 1, 7) // -2, -3, 0, "(a//-2)")
+    self.helper_test_variable(Variable("a", 0, 6) // -2, -3, 0, "(a//-2)")
 
   def test_sum_div_remove(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 20, 0, 0, "0")
