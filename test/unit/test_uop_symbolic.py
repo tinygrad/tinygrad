@@ -451,6 +451,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a+b+c*2).lt(1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
     self.helper_test_variable((a+b*2+c*4).lt(1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
 
+  def test_div_positive(self):
+    a = Variable("a", 1, 10)
+    self.helper_test_variable(((a*a*-2)//(a*2-1)).lt(0), 1, 1, "True")
+
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
     MIN, MAX = 0, 10
