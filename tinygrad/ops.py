@@ -166,14 +166,14 @@ def resolve(x, default:bool=True):
   return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
 
 # smax/smin are replacements for max/min that preserve symbolic
-def smax(lst, *more):
-  if isinstance(lst, (tuple, list)): assert len(more) == 0
-  else: lst = [lst, *more]
-  return max(lst, key=lambda x: x if isinstance(x, int) else x.vmax)
-def smin(lst, *more):
-  if isinstance(lst, (tuple, list)): assert len(more) == 0
-  else: lst = [lst, *more]
-  return min(lst, key=lambda x: x if isinstance(x, int) else x.vmin)
+def _suop(lst, uop_fxn, python_fxn):
+  max_uop, max_num = partition(lst, lambda x: isinstance(x, UOp))
+  if len(max_uop):
+    ret = functools.reduce(uop_fxn, max_uop)
+    return uop_fxn(ret, python_fxn(max_num)) if len(max_num) else ret
+  return python_fxn(max_num)
+def smax(*lst): return _suop(lst[0] if isinstance(lst[0], (tuple, list)) else lst, UOp.max, max)
+def smin(*lst): return _suop(lst[0] if isinstance(lst[0], (tuple, list)) else lst, UOp.min, min)
 
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
