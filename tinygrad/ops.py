@@ -193,7 +193,11 @@ class UOp(MathTrait):
   def __new__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
     if (ret:=ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
     if op is UOps.ALU and arg in COMMUTATIVE and (ret:=ucache.get((op, dtype, src[::-1], arg), None)) is not None: return ret
-    ucache[key] = ret = super().__new__(cls)
+    ret = super().__new__(cls)
+    ret.op, ret.dtype, ret.src, ret.arg = op, dtype, src, arg
+    if (nret:=instant.rewrite(ret)) is not None: ret = nret
+    else: del ret.op  # this is a new UOp
+    ucache[key] = ret
     return ret
 
   __slots__ = ["op", "dtype", "src", "arg"]

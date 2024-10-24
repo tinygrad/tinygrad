@@ -166,6 +166,13 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.src[1].op, UOps.CONST)
     self.assertEqual(nout.src[1].arg, 3.0)
 
+  def test_instant_is_instant(self):
+    a = UOp.variable('a', 0, 1)
+    self.assertIs(a+0, a)
+    self.assertIs(0+a, a)
+    self.assertIs(a*0, a.const_like(0))
+    self.assertIs(a*1, a)
+
   def test_commutative_work(self):
     a = UOp.variable('a', 0, 1)
     b = UOp.variable('b', 0, 1)
