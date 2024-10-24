@@ -63,7 +63,7 @@ if len(GPUS) > 1:
   shard_model(model, opt)
 
 for k, p in nn.state.get_state_dict(model).items():
-  print(k, p.shape, p.lazydata.axis if isinstance(p.lazydata, MultiLazyBuffer) else "")
+  print(k, p.shape, f"Axis {p.lazydata.axis}" if isinstance(p.lazydata, MultiLazyBuffer) else "")
 
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
@@ -151,6 +151,6 @@ with Tensor.train():
     GlobalCounters.reset()
     t0 = time.time()
     loss = step(x.contiguous(), y.contiguous())
-    # Device[Device.DEFAULT].synchronize()
-    # t1 = time.time()
-    # print(f"iteration {i}, loss: {loss.item():.6f}, time: {(t1-t0)*1000:.3f}ms, {int(B*T/(t1-t0))} tok/s")
+    Device[Device.DEFAULT].synchronize()
+    t1 = time.time()
+    print(f"iteration {i}, loss: {loss.item():.6f}, time: {(t1-t0)*1000:.3f}ms, {int(B*T/(t1-t0))} tok/s")
