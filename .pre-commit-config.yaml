@@ -1,3 +1,5 @@
+# on Windows:
+# $env:SKIP="devicetests,tests,example"
 repos:
   - repo: local
     hooks:
@@ -7,15 +9,15 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
-      - id: mypy
-        name: mypy
-        entry: python3 -m mypy tinygrad/ --strict-equality
+      - id: tiny
+        name: tiny tests
+        entry: python3 -m pytest test/test_tiny.py
         language: system
         always_run: true
         pass_filenames: false
-      - id: docs2
-        name: docs2
-        entry: python3 docs/abstractions2.py
+      - id: mypy
+        name: mypy
+        entry: python3 -m mypy tinygrad/ --strict-equality
         language: system
         always_run: true
         pass_filenames: false
