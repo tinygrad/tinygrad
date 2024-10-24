@@ -202,7 +202,7 @@ def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], uop_buf
   # assert cyclic dependency
   for b,reads in itertools.groupby((x for x in sink.sparents if x.op in {UOps.PRELOAD, UOps.LOAD}), key=lambda x:x.src[0]):
     if not all_same([x.op for x in reads]):
-      raise RuntimeError(f"detected cycle in kernel.\nhelp: consider using .contiguous() to load the pre-assign version of {uop_bufs[b]}.")
+      raise RuntimeError(f"cycle detected in kernel.\nhelp: consider using .contiguous() to load the pre-assign version of {uop_bufs[b]}.")
   sink = full_ast_rewrite(sink, ctx:=ScheduleItemContext(var_vals))
   # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
   if len(assign_targets:=[x.src[0] for x in sink.sparents if x.op is UOps.ASSIGN]) != 0:
