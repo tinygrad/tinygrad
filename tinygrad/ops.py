@@ -164,7 +164,17 @@ def resolve(x, default:bool=True):
   assert x.dtype is dtypes.bool, "UOp in resolve must be bool"
   # NOTE: generating the text for the exception is expensive, so we do this
   return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
-def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.vmax)
+
+# smax/smin are replacements for max/min that preserve symbolic
+def smax(lst, *more):
+  if isinstance(lst, (tuple, list)): assert len(more) == 0
+  else: lst = [lst, *more]
+  return max(lst, key=lambda x: x if isinstance(x, int) else x.vmax)
+def smin(lst, *more):
+  if isinstance(lst, (tuple, list)): assert len(more) == 0
+  else: lst = [lst, *more]
+  return min(lst, key=lambda x: x if isinstance(x, int) else x.vmin)
+
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
