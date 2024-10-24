@@ -166,6 +166,17 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.src[1].op, UOps.CONST)
     self.assertEqual(nout.src[1].arg, 3.0)
 
+  def test_commutative_work(self):
+    a = UOp.variable('a', 0, 1)
+    b = UOp.variable('b', 0, 1)
+    self.assertIs(a+b, b+a)
+
+  def test_consts_go_last_right_away(self):
+    a = UOp.variable('a', 0, 1)
+    tst = 2+a
+    self.assertIs(tst.src[0], a)
+    self.assertIs(tst.src[1], a.const_like(2))
+
   def test_consts_go_last(self):
     a = UOp.variable('a', 0, 1)
     b = UOp.variable('b', 0, 1)

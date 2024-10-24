@@ -196,16 +196,16 @@ class UOp(MathTrait):
     ucache[key] = ret = super().__new__(cls)
     return ret
 
-  __slots__ = ["op", "dtype", "src", "arg", "_initted"]
+  __slots__ = ["op", "dtype", "src", "arg"]
   def __init__(self, op:UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
-    if getattr(self, '_initted', False): return
+    if getattr(self, 'op', None) is not None: return
     # TODO: instant check rules here make debugging easier
     #assert op in UOps and isinstance(dtype, DType), f"bad UOp creation with {op} {dtype}"
     #if op is UOps.ALU and arg is BinaryOps.CMPNE: assert dtype.scalar() == dtypes.bool
     #if op is UOps.VECTORIZE and dtype != dtypes.void: assert len(src) == dtype.count, f"{len(src)} invalid for {dtype}"
     #if op is UOps.ALU and arg not in (BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE): assert all_same([dtype] + [x.dtype for x in src])
     #if op is UOps.CAST: assert dtype.count == src[0].dtype.count, f"cast can't change vectorization {src[0].dtype} --> {dtype}"
-    self.op, self.dtype, self.src, self.arg, self._initted = op, dtype, src, arg, True
+    self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
     # NOTE: this has to be done early now because the COMMUTATIVE op can only be created one way
     if op is UOps.ALU and arg in (BinaryOps.ADD, BinaryOps.MUL) and src[0].op is UOps.CONST and src[1].op is not UOps.CONST:
       self.src = self.src[::-1]
