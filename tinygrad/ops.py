@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, TypeVar, DefaultDict
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -196,15 +196,16 @@ class UOp(MathTrait):
     ucache[key] = ret = super().__new__(cls)
     return ret
 
-  __slots__ = ["op", "dtype", "src", "arg"]
+  __slots__ = ["op", "dtype", "src", "arg", "_initted"]
   def __init__(self, op:UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
+    if getattr(self, '_initted', False): return
     # TODO: instant check rules here make debugging easier
     #assert op in UOps and isinstance(dtype, DType), f"bad UOp creation with {op} {dtype}"
     #if op is UOps.ALU and arg is BinaryOps.CMPNE: assert dtype.scalar() == dtypes.bool
     #if op is UOps.VECTORIZE and dtype != dtypes.void: assert len(src) == dtype.count, f"{len(src)} invalid for {dtype}"
     #if op is UOps.ALU and arg not in (BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE): assert all_same([dtype] + [x.dtype for x in src])
     #if op is UOps.CAST: assert dtype.count == src[0].dtype.count, f"cast can't change vectorization {src[0].dtype} --> {dtype}"
-    self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
+    self.op, self.dtype, self.src, self.arg, self._initted = op, dtype, src, arg, True
     # NOTE: this has to be done early now because the COMMUTATIVE op can only be created one way
     if op is UOps.ALU and arg in (BinaryOps.ADD, BinaryOps.MUL) and src[0].op is UOps.CONST and src[1].op is not UOps.CONST:
       self.src = self.src[::-1]
@@ -494,7 +495,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
 def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
   # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
-  while frm.f_back is not None and frm.f_back.f_code.co_filename.split("/")[-1] in {"ops.py", "uopgraph.py", "schedule.py", "lowerer.py"}:
+  while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "uopgraph.py", "schedule.py", "lowerer.py"}:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
