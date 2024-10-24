@@ -376,7 +376,7 @@ jobs:
         WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
         WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Build WEBGPU Efficientnet
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python3 -m examples.compile_efficientnet
     - name: Install Puppeteer
       run: npm install puppeteer
     - name: Run WEBGPU Efficientnet
