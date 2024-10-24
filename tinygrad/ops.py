@@ -184,11 +184,12 @@ class UOp(MathTrait):
   def __reduce__(self): return UOp, (self.op, self.dtype, self.src, self.arg)
   def __new__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
     if (ret:=ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
+    if op is UOps.ALU and arg in COMMUTATIVE and (ret:=ucache.get((op, dtype, src[::-1], arg), None)) is not None: return ret
     ucache[key] = ret = super().__new__(cls)
     return ret
 
   __slots__ = ["op", "dtype", "src", "arg"]
-  def __init__(self, op: UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
+  def __init__(self, op:UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
     # TODO: instant check rules here make debugging easier
     #assert op in UOps and isinstance(dtype, DType), f"bad UOp creation with {op} {dtype}"
     #if op is UOps.ALU and arg is BinaryOps.CMPNE: assert dtype.scalar() == dtypes.bool
@@ -196,6 +197,9 @@ class UOp(MathTrait):
     #if op is UOps.ALU and arg not in (BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE): assert all_same([dtype] + [x.dtype for x in src])
     #if op is UOps.CAST: assert dtype.count == src[0].dtype.count, f"cast can't change vectorization {src[0].dtype} --> {dtype}"
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
+    # NOTE: this has to be done early now because the COMMUTATIVE op can only be created one way
+    if op is UOps.ALU and arg in (BinaryOps.ADD, BinaryOps.MUL) and src[0].op is UOps.CONST and src[1].op is not UOps.CONST:
+      self.src = self.src[::-1]
   def replace(self, **kwargs) -> UOp:
     for k in kwargs: assert k in self.__slots__, f"unkown replace arg, expected one of {self.__slots__}, got {k}"
     new_args = (kwargs.get("op", self.op), kwargs.get("dtype", self.dtype), kwargs.get("src", self.src), kwargs.get("arg", self.arg))
@@ -1016,11 +1020,8 @@ symbolic = PatternMatcher([
   # mul add lt
   (((UPat.cvar("c0", vec=False)*UPat.var("x"))+UPat.var("x2")).lt(UPat.cvar("c1", vec=False)),
    lambda x,x2,c0,c1: x.lt(c1//c0) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax and x2.vmin >= 0 else None),
-  # ** move add consts to end (NOTE: this is still happening before constant folding) **
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x+c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
+  # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
   (UPat(UOps.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
-  # ** move mul consts to end (NOTE: this is still happening before constant folding) **
-  (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.cvar("c1"), UPat.var("x"))), lambda c1,x: x*c1 if x.op not in (UOps.CONST, UOps.VCONST) else None),
   (UPat(UOps.ALU, arg=BinaryOps.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
   # *** rules from symbolic ***
   # unrolled arange div folding
@@ -1048,7 +1049,7 @@ symbolic_flat = symbolic+PatternMatcher([
 _substitute = PatternMatcher([(UPat(tuple(UOps), name="x"), lambda ctx,x: ctx.get(x,None))])
 
 # for debug
-syms = { BinaryOps.ADD: "+", BinaryOps.MUL: "*", BinaryOps.IDIV: "//", BinaryOps.MOD: "%",
+syms = { BinaryOps.ADD: "+", BinaryOps.MUL: "*", BinaryOps.IDIV: "//", BinaryOps.MOD: "%", BinaryOps.SHL: "<<", BinaryOps.SHR: ">>",
          BinaryOps.CMPLT: "<", BinaryOps.CMPNE: "!=", BinaryOps.AND: "&", BinaryOps.OR: "|", BinaryOps.XOR: "^"}
 renderer = PatternMatcher([
   (UPat((UOps.DEFINE_VAR, UOps.SPECIAL), name="x"), lambda x: UOp(UOps.NOOP, arg=x.arg[0])),
