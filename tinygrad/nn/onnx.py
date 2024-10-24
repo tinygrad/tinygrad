@@ -143,9 +143,9 @@ def get_run_onnx(onnx_model: ModelProto):
       inp = [to_python_const(x) if i in to_python_const_inps.get(n.op_type, ()) else x for i,x in enumerate(tensor_inp)]
 
       # running the op
-      if debug >= 4: print(f"\texecution:\n\t\tbefore `handle_arguments`: {inp=}, {opt=}")
-      inp, opt = handle_arguments(n.op_type, inp, opt, n=n, intermediate_tensors=intermediate_tensors)
-      if debug >= 4: print(f"\t\tafter `handle_arguments`: {inp=}, {opt=}")
+      if debug >= 4: print(f"\texecution:\n\t\tbefore `transform_arguments`: {inp=}, {opt=}")
+      inp, opt = transform_arguments(n.op_type, inp, opt, n=n, intermediate_tensors=intermediate_tensors)
+      if debug >= 4: print(f"\t\tafter `transform_arguments`: {inp=}, {opt=}")
       fxn, fxn_name = dispatch(n.op_type)
       if debug >= 4:
         print(f"\t\tcalling: {fxn_name}({', '.join(f'{k}={v}' for k,v in inspect.signature(fxn).bind(*inp, **opt).arguments.items())})")
@@ -170,7 +170,7 @@ def get_run_onnx(onnx_model: ModelProto):
 
 # https://github.com/onnx/onnx/blob/main/docs/Operators.md
 # transforms the arguments so that it can be easily dispatched
-def handle_arguments(op:str, inps, opts, **kwargs):
+def transform_arguments(op:str, inps, opts, **kwargs):
   # helpful functions
   def set_defaults(inps, opts, defaults, **_): return inps, {**defaults, **opts}
   def rewrite_opt_names(inps, opts, mapping, **_): return inps, {mapping.get(k, k): v for k, v in opts.items()}
@@ -507,6 +507,7 @@ class OnnxOps:
     roi = [[st, ed] for st, ed in zip(roi, roi[len(roi)//2:])] if isinstance(roi, list) else [None] * (X.ndim-2)
 
     # NOTE: this transformation makes it so that we can't just call Tensor.interpolate
+    # in Tensor.interpolate, we use aranged indexes without any transformation
     indexes = []
     for shape, size, scale, region in zip(input_shape, sizes, scales, roi):
       indexes.append(_apply_transformation(Tensor.arange(size), shape,scale, region, shape * scale, coordinate_transformation_mode))

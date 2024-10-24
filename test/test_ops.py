@@ -1723,6 +1723,14 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w).relu(),
       lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), vals=[[[[[2.,3.]]]], [[[[1.]]]]])
 
+  def test_padding_modes_conv2d(self):
+    # TODO is this the right test?
+    p = (2,3,2,2)
+    for mode in ["constant", "reflect", "replicate", "circular"]:
+      helper_test_op([(1,1,5,5), (1,1,3,3)],
+        lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p, mode=mode),w).relu(),
+        lambda x,w: Tensor.conv2d(x,w,padding=p, padding_mode=mode).relu(), vals=[[[[[2.,3.]]]], [[[[1.]]]]])
+
   def test_asymmetric_padding_conv2d(self):
     for p in [(0,1,0,1), (2,1,2,1), (2,0,2,1)]:
       with self.subTest(p):
