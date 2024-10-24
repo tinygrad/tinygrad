@@ -164,7 +164,17 @@ def resolve(x, default:bool=True):
   assert x.dtype is dtypes.bool, "UOp in resolve must be bool"
   # NOTE: generating the text for the exception is expensive, so we do this
   return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
-def smax(lst): return max(lst, key=lambda x: x if isinstance(x, int) else x.vmax)
+
+# smax/smin are replacements for max/min that preserve symbolic
+def _suop(lst, uop_fxn, python_fxn):
+  max_uop, max_num = partition(lst, lambda x: isinstance(x, UOp))
+  if len(max_uop):
+    ret = functools.reduce(uop_fxn, max_uop)
+    return uop_fxn(ret, python_fxn(max_num)) if len(max_num) else ret
+  return python_fxn(max_num)
+def smax(*lst): return _suop(lst[0] if isinstance(lst[0], (tuple, list)) else lst, UOp.max, max)
+def smin(*lst): return _suop(lst[0] if isinstance(lst[0], (tuple, list)) else lst, UOp.min, min)
+
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
@@ -1055,6 +1065,8 @@ renderer = PatternMatcher([
   (UPat(UOps.RANGE, name="x"), lambda x: UOp(UOps.NOOP, arg=f"ridx{x.arg[0]}")),
   (UPat(UOps.CONST, name="x"), lambda x: UOp(UOps.NOOP, arg=str(x.arg))),
   (UPat(UOps.BIND, src=UPat(UOps.NOOP), name="x"), lambda x: x.src[0]),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), name="x", arg=UnaryOps.NEG), lambda x: UOp(UOps.NOOP, arg=f"(-{x.src[0].arg})")),
+  (UPat(UOps.ALU, src=UPat(UOps.NOOP), name="x", arg=BinaryOps.MAX), lambda x: UOp(UOps.NOOP, arg=f"max({x.src[0].arg}, {x.src[1].arg})")),
   (UPat(UOps.ALU, src=UPat(UOps.NOOP), name="x", arg=TernaryOps.WHERE),
    lambda x: UOp(UOps.NOOP, arg=f"({x.src[1].arg} if {x.src[0].arg} else {x.src[2].arg})")),
   (UPat(UOps.ALU, src=UPat(UOps.NOOP), name="x"), lambda x: UOp(UOps.NOOP, arg=f"({x.src[0].arg}{syms[x.arg]}{x.src[1].arg})")),
