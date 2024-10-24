@@ -198,6 +198,7 @@ _db_tables = set()
 def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
   if CACHELEVEL == 0: return val
   if isinstance(key, (str,int)): key = {"key": key}
+  global _db_tables
   conn = db_connection()
   cur = conn.cursor()
   if table not in _db_tables:
