@@ -63,7 +63,7 @@ class TestTensorVariable(unittest.TestCase):
     zeros = 6+6+4+4+6+6
     self.assertAlmostEqual(t.item(), ones/(ones+zeros))
 
-  @unittest.skip("symbolic arange isn't supported")
+  #@unittest.skip("symbolic arange isn't supported")
   def test_symbolic_arange(self):
     vv = Variable("a", 1, 10).bind(2)
     ret = Tensor.arange(0, vv)
