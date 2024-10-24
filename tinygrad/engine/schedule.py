@@ -164,18 +164,16 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 # *** List[LazyBuffer] lowering to ScheduleItem ***
 
-def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], inputs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], metadata:Dict[UOp, Metadata],
-           cache:Dict[LazyBuffer, UOp]) -> UOp:
+def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], metadata:Dict[UOp, Metadata], cache:Dict[LazyBuffer, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   if buf is not buf.base:
-    cache[buf] = ret = to_uop(buf.base, outputs, inputs, buf_uops, metadata, cache).view(buf.st)
+    cache[buf] = ret = to_uop(buf.base, outputs, buf_uops, metadata, cache).view(buf.st)
     return ret
   if buf.op is MetaOps.CONST: return buf_uops[buf.buffer]
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
   if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs:
-    if not any(x.buffer is buf.buffer for x in outputs) and buf not in inputs: inputs.append(buf)
     return UOp(UOps.PRELOAD if buf.is_realized() else UOps.LOAD, dtype, (ubuf, buf.st.to_uop()))
-  src = tuple(to_uop(x, outputs, inputs, buf_uops, metadata, cache) for x in buf.srcs)
+  src = tuple(to_uop(x, outputs, buf_uops, metadata, cache) for x in buf.srcs)
   if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
   elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
   elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]), buf.arg)
@@ -191,10 +189,9 @@ def _lower_lazybuffer(outs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], uop_buf
                       var_vals:Dict[Variable, int]) -> ScheduleItem:
   """describe the computation for a LazyBuffer with UOp + inputs + var_vals"""
   cache: Dict[LazyBuffer, UOp] = {}
-  inputs: List[LazyBuffer] = []
   metadata: Dict[UOp, Metadata] = {}
   sink = UOp(UOps.SINK, src=tuple(UOp.store(buf_uops[out.buffer], ShapeTracker.from_shape(out.shape).to_uop(),
-                                            to_uop(out, outs, inputs, buf_uops, metadata, cache)) for out in outs))
+                                            to_uop(out, outs, buf_uops, metadata, cache)) for out in outs))
   # assert cyclic dependency
   for b,reads in itertools.groupby((x for x in sink.sparents if x.op in {UOps.PRELOAD, UOps.LOAD} and x.src[0] in assigned), key=lambda x:x.src[0]):
     if not all_same([x.op for x in reads]):
