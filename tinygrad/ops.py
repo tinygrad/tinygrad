@@ -1015,7 +1015,7 @@ symbolic = PatternMatcher([
   ((UPat.var("x") // UPat.cvar("c1")) // UPat.cvar("c2"), lambda x,c1,c2: x//(c1*c2)), # (x//c1)//c2 -> x//(c1*c2)
   # mod folding
   (UPat.var("x")%UPat.cvar("c")+(UPat.var("x")//UPat.cvar("c"))*UPat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
-  ((UPat.var("x") % UPat.var("y")).named("base") % UPat.var("y"), lambda base,x,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
+  ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
   # ** lt **
   # c0*x<c1 for positive int c0,c1
   ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints)).lt(UPat.cvar("c1", vec=False)),
