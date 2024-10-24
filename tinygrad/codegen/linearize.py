@@ -43,7 +43,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
         priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
     # prefer uops that are loop children
     else:
-      priority -= sum([(1 + l.arg) + (1000 if l.arg else 0) for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
+      priority -= sum([(1 + abs(l.arg)) + (1000 if (l.arg > 0) else 0) for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
     if u.op is UOps.IF and len(u.src) == 1: priority += 10000000 # if penalty
     return priority
   priorities:Dict[UOp, int] = {u:get_priority(u) for u in children}
