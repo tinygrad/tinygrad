@@ -56,8 +56,8 @@ class TimeoutException(Exception): pass
 def timeout_handler(signum, frame): raise TimeoutException()
 
 def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tuple[int, Optional[Tuple[Program, bytes, float]]]:
-  if hasattr(signal, "SIGALRM"):
-    signal.signal(signal.SIGALRM, timeout_handler)
+  if hasattr(signal, "alarm"):
+    signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
     # set timeout
     signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
   ret = None
@@ -74,7 +74,7 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tup
   except Exception as e:
     if getenv("BEAM_STRICT_MODE"): raise e
   finally:
-    if hasattr(signal, "SIGALRM"): signal.alarm(0)
+    if hasattr(signal, "alarm"): signal.alarm(0)
   return x[0], ret
 
 # workers should ignore ctrl c
