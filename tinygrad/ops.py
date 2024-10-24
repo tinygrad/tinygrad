@@ -1061,6 +1061,8 @@ symbolic_flat = symbolic+PatternMatcher([
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
+  # simplify valid
+  (UPat(UOps.ALU, name="valid", arg=BinaryOps.AND), simplify_valid),
 ])
 
 _substitute = PatternMatcher([(UPat(tuple(UOps), name="x"), lambda ctx,x: ctx.get(x,None))])
