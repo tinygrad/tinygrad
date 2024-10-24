@@ -961,6 +961,10 @@ def simplify_valid(valid:UOp) -> Optional[UOp]:
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
 
+def max_var_const(x:UOp, c1:UOp, c2:UOp):
+  if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
+  if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
+
 symbolic = PatternMatcher([
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
@@ -1005,6 +1009,7 @@ symbolic = PatternMatcher([
   (UPat(UOps.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
   (UPat.max(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
+  ((UPat.var("x")*UPat.cvar("c1")).max(UPat.var("x")*UPat.cvar("c2")), max_var_const),
   # ** two stage ALU folding **
   ((UPat.var("x") + UPat.cvar("c1")) + UPat.cvar("c2"), lambda x,c1,c2: x+(c1+c2)),
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.cvar("c2"), lambda x,c1,c2: x*(c1*c2)),
