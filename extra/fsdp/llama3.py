@@ -33,7 +33,10 @@ def shard_model(model, opt):
   for k, p in nn.state.get_state_dict(opt).items():
     if p in seen: continue
     seen.add(p)
-    p.shard_(GPUS, axis=None if prod(p.shape) <= 1 else 0)
+    axis = None if prod(p.shape) <= 1 else 0
+    if p.shape[0] == 1:
+      axis = None
+    p.shard_(GPUS, axis)
   for p in seen:
     p.realize()
 
@@ -148,7 +151,7 @@ def step(x, y):
 
 with Tensor.train():
   Device.DEFAULT = GPU_NAME
-  for i in range(2):
+  for i in range(20):
   
     GlobalCounters.reset()
     t0 = time.time()
