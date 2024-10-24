@@ -2,9 +2,9 @@ from __future__ import annotations
 from typing import Optional, Tuple, Dict, List, cast, TYPE_CHECKING, Any, DefaultDict, Callable
 import functools, itertools, operator
 from collections import defaultdict
-from tinygrad.dtype import dtypes, PtrDType, ImageDType, ConstType
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOp, UOps, UPat, PatternMatcher
-from tinygrad.ops import graph_rewrite, symbolic_flat, is_irreducible, split_uop, identity_element
+from tinygrad.dtype import dtypes, PtrDType, ImageDType
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOp, UOps, UPat, PatternMatcher, symbolic_flat
+from tinygrad.ops import graph_rewrite, is_irreducible, split_uop, identity_element, uop_given_valid, parse_valid, is_increasing, simplify_valid
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
@@ -78,69 +78,6 @@ float4_folding = PatternMatcher([
 
 # ***** image load valid simplification *****
 
-def is_increasing(f:UOp) -> bool:
-  # is f a monotonically increasing function regards its input
-  if is_irreducible(f): return True
-  if f.op is UOps.ALU and f.arg is BinaryOps.ADD: return is_increasing(f.src[0]) and is_increasing(f.src[1])
-  if f.op is UOps.ALU and f.arg in (BinaryOps.MUL, BinaryOps.IDIV) and f.src[1].op is UOps.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
-  return False  # False if not sure
-
-def replace_uop(uop:UOp, old:UOp, new:UOp) -> UOp:
-  # replace all `old` in `uop` to `new`
-  return new if uop is old else uop.replace(src=tuple(replace_uop(s, old, new) for s in uop.src))
-
-def parse_valid(valid:UOp) -> Tuple[UOp, bool, int]:
-  # if it's X <= c, returns X, True, c
-  # if it's X >= c, returns X, False, c
-
-  # (X < c).ne(True) -> X >= c
-  if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPNE and valid.src[1].op is UOps.CONST and valid.src[1].arg == 1 and \
-    (s0:=valid.src[0]).op is UOps.ALU and s0.arg is BinaryOps.CMPLT and s0.src[1].op is UOps.CONST: return s0.src[0], False, s0.src[1].arg
-  # X < c -> X <= c-1
-  if valid.op is UOps.ALU and valid.arg is BinaryOps.CMPLT and valid.src[1].op is UOps.CONST: return valid.src[0], True, valid.src[1].arg-1
-  raise ValueError(f"not able to parse {valid=}")
-
-def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
-  # return None if valid is always False, otherwise the simplified uop (might be the same as input)
-
-  # first, parse valid into {expr: (lower_bound, upper_bound)}
-  bounds:DefaultDict[UOp, List[Optional[ConstType]]] = defaultdict(lambda: [None, None])
-  for stmt in split_uop(valid, BinaryOps.AND):
-    try: expr, is_upper, c = parse_valid(stmt)
-    except ValueError: return uop  # give up if we cannot parse the valid
-    bounds[expr][int(is_upper)] = c
-
-  # simplify uop given that valid is True
-  for expr,v in bounds.items():
-    # some expr has lower bound > upper bound -> valid is an empty set and we return None
-    if v[0] is not None and v[1] is not None and v[0] > v[1]: return None
-
-    # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
-    candidates = []
-    if expr.op is UOps.ALU and expr.arg is BinaryOps.ADD and all(is_irreducible(u) and u.vmin == 0 for u in split_uop(expr, BinaryOps.ADD)):
-      # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, BinaryOps.ADD)])
-    # try checking the whole clause
-    candidates.append([(expr, UOp.variable("fake", expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1], expr.dtype))])
-
-    for candidate in candidates:
-      # if every branch in candidate gives the same simplified uop, we can rewrite the uop
-      newuops = [replace_uop(graph_rewrite(replace_uop(uop, X, newX), sym), newX, X) for X,newX in candidate]
-      if uop.op is UOps.VECTORIZE and len(uop.src) == 2:
-        if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
-        if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
-      elif all_same(newuops): uop = newuops[0]
-
-  return uop
-
-def simplify_valid(valid:UOp) -> Optional[UOp]:
-  ret:List[UOp] = []
-  something_changed = False
-  for stmt in split_uop(valid, BinaryOps.AND):
-    ret.append(stmt if not ret else uop_given_valid(functools.reduce(operator.and_, ret), stmt))
-    if ret[-1] is not stmt: something_changed = True
-  return functools.reduce(operator.and_, ret) if something_changed else None
-
 def simplify_buffer_load(load:UOp) -> Optional[UOp]:
   if not isinstance(load.src[0].dtype, PtrDType) or len(load.src) != 4: return None
   buf, start_idx, invalid_val, valid = load.src
@@ -159,7 +96,7 @@ def simplify_image_load(load:UOp) -> Optional[UOp]:
 
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
     if not is_upper_bound and c == 1 and all(is_irreducible(u) and u.vmin == 0 for u in split_uop(X, BinaryOps.ADD)):
-      testidx = functools.reduce(lambda nowidx,u: replace_uop(nowidx, u, u.const_like(0)), split_uop(X, BinaryOps.ADD), idx)
+      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), split_uop(X, BinaryOps.ADD), idx)
       testidx = graph_rewrite(testidx, sym)
       if testidx.src[0].vmax < 0 or testidx.src[1].vmax < 0:
         drop_stmt.append(stmt)
@@ -170,7 +107,7 @@ def simplify_image_load(load:UOp) -> Optional[UOp]:
     test_value = c + 1 if is_upper_bound else c - 1
     for i,b in zip(idx.src, (buf_dtype.shape[1], buf_dtype.shape[0])):
       if is_increasing(i):
-        rw = graph_rewrite(replace_uop(i, X, X.const_like(test_value)), sym)
+        rw = graph_rewrite(i.substitute({X:X.const_like(test_value)}), sym)
         if rw.vmin >= b or rw.vmax < 0:
           drop_stmt.append(stmt)
           break
