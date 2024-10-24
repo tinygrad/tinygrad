@@ -522,14 +522,11 @@ class UPat(MathTrait):
   def any(*src): return UPatAny(src=src)
 
   @staticmethod
-  @functools.lru_cache(None)
   def var(name:Optional[str]=None, dtype:Optional[DType]=None): return UPat(dtype=dtype, name=name)
   @staticmethod
-  @functools.lru_cache(None)
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None, vec=True):
     return UPat((UOps.CONST, UOps.VCONST) if vec else UOps.CONST, dtype=dtype, name=name)
   @staticmethod
-  @functools.lru_cache(None)
   def const(dtype:Optional[DType], b:ConstType): return UPat(UOps.CONST, dtype=dtype, arg=b)
 
   # copied from UOp
