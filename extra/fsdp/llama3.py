@@ -43,7 +43,7 @@ def shard_model(model, opt):
 
 MODEL_PARAMS = {
   "sm": {
-    "args": {"dim": 24, "n_heads": 1, "n_kv_heads": 1, "n_layers": 1, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 128256, "hidden_dim": 48},
+    "args": {"dim": 24, "n_heads": 1, "n_kv_heads": 1, "n_layers": 2, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 128256, "hidden_dim": 48},
     "files": 1
   },
   "8B": {
@@ -120,7 +120,7 @@ def tokenize_data():
     return Tensor(train), Tensor(val)
 
 train, val = tokenize_data()
-tokens = val
+tokens = train
 print(f"{tokens.shape=}")
 B = 4
 T = 16
@@ -141,10 +141,16 @@ def get_batch():
 data_iter = iter(get_batch())
 x, y = next(data_iter)
 
-@TinyJit
+# @TinyJit
 def step(x, y):
   print(f"{x.shape=} {y.shape=}")
+  print("x")
+  print(x.numpy())
+  print("y")
+  print(y.numpy())
   loss = model(x, 0, target=y)
+  print("loss")
+  print(loss.numpy())
   opt.zero_grad()
   loss.backward()
   return loss.realize(*opt.schedule_step())
