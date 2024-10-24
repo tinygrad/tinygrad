@@ -2147,6 +2147,7 @@ class TestOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
+@unittest.skipIf(Device.DEFAULT == "WEBGPU", "No uint8 on WEBGPU")
 class TestOpsUint8(unittest.TestCase):
   @unittest.skip('this is broken for negative numbers')
   def test_cast(self):
