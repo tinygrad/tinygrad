@@ -84,7 +84,7 @@ def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
 
 def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.int, x) if isinstance(x, int) else x
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class View:
   shape:Tuple[sint, ...]
   strides:Tuple[sint, ...]
