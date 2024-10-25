@@ -125,7 +125,7 @@ class TestValidIdxSimplification(unittest.TestCase):
     load = get_gated_load_uop(gate, idx)
     self.check(load,
       "0",
-      "((((gidx0*4)+lidx0)<19)!=True)")
+      "(((lidx0+(gidx0*4))<19)!=True)")
 
   def test_simplify_within_valid(self):
     ridx0 = Range(0, 4)
@@ -269,7 +269,7 @@ class TestImageSimplification(unittest.TestCase):
     # TODO: simplify idx
     # alu0 = ((idx2*2)+ridx0)
     self.assertEqual(render(load),
-      "(((alu0<11)&((((idx1*8)+ridx1)<3)!=1))?read_imagef(data0, smp, (int2)((((idx1*512)+(ridx1*64)+idx0+832)%1024),(alu0+((idx1+((ridx1+5)//8)+1)//2)+-4))):(float4)(0.0f,0.0f,0.0f,0.0f))")  # noqa: E501
+      "(((alu0<11)&((((idx1*8)+ridx1)<3)!=1))?read_imagef(data0, smp, (int2)(((idx0+(idx1*512)+(ridx1*64)+832)%1024),(alu0+((idx1+((ridx1+5)//8)+1)//2)+-4))):(float4)(0.0f,0.0f,0.0f,0.0f))")  # noqa: E501
 
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)
@@ -313,22 +313,22 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, alu9, (((alu8+(alu2*8))%64),(alu2//8)))
     # alu0 = (((idx0*4)+1)%32)
     self.assertEqual(render(load),
-                     "((idx0<256)?read_imagef(data0, smp, (int2)((((idx0//32)+(alu0*8))%64),(alu0//8))):(float4)(0.0f,0.0f,0.0f,0.0f))")
+                     "((idx0<256)?read_imagef(data0, smp, (int2)((((alu0*8)+(idx0//32))%64),(alu0//8))):(float4)(0.0f,0.0f,0.0f,0.0f))")
 
     load = get_load_image_uop(shape, alu9, (((alu8+(alu3*8))%64),(alu3//8)))
     # alu0 = (((idx0*4)+2)%32)
     self.assertEqual(render(load),
-                     "((idx0<256)?read_imagef(data0, smp, (int2)((((idx0//32)+(alu0*8))%64),(alu0//8))):(float4)(0.0f,0.0f,0.0f,0.0f))")
+                     "((idx0<256)?read_imagef(data0, smp, (int2)((((alu0*8)+(idx0//32))%64),(alu0//8))):(float4)(0.0f,0.0f,0.0f,0.0f))")
 
     load = get_load_image_uop(shape, alu9, (((alu8+(alu4*8))%64),(alu4//8)))
     # alu0 = (((idx0*4)+3)%32)
     self.assertEqual(render(load),
-                     "((idx0<256)?read_imagef(data0, smp, (int2)((((idx0//32)+(alu0*8))%64),(alu0//8))):(float4)(0.0f,0.0f,0.0f,0.0f))")
+                     "((idx0<256)?read_imagef(data0, smp, (int2)((((alu0*8)+(idx0//32))%64),(alu0//8))):(float4)(0.0f,0.0f,0.0f,0.0f))")
 
     load = get_load_image_uop(shape, alu9, (((alu8+(alu5*8))%64),(alu5//8)))
     # alu0 = ((idx0*4)%32)
     self.assertEqual(render(load),
-                     "((idx0<256)?read_imagef(data0, smp, (int2)((((idx0//32)+(alu0*8))%64),(alu0//8))):(float4)(0.0f,0.0f,0.0f,0.0f))")
+                     "((idx0<256)?read_imagef(data0, smp, (int2)((((alu0*8)+(idx0//32))%64),(alu0//8))):(float4)(0.0f,0.0f,0.0f,0.0f))")
 
   def test_simplify5(self):
     # openpilot 0.9.7, chunk replacement to simplify
