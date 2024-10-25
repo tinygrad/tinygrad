@@ -1003,10 +1003,6 @@ symbolic = PatternMatcher([
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat((UOps.VCONST, UOps.CONST))),
    lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src], truncate_output=False))),
-  # flip order of COMMUTATIVE ALUs
-  (UPat(UOps.ALU, name='x'),
-   lambda x: x.replace(src=x.src[::-1]) if x.arg in COMMUTATIVE and x.src[0] is not x.src[1] \
-    and x.src[1].tuplize < x.src[0].tuplize and x.src[0].op is not UOps.NOOP else None),
   # group like
   ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
   # ** combine terms **
@@ -1062,6 +1058,9 @@ symbolic = PatternMatcher([
   # ** mod **
   # mod folding
   (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  # flip order of ADD, MUL to sort
+  (UPat(UOps.ALU, name='x'), lambda x:
+   x.replace(src=x.src[::-1]) if x.arg in {BinaryOps.ADD, BinaryOps.MUL} and x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
 symbolic_flat = symbolic+PatternMatcher([
