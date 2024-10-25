@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Cal
 import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
+from tinygrad.helpers import OSX, strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
 
@@ -98,6 +98,7 @@ class CStyleLanguage(Renderer):
 
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
+  tinygrad_section = False
 
   def get_kernel_modifier(self, uops:List[UOp]) -> str: return ""
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
@@ -106,7 +107,7 @@ class CStyleLanguage(Renderer):
                 self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
     prg = ''.join([f"{self.kernel_prefix}void {self.get_kernel_modifier(uops)}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
-    [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
+    [")" + (" __attribute__((section(\".tinygrad\")))" if self.tinygrad_section else "") + "{\n" + tmp] + ['\n'.join(kernel), "\n}"])
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
   def render_dtype(self, dt:DType, mutable=True) -> str:
@@ -174,6 +175,8 @@ class ClangRenderer(CStyleLanguage):
   global_max = None
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
+  tinygrad_section = True
+  needs_errno = True
 
   # language options
   buffer_suffix = " restrict"
@@ -184,6 +187,9 @@ class ClangRenderer(CStyleLanguage):
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
       for dt, sz in [(dt, 64//dt.itemsize) for dt in [dtypes.float]]]
+
+  if OSX:
+    tinygrad_section, needs_errno = False, False
 
   def render_vector_prefix(self, dt:DType) -> str:
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({(sz:=dt.itemsize)}),vector_size({sz})));"
@@ -200,7 +206,7 @@ class ClangRenderer(CStyleLanguage):
   AMX_SET(0);\n  for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(4, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}
   AMX(0, (int *)(&data2), 0ull<<62); AMX(1, (int *)(&data1), 0ull<<62); AMX(12, 0, 0ull);
   for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(5, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}\n  AMX_SET(1);\n  return data0;\n}}"""] # noqa: E501
-    return super().render_kernel(function_name, kernel, bufs, uops, macros + prefix)
+    return super().render_kernel(function_name, kernel, bufs, uops, macros + prefix) + ("\n_Thread_local int errno;" if self.needs_errno else "")
 
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
