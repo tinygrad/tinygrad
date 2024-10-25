@@ -101,10 +101,6 @@ def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.
 
 # the order of these UOps controls the order of the toposort
 class UOps(FastEnum):
-  # consts!
-  VCONST = auto()
-  CONST = auto()
-
   # uops that aren't rendered
   SINK = auto()
   CONTIGUOUS = auto()
@@ -155,6 +151,10 @@ class UOps(FastEnum):
   # ops that are not graph nodes
   ENDRANGE = auto()
   ENDIF = auto()
+
+  # consts last!
+  VCONST = auto()
+  CONST = auto()
 
 BUFFER_UOPS = {UOps.LOAD, UOps.PRELOAD, UOps.STORE, UOps.VALID}
 COMMUTATIVE = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR}

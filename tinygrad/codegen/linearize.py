@@ -41,8 +41,11 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
       priority += u.arg[0]
       for p in range_phi[u]:
         priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
-    # prefer uops that are loop children
+    elif u.op is UOps.CONST:
+      # place consts first here, they don't do anything and it can cause issues with DEFINE_ACC
+      priority -= 100000000000
     else:
+      # prefer uops that are loop children
       priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
     if u.op is UOps.IF and len(u.src) == 1: priority += 10000000 # if penalty
     return priority
