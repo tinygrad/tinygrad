@@ -1,5 +1,5 @@
 import collections, time
-from typing import List, Any, Dict, cast, Optional, Tuple, Set, Union
+from typing import List, Any, Dict, cast, Optional, Tuple, Set
 from tinygrad.helpers import round_up, PROFILE, memsize_to_str
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, HCQArgsState
 from tinygrad.device import Buffer, BufferOptions, Compiled, Device
@@ -52,8 +52,6 @@ class HCQGraph(MultiGraphRunner):
 
     for j,ji in enumerate(self.jit_cache):
       enqueue_dev: HCQCompiled = ji.prg.device if (is_exec_prg:=isinstance(ji.prg, CompiledRunner)) else Device[ji.bufs[1].device] #type:ignore
-      enqueue_queue: Union[HWCommandQueue, HWComputeQueue, HWCopyQueue]
-      assert enqueue_dev.hw_copy_queue_t is not None
       enqueue_queue = self.comp_queues[enqueue_dev] if is_exec_prg else self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
       out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.signal_t(value=0))
 
