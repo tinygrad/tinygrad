@@ -250,6 +250,14 @@ generate_pciaccess() {
     -o $BASE/libpciaccess.py
 }
 
+generate_amdgpu_2() {
+  clang2py -k cdefstum \
+    extra/amdpci/amdgpu_ucode.h \
+    extra/amdpci/amdgpu_ring.h \
+    extra/amdpci/v11_structs.h \
+    -o $BASE/amdgpu_2.py
+}
+
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
@@ -259,6 +267,7 @@ elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
+elif [ "$1" == "amdgpu_2" ]; then generate_amdgpu_2
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc

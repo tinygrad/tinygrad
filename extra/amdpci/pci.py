@@ -1,6 +1,6 @@
 import os, ctypes
-from tinygrad.runtime.autogen import libpciaccess
-from tinygrad.helpers import to_mv
+from tinygrad.runtime.autogen import libpciaccess, amdgpu_2
+from tinygrad.helpers import to_mv, mv_address
 
 def check(x): assert x == 0
 
@@ -1065,7 +1065,7 @@ def replay_rlc():
   while amdgpu_rreg(0x3697) != 0x2c0: pass
 
   val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
-  assert val == 0x545
+  assert val == 0x545, hex(val)
   val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
   assert val == 0x545
   val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
@@ -1396,19 +1396,41 @@ gfx_v11_0_wait_for_rlc_autoload_complete()
 get_gb_addr_config()
 
 # try load fw
-def load_fw_into_vram(file, address):
-  with open('/lib/firmware/amdgpu/gc_11_0_0_pfp.bin', 'rb') as file:
+def load_fw_into_vram(fname, address, name=None):
+  with open(fname, 'rb') as file:
     file = bytearray(file.read())
+
+  if name == "mes":
+    x = amdgpu_2.struct_mes_firmware_header_v1_0.from_buffer(file[:ctypes.sizeof(amdgpu_2.struct_mes_firmware_header_v1_0)])
+    # print(x.mes_ucode_offset_bytes)
+    # print(x.mes_ucode_size_bytes)
+  else:
+    # print(fname)
+    x = amdgpu_2.struct_gfx_firmware_header_v2_0.from_buffer(file[:ctypes.sizeof(amdgpu_2.struct_gfx_firmware_header_v2_0)])
+    # print(x.ucode_offset_bytes)
+    # print(x.ucode_size_bytes)
+    # print(hex(x.ucode_start_addr_hi))
+    # print(hex(x.ucode_start_addr_lo))
+
   for i in range(len(file)): raw_vram[i + address] = file[i]
+  return x
+
+raw_vram.cast('I')[0x0] = 0xdeadbeef
 
 pfp_addr = 0x10000000
-load_fw_into_vram('/lib/firmware/amdgpu/gc_11_0_0_pfp.bin', pfp_addr)
+pfp_hdr = load_fw_into_vram('/lib/firmware/amdgpu/gc_11_0_0_pfp.bin', pfp_addr)
 
 me_addr = 0x20000000
-load_fw_into_vram('/lib/firmware/amdgpu/gc_11_0_0_me.bin', me_addr)
+me_hdr = load_fw_into_vram('/lib/firmware/amdgpu/gc_11_0_0_me.bin', me_addr)
 
 mec_addr = 0x30000000
-load_fw_into_vram('/lib/firmware/amdgpu/gc_11_0_0_mec.bin', mec_addr)
+mec_hdr = load_fw_into_vram('/lib/firmware/amdgpu/gc_11_0_0_mec.bin', mec_addr)
+
+mes_sched_pipe_addr = 0x40000000
+mes_2_hdr = load_fw_into_vram('/lib/firmware/amdgpu/gc_11_0_0_mes_2.bin', mes_sched_pipe_addr, "mes")
+
+mes_kiq_addr = 0x50000000
+mes1_hdr = load_fw_into_vram('/lib/firmware/amdgpu/gc_11_0_0_mes1.bin', mes_kiq_addr, "mes")
 
 regGRBM_GFX_CNTL = 0xa900 # (adev->reg_offset[GC_HWIP][0][1] + 0x0900)
 def soc21_grbm_select(me, pipe, queue, vmid):
@@ -1431,8 +1453,8 @@ regCP_MEC_RS64_PRGRM_CNTR_START_HI = 0xc938 # adev->reg_offset[GC_HWIP][0][1] + 
 def gfx_v11_0_config_gfx_rs64():
   for pipe in range(2):
     soc21_grbm_select(0, pipe, 0, 0)
-    amdgpu_wreg(regCP_PFP_PRGRM_CNTR_START, (pfp_addr >> 2) & 0xffffffff)
-    amdgpu_wreg(regCP_PFP_PRGRM_CNTR_START_HI, (pfp_addr >> 32) & 0xffffffff)
+    amdgpu_wreg(regCP_PFP_PRGRM_CNTR_START, ((pfp_hdr.ucode_start_addr_hi << 30) | (pfp_hdr.ucode_start_addr_lo >> 2)) & 0xffffffff)
+    amdgpu_wreg(regCP_PFP_PRGRM_CNTR_START_HI, pfp_hdr.ucode_start_addr_hi >> 2)
   soc21_grbm_select(0, 0, 0, 0)
 
   tmp = amdgpu_rreg(regCP_ME_CNTL)
@@ -1442,8 +1464,8 @@ def gfx_v11_0_config_gfx_rs64():
 
   for pipe in range(2):
     soc21_grbm_select(0, pipe, 0, 0)
-    amdgpu_wreg(regCP_ME_PRGRM_CNTR_START, (me_addr >> 2) & 0xffffffff)
-    amdgpu_wreg(regCP_ME_PRGRM_CNTR_START_HI, (me_addr >> 32) & 0xffffffff)
+    amdgpu_wreg(regCP_ME_PRGRM_CNTR_START, ((me_hdr.ucode_start_addr_hi << 30) | (me_hdr.ucode_start_addr_lo >> 2)) & 0xffffffff)
+    amdgpu_wreg(regCP_ME_PRGRM_CNTR_START_HI, me_hdr.ucode_start_addr_hi >> 2)
   soc21_grbm_select(0, 0, 0, 0)
 
   tmp = amdgpu_rreg(regCP_ME_CNTL)
@@ -1452,8 +1474,8 @@ def gfx_v11_0_config_gfx_rs64():
 
   for pipe in range(4):
     soc21_grbm_select(1, pipe, 0, 0)
-    amdgpu_wreg(regCP_MEC_RS64_PRGRM_CNTR_START, (mec_addr >> 2) & 0xffffffff)
-    amdgpu_wreg(regCP_MEC_RS64_PRGRM_CNTR_START_HI, (mec_addr >> 32) & 0xffffffff)
+    amdgpu_wreg(regCP_MEC_RS64_PRGRM_CNTR_START, ((mec_hdr.ucode_start_addr_hi << 30) | (mec_hdr.ucode_start_addr_lo >> 2)) & 0xffffffff)
+    amdgpu_wreg(regCP_MEC_RS64_PRGRM_CNTR_START_HI, mec_hdr.ucode_start_addr_hi >> 2)
   soc21_grbm_select(0, 0, 0, 0)
 
   tmp = amdgpu_rreg(regCP_ME_CNTL)
@@ -1565,6 +1587,15 @@ def gmc_v11_0_flush_gpu_tlb():
   amdgpu_wreg(0x291c, 0xf80001)
   while amdgpu_rreg(0x292e) != 1: pass
 
+def gfxhub_v3_0_set_fault_enable_default():
+  val = amdgpu_rreg(0x307f) # gfxhub_v3_0_set_fault_enable_default:425:(adev->reg_offset[GC_HWIP][0][0] + 0x1e1f)
+  amdgpu_wreg(0x307f, 0x408000) # gfxhub_v3_0_set_fault_enable_default:427:((adev->reg_offset[GC_HWIP][0][0] + 0x1e1f))
+  val = amdgpu_rreg(0x2824) # gfxhub_v3_0_set_fault_enable_default:435:(adev->reg_offset[GC_HWIP][0][0] + 0x15c4)
+  # assert val == 0x3ffffffc
+  amdgpu_wreg(0x2824, 0x3ffffffc) # gfxhub_v3_0_set_fault_enable_default:465:((adev->reg_offset[GC_HWIP][0][0] + 0x15c4))
+  amdgpu_wreg(0x1fc00, 0x0) # hdp_v6_0_flush_hdp:38:((adev->rmmio_remap.reg_offset + KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL) >> 2)
+  gmc_v11_0_flush_gpu_tlb()
+
 def gfxhub_v3_0_gart_enable():
   gfxhub_v3_0_init_gart_aperture_regs()
   gfxhub_v3_0_init_system_aperture_regs()
@@ -1575,6 +1606,7 @@ def gfxhub_v3_0_gart_enable():
   # gfxhub_v3_0_disable_identity_aperture()
   gfxhub_v3_0_setup_vmid_config()
   gfxhub_v3_0_program_invalidation()
+  gfxhub_v3_0_set_fault_enable_default()
   print("done gfxhub_v3_0_gart_enable")
 
 
@@ -1586,10 +1618,408 @@ def gfx_v11_0_gfxhub_enable():
   gmc_v11_0_flush_gpu_tlb()
   hdp_v6_0_flush_hdp()
 
+def gfx_v11_0_init_golden_registers():
+  # regTCP_CNTL, 0x20000000
+  val = amdgpu_rreg(0xb9a2)
+  amdgpu_wreg(0xb9a2, val | 0x20000000)
+
+regGRBM_CNTL = 0x2000
+def gfx_v11_0_constants_init():
+  # this is a TODO
+  val = amdgpu_rreg(0x2000) # gfx_v11_0_constants_init:1926:(adev->reg_offset[GC_HWIP][0][0] + 0x0da0)
+  assert val == 0xff
+  amdgpu_wreg(0x2000, 0xff) # gfx_v11_0_constants_init:1926:(adev->reg_offset[GC_HWIP][0][0] + 0x0da0)
+  val = amdgpu_rreg(0x2249) # gfx_v11_0_get_sa_active_bitmap:1780:(adev->reg_offset[GC_HWIP][0][0] + 0x0fe9)
+  assert val == 0xf00001
+  val = amdgpu_rreg(0xfb92) # gfx_v11_0_get_sa_active_bitmap:1784:(adev->reg_offset[GC_HWIP][0][1] + 0x5b92)
+  assert val == 0xf00000
+  val = amdgpu_rreg(0x263d) # gfx_v11_0_get_rb_active_bitmap:1799:(adev->reg_offset[GC_HWIP][0][0] + 0x13dd)
+  assert val == 0x1
+  val = amdgpu_rreg(0xfb94) # gfx_v11_0_get_rb_active_bitmap:1803:(adev->reg_offset[GC_HWIP][0][1] + 0x5b94)
+  assert val == 0x0
+  val = amdgpu_rreg(0x2249) # gfx_v11_0_get_sa_active_bitmap:1780:(adev->reg_offset[GC_HWIP][0][0] + 0x0fe9)
+  assert val == 0xf00001
+  val = amdgpu_rreg(0xfb92) # gfx_v11_0_get_sa_active_bitmap:1784:(adev->reg_offset[GC_HWIP][0][1] + 0x5b92)
+  assert val == 0xf00000
+  amdgpu_wreg(0xc200, 0x40000000) # gfx_v11_0_select_se_sh:1773:((adev->reg_offset[GC_HWIP][0][1] + 0x2200))
+  val = amdgpu_rreg(0x226f) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6755:(adev->reg_offset[GC_HWIP][0][0] + 0x100f)
+  assert val == 0xfff00001
+  val = amdgpu_rreg(0xfb90) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6756:(adev->reg_offset[GC_HWIP][0][1] + 0x5b90)
+  # assert val == 0x0, hex(val)
+  val = amdgpu_rreg(0x2249) # gfx_v11_0_get_sa_active_bitmap:1780:(adev->reg_offset[GC_HWIP][0][0] + 0x0fe9)
+  assert val == 0xf00001
+  val = amdgpu_rreg(0xfb92) # gfx_v11_0_get_sa_active_bitmap:1784:(adev->reg_offset[GC_HWIP][0][1] + 0x5b92)
+  assert val == 0xf00000
+  amdgpu_wreg(0xc200, 0x40000100) # gfx_v11_0_select_se_sh:1773:((adev->reg_offset[GC_HWIP][0][1] + 0x2200))
+  val = amdgpu_rreg(0x226f) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6755:(adev->reg_offset[GC_HWIP][0][0] + 0x100f)
+  assert val == 0xfff00001
+  val = amdgpu_rreg(0xfb90) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6756:(adev->reg_offset[GC_HWIP][0][1] + 0x5b90)
+  # assert val == 0x0
+  val = amdgpu_rreg(0x2249) # gfx_v11_0_get_sa_active_bitmap:1780:(adev->reg_offset[GC_HWIP][0][0] + 0x0fe9)
+  assert val == 0xf00001
+  val = amdgpu_rreg(0xfb92) # gfx_v11_0_get_sa_active_bitmap:1784:(adev->reg_offset[GC_HWIP][0][1] + 0x5b92)
+  assert val == 0xf00000
+  amdgpu_wreg(0xc200, 0x40010000) # gfx_v11_0_select_se_sh:1773:((adev->reg_offset[GC_HWIP][0][1] + 0x2200))
+  val = amdgpu_rreg(0x226f) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6755:(adev->reg_offset[GC_HWIP][0][0] + 0x100f)
+  assert val == 0xfff00001
+  val = amdgpu_rreg(0xfb90) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6756:(adev->reg_offset[GC_HWIP][0][1] + 0x5b90)
+  # assert val == 0x0
+  val = amdgpu_rreg(0x2249) # gfx_v11_0_get_sa_active_bitmap:1780:(adev->reg_offset[GC_HWIP][0][0] + 0x0fe9)
+  assert val == 0xf00001
+  val = amdgpu_rreg(0xfb92) # gfx_v11_0_get_sa_active_bitmap:1784:(adev->reg_offset[GC_HWIP][0][1] + 0x5b92)
+  assert val == 0xf00000
+  amdgpu_wreg(0xc200, 0x40010100) # gfx_v11_0_select_se_sh:1773:((adev->reg_offset[GC_HWIP][0][1] + 0x2200))
+  val = amdgpu_rreg(0x226f) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6755:(adev->reg_offset[GC_HWIP][0][0] + 0x100f)
+  assert val == 0xfff00001
+  val = amdgpu_rreg(0xfb90) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6756:(adev->reg_offset[GC_HWIP][0][1] + 0x5b90)
+  # assert val == 0x0
+  val = amdgpu_rreg(0x2249) # gfx_v11_0_get_sa_active_bitmap:1780:(adev->reg_offset[GC_HWIP][0][0] + 0x0fe9)
+  assert val == 0xf00001
+  val = amdgpu_rreg(0xfb92) # gfx_v11_0_get_sa_active_bitmap:1784:(adev->reg_offset[GC_HWIP][0][1] + 0x5b92)
+  assert val == 0xf00000
+  amdgpu_wreg(0xc200, 0x40020000) # gfx_v11_0_select_se_sh:1773:((adev->reg_offset[GC_HWIP][0][1] + 0x2200))
+  val = amdgpu_rreg(0x226f) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6755:(adev->reg_offset[GC_HWIP][0][0] + 0x100f)
+  assert val == 0xfff00001
+  val = amdgpu_rreg(0xfb90) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6756:(adev->reg_offset[GC_HWIP][0][1] + 0x5b90)
+  # assert val == 0x0
+  val = amdgpu_rreg(0x2249) # gfx_v11_0_get_sa_active_bitmap:1780:(adev->reg_offset[GC_HWIP][0][0] + 0x0fe9)
+  assert val == 0xf00001
+  val = amdgpu_rreg(0xfb92) # gfx_v11_0_get_sa_active_bitmap:1784:(adev->reg_offset[GC_HWIP][0][1] + 0x5b92)
+  assert val == 0xf00000
+  amdgpu_wreg(0xc200, 0x40020100) # gfx_v11_0_select_se_sh:1773:((adev->reg_offset[GC_HWIP][0][1] + 0x2200))
+  val = amdgpu_rreg(0x226f) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6755:(adev->reg_offset[GC_HWIP][0][0] + 0x100f)
+  assert val == 0xfff00001
+  val = amdgpu_rreg(0xfb90) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6756:(adev->reg_offset[GC_HWIP][0][1] + 0x5b90)
+  # assert val == 0x0
+  val = amdgpu_rreg(0x2249) # gfx_v11_0_get_sa_active_bitmap:1780:(adev->reg_offset[GC_HWIP][0][0] + 0x0fe9)
+  assert val == 0xf00001
+  val = amdgpu_rreg(0xfb92) # gfx_v11_0_get_sa_active_bitmap:1784:(adev->reg_offset[GC_HWIP][0][1] + 0x5b92)
+  assert val == 0xf00000
+  amdgpu_wreg(0xc200, 0x40030000) # gfx_v11_0_select_se_sh:1773:((adev->reg_offset[GC_HWIP][0][1] + 0x2200))
+  val = amdgpu_rreg(0x226f) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6755:(adev->reg_offset[GC_HWIP][0][0] + 0x100f)
+  assert val == 0xfff00001
+  val = amdgpu_rreg(0xfb90) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6756:(adev->reg_offset[GC_HWIP][0][1] + 0x5b90)
+  # assert val == 0x0
+  val = amdgpu_rreg(0x2249) # gfx_v11_0_get_sa_active_bitmap:1780:(adev->reg_offset[GC_HWIP][0][0] + 0x0fe9)
+  assert val == 0xf00001
+  val = amdgpu_rreg(0xfb92) # gfx_v11_0_get_sa_active_bitmap:1784:(adev->reg_offset[GC_HWIP][0][1] + 0x5b92)
+  assert val == 0xf00000
+  amdgpu_wreg(0xc200, 0x40030100) # gfx_v11_0_select_se_sh:1773:((adev->reg_offset[GC_HWIP][0][1] + 0x2200))
+  val = amdgpu_rreg(0x226f) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6755:(adev->reg_offset[GC_HWIP][0][0] + 0x100f)
+  assert val == 0xfff00001
+  val = amdgpu_rreg(0xfb90) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6756:(adev->reg_offset[GC_HWIP][0][1] + 0x5b90)
+  # assert val == 0x0
+  val = amdgpu_rreg(0x2249) # gfx_v11_0_get_sa_active_bitmap:1780:(adev->reg_offset[GC_HWIP][0][0] + 0x0fe9)
+  assert val == 0xf00001
+  val = amdgpu_rreg(0xfb92) # gfx_v11_0_get_sa_active_bitmap:1784:(adev->reg_offset[GC_HWIP][0][1] + 0x5b92)
+  assert val == 0xf00000
+  amdgpu_wreg(0xc200, 0x40040000) # gfx_v11_0_select_se_sh:1773:((adev->reg_offset[GC_HWIP][0][1] + 0x2200))
+  val = amdgpu_rreg(0x226f) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6755:(adev->reg_offset[GC_HWIP][0][0] + 0x100f)
+  assert val == 0xfff00001
+  val = amdgpu_rreg(0xfb90) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6756:(adev->reg_offset[GC_HWIP][0][1] + 0x5b90)
+  # assert val == 0x0
+  val = amdgpu_rreg(0x2249) # gfx_v11_0_get_sa_active_bitmap:1780:(adev->reg_offset[GC_HWIP][0][0] + 0x0fe9)
+  assert val == 0xf00001
+  val = amdgpu_rreg(0xfb92) # gfx_v11_0_get_sa_active_bitmap:1784:(adev->reg_offset[GC_HWIP][0][1] + 0x5b92)
+  assert val == 0xf00000
+  amdgpu_wreg(0xc200, 0x40040100) # gfx_v11_0_select_se_sh:1773:((adev->reg_offset[GC_HWIP][0][1] + 0x2200))
+  val = amdgpu_rreg(0x226f) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6755:(adev->reg_offset[GC_HWIP][0][0] + 0x100f)
+  assert val == 0xfff00001
+  val = amdgpu_rreg(0xfb90) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6756:(adev->reg_offset[GC_HWIP][0][1] + 0x5b90)
+  # assert val == 0x0
+  val = amdgpu_rreg(0x2249) # gfx_v11_0_get_sa_active_bitmap:1780:(adev->reg_offset[GC_HWIP][0][0] + 0x0fe9)
+  assert val == 0xf00001
+  val = amdgpu_rreg(0xfb92) # gfx_v11_0_get_sa_active_bitmap:1784:(adev->reg_offset[GC_HWIP][0][1] + 0x5b92)
+  assert val == 0xf00000
+  amdgpu_wreg(0xc200, 0x40050000) # gfx_v11_0_select_se_sh:1773:((adev->reg_offset[GC_HWIP][0][1] + 0x2200))
+  val = amdgpu_rreg(0x226f) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6755:(adev->reg_offset[GC_HWIP][0][0] + 0x100f)
+  assert val == 0xfff00001
+  val = amdgpu_rreg(0xfb90) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6756:(adev->reg_offset[GC_HWIP][0][1] + 0x5b90)
+  # assert val == 0x0
+  val = amdgpu_rreg(0x2249) # gfx_v11_0_get_sa_active_bitmap:1780:(adev->reg_offset[GC_HWIP][0][0] + 0x0fe9)
+  assert val == 0xf00001
+  val = amdgpu_rreg(0xfb92) # gfx_v11_0_get_sa_active_bitmap:1784:(adev->reg_offset[GC_HWIP][0][1] + 0x5b92)
+  assert val == 0xf00000
+  amdgpu_wreg(0xc200, 0x40050100) # gfx_v11_0_select_se_sh:1773:((adev->reg_offset[GC_HWIP][0][1] + 0x2200))
+  val = amdgpu_rreg(0x226f) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6755:(adev->reg_offset[GC_HWIP][0][0] + 0x100f)
+  assert val == 0xfff00001
+  val = amdgpu_rreg(0xfb90) # gfx_v11_0_get_wgp_active_bitmap_per_sh:6756:(adev->reg_offset[GC_HWIP][0][1] + 0x5b90)
+  # assert val == 0x0
+  amdgpu_wreg(0xc200, 0xe0000000) # gfx_v11_0_select_se_sh:1773:((adev->reg_offset[GC_HWIP][0][1] + 0x2200))
+  val = amdgpu_rreg(0xf006) # gfx_v11_0_get_tcc_info:1912:(adev->reg_offset[GC_HWIP][0][1] + 0x5006)
+  assert val == 0x1
+  val = amdgpu_rreg(0xfb96) # gfx_v11_0_get_tcc_info:1913:(adev->reg_offset[GC_HWIP][0][1] + 0x5b96)
+  assert val == 0x0
+  val = amdgpu_rreg(0x2545) # gfx_v11_0_constants_init:1934:(adev->reg_offset[GC_HWIP][0][0] + 0x12e5)
+  assert val == 0x40000
+  amdgpu_wreg(0xa900, 0x0) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_constants_init:1944:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa900, 0x10) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_constants_init:1944:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x20001000) # gfx_v11_0_constants_init:1950:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  amdgpu_wreg(0xa900, 0x20) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_constants_init:1944:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x20001000) # gfx_v11_0_constants_init:1950:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  amdgpu_wreg(0xa900, 0x30) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_constants_init:1944:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x20001000) # gfx_v11_0_constants_init:1950:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  amdgpu_wreg(0xa900, 0x40) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_constants_init:1944:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x20001000) # gfx_v11_0_constants_init:1950:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  amdgpu_wreg(0xa900, 0x50) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_constants_init:1944:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x20001000) # gfx_v11_0_constants_init:1950:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  amdgpu_wreg(0xa900, 0x60) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_constants_init:1944:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x20001000) # gfx_v11_0_constants_init:1950:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  amdgpu_wreg(0xa900, 0x70) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_constants_init:1944:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x20001000) # gfx_v11_0_constants_init:1950:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  amdgpu_wreg(0xa900, 0x0) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa900, 0x80) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_init_compute_vmid:1865:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x10002) # gfx_v11_0_init_compute_vmid:1866:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  val = amdgpu_rreg(0x31d2) # gfx_v11_0_init_compute_vmid:1869:(adev->reg_offset[GC_HWIP][0][0] + 0x1f72)
+  # assert val == 0x0
+  amdgpu_wreg(0x31d2, 0x8) # gfx_v11_0_init_compute_vmid:1871:((adev->reg_offset[GC_HWIP][0][0] + 0x1f72))
+  amdgpu_wreg(0xa900, 0x90) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_init_compute_vmid:1865:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x10002) # gfx_v11_0_init_compute_vmid:1866:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  val = amdgpu_rreg(0x31d2) # gfx_v11_0_init_compute_vmid:1869:(adev->reg_offset[GC_HWIP][0][0] + 0x1f72)
+  # assert val == 0x0
+  amdgpu_wreg(0x31d2, 0x8) # gfx_v11_0_init_compute_vmid:1871:((adev->reg_offset[GC_HWIP][0][0] + 0x1f72))
+  amdgpu_wreg(0xa900, 0xa0) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_init_compute_vmid:1865:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x10002) # gfx_v11_0_init_compute_vmid:1866:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  val = amdgpu_rreg(0x31d2) # gfx_v11_0_init_compute_vmid:1869:(adev->reg_offset[GC_HWIP][0][0] + 0x1f72)
+  # assert val == 0x0
+  amdgpu_wreg(0x31d2, 0x8) # gfx_v11_0_init_compute_vmid:1871:((adev->reg_offset[GC_HWIP][0][0] + 0x1f72))
+  amdgpu_wreg(0xa900, 0xb0) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_init_compute_vmid:1865:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x10002) # gfx_v11_0_init_compute_vmid:1866:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  val = amdgpu_rreg(0x31d2) # gfx_v11_0_init_compute_vmid:1869:(adev->reg_offset[GC_HWIP][0][0] + 0x1f72)
+  # assert val == 0x0
+  amdgpu_wreg(0x31d2, 0x8) # gfx_v11_0_init_compute_vmid:1871:((adev->reg_offset[GC_HWIP][0][0] + 0x1f72))
+  amdgpu_wreg(0xa900, 0xc0) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_init_compute_vmid:1865:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x10002) # gfx_v11_0_init_compute_vmid:1866:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  val = amdgpu_rreg(0x31d2) # gfx_v11_0_init_compute_vmid:1869:(adev->reg_offset[GC_HWIP][0][0] + 0x1f72)
+  # assert val == 0x0
+  amdgpu_wreg(0x31d2, 0x8) # gfx_v11_0_init_compute_vmid:1871:((adev->reg_offset[GC_HWIP][0][0] + 0x1f72))
+  amdgpu_wreg(0xa900, 0xd0) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_init_compute_vmid:1865:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x10002) # gfx_v11_0_init_compute_vmid:1866:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  val = amdgpu_rreg(0x31d2) # gfx_v11_0_init_compute_vmid:1869:(adev->reg_offset[GC_HWIP][0][0] + 0x1f72)
+  # assert val == 0x0
+  amdgpu_wreg(0x31d2, 0x8) # gfx_v11_0_init_compute_vmid:1871:((adev->reg_offset[GC_HWIP][0][0] + 0x1f72))
+  amdgpu_wreg(0xa900, 0xe0) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_init_compute_vmid:1865:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x10002) # gfx_v11_0_init_compute_vmid:1866:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  val = amdgpu_rreg(0x31d2) # gfx_v11_0_init_compute_vmid:1869:(adev->reg_offset[GC_HWIP][0][0] + 0x1f72)
+  # assert val == 0x0
+  amdgpu_wreg(0x31d2, 0x8) # gfx_v11_0_init_compute_vmid:1871:((adev->reg_offset[GC_HWIP][0][0] + 0x1f72))
+  amdgpu_wreg(0xa900, 0xf0) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0xa9e4, 0xc00c) # gfx_v11_0_init_compute_vmid:1865:((adev->reg_offset[GC_HWIP][0][1] + 0x09e4))
+  amdgpu_wreg(0xa9e3, 0x10002) # gfx_v11_0_init_compute_vmid:1866:((adev->reg_offset[GC_HWIP][0][1] + 0x09e3))
+  val = amdgpu_rreg(0x31d2) # gfx_v11_0_init_compute_vmid:1869:(adev->reg_offset[GC_HWIP][0][0] + 0x1f72)
+  # assert val == 0x0
+  amdgpu_wreg(0x31d2, 0x8) # gfx_v11_0_init_compute_vmid:1871:((adev->reg_offset[GC_HWIP][0][0] + 0x1f72))
+  amdgpu_wreg(0xa900, 0x0) # soc21_grbm_select:247:((adev->reg_offset[GC_HWIP][0][1] + 0x0900))
+  amdgpu_wreg(0x3310, 0x0) # gfx_v11_0_init_compute_vmid:1879:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * i)
+  amdgpu_wreg(0x3311, 0x0) # gfx_v11_0_init_compute_vmid:1880:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * i)
+  amdgpu_wreg(0x3328, 0x0) # gfx_v11_0_init_compute_vmid:1881:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + i)
+  amdgpu_wreg(0x3338, 0x0) # gfx_v11_0_init_compute_vmid:1882:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + i)
+  amdgpu_wreg(0x3312, 0x0) # gfx_v11_0_init_compute_vmid:1879:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * i)
+  amdgpu_wreg(0x3313, 0x0) # gfx_v11_0_init_compute_vmid:1880:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * i)
+  amdgpu_wreg(0x3329, 0x0) # gfx_v11_0_init_compute_vmid:1881:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + i)
+  amdgpu_wreg(0x3339, 0x0) # gfx_v11_0_init_compute_vmid:1882:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + i)
+  amdgpu_wreg(0x3314, 0x0) # gfx_v11_0_init_compute_vmid:1879:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * i)
+  amdgpu_wreg(0x3315, 0x0) # gfx_v11_0_init_compute_vmid:1880:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * i)
+  amdgpu_wreg(0x332a, 0x0) # gfx_v11_0_init_compute_vmid:1881:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + i)
+  amdgpu_wreg(0x333a, 0x0) # gfx_v11_0_init_compute_vmid:1882:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + i)
+  amdgpu_wreg(0x3316, 0x0) # gfx_v11_0_init_compute_vmid:1879:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * i)
+  amdgpu_wreg(0x3317, 0x0) # gfx_v11_0_init_compute_vmid:1880:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * i)
+  amdgpu_wreg(0x332b, 0x0) # gfx_v11_0_init_compute_vmid:1881:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + i)
+  amdgpu_wreg(0x333b, 0x0) # gfx_v11_0_init_compute_vmid:1882:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + i)
+  amdgpu_wreg(0x3318, 0x0) # gfx_v11_0_init_compute_vmid:1879:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * i)
+  amdgpu_wreg(0x3319, 0x0) # gfx_v11_0_init_compute_vmid:1880:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * i)
+  amdgpu_wreg(0x332c, 0x0) # gfx_v11_0_init_compute_vmid:1881:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + i)
+  amdgpu_wreg(0x333c, 0x0) # gfx_v11_0_init_compute_vmid:1882:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + i)
+  amdgpu_wreg(0x331a, 0x0) # gfx_v11_0_init_compute_vmid:1879:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * i)
+  amdgpu_wreg(0x331b, 0x0) # gfx_v11_0_init_compute_vmid:1880:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * i)
+  amdgpu_wreg(0x332d, 0x0) # gfx_v11_0_init_compute_vmid:1881:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + i)
+  amdgpu_wreg(0x333d, 0x0) # gfx_v11_0_init_compute_vmid:1882:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + i)
+  amdgpu_wreg(0x331c, 0x0) # gfx_v11_0_init_compute_vmid:1879:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * i)
+  amdgpu_wreg(0x331d, 0x0) # gfx_v11_0_init_compute_vmid:1880:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * i)
+  amdgpu_wreg(0x332e, 0x0) # gfx_v11_0_init_compute_vmid:1881:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + i)
+  amdgpu_wreg(0x333e, 0x0) # gfx_v11_0_init_compute_vmid:1882:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + i)
+  amdgpu_wreg(0x331e, 0x0) # gfx_v11_0_init_compute_vmid:1879:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * i)
+  amdgpu_wreg(0x331f, 0x0) # gfx_v11_0_init_compute_vmid:1880:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * i)
+  amdgpu_wreg(0x332f, 0x0) # gfx_v11_0_init_compute_vmid:1881:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + i)
+  amdgpu_wreg(0x333f, 0x0) # gfx_v11_0_init_compute_vmid:1882:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + i)
+  amdgpu_wreg(0x3302, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x3303, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x3321, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x3331, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x3304, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x3305, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x3322, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x3332, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x3306, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x3307, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x3323, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x3333, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x3308, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x3309, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x3324, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x3334, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x330a, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x330b, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x3325, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x3335, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x330c, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x330d, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x3326, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x3336, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x330e, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x330f, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x3327, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x3337, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x3310, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x3311, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x3328, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x3338, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x3312, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x3313, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x3329, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x3339, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x3314, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x3315, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x332a, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x333a, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x3316, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x3317, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x332b, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x333b, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x3318, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x3319, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x332c, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x333c, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x331a, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x331b, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x332d, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x333d, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x331c, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x331d, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x332e, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x333e, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+  amdgpu_wreg(0x331e, 0x0) # gfx_v11_0_init_gds_vmid:1897:((adev->reg_offset[GC_HWIP][0][0] + 0x20a0) + 2 * vmid)
+  amdgpu_wreg(0x331f, 0x0) # gfx_v11_0_init_gds_vmid:1898:((adev->reg_offset[GC_HWIP][0][0] + 0x20a1) + 2 * vmid)
+  amdgpu_wreg(0x332f, 0x0) # gfx_v11_0_init_gds_vmid:1899:((adev->reg_offset[GC_HWIP][0][0] + 0x20c0) + vmid)
+  amdgpu_wreg(0x333f, 0x0) # gfx_v11_0_init_gds_vmid:1900:((adev->reg_offset[GC_HWIP][0][0] + 0x20d0) + vmid)
+
+# def gfx_v11_0_constants_init():
+#   gfx_v11_0_setup_rb()
+
 gfx_v11_0_config_gfx_rs64()
 gfx_v11_0_gfxhub_enable()
+gfx_v11_0_init_golden_registers()
+gfx_v11_0_constants_init()
+
+def nbio_v4_3_gc_doorbell_init():
+  amdgpu_wreg(0x507a40, 0x30000007)
+  amdgpu_wreg(0x507a43, 0x3000000d)
+
+csb_addr = 0x85feafc000
+csb_size = 0x3c0
+def gfx_v11_0_init_csb():
+  amdgpu_wreg(0xa988, csb_addr >> 32)
+  amdgpu_wreg(0xa987, csb_addr & 0xffffffff)
+  amdgpu_wreg(0xa989, csb_size)
+
+def gfx_v11_0_rlc_enable_srm():
+  amdgpu_wreg(0xec80, 0x3)
+
+def gfx_v11_0_enable_gui_idle_interrupt():
+  amdgpu_wreg(0x306a, 0x0)
+
+def gfx_v11_0_cp_set_doorbell_range():
+  amdgpu_wreg(0x305a, 0x458) # ring0
+  amdgpu_wreg(0x305b, 0x7f8) 
+  amdgpu_wreg(0x305c, 0x0) # kiq
+  amdgpu_wreg(0x305d, 0x450)
+
+def gfx_v11_0_cp_compute_enable():
+  amdgpu_wreg(0xc904, 0x3c000000)
+
+def gfx_v11_0_cp_gfx_enable():
+  amdgpu_wreg(0xa803, 0x1000000)
+  for i in range(1000000):
+    val = amdgpu_rreg(0x21a0)
+    print(hex(val))
+    if val == 0: return
+  raise Exception('gfx_v11_0_cp_gfx_enable timeout')
+
+mes_uc_start_addr = [
+  mes_2_hdr.mes_uc_start_addr_lo + (mes_2_hdr.mes_uc_start_addr_hi << 32),
+  mes1_hdr.mes_uc_start_addr_lo + (mes1_hdr.mes_uc_start_addr_hi << 32)
+]
+
+mes_data_start_addr = [
+  mes_2_hdr.mes_data_start_addr_lo + (mes_2_hdr.mes_data_start_addr_hi << 32),
+  mes1_hdr.mes_data_start_addr_lo + (mes1_hdr.mes_data_start_addr_hi << 32)
+]
+
+def mes_v11_0_enable():
+  # print([hex(x >> 2) for x in mes_uc_start_addr])
+  amdgpu_wreg(0xc807, 0x40030000)  # regCP_MES_CNTL
+  for pipe in range(2):
+    soc21_grbm_select(3, pipe, 0, 0)
+    amdgpu_wreg(0xc800, (mes_uc_start_addr[pipe] >> 2) & 0xffffffff) # mes_v11_0_enable:685:((adev->reg_offset[GC_HWIP][0][1] + 0x2800))
+    amdgpu_wreg(0xc89d, (mes_uc_start_addr[pipe] >> 34)) # mes_v11_0_enable:687:((adev->reg_offset[GC_HWIP][0][1] + 0x289d))
+  soc21_grbm_select(0, 0, 0, 0)
+  amdgpu_wreg(0xc807, 0xc000000)
+
+def mes_v11_0_kiq_setting():
+  # TODO: pass ring to setup...
+  amdgpu_wreg(0xa98a, 0x3068)
+  amdgpu_wreg(0xa98a, 0x30e8)
+
+class Amdring:
+  def __init__(self):
+    self.mqd_mv = memoryview(bytearray(ctypes.sizeof(amdgpu_2.struct_v11_compute_mqd)))
+    self.mqd = amdgpu_2.struct_v11_compute_mqd.from_address(mv_address(self.mqd_mv))
+    self.eop_gpu_addr = 0xe0000000
+
+def mes_v11_0_mqd_init(ring):
+  ring.mqd.header = 0xC0310800
+  ring.mqd.compute_pipelinestat_enable = 0x00000001
+  ring.mqd.compute_static_thread_mgmt_se0 = 0xffffffff
+  ring.mqd.compute_static_thread_mgmt_se1 = 0xffffffff
+  ring.mqd.compute_static_thread_mgmt_se2 = 0xffffffff
+  ring.mqd.compute_static_thread_mgmt_se3 = 0xffffffff
+  ring.mqd.compute_misc_reserved = 0x00000007
+
+the_ring = Amdring()
+def mes_v11_0_queue_init(ring):
+  mes_v11_0_mqd_init(ring)
+
+def mes_v11_0_kiq_hw_init():
+  mes_v11_0_enable()
+  mes_v11_0_kiq_setting()
+  mes_v11_0_queue_init(the_ring)
+
+# nbio_v4_3_gc_doorbell_init()
+gfx_v11_0_init_csb()
+gfx_v11_0_rlc_enable_srm()
+gfx_v11_0_enable_gui_idle_interrupt()
+gfx_v11_0_cp_set_doorbell_range()
+gfx_v11_0_cp_compute_enable()
+gfx_v11_0_cp_gfx_enable()
+mes_v11_0_kiq_hw_init()
 
 
+print(raw_vram[0x0])
 
   # tmp = RREG32_SOC15(GC, 0, regCP_ME_CNTL);
 	# tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, PFP_PIPE0_RESET, 1);
