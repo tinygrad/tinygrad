@@ -70,8 +70,7 @@ class Tokenizer:
   def decode(self, toks): return self.model.decode([t for t in toks if t < self.num_base_tokens])
   def encode(self, text, allow_special=False):
     ret = self.model.encode(text, allowed_special="all" if allow_special else set(), disallowed_special=set())
-
-    return [tok % 8 for tok in ret]
+    return ret
 
 
 tokenizer = Tokenizer("tmp/tokenizer.model")
@@ -109,7 +108,7 @@ def get_batch():
 
 data_iter = iter(get_batch())
 
-vocab_size = 8 # 128256
+vocab_size = 128256
 dim = 4
 n_heads = 1
 
@@ -150,7 +149,6 @@ class Model:
     print(tokenizer.decode(tokens.tolist()[0]))
 
 model = Model()
-print(list(nn.state.get_parameters(model)))
 opt = nn.optim.AdamW(nn.state.get_parameters(model), lr=0.1)
 
 x, y = next(data_iter)
@@ -158,20 +156,13 @@ if len(GPUS) > 1:
   shard_model(model, opt)
 
 def step():
-  print("embeddings")
-  print(model.tok_embeddings.weight.numpy())
   opt.zero_grad()
   logits, loss = model(x, y)
   loss.backward()
-  print("embeddings grad")
-  print(model.tok_embeddings.weight.grad.numpy())
   loss.realize(*opt.schedule_step())
-  print("LOSS", loss.tolist())
-  print("embeddings updated")
-  print(model.tok_embeddings.weight.numpy())
-
+  print(f"Loss {loss.tolist()}")
 
 
 with Tensor.train():
-  for i in range(1): step()
+  for i in range(3): step()
 # model.generate()
