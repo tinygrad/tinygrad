@@ -31,9 +31,6 @@ def bits_to_float(d:UOp, float_dtype:DType) -> UOp:
   cast_to = {dtypes.uint64: dtypes.float64, dtypes.uint32: dtypes.float32, dtypes.uint16: float_dtype}[d.dtype]
   return d.bitcast(cast_to)
 # **** utils ****
-def shr(x:UOp, y:int) -> UOp: return x // (2**y)
-def shl(x:UOp, y:int) -> UOp: return x * (2**y)
-
 def rintk(d:UOp) -> UOp:
   """ceiling(d:float) -> int"""
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
@@ -44,7 +41,7 @@ def pow2if(q:UOp, float_dtype:DType):
   """cast(2^q, float_dtype) where q is any integer in the range of [-126, 127]"""
   assert q.dtype in (dtypes.int64, dtypes.int32, dtypes.int16, dtypes.uint32)
   final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype, dtypes.uint32: dtypes.float32}[q.dtype]
-  return shl((q + (exponent_bias(final_dtype)+1)), significand_bits(final_dtype)).bitcast(final_dtype)
+  return ((q + (exponent_bias(final_dtype)+1)) << significand_bits(final_dtype)).bitcast(final_dtype)
 
 def ilogb2k(d:UOp) -> UOp:
   """calculate the integer part of log2(d), where d is normalized fp value in the range of [0, +inf)."""
@@ -52,22 +49,21 @@ def ilogb2k(d:UOp) -> UOp:
   dint = d.bitcast({dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype])
   # -1 <= ilog2bk(d) <= 128
   # ((float_to_bits(d) >> significand_bits(dtype)) & exponent_mask(dtype)) - exponent_bias(dtype)
-  return (shr(dint, significand_bits(d.dtype)) & exponent_mask(d.dtype)) - (exponent_bias(d.dtype)+1)
+  return ((dint >> significand_bits(d.dtype)) & exponent_mask(d.dtype)) - (exponent_bias(d.dtype)+1)
 
 def ldexp3k(d:UOp, e:UOp) -> UOp:
   """d*2^e. e is a number obtained by casting an integer in the range [-127, 127] to a float. d is any float number."""
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   dtype = d.dtype
   cast_map = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}
-  e = e.cast(cast_map[d.dtype])
   m1 = d.bitcast(cast_map[d.dtype])
-  m2 = shl(e, significand_bits(d.dtype))
+  m2 = e.cast(cast_map[d.dtype]) << significand_bits(d.dtype)
   return (m1 + m2).bitcast(d.dtype).cast(dtype)
 
 def ldexp2k(d:UOp, e:UOp) -> UOp:
   """d*2^e. much faster than ldexp3k but risky. d > 0 and d is not denormal."""
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype in (dtypes.int16, dtypes.int32, dtypes.int64)
-  return (d * pow2if(shr(e, 1), d.dtype)) * pow2if(e - shr(e, 1), d.dtype)
+  return (d * pow2if((e >> 1), d.dtype)) * pow2if(e - (e >> 1), d.dtype)
 
 def frexp(v:UOp) -> Tuple[UOp, UOp]:
   """frexp(v) -> (mantissa, exponent)"""
@@ -76,7 +72,7 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   m1 = {dtypes.float64: 0x000FFFFFFFFFFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3800}[v.dtype]
   bits = float_to_bits(v)
-  exponent = shr(bits, significand_bits(v.dtype)) & exponent_mask(v.dtype)
+  exponent = (bits >> significand_bits(v.dtype)) & exponent_mask(v.dtype)
   exponent_zero = exponent.ne(0.0)
   # Set the exponent bits appropriately to normalize the mantissa into the range of [0.5, 1.0).
   result_f = bits_to_float((bits & m1) | m2, v.dtype)
@@ -106,7 +102,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
 
   f, e = frexp(d)
   ia = (f.cast(dtype_via) * 4.294967296e9).cast(dtypes.uint64)
-  i = shr(e.cast(dtypes.uint64), 5)
+  i = e.cast(dtypes.uint64) >> 5
   e = (e.cast(dtypes.uint64) & 31).cast(dtypes.uint32)
   offset = -e + 32
 
@@ -130,11 +126,8 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   lo = _shl_lazy(a3, e) | _shr_lazy(a4, offset)
 
   def _hp_mul(x:UOp, y:UOp) -> UOp: return x.cast(dtypes.uint64) * y.cast(dtypes.uint64)
-  p = _hp_mul(ia, lo)
-  p = _hp_mul(ia, mi) + shr(p, 32)
-  p = shl(_hp_mul(ia, hi), 32) + p
-
-  q = shr(p, 62).cast(dtypes.int32)
+  p = (_hp_mul(ia, hi) << 32) + _hp_mul(ia, mi) + (_hp_mul(ia, lo) >> 32)
+  q = (p >> 62).cast(dtypes.int32)
   p = p & 0x3fffffffffffffff
   r = (p.cast(dtype_via) * (3.4061215800865545e-19)).cast(input_dtype)
 
