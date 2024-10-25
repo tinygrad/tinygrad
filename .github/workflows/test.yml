@@ -445,9 +445,11 @@ jobs:
         if: matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv'
         id: cache-build
         uses: actions/cache@v4
+        env:
+          cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-4524e34adb7eaccc6f71262f2e21d7052bb17c2f-rebuild-${{ steps.get-month.outputs.date }}
+          key: ubuntu22.04-gpuocelot-4524e34adb7eaccc6f71262f2e21d7052bb17c2f-rebuild-${{ steps.get-month.outputs.month }}
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
