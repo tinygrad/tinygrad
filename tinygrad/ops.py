@@ -1058,9 +1058,9 @@ symbolic = PatternMatcher([
   # ** mod **
   # mod folding
   (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
-  # flip order of ADD, MUL to sort
-  (UPat(UOps.ALU, name='x'), lambda x:
-   x.replace(src=x.src[::-1]) if x.arg in {BinaryOps.ADD, BinaryOps.MUL} and x.src[1].tuplize < x.src[0].tuplize else None),
+  # flip order of ADD/MUL
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(UOps.ALU, arg=BinaryOps.MUL, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
 symbolic_flat = symbolic+PatternMatcher([
