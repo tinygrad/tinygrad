@@ -221,7 +221,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is UOps.REDUCE_AXIS else self.arg
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents}}
-  @property  # parents with self
+  @functools.cached_property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
 
   @functools.cached_property
