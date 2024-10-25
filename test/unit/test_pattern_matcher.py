@@ -11,6 +11,18 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), None)
 
+  def test_upat_any(self):
+    def test(a, x=None, y=None, z=None):
+      #print(x,y,z)
+      if y is not None: return a+y
+    matcher = PatternMatcher([
+      (UPat.var("a")+UPat.any(UPat.var("x"), UPat.var("y"), UPat.var("z")), test),
+    ])
+    v1 = UOp.variable("a", 0, 10)
+    v2 = UOp.variable("b", 0, 10)
+    c1 = v1+v2
+    self.assertEqual(matcher.rewrite(c1), c1)
+
   @unittest.skip("closures aren't supported on pattern matchers")
   def test_match_sz_0(self):
     match_cnt = 0
