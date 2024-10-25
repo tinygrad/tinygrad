@@ -3,6 +3,7 @@ import unittest
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
+import torch
 from hypothesis import given, strategies as strat, settings
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
@@ -27,10 +28,17 @@ binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, oper
 if Device.DEFAULT == "LLVM":
   binary_operations.remove(operator.lt)
 
-integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor), (Tensor.bitwise_and, np.bitwise_and),
-                                                 (Tensor.bitwise_or, np.bitwise_or)]
+integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor, torch.bitwise_xor),
+                                                 (Tensor.bitwise_and, np.bitwise_and, torch.bitwise_and),
+                                                 (Tensor.bitwise_or, np.bitwise_or, torch.bitwise_or)]
+
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin),
                     (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
+
+unary_operations_bf16 = [(Tensor.exp2, torch.exp2), (Tensor.log2, torch.log2), (Tensor.sin, torch.sin),
+                         (Tensor.sqrt, torch.sqrt), (Tensor.reciprocal, torch.reciprocal)]
+
+torch_dtypes_map = { dtypes.bfloat16: torch.bfloat16 }
 
 # TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
@@ -48,7 +56,7 @@ class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
   float32 = strat.floats(width=32, allow_subnormal=False)
   float16 = strat.floats(width=16, allow_subnormal=False)
-  bfloat16 = strat.floats(width=16, allow_subnormal=False)
+  bfloat16 = strat.floats(width=32, allow_subnormal=False).map(lambda x: torch.tensor([x]).to(torch.bfloat16).item())
   uint8 = strat.integers(0, 255)
   uint16 = strat.integers(0, 65535)
   uint32 = strat.integers(0, 2**32-1)
@@ -63,9 +71,14 @@ def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)), np.array([b]).astype(_to_np_dtype(dtype)))
-  if dtype is dtypes.bfloat16: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
-  elif dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
+  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
   else: np.testing.assert_equal(tensor_value, numpy_value)
+
+def universal_test_torch(a, b, dtype, op):
+  if not isinstance(op, tuple): op = (op, op, op)
+  tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
+  reference_value = op[2](torch.tensor([a], dtype=torch_dtypes_map[dtype]), torch.tensor([b], dtype=torch_dtypes_map[dtype])).item()
+  np.testing.assert_allclose(tensor_value, reference_value, atol=1e-10)
 
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
@@ -75,9 +88,22 @@ def universal_test_unary(a, dtype, op):
   run_schedule(sched)
   tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
-  if dtype in (*dtypes_float, dtypes.bfloat16):
+  if dtype in dtypes_float:
     np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)
+  if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
+    op = [x for x in ast.parents if x.op is UOps.ALU and x.arg in UnaryOps][0]
+    assert op.dtype == dtype
+
+def universal_test_unary_torch(a, dtype, op):
+  if not isinstance(op, tuple): op = (op, op, op)
+  out: Tensor = op[0](Tensor([a], dtype=dtype))
+  sched = create_schedule([out.lazydata])
+  ast = sched[-1].ast
+  run_schedule(sched)
+  tensor_value = out.numpy()
+  reference_value = op[1](torch.tensor([a], dtype=torch_dtypes_map[dtype])).item()
+  np.testing.assert_allclose(tensor_value, reference_value, atol=1e-3, rtol=1e-2)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
     op = [x for x in ast.parents if x.op is UOps.ALU and x.arg in UnaryOps][0]
     assert op.dtype == dtype
@@ -108,9 +134,10 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.float16, ht.float16, strat.sampled_from(binary_operations))
   def test_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
 
+  # use torch as reference as numpy does not support bfloat16
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16, Device.DEFAULT), f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
-  def test_bfloat16(self, a, b, op): universal_test(a, b, dtypes.bfloat16, op)
+  def test_bfloat16(self, a, b, op): universal_test_torch(a, b, dtypes.bfloat16, op)
 
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
@@ -119,10 +146,10 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.float16, strat.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
+  # use torch as reference as numpy does not support bfloat16
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16, Device.DEFAULT), f"no bfloat16 on {Device.DEFAULT}")
-  @given(ht.bfloat16, strat.sampled_from(unary_operations))
-  @unittest.skipIf(Device.DEFAULT == "AMD", "broken on AMD")
-  def test_bfloat16_unary(self, a, op): universal_test_unary(a, dtypes.bfloat16, op)
+  @given(ht.bfloat16, strat.sampled_from(unary_operations_bf16))
+  def test_bfloat16_unary(self, a, op): universal_test_unary_torch(a, dtypes.bfloat16, op)
 
   @given(ht.uint8, ht.uint8, strat.sampled_from(integer_binary_operations))
   def test_uint8(self, a, b, op): universal_test(a, b, dtypes.uint8, op)
