@@ -1003,13 +1003,13 @@ symbolic = PatternMatcher([
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
   (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
+  # ** constant folding **
+  (UPat(UOps.ALU, name="root", src=UPat((UOps.VCONST, UOps.CONST))),
+   lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src], truncate_output=False))),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y'), lambda x,y: x|y),
   (UPat.var('x', dtype=dtypes.bool).max(UPat.var('y')), lambda x,y: x|y),
-  # ** constant folding **
-  (UPat(UOps.ALU, name="root", src=UPat((UOps.VCONST, UOps.CONST))),
-   lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src], truncate_output=False))),
   # group like
   ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
   # ** combine terms **
