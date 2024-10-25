@@ -82,20 +82,10 @@ class WGSLRenderer(CStyleLanguage):
     if not local_size: local_size = [1]
     bind_it = iter(range(len(bufs)))
     prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
-    prg += """
-      fn ushl(v: vec2<u32>, shift: u32) -> vec2<u32> {
-        if (shift >= 32u) { return vec2<u32>(0u, v.x << (shift - 32u)); }
-        else {
-          return vec2<u32>(v.x << shift, (v.y << shift) | (v.x >> (32u - shift)));
-        }
-      }
-      fn ushr(v: vec2<u32>, shift: u32) -> vec2<u32> {
-        if (shift >= 32u) { return vec2<u32>(v.y >> (shift - 32u), 0u); }
-        else {
-          return vec2<u32>((v.x >> shift) | (v.y << (32u - shift)), v.y >> shift);
-        }
-      }
-    """
+    prg += "fn ushl(v: vec2<u32>, shift: u32) -> vec2<u32> {\n"
+    prg += "return select(vec2<u32>(v.x << shift, (v.y << shift) | (v.x >> (32u - shift))), vec2<u32>(0u, v.x << (shift - 32u)), shift >= 32u); }\n"
+    prg += "fn ushr(v: vec2<u32>, shift: u32) -> vec2<u32> {\n"
+    prg += "return select(vec2<u32>((v.x >> shift) | (v.y << (32u - shift)), v.y >> shift), vec2<u32>(v.y >> (shift - 32u), 0u), shift >= 32u); }\n"
     prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
     prg += "\n".join((prefix or [])+[f"@group(0) @binding({next(bind_it)+1}) {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}: {f'array<{self.type_map[dtype.base]}>' if isinstance(dtype, PtrDType) else 'i32'};" for name,(dtype,rw) in bufs])  # noqa: E501
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501
