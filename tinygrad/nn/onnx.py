@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Tuple, Sequence, Callable, Union, Optional, List, cast, Literal
+from typing import Dict, Tuple, Sequence, Callable, Union, Optional, List, cast, Literal, Any
 import functools, io, math, inspect
 from tinygrad.tensor import Tensor, Device, _broadcast_shape, ConstType
 from tinygrad.helpers import getenv, CI, OSX, prod, flatten, make_pair
@@ -18,8 +18,8 @@ except ImportError:
 # ========== helpers
 # Tensor -> python value cache for arguments
 @functools.lru_cache(None)
-def to_python_const(t:Tensor):
-  if not isinstance(t, Tensor): return t
+def to_python_const(t:Any):
+  if not isinstance(t,Tensor): return t
   if t.dtype is dtypes.uint8: return t.data().tobytes()
   return [] if 0 in t.shape else t.tolist()
 
@@ -170,30 +170,21 @@ def get_run_onnx(onnx_model: ModelProto):
 # https://github.com/onnx/onnx/blob/main/docs/Operators.md
 # transforms the arguments so that it can be easily dispatched
 def transform_arguments(op:str, inps, opts, **kwargs):
-  # helpful functions
-  def set_defaults(inps, opts, defaults, **_): return inps, {**defaults, **opts}
-  def rewrite_opt_names(inps, opts, mapping, **_): return inps, {mapping.get(k, k): v for k, v in opts.items()}
-  def remove_opt_entries(inps, opts, opt_names, **_): return inps, {k:v for k,v in opts.items() if k not in opt_names}
+  # helper functions for op_handler
+  def set_defaults(inps, opts, defaults: Dict, **_): return inps, {**defaults, **opts}
+  def rewrite_opt_names(inps, opts, mapping: Dict, **_): return inps, {mapping.get(k, k): v for k, v in opts.items()}
+  def remove_opt_entries(inps, opts, opt_names: Sequence[str], **_): return inps, {k:v for k,v in opts.items() if k not in opt_names}
   # TODO: k this axis thing is out of control
   def reduce(inps,opts): return [inps[0]], \
     {'axis': inps[1] if len(inps)==2 and inps[1] else opts.get('axes') or ([] if opts['noop_with_empty_axes'] else None), 'keepdim': opts['keepdims']}
 
-  # pad
+  # padding
   # (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> (..., x2_start, x2_end, x1_start, x1_end)
   def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed(list((pb, pe) for pb, pe in zip(pads, pads[len(pads)//2:]))))
   # (H_pad, W_pad) -> (U_pad, L_pad, D_pad, R_pad) aka (x1_begin, x2_begin, ..., x1_end, x2_end, ...)
   def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
     return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
             [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
-  # resolve auto_pad
-  # def _resolve_pool_pad(i_, k_, d_, s_, p_, auto_pad):
-  #   s_, d_, p_ = (make_pair(x, len(k_)*2) for x in (s_, d_, p_))
-  #   if auto_pad == "NOTSET": return p_ if len(p_) == len(k_)*2 else p_*2
-  #   o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
-  #   p_ = OnnxOps._auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad)
-  #   return p_
-  # def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=0, strides=1):
-    # return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads)
   conv_opts = {'pads': 'padding', 'dilations': 'dilation', 'strides': 'stride', 'group': 'groups'}
   def resolve_pool_pads(inps, opts, **_):
     p_,k_,d_,s_ = opts.get('pads', 0), opts.get('kernel_shape') or inps[1], opts.get('dilations',1), opts.get('strides',1),
@@ -204,12 +195,12 @@ def transform_arguments(op:str, inps, opts, **kwargs):
 
   # non lambda functions
   # terrible
-  def _split(inps,opts,n,**_):
+  def split(inps,opts,n,**_):
     size, num_outputs = inps[0].shape[opts.get('axis', 0)], opts.get('num_outputs') or len(n.output)
     return [inps[0], inps[1] if len(inps) == 2 else [size // num_outputs + (1 if i < size % num_outputs else 0) for i in range(num_outputs)]],\
             {k:v for k,v in opts.items() if k not in ('num_outputs', 'split')}
 
-  op_handler = {
+  op_handler: Dict[str, Callable] = {
     **{op: functools.partial(set_defaults, defaults=d) for op, d in {"HardSigmoid": {"alpha": 0.2, "beta": 0.5}}.items()},
     **{op: functools.partial(rewrite_opt_names, mapping=amap) for op, amap in
        {"Concat": {"axis": "dim"}, "LeakyRelu": {"alpha": "neg_slope"}, "Selu": {"gamma": "scale"}}.items()},
@@ -217,9 +208,9 @@ def transform_arguments(op:str, inps, opts, **kwargs):
     **{"Reduce"+op:lambda inps, opts, **_: reduce(*set_defaults(inps, opts, {"noop_with_empty_axes":0, "keepdims":1}))
        for op in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
     **{op: lambda inps, _, **__: (inps, {"axis": tuple(range(2, inps[0].ndim)), "keepdim": True}) for op in ("GlobalAveragePool", "GlobalMaxPool")},
-    **{op: lambda inps,opts,**_: resolve_pool_pads(inps,opts) for op in {"AveragePool", "MaxPool"}},
+    **{op: lambda inps, opts, **_: resolve_pool_pads(inps,opts) for op in {"AveragePool", "MaxPool"}},
     "Conv": lambda inps, opts, **_: remove_opt_entries(*rewrite_opt_names(*resolve_pool_pads(inps,opts), conv_opts), ('kernel_shape', 'auto_pad')),
-    "Split": lambda inps, opts, n, **_: rewrite_opt_names(*_split(inps, opts, n), mapping={'axis': 'dim'}),
+    "Split": lambda inps, opts, n, **_: rewrite_opt_names(*split(inps, opts, n), {'axis': 'dim'}),
     # -> opts y: Tensor
     "Gradient": lambda inps, opts, intermediate_tensor, **_: (inps, {"y": intermediate_tensor[opts["y"]]}),
     # only onnx_model_version < 10 has opt, we just unload the opt into inp to match other versions
@@ -241,20 +232,19 @@ def dispatch(op:str):
     "ReduceMax": "max", "ReduceMin": "min", "ReduceSum": "sum", "ReduceMean": "mean", "ReduceProd": "prod", "GlobalAveragePool": "mean",
     "GlobalMaxPool": "max", "Conv": "conv2d",
     # "SpaceToDepth": "rearrange", "DepthToSpace": "rearrange",
-    **{n:n.lower() for n in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu",
+    **{n:n.lower() for n in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "IsNaN", "IsInf",
     "Sigmoid", "MatMul", "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
     "Elu", "Celu", "Xor", "Round", "Softmax", "LeakyRelu", "Selu", "HardSigmoid", "Einsum", "Cast", "Split", "Clip")}}
 
   # easy lambdas
   # TODO: some of these easy lambdas can go in Tensor.py
   # TODO: hmmm maybe lambdas like this is also not the right idea lol, we're literally losing proper typing for less lines
-  # IsNaN
   lambda_methods: Dict[str, Callable[..., Tensor]] = {"Identity": lambda x:x, "Add": lambda x,y,**_: x+y, "Sub": lambda x,y:x-y,
   "Div": lambda x,y:(x/y).cast(x.dtype), "ArrayFeatureExtractor": lambda x,indices: x[..., indices],
   "ReduceSumSquare": lambda x,axis,keepdim: x.square().sum(axis, keepdim), "ReduceL1": lambda x,axis,keepdim: x.abs().sum(axis, keepdim),
   "ReduceL2": lambda x,axis,keepdim: x.square().sum(axis, keepdim).sqrt(), "ReduceLogSum": lambda x,axis,keepdim: x.sum(axis, keepdim).log(),
   "ReduceLogSumExp": lambda x,axis,keepdim: x.exp().sum(axis, keepdim).log(), "And": lambda x,y: (x==y).where(x,False),
-  "Or": lambda x,y: (x==y).where(x,True), "IsNaN": lambda x: x != x, "Binarizer": lambda x, threshold: (x>threshold).float(),
+  "Or": lambda x,y: (x==y).where(x,True), "Binarizer": lambda x, threshold: (x>threshold).float(),
   "Mean": lambda *data: functools.reduce(Tensor.add, data) / len(data), "Min": lambda *data: functools.reduce(Tensor.minimum, data),
   "Max": lambda *data: functools.reduce(Tensor.maximum, data), "Sum": lambda *data: functools.reduce(Tensor.add, data), }
 
@@ -386,14 +376,6 @@ def dispatch(op:str):
     return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
             [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
 
-  # resolve auto_pad
-  def _resolve_pool_pad(i_, k_, d_, s_, p_, auto_pad):
-    s_, d_, p_ = (make_pair(x, len(k_)*2) for x in (s_, d_, p_))
-    if auto_pad == "NOTSET": return p_ if len(p_) == len(k_)*2 else p_*2
-    o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
-    p_ = _auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad)
-    return p_
-
   def Pad(x:Tensor, pads:List[int], constant_value:Optional[ConstType]=None, axes:Optional[List[int]]=None, mode="constant", value:float=0.):
     constant_value, mode = value if constant_value is None else float(constant_value), {"edge": "replicate", "wrap":"circular"}.get(mode, mode)
     axes, real_pads  = axes or list(range(x.ndim)), [0] * (x.ndim*2)
@@ -409,10 +391,15 @@ def dispatch(op:str):
     indices = ((ret.reshape(-1, 1) == X.reshape(1, -1)) * Tensor.arange(X.numel(), dtype=dtypes.int64).unsqueeze(0)).sum(1).reshape(ret.shape)
     return ret.cast(X.dtype), indices.transpose(-2, -1) if storage_order else indices
 
+  # TODO: basically implement scatter
   def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
     assert pads is None, "no tests covering pads"
     out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
     ret = ((xI.reshape(-1, 1) == Tensor.arange(prod(out_sh))) * xT.reshape(-1, 1)).sum(0).reshape(1, 1, *out_sh)
+    # alternative setitem approach lol
+    # ret = Tensor.zeros(prod(out_sh), dtype=xT.dtype, device=xT.device).contiguous()
+    # ret[xI.flatten()] = xT.flatten()
+    # ret = ret.reshape(1,1,*out_sh)
     if outshape is not None and outshape != ret.shape:
       ret = ret.pad2d(_onnx_pads_to_pad2d_pads(_auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
     return ret
@@ -577,9 +564,6 @@ def dispatch(op:str):
     padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)
     return Tensor.eye(dim, dtype=tiny_dtype).pad(padarg)
 
-  def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
-    return (x == float("inf")) * bool(detect_positive) + (x == float("-inf")) * bool(detect_negative)
-
   def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1, block_size=0):
     if axis < 0: axis += x.ndim
     if not isinstance(x_zero_point, Tensor): x_zero_point = Tensor(x_zero_point)
@@ -590,7 +574,6 @@ def dispatch(op:str):
     return ((x.float() - x_zer) * x_sc).cast(x_scale.dtype)
 
   # copied from https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
-  # without importing PIL we'll have to manually decode a bunch of image formats like PNG, JPEG, WebP, etc
   # TODO maybe uint8 stuff may work?
   def ImageDecoder(encoded_stream: bytes, pixel_format="RGB"):
     try: import PIL.Image
@@ -695,7 +678,9 @@ def dispatch(op:str):
     out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
     return out, present
 
-  # dispatch!
+  #############
+  # dispatch! #
+  #############
   # op name rewrite
   if op in tensor_methods: return (fxn := getattr(Tensor, tensor_methods[op])), fxn.__qualname__
   # lambda

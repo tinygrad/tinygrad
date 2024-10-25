@@ -2468,6 +2468,20 @@ class Tensor:
     """
     return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
 
+  # TODO write tests for these two
+  # >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+  # TODO check when detect_positive is False, do we rewrite it into a noop
+  def isinf(self:Tensor, detect_positive=True, detect_negative=True):
+    """
+    Checks the tensor element-wise to return True where the element is infinity, otherwise returns False
+    """
+    return (self == float("inf")) * detect_positive + (self == float("-inf")) * detect_negative
+  def isnan(self:Tensor):
+    """
+    Checks the tensor element-wise to return True where the element is NaN, otherwise returns False
+    """
+    return self != self
+
   def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor:
     """
     Linearly interpolates between `self` and `end` by `weight`.
