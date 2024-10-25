@@ -10,7 +10,7 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
   children[u] = []
   for x in u.src:
     srcs[u].update(get_children_dfs(x, children, srcs, in_degree))
-    if x.op is UOps.RANGE and x.arg: srcs[u][x] = None
+    if x.op is UOps.RANGE and (x.arg > 0): srcs[u][x] = None
     children[x].append(u)
   in_degree[u] = len(u.src)
   return srcs[u]
@@ -37,7 +37,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   def get_priority(u:UOp):
     priority = 0
     # prefer ranges that depend on the least number of independent ranges
-    if u.op is UOps.RANGE and u.arg:
+    if u.op is UOps.RANGE and (u.arg > 0):
       priority += u.arg
       for p in range_phi[u]:
         priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
@@ -60,6 +60,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   @functools.lru_cache(None)
   def tuplize(u:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
     if u.op is UOps.ALU: arg = u.arg.value
+    if u.op is UOps.RANGE: arg = abs(u.arg)
     else: arg = u.arg
     return (u.op.value, arg, u.dtype, tuple(tuplize(x) for x in u.src))
 
