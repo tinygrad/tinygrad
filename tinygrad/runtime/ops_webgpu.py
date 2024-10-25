@@ -8,7 +8,7 @@ class WGSLCompiler(Compiler):
   def compile(self, src):
     return src.encode()
 
-def create_uniform(wgpu_device, val: int | float) -> wgpu.GPUBuffer:
+def create_uniform(wgpu_device, val) -> wgpu.GPUBuffer:
   buf = wgpu_device.create_buffer(size=4, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
   if isinstance(val, int): wgpu_device.queue.write_buffer(buf, 0, val.to_bytes(4, "little"))
   else: wgpu_device.queue.write_buffer(buf, 0, struct.pack('<f', val))
