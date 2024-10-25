@@ -350,14 +350,18 @@ def get_realizes(outs:List[LazyBuffer]) -> Tuple[Dict[LazyBuffer, None], Dict[La
     for tr in group: del realizes[tr]
   return realizes, reduce_for_op
 
+@dataclass(frozen=True)
+class ScheduleContext:
+  buf_uops: Dict[Buffer, UOp] = field(default_factory=dict)
+  uop_bufs: Dict[UOp, Buffer] = field(default_factory=dict)
+  var_vals: Dict[Variable, int] = field(default_factory=dict)
+  assigned: Set[UOp] = field(default_factory=set)
+
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  ctx = ScheduleContext()
   realizes, reduce_for_op = get_realizes(outs)
   output_groups: DefaultDict[LazyBuffer, List[UOp]] = defaultdict(list)
-  buf_uops: Dict[Buffer, UOp] = {}
-  uop_bufs: Dict[UOp, Buffer] = {}
-  var_vals: Dict[Variable, int] = {}
-  assigned: Set[UOp] = set()
   lazybufs_to_realize: Dict[Buffer, LazyBuffer] = {}
   for buf in realizes:
     if buf.realized is None and buf.op is not MetaOps.CONST:
@@ -376,27 +380,27 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
           buf.buffer.dtype = dtypes.float32
           buf.buffer.options = None
     if buf.op is MetaOps.CONST:
-      if isinstance(val:=buf.arg, UOp): var_vals.update([val.unbind()])
+      if isinstance(val:=buf.arg, UOp): ctx.var_vals.update([val.unbind()])
       uop = UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(buf.dtype.scalar(), buf.arg), v.const_like(0))
     # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
-    else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
-    if buf.buffer not in buf_uops:
-      buf_uops[buf.buffer] = uop
-      uop_bufs[uop] = buf.buffer
+    else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(ctx.buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
+    if buf.buffer not in ctx.buf_uops:
+      ctx.buf_uops[buf.buffer] = uop
+      ctx.uop_bufs[uop] = buf.buffer
     if buf.realized is None:
-      if buf.op is MetaOps.ASSIGN: assigned.add(buf_uops[buf.buffer])
-      if buf.op is not MetaOps.CONST:output_groups[reduce_for_op.get(buf, buf)].append(buf_uops[buf.buffer])
+      if buf.op is MetaOps.ASSIGN: ctx.assigned.add(ctx.buf_uops[buf.buffer])
+      if buf.op is not MetaOps.CONST:output_groups[reduce_for_op.get(buf, buf)].append(ctx.buf_uops[buf.buffer])
 
   # preschedule all buffers in realizes
   prescheduled: List[ScheduleItem] = []
   for stores in output_groups.values():
-    outs = [lazybufs_to_realize[uop_bufs[b]] for b in stores]
+    outs = [lazybufs_to_realize[ctx.uop_bufs[b]] for b in stores]
     cache: Dict[LazyBuffer, UOp] = {}
     metadata: Dict[UOp, Metadata] = {}
-    sink = UOp(UOps.SINK, src=tuple(UOp.store(buf_uops[out.buffer], ShapeTracker.from_shape(out.shape).to_uop(),
-                                              to_uop(out, outs, buf_uops, metadata, cache)) for out in outs))
-    prescheduled.append(si:=ScheduleItem(full_ast_rewrite(sink, ctx:=ScheduleItemContext(var_vals, assigned)), \
-        tuple(b for u in ctx.bufs if (b:=uop_bufs[u]).size != 0), tuple(dedup(metadata.values())), tuple(ctx.assign_preloads)))
+    sink = UOp(UOps.SINK, src=tuple(UOp.store(ctx.buf_uops[out.buffer], ShapeTracker.from_shape(out.shape).to_uop(),
+                                              to_uop(out, outs, ctx.buf_uops, metadata, cache)) for out in outs))
+    prescheduled.append(si:=ScheduleItem(full_ast_rewrite(sink, si_ctx:=ScheduleItemContext(ctx.var_vals, ctx.assigned)), \
+        tuple(b for u in si_ctx.bufs if (b:=ctx.uop_bufs[u]).size != 0), tuple(dedup(metadata.values())), tuple(si_ctx.assign_preloads)))
     if (m:=BUF_LIMIT.get(device:=si.outputs[0].device)) and len(si.bufs) >= m:
       if DEBUG >= 3: print(si)
       raise RuntimeError(f"Kernel for {si.metadata} exceeded the {m} buffer count limit for {device} with {len(si.bufs)} buffers.")
@@ -406,7 +410,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   in_degree: DefaultDict[ScheduleItem, int] = defaultdict(int)
   for lsi in prescheduled:
     # realize outputs before a parent is assigned to
-    parents_assigns = dedup(xsi for x in lsi.assign_preloads if (xsi:=schedule_targets.get(uop_bufs[x])) and xsi is not lsi)
+    parents_assigns = dedup(xsi for x in lsi.assign_preloads if (xsi:=schedule_targets.get(ctx.uop_bufs[x])) and xsi is not lsi)
     for assign in parents_assigns:
       graph[lsi].append(assign)
       in_degree[assign] += 1
@@ -429,7 +433,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   if any(degree != 0 for degree in in_degree.values()) or len(in_degree) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(in_degree)} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
-  return schedule, var_vals
+  return schedule, ctx.var_vals
 
 def create_schedule(outs:List[LazyBuffer]) -> List[ScheduleItem]:
   schedule, var_vals = create_schedule_with_vars(outs)
