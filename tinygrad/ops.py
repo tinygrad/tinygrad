@@ -226,6 +226,7 @@ class UOp(MathTrait):
 
   @functools.cached_property
   def tuplize(self:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
+    if self.op is UOps.NOOP: return (self.op.value, None, self.dtype, ())  # NOOPs are unordered
     return (self.op.value, self.arg.value if self.op is UOps.ALU else self.arg, self.dtype, tuple(x.tuplize for x in self.src))
 
   # *** uop shape stuff ***
