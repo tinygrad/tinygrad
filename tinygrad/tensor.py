@@ -1357,27 +1357,27 @@ class Tensor:
     """
     if mode not in {"constant", "reflect", "replicate", "circular"}: raise ValueError(f"{mode=} is not supported")
     # padding (left, right, top, bottom, ...) -> padding (..., (top, bottom), (left, right))
-    x, padding = self, ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2]))
-    pads, shrinks = tuple((max(pB,0), max(pA,0)) for pB,pA in padding), tuple((-min(pB,0),min(pA+s,s)) for (pB,pA),s in zip(padding, x.shape))
-    if mode == "constant": return x.shrink(shrinks).pad(pads, value)
+    X, pX = self, ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2]))
+    pads, shrinks = tuple((max(pB,0), max(pA,0)) for pB,pA in pX), tuple((-min(pB,0),min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape))
+    if mode == "constant": return X.shrink(shrinks).pad(pads, value)
     if mode == "circular":
-      if any(pB>sh or pA>sh for (pB,pA),sh in zip(padding, x.shape)): raise RuntimeError('Padding value causes wrapping around more than once.')
+      if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, X.shape)): raise RuntimeError('Padding value causes wrapping around more than once.')
       # first crop
-      x = x.shrink(shrinks)
-      cropped, x = x.shape, x.repeat(tuple(int(pB > 0) + int(pA > 0) + 1 for pB, pA in pads))
+      X = X.shrink(shrinks)
+      cropped, X = X.shape, X.repeat(tuple(int(pB > 0) + int(pA > 0) + 1 for pB, pA in pads))
       # shrink to circular padded shape if repeated shape is larger than circular padded shape else pad 0 to get to padded shape
-      x = x.shrink([(max(csh-pB, 0) if pB > 0 else 0, xsh - max(csh-pA, 0) if pA > 0 else xsh) for (pB,pA),csh,xsh in zip(padding, cropped, x.shape)])
-      return x.pad(tuple((max(pB-csh, 0), max(pA-csh, 0)) for (pB,pA),csh in zip(pads,cropped)))
+      X = X.shrink(tuple((max(csh-pB, 0) if pB > 0 else 0, xsh - max(csh-pA, 0) if pA > 0 else xsh) for (pB,pA),csh,xsh in zip(pX, cropped, X.shape)))
+      return X.pad(tuple((max(pB-csh, 0), max(pA-csh, 0)) for (pB,pA),csh in zip(pads,cropped)))
     for d,(pB,pA) in enumerate(pads):
       if mode == "reflect":
-        if pB >= (s:=x.shape[d]) or pA>=s: raise RuntimeError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
-        xB = x[[slice(pB,0,-1) if i == d else slice(None) for i in range(x.ndim)]] if pB else None
-        xA = x[[slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1) if i==d else slice(None) for i in range(x.ndim)]] if pA else None
+        if pB >= (s:=X.shape[d]) or pA>=s: raise RuntimeError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
+        xB = X[[slice(pB,0,-1) if i == d else slice(None) for i in range(X.ndim)]] if pB else None
+        xA = X[[slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1) if i==d else slice(None) for i in range(X.ndim)]] if pA else None
       if mode == "replicate":
-        xB = x[[slice(None,1) if i==d else slice(None) for i in range(x.ndim)]].expand([pB if i==d else None for i in range(x.ndim)]) if pB else None
-        xA = x[[slice(-1,None) if i==d else slice(None) for i in range(x.ndim)]].expand([pA if i==d else None for i in range(x.ndim)]) if pA else None
-      x = Tensor.cat(*(x_ for x_ in (xB, x, xA) if x_ is not None), dim=d)
-    return x.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(padding, x.shape)))
+        xB = X[[slice(None,1) if i==d else slice(None) for i in range(X.ndim)]].expand([pB if i==d else None for i in range(X.ndim)]) if pB else None
+        xA = X[[slice(-1,None) if i==d else slice(None) for i in range(X.ndim)]].expand([pA if i==d else None for i in range(X.ndim)]) if pA else None
+      X = Tensor.cat(*(X_ for X_ in (xB, X, xA) if X_ is not None), dim=d)
+    return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
 
   @property
   def T(self) -> Tensor:
