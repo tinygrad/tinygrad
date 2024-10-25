@@ -34,7 +34,7 @@ def render(uop:UOp) -> str:
 def Special(expr, nmax): return UOp(UOps.SPECIAL, dtypes.int, (), (expr, nmax))
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
 def Range(n, nmax):
-  return UOp(UOps.RANGE, dtypes.int, arg=(n, True), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, nmax),))
+  return UOp(UOps.RANGE, dtypes.int, arg=n, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, nmax),))
 
 class TestHelpers(unittest.TestCase):
   def test_is_increasing(self):
@@ -54,7 +54,7 @@ class TestHelpers(unittest.TestCase):
     self.assertTrue(is_increasing(f2))
     self.assertTrue(is_increasing(f3))
 
-    rng = UOp(UOps.RANGE, dtypes.int, arg=(2, True), src=(UOp(UOps.CONST, dtypes.int, arg=0, src=()), UOp(UOps.CONST, dtypes.int, arg=5, src=()),))
+    rng = UOp(UOps.RANGE, dtypes.int, arg=2, src=(UOp(UOps.CONST, dtypes.int, arg=0, src=()), UOp(UOps.CONST, dtypes.int, arg=5, src=()),))
     self.assertTrue(is_increasing(rng))
     self.assertTrue(is_increasing(rng+2))
 
