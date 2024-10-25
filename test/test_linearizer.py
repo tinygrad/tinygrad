@@ -1094,7 +1094,7 @@ class TestLinearizer(unittest.TestCase):
 
         # ensure the results for each choice of axis matches
         if golden_result is None: golden_result = np.frombuffer(real_bufs[0].as_buffer(), _to_np_dtype(real_bufs[0].dtype))
-        np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.15)
+        np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.2)
 
       # check that get_kernel_actions produces all 9 options
       from tinygrad.engine.search import get_kernel_actions

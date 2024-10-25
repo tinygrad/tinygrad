@@ -169,11 +169,11 @@ class TestGraphRewrite(unittest.TestCase):
   def test_commutative_work(self):
     a = UOp.variable('a', 0, 1)
     b = UOp.variable('b', 0, 1)
-    self.assertIs(a+b, b+a)
+    self.assertIs((a+b).simplify(), (b+a).simplify())
 
   def test_consts_go_last_right_away(self):
     a = UOp.variable('a', 0, 1)
-    tst = 2+a
+    tst = (2+a).simplify()
     self.assertIs(tst.src[0], a)
     self.assertIs(tst.src[1], a.const_like(2))
 
