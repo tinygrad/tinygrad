@@ -94,7 +94,7 @@ def view_r(view:UOp, r:UOp, rsrc:UOp) -> Optional[UOp]:
 
 def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:
   swizzle_st, src_st = unwrap(swizzle.st), unwrap(swizzle.src[0].st)
-  assert swizzle_st.contiguous, "can't push a non contiguous SWIZZLE down to STORE"
+  assert swizzle_st.contiguous, "can't push a non contiguous VIEW down to STORE"
   assert prod(swizzle_st.shape) == prod(src_st.shape), "can't push expands down to STORE"
   output_shape = swizzle_st.reduce(root.axis_arg)
   new_axis = tuple(i for i,(s,u) in enumerate(zip(src_st.shape, output_shape)) if s != u)
@@ -134,7 +134,7 @@ view_right = merge_views+PatternMatcher([
   (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, src=UPat.var("rsrc"), name="r"),), name="view"), view_r),
   # push a VIEW down to STORE, through a reduce (ONLY reshapes)
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.VIEW, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
-  # push SWIZZLE(s) down to STORE, through an elementwise op (ONLY reshapes)
+  # push VIEW(s) down to STORE, through an elementwise op (ONLY reshapes)
   (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.CONTIGUOUS, UOps.STORE), name="root"), push_swizzle_down_through_elementwise),
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
