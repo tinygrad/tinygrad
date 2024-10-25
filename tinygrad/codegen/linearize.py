@@ -38,7 +38,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     priority = 0
     # prefer ranges that depend on the least number of independent ranges
     if u.op is UOps.RANGE and u.arg > 0:
-      priority += u.arg
+      priority += (u.arg-1)
       for p in range_phi[u]:
         priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
     # prefer uops that are loop children
