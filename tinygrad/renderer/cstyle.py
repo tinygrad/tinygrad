@@ -115,10 +115,10 @@ class CStyleLanguage(Renderer):
     # sorts dtyped items first
     sorted_code_for_op = sorted(self.code_for_op.items(), key=lambda item: item[0][1] is None)
 
-    # fun=alu_rewrite is a hack to avoid closure on pattern matcher
-    return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x,fun=alu_op_rewrite:
-      fun(*[strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
-      for (op, dtype), alu_op_rewrite in sorted_code_for_op]])
+    # render_alu=alu_code_for_op is a hack to avoid closure on pattern matcher
+    return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x,render_alu=alu_code_for_op:
+      render_alu(*[strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
+      for (op, dtype), alu_code_for_op in sorted_code_for_op]])
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
@@ -183,8 +183,7 @@ class ClangRenderer(CStyleLanguage):
   # language options
   buffer_suffix = " restrict"
   type_map = {dtypes.bool:"_Bool", dtypes.half:"__fp16"}
-  code_for_op = {
-    **({(op, dtype): v for (op, dtype), v in CStyleLanguage.code_for_op.items() if op not in (UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2)}),
+  code_for_op = { **({(op,dtype): v for (op,dtype), v in CStyleLanguage.code_for_op.items() if op not in (UnaryOps.EXP2,UnaryOps.SIN,UnaryOps.LOG2)}),
     (UnaryOps.SQRT, (dtypes.float64,)): lambda x: f"__builtin_sqrtl({x})", (UnaryOps.SQRT, None): lambda x: f"__builtin_sqrtf({x})" }
 
   if AMX:

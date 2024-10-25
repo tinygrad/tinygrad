@@ -83,7 +83,7 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
-  code_for_op: Dict[Union[Op, Tuple[Op,Optional[Tuple[DType, ...]]]], Callable] = {}
+  code_for_op: Union[Dict[Op, Callable], Dict[Union[Op, Tuple[Op, Optional[Tuple[DType, ...]]]], Callable]] = {}
 
   def __reduce__(self): return self.__class__, ()
   def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")
