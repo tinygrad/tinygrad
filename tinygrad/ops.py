@@ -195,7 +195,9 @@ class UOpMetaClass(type):
     if op is UOps.ALU and arg in COMMUTATIVE and (src[0] is not src[1] and src[1].tuplize < src[0].tuplize and src[0].op is not UOps.NOOP):
       src = src[::-1]
     if (ret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
-    UOpMetaClass.ucache[key] = ret = super().__call__(op, dtype, src, arg)
+    ret = super().__call__(op, dtype, src, arg)
+    while (nret:=instant.rewrite(ret)) is not None: ret = nret
+    UOpMetaClass.ucache[key] = ret
     return ret
 
 class UOp(MathTrait, metaclass=UOpMetaClass):
@@ -979,6 +981,10 @@ instant = PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
+])
+
+symbolic = instant+PatternMatcher([
+  # ** more self folding **
   (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
   (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
   (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
@@ -1001,9 +1007,6 @@ instant = PatternMatcher([
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat((UOps.VCONST, UOps.CONST))),
    lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src], truncate_output=False))),
-])
-
-symbolic = instant+PatternMatcher([
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y'), lambda x,y: x|y),
