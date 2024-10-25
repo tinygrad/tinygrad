@@ -17,7 +17,7 @@ sys.setrecursionlimit(10000)
 BUF_LIMIT = {"METAL":32}
 METAOPS = {MetaOps.COPY:UOps.COPY, MetaOps.EMPTY:UOps.EMPTY, MetaOps.VIEW:UOps.BUFFER_VIEW}
 
-# *** ScheduleItem return type ***
+# **** ScheduleItem return type
 
 @dataclass(frozen=True)
 class ScheduleItem:
@@ -36,7 +36,30 @@ class ScheduleItem:
   @functools.cached_property
   def output_idxs(self) -> Tuple[int, ...]: return tuple(x.src[0].arg for x in self.ast.src) if self.ast.op is UOps.SINK else (0,)
 
-# *** UOp with VIEW (movementops) rewriting to UOp we can index ***
+# **** small wrapper for LazyBuffer -> UOp
+
+def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], metadata:Dict[UOp, Metadata], cache:Dict[LazyBuffer, UOp]) -> UOp:
+  if (r:=cache.get(buf)) is not None: return r
+  if buf is not buf.base:
+    cache[buf] = ret = to_uop(buf.base, outputs, buf_uops, metadata, cache).view(buf.st)
+    return ret
+  if buf.op is MetaOps.CONST: return buf_uops[buf.buffer]
+  dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
+  if buf.is_realized(): return UOp(UOps.PRELOAD, dtype, (buf_uops[buf.buffer], buf.st.to_uop()))
+  if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs: return UOp(UOps.LOAD, dtype, (ubuf, buf.st.to_uop()))
+  src = tuple(to_uop(x, outputs, buf_uops, metadata, cache) for x in buf.srcs)
+  if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
+  elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
+  elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]), buf.arg)
+  elif buf.op in METAOPS: ret = UOp(METAOPS[cast(MetaOps, buf.op)], buf.dtype, (buf_uops[buf.buffer], *src), buf.arg)
+  elif buf.op is UnaryOps.CAST: ret = UOp(UOps.CAST, dtype, src)
+  elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
+  else: ret = UOp(UOps.ALU, dtype, src, buf.op)
+  cache[buf] = ret
+  if buf.metadata is not None: metadata[ret] = buf.metadata
+  return ret
+
+# **** AST graph rewrite
 
 # ** helpers for doing movementops on uops
 
@@ -52,7 +75,7 @@ def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTr
   tmp = input_st.permute(permute_axis)
   return tmp, tmp.shape[-len(axis):]
 
-# ** reduceop fusor
+# ** movementops rewrite rules
 
 def view_r(view:UOp, r:UOp, rsrc:UOp) -> Optional[UOp]:
   if (st:=unwrap(view.st)).contiguous: return None
@@ -71,7 +94,7 @@ def view_r(view:UOp, r:UOp, rsrc:UOp) -> Optional[UOp]:
 
 def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp) -> UOp:
   swizzle_st, src_st = unwrap(swizzle.st), unwrap(swizzle.src[0].st)
-  assert swizzle_st.contiguous, "can't push a non contiguous SWIZZLE down to STORE"
+  assert swizzle_st.contiguous, "can't push a non contiguous VIEW down to STORE"
   assert prod(swizzle_st.shape) == prod(src_st.shape), "can't push expands down to STORE"
   output_shape = swizzle_st.reduce(root.axis_arg)
   new_axis = tuple(i for i,(s,u) in enumerate(zip(src_st.shape, output_shape)) if s != u)
@@ -107,11 +130,11 @@ view_right = merge_views+PatternMatcher([
   # ASSIGN can override st
   (UPat(UOps.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(UOps.ASSIGN, name="a"))),
    lambda a,b,st: UOp.store(b, (a.arg[0]+st.arg).to_uop(), a.replace(arg=())) if a.arg else None),
-  # view on reduce creates a new VIEW
+  # VIEW on a reduce creates a new VIEW
   (UPat(UOps.VIEW, src=(UPat(UOps.REDUCE_AXIS, src=UPat.var("rsrc"), name="r"),), name="view"), view_r),
-  # push a SWIZZLE down to STORE, through a reduce (ONLY reshapes)
+  # push a VIEW down to STORE, through a reduce (ONLY reshapes)
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.VIEW, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
-  # push SWIZZLE(s) down to STORE, through an elementwise op (ONLY reshapes)
+  # push VIEW(s) down to STORE, through an elementwise op (ONLY reshapes)
   (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.CONTIGUOUS, UOps.STORE), name="root"), push_swizzle_down_through_elementwise),
   (UPat(UOps.REDUCE_AXIS, src=(UPat(UOps.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
@@ -149,7 +172,6 @@ to_si = PatternMatcher([
   (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda _,x: x),
 ])
 
-PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, ScheduleItemContext, UOp]] = []
 def full_ast_rewrite(pre:UOp, ctx:ScheduleItemContext) -> UOp:
   # assert cyclic dependency
   for b,reads in itertools.groupby((x for x in pre.sparents if x.op in {UOps.PRELOAD,UOps.LOAD} and x.src[0] in ctx.assigned), key=lambda x:x.src[0]):
@@ -168,33 +190,13 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleItemContext) -> UOp:
   PROCESS_REPLAY_CAPTURE.append((pre, ScheduleItemContext(ctx.var_vals, ctx.assigned), sink))
   return sink
 
+PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, ScheduleItemContext, UOp]] = []
 if getenv("RUN_PROCESS_REPLAY"):
   @atexit.register
   def save_process_replay():
     for base_sink,ctx,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(base_sink.key), (base_sink, ctx, ret))
 
-# *** List[LazyBuffer] lowering to ScheduleItem ***
-
-def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], metadata:Dict[UOp, Metadata], cache:Dict[LazyBuffer, UOp]) -> UOp:
-  if (r:=cache.get(buf)) is not None: return r
-  if buf is not buf.base:
-    cache[buf] = ret = to_uop(buf.base, outputs, buf_uops, metadata, cache).view(buf.st)
-    return ret
-  if buf.op is MetaOps.CONST: return buf_uops[buf.buffer]
-  dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
-  if buf.is_realized(): return UOp(UOps.PRELOAD, dtype, (buf_uops[buf.buffer], buf.st.to_uop()))
-  if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs: return UOp(UOps.LOAD, dtype, (ubuf, buf.st.to_uop()))
-  src = tuple(to_uop(x, outputs, buf_uops, metadata, cache) for x in buf.srcs)
-  if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
-  elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
-  elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]), buf.arg)
-  elif buf.op in METAOPS: ret = UOp(METAOPS[cast(MetaOps, buf.op)], buf.dtype, (buf_uops[buf.buffer], *src), buf.arg)
-  elif buf.op is UnaryOps.CAST: ret = UOp(UOps.CAST, dtype, src)
-  elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
-  else: ret = UOp(UOps.ALU, dtype, src, buf.op)
-  cache[buf] = ret
-  if buf.metadata is not None: metadata[ret] = buf.metadata
-  return ret
+# **** Schedule creation and BFS toposort
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
@@ -214,6 +216,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       raise RuntimeError(f"Kernel for {si.metadata} exceeded the {m} buffer count limit for {device} with {len(si.bufs)} buffers.")
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
+  # do BFS
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
   in_degree: DefaultDict[ScheduleItem, int] = defaultdict(int)
   for lsi in prescheduled:
@@ -227,7 +230,6 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     for x in scheduled_parents:
       graph[x].append(lsi)
       in_degree[lsi] += 1
-
   queue = deque(lsi for lsi in prescheduled if in_degree[lsi] == 0)
   schedule: List[ScheduleItem] = []
   while queue:
@@ -236,7 +238,6 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     for x in graph[si]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
-
   # confirm everything was scheduled correctly
   if any(degree != 0 for degree in in_degree.values()) or len(in_degree) != len(schedule):
     raise RuntimeError(f"cycle detected in graph, prescheduled {len(in_degree)} but only scheduled {len(schedule)}")
