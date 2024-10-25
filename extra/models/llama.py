@@ -217,7 +217,7 @@ def convert_from_gguf(weights:Dict[str, Tensor], model: Transformer):
     "rope_freqs.weight": "rope_freqs.weight",
   }
   sd = {keymap[k]: v for k,v in weights.items()}
-  sd["output.weight"] = weights["token_embd.weight"].to(Device.DEFAULT)
+  sd["output.weight"] = weights["token_embd.weight"]
   return sd
 
 def fix_bf16(weights:Dict[Any, Tensor]):
