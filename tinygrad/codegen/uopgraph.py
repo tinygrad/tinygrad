@@ -488,7 +488,7 @@ reducer = PatternMatcher([
   # image load valid idx simplification
   (UPat(UOps.LOAD, name="load"), simplify_image_load),
   # buffer load valid idx simplification
-  (UPat(UOps.LOAD, name="load"), simplify_buffer_load),
+  #(UPat(UOps.LOAD, name="load"), simplify_buffer_load),
 ])
 
 # *** uop graph ***
