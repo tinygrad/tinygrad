@@ -193,7 +193,9 @@ class UOpMetaClass(type):
   ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
   def __call__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
     if (ret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
-    UOpMetaClass.ucache[key] = ret = super().__call__(op, dtype, src, arg)
+    ret = super().__call__(op, dtype, src, arg)
+    while (nret:=instant.rewrite(ret)) is not None: ret = nret
+    UOpMetaClass.ucache[key] = ret
     return ret
 
 class UOp(MathTrait, metaclass=UOpMetaClass):
@@ -972,6 +974,11 @@ def max_var_const(x:UOp, c1:UOp, c2:UOp):
   if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
 
+instant = PatternMatcher([
+  (UPat(UOps.ALU, arg=BinaryOps.ADD, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(UOps.ALU, arg=BinaryOps.MUL, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+])
+
 symbolic = PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
@@ -1058,9 +1065,6 @@ symbolic = PatternMatcher([
   # ** mod **
   # mod folding
   (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
-  # flip order of ADD/MUL
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
-  (UPat(UOps.ALU, arg=BinaryOps.MUL, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
 symbolic_flat = symbolic+PatternMatcher([
