@@ -441,7 +441,7 @@ jobs:
         id: month
         run: echo "month=$(date +'%Y%m')">> $GITHUB_OUTPUT
         shell: bash
-      - name: Cache gpuocelot
+      - name: Cache gpuocelot build (invalidated monthly)
         if: matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv'
         id: cache-build
         uses: actions/cache@v4
