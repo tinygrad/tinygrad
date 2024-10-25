@@ -110,15 +110,27 @@ class CStyleLanguage(Renderer):
       return (self.smem_prefix if dt.local else self.buffer_prefix) + self.render_dtype(dt.base) + ("*" if isinstance(dt, PtrDType) else "")
     return self.type_map.get(scalar:=dt.scalar(), scalar.name) + (str(dt.count) if (dt.count) > 1 else "")
 
+  # @functools.cached_property
+  # def alu_rewrite_2(self) -> PatternMatcher:
+  #   # sorts dtyped items first
+  #   sorted_code_for_op = sorted(self.code_for_op.items(), key=lambda item: item[0][1] is None)
+
+  #   # render_alu=alu_code_for_op is a hack to avoid closure on pattern matcher
+  #   return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x,render_alu=alu_code_for_op:
+  #     render_alu(*[strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
+  #     for (op, dtype), alu_code_for_op in sorted_code_for_op]])
+
   @functools.cached_property
   def alu_rewrite(self) -> PatternMatcher:
     # sorts dtyped items first
     sorted_code_for_op = sorted(self.code_for_op.items(), key=lambda item: item[0][1] is None)
 
-    # render_alu=alu_code_for_op is a hack to avoid closure on pattern matcher
-    return PatternMatcher([*[(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), lambda r,x,render_alu=alu_code_for_op:
-      render_alu(*[strip_parens(r[v]) if v.arg==x.arg and x.arg in {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.XOR} else r[v] for v in x.src]))
-      for (op, dtype), alu_code_for_op in sorted_code_for_op]])
+    # functools.partial is neccessary to avoid closure on pattern matcher
+    def func(r, x, render_alu):
+      return render_alu(*[strip_parens(r[v]) if v.arg == x.arg and x.arg in (BinaryOps.ADD,BinaryOps.MUL,BinaryOps.XOR) else r[v] for v in x.src])
+
+    return PatternMatcher([(UPat(UOps.ALU, arg=op, dtype=dtype, name="x"), functools.partial(func, render_alu=alu_code_for_op))
+      for (op, dtype), alu_code_for_op in sorted_code_for_op])
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
