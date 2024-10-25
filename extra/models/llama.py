@@ -205,6 +205,21 @@ def convert_from_huggingface(weights:Dict[str, Tensor], model: Transformer, n_he
     sd[keymap[k]] = v
   return sd
 
+def convert_from_gguf(weights:Dict[str, Tensor], model: Transformer):
+  keymap = {
+    "token_embd.weight": "tok_embeddings.weight",
+    **{f"blk.{l}.attn_norm.weight": f"layers.{l}.attention_norm.weight" for l in range(len(model.layers))},
+    **{f"blk.{l}.attn_{x}.weight": f"layers.{l}.attention.w{x}.weight" for x in ["q", "k", "v"] for l in range(len(model.layers))},
+    **{f"blk.{l}.attn_output.weight": f"layers.{l}.attention.wo.weight" for l in range(len(model.layers))},
+    **{f"blk.{l}.ffn_norm.weight": f"layers.{l}.ffn_norm.weight" for l in range(len(model.layers))},
+    **{f"blk.{l}.ffn_{x}.weight": f"layers.{l}.feed_forward.w{y}.weight" for x, y in {"gate": "1", "down": "2", "up": "3"}.items() for l in range(len(model.layers))},
+    "output_norm.weight": "norm.weight",
+    "rope_freqs.weight": "rope_freqs.weight",
+  }
+  sd = {keymap[k]: v for k,v in weights.items()}
+  sd["output.weight"] = weights["token_embd.weight"].to(Device.DEFAULT)
+  return sd
+
 def fix_bf16(weights:Dict[Any, Tensor]):
   if getenv("SUPPORT_BF16", 1):
     # TODO: without casting to float16, 70B llama OOM on tinybox.
