@@ -2155,9 +2155,11 @@ class Tensor:
     assert self.shape[axis] != 0
     pl_sz = self.shape[axis] - 1
     values = self.transpose(axis,-1).pad2d((pl_sz, 0), -float("inf"))._pool((self.shape[axis],)).max(-1).transpose(axis,-1)
-    idxs = Tensor.arange(self.shape[axis], dtype=dtypes.int64, device=self.device).reshape(*[1 if i != axis else -1 for i in range(self.ndim)]).expand(self.shape)
+    idxs = Tensor.arange(self.shape[axis], dtype=dtypes.int64, device=self.device)
+    idxs = idxs.reshape(*[1 if i != axis else -1 for i in range(self.ndim)]).expand(self.shape)
     idx_mask = (self == values) * idxs # index is turned on if values[i] = cummax[i]
-    max_idxs =  idx_mask.transpose(axis,-1).pad2d((self.shape[axis]-1, 0))._pool((self.shape[axis],)).max(-1).transpose(axis,-1) # fill blanks with max_idx
+    # fill blanks with max_idx
+    max_idxs =  idx_mask.transpose(axis,-1).pad2d((self.shape[axis]-1, 0))._pool((self.shape[axis],)).max(-1).transpose(axis,-1)
 
     return values, max_idxs.detach()
 
@@ -2178,7 +2180,6 @@ class Tensor:
     axis = self._resolve_dim(axis)
     if self.ndim == 0 or 0 in self.shape: return self, self.cast(dtypes.int64)
     return self._cummax(axis)
-
 
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, **kwargs) -> Tensor:
