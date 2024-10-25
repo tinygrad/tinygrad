@@ -190,13 +190,15 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
 
 ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
-class UOp(MathTrait):
-  def __reduce__(self): return UOp, (self.op, self.dtype, self.src, self.arg)
-  def __new__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
+class UOpMetaClass(type):
+  def __call__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
     if (ret:=ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
     if op is UOps.ALU and arg in COMMUTATIVE and (ret:=ucache.get((op, dtype, src[::-1], arg), None)) is not None: return ret
-    ucache[key] = ret = super().__new__(cls)
+    ucache[key] = ret = super().__call__(op, dtype, src, arg)
     return ret
+
+class UOp(MathTrait, metaclass=UOpMetaClass):
+  def __reduce__(self): return UOp, (self.op, self.dtype, self.src, self.arg)
 
   __slots__ = ["op", "dtype", "src", "arg"]
   def __init__(self, op:UOps, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
