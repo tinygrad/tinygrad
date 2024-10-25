@@ -590,9 +590,10 @@ class UPat(MathTrait):
 
 class UPatAny(UPat):
   def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
+    ret = []
     for x in self.src[0]:
-      if (match:=x.match(uop, store.copy())): return match
-    return []
+      if (match:=x.match(uop, store.copy())): ret.extend(match)
+    return ret
 
 def deconstruct_function(fxn:Callable) -> Tuple:
   new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
@@ -625,7 +626,8 @@ class PatternMatcher:
     ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
     for p,fxn,early_reject in self.pdict.get((uop.op, uop.arg), []) + ([] if uop.arg is None else self.pdict.get((uop.op, None), [])):
       if not early_reject.issubset(ler): continue
-      if (matches := p.match(uop, {})) and (ret:=(fxn(ctx, **matches[0]) if ctx is not None else fxn(**matches[0]))) is not None: return ret
+      for match in p.match(uop, {}):
+        if (ret:=(fxn(ctx, **match) if ctx is not None else fxn(**match))) is not None: return ret
     return None
 
 # *** tracking pattern matcher ***
