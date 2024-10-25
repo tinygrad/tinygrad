@@ -83,7 +83,7 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
-  # different types are necessary while ptx and llvm are not pm-style
+  # different types are necessary while ptx and llvmir are not pm-style
   code_for_op: Union[Dict[Op, Callable], Dict[Union[Op, Tuple[Op, Optional[Tuple[DType, ...]]]], Callable]] = {}
 
   def __reduce__(self): return self.__class__, ()
