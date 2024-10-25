@@ -7,7 +7,7 @@ from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite, split_uop, symbolic_flat, Variable, sint
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True)
 class ShapeTracker:
   views: Tuple[View, ...]
 
