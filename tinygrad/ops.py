@@ -194,7 +194,8 @@ class UOpMetaClass(type):
   def __call__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
     if (ret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
     ret = super().__call__(op, dtype, src, arg)
-    while (nret:=instant.rewrite(ret)) is not None: ret = nret
+    # NOTE: instant rules only get one shot to run
+    if (nret:=instant.rewrite(ret)) is not None: ret = nret
     UOpMetaClass.ucache[key] = ret
     return ret
 
@@ -975,9 +976,8 @@ def max_var_const(x:UOp, c1:UOp, c2:UOp):
   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
 
 instant = PatternMatcher([
-  (UPat(UOps.ALU, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.arg in COMMUTATIVE and \
-   x.src[0] is not x.src[1] and x.src[1].tuplize < x.src[0].tuplize else None),
-])
+  (UPat(UOps.ALU, arg=cc, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[0] is not x.src[1] \
+   and x.src[1].tuplize < x.src[0].tuplize else None) for cc in COMMUTATIVE])
 
 symbolic = PatternMatcher([
   # ** self folding **
