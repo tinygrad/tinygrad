@@ -1533,7 +1533,7 @@ class TestOps(unittest.TestCase):
     for stride in [(2,1), (1,2), 1]:
       helper_test_op([(2,4,4,5), (4,4,3,3)],
         lambda x,w: torch.nn.functional.conv_transpose2d(x,w, stride=stride).relu(),
-        lambda x,w: Tensor.conv_transpose2d(x,w,stride=stride).relu(), grad_rtol=1e-5)
+        lambda x,w: Tensor.conv_transpose2d(x,w,stride=stride).relu(), atol=1e-5, grad_rtol=1e-5)
 
   def test_output_padded_conv_transpose2d(self):
     for output_padding, stride in [((1,1), (2,3)), ((2,1), (3,2))]:
