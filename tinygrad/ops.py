@@ -977,7 +977,7 @@ def max_var_const(x:UOp, c1:UOp, c2:UOp):
 
 instant = PatternMatcher([
   (UPat(UOps.ALU, arg=cc, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[0] is not x.src[1] \
-   and x.src[1].tuplize < x.src[0].tuplize else None) for cc in COMMUTATIVE])
+   and x.src[1].tuplize < x.src[0].tuplize and x.src[0].op is not UOps.NOOP else None) for cc in COMMUTATIVE])
 
 symbolic = PatternMatcher([
   # ** self folding **
