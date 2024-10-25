@@ -974,13 +974,13 @@ def max_var_const(x:UOp, c1:UOp, c2:UOp):
   if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
 
-# instant promises to either return an existing UOp that's a parent or a const
-instant = PatternMatcher([
+symbolic = PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
   (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
   (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
+  (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
   (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
   ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
   ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
@@ -1001,15 +1001,10 @@ instant = PatternMatcher([
   # ** constant folding **
   (UPat(UOps.ALU, name="root", src=UPat((UOps.VCONST, UOps.CONST))),
    lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src], truncate_output=False))),
-])
-
-symbolic = instant+PatternMatcher([
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y'), lambda x,y: x|y),
   (UPat.var('x', dtype=dtypes.bool).max(UPat.var('y')), lambda x,y: x|y),
-  # ** self folding **
-  (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
   # group like
   ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
   # ** combine terms **
