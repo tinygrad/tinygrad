@@ -18,8 +18,8 @@ def dfdiv2_f2_f2_f2(nx:UOp, ny:UOp, dx:UOp, dy:UOp) -> Tuple[UOp, UOp]:
   return qx, qy
 # *** helper functions for bit manipulation ***
 def significand_bits(d:DType) -> int: return dtypes.finfo(d)[1]
-def exponent_bias(d:DType) -> int: return {dtypes.float64: 1022, dtypes.float32: 126, dtypes.float16: 14}[d]
-def exponent_mask(d:DType) -> int: return {dtypes.float64: 0x7FF, dtypes.float32: 0xFF, dtypes.float16: 0x1F}[d]
+def exponent_bias(d:DType) -> int: return {dtypes.float64: 1023, dtypes.float32: 127, dtypes.float16: 15}[d]
+def exponent_mask(d:DType) -> int: return {dtypes.float64: 2047, dtypes.float32: 255, dtypes.float16: 31}[d]
 
 def float_to_bits(d:UOp) -> UOp:
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
@@ -44,15 +44,14 @@ def pow2if(q:UOp, float_dtype:DType):
   """cast(2^q, float_dtype) where q is any integer in the range of [-126, 127]"""
   assert q.dtype in (dtypes.int64, dtypes.int32, dtypes.int16, dtypes.uint32)
   final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype, dtypes.uint32: dtypes.float32}[q.dtype]
-  return shl((q + (exponent_bias(final_dtype)+1)), significand_bits(final_dtype)).bitcast(final_dtype)
+  return shl(q + exponent_bias(final_dtype), significand_bits(final_dtype)).bitcast(final_dtype)
 
 def ilogb2k(d:UOp) -> UOp:
   """calculate the integer part of log2(d), where d is normalized fp value in the range of [0, +inf)."""
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   dint = d.bitcast({dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype])
   # -1 <= ilog2bk(d) <= 128
-  # ((float_to_bits(d) >> significand_bits(dtype)) & exponent_mask(dtype)) - exponent_bias(dtype)
-  return (shr(dint, significand_bits(d.dtype)) & exponent_mask(d.dtype)) - (exponent_bias(d.dtype)+1)
+  return (shr(dint, significand_bits(d.dtype)) & exponent_mask(d.dtype)) - exponent_bias(d.dtype)
 
 def ldexp3k(d:UOp, e:UOp) -> UOp:
   """d*2^e. e is a number obtained by casting an integer in the range [-127, 127] to a float. d is any float number."""
@@ -75,11 +74,11 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3800}[v.dtype]
   bits = float_to_bits(v)
   exponent = shr(bits, significand_bits(v.dtype)) & exponent_mask(v.dtype)
-  exponent_zero = exponent.ne(0.0)
+  exponent_zero = exponent.ne(0)
   # Set the exponent bits appropriately to normalize the mantissa into the range of [0.5, 1.0).
   result_f = bits_to_float((bits & m1) | m2, v.dtype)
   value = exponent_zero.where(result_f, v)
-  exp = exponent - exponent_bias(v.dtype)
+  exp = exponent - exponent_bias(v.dtype) + 1
   exp = exponent_zero.where(exp, exp.const_like(0))
   if v.dtype == dtypes.float16: exp = exp.bitcast(dtypes.int16)
   return value, exp
