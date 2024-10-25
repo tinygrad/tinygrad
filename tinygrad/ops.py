@@ -189,13 +189,13 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   cx[2], srcs = True, ('None' if srcfn(x) is None else ''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
 
-ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
 class UOpMetaClass(type):
+  ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
   def __call__(cls, op:UOps, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
     if op is UOps.ALU and arg in COMMUTATIVE and (src[0] is not src[1] and src[1].tuplize < src[0].tuplize and src[0].op is not UOps.NOOP):
       src = src[::-1]
-    if (ret:=ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
-    ucache[key] = ret = super().__call__(op, dtype, src, arg)
+    if (ret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
+    UOpMetaClass.ucache[key] = ret = super().__call__(op, dtype, src, arg)
     return ret
 
 class UOp(MathTrait, metaclass=UOpMetaClass):
