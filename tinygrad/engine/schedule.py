@@ -207,11 +207,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     metadata: Dict[UOp, Metadata] = {}
     sink = UOp(UOps.SINK, src=tuple(UOp.store(ctx.buf_uops[out.buffer], ShapeTracker.from_shape(out.shape).to_uop(),
                                               to_uop(out, outs, ctx.buf_uops, metadata, cache)) for out in outs))
-    prescheduled.append(si:=ScheduleItem(full_ast_rewrite(sink, si_ctx:=ScheduleItemContext(ctx.var_vals, ctx.assigned)), \
+    prescheduled.append(ScheduleItem(full_ast_rewrite(sink, si_ctx:=ScheduleItemContext(ctx.var_vals, ctx.assigned)), \
         tuple(b for u in si_ctx.bufs if (b:=ctx.uop_bufs[u]).size != 0), tuple(dedup(metadata.values())), tuple(si_ctx.assign_preloads)))
-    if (m:=BUF_LIMIT.get(device:=si.outputs[0].device)) and len(si.bufs) >= m:
-      if DEBUG >= 3: print(si)
-      raise RuntimeError(f"Kernel for {si.metadata} exceeded the {m} buffer count limit for {device} with {len(si.bufs)} buffers.")
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
@@ -233,6 +230,9 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   while queue:
     schedule.append(si:=queue.popleft())
     for b in si.outputs: del lazybufs_to_realize[b].srcs  # can only schedule once
+    if (m:=BUF_LIMIT.get(device:=si.outputs[0].device)) and len(si.bufs) >= m:
+      if DEBUG >= 3: print(si)
+      raise RuntimeError(f"Kernel for {si.metadata} exceeded the {m} buffer count limit for {device} with {len(si.bufs)} buffers.")
     for x in graph[si]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
