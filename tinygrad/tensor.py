@@ -278,7 +278,6 @@ class Tensor:
     ```
     """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
-    if sys.version_info[1] < 12: assert self.dtype.fmt != 'e' and self.dtype.fmt != '@e', "half is only supported for python >= 3.12"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return self._data().cast(self.dtype.fmt, self.shape) # type: ignore
 
@@ -292,9 +291,8 @@ class Tensor:
     ```
     """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
-    if sys.version_info[1] < 12: assert self.dtype.fmt != 'e' and self.dtype.fmt != '@e', "half is only supported for python >= 3.12"
     assert self.numel() == 1, "must have one element for item"
-    return self._data().cast(self.dtype.fmt)[0]
+    return self._data().cast(self.dtype.fmt)[0] # type: ignore
 
   # TODO: should be Tensor.tolist() -> Union[List[ConstType], ConstType]. The List is Sequence because mypy expects memoryview.tolist() -> list[int]
   # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803

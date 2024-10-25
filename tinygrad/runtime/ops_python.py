@@ -3,7 +3,7 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Tuple, List, Optional, Any, Dict
-import pickle, base64, itertools, time, struct, sys
+import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType, truncate
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
@@ -74,13 +74,11 @@ class PythonProgram:
         dl[i] = dtype
         if uop is UOps.DEFINE_GLOBAL:
           assert dtype.fmt is not None
-          if sys.version_info[1] < 12: assert dtype.fmt != 'e' and dtype.fmt != '@e'
-          ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
+          ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size # type: ignore
         elif uop is UOps.DEFINE_LOCAL:
           assert dtype.fmt is not None
-          if sys.version_info[1] < 12: assert dtype.fmt != 'e' and dtype.fmt != '@e'
           lbuf = memoryview(bytearray(arg[1]*dtype.itemsize))
-          ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
+          ul[i] = [lbuf.cast(dtype.fmt)] * warp_size # type: ignore
         elif uop is UOps.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is UOps.SPECIAL:
