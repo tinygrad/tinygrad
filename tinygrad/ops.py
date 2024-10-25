@@ -975,8 +975,8 @@ def max_var_const(x:UOp, c1:UOp, c2:UOp):
   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
 
 instant = PatternMatcher([
-  (UPat(UOps.ALU, arg=BinaryOps.ADD, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
-  (UPat(UOps.ALU, arg=BinaryOps.MUL, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(UOps.ALU, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.arg in COMMUTATIVE and \
+   x.src[0] is not x.src[1] and x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
 symbolic = PatternMatcher([
