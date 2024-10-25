@@ -101,6 +101,10 @@ def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.
 
 # the order of these UOps controls the order of the toposort
 class UOps(FastEnum):
+  # consts!
+  VCONST = auto()
+  CONST = auto()
+
   # uops that aren't rendered
   SINK = auto()
   CONTIGUOUS = auto()
@@ -119,8 +123,6 @@ class UOps(FastEnum):
   DEFINE_VAR = auto()
   DEFINE_LOCAL = auto()
   DEFINE_ACC = auto()
-  VCONST = auto()
-  CONST = auto()
   VALID = auto()
   SPECIAL = auto()
   NOOP = auto()
@@ -205,7 +207,6 @@ class UOp(MathTrait):
     #if op is UOps.ALU and arg not in (BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE): assert all_same([dtype] + [x.dtype for x in src])
     #if op is UOps.CAST: assert dtype.count == src[0].dtype.count, f"cast can't change vectorization {src[0].dtype} --> {dtype}"
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
-    # NOTE: this has to be done early now because the COMMUTATIVE op can only be created one way
     if op is UOps.ALU and arg in (BinaryOps.ADD, BinaryOps.MUL) and src[0].op is UOps.CONST and src[1].op is not UOps.CONST:
       self.src = self.src[::-1]
   def replace(self, **kwargs) -> UOp:
@@ -222,6 +223,10 @@ class UOp(MathTrait):
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents}}
   @property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
+
+  @functools.cached_property
+  def tuplize(self:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
+    return (self.op.value, self.arg.value if self.op is UOps.ALU else self.arg, self.dtype, tuple(x.tuplize for x in self.src))
 
   # *** uop shape stuff ***
 
