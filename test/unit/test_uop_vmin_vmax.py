@@ -139,7 +139,6 @@ class TestConstFactor(unittest.TestCase):
     uop = UOp.const(dtypes.int32, 30) + UOp.const(dtypes.int32, 12)
     self.assertEqual(uop.const_factor(), 6)  # GCD(30, 12) = 6
 
-  @unittest.skip("could be 5 or 7")
   def test_const_factor_multiplication(self):
     # const_factor for a multiplication of constants
     uop = UOp.const(dtypes.int32, 5) * UOp.const(dtypes.int32, 7)
