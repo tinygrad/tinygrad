@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Tuple, Sequence, Callable, Any, Union, Optional, List, cast, Literal
+from typing import Dict, Tuple, Sequence, Callable, Union, Optional, List, cast, Literal
 import functools, io, math, inspect
 from tinygrad.tensor import Tensor, Device, _broadcast_shape, ConstType
 from tinygrad.helpers import getenv, CI, OSX, prod, flatten, make_pair
@@ -75,9 +75,9 @@ def get_run_onnx(onnx_model: ModelProto):
     verbosity levels for `debug`:
       - 0: No debug output (default).
       - 1: Prints each op with input shapes.
-      - 2: Prints intermediate outputs with names for each op.
+      - 2: Prints intermediate outputs for each op.
       - 3: Prints the input for each op along with whether or not they are turned into a python const.
-      - 4: Prints the details of `handle_arguments` and `dispatch`
+      - 4: Prints the details of `transform_arguments` and `dispatch` (this shows what is actually being ran to compute output)
     NOTE: debug level 5 greatly hinders performance!
       - 5: Runs correctness verification using `torch` for initialization, input, and output data (must have `torch` and `onnx2torch` installed)
     """
@@ -147,8 +147,7 @@ def get_run_onnx(onnx_model: ModelProto):
       inp, opt = transform_arguments(n.op_type, inp, opt, n=n, intermediate_tensors=intermediate_tensors)
       if debug >= 4: print(f"\t\tafter `transform_arguments`: {inp=}, {opt=}")
       fxn, fxn_name = dispatch(n.op_type)
-      if debug >= 4:
-        print(f"\t\tcalling: {fxn_name}({', '.join(f'{k}={v}' for k,v in inspect.signature(fxn).bind(*inp, **opt).arguments.items())})")
+      if debug >= 4: print(f"\t\tcalling: {fxn_name}({', '.join(f'{k}={v}' for k,v in inspect.signature(fxn).bind(*inp, **opt).arguments.items())})")
       ret = fxn(*inp, **opt)
 
       # finalization after the op finishes running
@@ -174,9 +173,34 @@ def transform_arguments(op:str, inps, opts, **kwargs):
   # helpful functions
   def set_defaults(inps, opts, defaults, **_): return inps, {**defaults, **opts}
   def rewrite_opt_names(inps, opts, mapping, **_): return inps, {mapping.get(k, k): v for k, v in opts.items()}
+  def remove_opt_entries(inps, opts, opt_names, **_): return inps, {k:v for k,v in opts.items() if k not in opt_names}
   # TODO: k this axis thing is out of control
   def reduce(inps,opts): return [inps[0]], \
     {'axis': inps[1] if len(inps)==2 and inps[1] else opts.get('axes') or ([] if opts['noop_with_empty_axes'] else None), 'keepdim': opts['keepdims']}
+
+  # pad
+  # (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> (..., x2_start, x2_end, x1_start, x1_end)
+  def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed(list((pb, pe) for pb, pe in zip(pads, pads[len(pads)//2:]))))
+  # (H_pad, W_pad) -> (U_pad, L_pad, D_pad, R_pad) aka (x1_begin, x2_begin, ..., x1_end, x2_end, ...)
+  def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
+    return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
+            [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
+  # resolve auto_pad
+  # def _resolve_pool_pad(i_, k_, d_, s_, p_, auto_pad):
+  #   s_, d_, p_ = (make_pair(x, len(k_)*2) for x in (s_, d_, p_))
+  #   if auto_pad == "NOTSET": return p_ if len(p_) == len(k_)*2 else p_*2
+  #   o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
+  #   p_ = OnnxOps._auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad)
+  #   return p_
+  # def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=0, strides=1):
+    # return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads)
+  conv_opts = {'pads': 'padding', 'dilations': 'dilation', 'strides': 'stride', 'group': 'groups'}
+  def resolve_pool_pads(inps, opts, **_):
+    p_,k_,d_,s_ = opts.get('pads', 0), opts.get('kernel_shape') or inps[1], opts.get('dilations',1), opts.get('strides',1),
+    i_,(s_,d_,p_) = inps[0].shape[-len(k_):], (make_pair(x, len(k_)*2) for x in (s_, d_, p_))
+    if (auto_pad:=opts.get('auto_pad', "NOTSET"))=="NOTSET": return inps,{**opts, "pads":_onnx_pads_to_pad2d_pads(p_ if len(p_)==len(k_)*2 else p_*2)}
+    o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
+    return inps, {**opts, "pads": _onnx_pads_to_pad2d_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad))}
 
   # non lambda functions
   # terrible
@@ -192,6 +216,9 @@ def transform_arguments(op:str, inps, opts, **kwargs):
     # reduce ops
     **{"Reduce"+op:lambda inps, opts, **_: reduce(*set_defaults(inps, opts, {"noop_with_empty_axes":0, "keepdims":1}))
        for op in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
+    **{op: lambda inps, _, **__: (inps, {"axis": tuple(range(2, inps[0].ndim)), "keepdim": True}) for op in ("GlobalAveragePool", "GlobalMaxPool")},
+    **{op: lambda inps,opts,**_: resolve_pool_pads(inps,opts) for op in {"AveragePool", "MaxPool"}},
+    "Conv": lambda inps, opts, **_: remove_opt_entries(*rewrite_opt_names(*resolve_pool_pads(inps,opts), conv_opts), ('kernel_shape', 'auto_pad')),
     "Split": lambda inps, opts, n, **_: rewrite_opt_names(*_split(inps, opts, n), mapping={'axis': 'dim'}),
     # -> opts y: Tensor
     "Gradient": lambda inps, opts, intermediate_tensor, **_: (inps, {"y": intermediate_tensor[opts["y"]]}),
@@ -211,16 +238,18 @@ def dispatch(op:str):
   # tensor methods
   tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual": "__le__", "GreaterOrEqual": "__ge__", "Equal": "__eq__", "CastLike": "cast",
     "LogSoftmax": "log_softmax", "Not": "logical_not", "Tile": "repeat", "Range": "arange", "NegativeLogLikelihoodLoss": "nll_loss", "Concat": "cat",
-    "ReduceMax": "max", "ReduceMin": "min", "ReduceSum": "sum", "ReduceMean": "mean", "ReduceProd": "prod",
+    "ReduceMax": "max", "ReduceMin": "min", "ReduceSum": "sum", "ReduceMean": "mean", "ReduceProd": "prod", "GlobalAveragePool": "mean",
+    "GlobalMaxPool": "max", "Conv": "conv2d",
+    # "SpaceToDepth": "rearrange", "DepthToSpace": "rearrange",
     **{n:n.lower() for n in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu",
     "Sigmoid", "MatMul", "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
     "Elu", "Celu", "Xor", "Round", "Softmax", "LeakyRelu", "Selu", "HardSigmoid", "Einsum", "Cast", "Split", "Clip")}}
 
   # easy lambdas
   # TODO: some of these easy lambdas can go in Tensor.py
-  # TODO: hmmm maybe lambdas like this is also not the right idea lol
+  # TODO: hmmm maybe lambdas like this is also not the right idea lol, we're literally losing proper typing for less lines
   # IsNaN
-  lambda_methods: Dict[str, Callable[..., Any]] = {"Identity": lambda x:x, "Add": lambda x,y,**_: x+y, "Sub": lambda x,y:x-y,
+  lambda_methods: Dict[str, Callable[..., Tensor]] = {"Identity": lambda x:x, "Add": lambda x,y,**_: x+y, "Sub": lambda x,y:x-y,
   "Div": lambda x,y:(x/y).cast(x.dtype), "ArrayFeatureExtractor": lambda x,indices: x[..., indices],
   "ReduceSumSquare": lambda x,axis,keepdim: x.square().sum(axis, keepdim), "ReduceL1": lambda x,axis,keepdim: x.abs().sum(axis, keepdim),
   "ReduceL2": lambda x,axis,keepdim: x.square().sum(axis, keepdim).sqrt(), "ReduceLogSum": lambda x,axis,keepdim: x.sum(axis, keepdim).log(),
@@ -229,19 +258,9 @@ def dispatch(op:str):
   "Mean": lambda *data: functools.reduce(Tensor.add, data) / len(data), "Min": lambda *data: functools.reduce(Tensor.minimum, data),
   "Max": lambda *data: functools.reduce(Tensor.maximum, data), "Sum": lambda *data: functools.reduce(Tensor.add, data), }
 
-  # dispatch!
-  # op name rewrite
-  if op in tensor_methods: return (fxn := getattr(Tensor, tensor_methods[op])), fxn.__qualname__
-  # lambda
-  if op in lambda_methods: return lambda_methods[op], op + ".lambda"
-  # implemented
-  if hasattr(OnnxOps, op): return (fxn := getattr(OnnxOps, op)), fxn.__qualname__
-
-  raise NotImplementedError(f"Operation '{op}' is not implemented.")
-
-# this is not properly linted. WIP
-class OnnxOps:
-  # implemented methods
+  #######################
+  # implemented methods #
+  #######################
   def Gradient(x, y):
     y.backward()
     return tuple([t.grad for t in x])
@@ -275,15 +294,13 @@ class OnnxOps:
     if value_string is not None or value_strings is not None: raise NotImplementedError('value_string or value_strings not implemented')
   def ConstantOfShape(shape:List[ConstType], value:Tensor): return Tensor.ones(*shape, dtype=value.dtype) * (value if shape != [0] else 1)
 
-  def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + OnnxOps.Erf(x/math.sqrt(2)))
+  def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + Erf(x/math.sqrt(2)))
   def PRelu(X:Tensor, slope:Tensor):
     # HACK OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
     slope = slope[0] if slope.size(-1) != X.size(-1) else slope
     return (X > 0).where(X, X * slope)
   def ThresholdedRelu(X: Tensor, alpha=1.0): return (X > alpha).where(X, 0)
 
-  def GlobalAveragePool(X: Tensor): return X.mean(axis=tuple(range(2, X.ndim)), keepdim=True)
-  def GlobalMaxPool(X: Tensor): return X.max(axis=tuple(range(2, X.ndim)), keepdim=True)
   def OptionalHasElement(x: Optional[Tensor]=None): return Tensor(x is not None and x.numel() > 0)
   def OptionalGetElement(x: Optional[Tensor]=None): return x if x is not None else Tensor([])
 
@@ -294,7 +311,7 @@ class OnnxOps:
   def Expand(x: Tensor, shape:List): return x.expand(_broadcast_shape(x.shape, tuple(shape)))
   def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
 
-  def Asin(x): return OnnxOps.Atan(x / (1 - x * x).sqrt())
+  def Asin(x): return Atan(x / (1 - x * x).sqrt())
   def Acos(x: Tensor):
     negate = (x < 0)
     x = x.abs()
@@ -315,7 +332,7 @@ class OnnxOps:
   def ArgMax(x: Tensor, axis=0, keepdims=1, select_last_index=0):
     if select_last_index: return ((x.shape[axis]-1) - x.flip(axis).argmax(axis, keepdim=keepdims)).cast(dtypes.int64)
     return x.argmax(axis, keepdim=keepdims).cast(dtypes.int64)
-  def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return OnnxOps.ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
+  def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
 
   def Transpose(x: Tensor, perm=None): return x.permute(order=list(range(x.ndim)[::-1]) if perm is None else perm)
 
@@ -373,23 +390,21 @@ class OnnxOps:
   def _resolve_pool_pad(i_, k_, d_, s_, p_, auto_pad):
     s_, d_, p_ = (make_pair(x, len(k_)*2) for x in (s_, d_, p_))
     if auto_pad == "NOTSET": return p_ if len(p_) == len(k_)*2 else p_*2
-    o_ = [(math.floor((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) / s) + 1) for i,k,s in zip(i_, k_, s_)]
-    p_ = OnnxOps._auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad)
+    o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
+    p_ = _auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad)
     return p_
 
   def Pad(x:Tensor, pads:List[int], constant_value:Optional[ConstType]=None, axes:Optional[List[int]]=None, mode="constant", value:float=0.):
     constant_value, mode = value if constant_value is None else float(constant_value), {"edge": "replicate", "wrap":"circular"}.get(mode, mode)
     axes, real_pads  = axes or list(range(x.ndim)), [0] * (x.ndim*2)
     for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
-    return x.pad2d(OnnxOps._onnx_pads_to_pad2d_pads(real_pads), constant_value, mode)
+    return x.pad2d(_onnx_pads_to_pad2d_pads(real_pads), constant_value, mode)
 
   def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, count_include_pad=False, dilations=1, pads=0, strides=1):
-    pads = OnnxOps._onnx_pads_to_pad2d_pads(OnnxOps._resolve_pool_pad(X.shape[-len(kernel_shape):], kernel_shape, dilations, strides, pads, auto_pad))
     ret = X.pad2d(pads).avg_pool2d(kernel_shape, strides, dilations, ceil_mode=ceil_mode)
     return ret if count_include_pad else ret / X.ones_like().pad2d(pads).avg_pool2d(kernel_shape, strides, dilations, ceil_mode=ceil_mode)
 
   def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, dilations=1, pads=0, storage_order=0, strides=1):
-    pads = OnnxOps._onnx_pads_to_pad2d_pads(OnnxOps._resolve_pool_pad(X.shape[-len(kernel_shape):], kernel_shape, dilations, strides, pads, auto_pad))
     ret = X.pad2d(pads, float('-inf')).max_pool2d(kernel_shape, strides, dilations, ceil_mode=ceil_mode)
     indices = ((ret.reshape(-1, 1) == X.reshape(1, -1)) * Tensor.arange(X.numel(), dtype=dtypes.int64).unsqueeze(0)).sum(1).reshape(ret.shape)
     return ret.cast(X.dtype), indices.transpose(-2, -1) if storage_order else indices
@@ -399,12 +414,8 @@ class OnnxOps:
     out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
     ret = ((xI.reshape(-1, 1) == Tensor.arange(prod(out_sh))) * xT.reshape(-1, 1)).sum(0).reshape(1, 1, *out_sh)
     if outshape is not None and outshape != ret.shape:
-      ret = ret.pad2d(OnnxOps._onnx_pads_to_pad2d_pads(OnnxOps._auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
+      ret = ret.pad2d(_onnx_pads_to_pad2d_pads(_auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
     return ret
-
-  def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=0, strides=1):
-    pads = OnnxOps._resolve_pool_pad(X.shape[-len(kernel_shape):], kernel_shape, dilations, strides, pads, auto_pad)
-    return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=OnnxOps._onnx_pads_to_pad2d_pads(pads))
 
   # TODO: their reference implementation and their documentation have different information
   # ref: https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_conv_transpose.py
@@ -423,9 +434,9 @@ class OnnxOps:
     if pads is None: # we generate asymmetrical pads
       output_shape = [X.shape[i+2] * strides[i] for i in range(len(strides))]
       pads = [strides[i]*(input_shape[i]-1) + output_padding[i] + ((kernel_shape[i]-1)*dilations[i]+1)-output_shape[i] for i in range(len(input_shape))] # noqa: E501
-      pads = [0,0] * len(input_shape) if auto_pad == "NOTSET" else OnnxOps._auto_pad(pads, auto_pad)
+      pads = [0,0] * len(input_shape) if auto_pad == "NOTSET" else _auto_pad(pads, auto_pad)
     X = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=0, output_padding=output_padding)
-    return X.pad2d(OnnxOps._onnx_pads_to_pad2d_pads([-p for p in pads])) # neg it since we shrink
+    return X.pad2d(_onnx_pads_to_pad2d_pads([-p for p in pads])) # neg it since we shrink
     # return X if pads is None else X.shrink((None, None, *((pl, X.size(i+2)-pr) for i,(pl,pr) in enumerate(zip(pads, pads[len(pads)//2:])))))
 
   def DepthToSpace(X:Tensor, blocksize:int, mode:str="DCR"):
@@ -525,7 +536,7 @@ class OnnxOps:
         X = X.gather(i, low).lerp(X.gather(i, high), perc)
     if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
     return X.permute(*[perm.index(i) for i in range(len(perm))]) if perm else X
-  def Upsample(X, scales, mode): return OnnxOps.Resize(X=X, scales=scales, mode=mode)
+  def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 
   def CenterCropPad(t: Tensor, shape, axes=None):
     shrink_arg = [None] * t.ndim
@@ -683,3 +694,13 @@ class OnnxOps:
     bsz, _, seq_len, _ = xq.shape
     out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
     return out, present
+
+  # dispatch!
+  # op name rewrite
+  if op in tensor_methods: return (fxn := getattr(Tensor, tensor_methods[op])), fxn.__qualname__
+  # lambda
+  if op in lambda_methods: return lambda_methods[op], op + ".lambda"
+  # implemented
+  if op in locals(): return locals()[op], "implemented." + op
+
+  raise NotImplementedError(f"Operation '{op}' is not implemented.")
