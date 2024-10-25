@@ -981,12 +981,12 @@ instant = PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
+  (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
 ])
 
 symbolic = instant+PatternMatcher([
   # ** more self folding **
   (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
-  (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
   (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
   ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
   ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
@@ -1004,13 +1004,13 @@ symbolic = instant+PatternMatcher([
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
   (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
-  # ** constant folding **
-  (UPat(UOps.ALU, name="root", src=UPat((UOps.VCONST, UOps.CONST))),
-   lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src], truncate_output=False))),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y'), lambda x,y: x|y),
   (UPat.var('x', dtype=dtypes.bool).max(UPat.var('y')), lambda x,y: x|y),
+  # ** constant folding **
+  (UPat(UOps.ALU, name="root", src=UPat((UOps.VCONST, UOps.CONST))),
+   lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src], truncate_output=False))),
   # ** self folding **
   (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
   # group like
