@@ -57,12 +57,10 @@ def ilogb2k(d:UOp) -> UOp:
 def ldexp3k(d:UOp, e:UOp) -> UOp:
   """d*2^e. e is a number obtained by casting an integer in the range [-127, 127] to a float. d is any float number."""
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
-  dtype = d.dtype
   cast_map = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}
-  e = e.cast(cast_map[d.dtype])
   m1 = d.bitcast(cast_map[d.dtype])
-  m2 = shl(e, significand_bits(d.dtype))
-  return (m1 + m2).bitcast(d.dtype).cast(dtype)
+  m2 = shl(e.cast(cast_map[d.dtype]), significand_bits(d.dtype))
+  return (m1 + m2).bitcast(d.dtype).cast(d.dtype)
 
 def ldexp2k(d:UOp, e:UOp) -> UOp:
   """d*2^e. much faster than ldexp3k but risky. d > 0 and d is not denormal."""
@@ -86,7 +84,8 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   if v.dtype == dtypes.float16: exp = exp.bitcast(dtypes.int16)
   return value, exp
 
-def polyN(u:UOp, s:UOp, coeffs:List[float]) -> UOp: return functools.reduce(lambda u,c: u*s+c, coeffs, u)
+def polyN(s:UOp, coeffs:List[float]) -> UOp: return functools.reduce(lambda u,c: u*s+c, coeffs, s.const_like(0))
+
 # *** reduction algorithms for sine ***
 def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   """
@@ -130,10 +129,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   lo = _shl_lazy(a3, e) | _shr_lazy(a4, offset)
 
   def _hp_mul(x:UOp, y:UOp) -> UOp: return x.cast(dtypes.uint64) * y.cast(dtypes.uint64)
-  p = _hp_mul(ia, lo)
-  p = _hp_mul(ia, mi) + shr(p, 32)
-  p = shl(_hp_mul(ia, hi), 32) + p
-
+  p = shl(_hp_mul(ia, hi), 32) + _hp_mul(ia, mi) + shr(_hp_mul(ia, lo), 32)
   q = shr(p, 62).cast(dtypes.int32)
   p = p & 0x3fffffffffffffff
   r = (p.cast(dtype_via) * (3.4061215800865545e-19)).cast(input_dtype)
@@ -149,9 +145,7 @@ def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
   """
   m_1_pi = 0.318309886183790671537767526745028724
   qdh = (d * (m_1_pi / 16777216)).cast(dtypes.int64).cast(d.dtype) * 16777216.0
-  def _quadrant(x:UOp) -> UOp:
-    if x.dtype == dtypes.float64: return rintk(d * m_1_pi -qdh).cast(x.dtype)
-    return rintk(x * m_1_pi).cast(x.dtype)
+  def _quadrant(x:UOp) -> UOp: return rintk(d * m_1_pi -qdh).cast(x.dtype) if x.dtype == dtypes.float64 else rintk(x * m_1_pi).cast(x.dtype)
   def _reduce_d(x:UOp, q:UOp):
     if x.dtype == dtypes.float64:
       d = qdh * -3.1415926218032836914 + x
@@ -173,17 +167,14 @@ def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
   return _reduce_d(d, (q := _quadrant(d))), q.cast(dtypes.int32)
 # *** approximate sine on small angle. ***
 def trig_poly(d:UOp, coeff32, coeff64):
-  u = None
   s = d * d
   if d.dtype == dtypes.float64:
-    s2 = s * s
-    s4 = s2 * s2
     def __poly4(x:UOp, x2:UOp, c3, c2, c1, c0) -> UOp: return x2 * (x*c3+c2) + (x*c1+c0)
     def __poly8(x, x2, x4, c7, c6, c5, c4, c3, c2, c1, c0) -> UOp: return x4 * __poly4(x, x2, c7, c6, c5, c4) + __poly4(x, x2, c3, c2, c1, c0)
-    u = __poly8(s, s2, s4, *coeff64[:-1])
-    u = u * s + coeff64[-1]
-  else:
-    u = polyN(s.const_like(coeff32[0]), s, coeff32[1:])
+    s2 = s * s
+    s4 = s2 * s2
+    u = __poly8(s, s2, s4, *coeff64[:-1]) * s + coeff64[-1]
+  else: u = polyN(s, coeff32)
   return s * (u * d) + d
 # approximate sine on [-pi/2, pi/2]
 def sin_poly(d:UOp) -> UOp:
@@ -192,16 +183,15 @@ def sin_poly(d:UOp) -> UOp:
                        -2.50521083763502045810755e-08, 2.75573192239198747630416e-06, -0.000198412698412696162806809, 0.00833333333333332974823815,
                        -0.166666666666666657414808])
 
+def _ifand(q:UOp, n:int): return (q & n).ne(0)
+
 def sin_poly_small(d:UOp, q:UOp) -> UOp:
-  def _ifand(n:int): return (q & n).ne(0)
   r = sin_poly(d)
-  return r * _ifand(1).where(r.const_like(-1), r.const_like(1))
+  return r * _ifand(q, 1).where(r.const_like(-1), r.const_like(1))
 
 def sin_poly_large(d:UOp, q:UOp) -> UOp:
-  def _ifand(n:int): return (q & n).ne(0)
-  d = d + _ifand(1).where(d.const_like(math.pi / 2), d.const_like(0))
-  r = sin_poly(d)
-  return r * _ifand(2).where(r.const_like(-1), r.const_like(1))
+  r = sin_poly(d + _ifand(q, 1).where(d.const_like(math.pi / 2), d.const_like(0)))
+  return r * _ifand(q, 2).where(r.const_like(-1), r.const_like(1))
 
 # *** toplevel functions for xsin/xlog2/xexp2 ***
 
@@ -212,13 +202,12 @@ def xsin(d:UOp, fast:bool=False, switch_over:float=30.0) -> UOp:
   - switch_over is the threshold for switching to payne_hanek_reduction.
   """
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
-  reduction_algo = cody_waite_reduction if fast else payne_hanek_reduction
   # mask +-inf/nan as zero
   x = _lazy_map_numbers(d, d.const_like(0.0), d.const_like(0.0), d.const_like(0.0), d)
   # x_sign = sign(x)
   x_sign = x.ne(0).where(x.lt(0).where(x.const_like(-1), x.const_like(1)), x.const_like(0))
   x_abs = x * x_sign
-  r, q = reduction_algo(x_abs)
+  r, q = (cody_waite_reduction if fast else payne_hanek_reduction)(x_abs)
   if fast: result = sin_poly_small(r, q)
   else:
     # Payne Hanek Reduction assumes abs(x) >= pi/4, so for smaller values, use cody_waite_reduction.
@@ -245,15 +234,13 @@ def xexp2(d:UOp) -> UOp:
   s = x - q.cast(x.dtype)
   # a polynomial approximation with 13 non-zero terms in the range of [−(log 2)/2,(log 2)/2].
   if fp64_p:
-    u = polyN(s.const_like(0.4434359082926529454e-9), s, [0.7073164598085707425e-8, 0.1017819260921760451e-6, 0.1321543872511327615e-5,
-                                                          0.1525273353517584730e-4, 0.1540353045101147808e-3, 0.1333355814670499073e-2,
-                                                          0.9618129107597600536e-2, 0.5550410866482046596e-1, 0.2402265069591012214e+0,
-                                                          0.6931471805599452862e+0, 0.1000000000000000000e+1])
+    u = polyN(s, [0.4434359082926529454e-9, 0.7073164598085707425e-8, 0.1017819260921760451e-6, 0.1321543872511327615e-5, 0.1525273353517584730e-4,
+                  0.1540353045101147808e-3, 0.1333355814670499073e-2, 0.9618129107597600536e-2, 0.5550410866482046596e-1, 0.2402265069591012214e+0,
+                  0.6931471805599452862e+0, 0.1000000000000000000e+1])
   else:
-    u = polyN(s.const_like(0.1535920892e-3), s,
-              [0.1339262701e-2, 0.9618384764e-2, 0.5550347269e-1, 0.2402264476e+0, 0.6931471825e+0, 0.1000000000e+1])
+    u = polyN(s, [0.1535920892e-3, 0.1339262701e-2, 0.9618384764e-2, 0.5550347269e-1, 0.2402264476e+0, 0.6931471825e+0, 0.1000000000e+1])
   u = ldexp2k(u, q) # u*2^q
-  upper = {dtypes.float64: 1024, dtypes.float32: 128, dtypes.float16: 23.0}[x.dtype]
+  upper = {dtypes.float64: 1024, dtypes.float32: 128, dtypes.float16: 23}[x.dtype]
   lower = {dtypes.float64: -2000, dtypes.float32: -150, dtypes.float16: -22}[x.dtype]
   # Replace x >= upper with +inf
   u = x.ne(upper).where(u, x.const_like(math.inf))
@@ -284,15 +271,15 @@ def xlog2(d:UOp) -> UOp:
   if fp64_p:
     x = (m - 1.0) * (m + 1.0).recip()
     x2 = x * x
-    t = polyN(x.const_like(0.2211941750456081490e+0), x2, [0.2200768693152277689e+0, 0.2623708057488514656e+0, 0.3205977477944495502e+0,
-                                                           0.4121985945485324709e+0, 0.5770780162997058982e+0, 0.96179669392608091449])
+    t = polyN(x2, [0.2211941750456081490e+0, 0.2200768693152277689e+0, 0.2623708057488514656e+0, 0.3205977477944495502e+0,
+                   0.4121985945485324709e+0, 0.5770780162997058982e+0, 0.96179669392608091449])
     s_hi, s_lo = dfadd2_f2_f2_f2(e, e.const_like(0), *dfmul2_f2_f2_f2(t.const_like(2.885390081777926774), t.const_like(0), x, x.const_like(0)))
     r = t * (x * x2) + (s_hi + s_lo)
   else:
     xx, xy = dfdiv2_f2_f2_f2(*dfadd2_f2_f2_f2(m.const_like(-1), m.const_like(0), m, m.const_like(0)),
                              *dfadd2_f2_f2_f2(m.const_like(1), m.const_like(0), m, m.const_like(0)))
     x2 = xx * xx
-    t = polyN(d.const_like(0.4374550283e+0), x2, [0.5764790177e+0, 0.9618012905120])
+    t = polyN(x2, [0.4374550283e+0, 0.5764790177e+0, 0.9618012905120])
     sx, sy = dfadd2_f2_f2_f2(e, e.const_like(0),
                              *dfmul2_f2_f2_f2(xx, xy, xx.const_like(2.8853900432586669922), xy.const_like(3.2734474483568488616e-08)))
     sx, sy = dfadd2_f2_f2_f2(sx, sy, x2.const_like(0), (x2 * xx) * t)
