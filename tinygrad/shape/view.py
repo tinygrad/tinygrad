@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast
 from tinygrad.dtype import dtypes
 from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin
-from tinygrad.helpers import prod, all_int, argsort
+from tinygrad.helpers import prod, all_int, argsort, flatten
 
 @functools.lru_cache(maxsize=None)
 def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:
@@ -84,13 +84,19 @@ def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
 
 def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.int, x) if isinstance(x, int) else x
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True)
 class View:
   shape:Tuple[sint, ...]
   strides:Tuple[sint, ...]
   offset:sint
   mask:Optional[Tuple[Tuple[sint, sint], ...]]
   contiguous:bool
+
+  @functools.cached_property
+  def t(self):
+    return tuple(x.tuplize if isinstance(x, UOp) else (x,) \
+                 for x in self.shape+self.strides+(self.offset,)+(tuple(flatten(self.mask)) if self.mask is not None else tuple()))
+  def __lt__(self, o:View): return self.t < o.t
 
   def to_indexed_uops(self:View, _idxs:Optional[List[UOp]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> Tuple[UOp, UOp]:
     idxs = [UOp.range(dtypes.int, 0, s, i) for i,s in enumerate(self.shape)] if _idxs is None else _idxs
