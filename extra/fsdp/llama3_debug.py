@@ -17,20 +17,21 @@ GPU_NAME = Device.DEFAULT
 B = 4
 T = 16
 vocab_size = 128256
-dim = 16
-n_heads = 4
+dim = 4
+n_heads = 1
 max_context = 8192
-rope_theta=10000
+rope_theta=50000
 hidden_dim = 48
 epoch = 3
-lr = 1e-2
+lr = 1e-4
+weight_decay=0
 generate_tokens = 5
 assert dim % n_heads == 0 and dim % SHARD == 0
 s_head_dim = dim // n_heads
 shard_dim = dim // SHARD
 assert shard_dim % s_head_dim == 0, f"head must be evenly distributed in each shard {shard_dim=} {s_head_dim=}"
 norm_eps = 1e-5
-n_layers = 2
+n_layers = 1
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, dtype=dtypes.half) -> Tensor:
@@ -166,9 +167,10 @@ data_iter = iter(get_batch())
 
 class Attention:
   def __init__(self):
-    self.wq = nn.Linear(dim, dim)
-    self.wk = nn.Linear(dim, dim)
-    self.wv = nn.Linear(dim, dim)
+    self.wq = nn.Linear(dim, dim, bias=False)
+    self.wk = nn.Linear(dim, dim, bias=False)
+    self.wv = nn.Linear(dim, dim, bias=False)
+    self.wo = nn.Linear(dim, dim, bias=False)
   
   def __call__(self, x: Tensor, freqs_cis: Tensor, mask: Tensor):
     _B, _T, _ = x.shape
@@ -178,6 +180,7 @@ class Attention:
     xq, xk, xv = map(lambda w: w.transpose(1, 2), [xq, xk, xv])
     attn = xq.scaled_dot_product_attention(xk, xv, mask)
     attn = attn.transpose(1,2).reshape(_B, _T, dim)
+    attn = self.wo(attn)
     return attn
 
 class FeedForward:
@@ -202,11 +205,11 @@ class TransformerBlock:
 
 class Transformer:
   def __init__(self):
-    self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.layers = [TransformerBlock() for _ in range(n_layers)]
     self.norm = nn.RMSNorm(dim, norm_eps)
+    self.tok_embeddings = nn.Embedding(vocab_size, dim)
+    self.output = nn.Linear(dim, vocab_size, bias=False)
     self.freqs_cis = precompute_freqs_cis(s_head_dim, max_context * 2, rope_theta).contiguous()
-    self.out = nn.Linear(dim, vocab_size, bias=False)
 
   def __call__(self, x: Tensor, target: Tensor = None):
     _B, _T = x.shape
@@ -216,7 +219,7 @@ class Transformer:
     for layer in self.layers:
       x = layer(x, freqs_cis, mask)
     x = self.norm(x)
-    x = self.out(x)
+    x = self.output(x)
     if target is not None:
       loss = x.sparse_categorical_crossentropy(target)
       return x, loss
@@ -233,10 +236,10 @@ class Transformer:
     return tokenizer.decode(tokens.tolist()[0])
 
 model = Transformer()
-opt = nn.optim.AdamW(nn.state.get_parameters(model), lr=lr)
+opt = nn.optim.AdamW(nn.state.get_parameters(model), lr=lr, weight_decay=weight_decay)
 model_size, model_size_unit = get_size(nn.state.get_parameters(model))
 opt_size, opt_size_unit = get_size(nn.state.get_parameters(opt))
-print(f"Model {model_size:.2f} {model_size_unit} Opt: {opt_size:.2f} {opt_size_unit}")
+print(f"Model {model_size:.4f} {model_size_unit} Opt: {opt_size:.4f} {opt_size_unit}")
 x, y = next(data_iter)
 if len(GPUS) > 1:
   shard_model(model, opt)
@@ -244,8 +247,8 @@ if len(GPUS) > 1:
 losses = []
 @TinyJit
 def step():
-  opt.zero_grad()
   logits, loss = model(x, y)
+  opt.zero_grad()
   loss.backward()
   loss.realize(*opt.schedule_step())
   return loss.tolist()

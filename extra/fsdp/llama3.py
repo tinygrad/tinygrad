@@ -15,6 +15,7 @@ import math
 import re
 from tinygrad.multi import MultiLazyBuffer
 
+Tensor.manual_seed(2)
 SHARD = int(os.environ.get("SHARD", 1))
 GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
 GPU_NAME = Device.DEFAULT
@@ -43,7 +44,7 @@ def shard_model(model, opt):
 
 MODEL_PARAMS = {
   "sm": {
-    "args": {"dim": 4, "n_heads": 1, "n_kv_heads": 1, "n_layers": 1, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 128, "hidden_dim": 48},
+    "args": {"dim": 4, "n_heads": 1, "n_kv_heads": 1, "n_layers": 1, "norm_eps": 1e-5, "rope_theta": 500000, "vocab_size": 128256, "hidden_dim": 48},
     "files": 1
   },
   "8B": {
@@ -138,8 +139,6 @@ x, y = next(data_iter)
 # @TinyJit
 def step(x, y):
   loss = model(x, 0, target=y)
-  print("loss")
-  print(loss.numpy())
   opt.zero_grad()
   loss.backward()
   return loss.realize(*opt.schedule_step())
@@ -153,4 +152,4 @@ with Tensor.train():
     loss = step(x.contiguous(), y.contiguous())
     Device[Device.DEFAULT].synchronize()
     t1 = time.time()
-    # print(f"iteration {i}, loss: {loss.item():.6f}, time: {(t1-t0)*1000:.3f}ms, {int(B*T/(t1-t0))} tok/s")
+    print(f"iteration {i}, loss: {loss.item():.6f}, time: {(t1-t0)*1000:.3f}ms, {int(B*T/(t1-t0))} tok/s")

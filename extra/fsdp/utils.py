@@ -9,7 +9,7 @@ def print_size(name, *tensors: Tensor):
     for unit in ['bytes', 'KB', 'MB', 'GB']:
         if size < 1000 or unit == 'GB': break
         size /= 1000
-    print(f'{name} size: {size:.2f} {unit}')
+    print(f'{name} size: {size:.4f} {unit}')
 
 def print_lb(lb):
   assert isinstance(lb, MultiLazyBuffer)

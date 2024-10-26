@@ -4,17 +4,12 @@ from tinygrad.helpers import getenv
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, dtype=dtypes.half) -> Tensor:
-  print(f"{dim=} {end=} {theta=}")
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
-  print("freqs", freqs.shape)
-  print(freqs.numpy())
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
-  print("freqs2", freqs.cos().shape)
   # TODO: move dtype outside this
   ret = Tensor.stack(freqs.cos().cast(dtype), freqs.sin().cast(dtype), dim=-1)
-  print("ret", ret.shape)
   ret = ret.reshape(1, end, 1, dim//2, 2)
-  print("ret2", ret.shape)
+  ret.requires_grad = False
   return ret
 
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
@@ -159,7 +154,6 @@ class Transformer:
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
     h = self.tok_embeddings(tokens)
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1).realize() if seqlen > 1 else None
-    print(f"{mask.shape=}")
     for layer in self.layers:
       h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h)).float()
