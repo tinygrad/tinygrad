@@ -197,8 +197,8 @@ class TransformerBlock:
 class Model:
   def __init__(self):
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
-    self.attention = Attention()
-    # self.layer = TransformerBlock()
+    # self.attention = Attention()
+    self.layer = TransformerBlock()
     self.freqs_cis = precompute_freqs_cis(s_head_dim, max_context * 2, rope_theta).contiguous()
     self.out = nn.Linear(dim, vocab_size, bias=False)
 
@@ -207,8 +207,8 @@ class Model:
     x = self.tok_embeddings(x)
     freqs_cis = self.freqs_cis.shrink((None, (0, _T),None,None,None))
     mask = Tensor.full((1, 1, _T, _T), float("-inf"), dtype=x.dtype, device=x.device).triu(1).realize()
-    # x = self.layer(x, freqs_cis, mask)
-    x = self.attention(x, freqs_cis, mask)
+    x = self.layer(x, freqs_cis, mask)
+    # x = self.attention(x, freqs_cis, mask)
     x = self.out(x)
     if target is not None:
       loss = x.sparse_categorical_crossentropy(target)
