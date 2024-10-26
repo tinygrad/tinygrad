@@ -167,38 +167,56 @@ def get_run_onnx(onnx_model: ModelProto):
 # the tradeoff is linecount + maybe readablilty vs maintainablilty + good errors
 # actually maybe readability also suffers, crap.
 
-# https://github.com/onnx/onnx/blob/main/docs/Operators.md
 # transforms the arguments so that it can be easily dispatched
-def transform_arguments(op:str, inps, opts, **kwargs):
-  # helper functions for op_handler
-  def set_defaults(inps, opts, defaults: Dict, **_): return inps, {**defaults, **opts}
-  def rewrite_opt_names(inps, opts, mapping: Dict, **_): return inps, {mapping.get(k, k): v for k, v in opts.items()}
-  def remove_opt_entries(inps, opts, opt_names: Sequence[str], **_): return inps, {k:v for k,v in opts.items() if k not in opt_names}
-  # TODO: k this axis thing is out of control
-  def reduce(inps,opts): return [inps[0]], \
-    {'axis': inps[1] if len(inps)==2 and inps[1] else opts.get('axes') or ([] if opts['noop_with_empty_axes'] else None), 'keepdim': opts['keepdims']}
+# Argument types are defined in here: https://github.com/onnx/onnx/blob/main/docs/Operators.md
+# NOTE: There are numerous tests that have argument specifications which differ from Onnx's docs
+# TODO: maybe map this better so the return is just `args: Dict[str, Any]` with 'self': Tensor, ..., probably clearer
+def transform_arguments(op:str, inps:List, opts:Dict, **kwargs):
+  # helper functions
+  # NOTE: isinstance(arg, Tensor) to get aronud __bool__ being banned on tensor
+  def arg_select(*args: Any): return next((arg for arg in args if isinstance(arg, Tensor) or arg), args[-1])
+  def list_get(l, i, default=None): return l[i] if i < len(l) else default
 
   # padding
   # (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> (..., x2_start, x2_end, x1_start, x1_end)
-  def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed(list((pb, pe) for pb, pe in zip(pads, pads[len(pads)//2:]))))
+  def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed(list((pB, pE) for pB, pE in zip(pads, pads[len(pads)//2:]))))
   # (H_pad, W_pad) -> (U_pad, L_pad, D_pad, R_pad) aka (x1_begin, x2_begin, ..., x1_end, x2_end, ...)
   def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
     return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
             [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
-  conv_opts = {'pads': 'padding', 'dilations': 'dilation', 'strides': 'stride', 'group': 'groups'}
   def resolve_pool_pads(inps, opts, **_):
-    p_,k_,d_,s_ = opts.get('pads', 0), opts.get('kernel_shape') or inps[1], opts.get('dilations',1), opts.get('strides',1),
+    p_,k_,d_,s_ = opts.get('pads', 0), opts.get('kernel_shape') or inps[1].shape[2:], opts.get('dilations',1), opts.get('strides',1),
     i_,(s_,d_,p_) = inps[0].shape[-len(k_):], (make_pair(x, len(k_)*2) for x in (s_, d_, p_))
     if (auto_pad:=opts.get('auto_pad', "NOTSET"))=="NOTSET": return inps,{**opts, "pads":_onnx_pads_to_pad2d_pads(p_ if len(p_)==len(k_)*2 else p_*2)}
     o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
     return inps, {**opts, "pads": _onnx_pads_to_pad2d_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad))}
+  conv_opts = {'pads': 'padding', 'dilations': 'dilation', 'strides': 'stride', 'group': 'groups'}
 
-  # non lambda functions
-  # terrible
-  def split(inps,opts,n,**_):
-    size, num_outputs = inps[0].shape[opts.get('axis', 0)], opts.get('num_outputs') or len(n.output)
-    return [inps[0], inps[1] if len(inps) == 2 else [size // num_outputs + (1 if i < size % num_outputs else 0) for i in range(num_outputs)]],\
-            {k:v for k,v in opts.items() if k not in ('num_outputs', 'split')}
+  # reduce
+  def reduce(inps,opts): return [inps[0]], \
+    {'axis': arg_select(list_get(inps,1), opts.get('axes'), ([] if opts['noop_with_empty_axes'] else None)), 'keepdim': opts['keepdims']}
+
+  # multi-line transformations
+  def _slice(inps, opts, **_):
+    # only onnx_model_version < 10 has opt, we just unload the opt into inp to match other versions
+    inps += [list(v) for v in reversed(opts.values())] # axes, ends, starts -> starts, ends, axes
+    starts, ends, axes, steps = inps[1], inps[2], list_get(inps, 3, list(range(inps[0].ndim))), list_get(inps, 4, [1]*inps[0].ndim)
+    slices = [slice(0,x,1) for x in inps[0].shape]
+    for i, axis in enumerate(axes): slices[axis] = slice(starts[i], ends[i], steps[i])
+    return [inps[0]], {"indices": tuple(slices)}
+  def split(inps, opts, n, **_):
+    sz, n_outputs = inps[0].shape[opts.get('axis', 0)], opts.get('num_outputs') or len(n.output)
+    return [inps[0]], {**opts, 'split': arg_select(list_get(inps,1), [sz // n_outputs + (1 if i < sz % n_outputs else 0) for i in range(n_outputs)])}
+  def pad(inps, opts, **_):
+    x, pads, value, mode = inps[0], opts.get('pads') or inps[1], opts.get('value') or list_get(inps,2) or 0, opts.get("mode", "constant")
+    axes, real_pads = list_get(inps, 3, list(range(x.ndim))), [0] * (x.ndim*2)
+    for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
+    return [x], {"padding":_onnx_pads_to_pad2d_pads(real_pads), "value":value, "mode":{"edge":"replicate", "wrap":"circular"}.get(mode, mode)}
+
+  # helper functions for op_handler
+  def set_defaults(inps, opts, defaults: Dict, **_): return inps, {**defaults, **opts}
+  def rewrite_opt_names(inps, opts, mapping: Dict, **_): return inps, {mapping.get(k, k): v for k, v in opts.items()}
+  def remove_opt_entries(inps, opts, opt_names: Sequence[str], **_): return inps, {k:v for k,v in opts.items() if k not in opt_names}
 
   op_handler: Dict[str, Callable] = {
     **{op: functools.partial(set_defaults, defaults=d) for op, d in {"HardSigmoid": {"alpha": 0.2, "beta": 0.5}}.items()},
@@ -210,19 +228,24 @@ def transform_arguments(op:str, inps, opts, **kwargs):
     **{op: lambda inps, _, **__: (inps, {"axis": tuple(range(2, inps[0].ndim)), "keepdim": True}) for op in ("GlobalAveragePool", "GlobalMaxPool")},
     **{op: lambda inps, opts, **_: resolve_pool_pads(inps,opts) for op in {"AveragePool", "MaxPool"}},
     "Conv": lambda inps, opts, **_: remove_opt_entries(*rewrite_opt_names(*resolve_pool_pads(inps,opts), conv_opts), ('kernel_shape', 'auto_pad')),
-    "Split": lambda inps, opts, n, **_: rewrite_opt_names(*split(inps, opts, n), {'axis': 'dim'}),
+    "Split": lambda inps, opts, n, **_: remove_opt_entries(*rewrite_opt_names(*split(inps,opts,n), {'axis':'dim', 'split':'sizes'}), ('num_outputs')),
     # -> opts y: Tensor
     "Gradient": lambda inps, opts, intermediate_tensor, **_: (inps, {"y": intermediate_tensor[opts["y"]]}),
-    # only onnx_model_version < 10 has opt, we just unload the opt into inp to match other versions
-    "Slice": lambda inps, opts, **_: (inps + [list(v) for v in reversed(opts.values())], {}), # axes, ends, starts -> starts, ends, axes
+    "Slice": lambda inps, opts, **_: _slice(inps, opts),
     # cast and castlike currently doesn't support staturate for float8
     "Einsum": lambda inps, opts, **_: ([opts['equation']] + inps, {}), "Cast": lambda inps, opts, **_: (inps, {'dtype': parse_dtype(opts['to'])}),
     "CastLike": lambda inps, _, **__: ([inps[0]], {'dtype': inps[1].dtype}),
-    # TODO: this is crazy
-    "Clip": lambda inps, _, **__: ([inps[0], inps[1] if len(inps)>1 and inps[1] is not None else opts.get('min') or dtypes.min(inps[0].dtype),
-                                    inps[2] if len(inps)>2 and inps[2] is not None else opts.get('max') or dtypes.max(inps[0].dtype)], {}),
+    "Clip": lambda inps, _, **__: ([inps[0], arg_select(list_get(inps,1), opts.get('min'), dtypes.min(inps[0].dtype)),
+                                    arg_select(list_get(inps,2), opts.get('max'), dtypes.max(inps[0].dtype))], {}),
+    "Shape": lambda _, opts, **__: ([], {"data":inps[0].shape[slice(opts.get("start", None), opts.get("end", None))], "dtype":dtypes.int64},),
+    "Flatten": lambda inps, opts, **_: (inps, {"shape": (prod(inps[0].shape[0:opts.get("axis",1)]), -1)}),
+    "Reshape": lambda inps, opts, **_: ([inps[0]],
+                                        {"shape": [int(x) or (0 if opts.get('allowzero') else inps[0].size(i)) for i, x in enumerate(inps[1])]}),
+    "Transpose": lambda inps, opts, **_: (inps, {"order": opts.get("perm") or list(range(inps[0].ndim))[::-1]}),
+    "Pad": lambda inps, opts, **_: rewrite_opt_names(*pad(inps, opts), {})
     }
   return op_handler.get(op, lambda inps, opts, **_: (inps, opts))(inps, opts, **kwargs)
+  # def Transpose(x: Tensor, perm=None): return x.permute(order=list(range(x.ndim)[::-1]) if perm is None else perm)
 
 # dispatches the op to Tensor.py methods
 def dispatch(op:str):
@@ -230,15 +253,16 @@ def dispatch(op:str):
   tensor_methods = {"Less": "__lt__", "Greater": "__gt__", "LessOrEqual": "__le__", "GreaterOrEqual": "__ge__", "Equal": "__eq__", "CastLike": "cast",
     "LogSoftmax": "log_softmax", "Not": "logical_not", "Tile": "repeat", "Range": "arange", "NegativeLogLikelihoodLoss": "nll_loss", "Concat": "cat",
     "ReduceMax": "max", "ReduceMin": "min", "ReduceSum": "sum", "ReduceMean": "mean", "ReduceProd": "prod", "GlobalAveragePool": "mean",
-    "GlobalMaxPool": "max", "Conv": "conv2d",
+    "GlobalMaxPool": "max", "Conv": "conv2d", "Flatten": "reshape", "Transpose": "permute", "Pad": "pad2d", "Slice": "__getitem__",
     # "SpaceToDepth": "rearrange", "DepthToSpace": "rearrange",
-    **{n:n.lower() for n in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "IsNaN", "IsInf",
-    "Sigmoid", "MatMul", "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-    "Elu", "Celu", "Xor", "Round", "Softmax", "LeakyRelu", "Selu", "HardSigmoid", "Einsum", "Cast", "Split", "Clip")}}
+    **{n:n.lower() for n in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Sinh", "Cosh", "Tanh",
+    "Asinh", "Acosh", "Atanh", "Relu", "PRelu", "Elu", "Celu", "IsNaN", "IsInf",
+    "Sigmoid", "MatMul", "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Softsign",
+    "Xor", "Round", "Softmax", "Erf", "LeakyRelu", "Selu", "HardSigmoid", "Einsum", "Cast", "Split", "Clip", "Reshape")}}
 
   # easy lambdas
   # TODO: some of these easy lambdas can go in Tensor.py
-  # TODO: hmmm maybe lambdas like this is also not the right idea lol, we're literally losing proper typing for less lines
+  # TODO: hmmm maybe lambdas like this is also not the right idea lol, we're literally losing proper typing for a few lines
   lambda_methods: Dict[str, Callable[..., Tensor]] = {"Identity": lambda x:x, "Add": lambda x,y,**_: x+y, "Sub": lambda x,y:x-y,
   "Div": lambda x,y:(x/y).cast(x.dtype), "ArrayFeatureExtractor": lambda x,indices: x[..., indices],
   "ReduceSumSquare": lambda x,axis,keepdim: x.square().sum(axis, keepdim), "ReduceL1": lambda x,axis,keepdim: x.abs().sum(axis, keepdim),
@@ -254,12 +278,6 @@ def dispatch(op:str):
   def Gradient(x, y):
     y.backward()
     return tuple([t.grad for t in x])
-
-  def Slice(data, starts, ends, axes=None, steps=None):
-    axes, steps = axes or list(range(data.ndim)), steps or [1]*data.ndim
-    slices = [slice(0,x,1) for x in data.shape]
-    for i, axis in enumerate(axes): slices[axis] = slice(starts[i], ends[i], steps[i])
-    return data[slices]
 
   # TODO maybe don't cast hack things
   # TODO maybe implement meshgrid utility
@@ -278,26 +296,20 @@ def dispatch(op:str):
   def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, value_int=None,value_ints=None,value_string=None,value_strings=None):
     if value is not None: return value
     if value_float is not None: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False)
-    if value_floats is not None: return Tensor(list(value_floats), dtype=dtypes.float32, requires_grad=False)
+    if value_floats is not None: return Tensor(value_floats, dtype=dtypes.float32, requires_grad=False)
     if value_int is not None: return Tensor(value_int, dtype=dtypes.int64, requires_grad=False)
-    if value_ints is not None: return Tensor(list(value_ints), dtype=dtypes.int64, requires_grad=False)
+    if value_ints is not None: return Tensor(value_ints, dtype=dtypes.int64, requires_grad=False)
     if value_string is not None or value_strings is not None: raise NotImplementedError('value_string or value_strings not implemented')
   def ConstantOfShape(shape:List[ConstType], value:Tensor): return Tensor.ones(*shape, dtype=value.dtype) * (value if shape != [0] else 1)
 
-  def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + Erf(x/math.sqrt(2)))
-  def PRelu(X:Tensor, slope:Tensor):
-    # HACK OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
-    slope = slope[0] if slope.size(-1) != X.size(-1) else slope
-    return (X > 0).where(X, X * slope)
+  def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
   def ThresholdedRelu(X: Tensor, alpha=1.0): return (X > alpha).where(X, 0)
 
   def OptionalHasElement(x: Optional[Tensor]=None): return Tensor(x is not None and x.numel() > 0)
   def OptionalGetElement(x: Optional[Tensor]=None): return x if x is not None else Tensor([])
 
-  def Shape(data: Tensor, end=None, start=0): return Tensor(data.shape[start:end], dtype=dtypes.int64)
+  def Shape(data, dtype): return Tensor(data=data, dtype=dtype)
   def Size(data: Union[Tensor, List]): return prod(data if isinstance(data, list) else data.shape)
-  def Flatten(x: Tensor, axis=1): return x.reshape(prod(x.shape[0:axis]), -1)
-  def Reshape(data: Tensor, shape, allowzero=0): return data.reshape([int(x) or (0 if allowzero else data.size(i)) for i, x in enumerate(shape)])
   def Expand(x: Tensor, shape:List): return x.expand(_broadcast_shape(x.shape, tuple(shape)))
   def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
 
@@ -323,8 +335,6 @@ def dispatch(op:str):
     if select_last_index: return ((x.shape[axis]-1) - x.flip(axis).argmax(axis, keepdim=keepdims)).cast(dtypes.int64)
     return x.argmax(axis, keepdim=keepdims).cast(dtypes.int64)
   def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
-
-  def Transpose(x: Tensor, perm=None): return x.permute(order=list(range(x.ndim)[::-1]) if perm is None else perm)
 
   # **************** Complex Ops ****************
 
@@ -375,12 +385,6 @@ def dispatch(op:str):
   def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
     return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
             [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
-
-  def Pad(x:Tensor, pads:List[int], constant_value:Optional[ConstType]=None, axes:Optional[List[int]]=None, mode="constant", value:float=0.):
-    constant_value, mode = value if constant_value is None else float(constant_value), {"edge": "replicate", "wrap":"circular"}.get(mode, mode)
-    axes, real_pads  = axes or list(range(x.ndim)), [0] * (x.ndim*2)
-    for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
-    return x.pad2d(_onnx_pads_to_pad2d_pads(real_pads), constant_value, mode)
 
   def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, count_include_pad=False, dilations=1, pads=0, strides=1):
     ret = X.pad2d(pads).avg_pool2d(kernel_shape, strides, dilations, ceil_mode=ceil_mode)
@@ -542,12 +546,6 @@ def dispatch(op:str):
     ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
     cond = indices[:,None] == Tensor.arange(int(depth)).reshape((1,) * len(ls) + (int(depth),) + (1,) * len(rs))
     return cond.where(values[1], values[0])
-
-  def Erf(x: Tensor):
-    t = 1.0 / (1.0 + 0.3275911 * x.abs())
-    y = (0.254829592 * t + -0.284496736 * t ** 2 + 1.421413741 * t ** 3 + -1.453152027 * t ** 4 + 1.061405429 * t ** 5)
-    z = 1.0 - y * (-x * x).exp()
-    return (x > 0).where(z, -z)
 
   def Compress(inp: Tensor, condition, axis=None):
     if axis is None:

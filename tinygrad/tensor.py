@@ -1753,6 +1753,17 @@ class Tensor:
     m, _, ss = self._softmax(axis, dtype)
     return m - ss.log()
 
+  # TODO: tests and polish
+  # https://pytorch.org/docs/stable/special.html#torch.special.erf
+  def erf(self):
+    """
+    Computes the error using Gauss error function
+    """
+    t = 1.0 / (1.0 + 0.3275911 * self.abs())
+    y = (0.254829592 * t + -0.284496736 * t ** 2 + 1.421413741 * t ** 3 + -1.453152027 * t ** 4 + 1.061405429 * t ** 5)
+    z = 1.0 - y * (-self * self).exp()
+    return (self > 0).where(z, -z)
+
   def logsumexp(self, axis=None, keepdim=False):
     """
     Computes the log-sum-exp of the tensor along the specified axis or axes.
@@ -2564,6 +2575,24 @@ class Tensor:
     ```
     """
     return self.relu() - alpha*(1-self.exp()).relu()
+
+  # TODO: add tests
+  def prelu(self, slope):
+    """
+    Applies the Parametric Rectified Linear Unit (PReLU) function element-wise.
+
+    - Described: https://paperswithcode.com/method/prelu
+    - Paper: https://arxiv.org/abs/1502.01852v1
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).prelu().numpy())
+    ```
+    """
+    # NOTE: our implementation is a combination of onnx's https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_prelu.py#L17
+    # and torch's https://pytorch.org/docs/stable/generated/torch.nn.functional.prelu.html
+    if self.ndim < 3 and slope.ndim != 0: raise ValueError("slope must be scalar if there are no channels")
+    if slope.ndim == 1 and self.ndim > 2: slope = slope.reshape(*(self.size(i) if self.size(i) == slope.size(0) else 1 for i in range(self.ndim)))
+    return (self > 0).where(self, self * slope)
 
   def celu(self, alpha=1.0):
     """
