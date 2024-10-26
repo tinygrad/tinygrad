@@ -363,24 +363,28 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
 
   while (data:=queue_in.get()) is not None:
     idx, img, ann = data
-
-    if seed is not None:
-      np.random.seed(seed)
-      torch.manual_seed(seed)
-
     img_id = img["id"]
     img = image_load(base_dir, img["subset"], img["file_name"])
     tgt = prepare_target(ann, img_id, img.size[::-1])
-    img, tgt = random_horizontal_flip(img, tgt)
-    img, tgt, _ = resize(img, tgt=tgt)
-    match_quality_matrix = box_iou(tgt["boxes"], anchors)
-    matches = find_matches(match_quality_matrix, allow_low_quality_matches=True)
-    matches = np.clip(matches, 0, None)
-    boxes, labels = tgt["boxes"][matches], tgt["labels"][matches]
+
+    if val:
+      img, _ = resize(img)
+    else:
+      if seed is not None:
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
+      img, tgt = random_horizontal_flip(img, tgt)
+      img, tgt, _ = resize(img, tgt=tgt)
+      match_quality_matrix = box_iou(tgt["boxes"], anchors)
+      matches = find_matches(match_quality_matrix, allow_low_quality_matches=True)
+      matches = np.clip(matches, 0, None)
+      boxes, labels = tgt["boxes"][matches], tgt["labels"][matches]
+
+      Y_boxes[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = boxes.tobytes()
+      Y_labels[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = labels.tobytes()
 
     X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
-    Y_boxes[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = boxes.tobytes()
-    Y_labels[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = labels.tobytes()
 
     queue_out.put(idx)
   queue_out.put(None)
@@ -440,7 +444,11 @@ def batch_load_retinanet(dataset, val:bool, anchors:np.ndarray, base_dir:Path, b
         if data_out_count[bc] == batch_size: break
 
       data_out_count[bc] = 0
-      yield X[bc * batch_size:(bc + 1) * batch_size], Y_boxes[bc * batch_size:(bc + 1) * batch_size], Y_labels[bc * batch_size:(bc + 1) * batch_size], Cookie(bc)
+
+      if val:
+        yield X[bc * batch_size:(bc + 1) * batch_size], Cookie(bc)
+      else:
+        yield X[bc * batch_size:(bc + 1) * batch_size], Y_boxes[bc * batch_size:(bc + 1) * batch_size], Y_labels[bc * batch_size:(bc + 1) * batch_size], Cookie(bc)
   finally:
     shutdown = True
 

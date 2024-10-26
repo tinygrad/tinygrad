@@ -1,7 +1,7 @@
 from extra.datasets.kits19 import iterate, preprocess
 from examples.mlperf.dataloader import batch_load_unet3d, batch_load_retinanet
 from test.external.mlperf_retinanet.openimages import get_openimages, postprocess_targets
-from test.external.mlperf_retinanet.presets import DetectionPresetTrain
+from test.external.mlperf_retinanet.presets import DetectionPresetTrain, DetectionPresetEval
 from test.external.mlperf_retinanet.transforms import GeneralizedRCNNTransform
 from test.external.mlperf_unet3d.kits19 import PytTrain, PytVal
 from tinygrad.helpers import temp
@@ -121,10 +121,10 @@ class TestOpenImagesDataset(ExternalTestDatasets):
 
     return base_dir, ann_file
 
-  def _create_ref_dataloader(self, subset, batch_size=1):
+  def _create_ref_dataloader(self, subset):
     self._set_seed()
     base_dir, ann_file = self._create_samples(subset)
-    transforms = DetectionPresetTrain("hflip")
+    transforms = DetectionPresetTrain("hflip") if subset == "train" else DetectionPresetEval()
     dataset = get_openimages(ann_file.stem, base_dir, subset, transforms)
     return iter(dataset)
 
@@ -149,6 +149,15 @@ class TestOpenImagesDataset(ExternalTestDatasets):
       np.testing.assert_equal(tinygrad_img.numpy(), ref_img.tensors.transpose(1, 3).numpy())
       np.testing.assert_equal(tinygrad_boxes[0].numpy(), ref_boxes.numpy())
       np.testing.assert_equal(tinygrad_labels[0].numpy(), ref_labels.numpy())
+
+  def test_validation_set(self):
+    img_size, img_mean, img_std, anchors = (800, 800), [0.0, 0.0, 0.0], [1.0, 1.0, 1.0], torch.ones((120087, 4))
+    tinygrad_dataloader, ref_dataloader = self._create_tinygrad_dataloader("validation", anchors.numpy()), self._create_ref_dataloader("val")
+    transform = GeneralizedRCNNTransform(img_size, img_mean, img_std)
+
+    for ((tinygrad_img, _), (ref_img, _)) in zip(tinygrad_dataloader, ref_dataloader):
+      ref_img, _ = transform(ref_img.unsqueeze(0))
+      np.testing.assert_equal(tinygrad_img.numpy(), ref_img.tensors.transpose(1, 3).numpy())
 
 if __name__ == '__main__':
   unittest.main()
