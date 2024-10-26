@@ -70,6 +70,10 @@ def shard_model(model, opt):
       axis = None
     p.shard_(GPUS, axis)
 
+def to_device_0(model):
+  for k, p in nn.state.get_state_dict(model).items():
+    p.to_(GPUS[0])
+
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
   def __init__(self, model_path: str):
@@ -131,6 +135,10 @@ dim = 16
 n_heads = 4
 max_context = 8192
 rope_theta=10000
+hidden_dim = 48
+epoch = 3
+lr = 1e-2
+generate_tokens = 5
 assert dim % n_heads == 0 and dim % SHARD == 0
 s_head_dim = dim // n_heads
 shard_dim = dim // SHARD
@@ -152,8 +160,6 @@ def get_batch():
 
 data_iter = iter(get_batch())
 
-
-
 class Attention:
   def __init__(self):
     self.wq = nn.Linear(dim, dim)
@@ -161,46 +167,66 @@ class Attention:
     self.wv = nn.Linear(dim, dim)
   
   def __call__(self, x: Tensor, freqs_cis: Tensor, mask: Tensor):
+    _B, _T, _ = x.shape
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-    xq, xk, xv = map(lambda w: w.reshape(B, T, n_heads, s_head_dim), [xq, xk, xv])
+    xq, xk, xv = map(lambda w: w.reshape(_B, _T, n_heads, s_head_dim), [xq, xk, xv])
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     xq, xk, xv = map(lambda w: w.transpose(1, 2), [xq, xk, xv])
     attn = xq.scaled_dot_product_attention(xk, xv, mask)
-    attn = attn.transpose(1,2).reshape(B, T, dim)
+    attn = attn.transpose(1,2).reshape(_B, _T, dim)
     return attn
+
+class FeedForward:
+  def __init__(self):
+    self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+    self.w2 = nn.Linear(hidden_dim, dim, bias=False)
+    self.w3 = nn.Linear(dim, hidden_dim, bias=False) # the gate in Gated Linear Unit
+
+  def __call__(self, x:Tensor) -> Tensor:
+    return self.w2(self.w1(x).silu() * self.w3(x)) # SwiGLU [arxiv/2002.05202, eq (5)]
+
+class TransformerBlock:
+  def __init__(self):
+    self.attention = Attention()
+    self.feed_forward = FeedForward()
+  
+  def __call__(self, x: Tensor, freqs_cis: Tensor, mask: Tensor):
+    h = x + self.attention(x, freqs_cis, mask)
+    return (h + self.feed_forward(h))
 
 class Model:
   def __init__(self):
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.attention = Attention()
+    # self.layer = TransformerBlock()
     self.freqs_cis = precompute_freqs_cis(s_head_dim, max_context * 2, rope_theta).contiguous()
     self.out = nn.Linear(dim, vocab_size, bias=False)
 
   def __call__(self, x: Tensor, target: Tensor = None):
+    _B, _T = x.shape
     x = self.tok_embeddings(x)
-    freqs_cis = self.freqs_cis.shrink((None, (0, T),None,None,None))
-    mask = Tensor.full((1, 1, T, T), float("-inf"), dtype=x.dtype, device=x.device).triu(1).realize()
+    freqs_cis = self.freqs_cis.shrink((None, (0, _T),None,None,None))
+    mask = Tensor.full((1, 1, _T, _T), float("-inf"), dtype=x.dtype, device=x.device).triu(1).realize()
+    # x = self.layer(x, freqs_cis, mask)
     x = self.attention(x, freqs_cis, mask)
     x = self.out(x)
-
     if target is not None:
       loss = x.sparse_categorical_crossentropy(target)
       return x, loss
     return x, None
   
   def generate(self):
+    to_device_0(model)
     tokens = Tensor([tokenizer.encode("<|begin_of_text|>", allow_special=True)])
-    if len(GPUS) > 1:
-      tokens.shard_(GPUS)
-    for _ in range(10):
+    for _ in range(generate_tokens):
       logits, _ = self(tokens)
       logits = logits[:, -1, :]
       idx_next = logits.softmax().multinomial()
       tokens = tokens.cat(idx_next, dim=1)
-    print(tokenizer.decode(tokens.tolist()[0]))
+    return tokenizer.decode(tokens.tolist()[0])
 
 model = Model()
-opt = nn.optim.AdamW(nn.state.get_parameters(model), lr=0.1)
+opt = nn.optim.AdamW(nn.state.get_parameters(model), lr=lr)
 model_size, model_size_unit = get_size(nn.state.get_parameters(model))
 opt_size, opt_size_unit = get_size(nn.state.get_parameters(opt))
 print(f"Model {model_size:.2f} {model_size_unit} Opt: {opt_size:.2f} {opt_size_unit}")
@@ -218,8 +244,7 @@ def step():
 
 Device.DEFAULT = GPU_NAME
 with Tensor.train():
-  for i in range(3): step()
-# model.generate()
+  for i in range(epoch): step()
 
 
 def size_unit(size: str):
@@ -235,4 +260,8 @@ for device in GPUS:
   mem_usage.append(f"{device.name}: {highest:.2f} {unit}")
 
 print("Losses", losses)
-print("Mem usage", mem_usage)
+print("Training peak mem", mem_usage)
+
+
+text = model.generate()
+print("Inference:", text)
