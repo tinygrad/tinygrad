@@ -13,11 +13,10 @@ def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.mul, x
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
-WIN = platform.system() == "Windows"
 CI = os.getenv("CI", "") != ""
 
 # fix colors on Windows, https://stackoverflow.com/questions/12492810/python-how-can-i-make-the-ansi-escape-codes-to-work-also-in-windows
-if WIN: os.system("")
+if sys.platform == "win32": os.system("")
 
 def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x):
@@ -45,7 +44,9 @@ def fully_flatten(l):
   return [l]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
-def ceildiv(num:int, amt:int) -> int: return -int(num//-amt)
+def ceildiv(num, amt):
+  ret = -(num//-amt)
+  return ret if not isinstance(ret, float) else int(ret)
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
 def data64(data: int) -> Tuple[int, int]: return (data >> 32, data & 0xFFFFFFFF)
 def data64_le(data: int) -> Tuple[int, int]: return (data & 0xFFFFFFFF, data >> 32)
@@ -102,7 +103,7 @@ DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0),
 WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 PROFILE, PROFILEPATH = ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
 USE_TC, TC_OPT, AMX, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0), ContextVar("TRANSCENDENTAL", 1)
-FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
+FUSE_ARANGE, FUSE_CONV_BW, LAZYCACHE = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0), ContextVar("LAZYCACHE", 1)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
 
 @dataclass(frozen=True)

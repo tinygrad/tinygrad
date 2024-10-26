@@ -1,5 +1,6 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal
+import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal, sys
+assert sys.platform != 'win32'
 from typing import Tuple, List, Any, cast, Union, Dict, Type
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command
@@ -230,10 +231,10 @@ class NVProgram(HCQProgram):
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
     self.lib_gpu = self.device.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, BufferOptions(cpu_access=True))
 
-    self.prog_addr, self.prog_sz, self.regs_usage, self.shmem_usage, self.lcmem_usage = self.lib_gpu.va_addr, image.nbytes, 0, 0, 0
+    self.prog_addr, self.prog_sz, self.regs_usage, self.shmem_usage, self.lcmem_usage = self.lib_gpu.va_addr, image.nbytes, 0, 0x400, 0
     self.constbufs: Dict[int, Tuple[int, int]] = {0: (0, 0x160)} # Dict[constbuf index, Tuple[va_addr, size]]
     for sh in sections:
-      if sh.name == f".nv.shared.{self.name}": self.shmem_usage = sh.header.sh_size
+      if sh.name == f".nv.shared.{self.name}": self.shmem_usage = round_up(0x400 + sh.header.sh_size, 128)
       if sh.name == f".text.{self.name}":
         self.prog_addr, self.prog_sz, self.regs_usage = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size, max(sh.header.sh_info>>24, 16)
       elif m:=re.match(r'\.nv\.constant(\d+)', sh.name): self.constbufs[int(m.group(1))] = (self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size)
@@ -258,14 +259,13 @@ class NVProgram(HCQProgram):
     self.constbuffer_0 = [0] * 88
     self.constbuffer_0[6:12] = [*data64_le(self.device.shared_mem_window), *data64_le(self.device.local_mem_window), *data64_le(0xfffdc0)]
 
-    smem_config = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
+    smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
     self.qmd = qmd_struct_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
                             invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
                             cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3, constant_buffer_invalidate_0=1,
-                            shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=smem_config,
-                            max_sm_config_shared_mem_size=0x1a, register_count_v=self.regs_usage, target_sm_config_shared_mem_size=smem_config,
+                            shared_memory_size=self.shmem_usage, min_sm_config_shared_mem_size=smem_cfg, target_sm_config_shared_mem_size=smem_cfg,
+                            max_sm_config_shared_mem_size=0x1a, register_count_v=self.regs_usage, program_address=self.prog_addr, sass_version=0x89,
                             barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.prog_sz>>8,
-                            program_address=self.prog_addr, sass_version=0x89,
                             program_prefetch_addr_lower_shifted=self.prog_addr>>8, program_prefetch_addr_upper_shifted=self.prog_addr>>40)
 
     for i,(addr,sz) in self.constbufs.items():
@@ -486,9 +486,9 @@ class NVDevice(HCQCompiled):
     self.cmdq: memoryview = to_mv(self.cmdq_page.va_addr, 0x200000).cast("I")
     self.cmdq_wptr: int = 0 # in bytes
 
-    sm_info = nv_gpu.NV2080_CTRL_GR_INFO(index=nv_gpu.NV2080_CTRL_GR_INFO_INDEX_SM_VERSION)
-    rmctrl.gr_get_info(self.fd_ctl, self.root, self.subdevice, grInfoListSize=1, grInfoList=ctypes.addressof(sm_info))
-    self.arch: str = f"sm_{(sm_info.data>>8)&0xff}{(val>>4) if (val:=sm_info.data&0xff) > 0xf else val}"
+    self.num_gpcs, self.num_tpc_per_gpc, self.num_sm_per_tpc, self.max_warps_per_sm, self.sm_version = self._query_gpu_info('num_gpcs',
+      'num_tpc_per_gpc', 'num_sm_per_tpc', 'max_warps_per_sm', 'sm_version')
+    self.arch: str = f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
 
     compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
     super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
@@ -520,6 +520,12 @@ class NVDevice(HCQCompiled):
     return GPFifo(ring=to_mv(gpfifo_area.va_addr + offset, entries * 8).cast("Q"), entries_count=entries, token=ws_token_params.workSubmitToken,
                   controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.va_addr + offset + entries * 8))
 
+  def _query_gpu_info(self, *reqs):
+    nvrs = [getattr(nv_gpu,'NV2080_CTRL_GR_INFO_INDEX_'+r.upper(), getattr(nv_gpu,'NV2080_CTRL_GR_INFO_INDEX_LITTER_'+r.upper(),None)) for r in reqs]
+    infos = (nv_gpu.NV2080_CTRL_GR_INFO*len(nvrs))(*[nv_gpu.NV2080_CTRL_GR_INFO(index=nvr) for nvr in nvrs])
+    rmctrl.gr_get_info(self.fd_ctl, self.root, self.subdevice, grInfoListSize=len(infos), grInfoList=ctypes.addressof(infos))
+    return [x.data for x in infos]
+
   def _setup_gpfifos(self):
     # Set windows addresses to not collide with other allocated buffers.
     self.shared_mem_window, self.local_mem_window, self.slm_per_thread, self.shader_local_mem = 0xfe000000, 0xff000000, 0, None
@@ -534,20 +540,19 @@ class NVDevice(HCQCompiled):
     self.timeline_value += 2
 
   def _ensure_has_local_memory(self, required):
-    if self.slm_per_thread >= required: return
+    if self.slm_per_thread >= required or ((maxlm:=getenv("NV_MAX_LOCAL_MEMORY_PER_THREAD")) > 0 and required >= maxlm): return
 
     if self.shader_local_mem is not None: self.allocator.free(self.shader_local_mem, self.shader_local_mem.size)
 
     self.slm_per_thread, old_slm_per_thread = round_up(required, 32), self.slm_per_thread
-    bytes_per_warp = round_up(self.slm_per_thread * 32, 0x200)
-    bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
+    bytes_per_tpc = round_up(round_up(self.slm_per_thread * 32, 0x200) * self.max_warps_per_sm * self.num_sm_per_tpc, 0x8000)
 
-    try: self.shader_local_mem = self.allocator.alloc(round_up(bytes_per_tpc * 64, 0x20000))
+    try: self.shader_local_mem = self.allocator.alloc(round_up(bytes_per_tpc * self.num_tpc_per_gpc * self.num_gpcs, 0x20000))
     except MemoryError:
       # If can't allocate a new size, reallocator the old buffer.
       self.slm_per_thread = old_slm_per_thread
-      bytes_per_tpc = round_up(round_up(self.slm_per_thread * 32, 0x200) * 48 * 2, 0x8000)
-      self.shader_local_mem = self.allocator.alloc(round_up(bytes_per_tpc * 64, 0x20000))
+      bytes_per_tpc = round_up(round_up(self.slm_per_thread * 32, 0x200) * self.max_warps_per_sm * self.num_sm_per_tpc, 0x8000)
+      self.shader_local_mem = self.allocator.alloc(round_up(bytes_per_tpc * self.num_tpc_per_gpc * self.num_gpcs, 0x20000))
 
     NVComputeQueue().wait(self.timeline_signal, self.timeline_value - 1) \
                     .setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
@@ -571,9 +576,10 @@ class NVDevice(HCQCompiled):
       for i in range(mmu_info.count):
         pfinfo = mmu_info.mmuFaultInfoList[i]
         report += [f"MMU fault: 0x{pfinfo.faultAddress:X} | {NV_PFAULT_FAULT_TYPE[pfinfo.faultType]} | {NV_PFAULT_ACCESS_TYPE[pfinfo.accessType]}"]
-        report += ["GPU mappings:\n"+"\n".join([f"\t0x{x:X} - 0x{x+y-1:X} | {self._debug_mappings[(x,y)]}" for x,y in sorted(self._debug_mappings)])]
+        if DEBUG >= 5:
+          report += ["GPU mappings:\n"+"\n".join(f"\t0x{x:X} - 0x{x+y-1:X} | {self._debug_mappings[(x,y)]}" for x,y in sorted(self._debug_mappings))]
     else:
       for i, e in enumerate(sm_errors.smErrorStateArray):
-        if e.hwwGlobalEsr or e.hwwWarpEsr: report += [f"SM{i} fault: esr={e.hwwGlobalEsr} warp_esr={e.hwwWarpEsr} warp_pc={e.hwwWarpEsrPc64}"]
+        if e.hwwGlobalEsr or e.hwwWarpEsr: report += [f"SM {i} fault: esr={e.hwwGlobalEsr} warp_esr={e.hwwWarpEsr} warp_pc={e.hwwWarpEsrPc64}"]
 
     raise RuntimeError("\n".join(report))
