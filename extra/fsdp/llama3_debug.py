@@ -1,19 +1,24 @@
 import os
 os.environ["TRACEMETA"] = "0"
-from pathlib import Path
 from typing import List
-import json, argparse, random, time
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
-from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters, TinyJit
 from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm, prod
-from extra.fsdp.utils import print_size
 import numpy as np
 import math
 import re
 from tinygrad.multi import MultiLazyBuffer
+
+def get_size(tensors: List[Tensor]): return sum([t.nbytes() if isinstance(t, Tensor) else t.size for t in tensors])
+
+def print_size(name, *tensors: Tensor):
+    size = get_size(tensors)
+    for unit in ['bytes', 'KB', 'MB', 'GB']:
+        if size < 1000 or unit == 'GB': break
+        size /= 1000
+    print(f'{name} size: {size:.2f} {unit}')
 
 Tensor.manual_seed(2)
 SHARD = int(os.environ.get("SHARD", 1))
@@ -151,7 +156,8 @@ class Model:
 
 model = Model()
 opt = nn.optim.AdamW(nn.state.get_parameters(model), lr=0.1)
-
+print_size("model", *nn.state.get_parameters(model))
+print_size("opt", *nn.state.get_parameters(opt))
 x, y = next(data_iter)
 if len(GPUS) > 1:
   shard_model(model, opt)
@@ -164,7 +170,7 @@ def step():
   loss.realize(*opt.schedule_step())
   print(f"Loss {loss.tolist()}")
 
-
+Device.DEFAULT = GPU_NAME
 with Tensor.train():
   for i in range(3): step()
 # model.generate()

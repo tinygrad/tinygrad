@@ -6,8 +6,11 @@ from tinygrad.dtype import DType
 from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps, MathTrait
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
+import os
 
 def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[Tuple[Tuple[sint, sint], ...]]=None):
+  if os.environ.get("DEBUG_SHARD"):
+    print(f"RESHARD ring: {RING >= 2}")
   if mlb.axis is None:
     return mlb
   if axis is None:
@@ -79,6 +82,8 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   # so just fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
   use_ring = (RING >= 2 or (n_lbs > 2 and dim > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   if DEBUG >= 2: print(f"{'RING ALLREDUCE' if use_ring else 'NAIVE ALLREDUCE'} {n_lbs}x{dim} | {lbs[0].dtype}")
+  if os.environ.get("DEBUG_SHARD"):
+    print(f"ALL REDUCE ring: {use_ring}")
   if not use_ring:
     return [functools.reduce(lambda x,y: x.alu(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
   factor = max(f for f in [32, 16, 8, 4, 2, 1] if dim % f == 0)
