@@ -30,6 +30,7 @@ s_head_dim = dim // n_heads
 shard_dim = dim // SHARD
 assert shard_dim % s_head_dim == 0, f"head must be evenly distributed in each shard {shard_dim=} {s_head_dim=}"
 norm_eps = 1e-5
+n_layers = 2
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, dtype=dtypes.half) -> Tensor:
@@ -192,15 +193,17 @@ class TransformerBlock:
   def __init__(self):
     self.attention = Attention()
     self.feed_forward = FeedForward()
+    self.attention_norm = nn.RMSNorm(dim, norm_eps)
+    self.ffn_norm = nn.RMSNorm(dim, norm_eps)
   
   def __call__(self, x: Tensor, freqs_cis: Tensor, mask: Tensor):
-    h = x + self.attention(x, freqs_cis, mask)
-    return (h + self.feed_forward(h))
+    h = x + self.attention(self.attention_norm(x), freqs_cis, mask)
+    return (h + self.feed_forward(self.ffn_norm(h)))
 
 class Transformer:
   def __init__(self):
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
-    self.layer = TransformerBlock()
+    self.layers = [TransformerBlock() for _ in range(n_layers)]
     self.norm = nn.RMSNorm(dim, norm_eps)
     self.freqs_cis = precompute_freqs_cis(s_head_dim, max_context * 2, rope_theta).contiguous()
     self.out = nn.Linear(dim, vocab_size, bias=False)
@@ -210,7 +213,8 @@ class Transformer:
     x = self.tok_embeddings(x)
     freqs_cis = self.freqs_cis.shrink((None, (0, _T),None,None,None))
     mask = Tensor.full((1, 1, _T, _T), float("-inf"), dtype=x.dtype, device=x.device).triu(1).realize()
-    x = self.layer(x, freqs_cis, mask)
+    for layer in self.layers:
+      x = layer(x, freqs_cis, mask)
     x = self.norm(x)
     x = self.out(x)
     if target is not None:
