@@ -92,9 +92,19 @@ def tokenize_data():
     return Tensor(train), Tensor(val)
 
 train, val = tokenize_data()
+
+
 tokens = train
 B = 4
 T = 16
+vocab_size = 128256
+dim = 16
+n_heads = 2
+assert dim % n_heads == 0 and dim % SHARD == 0
+s_head_dim = dim // n_heads
+shard_dim = dim // SHARD
+assert shard_dim % s_head_dim == 0 or s_head_dim % shard_dim == 0
+
 # lightweight dataloader
 def get_batch():
   i = 0
@@ -111,11 +121,7 @@ def get_batch():
 
 data_iter = iter(get_batch())
 
-vocab_size = 128256
-dim = 8
-n_heads = 1
-assert dim % n_heads == 0
-s_head_dim = dim // n_heads
+
 
 class Attention:
   def __init__(self):
@@ -124,9 +130,11 @@ class Attention:
     self.wv = nn.Linear(dim, dim)
   
   def __call__(self, x: Tensor):
-    B, T, DIM = x.shape
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+    xq, xk, xv = map(lambda w: w.reshape(B, T, n_heads, s_head_dim).transpose(1,2), [xq, xk, xv])
+
     attn = xq.scaled_dot_product_attention(xk, xv)
+    attn = attn.transpose(1,2).reshape(B, T, dim)
     return attn
 
 class Model:
