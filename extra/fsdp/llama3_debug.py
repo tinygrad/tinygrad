@@ -36,8 +36,7 @@ def shard_model(model, opt):
     if p.shape[0] == 1:
       axis = None
     p.shard_(GPUS, axis)
-  for p in seen:
-    p.realize()
+
 class Tokenizer:
   pat_str = r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"
   def __init__(self, model_path: str):
@@ -126,10 +125,12 @@ class Attention:
 class Model:
   def __init__(self):
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
+    self.attention = Attention()
     self.out = nn.Linear(dim, vocab_size, bias=False)
 
   def __call__(self, x: Tensor, target: Tensor = None):
     x = self.tok_embeddings(x)
+    x = self.attention(x)
     x = self.out(x)
 
     if target is not None:
@@ -155,6 +156,7 @@ x, y = next(data_iter)
 if len(GPUS) > 1:
   shard_model(model, opt)
 
+
 def step():
   opt.zero_grad()
   logits, loss = model(x, y)
@@ -166,3 +168,15 @@ def step():
 with Tensor.train():
   for i in range(3): step()
 # model.generate()
+
+
+def size_unit(size: str):
+  for unit in ['bytes', 'KB', 'MB', 'GB']:
+    if size < 1000 or unit == 'GB': break
+    size /= 1000
+  return float(size), unit
+
+for device in GPUS:
+  device = Device[device].allocator
+  highest, unit = size_unit(device.mem_high)
+  print(f"{device.name} highest: {highest:.2f} {unit}")
