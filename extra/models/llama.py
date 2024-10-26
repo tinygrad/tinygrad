@@ -156,12 +156,10 @@ class Transformer:
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float, target: Optional[Tensor] = None):
     _bsz, seqlen = tokens.shape
-    print(f"in transformer forward: {self.freqs_cis.shape=}")
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
-    print(f"{freqs_cis.grad=}")
-    print(f"shrinekd freqs cis {freqs_cis.shape=}")
     h = self.tok_embeddings(tokens)
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1).realize() if seqlen > 1 else None
+    print(f"{mask.shape=}")
     for layer in self.layers:
       h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h)).float()

@@ -160,12 +160,12 @@ class Attention:
     self.wk = nn.Linear(dim, dim)
     self.wv = nn.Linear(dim, dim)
   
-  def __call__(self, x: Tensor, freqs_cis: Tensor):
+  def __call__(self, x: Tensor, freqs_cis: Tensor, mask: Tensor):
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
     xq, xk, xv = map(lambda w: w.reshape(B, T, n_heads, s_head_dim), [xq, xk, xv])
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     xq, xk, xv = map(lambda w: w.transpose(1, 2), [xq, xk, xv])
-    attn = xq.scaled_dot_product_attention(xk, xv)
+    attn = xq.scaled_dot_product_attention(xk, xv, mask)
     attn = attn.transpose(1,2).reshape(B, T, dim)
     return attn
 
@@ -179,7 +179,8 @@ class Model:
   def __call__(self, x: Tensor, target: Tensor = None):
     x = self.tok_embeddings(x)
     freqs_cis = self.freqs_cis.shrink((None, (0, T),None,None,None))
-    x = self.attention(x, freqs_cis)
+    mask = Tensor.full((1, 1, T, T), float("-inf"), dtype=x.dtype, device=x.device).triu(1).realize()
+    x = self.attention(x, freqs_cis, mask)
     x = self.out(x)
 
     if target is not None:
