@@ -72,8 +72,26 @@
     stroke-width: 1.4px;
   }
   .graph {
-    width: 70%;
+    flex: 1;
+    overflow: hidden;
     position: relative;
+  }
+  .collapse-btn {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    background: #1a1b26;
+    border: 1px solid #4a4b57;
+    color: #f0f0f5;
+    width: 32px;
+    height: 32px;
+    padding: 8px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .collapsed .kernel-list, .collapsed .metadata {
+    width: 0;
+    padding: 0;
   }
   .main-container {
     display: flex;
@@ -96,7 +114,8 @@
   }
   .kernel-list {
     width: 15%;
-    overflow-y: auto;
+    padding-right: 20px;
+    overflow-y: hidden;
   }
   .kernel-list > ul > * + * {
     margin-top: 4px;
@@ -104,7 +123,7 @@
   .metadata {
     width: 20%;
     padding-left: 20px;
-    overflow-y: auto;
+    overflow-y: hidden;
   }
   .resize-handle {
     position: absolute;
@@ -144,7 +163,12 @@
   <div class="main-container">
     <div class="container kernel-list"></div>
     <div class="container graph">
-      <svg>
+      <button class="collapse-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M15 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <svg id="graph-svg">
         <g id="render"></g>
       </svg>
     </div>
@@ -194,7 +218,7 @@
         g.setParent(k, "addition");
       }
     }
-    const svg = d3.select("svg");
+    const svg = d3.select("#graph-svg");
     const inner = svg.select("g");
     var zoom = d3.zoom()
       .scaleExtent([0.05, 2])
@@ -220,6 +244,7 @@
   var currentRewrite = 0;
   var expandKernel = true;
   async function main() {
+    const mainContainer = document.querySelector('.main-container');
     // ***** LHS kernels list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
@@ -278,6 +303,33 @@
       className: "wrap code-block language-python" });
     metadata.appendChild(pre);
     hljs.highlightElement(pre);
+    // ** collapse/expand
+    let isCollapsed = false;
+    const collapseBtn = document.querySelector(".collapse-btn");
+    const graph = document.querySelector(".graph");
+    function adjustGraph() {
+      const leftWidth = isCollapsed ? 0 : kernelList.offsetWidth;
+      const rightWidth = isCollapsed ? 0 : metadata.offsetWidth;
+      graph.style.width = `calc(100% - ${leftWidth + rightWidth}px)`;
+    }
+    collapseBtn.addEventListener("click", () => {
+      isCollapsed = !isCollapsed;
+      mainContainer.classList.toggle("collapsed", isCollapsed);
+      if (isCollapsed) {
+        kernelList.style.display = "none";
+        metadata.style.display = "none";
+      } else {
+        kernelList.style.display = "block";
+        metadata.style.display = "block";
+      }
+      collapseBtn.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
+      adjustGraph();
+    });
+    const resizeObserver = new ResizeObserver(adjustGraph);
+    resizeObserver.observe(kernelList);
+    resizeObserver.observe(metadata);
+    window.addEventListener("resize", adjustGraph);
+    adjustGraph();
     // ** resizer
     let containerWidth;
     let leftStartX, rightStartX;
@@ -288,18 +340,19 @@
       e.preventDefault();
       kernelList.style.userSelect = "none";
       leftStartX = e.clientX;
-      containerWidth = document.querySelector(".main-container").getBoundingClientRect().width;
+      containerWidth = mainContainer.getBoundingClientRect().width;
       kernelListWidth = kernelList.getBoundingClientRect().width;
       document.documentElement.addEventListener("mousemove", kernelResize, false);
       document.documentElement.addEventListener("mouseup", () => stopResize(kernelList, kernelResize), false);
     });
     function kernelResize(e) {
+      if (isCollapsed) return;
       const change = e.clientX - leftStartX;
-      const newWidth = ((kernelListWidth + change) / containerWidth) * 100;
+      const newWidth = ((kernelListWidth+change) / containerWidth) * 100;
       if (newWidth >= 15 && newWidth <= 50) {
         kernelList.style.width = `${newWidth}%`;
-        const metadataWidth = parseInt(document.querySelector(".container.metadata").style.width || "20");
-        document.querySelector(".graph").style.width = `${100 - newWidth - metadataWidth}%`;
+        const metadataWidth = parseInt(metadata.style.width || "20");
+        graph.style.width = `${100 - newWidth - metadataWidth}%`;
       }
     }
     metadata.appendChild(Object.assign(document.createElement("div"), { id: "metadata-resize-handle", className: "resize-handle" }));
@@ -308,18 +361,19 @@
       e.preventDefault();
       metadata.style.userSelect = "none";
       rightStartX = e.clientX;
-      containerWidth = document.querySelector(".main-container").getBoundingClientRect().width;
+      containerWidth = mainContainer.getBoundingClientRect().width;
       metadataWidth = metadata.getBoundingClientRect().width;
       document.documentElement.addEventListener("mousemove", metadataResize, false);
       document.documentElement.addEventListener("mouseup", () => stopResize(metadata, metadataResize), false);
     });
     function metadataResize(e) {
+      if (isCollapsed) return;
       const change = e.clientX - rightStartX;
       const newWidth = ((metadataWidth-change) / containerWidth) * 100;
       if (newWidth >= 20 && newWidth <= 50) {
         metadata.style.width = `${newWidth}%`;
-        const kernelWidth = parseInt(document.querySelector(".container.kernel-list").style.width || "15");
-        document.querySelector(".graph").style.width = `${100 - newWidth - kernelWidth}%`;
+        const kernelWidth = parseInt(kernelList.style.width || "15");
+        graph.style.width = `${100 - newWidth - kernelWidth}%`;
       }
     }
     function stopResize(element, resizeFunc) {
