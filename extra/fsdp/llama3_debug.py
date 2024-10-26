@@ -1,6 +1,6 @@
 import os
 os.environ["TRACEMETA"] = "0"
-from typing import List
+from typing import List, Tuple
 import tiktoken
 from tiktoken.load import load_tiktoken_bpe
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
@@ -10,6 +10,33 @@ import numpy as np
 import math
 import re
 from tinygrad.multi import MultiLazyBuffer
+
+# https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, dtype=dtypes.half) -> Tensor:
+  freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
+  freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
+  # TODO: move dtype outside this
+  ret = Tensor.stack(freqs.cos().cast(dtype), freqs.sin().cast(dtype), dim=-1)
+  ret = ret.reshape(1, end, 1, dim//2, 2)
+  ret.requires_grad = False
+  return ret
+
+# (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
+def complex_mult(A, c, d):
+  a,b = A[..., 0:1], A[..., 1:2]
+  ro = a*c - b*d
+  co = a*d + b*c
+  return ro.cat(co, dim=-1)
+
+def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> Tuple[Tensor, Tensor]:
+  assert freqs_cis.shape[1] == xq.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
+  xq = xq.reshape(*xq.shape[0:-1], -1, 2)
+  xk = xk.reshape(*xk.shape[0:-1], -1, 2)
+  assert len(xq.shape) == len(xk.shape) == len(freqs_cis.shape) == 5
+  c, d = freqs_cis[..., 0:1], freqs_cis[..., 1:2]
+  xq_out = complex_mult(xq, c, d)
+  xk_out = complex_mult(xk, c, d)
+  return xq_out.flatten(3), xk_out.flatten(3)
 
 def get_size(tensors: List[Tensor]):
   size = sum([t.nbytes() if isinstance(t, Tensor) else t.size for t in tensors])
@@ -30,6 +57,8 @@ def shard_model(model, opt):
     axis = 0
     if k == 'tok_embeddings.weight':
       axis = 1
+    elif k == 'freqs_cis':
+      axis = None
     elif p.shape[0] == 1:
       axis = None
     p.shard_(GPUS, axis)
@@ -100,6 +129,8 @@ T = 16
 vocab_size = 128256
 dim = 16
 n_heads = 4
+max_context = 8192
+rope_theta=10000
 assert dim % n_heads == 0 and dim % SHARD == 0
 s_head_dim = dim // n_heads
 shard_dim = dim // SHARD
@@ -129,10 +160,11 @@ class Attention:
     self.wk = nn.Linear(dim, dim)
     self.wv = nn.Linear(dim, dim)
   
-  def __call__(self, x: Tensor):
+  def __call__(self, x: Tensor, freqs_cis: Tensor):
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-    xq, xk, xv = map(lambda w: w.reshape(B, T, n_heads, s_head_dim).transpose(1,2), [xq, xk, xv])
-
+    xq, xk, xv = map(lambda w: w.reshape(B, T, n_heads, s_head_dim), [xq, xk, xv])
+    xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
+    xq, xk, xv = map(lambda w: w.transpose(1, 2), [xq, xk, xv])
     attn = xq.scaled_dot_product_attention(xk, xv)
     attn = attn.transpose(1,2).reshape(B, T, dim)
     return attn
@@ -141,11 +173,13 @@ class Model:
   def __init__(self):
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.attention = Attention()
+    self.freqs_cis = precompute_freqs_cis(s_head_dim, max_context * 2, rope_theta).contiguous()
     self.out = nn.Linear(dim, vocab_size, bias=False)
 
   def __call__(self, x: Tensor, target: Tensor = None):
     x = self.tok_embeddings(x)
-    x = self.attention(x)
+    freqs_cis = self.freqs_cis.shrink((None, (0, T),None,None,None))
+    x = self.attention(x, freqs_cis)
     x = self.out(x)
 
     if target is not None:

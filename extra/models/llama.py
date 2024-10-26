@@ -4,10 +4,18 @@ from tinygrad.helpers import getenv
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, dtype=dtypes.half) -> Tensor:
+  print(f"{dim=} {end=} {theta=}")
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
+  print("freqs", freqs.shape)
+  print(freqs.numpy())
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
+  print("freqs2", freqs.cos().shape)
   # TODO: move dtype outside this
-  return Tensor.stack(freqs.cos().cast(dtype), freqs.sin().cast(dtype), dim=-1).reshape(1, end, 1, dim//2, 2)
+  ret = Tensor.stack(freqs.cos().cast(dtype), freqs.sin().cast(dtype), dim=-1)
+  print("ret", ret.shape)
+  ret = ret.reshape(1, end, 1, dim//2, 2)
+  print("ret2", ret.shape)
+  return ret
 
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
 def complex_mult(A, c, d):
@@ -46,11 +54,6 @@ class Attention:
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
-    print("x", x.lazydata.shape, x.lazydata)
-    print(x.numpy())
-    print("wq weight", self.wq.weight.shape, self.wq.weight.lazydata)
-    print(self.wq.weight.numpy())
-    print
     if getenv("WQKV"):
       if not hasattr(self, 'wqkv'): self.wqkv = Tensor.cat(self.wq.weight, self.wk.weight, self.wv.weight)
       xqkv = x @ self.wqkv.T
@@ -58,8 +61,6 @@ class Attention:
     else:
       xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
-    print("xq", xq.shape, xq.lazydata)
-    print(xq.numpy())
     
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
@@ -155,15 +156,15 @@ class Transformer:
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float, target: Optional[Tensor] = None):
     _bsz, seqlen = tokens.shape
+    print(f"in transformer forward: {self.freqs_cis.shape=}")
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
+    print(f"{freqs_cis.grad=}")
     print(f"shrinekd freqs cis {freqs_cis.shape=}")
     h = self.tok_embeddings(tokens)
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1).realize() if seqlen > 1 else None
     for layer in self.layers:
       h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h)).float()
-    print("logits")
-    print(f"{logits.shape=}")
     loss = logits.sparse_categorical_crossentropy(target)
     return loss
     print(f"{loss.shape=}")
