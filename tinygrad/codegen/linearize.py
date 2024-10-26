@@ -10,7 +10,7 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
   children[u] = []
   for x in u.src:
     srcs[u].update(get_children_dfs(x, children, srcs, in_degree))
-    if x.op is UOps.RANGE and x.arg > 0: srcs[u][x] = None
+    if x.op is UOps.RANGE and x.arg % 2 == 1: srcs[u][x] = None
     children[x].append(u)
   in_degree[u] = len(u.src)
   return srcs[u]
@@ -37,8 +37,8 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   def get_priority(u:UOp):
     priority = 0
     # prefer ranges that depend on the least number of independent ranges
-    if u.op is UOps.RANGE and u.arg > 0:
-      priority += u.arg
+    if u.op is UOps.RANGE and u.arg % 2 == 1:
+      priority += (u.arg // 2)
       for p in range_phi[u]:
         priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
     elif u.op is UOps.CONST:
@@ -46,7 +46,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
       priority -= 100000000000
     else:
       # prefer uops that are loop children
-      priority -= sum([(abs(l.arg)+1) + (0 if l.arg <= 0 else 1000) for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
+      priority -= sum([(l.arg // 2) + 1000*(l.arg % 2 == 1) for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
     if u.op is UOps.IF and len(u.src) == 1: priority += 10000000 # if penalty
     return priority
   priorities:Dict[UOp, int] = {u:get_priority(u) for u in children}
