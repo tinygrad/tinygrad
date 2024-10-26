@@ -16,10 +16,6 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
   if axis is None:
     return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None)
 
-  if RING < 2:
-    gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]
-    sharded = to_sharded(gathered, axis, bounds)
-    return MultiLazyBuffer(sharded, axis)
   shape = mlb.shape
   shards = len(mlb.lbs)
   originalAxis = mlb.axis
@@ -28,8 +24,12 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
   splits = tuple([max(0, min(sz, total - sz*i)) for i in range(shards)])
   assert sum(splits) == shape[axis], "specified splits do not sum up to axis shape"
   boundaries = tuple(itertools.accumulate(splits))
-  bounds = tuple(zip((0,) + boundaries, boundaries))
-
+  if bounds is None:
+    bounds = tuple(zip((0,) + boundaries, boundaries))
+  if RING < 2:
+    gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]
+    sharded = to_sharded(gathered, axis, bounds)
+    return MultiLazyBuffer(sharded, axis)
   chunks: List[Tuple[int, int]] = []
   steps = shape[axis] // shards
   for i in range(shards):

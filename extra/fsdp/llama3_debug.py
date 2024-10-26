@@ -11,19 +11,16 @@ import math
 import re
 from tinygrad.multi import MultiLazyBuffer
 
-def get_size(tensors: List[Tensor]): return sum([t.nbytes() if isinstance(t, Tensor) else t.size for t in tensors])
-
-def print_size(name, *tensors: Tensor):
-    size = get_size(tensors)
-    for unit in ['bytes', 'KB', 'MB', 'GB']:
-        if size < 1000 or unit == 'GB': break
-        size /= 1000
-    print(f'{name} size: {size:.2f} {unit}')
+def get_size(tensors: List[Tensor]):
+  size = sum([t.nbytes() if isinstance(t, Tensor) else t.size for t in tensors])
+  for unit in ['bytes', 'KB', 'MB', 'GB']:
+    if size < 1000 or unit == 'GB': break
+    size /= 1000
+  return size, unit
 
 Tensor.manual_seed(2)
 SHARD = int(os.environ.get("SHARD", 1))
 GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
-print(GPUS)
 GPU_NAME = Device.DEFAULT
 def shard_model(model, opt):
   seen = set()
@@ -31,7 +28,9 @@ def shard_model(model, opt):
     if p in seen: continue
     seen.add(p)
     axis = 0
-    if p.shape[0] == 1:
+    if k == 'tok_embeddings.weight':
+      axis = 1
+    elif p.shape[0] == 1:
       axis = None
     p.shard_(GPUS, axis)
   for k, p in nn.state.get_state_dict(opt).items():
@@ -113,8 +112,10 @@ def get_batch():
 data_iter = iter(get_batch())
 
 vocab_size = 128256
-dim = 4
+dim = 8
 n_heads = 1
+assert dim % n_heads == 0
+s_head_dim = dim // n_heads
 
 class Attention:
   def __init__(self):
@@ -123,6 +124,7 @@ class Attention:
     self.wv = nn.Linear(dim, dim)
   
   def __call__(self, x: Tensor):
+    B, T, DIM = x.shape
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
     attn = xq.scaled_dot_product_attention(xk, xv)
     return attn
@@ -156,19 +158,20 @@ class Model:
 
 model = Model()
 opt = nn.optim.AdamW(nn.state.get_parameters(model), lr=0.1)
-print_size("model", *nn.state.get_parameters(model))
-print_size("opt", *nn.state.get_parameters(opt))
+model_size, model_size_unit = get_size(nn.state.get_parameters(model))
+opt_size, opt_size_unit = get_size(nn.state.get_parameters(opt))
+print(f"Model {model_size:.2f} {model_size_unit} Opt: {opt_size:.2f} {opt_size_unit}")
 x, y = next(data_iter)
 if len(GPUS) > 1:
   shard_model(model, opt)
 
-
+losses = []
 def step():
   opt.zero_grad()
   logits, loss = model(x, y)
   loss.backward()
   loss.realize(*opt.schedule_step())
-  print(f"Loss {loss.tolist()}")
+  losses.append(f"{loss.tolist():.2f}")
 
 Device.DEFAULT = GPU_NAME
 with Tensor.train():
@@ -182,7 +185,11 @@ def size_unit(size: str):
     size /= 1000
   return float(size), unit
 
+mem_usage = []
 for device in GPUS:
   device = Device[device].allocator
   highest, unit = size_unit(device.mem_high)
-  print(f"{device.name} highest: {highest:.2f} {unit}")
+  mem_usage.append(f"{device.name}: {highest:.2f} {unit}")
+
+print("Losses", losses)
+print("Mem usage", mem_usage)
