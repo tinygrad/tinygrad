@@ -1,5 +1,5 @@
 from extra.datasets.kits19 import iterate, preprocess
-from extra.datasets.openimages import download_dataset
+from extra.datasets.openimages import normalize
 from examples.mlperf.dataloader import batch_load_unet3d, batch_load_retinanet
 from test.external.mlperf_retinanet.openimages import get_openimages, postprocess_targets
 from test.external.mlperf_retinanet.presets import DetectionPresetTrain, DetectionPresetEval
@@ -86,8 +86,6 @@ class TestKiTS19Dataset(ExternalTestDatasets):
 
 class TestOpenImagesDataset(ExternalTestDatasets):
   def _create_samples(self, subset):
-    self._set_seed()
-
     os.makedirs(Path(base_dir:=tempfile.gettempdir() + "/openimages") / f"{subset}/data", exist_ok=True)
     os.makedirs(base_dir / Path(f"{subset}/labels"), exist_ok=True)
 
@@ -111,15 +109,16 @@ class TestOpenImagesDataset(ExternalTestDatasets):
     return base_dir, ann_file
 
   def _create_ref_dataloader(self, subset, batch_size=1):
+    self._set_seed()
     base_dir, ann_file = self._create_samples(subset)
     transforms = DetectionPresetTrain("hflip")
     dataset = get_openimages(ann_file.stem, base_dir, subset, transforms)
     return iter(dataset)
 
-  def _create_tinygrad_dataloader(self, subset, anchors, batch_size=1):
+  def _create_tinygrad_dataloader(self, subset, anchors, batch_size=1, seed=42):
     base_dir, ann_file = self._create_samples(subset)
     dataset = COCO(ann_file)
-    dataloader = batch_load_retinanet(dataset, subset == "validation", anchors, Path(base_dir), batch_size=batch_size)
+    dataloader = batch_load_retinanet(dataset, subset == "validation", anchors, Path(base_dir), batch_size=batch_size, shuffle=False, seed=seed)
     return iter(dataloader)
 
   def test_training_set(self):
@@ -128,7 +127,6 @@ class TestOpenImagesDataset(ExternalTestDatasets):
     transform = GeneralizedRCNNTransform(img_size, img_mean, img_std)
 
     for ((tinygrad_img, tinygrad_boxes, tinygrad_labels, _), (ref_img, ref_tgt)) in zip(tinygrad_dataloader, ref_dataloader):
-      self._set_seed()
       ref_tgt = [ref_tgt]
 
       ref_img, ref_tgt = transform(ref_img.unsqueeze(0), ref_tgt)
@@ -136,8 +134,8 @@ class TestOpenImagesDataset(ExternalTestDatasets):
       ref_boxes, ref_labels = ref_tgt[0]["boxes"], ref_tgt[0]["labels"]
       
       np.testing.assert_equal(tinygrad_img.numpy(), ref_img.tensors.transpose(1, 3).numpy())
-      # print(f"{tinygrad_img.shape=} {tinygrad_boxes.shape=} {tinygrad_labels.shape=}")
-      # print(f"{ref_boxes.shape=} {ref_labels.shape=} {ref_img.tensors.shape=}")
+      np.testing.assert_equal(tinygrad_boxes[0].numpy(), ref_boxes.numpy())
+      np.testing.assert_equal(tinygrad_labels[0].numpy(), ref_labels.numpy())
 
 if __name__ == '__main__':
   unittest.main()

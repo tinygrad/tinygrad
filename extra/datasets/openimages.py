@@ -193,8 +193,8 @@ def resize(img:Image, tgt:Optional[Dict[str, Union[np.ndarray, Tuple]]]=None, si
   img = np.array(img)
 
   if tgt is not None:
-    ratios = [s / s_orig for s, s_orig in zip(size, img.shape[::-1])]
-    ratio_w, ratio_h = ratios
+    ratios = [s / s_orig for s, s_orig in zip(size, img_size)]
+    ratio_h, ratio_w = ratios
     x_min, y_min, x_max, y_max = [tgt["boxes"][:, i] for i in range(tgt["boxes"].shape[-1])]
     x_min = x_min * ratio_w
     x_max = x_max * ratio_w

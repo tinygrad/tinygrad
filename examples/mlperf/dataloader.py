@@ -1,5 +1,5 @@
 import os, random, pickle, queue
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from pathlib import Path
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
 
@@ -356,17 +356,18 @@ def batch_load_unet3d(preprocessed_dataset_dir:Path, batch_size:int=6, val:bool=
 
 ### RetinaNet
 
-def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue, X:Tensor, Y_boxes:Tensor, Y_labels:Tensor, anchors:np.ndarray):
+def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue, X:Tensor, Y_boxes:Tensor, Y_labels:Tensor, anchors:np.ndarray, seed:Optional[int]=None):
   from extra.datasets.openimages import image_load, prepare_target, random_horizontal_flip, resize
   from examples.mlperf.helpers import box_iou, find_matches
   import torch
 
   while (data:=queue_in.get()) is not None:
-    np.random.seed(42)
-    random.seed(42)
-    torch.manual_seed(42)
-
     idx, img, ann = data
+
+    if seed is not None:
+      np.random.seed(seed)
+      torch.manual_seed(seed)
+
     img_id = img["id"]
     img = image_load(base_dir, img["subset"], img["file_name"])
     tgt = prepare_target(ann, img_id, img.size[::-1])
@@ -384,7 +385,7 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
     queue_out.put(idx)
   queue_out.put(None)
 
-def batch_load_retinanet(dataset, val:bool, anchors:np.ndarray, base_dir:Path, batch_size:int=32, seed:int=None):
+def batch_load_retinanet(dataset, val:bool, anchors:np.ndarray, base_dir:Path, batch_size:int=32, shuffle:bool=True, seed:Optional[int]=None):
   def _enqueue_batch(bc):
     for idx in range(bc * batch_size, (bc+1) * batch_size):
       img = dataset.loadImgs(next(dataset_iter))[0]
@@ -415,16 +416,16 @@ def batch_load_retinanet(dataset, val:bool, anchors:np.ndarray, base_dir:Path, b
         try: _enqueue_batch(self.bc)
         except StopIteration: pass
 
-  # def shuffle_indices(file_indices, seed=None):
-  #   rng = random.Random(seed)
-  #   rng.shuffle(file_indices)
+  def shuffle_indices(indices, seed):
+    rng = random.Random(seed)
+    rng.shuffle(indices)
 
-  # if shuffle: shuffle_indices(file_indices, seed=seed)
+  if shuffle: shuffle_indices(image_ids, seed=seed)
   dataset_iter = iter(image_ids)
 
   try:
     for _ in range(cpu_count()):
-      proc = Process(target=load_retinanet_data, args=(base_dir, val, queue_in, queue_out, X, Y_boxes, Y_labels, anchors))
+      proc = Process(target=load_retinanet_data, args=(base_dir, val, queue_in, queue_out, X, Y_boxes, Y_labels, anchors, seed))
       proc.daemon = True
       proc.start()
       procs.append(proc)
