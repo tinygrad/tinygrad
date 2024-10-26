@@ -122,7 +122,7 @@ class TestOpenImagesDataset(ExternalTestDatasets):
     return iter(dataloader)
 
   def test_training_set(self):
-    img_size, img_mean, img_std, anchors = (800, 800), [0.485, 0.456, 0.406], [0.229, 0.224, 0.225], torch.ones((120087, 4))
+    img_size, img_mean, img_std, anchors = (800, 800), [0.0, 0.0, 0.0], [1.0, 1.0, 1.0], torch.ones((120087, 4))
     tinygrad_dataloader, ref_dataloader = self._create_tinygrad_dataloader("train", anchors.numpy()), self._create_ref_dataloader("train")
     transform = GeneralizedRCNNTransform(img_size, img_mean, img_std)
 
