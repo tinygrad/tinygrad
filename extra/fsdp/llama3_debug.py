@@ -14,11 +14,12 @@ from tinygrad.multi import MultiLazyBuffer
 SHARD = int(os.environ.get("SHARD", 1))
 GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
 GPU_NAME = Device.DEFAULT
+Device.DEFAULT = "CLANG"
 B = 4
 T = 16
 vocab_size = 128256
-dim = 4
-n_heads = 1
+dim = 16
+n_heads = 4
 max_context = 8192
 rope_theta=50000
 hidden_dim = 48
@@ -29,7 +30,7 @@ generate_tokens = 5
 assert dim % n_heads == 0 and dim % SHARD == 0
 s_head_dim = dim // n_heads
 shard_dim = dim // SHARD
-assert shard_dim % s_head_dim == 0, f"head must be evenly distributed in each shard {shard_dim=} {s_head_dim=}"
+assert shard_dim % s_head_dim == 0 or s_head_dim % shard_dim == 0, f"head must be evenly distributed in each shard {shard_dim=} {s_head_dim=}"
 norm_eps = 1e-5
 n_layers = 1
 
