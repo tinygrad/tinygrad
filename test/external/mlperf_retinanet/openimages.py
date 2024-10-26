@@ -1,17 +1,11 @@
 # https://github.com/mlcommons/training/blob/cdd928d4596c142c15a7d86b2eeadbac718c8da2/single_stage_detector/ssd/coco_utils.py
 
-import copy
 import os
-from PIL import Image
 
-import random
-import numpy as np
 import torch
 import torch.utils.data
 import torchvision
 
-from pycocotools import mask as coco_mask
-from pycocotools.coco import COCO
 
 from test.external.mlperf_retinanet import transforms as T
 from test.external.mlperf_retinanet.boxes import box_iou
@@ -103,7 +97,8 @@ def get_openimages(name, root, image_set, transforms):
     return dataset
 
 # This applies the filtering in https://github.com/mlcommons/training/blob/cdd928d4596c142c15a7d86b2eeadbac718c8da2/single_stage_detector/ssd/model/retinanet.py#L117
-# and https://github.com/mlcommons/training/blob/cdd928d4596c142c15a7d86b2eeadbac718c8da2/single_stage_detector/ssd/model/retinanet.py#L203 to match with tinygrad's dataloader implementation.
+# and https://github.com/mlcommons/training/blob/cdd928d4596c142c15a7d86b2eeadbac718c8da2/single_stage_detector/ssd/model/retinanet.py#L203
+# to match with tinygrad's dataloader implementation.
 def postprocess_targets(targets, anchors):
     proposal_matcher, matched_idxs = Matcher(0.5, 0.4, allow_low_quality_matches=True), []
     for anchors_per_image, targets_per_image in zip(anchors, targets):

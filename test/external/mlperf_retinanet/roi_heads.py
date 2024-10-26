@@ -1,17 +1,8 @@
 # https://github.com/mlcommons/training/blob/cdd928d4596c142c15a7d86b2eeadbac718c8da2/single_stage_detector/ssd/model/roi_heads.py
 
 import torch
-import torchvision
 
 import torch.nn.functional as F
-from torch import nn, Tensor
-
-from torchvision.ops import boxes as box_ops
-from torchvision.ops import roi_align
-
-from typing import Optional, List, Dict, Tuple
-
-from test.external.mlperf_retinanet.utils import BoxCoder, Matcher
 
 
 def expand_boxes(boxes, scale):

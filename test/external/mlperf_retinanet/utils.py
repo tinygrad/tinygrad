@@ -3,74 +3,6 @@
 import math
 import torch
 
-from collections import OrderedDict
-from torch import Tensor, nn
-from typing import List, Tuple, Dict
-
-from torchvision.ops.misc import FrozenBatchNorm2d
-
-
-class IntermediateLayerGetter(nn.ModuleDict):
-    """
-    Module wrapper that returns intermediate layers from a model
-
-    It has a strong assumption that the modules have been registered
-    into the model in the same order as they are used.
-    This means that one should **not** reuse the same nn.Module
-    twice in the forward if you want this to work.
-
-    Additionally, it is only able to query submodules that are directly
-    assigned to the model. So if `model` is passed, `model.feature1` can
-    be returned, but not `model.feature1.layer2`.
-
-    Args:
-        model (nn.Module): model on which we will extract the features
-        return_layers (Dict[name, new_name]): a dict containing the names
-            of the modules for which the activations will be returned as
-            the key of the dict, and the value of the dict is the name
-            of the returned activation (which the user can specify).
-
-    Examples::
-
-        >>> m = torchvision.models.resnet18(pretrained=True)
-        >>> # extract layer1 and layer3, giving as names `feat1` and feat2`
-        >>> new_m = torchvision.models._utils.IntermediateLayerGetter(m,
-        >>>     {'layer1': 'feat1', 'layer3': 'feat2'})
-        >>> out = new_m(torch.rand(1, 3, 224, 224))
-        >>> print([(k, v.shape) for k, v in out.items()])
-        >>>     [('feat1', torch.Size([1, 64, 56, 56])),
-        >>>      ('feat2', torch.Size([1, 256, 14, 14]))]
-    """
-    _version = 2
-    __annotations__ = {
-        "return_layers": Dict[str, str],
-    }
-
-    def __init__(self, model: nn.Module, return_layers: Dict[str, str]) -> None:
-        if not set(return_layers).issubset([name for name, _ in model.named_children()]):
-            raise ValueError("return_layers are not present in model")
-        orig_return_layers = return_layers
-        return_layers = {str(k): str(v) for k, v in return_layers.items()}
-        layers = OrderedDict()
-        for name, module in model.named_children():
-            layers[name] = module
-            if name in return_layers:
-                del return_layers[name]
-            if not return_layers:
-                break
-
-        super(IntermediateLayerGetter, self).__init__(layers)
-        self.return_layers = orig_return_layers
-
-    def forward(self, x):
-        out = OrderedDict()
-        for name, module in self.items():
-            x = module(x)
-            if name in self.return_layers:
-                out_name = self.return_layers[name]
-                out[out_name] = x
-        return out
-
 
 @torch.jit._script_if_tracing
 def encode_boxes(reference_boxes, proposals, weights):
@@ -285,10 +217,9 @@ class Matcher(object):
                 raise ValueError(
                     "No ground-truth boxes available for one of the images "
                     "during training")
-            else:
-                raise ValueError(
-                    "No proposal boxes available for one of the images "
-                    "during training")
+            raise ValueError(
+                "No proposal boxes available for one of the images "
+                "during training")
 
         # match_quality_matrix is M (gt) x N (predicted)
         # Max over gt elements (dim 0) to find best gt candidate for each prediction
@@ -342,68 +273,3 @@ class Matcher(object):
 
         pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
         matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
-
-
-class SSDMatcher(Matcher):
-
-    def __init__(self, threshold):
-        super().__init__(threshold, threshold, allow_low_quality_matches=False)
-
-    def __call__(self, match_quality_matrix):
-        matches = super().__call__(match_quality_matrix)
-
-        # For each gt, find the prediction with which it has the highest quality
-        _, highest_quality_pred_foreach_gt = match_quality_matrix.max(dim=1)
-        matches[highest_quality_pred_foreach_gt] = torch.arange(highest_quality_pred_foreach_gt.size(0),
-                                                                dtype=torch.int64,
-                                                                device=highest_quality_pred_foreach_gt.device)
-
-        return matches
-
-
-def overwrite_eps(model, eps):
-    """
-    This method overwrites the default eps values of all the
-    FrozenBatchNorm2d layers of the model with the provided value.
-    This is necessary to address the BC-breaking change introduced
-    by the bug-fix at pytorch/vision#2933. The overwrite is applied
-    only when the pretrained weights are loaded to maintain compatibility
-    with previous versions.
-
-    Args:
-        model (nn.Module): The model on which we perform the overwrite.
-        eps (float): The new value of eps.
-    """
-    for module in model.modules():
-        if isinstance(module, FrozenBatchNorm2d):
-            module.eps = eps
-
-
-def retrieve_out_channels(model, size):
-    """
-    This method retrieves the number of output channels of a specific model.
-
-    Args:
-        model (nn.Module): The model for which we estimate the out_channels.
-            It should return a single Tensor or an OrderedDict[Tensor].
-        size (Tuple[int, int]): The size (wxh) of the input.
-
-    Returns:
-        out_channels (List[int]): A list of the output channels of the model.
-    """
-    in_training = model.training
-    model.eval()
-
-    with torch.no_grad():
-        # Use dummy data to retrieve the feature map sizes to avoid hard-coding their values
-        device = next(model.parameters()).device
-        tmp_img = torch.zeros((1, 3, size[1], size[0]), device=device)
-        features = model(tmp_img)
-        if isinstance(features, torch.Tensor):
-            features = OrderedDict([('0', features)])
-        out_channels = [x.size(1) for x in features.values()]
-
-    if in_training:
-        model.train()
-
-    return out_channels

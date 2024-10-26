@@ -1,7 +1,6 @@
 # https://github.com/mlcommons/training/blob/cdd928d4596c142c15a7d86b2eeadbac718c8da2/single_stage_detector/ssd/transforms.py
 
 import torch
-import torchvision
 
 from torch import nn, Tensor
 from torchvision.transforms import functional as F
@@ -23,7 +22,7 @@ def _flip_coco_person_keypoints(kps, width):
 # TODO(ahmadki): remove this block, and replace get_image_size with F.get_image_size
 #                once https://github.com/pytorch/vision/pull/4321 is public
 
-from PIL import Image, ImageOps, ImageEnhance
+from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 from typing import Any
 
@@ -42,7 +41,6 @@ def _is_pil_image(img: Any) -> bool:
 
 def get_image_size_tensor(img: Tensor) -> List[int]:
     # Returns (w, h) of tensor image
-    _assert_image_tensor(img)
     return [img.shape[-1], img.shape[-2]]
 
 @torch.jit.unused
@@ -97,9 +95,7 @@ class ToTensor(nn.Module):
         return image, target
 
 
-import math
 import torch
-import torchvision
 
 from torch import nn, Tensor
 from typing import List, Tuple, Dict, Optional
@@ -108,21 +104,10 @@ from test.external.mlperf_retinanet.image_list import ImageList
 from test.external.mlperf_retinanet.roi_heads import paste_masks_in_image
 
 
-@torch.jit.unused
-def _get_shape_onnx(image: Tensor) -> Tensor:
-    from torch.onnx import operators
-    return operators.shape_as_tensor(image)[-2:]
-
-
 def _resize_image_and_masks(image: Tensor,
                             target: Optional[Dict[str, Tensor]] = None,
                             image_size: Optional[Tuple[int, int]] = None,
                             ) -> Tuple[Tensor, Optional[Dict[str, Tensor]]]:
-    if torchvision._is_tracing():
-        im_shape = _get_shape_onnx(image)
-    else:
-        im_shape = torch.tensor(image.shape[-2:])
-
     image = torch.nn.functional.interpolate(image[None], size=image_size, scale_factor=None, mode='bilinear',
                                             recompute_scale_factor=None, align_corners=False)[0]
 
@@ -161,7 +146,7 @@ class GeneralizedRCNNTransform(nn.Module):
                 images: List[Tensor],
                 targets: Optional[List[Dict[str, Tensor]]] = None
                 ) -> Tuple[ImageList, Optional[List[Dict[str, Tensor]]]]:
-        images = [img for img in images]
+        images = list(img for img in images)
         if targets is not None:
             # make a copy of targets to avoid modifying it in-place
             # once torchscript supports dict comprehension

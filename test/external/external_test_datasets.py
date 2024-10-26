@@ -1,8 +1,7 @@
 from extra.datasets.kits19 import iterate, preprocess
-from extra.datasets.openimages import normalize
 from examples.mlperf.dataloader import batch_load_unet3d, batch_load_retinanet
 from test.external.mlperf_retinanet.openimages import get_openimages, postprocess_targets
-from test.external.mlperf_retinanet.presets import DetectionPresetTrain, DetectionPresetEval
+from test.external.mlperf_retinanet.presets import DetectionPresetTrain
 from test.external.mlperf_retinanet.transforms import GeneralizedRCNNTransform
 from test.external.mlperf_unet3d.kits19 import PytTrain, PytVal
 from tinygrad.helpers import temp
@@ -91,9 +90,23 @@ class TestOpenImagesDataset(ExternalTestDatasets):
 
     lbls, img_size = ["class_1", "class_2"], (447, 1024)
     cats = [{"id": i, "name": c, "supercategory": None} for i, c in enumerate(lbls)]
-    imgs = [{"id": i, "file_name": f"image_{i}.jpg", "height": img_size[0], "width": img_size[1], "subset": subset, "license": None, "coco_url": None} for i in range(len(lbls))]
+    imgs = [
+      {
+        "id": i, "file_name": f"image_{i}.jpg",
+        "height": img_size[0], "width": img_size[1],
+        "subset": subset, "license": None, "coco_url": None
+      }
+      for i in range(len(lbls))
+    ]
     annots = [
-      {"id": i, "image_id": i, "category_id": 0, "bbox": [23.217183744, 31.75409775, 964.1241282560001, 326.09017434000003], "area": 314391.4050683996, "IsOccluded": 0, "IsInside": 0, "IsDepiction": 0, "IsTruncated": 0, "IsGroupOf": 0, "iscrowd": 0}
+      {
+        "id": i, "image_id": i,
+        "category_id": 0, "bbox": [23.217183744, 31.75409775, 964.1241282560001, 326.09017434000003],
+        "area": 314391.4050683996, "IsOccluded": 0,
+        "IsInside": 0, "IsDepiction": 0,
+        "IsTruncated": 0, "IsGroupOf": 0,
+        "iscrowd": 0
+      }
       for i in range(len(lbls))
     ]
     info = {"dataset": "openimages_mlperf", "version": "v6"}
@@ -132,7 +145,7 @@ class TestOpenImagesDataset(ExternalTestDatasets):
       ref_img, ref_tgt = transform(ref_img.unsqueeze(0), ref_tgt)
       ref_tgt = postprocess_targets(ref_tgt, anchors.unsqueeze(0))
       ref_boxes, ref_labels = ref_tgt[0]["boxes"], ref_tgt[0]["labels"]
-      
+
       np.testing.assert_equal(tinygrad_img.numpy(), ref_img.tensors.transpose(1, 3).numpy())
       np.testing.assert_equal(tinygrad_boxes[0].numpy(), ref_boxes.numpy())
       np.testing.assert_equal(tinygrad_labels[0].numpy(), ref_labels.numpy())
