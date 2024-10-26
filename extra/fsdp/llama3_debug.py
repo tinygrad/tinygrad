@@ -11,6 +11,26 @@ import math
 import re
 from tinygrad.multi import MultiLazyBuffer
 
+SHARD = int(os.environ.get("SHARD", 1))
+GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
+GPU_NAME = Device.DEFAULT
+B = 4
+T = 16
+vocab_size = 128256
+dim = 16
+n_heads = 4
+max_context = 8192
+rope_theta=10000
+hidden_dim = 48
+epoch = 3
+lr = 1e-2
+generate_tokens = 5
+assert dim % n_heads == 0 and dim % SHARD == 0
+s_head_dim = dim // n_heads
+shard_dim = dim // SHARD
+assert shard_dim % s_head_dim == 0, f"head must be evenly distributed in each shard {shard_dim=} {s_head_dim=}"
+norm_eps = 1e-5
+
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, dtype=dtypes.half) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
@@ -46,9 +66,7 @@ def get_size(tensors: List[Tensor]):
   return size, unit
 
 Tensor.manual_seed(2)
-SHARD = int(os.environ.get("SHARD", 1))
-GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
-GPU_NAME = Device.DEFAULT
+
 def shard_model(model, opt):
   seen = set()
   for k, p in nn.state.get_state_dict(model).items():
@@ -128,21 +146,6 @@ train, val = tokenize_data()
 
 
 tokens = train
-B = 4
-T = 16
-vocab_size = 128256
-dim = 16
-n_heads = 4
-max_context = 8192
-rope_theta=10000
-hidden_dim = 48
-epoch = 3
-lr = 1e-2
-generate_tokens = 5
-assert dim % n_heads == 0 and dim % SHARD == 0
-s_head_dim = dim // n_heads
-shard_dim = dim // SHARD
-assert shard_dim % s_head_dim == 0, f"head must be evenly distributed in each shard {shard_dim=} {s_head_dim=}"
 
 # lightweight dataloader
 def get_batch():
@@ -194,11 +197,11 @@ class TransformerBlock:
     h = x + self.attention(x, freqs_cis, mask)
     return (h + self.feed_forward(h))
 
-class Model:
+class Transformer:
   def __init__(self):
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
-    # self.attention = Attention()
     self.layer = TransformerBlock()
+    self.norm = nn.RMSNorm(dim, norm_eps)
     self.freqs_cis = precompute_freqs_cis(s_head_dim, max_context * 2, rope_theta).contiguous()
     self.out = nn.Linear(dim, vocab_size, bias=False)
 
@@ -208,7 +211,7 @@ class Model:
     freqs_cis = self.freqs_cis.shrink((None, (0, _T),None,None,None))
     mask = Tensor.full((1, 1, _T, _T), float("-inf"), dtype=x.dtype, device=x.device).triu(1).realize()
     x = self.layer(x, freqs_cis, mask)
-    # x = self.attention(x, freqs_cis, mask)
+    x = self.norm(x)
     x = self.out(x)
     if target is not None:
       loss = x.sparse_categorical_crossentropy(target)
@@ -225,7 +228,7 @@ class Model:
       tokens = tokens.cat(idx_next, dim=1)
     return tokenizer.decode(tokens.tolist()[0])
 
-model = Model()
+model = Transformer()
 opt = nn.optim.AdamW(nn.state.get_parameters(model), lr=lr)
 model_size, model_size_unit = get_size(nn.state.get_parameters(model))
 opt_size, opt_size_unit = get_size(nn.state.get_parameters(opt))
