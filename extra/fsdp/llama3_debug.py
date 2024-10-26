@@ -5,7 +5,7 @@ import tiktoken
 from tiktoken.load import load_tiktoken_bpe
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters, TinyJit
-from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm, prod
+from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm, prod, trange
 import numpy as np
 import math
 import re
@@ -16,7 +16,7 @@ GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
 GPU_NAME = Device.DEFAULT
 if len(GPUS) > 1:
   Device.DEFAULT = "CLANG"
-B = 32
+B = 4
 T = 16
 vocab_size = 128256
 dim = 16
@@ -145,26 +145,6 @@ def tokenize_data():
     val = tokenizer.encode(text[split:])
     return Tensor(train), Tensor(val)
 
-train, val = tokenize_data()
-
-
-tokens = train
-
-# lightweight dataloader
-def get_batch():
-  i = 0
-  while True:
-    x = tokens[i:i+B*T].view(B, T)
-    y = tokens[i+1:i+B*T+1].view(B, T)
-    if len(GPUS) > 1:
-      x.shard_(GPUS)
-      y.shard_(GPUS)
-    yield x, y
-    i += B*T
-    if i + B*T + 1 >= len(tokens):
-      i = 0 # in prod we'd want to randomize the start point a bit
-
-data_iter = iter(get_batch())
 
 class Attention:
   def __init__(self):
@@ -241,25 +221,54 @@ opt = nn.optim.AdamW(nn.state.get_parameters(model), lr=lr, weight_decay=weight_
 model_size, model_size_unit = get_size(nn.state.get_parameters(model))
 opt_size, opt_size_unit = get_size(nn.state.get_parameters(opt))
 print(f"Model {model_size:.4f} {model_size_unit} Opt: {opt_size:.4f} {opt_size_unit}")
-x, y = next(data_iter)
+
 if len(GPUS) > 1:
   shard_model(model, opt)
 
-losses = []
+train, val = tokenize_data()
+
+# lightweight dataloader
+def get_batch(tokens, batch):
+  i = 0
+  while True:
+    x = tokens[i:i+batch*T].view(batch, T)
+    y = tokens[i+1:i+batch*T+1].view(batch, T)
+    if len(GPUS) > 1:
+      x.shard_(GPUS)
+      y.shard_(GPUS)
+    yield x, y
+    i += batch*T
+    if i + batch*T + 1 >= len(tokens):
+      i = 0 # in prod we'd want to randomize the start point a bit
+
+train_data = iter(get_batch(train, B))
+x_test, y_test = next(iter(get_batch(val, 32)))
+
+
 @TinyJit
-def step():
+@Tensor.train()
+def train_step():
+  x, y = next(train_data)
   logits, loss = model(x, y)
   opt.zero_grad()
   loss.backward()
   loss.realize(*opt.schedule_step())
-  return loss.tolist()
-  
+  return loss
 
+@TinyJit
+@Tensor.test()
+def get_test_acc() -> Tensor:
+  _, loss = model(x_test, y_test)
+  return loss
+
+
+losses = []
 Device.DEFAULT = GPU_NAME
-with Tensor.train():
-  for i in range(epoch):
-    loss = step()
-    losses.append(f"{loss:.2f}")
+test_acc = float('nan')
+for i in (t:= trange(epoch)):
+  loss = train_step()
+  if i % 10 == 9: test_acc = get_test_acc().item()
+  t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
 
 
 def size_unit(size: str):
@@ -274,7 +283,6 @@ for device in GPUS:
   highest, unit = size_unit(device.mem_high)
   mem_usage.append(f"{device.name}: {highest:.2f} {unit}")
 
-print("Losses", losses)
 print("Training peak mem", mem_usage)
 
 
