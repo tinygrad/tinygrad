@@ -16,7 +16,7 @@ GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
 GPU_NAME = Device.DEFAULT
 if len(GPUS) > 1:
   Device.DEFAULT = "CLANG"
-B = 4
+B = 32
 T = 16
 vocab_size = 128256
 dim = 16
@@ -257,7 +257,7 @@ def train_step():
 
 @TinyJit
 @Tensor.test()
-def get_test_acc() -> Tensor:
+def test_step() -> Tensor:
   _, loss = model(x_test, y_test)
   return loss
 
@@ -267,8 +267,8 @@ Device.DEFAULT = GPU_NAME
 test_acc = float('nan')
 for i in (t:= trange(epoch)):
   loss = train_step()
-  if i % 10 == 9: test_acc = get_test_acc().item()
-  t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
+  if i % 10 == 9: test_loss = test_step().item()
+  t.set_description(f"loss: {loss.item():6.2f} test_loss: {test_acc:5.2f}")
 
 
 def size_unit(size: str):
