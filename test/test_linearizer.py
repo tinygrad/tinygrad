@@ -131,7 +131,7 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = (x.numpy()-x.numpy().sum(-1, keepdims=True)).sum(-1).reshape(1,1)
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
     for l in lins:
-      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg) or (u.op is UOps.ENDRANGE and u.src[0].arg)]
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg % 2 == 1) or (u.op is UOps.ENDRANGE and u.src[0].arg % 2 == 1)]
       for i,u in enumerate(ranges):
         if i == 0: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
@@ -195,7 +195,7 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
     for l in lins:
-      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg) or (u.op is UOps.ENDRANGE and u.src[0].arg)]
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg % 2 == 1) or (u.op is UOps.ENDRANGE and u.src[0].arg % 2 == 1)]
       for i,u in enumerate(ranges):
         if i == 0: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
@@ -219,7 +219,7 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = (x2.numpy()*(x1.numpy()-x0.numpy().sum(axis=1, keepdims=True)).sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,1,5)
     lins = helper_linearizer_ast(sink, [x0,x1,x2], wanna_output=[wanna_output])
     for l in lins:
-      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg) or (u.op is UOps.ENDRANGE and u.src[0].arg)]
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg % 2 == 1) or (u.op is UOps.ENDRANGE and u.src[0].arg % 2 == 1)]
       for i,u in enumerate(ranges):
         if i == 0: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
@@ -271,7 +271,7 @@ class TestLinearizer(unittest.TestCase):
     ]
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
     for l in lins:
-      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg) or (u.op is UOps.ENDRANGE and u.src[0].arg)]
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg % 2 == 1) or (u.op is UOps.ENDRANGE and u.src[0].arg % 2 == 1)]
       for i,u in enumerate(ranges):
         if i < 2: continue
         assert ranges[i-2] != u or ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-2], ranges[i-1], {u}}"
@@ -302,7 +302,7 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = (x.numpy()-x.numpy().sum(axis=1, keepdims=True)).sum(axis=1).reshape(27,1,1,5)
     lins = helper_linearizer_ast(sink, [x], wanna_output=[wanna_output], opts=opts)
     for l in lins:
-      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg) or (u.op is UOps.ENDRANGE and u.src[0].arg)]
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg % 2 == 1) or (u.op is UOps.ENDRANGE and u.src[0].arg % 2 == 1)]
       for i,u in enumerate(ranges):
         if i == 0: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
@@ -340,7 +340,7 @@ class TestLinearizer(unittest.TestCase):
     wanna_output = (x.numpy()-(x.numpy().sum(-1, keepdims=True)+np.exp2(x_p.numpy()).sum(-1, keepdims=True))).sum(-1).reshape(4, 1,1)
     lins = helper_linearizer_ast(sink, [x,x_p], wanna_output=[wanna_output], opts=opts)
     for l in lins:
-      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg) or (u.op is UOps.ENDRANGE and u.src[0].arg)]
+      ranges = [u.op for u in l.uops if (u.op is UOps.RANGE and u.arg % 2 == 1) or (u.op is UOps.ENDRANGE and u.src[0].arg % 2 == 1)]
       for i,u in enumerate(ranges):
         if i == 0: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
