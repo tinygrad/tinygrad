@@ -16,7 +16,7 @@ GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
 GPU_NAME = Device.DEFAULT
 if len(GPUS) > 1:
   Device.DEFAULT = "CLANG"
-B = 4
+B = 32
 T = 16
 vocab_size = 128256
 dim = 16
@@ -24,7 +24,7 @@ n_heads = 4
 max_context = 8192
 rope_theta=50000
 hidden_dim = 48
-epoch = 3
+epoch = 30
 lr = 1e-4
 weight_decay=0
 generate_tokens = 5
