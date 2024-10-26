@@ -242,16 +242,20 @@ if len(GPUS) > 1:
   shard_model(model, opt)
 
 losses = []
+@TinyJit
 def step():
   opt.zero_grad()
   logits, loss = model(x, y)
   loss.backward()
   loss.realize(*opt.schedule_step())
-  losses.append(f"{loss.tolist():.2f}")
+  return loss.tolist()
+  
 
 Device.DEFAULT = GPU_NAME
 with Tensor.train():
-  for i in range(epoch): step()
+  for i in range(epoch):
+    loss = step()
+    losses.append(f"{loss:.2f}")
 
 
 def size_unit(size: str):
