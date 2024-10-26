@@ -190,7 +190,7 @@ def resize(img:Image, tgt:Optional[Dict[str, Union[np.ndarray, Tuple]]]=None, si
   import torchvision.transforms.functional as F
   img_size = img.size[::-1]
   img = F.resize(img, size=size)
-  img = np.array(img)
+  img = np.array(img, dtype=np.float32)
 
   if tgt is not None:
     ratios = [s / s_orig for s, s_orig in zip(size, img_size)]
