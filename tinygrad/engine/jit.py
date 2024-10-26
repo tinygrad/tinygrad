@@ -113,18 +113,18 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     dims = [tuple(sym_infer(s, var_vals) for s in dim) for dim in self.symbolic_dims]
     for j, (gl, lc) in self.launch_dims_replace.items(): yield j, (dims[gl] if gl is not None else None), (dims[lc] if lc is not None else None)
 
-  def _access_resources(self, read:List[Buffer], write:List[Buffer], new_dependency:Any):
+  def _access_resources(self, rawbufs:List[Buffer], write:List[int], new_dependency:Any):
     # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
     # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
     wait_nodes = []
 
-    for rawbuf in read + write:
+    for i,rawbuf in enumerate(rawbufs):
       if id(rawbuf.base._buf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[id(rawbuf.base._buf)])
-    for rawbuf in write:
-      if id(rawbuf.base._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf.base._buf)))
+      if i in write:
+        if id(rawbuf.base._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf.base._buf)))
+        self.w_dependency_map[id(rawbuf.base._buf)] = new_dependency
+      else: self.r_dependency_map[id(rawbuf.base._buf)].append(new_dependency)
 
-    for rawbuf in read: self.r_dependency_map[id(rawbuf.base._buf)].append(new_dependency)
-    for rawbuf in write: self.w_dependency_map[id(rawbuf.base._buf)] = new_dependency
     return list({id(x):x for x in wait_nodes}.values())
 
 # a marker for your graph supporting multiple devices of the same type

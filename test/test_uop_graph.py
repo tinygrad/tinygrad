@@ -166,6 +166,17 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.src[1].op, UOps.CONST)
     self.assertEqual(nout.src[1].arg, 3.0)
 
+  def test_commutative_work(self):
+    a = UOp.variable('a', 0, 1)
+    b = UOp.variable('b', 0, 1)
+    self.assertIs((a+b).simplify(), (b+a).simplify())
+
+  def test_consts_go_last_right_away(self):
+    a = UOp.variable('a', 0, 1)
+    tst = (2+a).simplify()
+    self.assertIs(tst.src[0], a)
+    self.assertIs(tst.src[1], a.const_like(2))
+
   def test_consts_go_last(self):
     a = UOp.variable('a', 0, 1)
     b = UOp.variable('b', 0, 1)
@@ -174,7 +185,7 @@ class TestGraphRewrite(unittest.TestCase):
     outs = [2+a, 2+a+d+3+b+c+4, UOp(UOps.ALU, a.dtype, src=(a.const_like(2), a), arg=BinaryOps.ADD), (4+d)+c+(2+a)+b]
     for out in outs:
       sink = graph_rewrite(out, sym)
-      print(sink)
+      print(sink.render())
       self.assertEqual(sink.op, UOps.ALU)
       self.assertEqual(sink.src[1].op, UOps.CONST)
       self.assertEqual(len([x for x in sink.sparents if x.op is UOps.CONST]), 1)
