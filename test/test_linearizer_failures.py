@@ -1331,7 +1331,7 @@ class TestLinearizerFailures(unittest.TestCase):
                         UOp(UOps.DEFINE_GLOBAL, dtypes.half.ptr(), arg=1, src=()),
                         UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 256, 1, 64, 4, 58, 4, 58), strides=(0, 200704, 0, 3136, 0, 56, 0, 1), offset=-57, mask=((0, 1), (0, 256), (0, 1), (0, 64), (0, 4), (1, 57), (0, 4), (1, 57)), contiguous=False), View(shape=(256, 1, 64, 56, 56, 64, 3, 3), strides=(3444736, 0, 0, 232, 1, 53824, 13688, 59), offset=0, mask=None, contiguous=False))), src=()),)),            UOp(UOps.LOAD, dtypes.half, arg=None, src=(              UOp(UOps.DEFINE_GLOBAL, dtypes.half.ptr(), arg=2, src=()),              UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(256, 1, 64, 56, 56, 64, 3, 3), strides=(0, 0, 576, 0, 0, 9, 3, 1), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)),)),))
     opts = [Opt(op=OptOps.SWAP, axis=1, amt=2)]
-    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["CUDA", "NV", "METAL", "AMD", "HIP"])
+    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
 if __name__ == '__main__':
   unittest.main()
