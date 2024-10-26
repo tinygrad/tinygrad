@@ -99,11 +99,11 @@ B = 4
 T = 16
 vocab_size = 128256
 dim = 16
-n_heads = 2
+n_heads = 4
 assert dim % n_heads == 0 and dim % SHARD == 0
 s_head_dim = dim // n_heads
 shard_dim = dim // SHARD
-assert shard_dim % s_head_dim == 0 or s_head_dim % shard_dim == 0
+assert shard_dim % s_head_dim == 0, f"head must be evenly distributed in each shard {shard_dim=} {s_head_dim=}"
 
 # lightweight dataloader
 def get_batch():
