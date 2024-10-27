@@ -9,8 +9,6 @@ from tinygrad.shape.shapetracker import sint
 import os
 
 def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[Tuple[Tuple[sint, sint], ...]]=None):
-  if os.environ.get("DEBUG_SHARD"):
-    print(f"RESHARD ring: {RING >= 2}")
   if mlb.axis is None:
     return mlb
   if axis is None:

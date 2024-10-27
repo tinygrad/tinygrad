@@ -4,9 +4,8 @@ from typing import Tuple, Optional, List
 from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, init_c_struct_t
 from tinygrad.device import Compiled, BufferOptions, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.assembly import PTXRenderer
 from tinygrad.runtime.autogen import cuda
-import os
 from tinygrad.runtime.support.compiler_cuda import cuda_disassemble, pretty_ptx, CUDACompiler, PTXCompiler, PTX
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
 
@@ -61,10 +60,9 @@ class CUDAProgram:
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, self.smem, None, None, self.vargs)), enable=wait)
 
 class CUDAAllocator(LRUAllocator):
-  def __init__(self, device:CUDADevice, name: Optional[str]=None):
+  def __init__(self, device:CUDADevice):
     self.device = device
-    super().__init__(name)
-
+    super().__init__()
   def _alloc(self, size, options:BufferOptions):
     check(cuda.cuCtxSetCurrent(self.device.context))
     if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0x01)))
@@ -89,7 +87,7 @@ class CUDAAllocator(LRUAllocator):
     check(cuda.cuEventRecord(sync_event, None))
     check(cuda.cuCtxSetCurrent(dest_dev.context))
     check(cuda.cuStreamWaitEvent(None, sync_event, 0)) # sync the default stream on the dest dev
-  def offset(self, buf, size:int, offset:int): return cuda.CUdeviceptr_v2(buf.value + offset)
+  def offset(self, buf, size:int, offset:int): return ctypes.c_ulong(buf.value + offset)
 
 class CUDADevice(Compiled):
   devices: List[CUDADevice] = []
@@ -116,7 +114,7 @@ class CUDADevice(Compiled):
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    super().__init__(device, CUDAAllocator(self, name=f"CUDA: {device_id}"), PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch),
+    super().__init__(device, CUDAAllocator(self), PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch),
                      PTXCompiler(self.arch) if PTX else CUDACompiler(self.arch), functools.partial(CUDAProgram, self), graph=CUDAGraph)
 
   def synchronize(self):

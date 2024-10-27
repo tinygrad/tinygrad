@@ -4,10 +4,10 @@
 # this is the (living) definition of uops
 from typing import Tuple, List, Optional, Any, Dict
 import pickle, base64, itertools, time, struct
-from tinygrad.dtype import DType, dtypes, ImageDType, truncate
+from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
-from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, UOps, UOp
+from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, truncate, UOps, UOp
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
 
@@ -215,4 +215,4 @@ class PythonAllocator(Allocator):
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(device, PythonAllocator(name=device), PythonRenderer(), PythonCompiler(), PythonProgram)
+    super().__init__(device, PythonAllocator(), PythonRenderer(), PythonCompiler(), PythonProgram)
