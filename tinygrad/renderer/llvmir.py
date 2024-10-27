@@ -106,8 +106,10 @@ class LLVMRenderer(Renderer):
       elif uop is UOps.STORE:
         element = cast(bb, lvars[src[2]], src[2].dtype, src[0].dtype)
         if len(src) > 3:
-          with bb[-1].if_then(lvars[src[3]]):
-            bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
+          if src[3].op is UOps.IF: bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
+          else:
+            with bb[-1].if_then(lvars[src[3]]):
+              bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
         else:
           bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
       elif uop is UOps.ENDRANGE:

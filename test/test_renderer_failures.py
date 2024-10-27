@@ -42,8 +42,8 @@ class TestCStyleFailures(unittest.TestCase):
     ret = _test_uop_result([Tensor([1])], uops)[0]
     self.assertEqual(ret[0], 1)
 
-@unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
 class TestPTXFailures(unittest.TestCase):
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
   def test_gated_store_with_alu(self):
     a = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     gate_alu = (lidx0:=UOp(UOps.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
@@ -53,6 +53,7 @@ class TestPTXFailures(unittest.TestCase):
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
 
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
   def test_gated_store_with_if(self):
     a = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     gate_alu = (lidx0:=UOp(UOps.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
@@ -63,6 +64,17 @@ class TestPTXFailures(unittest.TestCase):
     uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
+
+  def test_cmplt(self):
+    a = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
+    cmp = UOp(UOps.LOAD, dtypes.int, (a, UOp.const(dtypes.int, 0))).eq(UOp.const(dtypes.int, 0))
+    if_uop = UOp(UOps.IF, dtypes.void, (cmp,))
+    val = UOp.const(dtypes.int, 1)
+    gated_alu_store = UOp(UOps.STORE, dtypes.void, (a, UOp.const(dtypes.int, 0), val, if_uop))
+    sink = UOp(UOps.SINK, dtypes.void, (gated_alu_store,))
+    uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
+    ret = _test_uop_result([], uops)[0]
+    np.testing.assert_equal(ret, [1])
 
 if __name__ == '__main__':
   unittest.main()
