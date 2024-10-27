@@ -340,6 +340,13 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.round(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
     helper_test_op(None, lambda x: x.round(), vals=[[2.5, -1.5]], forward_only=True)
 
+  # TODO: fix backward
+  def test_isinf(self):
+    helper_test_op(None, torch.isinf, Tensor.isinf, vals=[[float('-inf'), 0., float('inf'), float('nan'), 1.1]], forward_only=True)
+  # TODO: fix backward
+  def test_isnan(self):
+    helper_test_op(None, torch.isnan, Tensor.isnan, vals=[[float('-inf'), 0., float('inf'), float('nan'), 1.1]], forward_only=True)
+
   def test_lerp(self):
     helper_test_op([(45,35), (45,35), (45,35)], lambda x,y,z: x.lerp(y,z))
     helper_test_op(None, lambda x,y,z: x.lerp(y,z), vals=[[1.,2.,3.], [4.,5.,6.], 0.5])
@@ -661,6 +668,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.nn.functional.elu, Tensor.elu)
     helper_test_op([(45,65)], lambda x: torch.nn.functional.elu(x, alpha=0.1), lambda x: Tensor.elu(x, alpha=0.1))
     helper_test_op([()], torch.nn.functional.elu, Tensor.elu)
+  # TODO: fix backward
+  def test_prelu(self):
+    helper_test_op([(45,65), ()], lambda x,w: torch.nn.functional.prelu(x,w), lambda x,w: Tensor.prelu(x,w,channel_dim=1), forward_only=True)
+    helper_test_op([(1,3,6,6), ()], lambda x,w: torch.nn.functional.prelu(x,w), lambda x,w: Tensor.prelu(x,w,channel_dim=1), forward_only=True)
+    helper_test_op([(1,3,6,6), (3,)], lambda x,w: torch.nn.functional.prelu(x,w), lambda x,w: Tensor.prelu(x,w,channel_dim=1), forward_only=True)
+    helper_test_op([(3,3,3,3), (3,)], lambda x,w: torch.nn.functional.prelu(x,w), lambda x,w: Tensor.prelu(x,w,channel_dim=1), forward_only=True)
   def test_relu6(self):
     helper_test_op([(45,65)], torch.nn.functional.relu6, Tensor.relu6)
     helper_test_op([()], torch.nn.functional.relu6, Tensor.relu6)
@@ -1070,6 +1083,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,10,10)], lambda x: x.log_softmax(0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(10,10,10)], lambda x: x.log_softmax(1), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(10,10,10)], lambda x: x.log_softmax(2), atol=1e-7, grad_atol=1e-7)
+
+  # TODO: fix backward
+  def test_erf(self):
+    helper_test_op(None, lambda x: torch.special.erf(x), lambda x: x.erf(), vals=[[0., -1., 10.]], forward_only=True)
+    helper_test_op([(45)], lambda x: torch.special.erf(x), lambda x: x.erf(), forward_only=True)
 
   def test_logsumexp(self):
     helper_test_op([(45,65)], lambda x: torch.logsumexp(x, dim=0), lambda x: x.logsumexp(0), atol=1e-7, grad_atol=1e-7)

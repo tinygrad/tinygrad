@@ -1753,11 +1753,19 @@ class Tensor:
     m, _, ss = self._softmax(axis, dtype)
     return m - ss.log()
 
-  # TODO: tests and polish
-  # https://pytorch.org/docs/stable/special.html#torch.special.erf
   def erf(self):
     """
-    Computes the error using Gauss error function
+    Computes the error function (erf) of each element in the tensor.
+
+    This implementation uses Abramowitz and Stegun approximation
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([0., -1., 10.])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.erf().numpy())
+    ```
     """
     t = 1.0 / (1.0 + 0.3275911 * self.abs())
     y = (0.254829592 * t + -0.284496736 * t ** 2 + 1.421413741 * t ** 3 + -1.453152027 * t ** 4 + 1.061405429 * t ** 5)
@@ -2485,11 +2493,19 @@ class Tensor:
   def isinf(self:Tensor, detect_positive=True, detect_negative=True):
     """
     Checks the tensor element-wise to return True where the element is infinity, otherwise returns False
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isinf().numpy())
+    ```
     """
     return (self == float("inf")) * detect_positive + (self == float("-inf")) * detect_negative
   def isnan(self:Tensor):
     """
     Checks the tensor element-wise to return True where the element is NaN, otherwise returns False
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isnan().numpy())
+    ```
     """
     return self != self
 
@@ -2576,23 +2592,24 @@ class Tensor:
     """
     return self.relu() - alpha*(1-self.exp()).relu()
 
-  # TODO: add tests
-  def prelu(self, slope):
+  def prelu(self, weight: Tensor, channel_dim:Optional[int]=1):
     """
     Applies the Parametric Rectified Linear Unit (PReLU) function element-wise.
+    NOTE: prelu follows unconventional broadcasting rules if weight is a 1-D Tensor
 
     - Described: https://paperswithcode.com/method/prelu
     - Paper: https://arxiv.org/abs/1502.01852v1
+    - See: https://pytorch.org/docs/stable/generated/torch.nn.functional.prelu.html
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).prelu().numpy())
     ```
     """
-    # NOTE: our implementation is a combination of onnx's https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_prelu.py#L17
-    # and torch's https://pytorch.org/docs/stable/generated/torch.nn.functional.prelu.html
-    if self.ndim < 3 and slope.ndim != 0: raise ValueError("slope must be scalar if there are no channels")
-    if slope.ndim == 1 and self.ndim > 2: slope = slope.reshape(*(self.size(i) if self.size(i) == slope.size(0) else 1 for i in range(self.ndim)))
-    return (self > 0).where(self, self * slope)
+    if self.ndim <= 2 and weight.ndim != 0: raise ValueError("weight must be scalar if there are no channels")
+    if weight.ndim == 1 and weight.numel() != 1:
+      weight = weight.reshape(*(weight.size(0) if i == self.shape.index(weight.size(0)) else 1 for i in range(self.ndim))) \
+               if channel_dim is None else weight.reshape(*(1 if i != 1 else self.size(i) for i in range(self.ndim)))
+    return (self > 0).where(self, self * weight)
 
   def celu(self, alpha=1.0):
     """

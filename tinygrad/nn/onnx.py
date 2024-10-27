@@ -167,23 +167,28 @@ def get_run_onnx(onnx_model: ModelProto):
 # the tradeoff is linecount + maybe readablilty vs maintainablilty + good errors
 # actually maybe readability also suffers, crap.
 
-# transforms the arguments so that it can be easily dispatched
 # Argument types are defined in here: https://github.com/onnx/onnx/blob/main/docs/Operators.md
 # NOTE: There are numerous tests that have argument specifications which differ from Onnx's docs
-# TODO: maybe map this better so the return is just `args: Dict[str, Any]` with 'self': Tensor, ..., probably clearer
+
+# TODO TODO TODO !!!! maybe
+# TODO: maybe map this better so the return is just one dict `args: Dict[str, Any]` with 'self': Tensor, ..., probably much clearer, and no need
+# helper functions for op_handler. but again, tradeoff is more lines :D
+
+# transforms the arguments so that it can be easily dispatched
 def transform_arguments(op:str, inps:List, opts:Dict, **kwargs):
   # helper functions
   # NOTE: isinstance(arg, Tensor) to get aronud __bool__ being banned on tensor
   def arg_select(*args: Any): return next((arg for arg in args if isinstance(arg, Tensor) or arg), args[-1])
   def list_get(l, i, default=None): return l[i] if i < len(l) else default
 
-  # padding
+  # padding helpers
   # (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> (..., x2_start, x2_end, x1_start, x1_end)
   def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed(list((pB, pE) for pB, pE in zip(pads, pads[len(pads)//2:]))))
   # (H_pad, W_pad) -> (U_pad, L_pad, D_pad, R_pad) aka (x1_begin, x2_begin, ..., x1_end, x2_end, ...)
   def _auto_pad(pads, auto_pad: Literal["SAME_UPPER", "SAME_LOWER"]):
     return [pads[i]//2 for i in range(len(pads))] + [pads[i]-pads[i]//2 for i in range(len(pads))] if auto_pad == "SAME_UPPER" else \
             [pads[i]-pads[i]//2 for i in range(len(pads))] + [pads[i]//2 for i in range(len(pads))]
+  # pool
   def resolve_pool_pads(inps, opts, **_):
     p_,k_,d_,s_ = opts.get('pads', 0), opts.get('kernel_shape') or inps[1].shape[2:], opts.get('dilations',1), opts.get('strides',1),
     i_,(s_,d_,p_) = inps[0].shape[-len(k_):], (make_pair(x, len(k_)*2) for x in (s_, d_, p_))
@@ -229,10 +234,9 @@ def transform_arguments(op:str, inps:List, opts:Dict, **kwargs):
     **{op: lambda inps, opts, **_: resolve_pool_pads(inps,opts) for op in {"AveragePool", "MaxPool"}},
     "Conv": lambda inps, opts, **_: remove_opt_entries(*rewrite_opt_names(*resolve_pool_pads(inps,opts), conv_opts), ('kernel_shape', 'auto_pad')),
     "Split": lambda inps, opts, n, **_: remove_opt_entries(*rewrite_opt_names(*split(inps,opts,n), {'axis':'dim', 'split':'sizes'}), ('num_outputs')),
-    # -> opts y: Tensor
     "Gradient": lambda inps, opts, intermediate_tensor, **_: (inps, {"y": intermediate_tensor[opts["y"]]}),
     "Slice": lambda inps, opts, **_: _slice(inps, opts),
-    # cast and castlike currently doesn't support staturate for float8
+    # NOTE: cast and castlike currently doesn't support staturate for float8
     "Einsum": lambda inps, opts, **_: ([opts['equation']] + inps, {}), "Cast": lambda inps, opts, **_: (inps, {'dtype': parse_dtype(opts['to'])}),
     "CastLike": lambda inps, _, **__: ([inps[0]], {'dtype': inps[1].dtype}),
     "Clip": lambda inps, _, **__: ([inps[0], arg_select(list_get(inps,1), opts.get('min'), dtypes.min(inps[0].dtype)),
@@ -242,7 +246,8 @@ def transform_arguments(op:str, inps:List, opts:Dict, **kwargs):
     "Reshape": lambda inps, opts, **_: ([inps[0]],
                                         {"shape": [int(x) or (0 if opts.get('allowzero') else inps[0].size(i)) for i, x in enumerate(inps[1])]}),
     "Transpose": lambda inps, opts, **_: (inps, {"order": opts.get("perm") or list(range(inps[0].ndim))[::-1]}),
-    "Pad": lambda inps, opts, **_: rewrite_opt_names(*pad(inps, opts), {})
+    "Pad": lambda inps, opts, **_: pad(inps, opts),
+    "PRelu": lambda inps, opts, **_: (inps, {"channel_dim": None}),
     }
   return op_handler.get(op, lambda inps, opts, **_: (inps, opts))(inps, opts, **kwargs)
   # def Transpose(x: Tensor, perm=None): return x.permute(order=list(range(x.ndim)[::-1]) if perm is None else perm)
@@ -682,7 +687,7 @@ def dispatch(op:str):
   # op name rewrite
   if op in tensor_methods: return (fxn := getattr(Tensor, tensor_methods[op])), fxn.__qualname__
   # lambda
-  if op in lambda_methods: return lambda_methods[op], op + ".lambda"
+  if op in lambda_methods: return lambda_methods[op], 'lambda_methods.' + op
   # implemented
   if op in locals(): return locals()[op], "implemented." + op
 
