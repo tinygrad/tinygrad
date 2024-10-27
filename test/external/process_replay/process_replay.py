@@ -5,8 +5,8 @@ from typing import Callable, List, Tuple, Union, cast
 from tinygrad.engine.schedule import ScheduleItemContext, full_ast_rewrite
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 from tinygrad.codegen.kernel import Kernel, Opt
-from tinygrad.ops import UOp
 from tinygrad.renderer import Renderer
+from tinygrad.ops import UOp
 from test.helpers import print_diff
 
 # *** process replay settings
