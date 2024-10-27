@@ -211,13 +211,14 @@ class View:
           if newe: newe[0] = 0
           break
         elif len(term) > 1:
-          idx = max(range(len(term)), key=lambda i: abs(term[i][1]))
-          d1, s1 = term[idx]
-          if (b % s1 != 0 or e % s1 != 0):
+          if not all_int([t[1] for t in term]):
             bad = True
             continue
+          idx = max(range(len(term)), key=functools.partial(lambda t,i: abs(cast(int, t[i][1])), term))
+          d1, s1 = term[idx]
           next_s1 = vm1.shape[d1] * s1
-          if abs(next_s1) < vm2.shape[d2] or vm2.shape[d2] % next_s1 != 0:
+          if (not isinstance(next_s1, int) or abs(next_s1) < vm2.shape[d2] or vm2.shape[d2] % next_s1 != 0
+              or b % s1 != 0 or e % s1 != 0):
             bad = True
             continue
         d1, s1 = term[idx]
