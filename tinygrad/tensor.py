@@ -2595,7 +2595,7 @@ class Tensor:
   def prelu(self, weight: Tensor, channel_dim:Optional[int]=1):
     """
     Applies the Parametric Rectified Linear Unit (PReLU) function element-wise.
-    NOTE: prelu follows unconventional broadcasting rules if weight is a 1-D Tensor
+    NOTE: prelu follows unconventional broadcasting rules if weight is a non-scalar 1-D Tensor
 
     - Described: https://paperswithcode.com/method/prelu
     - Paper: https://arxiv.org/abs/1502.01852v1

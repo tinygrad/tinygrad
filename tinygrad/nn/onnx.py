@@ -235,10 +235,10 @@ def transform_arguments(op:str, inps:List, opts:Dict, **kwargs):
     "Conv": lambda inps, opts, **_: remove_opt_entries(*rewrite_opt_names(*resolve_pool_pads(inps,opts), conv_opts), ('kernel_shape', 'auto_pad')),
     "Split": lambda inps, opts, n, **_: remove_opt_entries(*rewrite_opt_names(*split(inps,opts,n), {'axis':'dim', 'split':'sizes'}), ('num_outputs')),
     "Gradient": lambda inps, opts, intermediate_tensor, **_: (inps, {"y": intermediate_tensor[opts["y"]]}),
-    "Slice": lambda inps, opts, **_: _slice(inps, opts),
+    "Slice": lambda inps, opts, **_: _slice(inps, opts), "Einsum": lambda inps, opts, **_: ([opts['equation']] + inps, {}),
     # NOTE: cast and castlike currently doesn't support staturate for float8
-    "Einsum": lambda inps, opts, **_: ([opts['equation']] + inps, {}), "Cast": lambda inps, opts, **_: (inps, {'dtype': parse_dtype(opts['to'])}),
-    "CastLike": lambda inps, _, **__: ([inps[0]], {'dtype': inps[1].dtype}),
+    "Cast": lambda inps, opts, **_: (inps, {'dtype': parse_dtype(opts['to'])}),"CastLike": lambda inps, _,**__: ([inps[0]], {'dtype': inps[1].dtype}),
+    "EyeLike": lambda inps, opts, **_: (inps, {**opts, 'dtype': parse_dtype(opts['dtype']) if 'dtype' in opts else inps[0].dtype}),
     "Clip": lambda inps, _, **__: ([inps[0], arg_select(list_get(inps,1), opts.get('min'), dtypes.min(inps[0].dtype)),
                                     arg_select(list_get(inps,2), opts.get('max'), dtypes.max(inps[0].dtype))], {}),
     "Shape": lambda _, opts, **__: ([], {"data":inps[0].shape[slice(opts.get("start", None), opts.get("end", None))], "dtype":dtypes.int64},),
@@ -247,8 +247,14 @@ def transform_arguments(op:str, inps:List, opts:Dict, **kwargs):
                                         {"shape": [int(x) or (0 if opts.get('allowzero') else inps[0].size(i)) for i, x in enumerate(inps[1])]}),
     "Transpose": lambda inps, opts, **_: (inps, {"order": opts.get("perm") or list(range(inps[0].ndim))[::-1]}),
     "Pad": lambda inps, opts, **_: pad(inps, opts),
-    "PRelu": lambda inps, opts, **_: (inps, {"channel_dim": None}),
+    "PRelu": lambda inps, _, **__: (inps, {"channel_dim": None}),
     }
+    # def EyeLike(x: Tensor, dtype: Optional[int]=None, k=0):
+    # tiny_dtype = x.dtype if dtype is None else parse_dtype(dtype)
+    # dim = cast(int, min(x.shape))
+    # if x.size(0) == x.size(1): return Tensor.eye(dim, dtype=tiny_dtype)
+    # padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)
+    # return Tensor.eye(dim, dtype=tiny_dtype).pad(padarg)
   return op_handler.get(op, lambda inps, opts, **_: (inps, opts))(inps, opts, **kwargs)
   # def Transpose(x: Tensor, perm=None): return x.permute(order=list(range(x.ndim)[::-1]) if perm is None else perm)
 
@@ -349,7 +355,6 @@ def dispatch(op:str):
     return ret
 
   def CumSum(X:Tensor, axis:int, exclusive=0, reverse=0):
-    if axis < 0: axis += X.ndim
     if reverse: X = X.flip(axis)
     if exclusive: X = X.pad(tuple((1,0) if i == axis else None for i in range(X.ndim)))\
                         .shrink(tuple((0,X.shape[axis]) if i == axis else None for i in range(X.ndim)))
@@ -360,7 +365,7 @@ def dispatch(op:str):
   def BatchNormalization(X: Tensor, scale, B, input_mean, input_var, epsilon=1e-05, momentum=0.9, training_mode=0, spatial=1, is_test=0):
     if training_mode:
       batch_mean = X.mean(axis=(reduce_axes:=tuple(x for x in range(X.ndim) if x != 1)))
-      y = (X - batch_mean.detach().reshape(shape=[1, -1, *([1]*(X.ndim-2))]))  # d(var)/d(mean) = 0
+      y = (X - batch_mean.detach().reshape(1, -1, *([1]*(X.ndim-2))))  # d(var)/d(mean) = 0
       batch_var = (y*y).mean(axis=reduce_axes)
       running_mean, running_var = input_mean * momentum + batch_mean * (1 - momentum), input_var * momentum + batch_var * (1 - momentum)
       return X.batchnorm(scale, B, batch_mean, batch_var.add(epsilon).rsqrt()), running_mean, running_var
@@ -369,17 +374,17 @@ def dispatch(op:str):
   def InstanceNormalization(x: Tensor, scale: Tensor, bias: Tensor, epsilon=1e-05):
     axis = tuple(range(2, x.ndim))
     mean = x.mean(axis=axis, keepdim=True)
-    invstd = x.sub(mean).square().mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
-    return x.sub(mean).mul(scale.reshape(shape=[-1, 1, 1])).mul(invstd).add(bias.reshape(shape=[-1, 1, 1]))
+    invstd = ((x - mean) ** 2).mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
+    return (x - mean) * scale.reshape(-1, 1, 1) * invstd + bias.reshape(-1, 1, 1)
 
   def LayerNormalization(x: Tensor, scale, bias, axis=-1, epsilon=1e-05, stash_type=1):
     assert stash_type == 1, "only float32 is supported"
     axis = tuple(i for i in range(axis if axis >= 0 else x.ndim + axis, x.ndim))
     mean = x.mean(axis=axis, keepdim=True)
-    return x.layernorm(axis, epsilon).mul(scale).add(bias), mean, (x.sub(mean)).square().mean(axis=axis, keepdim=True).add(epsilon).rsqrt()
+    return x.layernorm(axis, epsilon) * scale + bias, mean, ((x - mean).square().mean(axis=axis, keepdim=True) + epsilon).rsqrt()
 
   def GroupNormalization(x: Tensor, scale: Tensor, bias: Tensor, num_groups, epsilon=1e-05):
-    return x.reshape(x.size(0), num_groups, -1).layernorm(axis=-1, eps=epsilon).mul(scale.unsqueeze(-1)).add(bias.unsqueeze(-1)).reshape(x.shape)
+    return (x.rearrange('b (g c) h w -> b g (c h w)',g=num_groups).layernorm(eps=epsilon) * scale.unsqueeze(-1) + bias.unsqueeze(-1)).reshape(x.shape)
 
   # **************** Ops with Padding ****************
   # helpers
@@ -401,17 +406,11 @@ def dispatch(op:str):
     return ret.cast(X.dtype), indices.transpose(-2, -1) if storage_order else indices
 
   # TODO: basically implement scatter
-  def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
-    assert pads is None, "no tests covering pads"
+  def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=(0,0,0,0), strides=None):
     out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
     ret = ((xI.reshape(-1, 1) == Tensor.arange(prod(out_sh))) * xT.reshape(-1, 1)).sum(0).reshape(1, 1, *out_sh)
-    # alternative setitem approach lol
-    # ret = Tensor.zeros(prod(out_sh), dtype=xT.dtype, device=xT.device).contiguous()
-    # ret[xI.flatten()] = xT.flatten()
-    # ret = ret.reshape(1,1,*out_sh)
-    if outshape is not None and outshape != ret.shape:
-      ret = ret.pad2d(_onnx_pads_to_pad2d_pads(_auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")))
-    return ret
+    if outshape is not None and outshape != ret.shape: pads = _auto_pad([outshape[-2] - ret.shape[-2], outshape[-1] - ret.shape[-1]], "SAME_UPPER")
+    return ret.pad2d(_onnx_pads_to_pad2d_pads(pads))
 
   # TODO: their reference implementation and their documentation have different information
   # ref: https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_conv_transpose.py
@@ -447,9 +446,8 @@ def dispatch(op:str):
     return data * mask * (1/(1.0 - ratio)), mask
 
   def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
-    bs, c, iy, ix = x.shape
-    ret = x/x.mul(x).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)  # noqa: E501
-    return ret
+    pooled_x = (x**2).rearrange('b c h w -> b 1 c (h w)').pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1)
+    return x / (pooled_x.reshape(x.shape) * alpha + bias).pow(beta)
 
   def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)): return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
 
@@ -545,12 +543,9 @@ def dispatch(op:str):
 
   def OneHot(indices: Tensor, depth, values, axis=-1):
     # Scalar or Rank 1 tensor containing exactly one element
-    depth = depth[0] if isinstance(depth, list) else depth
-    indices, rank = (indices < 0).where(indices+depth, indices), indices.ndim
-    if axis < 0: axis += rank + 1
-    ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
-    cond = indices[:,None] == Tensor.arange(int(depth)).reshape((1,) * len(ls) + (int(depth),) + (1,) * len(rs))
-    return cond.where(values[1], values[0])
+    depth, indices = depth[0] if isinstance(depth, list) else depth, (indices < 0).where(indices+depth, indices),
+    if axis < 0: axis += indices.ndim + 1
+    return (indices[:,None] == Tensor.arange(int(depth)).reshape((int(depth),) + (1,)*(indices.ndim-axis))).where(values[1], values[0])
 
   def Compress(inp: Tensor, condition, axis=None):
     if axis is None:
@@ -561,11 +556,8 @@ def dispatch(op:str):
     return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
   def EyeLike(x: Tensor, dtype: Optional[int]=None, k=0):
-    tiny_dtype = x.dtype if dtype is None else parse_dtype(dtype)
-    dim = cast(int, min(x.shape))
-    if x.size(0) == x.size(1): return Tensor.eye(dim, dtype=tiny_dtype)
-    padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)
-    return Tensor.eye(dim, dtype=tiny_dtype).pad(padarg)
+    ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype)
+    return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.size(0)-k) for d in x.shape))
 
   def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1, block_size=0):
     if axis < 0: axis += x.ndim
