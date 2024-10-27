@@ -2,12 +2,13 @@
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, functools
 from typing import Callable, List, Tuple, Union, cast
-from tinygrad.engine.schedule import full_ast_rewrite
+from tinygrad.engine.schedule import ScheduleItemContext, full_ast_rewrite
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 from tinygrad.codegen.kernel import Kernel, Opt
-from test.external.process_replay.helpers import ProcessReplayContext, print_diff
 from tinygrad.ops import UOp
 from tinygrad.renderer import Renderer
+from test.helpers import print_diff
+from test.external.process_replay.helpers import ProcessReplayContext
 
 # *** process replay settings
 
@@ -21,15 +22,14 @@ early_stop = multiprocessing.Event()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 # user config
-ASSERT_FLAGS = {"[pr]", "[run_process_replay]"}
-ASSERT_DIFF = int(any(flag in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag) for flag in ASSERT_FLAGS))
+ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in os.getenv("PR_TITLE", flag))
 if not getenv("ASSERT_PROCESS_REPLAY", 1): ASSERT_DIFF = 0
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
 if REF == "master": SKIP_PROCESS_REPLAY = True
 
 # *** recreators
 
-def recreate_sched(sink:UOp, ctx, _) -> UOp: return full_ast_rewrite(sink, ctx)
+def recreate_sched(sink:UOp, ctx:ScheduleItemContext, _) -> UOp: return full_ast_rewrite(sink, ctx)
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str, ctx:ProcessReplayContext, _) -> str:
   with Context(**{k:v for k,v in ctx.ctx_vars.items() if k in ContextVar._cache and k != "DEBUG"}):
     k = Kernel(ast, opts=opts)

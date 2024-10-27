@@ -5,9 +5,9 @@ from typing import Tuple, List, Optional, Dict, Set
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite, _get_chain, symbolic_flat, Variable, sint
+from tinygrad.ops import UOp, UOps, BinaryOps, graph_rewrite, split_uop, symbolic_flat, Variable, sint
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class ShapeTracker:
   views: Tuple[View, ...]
 
@@ -73,17 +73,15 @@ class ShapeTracker:
   def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     ret: List[Optional[sint]] = [None] * len(self.shape)
-    idx, valid = self.to_indexed_uops()
-    idx = graph_rewrite(idx, symbolic_flat)
-    for c in _get_chain(idx, BinaryOps.ADD):
+    idx, valid = (graph_rewrite(u, symbolic_flat) for u in self.to_indexed_uops())
+    for c in split_uop(idx, BinaryOps.ADD):
       if c.op is UOps.RANGE: ret[c.arg] = 1
       if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[0].op is UOps.RANGE and c.src[1].op is UOps.CONST: ret[c.src[0].arg] = c.src[1].arg
       if c.op is UOps.ALU and c.arg is BinaryOps.MUL and c.src[1].op is UOps.RANGE and c.src[0].op is UOps.CONST: ret[c.src[1].arg] = c.src[0].arg
-    used_ranges = [x.arg for x in graph_rewrite(idx, symbolic_flat).sparents if x.op is UOps.RANGE]
+    used_ranges = [x.arg for x in idx.sparents if x.op is UOps.RANGE]
     ret = [x if i in used_ranges else 0 for i,x in enumerate(ret)]
     if not ignore_valid:
-      masked_axis = [x.arg for x in graph_rewrite(valid, symbolic_flat).sparents if x.op is UOps.RANGE]
-      ret = [None if i in masked_axis else x for i,x in enumerate(ret)]
+      for masked_axis in [x.arg for x in valid.sparents if x.op is UOps.RANGE]: ret[masked_axis] = None
     return tuple(ret)
 
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]

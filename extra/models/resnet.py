@@ -160,5 +160,5 @@ if __name__ == "__main__":
   jmodel = TinyJit(model)
   jmodel(Tensor.rand(1, 3, 224, 224)).realize()
   GlobalCounters.reset()
-  with Context(GRAPH=1): jmodel(Tensor.rand(1, 3, 224, 224)).realize()
+  jmodel(Tensor.rand(1, 3, 224, 224)).realize()
   for i in range(10): jmodel(Tensor.rand(1, 3, 224, 224))

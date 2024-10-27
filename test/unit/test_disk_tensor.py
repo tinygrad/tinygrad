@@ -1,7 +1,4 @@
-import os
-import pathlib, tempfile, unittest
-import tarfile
-
+import os, pathlib, tempfile, unittest, tarfile
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
@@ -13,7 +10,7 @@ def compare_weights_both(url):
   import torch
   fn = fetch(url)
   tg_weights = get_state_dict(torch_load(fn))
-  torch_weights = get_state_dict(torch.load(fn, map_location=torch.device('cpu')), tensor_type=torch.Tensor)
+  torch_weights = get_state_dict(torch.load(fn, map_location=torch.device('cpu'), weights_only=True), tensor_type=torch.Tensor)
   assert list(tg_weights.keys()) == list(torch_weights.keys())
   for k in tg_weights:
     if tg_weights[k].dtype == dtypes.bfloat16: tg_weights[k] = torch_weights[k].float() # numpy doesn't support bfloat16
