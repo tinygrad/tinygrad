@@ -1,16 +1,9 @@
 import os
 os.environ["TRACEMETA"] = "0"
-from typing import List, Tuple
-import tiktoken
-from tiktoken.load import load_tiktoken_bpe
-from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
-from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters, TinyJit
-from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm, prod, trange
-import numpy as np
+from tinygrad import Tensor, nn, Device, TinyJit
+from tinygrad.helpers import prod, trange
 import math
-import re
-from tinygrad.multi import MultiLazyBuffer
-from extra.models.llama import sample, Transformer
+from extra.models.llama import Transformer
 from extra.fsdp.utils import get_size
 from examples.llama3 import Tokenizer
 Tensor.manual_seed(2)
