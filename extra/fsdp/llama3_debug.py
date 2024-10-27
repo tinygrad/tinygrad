@@ -20,7 +20,7 @@ B = 4
 T = 16
 vocab_size = 128256
 dim = 4096
-n_layers = 2
+n_layers = 8
 n_heads = 32
 n_kv_heads = 8
 max_context = 8192
@@ -297,5 +297,5 @@ for device in GPUS:
 print("Training peak mem", mem_usage)
 
 
-text = model.generate()
-print("Inference:", text)
+# text = model.generate()
+# print("Inference:", text)
