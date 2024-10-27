@@ -131,8 +131,7 @@ class MetalAllocator(LRUAllocator):
     ret = msg(self.device.device, "newBufferWithLength:options:", size, MTLResourceOptions.MTLResourceStorageModeShared, restype=objc_id)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
-  def _free(self, opaque:MetalBuffer, options):
-    msg(opaque.buf, "release")
+  def _free(self, opaque:MetalBuffer, options): msg(opaque.buf, "release")
   def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = msg(src_dev.mtl_queue, "commandBuffer", restype=objc_instance)

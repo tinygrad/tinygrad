@@ -60,18 +60,9 @@ class CUDAProgram:
       for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, self.smem, None, None, self.vargs)), enable=wait)
 
-def size_unit(size: str):
-  for unit in ['bytes', 'KB', 'MB', 'GB']:
-    if size < 1000 or unit == 'GB': break
-    size /= 1000
-  return float(size), unit
-
 class CUDAAllocator(LRUAllocator):
   def __init__(self, device:CUDADevice, device_id: str):
     self.device = device
-    self.name = device_id
-    self.mem = 0
-    self.mem_high = 0
     super().__init__(device_id)
 
   def _alloc(self, size, options:BufferOptions):
@@ -106,7 +97,6 @@ class CUDADevice(Compiled):
 
   def __init__(self, device:str):
     device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.device_id = device
     check(cuda.cuInit(0))
     self.cu_device = init_c_var(cuda.CUdevice(), lambda x: check(cuda.cuDeviceGet(ctypes.byref(x), device_id)))
     self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, self.cu_device)))
@@ -126,7 +116,7 @@ class CUDADevice(Compiled):
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    super().__init__(device, CUDAAllocator(self, self.device_id), PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch),
+    super().__init__(device, CUDAAllocator(self, device_id), PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch),
                      PTXCompiler(self.arch) if PTX else CUDACompiler(self.arch), functools.partial(CUDAProgram, self), graph=CUDAGraph)
 
   def synchronize(self):
