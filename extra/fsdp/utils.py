@@ -1,11 +1,13 @@
 from tinygrad import Tensor
-from typing import List
+from typing import List, Callable, Optional
 from tinygrad.multi import MultiLazyBuffer
 
-def get_size(tensors: List[Tensor]):
-  size = sum([t.nbytes() if isinstance(t, Tensor) else t.size for t in tensors])
-  for unit in ['bytes', 'KB', 'MB', 'GB']:
-    if size < 1000 or unit == 'GB': break
+def get_size(tensors: List[Tensor],
+             getter: Callable[[Tensor], int]=lambda t: t.nbytes(),
+             units: List[str]=["bytes", "KB", "MB", "GB"]):
+  size = sum([getter(t) if isinstance(t, Tensor) else t.size for t in tensors])
+  for i, unit in enumerate(units):
+    if size < 1000 or i == len(units) - 1: break
     size /= 1000
   return size, unit
 

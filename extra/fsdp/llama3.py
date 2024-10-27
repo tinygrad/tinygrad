@@ -18,13 +18,13 @@ B = 4
 T = 16
 vocab_size = 128256
 dim = 4096
-n_layers = 32
+n_layers = 16
 n_heads = 32
 n_kv_heads = 8
 max_context = 8192
 rope_theta=50000
 hidden_dim = 14336
-epoch = 2
+epoch = 30
 lr = 1e-4
 weight_decay=0
 generate_tokens = 5
@@ -104,7 +104,18 @@ if len(GPUS) > 1:
   shard_model(model, opt)
 model_size, model_size_unit = get_size(nn.state.get_parameters(model))
 opt_size, opt_size_unit = get_size(nn.state.get_parameters(opt))
-print(f"Model {model_size:.4f} {model_size_unit} Opt: {opt_size:.4f} {opt_size_unit}")
+print(f"Model {model_size:.2f} {model_size_unit} Optimizer: {opt_size:.2f} {opt_size_unit}")
+model_elem, model_elem_unit = get_size(
+  nn.state.get_parameters(model),
+  lambda t: t.numel(),
+  units=["", "K", "M", "B"]
+)
+optim_elem, optim_elem_unit = get_size(
+  nn.state.get_parameters(opt),
+  lambda t: t.numel(),
+  units=["", "K", "M", "B"]
+)
+print(f"Model params: {model_elem:.2f} {model_elem_unit} Optimizer params: {optim_elem:.2f} {optim_elem_unit}")
 
 def forward_pass(x: Tensor, y: Tensor):
   logits = model(x, 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
@@ -156,4 +167,4 @@ for device in GPUS:
   device = Device[device].allocator
   highest, unit = size_unit(device.mem_high)
   mem_usage.append(f"{device.name}: {highest:.2f} {unit}")
-print("Peak training mem", mem_usage)
+print("Peak mem", mem_usage)
