@@ -2,14 +2,12 @@ from tinygrad import Tensor
 from typing import List
 from tinygrad.multi import MultiLazyBuffer
 
-def get_size(tensors: List[Tensor]): return sum([t.nbytes() if isinstance(t, Tensor) else t.size for t in tensors])
-
-def print_size(name, *tensors: Tensor):
-    size = get_size(tensors)
-    for unit in ['bytes', 'KB', 'MB', 'GB']:
-        if size < 1000 or unit == 'GB': break
-        size /= 1000
-    print(f'{name} size: {size:.4f} {unit}')
+def get_size(tensors: List[Tensor]):
+  size = sum([t.nbytes() if isinstance(t, Tensor) else t.size for t in tensors])
+  for unit in ['bytes', 'KB', 'MB', 'GB']:
+    if size < 1000 or unit == 'GB': break
+    size /= 1000
+  return size, unit
 
 def print_lb(lb):
   assert isinstance(lb, MultiLazyBuffer)
