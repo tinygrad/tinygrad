@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
 from typing import List, Any, Tuple, Optional, cast, TypeVar
-from tinygrad.helpers import prod, getenv, DEBUG
+from tinygrad.helpers import prod, getenv, DEBUG, size_unit
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -122,44 +122,16 @@ class MetalBuffer:
   def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
 
 
-def size_unit(size: str):
-  for unit in ['bytes', 'KB', 'MB', 'GB']:
-    if size < 1000 or unit == 'GB': break
-    size /= 1000
-  return float(size), unit
-
 class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice, name: str):
     self.device:MetalDevice = device
-    self.mem = 0
-    self.name = name
-    self.mem_high = 0
-    super().__init__()
-  def reset_mem_high(self):
-    self.mem_high = 0
-    print(f"{self.name:8} Mem high reset")
-  def mem_changed(self, mem):
-    self.mem += mem
-    self.mem_high = max(self.mem, self.mem_high)
-    reset_color = "\u001b[39m"
-    magenta = "\u001b[35m"
-    blue = "\u001b[34m"
-    cyan = "\u001b[36m"
-    white = "\u001b[37m"
-    color = magenta if self.name == "METAL" else blue if self.name == "METAL:1" else cyan if self.name == "METAL:2" else white
-    current_mem, mem_unit = size_unit(self.mem)
-    mem_high, mem_high_unit = size_unit(self.mem_high)
-    changed, changed_unit = size_unit(mem)
-    if os.environ.get("DEBUG_MEM"):
-      print(f"\n{color}{self.name:8} ALLOC {changed:10.2f} {changed_unit} current mem: {current_mem:.2f} {mem_unit}, highest: {mem_high:.2f} {mem_high_unit} {reset_color}")
+    super().__init__(name)
   def _alloc(self, size:int, options) -> MetalBuffer:
-    self.mem_changed(size)
     # Buffer is explicitly released in _free() rather than garbage collected via reference count
     ret = msg(self.device.device, "newBufferWithLength:options:", size, MTLResourceOptions.MTLResourceStorageModeShared, restype=objc_id)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options):
-    self.mem_changed(-1 * opaque.size)
     msg(opaque.buf, "release")
   def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()

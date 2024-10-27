@@ -72,32 +72,13 @@ class CUDAAllocator(LRUAllocator):
     self.name = device_id
     self.mem = 0
     self.mem_high = 0
-    super().__init__()
-  def reset_mem_high(self):
-    self.mem_high = 0
-    print(f"{self.name:8} Mem high reset")
-  def mem_changed(self, mem):
-    self.mem += mem
-    self.mem_high = max(self.mem, self.mem_high)
-    reset_color = "\u001b[39m"
-    magenta = "\u001b[35m"
-    blue = "\u001b[34m"
-    cyan = "\u001b[36m"
-    white = "\u001b[37m"
-    color = magenta if self.name == "CUDA" else blue if self.name == "CUDA:1" else cyan if self.name == "CUDA:2" else white
-    current_mem, mem_unit = size_unit(self.mem)
-    mem_high, mem_high_unit = size_unit(self.mem_high)
-    changed, changed_unit = size_unit(mem)
-    if os.environ.get("DEBUG_MEM"):
-      print(f"\n{color}{self.name:8} ALLOC {changed:10.2f} {changed_unit} current mem: {current_mem:.2f} {mem_unit}, highest: {mem_high:.2f} {mem_high_unit} {reset_color}")
+    super().__init__(device_id)
 
   def _alloc(self, size, options:BufferOptions):
-    self.mem_changed(size)
     check(cuda.cuCtxSetCurrent(self.device.context))
     if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0x01)))
     return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
-  def _free(self, opaque, options:BufferOptions, size: int):
-    self.mem_changed(-1 * size)
+  def _free(self, opaque, options:BufferOptions):
     if options.host: check(cuda.cuMemFreeHost(opaque))
     else: check(cuda.cuMemFree_v2(opaque))
   def copyin(self, dest, src:memoryview):

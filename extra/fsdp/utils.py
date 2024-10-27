@@ -9,6 +9,7 @@ def get_size(tensors: List[Tensor]):
     size /= 1000
   return size, unit
 
+
 def print_lb(lb):
   assert isinstance(lb, MultiLazyBuffer)
   seen = set()

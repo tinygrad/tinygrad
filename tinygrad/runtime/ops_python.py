@@ -215,4 +215,4 @@ class PythonAllocator(Allocator):
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(device, PythonAllocator(), PythonRenderer(), PythonCompiler(), PythonProgram)
+    super().__init__(device, PythonAllocator(name=device), PythonRenderer(), PythonCompiler(), PythonProgram)

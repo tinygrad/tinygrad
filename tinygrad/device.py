@@ -3,7 +3,7 @@ from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import List, Optional, Dict, Tuple, Any, Iterator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib
-from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
+from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, size_unit
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.renderer import Renderer
 
@@ -132,14 +132,44 @@ class Buffer:
     if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
     return Buffer(self.device, size, dtype, base=self, offset=offset)
 
+ALLOCATOR_ID = 0
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
+  def __init__(self, name=None):
+    global ALLOCATOR_ID
+    self.id = ALLOCATOR_ID
+    self.name = f"Untitled {self.id}" if name is None else name
+    self.mem = 0
+    self.mem_high = 0
+    print("ALLOCATOR INIT", self.name, self.id)
+    ALLOCATOR_ID += 1
+  def mem_changed(self, mem):
+    self.mem += mem
+    self.mem_high = max(self.mem, self.mem_high)
+    reset_color = "\u001b[39m"
+    magenta = "\u001b[35m"
+    blue = "\u001b[34m"
+    cyan = "\u001b[36m"
+    white = "\u001b[37m"
+    red = "\u001b[31m"
+    yellow = "\u001b[33m"
+    colors = [magenta, blue, cyan, white, red, yellow]
+    color = colors[self.id % 6]
+    current_mem, mem_unit = size_unit(self.mem)
+    mem_high, mem_high_unit = size_unit(self.mem_high)
+    changed, changed_unit = size_unit(mem)
+    if os.environ.get("DEBUG_MEM"):
+      print(f"\n{color}{self.name:8} ALLOC {changed:10.2f} {changed_unit} current mem: {current_mem:.2f} {mem_unit}, highest: {mem_high:.2f} {mem_high_unit} {reset_color}")
+
   def alloc(self, size:int, options:Optional[BufferOptions]=None):
+    self.mem_changed(size)
     assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
     return self._alloc(size, options if options is not None else BufferOptions())
   def _alloc(self, size:int, options:BufferOptions): raise NotImplementedError("need alloc")
-  def free(self, opaque, size:int, options:Optional[BufferOptions]=None): self._free(opaque, options if options is not None else BufferOptions(), size)
-  def _free(self, opaque, options:BufferOptions, size: int): pass  # if opaque is a Python object, you don't need a free
+  def free(self, opaque, size:int, options:Optional[BufferOptions]=None):
+    self.mem_changed(-1 * size)
+    self._free(opaque, options if options is not None else BufferOptions())
+  def _free(self, opaque, options:BufferOptions): pass  # if opaque is a Python object, you don't need a free
   def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 
@@ -148,7 +178,9 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   The LRU Allocator is responsible for caching buffers.
   It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
   """
-  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
+  def __init__(self, name: Optional[str]=None):
+    self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
+    super().__init__(name)
   def alloc(self, size:int, options:Optional[BufferOptions]=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
@@ -171,7 +203,7 @@ class _MallocAllocator(LRUAllocator):
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
   def offset(self, buf, size:int, offset:int): return from_mv(self.as_buffer(buf)[offset:offset+size])
 
-MallocAllocator = _MallocAllocator()
+MallocAllocator = _MallocAllocator(name="PYTHON")
 
 # **************** for Compiled Devices ****************
 

@@ -1,7 +1,7 @@
 import os
 os.environ["TRACEMETA"] = "0"
 from tinygrad import Tensor, nn, Device, TinyJit
-from tinygrad.helpers import prod, trange
+from tinygrad.helpers import prod, trange, size_unit
 import math
 from extra.models.llama import Transformer
 from extra.fsdp.utils import get_size
@@ -149,3 +149,9 @@ def generate():
   return tokenizer.decode(tokens.tolist()[0])
 
 train()
+
+mem_usage = []
+for device in GPUS:
+  device = Device[device].allocator
+  highest, unit = size_unit(device.mem_high)
+  mem_usage.append(f"{device.name}: {highest:.2f} {unit}")
