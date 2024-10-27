@@ -29,7 +29,7 @@ hidden_dim = 14336
 epoch = 50
 lr = 1e-4
 weight_decay=0
-generate_tokens = 50
+generate_tokens = 10
 assert dim % n_heads == 0 and dim % SHARD == 0
 head_dim = dim // n_heads
 shard_dim = dim // SHARD
@@ -156,11 +156,12 @@ def generate():
   tokens = Tensor([tokenizer.encode("<|begin_of_text|>", allow_special=True)])
   if len(GPUS) > 1:
     tokens.shard_(GPUS, axis=None)
-  for start_pos in range(generate_tokens):
+  for start_pos in (t:= trange(generate_tokens)):
     idx_next = model(tokens, start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).unsqueeze(0)
     if len(GPUS) > 1:
       idx_next.shard_(GPUS, axis=None)
     tokens = tokens.cat(idx_next, dim=1)
+    t.set_description(f"Tokens generated {start_pos+1}")
   text = tokenizer.decode(tokens.tolist()[0])
   print(text)
   return text
