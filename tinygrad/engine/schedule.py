@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Set, Tuple, List, Dict, Optional, DefaultDict, cast
 from tinygrad.ops import BUFFER_UOPS, MetaOps, ReduceOps, UnaryOps, UOp, UOps, PatternMatcher, UPat, Variable, graph_rewrite, track_rewrites, sint
 from tinygrad.helpers import DEBUG, Metadata, all_same, colored, diskcache_put, prod, dedup, getenv, unwrap
-from tinygrad.dtype import ImageDType
+from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.engine.lazy import LazyBuffer
@@ -38,20 +38,37 @@ class ScheduleItem:
 
 # **** small wrapper for LazyBuffer -> UOp
 
-def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], buf_uops:Dict[Buffer, UOp], metadata:Dict[UOp, Metadata], cache:Dict[LazyBuffer, UOp]) -> UOp:
+@dataclass(frozen=True)
+class ScheduleContext:
+  realizes: Dict[Buffer, LazyBuffer]
+  buf_uops: Dict[Buffer, UOp] = field(default_factory=dict)
+  uop_bufs: Dict[UOp, Buffer] = field(default_factory=dict)
+  var_vals: Dict[Variable, int] = field(default_factory=dict)
+
+def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], ctx:ScheduleContext, metadata:Dict[UOp, Metadata], cache:Dict[LazyBuffer, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   if buf is not buf.base:
-    cache[buf] = ret = to_uop(buf.base, outputs, buf_uops, metadata, cache).view(buf.st)
+    cache[buf] = ret = to_uop(buf.base, outputs, ctx, metadata, cache).view(buf.st)
     return ret
-  if buf.op is MetaOps.CONST: return buf_uops[buf.buffer]
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
-  if buf.is_realized(): return UOp(UOps.PRELOAD, dtype, (buf_uops[buf.buffer], buf.st.to_uop()))
-  if (ubuf:=buf_uops.get(buf.buffer)) is not None and buf not in outputs: return UOp(UOps.LOAD, dtype, (ubuf, buf.st.to_uop()))
-  src = tuple(to_uop(x, outputs, buf_uops, metadata, cache) for x in buf.srcs)
+  # consts have VALID + value
+  if buf.op is MetaOps.CONST:
+    if isinstance(val:=buf.arg, UOp): ctx.var_vals.update([val.unbind()])
+    return UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(dtype, buf.arg), v.const_like(0))
+  # everything else has BUFFER
+  if (b:=buf.buffer) not in ctx.buf_uops:
+    ctx.buf_uops[b] = ubuf = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(ctx.buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
+    ctx.uop_bufs[ubuf] = b
+  else: ubuf = ctx.buf_uops[b]
+  # if it's not fused it's a LOAD
+  if buf.is_realized(): return UOp(UOps.PRELOAD, dtype, (ubuf, buf.st.to_uop()))
+  if b in ctx.realizes and buf not in outputs: return UOp(UOps.LOAD, dtype, (ubuf, buf.st.to_uop()))
+  # otherwise we fuse it like normal
+  src = tuple(to_uop(x, outputs, ctx, metadata, cache) for x in buf.srcs)
   if buf.op in ReduceOps: ret = src[0].r(buf.op, buf.arg)
   elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(UOps.CONTIGUOUS, dtype, src)
-  elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (buf_uops[buf.buffer], src[1]), buf.arg)
-  elif buf.op in METAOPS: ret = UOp(METAOPS[cast(MetaOps, buf.op)], buf.dtype, (buf_uops[buf.buffer], *src), buf.arg)
+  elif buf.op is MetaOps.ASSIGN: ret = UOp(UOps.ASSIGN, dtype, (ubuf, src[1]), buf.arg)
+  elif buf.op in METAOPS: ret = UOp(METAOPS[cast(MetaOps, buf.op)], buf.dtype, (ubuf, *src), buf.arg)
   elif buf.op is UnaryOps.CAST: ret = UOp(UOps.CAST, dtype, src)
   elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
   else: ret = UOp(UOps.ALU, dtype, src, buf.op)
@@ -200,16 +217,18 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  ctx, store_groups, lazybufs_to_realize = get_realizes(outs)
+  store_groups, lazybufs_to_realize, assigns = get_realizes(outs)
+  ctx = ScheduleContext(lazybufs_to_realize)
   # preschedule all buffers in realizes
   prescheduled: List[ScheduleItem] = []
   for stores in store_groups:
-    outs = [lazybufs_to_realize[ctx.uop_bufs[b]] for b in stores]
+    outs = [lazybufs_to_realize[b] for b in stores]
     cache: Dict[LazyBuffer, UOp] = {}
     metadata: Dict[UOp, Metadata] = {}
-    sink = UOp(UOps.SINK, src=tuple(UOp.store(ctx.buf_uops[out.buffer], ShapeTracker.from_shape(out.shape).to_uop(),
-                                              to_uop(out, outs, ctx.buf_uops, metadata, cache)) for out in outs))
-    prescheduled.append(ScheduleItem(full_ast_rewrite(sink, si_ctx:=ScheduleItemContext(ctx.var_vals, ctx.assigned)), \
+    to_store = tuple(to_uop(out, outs, ctx, metadata, cache) for out in outs)
+    sink = UOp(UOps.SINK, src=tuple(UOp.store(ctx.buf_uops[x.buffer], ShapeTracker.from_shape(x.shape).to_uop(), u) for x,u in zip(outs,to_store)))
+    assigned = {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None}
+    prescheduled.append(ScheduleItem(full_ast_rewrite(sink, si_ctx:=ScheduleItemContext(ctx.var_vals, assigned)), \
         tuple(b for u in si_ctx.bufs if (b:=ctx.uop_bufs[u]).size != 0), tuple(dedup(metadata.values())), tuple(si_ctx.assign_preloads)))
   schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
 
