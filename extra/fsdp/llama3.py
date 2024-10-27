@@ -26,10 +26,10 @@ n_kv_heads = 8
 max_context = 8192
 rope_theta=50000
 hidden_dim = 14336
-epoch = 1
+epoch = 50
 lr = 1e-4
 weight_decay=0
-generate_tokens = 5
+generate_tokens = 50
 assert dim % n_heads == 0 and dim % SHARD == 0
 head_dim = dim // n_heads
 shard_dim = dim // SHARD
@@ -161,7 +161,9 @@ def generate():
     if len(GPUS) > 1:
       idx_next.shard_(GPUS, axis=None)
     tokens = tokens.cat(idx_next, dim=1)
-  return tokenizer.decode(tokens.tolist()[0])
+  text = tokenizer.decode(tokens.tolist()[0])
+  print(text)
+  return text
 
 def get_mem_high_reset():
   mem_usage = []
