@@ -73,7 +73,7 @@ def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], ctx:ScheduleContext, metada
   elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
   else: ret = UOp(UOps.ALU, dtype, src, buf.op)
   cache[buf] = ret
-  if buf.metadata is not None: metadata[ret] = buf.metadata
+  if buf.metadata is not None: metadata[ubuf] = buf.metadata
   return ret
 
 # **** AST graph rewrite
