@@ -96,6 +96,8 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   - `q`[int32] is an integer taking values 0,1,2 or 3, corresponding to the quadrant of the original angle `d`.
   """
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
+  # https://stackoverflow.com/questions/30463616/payne-hanek-algorithm-implementation-in-c/30465751#30465751
+  # 190 bits of 2/pi for Payne-Hanek style argument reduction
   two_over_pi_f = [0x00000000,0x28be60db,0x9391054a,0x7f09d5f4,0x7d4d3770,0x36d8a566,0x4f10e410]
 
   input_dtype: DType = d.dtype
@@ -104,6 +106,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
 
   f, e = frexp(d)
   ia = (f.cast(dtype_via) * 4.294967296e9).cast(dtypes.uint64)
+  # extract 96 relevant bits of 2/pi based on magnitude of argument
   i = shr(e.cast(dtypes.uint64), 5)
   e = (e.cast(dtypes.uint64) & 31).cast(dtypes.uint32)
   offset = -e + 32
@@ -129,6 +132,8 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
 
   def _hp_mul(x:UOp, y:UOp) -> UOp: return x.cast(dtypes.uint64) * y.cast(dtypes.uint64)
   p = shl(_hp_mul(ia, hi), 32) + _hp_mul(ia, mi) + shr(_hp_mul(ia, lo), 32)
+
+  # round quotient to nearest
   q = shr(p, 62).cast(dtypes.int32)
   p = p & 0x3fffffffffffffff
   r = (p.cast(dtype_via) * (3.4061215800865545e-19)).cast(input_dtype)
