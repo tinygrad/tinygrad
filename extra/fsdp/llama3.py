@@ -148,7 +148,7 @@ def generate():
     tokens = tokens.cat(idx_next, dim=1)
   return tokenizer.decode(tokens.tolist()[0])
 
-# train()
+train()
 
 mem_usage = []
 for device in GPUS:
