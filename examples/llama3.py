@@ -217,7 +217,7 @@ if __name__ == "__main__":
   Tensor.no_grad = True
 
   parser = argparse.ArgumentParser()
-  parser.add_argument("--download_model", action="store_true", help="Download a 8B model")
+  parser.add_argument("--download_model", action="store_true", help="Download a model")
   parser.add_argument("--model", type=Path, help="Model path")
   parser.add_argument("--size", choices=["1B", "8B", "70B"], default="8B", help="Model size")
   parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
@@ -233,7 +233,7 @@ if __name__ == "__main__":
   parser.add_argument("--profile", action="store_true", help="Output profile data")
   args = parser.parse_args()
 
-  assert not (args.download_model and args.model), "either download or provide model"
+  assert (args.model and not args.download_model) or (not args.model and args.download_model), "either download or provide model"
   if args.download_model:
     if args.size == "1B":
       fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-1b-instruct")
