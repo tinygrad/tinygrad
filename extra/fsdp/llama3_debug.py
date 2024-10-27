@@ -16,11 +16,11 @@ GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
 GPU_NAME = Device.DEFAULT
 if len(GPUS) > 1:
   Device.DEFAULT = "CLANG"
-B = 32
+B = 4
 T = 16
 vocab_size = 128256
-dim = 16
-n_heads = 4
+dim = 4096
+n_heads = 2
 max_context = 8192
 rope_theta=50000
 hidden_dim = 48
@@ -264,11 +264,11 @@ def test_step() -> Tensor:
 
 losses = []
 Device.DEFAULT = GPU_NAME
-test_acc = float('nan')
+test_loss = float('nan')
 for i in (t:= trange(epoch)):
   loss = train_step()
   if i % 10 == 9: test_loss = test_step().item()
-  t.set_description(f"loss: {loss.item():6.2f} test_loss: {test_acc:5.2f}")
+  t.set_description(f"loss: {loss.item():6.2f} test_loss: {test_loss:5.2f}")
 
 
 def size_unit(size: str):
