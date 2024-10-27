@@ -20,8 +20,9 @@ B = 4
 T = 16
 vocab_size = 128256
 dim = 4096
-n_layers = 32
+n_layers = 2
 n_heads = 32
+n_kv_heads = 8
 max_context = 8192
 rope_theta=50000
 hidden_dim = 14336
@@ -30,7 +31,7 @@ lr = 1e-4
 weight_decay=0
 generate_tokens = 5
 assert dim % n_heads == 0 and dim % SHARD == 0
-s_head_dim = dim // n_heads
+head_dim = dim // n_heads
 shard_dim = dim // SHARD
 norm_eps = 1e-5
 
@@ -146,20 +147,29 @@ def tokenize_data():
     val = tokenizer.encode(text[split:])
     return Tensor(train), Tensor(val)
 
+def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
+  bs, seqlen, n_kv_heads, head_dim = x.shape
+  if n_rep == 1: return x
+  # NOTE: this is different from x.repeat((1, 1, n_rep, 1))
+  return x.repeat((1, 1, 1, n_rep)).reshape(bs, seqlen, n_kv_heads * n_rep, head_dim)
 
 class Attention:
   def __init__(self):
     self.wq = nn.Linear(dim, dim, bias=False)
-    self.wk = nn.Linear(dim, dim, bias=False)
-    self.wv = nn.Linear(dim, dim, bias=False)
+    self.wk = nn.Linear(dim, n_kv_heads * head_dim, bias=False)
+    self.wv = nn.Linear(dim, n_kv_heads * head_dim, bias=False)
     self.wo = nn.Linear(dim, dim, bias=False)
+    self.n_rep = n_heads // n_kv_heads
   
   def __call__(self, x: Tensor, freqs_cis: Tensor, mask: Tensor):
     _B, _T, _ = x.shape
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-    xq, xk, xv = map(lambda w: w.reshape(_B, _T, n_heads, s_head_dim), [xq, xk, xv])
+    xq = xq.reshape(_B, _T, n_heads, head_dim)
+    xk, xv = map(lambda w: w.reshape(_B, _T, n_kv_heads, head_dim), [xk, xv])
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
+    xk, xv = map(lambda t: repeat_kv(t, self.n_rep), [xk, xv])
     xq, xk, xv = map(lambda w: w.transpose(1, 2), [xq, xk, xv])
+
     attn = xq.scaled_dot_product_attention(xk, xv, mask)
     attn = attn.transpose(1,2).reshape(_B, _T, dim)
     attn = self.wo(attn)
@@ -191,7 +201,7 @@ class Transformer:
     self.norm = nn.RMSNorm(dim, norm_eps)
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.output = nn.Linear(dim, vocab_size, bias=False)
-    self.freqs_cis = precompute_freqs_cis(s_head_dim, max_context * 2, rope_theta).contiguous()
+    self.freqs_cis = precompute_freqs_cis(head_dim, max_context * 2, rope_theta).contiguous()
 
   def __call__(self, x: Tensor, target: Tensor = None):
     _B, _T = x.shape
