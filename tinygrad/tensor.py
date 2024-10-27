@@ -604,7 +604,7 @@ class Tensor:
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
-    return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
+    return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._associative_scan(F.Sum) + (start - step)).cast(dtype)
 
   @staticmethod
   def eye(n:int, m:Optional[int]=None, **kwargs) -> Tensor:
@@ -2121,10 +2121,27 @@ class Tensor:
     """
     return x.dot(self, acc_dtype=acc_dtype) if reverse else self.dot(x, acc_dtype=acc_dtype)
 
-  def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:
+  def _associative_scan(self, fxn:Type[Function], axis:int=0, _first_zero=False, acc_val=0) -> Tensor:
     assert self.shape[axis] != 0
     pl_sz = self.shape[axis] - int(not _first_zero)
-    return self.transpose(axis,-1).pad2d((pl_sz,-int(_first_zero)))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
+    ret = self.transpose(axis,-1).pad2d((pl_sz,-int(_first_zero)), acc_val)._pool((self.shape[axis],))
+    ret = ret.cast(sum_acc_dtype(self.dtype))._reduce(fxn, -1, False)
+    if self.dtype in (dtypes.float16, dtypes.bfloat16): ret = ret.cast(self.dtype)
+    return ret.transpose(axis,-1)
+
+  def associative_scan(self, fxn:Type[Function], axis:int=0, acc_val=0) -> Tensor:
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape: return self
+    # TODO: someday the optimizer will find this on it's own
+    # for now this is a two stage cumsum
+    SPLIT = 256
+    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._associative_scan(fxn, axis, acc_val=acc_val)
+    ret = self.transpose(axis,-1).pad2d((round_up(s, SPLIT)-s, 0)).unflatten(-1, (-1, SPLIT))._associative_scan(fxn, -1, acc_val=acc_val)
+    base_add = ret[..., -1]._associative_scan(fxn, -1, _first_zero=True, acc_val=acc_val)
+    base_add = base_add.unsqueeze(-1).expand(*base_add.shape, ret.shape[-1])
+    def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
+    return Tensor.stack(fix(ret), fix(base_add))._reduce(fxn, 0, False)
+
   def cumsum(self, axis:int=0) -> Tensor:
     """
     Computes the cumulative sum of the tensor along the specified axis.
@@ -2139,29 +2156,7 @@ class Tensor:
     print(t.cumsum(1).numpy())
     ```
     """
-    axis = self._resolve_dim(axis)
-    if self.ndim == 0 or 0 in self.shape: return self
-    # TODO: someday the optimizer will find this on it's own
-    # for now this is a two stage cumsum
-    SPLIT = 256
-    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumsum(axis)
-    ret = self.transpose(axis,-1).pad2d((round_up(s, SPLIT)-s, 0)).unflatten(-1, (-1, SPLIT))._cumsum(-1)
-    base_add = ret[..., -1]._cumsum(-1, _first_zero=True)
-    base_add = base_add.unsqueeze(-1).expand(*base_add.shape, ret.shape[-1])
-    def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    return fix(ret) + fix(base_add)
-
-  def _cummax(self, axis:int=0, _first_zero=False) -> Tuple[Tensor, Tensor]:
-    assert self.shape[axis] != 0
-    pl_sz = self.shape[axis] - 1
-    values = self.transpose(axis,-1).pad2d((pl_sz, 0), -float("inf"))._pool((self.shape[axis],)).max(-1).transpose(axis,-1)
-    idxs = Tensor.arange(self.shape[axis], dtype=dtypes.int64, device=self.device)
-    idxs = idxs.reshape(*[1 if i != axis else -1 for i in range(self.ndim)]).expand(self.shape)
-    idx_mask = (self == values) * idxs # index is turned on if values[i] = cummax[i]
-    # fill blanks with max_idx
-    max_idxs =  idx_mask.transpose(axis,-1).pad2d((self.shape[axis]-1, 0))._pool((self.shape[axis],)).max(-1).transpose(axis,-1)
-
-    return values, max_idxs.detach()
+    return self.associative_scan(F.Sum, axis)
 
   def cummax(self, axis:int=0) -> Tuple[Tensor, Tensor]:
     """
@@ -2177,9 +2172,11 @@ class Tensor:
     print(t.cummax(1).numpy())
     ```
     """
-    axis = self._resolve_dim(axis)
-    if self.ndim == 0 or 0 in self.shape: return self, self.cast(dtypes.int64)
-    return self._cummax(axis)
+    values = self.associative_scan(F.Max, axis, acc_val=-float("inf"))
+    idxs = Tensor.arange(values.shape[axis], dtype=dtypes.int64, device=values.device)
+    idxs = idxs.reshape(*[1 if i != self._resolve_dim(axis) else -1 for i in range(values.ndim)]).expand(values.shape)
+    idx_mask = (self == values) * idxs # index is turned on if values[i] = cummax[i]
+    return values, idx_mask.associative_scan(F.Max, axis).detach()
 
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, **kwargs) -> Tensor:

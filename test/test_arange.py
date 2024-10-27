@@ -6,6 +6,7 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.codegen.kernel import Opt, OptOps, Kernel, KernelOptError
 from tinygrad.engine.realize import CompiledRunner, ExecItem
 from tinygrad.engine.search import get_kernel_actions
+import tinygrad.function as F
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, N, opts=None):
@@ -86,7 +87,7 @@ class TestIndexing(unittest.TestCase):
     print("*** indexing ***")
     with Context(NOOPT=1, FUSE_ARANGE=1):
       GlobalCounters.reset()
-      rng = Tensor.ones(4, 256, 16384, dtype=dtypes.int)._cumsum(axis=-1, _first_zero=True).reshape(4, 256, 16384, 1)
+      rng = Tensor.ones(4, 256, 16384, dtype=dtypes.int)._associative_scan(F.Sum, axis=-1, _first_zero=True).reshape(4, 256, 16384, 1)
       idxs = idxs.reshape(4,1,1,1).expand(4, 256, 16384, 1)
       reshape_dataset = dataset.T.reshape(1, 256, 16384, 1).expand(4, 256, 16384, 1)
       full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, 256, 16384, 1))
