@@ -10,19 +10,20 @@ Tensor.manual_seed(2)
 
 SHARD = int(os.environ.get("SHARD", 1))
 GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
+print(f"Training on {GPUS}")
 GPU_NAME = Device.DEFAULT
 if len(GPUS) > 1:
   Device.DEFAULT = "CLANG"
 B = 4
 T = 16
 vocab_size = 128256
-dim = 64
-n_layers = 1
+dim = 4096
+n_layers = 32
 n_heads = 32
 n_kv_heads = 8
 max_context = 8192
 rope_theta=50000
-hidden_dim = 32
+hidden_dim = 14336
 epoch = 2
 lr = 1e-4
 weight_decay=0

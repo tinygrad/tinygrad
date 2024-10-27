@@ -61,9 +61,9 @@ class CUDAProgram:
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, self.smem, None, None, self.vargs)), enable=wait)
 
 class CUDAAllocator(LRUAllocator):
-  def __init__(self, device:CUDADevice, device_id: str):
+  def __init__(self, device:CUDADevice, name: Optional[str]=None):
     self.device = device
-    super().__init__(device_id)
+    super().__init__(name)
 
   def _alloc(self, size, options:BufferOptions):
     check(cuda.cuCtxSetCurrent(self.device.context))
@@ -116,7 +116,7 @@ class CUDADevice(Compiled):
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    super().__init__(device, CUDAAllocator(self, device_id), PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch),
+    super().__init__(device, CUDAAllocator(self, name=f"CUDA: {device_id}"), PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch),
                      PTXCompiler(self.arch) if PTX else CUDACompiler(self.arch), functools.partial(CUDAProgram, self), graph=CUDAGraph)
 
   def synchronize(self):
