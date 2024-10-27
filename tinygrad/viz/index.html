@@ -71,59 +71,53 @@
     fill: #4a4b57;
     stroke-width: 1.4px;
   }
-  .graph {
-    flex: 1;
-    overflow: hidden;
-    position: relative;
-  }
-  .collapse-btn {
-    position: absolute;
-    top: 20px;
-    left: 20px;
-    background: #1a1b26;
-    border: 1px solid #4a4b57;
-    color: #f0f0f5;
-    width: 32px;
-    height: 32px;
-    padding: 8px;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  .collapsed .kernel-list, .collapsed .metadata {
-    width: 0;
-    padding: 0;
-  }
   .main-container {
     display: flex;
-    padding: 12px;
     width: 100%;
     height: 100%;
-  }
-  .main-container > * + * {
-    margin-left: 8px;
+    position: relative;
   }
   .container {
     background-color: #0f1018;
-    height: 100%;
     border-radius: 8px;
     padding: 8px;
-    position: relative;
   }
   .container > * + *, .rewrite-container > * + * {
     margin-top: 12px;
   }
+  .graph {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1;
+  }
   .kernel-list {
+    position: relative;
     width: 15%;
-    padding-right: 20px;
-    overflow-y: hidden;
+    padding: 50px 20px 20px 20px;
+    background-color: #0f1018;
+    border-right: 1px solid white;
+    border-radius: 8px;
+    z-index: 2;
+    height: 100%;
+    overflow-y: auto;
   }
   .kernel-list > ul > * + * {
     margin-top: 4px;
   }
   .metadata {
+    position: relative;
     width: 20%;
-    padding-left: 20px;
-    overflow-y: hidden;
+    padding: 20px;
+    background-color: #0f1018;
+    border-left: 1px solid white;
+    border-radius: 8px;
+    z-index: 2;
+    margin-left: auto;
+    height: 100%;
+    overflow-y: auto;
   }
   .resize-handle {
     position: absolute;
@@ -132,6 +126,7 @@
     width: 20px;
     height: 100%;
     cursor: col-resize;
+    z-index: 3;
     background-color: transparent;
   }
   #kernel-resize-handle {
@@ -139,6 +134,25 @@
   }
   #metadata-resize-handle {
     left: 0;
+  }
+  .collapse-btn {
+    position: fixed;
+    top: 10px;
+    left: 20px;
+    background: #1a1b26;
+    border: 1px solid #4a4b57;
+    color: #f0f0f5;
+    width: 32px;
+    height: 32px;
+    padding: 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    z-index: 4;
+  }
+  .collapsed .kernel-list, .collapsed .metadata {
+    width: 0;
+    padding: 0;
+    overflow: hidden;
   }
   .rewrite-list {
     display: flex;
@@ -161,13 +175,11 @@
 </head>
 <body>
   <div class="main-container">
+    <button class="collapse-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 19l-7-7 7-7"/></svg>
+    </button>
     <div class="container kernel-list"></div>
     <div class="container graph">
-      <button class="collapse-btn">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M15 19l-7-7 7-7"/>
-        </svg>
-      </button>
       <svg id="graph-svg">
         <g id="render"></g>
       </svg>
@@ -303,84 +315,6 @@
       className: "wrap code-block language-python" });
     metadata.appendChild(pre);
     hljs.highlightElement(pre);
-    // ** collapse/expand
-    let isCollapsed = false;
-    const collapseBtn = document.querySelector(".collapse-btn");
-    const graph = document.querySelector(".graph");
-    function adjustGraph() {
-      const leftWidth = isCollapsed ? 0 : kernelList.offsetWidth;
-      const rightWidth = isCollapsed ? 0 : metadata.offsetWidth;
-      graph.style.width = `calc(100% - ${leftWidth + rightWidth}px)`;
-    }
-    collapseBtn.addEventListener("click", () => {
-      isCollapsed = !isCollapsed;
-      mainContainer.classList.toggle("collapsed", isCollapsed);
-      if (isCollapsed) {
-        kernelList.style.display = "none";
-        metadata.style.display = "none";
-      } else {
-        kernelList.style.display = "block";
-        metadata.style.display = "block";
-      }
-      collapseBtn.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
-      adjustGraph();
-    });
-    const resizeObserver = new ResizeObserver(adjustGraph);
-    resizeObserver.observe(kernelList);
-    resizeObserver.observe(metadata);
-    window.addEventListener("resize", adjustGraph);
-    adjustGraph();
-    // ** resizer
-    let containerWidth;
-    let leftStartX, rightStartX;
-    let kernelListWidth, metadataWidth;
-    kernelList.appendChild(Object.assign(document.createElement("div"), { id: "kernel-resize-handle", className: "resize-handle" }));
-    const kernelResizeHandle = document.getElementById("kernel-resize-handle");
-    kernelResizeHandle.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      kernelList.style.userSelect = "none";
-      leftStartX = e.clientX;
-      containerWidth = mainContainer.getBoundingClientRect().width;
-      kernelListWidth = kernelList.getBoundingClientRect().width;
-      document.documentElement.addEventListener("mousemove", kernelResize, false);
-      document.documentElement.addEventListener("mouseup", () => stopResize(kernelList, kernelResize), false);
-    });
-    function kernelResize(e) {
-      if (isCollapsed) return;
-      const change = e.clientX - leftStartX;
-      const newWidth = ((kernelListWidth+change) / containerWidth) * 100;
-      if (newWidth >= 15 && newWidth <= 50) {
-        kernelList.style.width = `${newWidth}%`;
-        const metadataWidth = parseInt(metadata.style.width || "20");
-        graph.style.width = `${100 - newWidth - metadataWidth}%`;
-      }
-    }
-    metadata.appendChild(Object.assign(document.createElement("div"), { id: "metadata-resize-handle", className: "resize-handle" }));
-    const metadataResizeHandle = document.getElementById("metadata-resize-handle");
-    metadataResizeHandle.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      metadata.style.userSelect = "none";
-      rightStartX = e.clientX;
-      containerWidth = mainContainer.getBoundingClientRect().width;
-      metadataWidth = metadata.getBoundingClientRect().width;
-      document.documentElement.addEventListener("mousemove", metadataResize, false);
-      document.documentElement.addEventListener("mouseup", () => stopResize(metadata, metadataResize), false);
-    });
-    function metadataResize(e) {
-      if (isCollapsed) return;
-      const change = e.clientX - rightStartX;
-      const newWidth = ((metadataWidth-change) / containerWidth) * 100;
-      if (newWidth >= 20 && newWidth <= 50) {
-        metadata.style.width = `${newWidth}%`;
-        const kernelWidth = parseInt(kernelList.style.width || "15");
-        graph.style.width = `${100 - newWidth - kernelWidth}%`;
-      }
-    }
-    function stopResize(element, resizeFunc) {
-      document.documentElement.removeEventListener("mousemove", resizeFunc, false);
-      document.documentElement.removeEventListener("mouseup", stopResize, false);
-      element.style.userSelect = "initial";
-    }
     // ** code blocks
     let code = ret.uops[currentRewrite];
     let lang = "python"
@@ -428,6 +362,64 @@
       })
     } else {
       metadata.appendChild(Object.assign(document.createElement("p"), { textContent: `No rewrites in ${toPath(ret.loc)}.` }));
+    }
+    // ***** collapse/expand
+    let isCollapsed = false;
+    const collapseBtn = document.querySelector(".collapse-btn");
+    const graph = document.querySelector(".graph");
+    collapseBtn.addEventListener("click", () => {
+      isCollapsed = !isCollapsed;
+      mainContainer.classList.toggle("collapsed", isCollapsed);
+      kernelList.style.display = isCollapsed ? "none" : "block";
+      metadata.style.display = isCollapsed ? "none" : "block";
+      collapseBtn.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
+    });
+    // ***** resizer
+    let containerWidth;
+    let leftStartX, rightStartX;
+    let kernelListWidth, metadataWidth;
+    kernelList.appendChild(Object.assign(document.createElement("div"), { id: "kernel-resize-handle", className: "resize-handle" }));
+    const kernelResizeHandle = document.getElementById("kernel-resize-handle");
+    kernelResizeHandle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      kernelList.style.userSelect = "none";
+      leftStartX = e.clientX;
+      containerWidth = mainContainer.getBoundingClientRect().width;
+      kernelListWidth = kernelList.getBoundingClientRect().width;
+      document.documentElement.addEventListener("mousemove", kernelResize, false);
+      document.documentElement.addEventListener("mouseup", () => stopResize(kernelList, kernelResize), false);
+    });
+    function kernelResize(e) {
+      if (isCollapsed) return;
+      const change = e.clientX - leftStartX;
+      const newWidth = ((kernelListWidth+change) / containerWidth) * 100;
+      if (newWidth >= 15 && newWidth <= 50) {
+        kernelList.style.width = `${newWidth}%`;
+      }
+    }
+    metadata.appendChild(Object.assign(document.createElement("div"), { id: "metadata-resize-handle", className: "resize-handle" }));
+    const metadataResizeHandle = document.getElementById("metadata-resize-handle");
+    metadataResizeHandle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      metadata.style.userSelect = "none";
+      rightStartX = e.clientX;
+      containerWidth = mainContainer.getBoundingClientRect().width;
+      metadataWidth = metadata.getBoundingClientRect().width;
+      document.documentElement.addEventListener("mousemove", metadataResize, false);
+      document.documentElement.addEventListener("mouseup", () => stopResize(metadata, metadataResize), false);
+    });
+    function metadataResize(e) {
+      if (isCollapsed) return;
+      const change = e.clientX - rightStartX;
+      const newWidth = ((metadataWidth-change) / containerWidth) * 100;
+      if (newWidth >= 20 && newWidth <= 50) {
+        metadata.style.width = `${newWidth}%`;
+      }
+    }
+    function stopResize(element, resizeFunc) {
+      document.documentElement.removeEventListener("mousemove", resizeFunc, false);
+      document.documentElement.removeEventListener("mouseup", stopResize, false);
+      element.style.userSelect = "initial";
     }
   }
 
