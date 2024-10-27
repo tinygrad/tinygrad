@@ -1,13 +1,27 @@
 import os
-os.environ["TRACEMETA"] = "0"
 from tinygrad import Tensor, nn, Device, TinyJit
 from tinygrad.helpers import prod, trange, size_unit
 import math
 from extra.models.llama import Transformer
-from extra.fsdp.utils import get_size
 from examples.llama3 import Tokenizer
 import time
+from typing import List, Callable
 Tensor.manual_seed(2)
+
+def get_size(tensors: List[Tensor],
+             getter: Callable[[Tensor], int]=lambda t: t.nbytes(),
+             units: List[str]=["bytes", "KB", "MB", "GB"]):
+  size = sum([getter(t) if isinstance(t, Tensor) else t.size for t in tensors])
+  for i, unit in enumerate(units):
+    if size < 1000 or i == len(units) - 1: break
+    size /= 1000
+  return size, unit
+
+def size_unit(size: int):
+  for unit in ['bytes', 'KB', 'MB', 'GB']:
+    if size < 1000 or unit == 'GB': break
+    size /= 1000
+  return float(size), unit
 
 SHARD = int(os.environ.get("SHARD", 1))
 GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
