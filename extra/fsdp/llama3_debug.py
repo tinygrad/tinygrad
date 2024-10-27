@@ -19,14 +19,14 @@ if len(GPUS) > 1:
 B = 4
 T = 16
 vocab_size = 128256
-dim = 4096
-n_layers = 8
+dim = 64
+n_layers = 1
 n_heads = 32
 n_kv_heads = 8
 max_context = 8192
 rope_theta=50000
-hidden_dim = 14336
-epoch = 30
+hidden_dim = 32
+epoch = 0
 lr = 1e-4
 weight_decay=0
 generate_tokens = 5
@@ -34,6 +34,56 @@ assert dim % n_heads == 0 and dim % SHARD == 0
 head_dim = dim // n_heads
 shard_dim = dim // SHARD
 norm_eps = 1e-5
+
+def sample(logits: Tensor, temp: float = 0.95, k: int=0, p: float=0.0, af: float=0.0, ap: float=0.0):
+  assert logits.ndim == 1, "only works on 1d tensors"
+  assert 0 <= p <= 1, "p must be between 0 and 1"
+  assert 0 <= k <= logits.numel(), "k must be between 0 and numel"
+
+  # if temperature is very low just use argmax
+  if temp < 1e-6: return logits.argmax()
+
+  logits = logits.to(Device.DEFAULT)
+
+  # alpha sampling
+  if af or ap:
+    if not hasattr(sample, "alpha_counter"):
+      setattr(sample, "alpha_counter", Tensor.zeros_like(logits, dtype=dtypes.int32).contiguous())
+    logits = logits - (sample.alpha_counter * af + (sample.alpha_counter > 0) * ap)
+
+  # replace NaNs with -inf
+  logits = (logits != logits).where(-float("inf"), logits)
+
+  # softmax
+  t = (logits / temp).softmax()
+
+  counter, counter2 = Tensor.arange(t.numel(), device=logits.device).contiguous(), Tensor.arange(t.numel() - 1, -1, -1, device=logits.device).contiguous()
+  # top k
+  if k:
+    output, output_indices = Tensor.zeros(k, device=logits.device).contiguous(), Tensor.zeros(k, device=logits.device, dtype=dtypes.int32).contiguous()
+    for i in range(k):
+      t_argmax = (t.numel() - ((t == (t_max := t.max())) * counter2).max() - 1).cast(dtypes.default_int)
+      output = output + t_max.unsqueeze(0).pad(((i, k - i - 1),))
+      output_indices = output_indices + t_argmax.unsqueeze(0).pad(((i, k - i - 1),))
+      t = (counter == t_argmax).where(0, t)
+
+    # approximate top p
+    # because we are already limited to top k elements we can do top p "without sorting"
+    output_cumsum = output[::-1]._cumsum()[::-1] + t.sum()
+    output = (output_cumsum >= (1 - p)) * output
+    output_indices = (output_cumsum >= (1 - p)) * output_indices
+
+    # sample
+    output_idx = output.multinomial()
+    output_token = output_indices[output_idx]
+  else:
+    output_token = t.multinomial()
+
+  # increase alpha counter
+  if af or ap:
+    sample.alpha_counter = (counter == output_token).where(sample.alpha_counter + 1, sample.alpha_counter)
+
+  return output_token
 
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
@@ -161,12 +211,23 @@ class Attention:
     self.wo = nn.Linear(dim, dim, bias=False)
     self.n_rep = n_heads // n_kv_heads
   
-  def __call__(self, x: Tensor, freqs_cis: Tensor, mask: Tensor):
+  def __call__(self, x: Tensor, freqs_cis: Tensor, mask: Tensor, start_pos: int):
     _B, _T, _ = x.shape
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
     xq = xq.reshape(_B, _T, n_heads, head_dim)
     xk, xv = map(lambda w: w.reshape(_B, _T, n_kv_heads, head_dim), [xk, xv])
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
+
+    if not Tensor.training:
+      if not hasattr(self, "cache_v"):
+        self.cache_kv = Tensor.zeros(2, _B, max_context, n_kv_heads, head_dim, dtype=x.dtype).contiguous().realize()
+        if isinstance(x.device, tuple):
+          self.cache_kv.shard_((x.device), axis=3)
+      assert xk.dtype == xv.dtype == self.cache_kv.dtype, f"{xk.dtype=}, {xv.dtype=}, {self.cache_kv.dtype=}"
+      self.cache_kv.shrink((None, None, (start_pos, start_pos + _T), None, None)).assign(Tensor.stack(xk, xv)).realize()
+      xk = self.cache_kv[0].shrink((None, (0, start_pos + _T), None, None)) if start_pos > 0 else xk
+      xv = self.cache_kv[1].shrink((None, (0, start_pos + _T), None, None)) if start_pos > 0 else xv
+
     xk, xv = map(lambda t: repeat_kv(t, self.n_rep), [xk, xv])
     xq, xk, xv = map(lambda w: w.transpose(1, 2), [xq, xk, xv])
 
@@ -191,8 +252,8 @@ class TransformerBlock:
     self.attention_norm = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm = nn.RMSNorm(dim, norm_eps)
   
-  def __call__(self, x: Tensor, freqs_cis: Tensor, mask: Tensor):
-    h = x + self.attention(self.attention_norm(x), freqs_cis, mask)
+  def __call__(self, x: Tensor, freqs_cis: Tensor, mask: Tensor, start_pos: int):
+    h = x + self.attention(self.attention_norm(x), freqs_cis, mask, start_pos)
     return (h + self.feed_forward(self.ffn_norm(h)))
 
 class Transformer:
@@ -203,13 +264,13 @@ class Transformer:
     self.output = nn.Linear(dim, vocab_size, bias=False)
     self.freqs_cis = precompute_freqs_cis(head_dim, max_context * 2, rope_theta).contiguous()
 
-  def __call__(self, x: Tensor, target: Tensor = None):
+  def __call__(self, x: Tensor, start_pos: int=0, target: Tensor = None):
     _B, _T = x.shape
     x = self.tok_embeddings(x)
     freqs_cis = self.freqs_cis.shrink((None, (0, _T),None,None,None))
-    mask = Tensor.full((1, 1, _T, _T), float("-inf"), dtype=x.dtype, device=x.device).triu(1).realize()
+    mask = Tensor.full((1, 1, _T, start_pos + _T), float("-inf"), dtype=x.dtype, device=x.device).triu(1).realize()
     for layer in self.layers:
-      x = layer(x, freqs_cis, mask)
+      x = layer(x, freqs_cis, mask, start_pos)
     x = self.norm(x)
     x = self.output(x)
     if target is not None:
@@ -218,12 +279,16 @@ class Transformer:
     return x, None
   
   def generate(self):
-    to_device_0(model)
     tokens = Tensor([tokenizer.encode("<|begin_of_text|>", allow_special=True)])
-    for _ in range(generate_tokens):
-      logits, _ = self(tokens)
+
+    if len(GPUS) > 1:
+      tokens.shard_(GPUS, axis=None)
+    for start_pos in range(generate_tokens):
+      logits, _ = self(tokens, start_pos)
       logits = logits[:, -1, :]
-      idx_next = logits.softmax().multinomial()
+      idx_next = sample(logits.flatten()).unsqueeze(0).realize()
+      if len(GPUS) > 1:
+        idx_next.shard_(GPUS, axis=None)
       tokens = tokens.cat(idx_next, dim=1)
     return tokenizer.decode(tokens.tolist()[0])
 
@@ -259,7 +324,7 @@ x_test, y_test = next(iter(get_batch(val, 32)))
 @TinyJit
 @Tensor.train()
 def train_step(x: Tensor, y: Tensor):
-  logits, loss = model(x, y)
+  logits, loss = model(x, target=y)
   opt.zero_grad()
   loss.backward()
   loss.realize(*opt.schedule_step())
@@ -296,6 +361,8 @@ for device in GPUS:
 
 print("Training peak mem", mem_usage)
 
-
-# text = model.generate()
-# print("Inference:", text)
+opt.zero_grad()
+for p in nn.state.get_parameters(model):
+  p.requires_grad = False
+text = model.generate()
+print("Inference:", text)

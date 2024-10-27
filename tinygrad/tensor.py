@@ -373,7 +373,7 @@ class Tensor:
     """
     self.lazydata = self.shard(devices, axis, splits).lazydata
     return self
-  
+
   def reshard_(self, axis: Optional[int]=None):
     self.lazydata = reshard(self.lazydata, axis)
     return self
