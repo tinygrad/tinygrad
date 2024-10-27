@@ -1,10 +1,9 @@
 import os
 from tinygrad import Tensor, nn, Device, TinyJit
-from tinygrad.helpers import prod, trange, size_unit
+from tinygrad.helpers import prod, trange
 import math
 from extra.models.llama import Transformer
 from examples.llama3 import Tokenizer
-import time
 from typing import List, Callable
 Tensor.manual_seed(2)
 
@@ -180,17 +179,6 @@ def generate():
   print(text)
   return text
 
-def get_mem_high_reset():
-  mem_usage = []
-  for device in GPUS:
-    allocator = Device[device].allocator
-    highest, unit = size_unit(allocator.mem_high)
-    mem_usage.append(f"{allocator.name}: {highest:.2f} {unit}")
-    allocator.mem_high = 0
-  return mem_usage
 
 train()
-time.sleep(10)
-print("Training peak mem", get_mem_high_reset())
 generate()
-print("Inference peak mem", get_mem_high_reset())
