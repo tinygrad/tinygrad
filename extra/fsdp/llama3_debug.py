@@ -266,7 +266,7 @@ Device.DEFAULT = GPU_NAME
 test_loss = float('nan')
 for i in (t:= trange(epoch)):
   x, y = next(train_data)
-  loss = train_step(x, y)
+  loss = train_step(x.contiguous(), y.contiguous())
   if i % 10 == 9: test_loss = test_step().item()
   t.set_description(f"loss: {loss.item():6.2f} test_loss: {test_loss:5.2f}")
 
