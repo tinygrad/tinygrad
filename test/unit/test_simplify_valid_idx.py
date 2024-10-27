@@ -3,7 +3,7 @@ from typing import Tuple
 
 from tinygrad.codegen.uopgraph import full_graph_rewrite, is_increasing
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, UOps
+from tinygrad.ops import UOp, UOps, simplify_valid
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(UOps.LOAD, dtypes.float, (
@@ -64,7 +64,7 @@ class TestValidIdxSimplification(unittest.TestCase):
       "0",
       "(((lidx0+(gidx0*4))<19)!=True)")
 
-  def test_simplify_within_valid(self):
+  def test_simplify_within_valid1(self):
     ridx0 = Range(0, 4)
     ridx1 = Range(1, 4)
     ridx2 = Range(2, 4)
@@ -75,6 +75,13 @@ class TestValidIdxSimplification(unittest.TestCase):
     self.check(load,
       "(((ridx0+ridx1)+ridx2)+ridx3)",
       "((((ridx0*3)+ridx1)<8)&((((ridx2*3)+ridx3)%4)<2))")
+
+  def test_simplify_within_valid2(self):
+    gidx0 = Special("gidx0", 56)
+    ridx0 = Range(0, 3)
+    alu0 = gidx0+ridx0
+    valid = alu0.lt(57) & alu0.ge(1)
+    self.assertIsNone(simplify_valid(valid))
 
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
