@@ -20,10 +20,11 @@ B = 4
 T = 16
 vocab_size = 128256
 dim = 4096
+n_layers = 32
 n_heads = 32
 max_context = 8192
 rope_theta=50000
-hidden_dim = 48
+hidden_dim = 14336
 epoch = 30
 lr = 1e-4
 weight_decay=0
@@ -32,7 +33,7 @@ assert dim % n_heads == 0 and dim % SHARD == 0
 s_head_dim = dim // n_heads
 shard_dim = dim // SHARD
 norm_eps = 1e-5
-n_layers = 4
+
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, dtype=dtypes.half) -> Tensor:
