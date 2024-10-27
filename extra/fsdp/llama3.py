@@ -148,10 +148,11 @@ def generate():
     tokens = tokens.cat(idx_next, dim=1)
   return tokenizer.decode(tokens.tolist()[0])
 
-train()
+# train()
 
 mem_usage = []
 for device in GPUS:
   device = Device[device].allocator
   highest, unit = size_unit(device.mem_high)
   mem_usage.append(f"{device.name}: {highest:.2f} {unit}")
+print("Peak training mem", mem_usage)

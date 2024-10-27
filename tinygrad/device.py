@@ -141,7 +141,6 @@ class Allocator:
     self.name = f"Untitled {self.id}" if name is None else name
     self.mem = 0
     self.mem_high = 0
-    print("ALLOCATOR INIT", self.name, self.id)
     ALLOCATOR_ID += 1
   def mem_changed(self, mem):
     self.mem += mem
