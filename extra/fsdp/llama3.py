@@ -6,6 +6,7 @@ import math
 from extra.models.llama import Transformer
 from extra.fsdp.utils import get_size
 from examples.llama3 import Tokenizer
+import time
 Tensor.manual_seed(2)
 
 SHARD = int(os.environ.get("SHARD", 1))
@@ -13,6 +14,7 @@ GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
 print(f"Training on {GPUS}")
 GPU_NAME = Device.DEFAULT
 if len(GPUS) > 1:
+  # This is a hack to prevent device 0 doing the initialization for the whole tensor
   Device.DEFAULT = "CLANG"
 B = 4
 T = 16
@@ -24,7 +26,7 @@ n_kv_heads = 8
 max_context = 8192
 rope_theta=50000
 hidden_dim = 14336
-epoch = 30
+epoch = 1
 lr = 1e-4
 weight_decay=0
 generate_tokens = 5
@@ -99,45 +101,46 @@ model = Transformer(
   max_context=max_context,
   jit=False
 )
-opt = nn.optim.AdamW(nn.state.get_parameters(model), lr=lr, weight_decay=weight_decay)
-if len(GPUS) > 1:
-  shard_model(model, opt)
-model_size, model_size_unit = get_size(nn.state.get_parameters(model))
-opt_size, opt_size_unit = get_size(nn.state.get_parameters(opt))
-print(f"Model {model_size:.2f} {model_size_unit} Optimizer: {opt_size:.2f} {opt_size_unit}")
-model_elem, model_elem_unit = get_size(
-  nn.state.get_parameters(model),
-  lambda t: t.numel(),
-  units=["", "K", "M", "B"]
-)
-optim_elem, optim_elem_unit = get_size(
-  nn.state.get_parameters(opt),
-  lambda t: t.numel(),
-  units=["", "K", "M", "B"]
-)
-print(f"Model params: {model_elem:.2f} {model_elem_unit} Optimizer params: {optim_elem:.2f} {optim_elem_unit}")
-
-def forward_pass(x: Tensor, y: Tensor):
-  logits = model(x, 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
-  loss = logits.sparse_categorical_crossentropy(y)
-  return loss
-
-@TinyJit
-def train_step(x: Tensor, y: Tensor):
-  opt.zero_grad()
-  loss = forward_pass(x, y)
-  loss.backward()
-  loss.realize(*opt.schedule_step())
-  return loss
-
-@TinyJit
-@Tensor.test()
-def test_step() -> Tensor:
-  loss = forward_pass(x_test, y_test)
-  return loss
 
 @Tensor.train()
 def train():
+  opt = nn.optim.AdamW(nn.state.get_parameters(model), lr=lr, weight_decay=weight_decay)
+  if len(GPUS) > 1:
+    shard_model(model, opt)
+  model_size, model_size_unit = get_size(nn.state.get_parameters(model))
+  opt_size, opt_size_unit = get_size(nn.state.get_parameters(opt))
+  print(f"Model {model_size:.2f} {model_size_unit} Optimizer: {opt_size:.2f} {opt_size_unit}")
+  model_elem, model_elem_unit = get_size(
+    nn.state.get_parameters(model),
+    lambda t: t.numel(),
+    units=["", "K", "M", "B"]
+  )
+  optim_elem, optim_elem_unit = get_size(
+    nn.state.get_parameters(opt),
+    lambda t: t.numel(),
+    units=["", "K", "M", "B"]
+  )
+  print(f"Model params: {model_elem:.2f} {model_elem_unit} Optimizer params: {optim_elem:.2f} {optim_elem_unit}")
+
+  def forward_pass(x: Tensor, y: Tensor):
+    logits = model(x, 0, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P)
+    loss = logits.sparse_categorical_crossentropy(y)
+    return loss
+
+  @TinyJit
+  def train_step(x: Tensor, y: Tensor):
+    opt.zero_grad()
+    loss = forward_pass(x, y)
+    loss.backward()
+    loss.realize(*opt.schedule_step())
+    return loss
+
+  @TinyJit
+  @Tensor.test()
+  def test_step() -> Tensor:
+    loss = forward_pass(x_test, y_test)
+    return loss
+
   Device.DEFAULT = GPU_NAME
   test_loss = float('nan')
   for i in (t:= trange(epoch)):
@@ -145,9 +148,9 @@ def train():
     loss = train_step(x.contiguous(), y.contiguous())
     if i % 10 == 9: test_loss = test_step().item()
     t.set_description(f"loss: {loss.item():6.2f} test_loss: {test_loss:5.2f}")
+  opt.zero_grad()
 
 def generate():
-  opt.zero_grad()
   for p in nn.state.get_parameters(model):
     p.requires_grad = False
   tokens = Tensor([tokenizer.encode("<|begin_of_text|>", allow_special=True)])
@@ -160,11 +163,17 @@ def generate():
     tokens = tokens.cat(idx_next, dim=1)
   return tokenizer.decode(tokens.tolist()[0])
 
-train()
+def get_mem_high_reset():
+  mem_usage = []
+  for device in GPUS:
+    allocator = Device[device].allocator
+    highest, unit = size_unit(allocator.mem_high)
+    mem_usage.append(f"{allocator.name}: {highest:.2f} {unit}")
+    allocator.mem_high = 0
+  return mem_usage
 
-mem_usage = []
-for device in GPUS:
-  device = Device[device].allocator
-  highest, unit = size_unit(device.mem_high)
-  mem_usage.append(f"{device.name}: {highest:.2f} {unit}")
-print("Peak mem", mem_usage)
+train()
+time.sleep(10)
+print("Training peak mem", get_mem_high_reset())
+generate()
+print("Inference peak mem", get_mem_high_reset())
