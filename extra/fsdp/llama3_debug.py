@@ -20,7 +20,7 @@ B = 4
 T = 16
 vocab_size = 128256
 dim = 4096
-n_heads = 2
+n_heads = 32
 max_context = 8192
 rope_theta=50000
 hidden_dim = 48
@@ -32,7 +32,7 @@ assert dim % n_heads == 0 and dim % SHARD == 0
 s_head_dim = dim // n_heads
 shard_dim = dim // SHARD
 norm_eps = 1e-5
-n_layers = 1
+n_layers = 4
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, dtype=dtypes.half) -> Tensor:
@@ -247,8 +247,7 @@ x_test, y_test = next(iter(get_batch(val, 32)))
 
 @TinyJit
 @Tensor.train()
-def train_step():
-  x, y = next(train_data)
+def train_step(x: Tensor, y: Tensor):
   logits, loss = model(x, y)
   opt.zero_grad()
   loss.backward()
@@ -266,7 +265,8 @@ losses = []
 Device.DEFAULT = GPU_NAME
 test_loss = float('nan')
 for i in (t:= trange(epoch)):
-  loss = train_step()
+  x, y = next(train_data)
+  loss = train_step(x, y)
   if i % 10 == 9: test_loss = test_step().item()
   t.set_description(f"loss: {loss.item():6.2f} test_loss: {test_loss:5.2f}")
 
