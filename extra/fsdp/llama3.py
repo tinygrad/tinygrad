@@ -59,6 +59,26 @@ model_size, model_size_unit = get_size(nn.state.get_parameters(model))
 opt_size, opt_size_unit = get_size(nn.state.get_parameters(opt))
 print(f"Model {model_size:.4f} {model_size_unit} Opt: {opt_size:.4f} {opt_size_unit}")
 
+def shard_model(model, opt):
+  seen = set()
+  for k, p in nn.state.get_state_dict(model).items():
+    if p in seen: continue
+    seen.add(p)
+    axis = 0
+    if k == 'tok_embeddings.weight':
+      axis = 1
+    elif k == 'freqs_cis':
+      axis = None
+    elif p.shape[0] == 1:
+      axis = None
+    p.shard_(GPUS, axis)
+  for k, p in nn.state.get_state_dict(opt).items():
+    if p in seen: continue
+    seen.add(p)
+    axis = None if prod(p.shape) <= 1 else 0
+    if p.shape[0] == 1:
+      axis = None
+    p.shard_(GPUS, axis)
 
 
 class Tokenizer:
@@ -111,16 +131,21 @@ def tokenize_data():
     val = tokenizer.encode(text[split:])
     return Tensor(train), Tensor(val)
 
+if len(GPUS) > 1:
+  shard_model(model, opt)
+
 
 def generate():
   opt.zero_grad()
   for p in nn.state.get_parameters(model):
     p.requires_grad = False
   tokens = Tensor([tokenizer.encode("<|begin_of_text|>", allow_special=True)])
+  if len(GPUS) > 1:
+    tokens.shard_(GPUS, axis=None)
   for start_pos in range(generate_tokens):
     idx_next = model(tokens, start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).unsqueeze(0)
-    # if len(GPUS) > 1:
-    #   idx_next.shard_(GPUS, axis=None)
+    if len(GPUS) > 1:
+      idx_next.shard_(GPUS, axis=None)
     tokens = tokens.cat(idx_next, dim=1)
   return tokenizer.decode(tokens.tolist()[0])
 
