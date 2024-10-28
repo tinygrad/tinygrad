@@ -1,6 +1,6 @@
 import os
 from tinygrad import Tensor, nn, Device, TinyJit
-from tinygrad.helpers import prod, trange
+from tinygrad.helpers import prod, trange, fetch
 import math
 from extra.models.llama import Transformer
 from examples.llama3 import Tokenizer
@@ -71,9 +71,9 @@ def shard_model(model, opt):
       axis = None
     p.shard_(GPUS, axis)
 
-tokenizer = Tokenizer("tmp/tokenizer.model")
+tokenizer = Tokenizer(fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-8b-sfr").as_posix())
 def tokenize_data():
-  with open("tmp/tiny_shakespeare.txt") as f:
+  with open(fetch("https://raw.githubusercontent.com/karpathy/char-rnn/refs/heads/master/data/tinyshakespeare/input.txt", "tiny_shakespeare.txt")) as f:
     text = f.read()
     length = len(text)
     split = math.floor(length * 0.8)
