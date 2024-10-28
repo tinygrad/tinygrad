@@ -21,15 +21,6 @@ def significand_bits(d:DType) -> int: return dtypes.finfo(d)[1]
 def exponent_bias(d:DType) -> int: return {dtypes.float64: 1023, dtypes.float32: 127, dtypes.float16: 15}[d]
 def exponent_mask(d:DType) -> int: return {dtypes.float64: 2047, dtypes.float32: 255, dtypes.float16: 31}[d]
 
-def float_to_bits(d:UOp) -> UOp:
-  assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
-  cast_to = {dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[d.dtype]
-  return d.bitcast(cast_to)
-
-def bits_to_float(d:UOp, float_dtype:DType) -> UOp:
-  assert d.dtype in [dtypes.uint64, dtypes.uint32, dtypes.uint16]
-  cast_to = {dtypes.uint64: dtypes.float64, dtypes.uint32: dtypes.float32, dtypes.uint16: float_dtype}[d.dtype]
-  return d.bitcast(cast_to)
 # **** utils ****
 def shr(x:UOp, y:int) -> UOp: return x // (2**y)
 def shl(x:UOp, y:int) -> UOp: return x * (2**y)
@@ -72,11 +63,11 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
   m1 = {dtypes.float64: 0x000FFFFFFFFFFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3800}[v.dtype]
-  bits = float_to_bits(v)
+  bits = v.bitcast({dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[v.dtype])
   exponent = shr(bits, significand_bits(v.dtype)) & exponent_mask(v.dtype)
   exponent_zero = exponent.ne(0)
   # Set the exponent bits appropriately to normalize the mantissa into the range of [0.5, 1.0).
-  result_f = bits_to_float((bits & m1) | m2, v.dtype)
+  result_f = ((bits & m1) | m2).bitcast(v.dtype)
   value = exponent_zero.where(result_f, v)
   exp = exponent - exponent_bias(v.dtype) + 1
   exp = exponent_zero.where(exp, exp.const_like(0))
