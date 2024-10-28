@@ -165,6 +165,7 @@ class ScheduleItemContext:
   sts: Set[ShapeTracker] = field(default_factory=set)
   bufs: List[UOp] = field(default_factory=list)
   assign_preloads: List[UOp] = field(default_factory=list)
+  metadata: Dict[Metadata, None] = field(default_factory=dict)
 
 def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
   if (st:=unwrap(x.st)) in ctx.sts: return None
@@ -219,34 +220,36 @@ if getenv("RUN_PROCESS_REPLAY"):
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   store_groups, lazybufs_to_realize, assigns = get_realizes(outs)
   ctx = ScheduleContext(lazybufs_to_realize)
-  # preschedule all buffers in realizes
-  prescheduled: List[ScheduleItem] = []
+  # split realizes into small graphs
+  small_graphs: List[Tuple[UOp, ScheduleItemContext]] = []
   for stores in store_groups:
     outs = [lazybufs_to_realize[b] for b in stores]
     cache: Dict[LazyBuffer, UOp] = {}
     metadata: Dict[UOp, Metadata] = {}
     to_store = tuple(to_uop(out, outs, ctx, metadata, cache) for out in outs)
     sink = UOp(UOps.SINK, src=tuple(UOp.store(ctx.buf_uops[x.buffer], ShapeTracker.from_shape(x.shape).to_uop(), u) for x,u in zip(outs,to_store)))
-    assigned = {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None}
-    prescheduled.append(ScheduleItem(full_ast_rewrite(sink, si_ctx:=ScheduleItemContext(ctx.var_vals, assigned)), \
-        tuple(b for u in si_ctx.bufs if (b:=ctx.uop_bufs[u]).size != 0), tuple(dedup(metadata.values())), tuple(si_ctx.assign_preloads)))
-  schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
+    si_ctx = ScheduleItemContext(ctx.var_vals, {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None},
+                                 metadata={x:None for x in metadata.values()})
+    small_graphs.append((full_ast_rewrite(sink, si_ctx), si_ctx))
 
   # do BFS
+  prescheduled = [ScheduleItem(u, tuple(b for u in c.bufs if (b:=ctx.uop_bufs[u]).size != 0),
+                           tuple(c.metadata), tuple(c.assign_preloads)) for u,c in small_graphs]
+  schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
   in_degree: DefaultDict[ScheduleItem, int] = defaultdict(int)
-  for lsi in prescheduled:
+  for si in prescheduled:
     # realize outputs before a parent is assigned to
-    parents_assigns = dedup(xsi for x in lsi.assign_preloads if (xsi:=schedule_targets.get(ctx.uop_bufs[x])) and xsi is not lsi)
+    parents_assigns = dedup(xsi for x in si.assign_preloads if (xsi:=schedule_targets.get(ctx.uop_bufs[x])) and xsi is not si)
     for assign in parents_assigns:
-      graph[lsi].append(assign)
+      graph[si].append(assign)
       in_degree[assign] += 1
     # realize outputs after all parents are realized
-    scheduled_parents = dedup(xsi for x in lsi.inputs if (xsi:=schedule_targets.get(x)) is not None and xsi not in parents_assigns)
+    scheduled_parents = dedup(xsi for x in si.inputs if (xsi:=schedule_targets.get(x)) is not None and xsi not in parents_assigns)
     for x in scheduled_parents:
-      graph[x].append(lsi)
-      in_degree[lsi] += 1
-  queue = deque(lsi for lsi in prescheduled if in_degree[lsi] == 0)
+      graph[x].append(si)
+      in_degree[si] += 1
+  queue = deque(si for si in prescheduled if in_degree[si] == 0)
   schedule: List[ScheduleItem] = []
   while queue:
     schedule.append(si:=queue.popleft())
@@ -258,8 +261,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
   # confirm everything was scheduled correctly
-  if any(degree != 0 for degree in in_degree.values()) or len(in_degree) != len(schedule):
-    raise RuntimeError(f"cycle detected in graph, prescheduled {len(in_degree)} but only scheduled {len(schedule)}")
+  if len(schedule) != (ps:=len(prescheduled)): raise RuntimeError(f"cycle detected in graph, prescheduled {ps} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, ctx.var_vals
 

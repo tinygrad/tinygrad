@@ -607,16 +607,20 @@ class TestOps(unittest.TestCase):
 
   def test_log(self):
     helper_test_op([(45,65)], torch.log, Tensor.log)
+    helper_test_op(None, torch.log, Tensor.log, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.log, Tensor.log)
   def test_log2(self):
     helper_test_op([(45,65)], torch.log2, Tensor.log2)
+    helper_test_op(None, torch.log2, Tensor.log2, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.log2, Tensor.log2)
 
   def test_exp(self):
     helper_test_op([(45,65)], torch.exp, Tensor.exp)
+    helper_test_op(None, torch.exp, Tensor.exp, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.exp, Tensor.exp)
   def test_exp2(self):
     helper_test_op([(45,65)], torch.exp2, Tensor.exp2)
+    helper_test_op(None, torch.exp2, Tensor.exp2, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.exp2, Tensor.exp2)
 
   def test_sign(self):
