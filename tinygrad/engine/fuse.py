@@ -1,8 +1,7 @@
 import sys
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
-from typing import Set, Tuple, List, Dict, DefaultDict
-from tinygrad.ops import UNSAFE_PAD_OPS, MetaOps, ReduceOps, UnaryOps, UOp, UOps, Variable, resolve
+from typing import Tuple, List, Dict, DefaultDict
+from tinygrad.ops import UNSAFE_PAD_OPS, MetaOps, ReduceOps, UnaryOps, resolve
 from tinygrad.helpers import DEBUG, FUSE_CONV_BW, FUSE_ARANGE, prod, dedup, all_int, merge_dicts
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -11,13 +10,6 @@ from tinygrad.device import Buffer
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
-
-@dataclass(frozen=True)
-class ScheduleContext:
-  buf_uops: Dict[Buffer, UOp] = field(default_factory=dict)
-  uop_bufs: Dict[UOp, Buffer] = field(default_factory=dict)
-  var_vals: Dict[Variable, int] = field(default_factory=dict)
-  assigned: Set[UOp] = field(default_factory=set)
 
 def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None], simple_pads:Dict[LazyBuffer, None], \
     children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer], double_reduces:Dict[LazyBuffer, None]):
@@ -94,7 +86,7 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def get_realizes(outs:List[LazyBuffer]) -> Tuple[ScheduleContext, List[List[UOp]], Dict[Buffer, LazyBuffer]]:
+def get_realizes(outs:List[LazyBuffer]) -> Tuple[List[List[Buffer]], Dict[Buffer, LazyBuffer], Dict[LazyBuffer, LazyBuffer]]:
   """search the graph for all the LazyBuffers that need to realize"""
   # start by just realizing the buffers passed in
   realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
@@ -165,14 +157,14 @@ def get_realizes(outs:List[LazyBuffer]) -> Tuple[ScheduleContext, List[List[UOp]
     kernel_children = {c for tr in group for c in children[tr] if c.op not in {MetaOps.COPY, MetaOps.VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group: del realizes[tr]
-  ctx = ScheduleContext()
-  output_groups: DefaultDict[LazyBuffer, List[UOp]] = defaultdict(list)
+  output_groups: DefaultDict[LazyBuffer, List[Buffer]] = defaultdict(list)
   lazybufs_to_realize: Dict[Buffer, LazyBuffer] = {}
   for buf in realizes:
     if buf.realized is None and buf.op is not MetaOps.CONST:
       if (dup:=lazybufs_to_realize.get(buf.buffer)) is not None:
         raise RuntimeError(f"can't double realize in one schedule, Buffer is realizing both {dup} and {buf}")
       lazybufs_to_realize[buf.buffer] = buf
+      output_groups[reduce_for_op.get(buf, buf)].append(buf.buffer)
 
       # make things that can't be images not images
       if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
@@ -184,15 +176,4 @@ def get_realizes(outs:List[LazyBuffer]) -> Tuple[ScheduleContext, List[List[UOp]
           assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
           buf.buffer.dtype = dtypes.float32
           buf.buffer.options = None
-    if buf.op is MetaOps.CONST:
-      if isinstance(val:=buf.arg, UOp): ctx.var_vals.update([val.unbind()])
-      uop = UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(buf.dtype.scalar(), buf.arg), v.const_like(0))
-    # NOTE: UOps.BUFFER creation must come after the ImageDType fixup
-    else: uop = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(ctx.buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
-    if buf.buffer not in ctx.buf_uops:
-      ctx.buf_uops[buf.buffer] = uop
-      ctx.uop_bufs[uop] = buf.buffer
-    if buf.realized is None:
-      if buf.op is MetaOps.ASSIGN: ctx.assigned.add(ctx.buf_uops[buf.buffer])
-      if buf.op is not MetaOps.CONST:output_groups[reduce_for_op.get(buf, buf)].append(ctx.buf_uops[buf.buffer])
-  return ctx, list(output_groups.values()), lazybufs_to_realize
+  return list(output_groups.values()), lazybufs_to_realize, assign_targets
