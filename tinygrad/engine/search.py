@@ -56,10 +56,11 @@ class TimeoutException(Exception): pass
 def timeout_handler(signum, frame): raise TimeoutException()
 
 def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tuple[int, Optional[Tuple[Program, bytes, float]]]:
-  if hasattr(signal, "SIGALRM"):
-    signal.signal(signal.SIGALRM, timeout_handler)
+  if hasattr(signal, "alarm"):
+    signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
     # set timeout
     signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
+  ret = None
   try:
     p = x[1].to_program(name_override="test")
     assert p.uops is not None, "uop list wasn't generated?"
@@ -70,14 +71,10 @@ def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tup
     ret = (p, prog, et)
   except RuntimeError:
     if DEBUG >= 4: traceback.print_exc()
-    ret = None
-  except TimeoutException:
-    ret = None
   except Exception as e:
     if getenv("BEAM_STRICT_MODE"): raise e
-    ret = None
   finally:
-    if hasattr(signal, "SIGALRM"): signal.alarm(0)
+    if hasattr(signal, "alarm"): signal.alarm(0)
   return x[0], ret
 
 # workers should ignore ctrl c
@@ -159,7 +156,10 @@ def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True,
           with open(CAPTURE_BEAM, 'a') as f: f.write(str(acted_lins[i].ast).replace('\n','')+f" :: {acted_lins[i].applied_opts}\n")
         seen_libs.add(lib)
         try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0, clear_l2=hasattr(dev, 'invalidate_caches'))
-        except RuntimeError: continue # for runtime issues
+        except RuntimeError as e:
+          if len(CAPTURE_BEAM) > 0:
+            with open(CAPTURE_BEAM, 'a') as f: f.write("# Upper ast finished with an error:" + str(e).replace('\n',' ')+ "\n")
+          continue # for runtime issues
         timed_lins.append((acted_lins[i], min(tms)))
         if BEAM_DEBUG > 1: print(f"{time.perf_counter() - st:7.2f}s: {i:5d} {len(cast(List, p.uops)):5d} uops {compile_et*1e6:12.2f} us compile/{timed_lins[-1][1]*1e6:12.2f} us run       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}")  # noqa: E501
         elif DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")  # noqa: E501

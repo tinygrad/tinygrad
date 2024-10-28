@@ -44,7 +44,7 @@ class GraphRewriteDetails(GraphRewriteMetadata):
 def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List[List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]]:
   kernels: Dict[Optional[str], List[Tuple[Any, TrackedRewriteContext, GraphRewriteMetadata]]] = {}
   for k,ctxs in contexts:
-    name = to_function_name(k.name) if isinstance(k, Kernel) else None
+    name = to_function_name(k.name) if isinstance(k, Kernel) else k
     for ctx in ctxs:
       if ctx.sink.op is UOps.CONST: continue
       upats = [(upat.location, upat.printable(), tm) for _,_,upat,tm in ctx.matches if upat is not None]
@@ -129,7 +129,7 @@ if __name__ == "__main__":
   multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
   st = time.perf_counter()
   print("*** viz is starting")
-  with open("/tmp/rewrites.pkl", "rb") as f: contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = pickle.load(f)
+  with open(sys.argv[1], "rb") as f: contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = pickle.load(f)
   print("*** unpickled saved rewrites")
   kernels = get_metadata(contexts)
   if getenv("FUZZ_VIZ"):

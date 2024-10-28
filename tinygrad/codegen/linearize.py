@@ -1,7 +1,7 @@
-from typing import List, Set, Dict, Tuple, Any, Optional
+from typing import List, Set, Dict, Tuple
 import functools, heapq
 from tinygrad.ops import type_verify, END_FOR_UOP, UOp, UOps
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import DEBUG
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
@@ -41,8 +41,11 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
       priority += u.arg[0]
       for p in range_phi[u]:
         priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
-    # prefer uops that are loop children
+    elif u.op is UOps.CONST:
+      # place consts first here, they don't do anything and it can cause issues with DEFINE_ACC
+      priority -= 100000000000
     else:
+      # prefer uops that are loop children
       priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is UOps.RANGE and u in ss])
     if u.op is UOps.IF and len(u.src) == 1: priority += 10000000 # if penalty
     return priority
@@ -57,17 +60,9 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     for x in u.src: fix_priority(x, priorities[u])
   fix_priority(sink, 0)
 
-  @functools.lru_cache(None)
-  def tuplize(u:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
-    # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
-    if u.op is UOps.DEFINE_VAR: arg = u.arg[0]
-    elif u.op is UOps.ALU: arg = u.arg.value
-    else: arg = u.arg
-    return (u.op.value, arg, u.dtype, tuple(tuplize(x) for x in u.src))
-
   # NOTE: the compare should never make it all the way to u
   queue:List[Tuple[int, Tuple, UOp]] = []
-  def push(u:UOp): heapq.heappush(queue, (priorities[u], tuplize(u), u))
+  def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
 
   for u in children:
     if in_degree[u] == 0: push(u)

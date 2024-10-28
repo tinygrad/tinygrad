@@ -1,7 +1,4 @@
-import os
-import pathlib, tempfile, unittest
-import tarfile
-
+import os, pathlib, tempfile, unittest, tarfile
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType

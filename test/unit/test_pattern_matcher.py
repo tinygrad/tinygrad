@@ -11,6 +11,18 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), None)
 
+  def test_upat_any(self):
+    def test(a, x=None, y=None, z=None):
+      #print(x,y,z)
+      if y is not None: return a+y
+    matcher = PatternMatcher([
+      (UPat.var("a")+UPat.any(UPat.var("x"), UPat.var("y"), UPat.var("z")), test),
+    ])
+    v1 = UOp.variable("a", 0, 10)
+    v2 = UOp.variable("b", 0, 10)
+    c1 = v1+v2
+    self.assertEqual(matcher.rewrite(c1), c1)
+
   @unittest.skip("closures aren't supported on pattern matchers")
   def test_match_sz_0(self):
     match_cnt = 0
@@ -126,12 +138,15 @@ class TestPatternMatcher(unittest.TestCase):
     c3 = UOp(UOps.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
     self.assertEqual(matcher.rewrite(c3), c3)
     self.assertEqual(matcher.rewrite(c2), None)
+    # that CONST/ALU -> ALU/CONST rewrite is now instant
+    """
     matcher = PatternMatcher([(UPat(UOps.ALU, name="x", src=(UPat(UOps.CONST), UPat(UOps.ALU))), lambda x: x)])
     c4 = UOp(UOps.ALU, dtypes.float, (c1,c3), BinaryOps.ADD)
     c5 = UOp(UOps.ALU, dtypes.float, (c3,c1), BinaryOps.ADD)
     self.assertEqual(matcher.rewrite(c3), None)
     self.assertEqual(matcher.rewrite(c4), c4)
     self.assertEqual(matcher.rewrite(c5), None)
+    """
 
   def test_src_permutations(self):
     matcher = PatternMatcher([(UPat(UOps.ALU, name="x", src=[UPat(UOps.CONST), UPat(UOps.ALU)]), lambda x: x)])
