@@ -2106,20 +2106,20 @@ gfx_v11_0_cp_gfx_enable()
 mes_v11_0_kiq_hw_init()
 
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
+PACKET3_SET_UCONFIG_REG_START = 0x0000c000
 def gfx_v11_0_ring_test_ring():
   amdgpu_wreg(0x1fc00, 0x0) # hdp flush
   amdgpu_wreg(0xc040, 0xcafedead)
 
-  the_ring.write(amd_gpu.PACKET3(amd_gpu.PACKET3_WRITE_DATA, 3))
-  the_ring.write((1 << 16)) # kiq cmd?
-  the_ring.write(0xc040)
-  the_ring.write(0)
+  the_ring.write(amd_gpu.PACKET3(amd_gpu.PACKET3_SET_UCONFIG_REG, 1))
+  the_ring.write(0x40) # uconfreg
   the_ring.write(0xdeadc0de)
 
   amdgpu_mm_wdoorbell64(the_ring.doorbell_index, the_ring.next_ptr)
 
   while True:
-    if raw_vram[the_ring.eop_gpu_addr] == 0xdeadc0de:
+    print("now", hex(amdgpu_rreg(0xc040)))
+    if amdgpu_rreg(0xc040) == 0xdeadc0de:
       break
 
 gfx_v11_0_ring_test_ring()
