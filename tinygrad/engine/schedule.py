@@ -165,6 +165,7 @@ class ScheduleItemContext:
   sts: Set[ShapeTracker] = field(default_factory=set)
   bufs: List[UOp] = field(default_factory=list)
   assign_preloads: List[UOp] = field(default_factory=list)
+  metadata: Dict[Metadata, None] = field(default_factory=dict)
 
 def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
   if (st:=unwrap(x.st)) in ctx.sts: return None
@@ -219,20 +220,22 @@ if getenv("RUN_PROCESS_REPLAY"):
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   store_groups, lazybufs_to_realize, assigns = get_realizes(outs)
   ctx = ScheduleContext(lazybufs_to_realize)
-  # preschedule all buffers in realizes
-  prescheduled: List[ScheduleItem] = []
+  # split realizes into small graphs
+  small_graphs: List[Tuple[UOp, ScheduleItemContext]] = []
   for stores in store_groups:
     outs = [lazybufs_to_realize[b] for b in stores]
     cache: Dict[LazyBuffer, UOp] = {}
     metadata: Dict[UOp, Metadata] = {}
     to_store = tuple(to_uop(out, outs, ctx, metadata, cache) for out in outs)
     sink = UOp(UOps.SINK, src=tuple(UOp.store(ctx.buf_uops[x.buffer], ShapeTracker.from_shape(x.shape).to_uop(), u) for x,u in zip(outs,to_store)))
-    assigned = {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None}
-    prescheduled.append(ScheduleItem(full_ast_rewrite(sink, si_ctx:=ScheduleItemContext(ctx.var_vals, assigned)), \
-        tuple(b for u in si_ctx.bufs if (b:=ctx.uop_bufs[u]).size != 0), tuple(dedup(metadata.values())), tuple(si_ctx.assign_preloads)))
-  schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
+    si_ctx = ScheduleItemContext(ctx.var_vals, {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None},
+                                 metadata={x:None for x in metadata.values()})
+    small_graphs.append((full_ast_rewrite(sink, si_ctx), si_ctx))
 
   # do BFS
+  prescheduled = [ScheduleItem(ast, tuple(b for u in c.bufs if (b:=ctx.uop_bufs[u]).size != 0),
+                               tuple(c.metadata), tuple(c.assign_preloads)) for ast,c in small_graphs]
+  schedule_targets = {out:lsi for lsi in prescheduled for out in lsi.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
   in_degree: DefaultDict[ScheduleItem, int] = defaultdict(int)
   for lsi in prescheduled:
