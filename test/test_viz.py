@@ -5,7 +5,7 @@ from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, TrackedPatternMatcher as 
     graph_rewrite, contexts, track_rewrites
 from tinygrad.viz.serve import get_details, get_metadata, uop_to_json
 
-@track_rewrites
+@track_rewrites()
 def rewrite(sink:UOp, pm:PatternMatcher, ctx=None): return graph_rewrite(sink, pm, ctx)
 
 def helper_test_viz(sink:UOp, pm:PatternMatcher, ctx=None) -> List[UOp]:
@@ -59,28 +59,28 @@ class TestViz(unittest.TestCase):
 
   def test_track_rewrites(self):
     simple = PatternMatcher([(UPat.var("x")*1, lambda x:x)])
-    @track_rewrites
-    def do_rewrite(key:str, x:UOp): return graph_rewrite(x, simple)
+    @track_rewrites(named=True)
+    def do_rewrite(x:UOp): return graph_rewrite(x, simple)
     ld = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1), UOp.const(dtypes.int, 0)))
-    do_rewrite("uop_0", ld*1)
-    do_rewrite("uop_1", ld*2)
+    do_rewrite(ld*1)
+    do_rewrite(ld*2)
     ret = get_metadata(contexts)
-    self.assertEqual(len(ret), 1)
+    self.assertEqual(len(ret), 2)
     key, _, m = ret[0][0]
-    self.assertEqual(key, "uop_0")
+    self.assertEqual(key, "do_rewrite_1")
     self.assertEqual(len(m.upats), 1)
-    key, _, m = ret[0][1]
-    self.assertEqual(key, "uop_1")
+    key, _, m = ret[1][0]
+    self.assertEqual(key, "do_rewrite_2")
     self.assertEqual(len(m.upats), 0)
 
   def test_track_rewrites_with_exception(self):
     simple = PatternMatcher([(UPat.var("x")*1, lambda x:x)])
-    @track_rewrites
-    def do_rewrite(key:str, x:UOp):
+    @track_rewrites()
+    def do_rewrite(x:UOp):
       x = graph_rewrite(x, simple) # NOTE: viz tracks this
       raise Exception("test")
     ld = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1), UOp.const(dtypes.int, 0)))
-    with self.assertRaises(Exception): do_rewrite("uop_0", ld*1)
+    with self.assertRaises(Exception): do_rewrite(ld*1)
     ret = get_metadata(contexts)
     self.assertEqual(len(ret), 1)
 

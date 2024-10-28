@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Tuple, Any
-import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib
+import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys
+assert sys.platform != 'win32'
 from tinygrad.device import BufferOptions, Compiled, Allocator
 from tinygrad.helpers import from_mv, getenv, DEBUG, round_up, mv_address, to_mv, cpu_objdump
 from tinygrad.runtime.ops_clang import ClangCompiler

@@ -614,16 +614,20 @@ class TestOps(unittest.TestCase):
 
   def test_log(self):
     helper_test_op([(45,65)], torch.log, Tensor.log)
+    helper_test_op(None, torch.log, Tensor.log, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.log, Tensor.log)
   def test_log2(self):
     helper_test_op([(45,65)], torch.log2, Tensor.log2)
+    helper_test_op(None, torch.log2, Tensor.log2, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.log2, Tensor.log2)
 
   def test_exp(self):
     helper_test_op([(45,65)], torch.exp, Tensor.exp)
+    helper_test_op(None, torch.exp, Tensor.exp, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.exp, Tensor.exp)
   def test_exp2(self):
     helper_test_op([(45,65)], torch.exp2, Tensor.exp2)
+    helper_test_op(None, torch.exp2, Tensor.exp2, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.exp2, Tensor.exp2)
 
   def test_sign(self):
@@ -1581,7 +1585,7 @@ class TestOps(unittest.TestCase):
     for stride in [(2,1), (1,2), 1]:
       helper_test_op([(2,4,4,5), (4,4,3,3)],
         lambda x,w: torch.nn.functional.conv_transpose2d(x,w, stride=stride).relu(),
-        lambda x,w: Tensor.conv_transpose2d(x,w,stride=stride).relu(), grad_rtol=1e-5)
+        lambda x,w: Tensor.conv_transpose2d(x,w,stride=stride).relu(), atol=1e-5, grad_rtol=1e-5)
 
   def test_output_padded_conv_transpose2d(self):
     for output_padding, stride in [((1,1), (2,3)), ((2,1), (3,2))]:

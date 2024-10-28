@@ -2,6 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
+from tinygrad.engine.schedule import create_schedule
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -166,6 +167,16 @@ class TestAssign(unittest.TestCase):
     a += 1
     a += 1
     np.testing.assert_allclose(a.numpy(), 3)
+
+  # NOTE: this is similar to the resnet failure
+  #@unittest.expectedFailure
+  def test_double_assign_alt(self):
+    a = Tensor.ones(4).contiguous().realize()
+    b = Tensor([1, 2, 3, 4]).realize().lazydata
+    a1 = a.lazydata.assign(b)
+    a2 = a.lazydata.assign(b)
+    sched = create_schedule([a1, a2])
+    self.assertEqual(len(sched), 1)
 
   def test_crossover_assign(self):
     a = Tensor.full((4,), 2).contiguous().realize()
