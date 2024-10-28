@@ -242,6 +242,12 @@
   // **** extra helpers
   const toPath = ([fp, lineno]) => `${fp.replaceAll("\\", "/").split("/").pop()}:${lineno}`;
 
+  function vsCodeOpener(parts) {
+    const linkElement = Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
+      href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" })
+    return linkElement;
+  }
+
   // **** main loop
   var ret = {};
   var cache = {};
@@ -305,7 +311,7 @@
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
-    metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: toPath(ret.loc) }));
+    metadata.appendChild(vsCodeOpener(ret.loc.join(":").split("/")));
     const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(ret.code_line)}</code>`,
       className: "wrap code-block language-python" });
     metadata.appendChild(pre);
@@ -335,8 +341,7 @@
             const [loc, pattern] = ret.upats[i-1];
             const parts = loc.join(":").split("/");
             const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
-            const link = Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
-              href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" })
+            const link = vsCodeOpener(parts);
             div.appendChild(link);
             const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
             pre.appendChild(Object.assign(document.createElement("code"), { textContent: DOMPurify.sanitize(pattern), className: "language-python" }));
