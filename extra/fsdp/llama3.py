@@ -23,12 +23,9 @@ def size_unit(size: int):
   return float(size), unit
 
 SHARD = int(os.environ.get("SHARD", 1))
-GPUS = [f"{Device.DEFAULT}:{i}" for i in range(SHARD)]
-print(f"Training on {GPUS}")
-GPU_NAME = Device.DEFAULT
-if len(GPUS) > 1:
-  # This is a hack to prevent device 0 doing the initialization for the whole tensor
-  Device.DEFAULT = "CLANG"
+GPUS = [f"{Device.DEFAULT}:{i+1}" for i in range(SHARD)]
+
+print(f"Allocating data on {Device.DEFAULT}, Training on {GPUS}")
 B = 4
 T = 16
 vocab_size = 128256
