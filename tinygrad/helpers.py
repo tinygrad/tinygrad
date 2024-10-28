@@ -6,6 +6,7 @@ from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, 
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
 import itertools
+from tinygrad.ops import sint
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -328,10 +329,10 @@ copyreg.pickle(types.CodeType, _serialize_code)
 def _serialize_module(module:types.ModuleType): return importlib.import_module, (module.__name__,)
 copyreg.pickle(types.ModuleType, _serialize_module)
 
-def find_paddings_for_concat(axis: int, shapes: List[Tuple[int, ...]]):
+def find_paddings_for_concat(axis: int, shapes: List[Tuple[sint, ...]]):
   cat_dims = [s[axis] for s in shapes]
   cat_dim_cumsum = [0, *itertools.accumulate(cat_dims)]
-  slc:List[List[Optional[Tuple[int, int]]]] = [[(0,0) for _ in range(len(shapes[0]))] for _ in shapes]
+  slc:List[List[Optional[Tuple[sint, sint]]]] = [[(0,0) for _ in range(len(shapes[0]))] for _ in shapes]
   for d,k,s in zip(cat_dims, cat_dim_cumsum[:-1], slc):
     s[axis] = (k, cat_dim_cumsum[-1] - k - d)
   return slc
