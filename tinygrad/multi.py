@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional, Union, Tuple, List, Dict
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv, round_up
+from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv, round_up, find_paddings_for_concat
 from tinygrad.dtype import DType
 from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps, MathTrait, sint
 from tinygrad.engine.lazy import LazyBuffer
@@ -49,10 +49,10 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
 
   n_lbs = len(mlb.lbs)
   reassembled_chunks = [[lbs[i] if _i == i else None for _i in range(n_lbs)] for i, lbs in enumerate(chunked)]
-    # A0 X  X  X      A0 A1 X  X      A0 A1 A2 X      A0 A1 A2 A3
-    # X  B1 X  X  --> X  B1 B2 X  --> X  B1 B2 B3 --> B0 B1 B2 B3
-    # X  X  C2 X      X  X  C2 C3     C0 X  C2 C3     C0 C1 C2 C3
-    # X  X  X  D3     D0 X  X  D3     D0 D1 X  D3     D0 D1 D2 D3
+    # [A0 X  X  X ]     [A0 A1 X  X ]     [A0 A1 A2 X ]     [A0 A1 A2 A3]
+    # [X  B1 X  X ] --> [X  B1 B2 X ] --> [X  B1 B2 B3] --> [B0 B1 B2 B3]
+    # [X  X  C2 X ]     [X  X  C2 C3]     [C0 X  C2 C3]     [C0 C1 C2 C3]
+    # [X  X  X  D3]     [D0 X  X  D3]     [D0 D1 X  D3]     [D0 D1 D2 D3]
   for step in range(n_lbs - 1):
     for src_shard in range(n_lbs):
       src_chunk = (step + src_shard + 1) % n_lbs
@@ -64,14 +64,10 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
       reassembled_chunks[dst_shard][dst_chunk] = copied
 
   reassembled_lbs = []
-  for i, chunks in enumerate(reassembled_chunks):
-    cat_dims =  [s.shape[originalAxis] for s in chunks]
-    cat_dim_cumsum = [0, *itertools.accumulate(cat_dims)]
-    slc:List[List[Optional[Tuple[sint, sint]]]] = [[(0,0) for _ in range(len(shape))] for _ in chunks]
-    for d,k,s in zip(cat_dims, cat_dim_cumsum[:-1], slc):
-      s[originalAxis] = (k, cat_dim_cumsum[-1] - k - d)
-    padded = [arg.pad(tuple(s)) for arg,s in zip(chunks, slc)]
-    assembled = functools.reduce(lambda x, y: x.alu(BinaryOps.ADD, y), padded)
+  for chunks in reassembled_chunks:
+    slc = find_paddings_for_concat(originalAxis, [chunk.shape for chunk in chunks])
+    assembled = functools.reduce(lambda x, y: x.alu(BinaryOps.ADD, y),
+      [arg.pad(tuple(s)) for arg,s in zip(chunks, slc)])
     reassembled_lbs.append(assembled)
   return MultiLazyBuffer(reassembled_lbs, axis)
 

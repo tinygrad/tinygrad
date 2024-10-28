@@ -1,5 +1,5 @@
 import unittest, functools, random
-from typing import List, Union
+from typing import List, Union, Optional, Tuple
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.ops import MetaOps, ReduceOps, BinaryOps, UOps
 from tinygrad.helpers import CI, getenv, prod, Context
@@ -35,13 +35,17 @@ def _test_allreduce(t:Tensor):
   b.realize()
   return aa, b
 
-def _test_elementwise(shard1: Union[int, None], shard2: Union[int, None]):
-  t1 = Tensor.ones(256, 256).contiguous().realize()
-  t2 = Tensor.ones(256, 256).contiguous().realize()
+def _test_elementwise(shard1: Union[int, None], shard2: Union[int, None],
+                      t1_shape: Optional[Tuple[int, ...]]=(256, 256),
+                      t2_shape: Optional[Tuple[int, ...]]=(256, 256)
+                      ):
+  t1 = Tensor.ones(*t1_shape).contiguous().realize()
+  t2 = Tensor.ones(*t2_shape).contiguous().realize()
   t1.shard_(devices_4, shard1)
   t2.shard_(devices_4, shard2)
   O = t1 + t2
   return O, 2
+
 
 
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
@@ -148,6 +152,11 @@ class TestMultiTensor(unittest.TestCase):
   def test_four_add_reshard_ring(self):
     with Context(RING=2):
       a, b = _test_elementwise(0, 1)
+      np.testing.assert_allclose(a.numpy(), b)
+
+  def test_four_add_reshard_ring_rect(self):
+    with Context(RING=2):
+      a, b = _test_elementwise(0, 1, (256, 512), (256, 512))
       np.testing.assert_allclose(a.numpy(), b)
 
   def test_four_add_reshard_jit(self):
