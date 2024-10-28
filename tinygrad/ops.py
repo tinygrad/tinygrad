@@ -208,6 +208,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     #if op is UOps.VECTORIZE and dtype != dtypes.void: assert len(src) == dtype.count, f"{len(src)} invalid for {dtype}"
     #if op is UOps.ALU and arg not in (BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE): assert all_same([dtype] + [x.dtype for x in src])
     #if op is UOps.CAST: assert dtype.count == src[0].dtype.count, f"cast can't change vectorization {src[0].dtype} --> {dtype}"
+    #if op is UOps.INDEX: assert isinstance(dtype, PtrDType), f"INDEX must be ptr, it's {dtype}"
     self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
   def __reduce__(self): return UOp, (self.op, self.dtype, self.src, self.arg)
   def replace(self, **kwargs) -> UOp:

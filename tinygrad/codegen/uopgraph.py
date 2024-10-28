@@ -440,6 +440,7 @@ expander = PatternMatcher([
 
 def no_vectorized_load_store(ls:UOp):
   idx = ls.src[0]
+  assert isinstance(idx.dtype, PtrDType), "idx must have pointer dtype"
   if idx.dtype.v == 1: return None
   # ugh, the meaning of a dtype.count idx is overloaded
   if ls.op is UOps.LOAD and idx.dtype.v != ls.dtype.count: return None
@@ -454,6 +455,7 @@ def no_vectorized_acc(acc:UOp):
   return UOp(UOps.VECTORIZE, acc.dtype, alus)
 
 def no_vectorized_index(idx:UOp):
+  assert isinstance(idx.dtype, PtrDType), "idx must have pointer dtype"
   if idx.dtype.v == 1: return None
   tv = [UOp(idx.op, idx.dtype.scalar(), (idx.src[0], idx.src[1].gep(i))) for i in range(idx.src[1].dtype.count)]
   return UOp(UOps.VECTORIZE, idx.dtype, tuple(tv))

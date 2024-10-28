@@ -18,8 +18,8 @@ class DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self.name == 'void': return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
-  def ptr(self, local=False) -> Union[PtrDType, ImageDType]:
-    return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, local)
+  def ptr(self, local=False, v=1) -> Union[PtrDType, ImageDType]:
+    return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, local, v)
   def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
 
 @dataclass(frozen=True, repr=False)
@@ -29,13 +29,16 @@ class ImageDType(DType):
   local: bool = False  # images are never local
   def scalar(self) -> DType: return self.base
   def vec(self, sz:int): return self.base.vec(sz)
-  def ptr(self, local=False) -> Union[PtrDType, ImageDType]: return self
+  def ptr(self, local=False, v=1) -> Union[PtrDType, ImageDType]: return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
 @dataclass(frozen=True, repr=False)
 class PtrDType(DType):
   base: DType
   local: bool
+  v: int
+  def scalar(self): return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self.base, self.local, 1)
+  def vec(self, v:int): return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self.base, self.local, v)
   def __hash__(self): return super().__hash__()
   # local isn't used in the compare
   def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.count==dt.count
