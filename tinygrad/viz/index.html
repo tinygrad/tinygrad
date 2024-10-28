@@ -87,10 +87,7 @@
   }
   .graph {
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    inset: 0;
     z-index: 1;
   }
   .kernel-list {
@@ -375,52 +372,35 @@
       collapseBtn.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
     });
     // ***** resizer
-    let containerWidth;
-    let leftStartX, rightStartX;
-    let kernelListWidth, metadataWidth;
-    kernelList.appendChild(Object.assign(document.createElement("div"), { id: "kernel-resize-handle", className: "resize-handle" }));
-    const kernelResizeHandle = document.getElementById("kernel-resize-handle");
-    kernelResizeHandle.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      kernelList.style.userSelect = "none";
-      leftStartX = e.clientX;
-      containerWidth = mainContainer.getBoundingClientRect().width;
-      kernelListWidth = kernelList.getBoundingClientRect().width;
-      document.documentElement.addEventListener("mousemove", kernelResize, false);
-      document.documentElement.addEventListener("mouseup", () => stopResize(kernelList, kernelResize), false);
-    });
-    function kernelResize(e) {
-      if (isCollapsed) return;
-      const change = e.clientX - leftStartX;
-      const newWidth = ((kernelListWidth+change) / containerWidth) * 100;
-      if (newWidth >= 15 && newWidth <= 50) {
-        kernelList.style.width = `${newWidth}%`;
-      }
+    function createResizer(element, width, type) {
+      const { minWidth, maxWidth } = width;
+      const handle = Object.assign(document.createElement("div"), { id: `${type}-resize-handle`, className: "resize-handle" });
+      element.appendChild(handle);
+
+      const resize = (e) => {
+        const change = e.clientX - element.dataset.startX;
+        const adjustedChange = type === "kernel" ? change : -change;
+        const newWidth = ((Number(element.dataset.startWidth) + adjustedChange) / Number(element.dataset.containerWidth)) * 100;
+        if (newWidth >= minWidth && newWidth <= maxWidth) {
+          element.style.width = `${newWidth}%`;
+        }
+      };
+
+      handle.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        element.dataset.startX = e.clientX;
+        element.dataset.containerWidth = mainContainer.getBoundingClientRect().width;
+        element.dataset.startWidth = element.getBoundingClientRect().width;
+
+        document.documentElement.addEventListener("mousemove", resize, false);
+        document.documentElement.addEventListener("mouseup", () => {
+          document.documentElement.removeEventListener("mousemove", resize, false);
+          element.style.userSelect = "initial";
+        }, { once: true });
+      });
     }
-    metadata.appendChild(Object.assign(document.createElement("div"), { id: "metadata-resize-handle", className: "resize-handle" }));
-    const metadataResizeHandle = document.getElementById("metadata-resize-handle");
-    metadataResizeHandle.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      metadata.style.userSelect = "none";
-      rightStartX = e.clientX;
-      containerWidth = mainContainer.getBoundingClientRect().width;
-      metadataWidth = metadata.getBoundingClientRect().width;
-      document.documentElement.addEventListener("mousemove", metadataResize, false);
-      document.documentElement.addEventListener("mouseup", () => stopResize(metadata, metadataResize), false);
-    });
-    function metadataResize(e) {
-      if (isCollapsed) return;
-      const change = e.clientX - rightStartX;
-      const newWidth = ((metadataWidth-change) / containerWidth) * 100;
-      if (newWidth >= 20 && newWidth <= 50) {
-        metadata.style.width = `${newWidth}%`;
-      }
-    }
-    function stopResize(element, resizeFunc) {
-      document.documentElement.removeEventListener("mousemove", resizeFunc, false);
-      document.documentElement.removeEventListener("mouseup", stopResize, false);
-      element.style.userSelect = "initial";
-    }
+    createResizer(kernelList, { minWidth: 15, maxWidth: 50 }, "kernel"); // left resizer
+    createResizer(metadata, { minWidth: 20, maxWidth: 50 }, "metadata"); // right resizer
   }
 
   // **** keyboard shortcuts
