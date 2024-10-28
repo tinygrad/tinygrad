@@ -35,6 +35,15 @@ def _test_allreduce(t:Tensor):
   b.realize()
   return aa, b
 
+def _test_elementwise(shard1: Union[int, None], shard2: Union[int, None]):
+  t1 = Tensor.ones(256, 256).contiguous().realize()
+  t2 = Tensor.ones(256, 256).contiguous().realize()
+  t1.shard_(devices_4, shard1)
+  t2.shard_(devices_4, shard2)
+  O = t1 + t2
+  return O, 2
+
+
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestMultiTensor(unittest.TestCase):
   def test_to(self):
@@ -128,18 +137,26 @@ class TestMultiTensor(unittest.TestCase):
   def test_simple_add_XW(self): return self._test_simple_add_axis(0, 0)
 
   def test_four_add(self):
-    def _test(x_shard: Union[int, None], w_shard: Union[int, None]):
-      X = Tensor.ones(256, 256).contiguous().realize()
-      W = Tensor.ones(256, 256).contiguous().realize()
-      X.shard_(devices_4, x_shard)
-      W.shard_(devices_4, w_shard)
-      O = X + W
-      np.testing.assert_allclose(O.numpy(), 2)
-    _test(0, None)
+    a, b = _test_elementwise(0, None)
+    np.testing.assert_allclose(a.numpy(), b)
+
+  def test_four_add_reshard_naive(self):
     with Context(RING=0):
-      _test(0, 1)
+      a, b = _test_elementwise(0, 1)
+      np.testing.assert_allclose(a.numpy(), b)
+
+  def test_four_add_reshard_ring(self):
     with Context(RING=2):
-      _test(0, 1)
+      a, b = _test_elementwise(0, 1)
+      np.testing.assert_allclose(a.numpy(), b)
+
+  def test_four_add_reshard_jit(self):
+    for ring in [0, 2]:
+      with Context(RING=ring):
+        jit_reshard = TinyJit(_test_elementwise)
+        for _ in range(5):
+          a, b = jit_reshard(0, 1)
+          np.testing.assert_allclose(a.numpy(), b)
 
   def test_elementwise_dtype(self):
     Tensor.manual_seed(0)
@@ -555,20 +572,13 @@ class TestMultiTensor(unittest.TestCase):
     with self.assertRaises(AssertionError): t0.reshape(4, 3, 2, 7, 15)
 
   def test_mlb_assign_change_axis(self):
-    with Context(RING=0):
-      t_none = Tensor.zeros((16, 16)).shard(devices_2, axis=1).contiguous().realize()
-      t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)
-      ones = Tensor.ones((16, 16))
-      t_none.assign(t_zero)
-      np.testing.assert_allclose(t_none.numpy(), ones.numpy())
-
-  def test_mlb_assign_change_axis_ring(self):
-    with Context(RING=2):
-      t_none = Tensor.zeros((16, 16)).shard(devices_2, axis=1).contiguous().realize()
-      t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)
-      ones = Tensor.ones((16, 16))
-      t_none.assign(t_zero)
-      np.testing.assert_allclose(t_none.numpy(), ones.numpy())
+    for ring in [0, 2]:
+      with Context(RING=ring):
+        t_none = Tensor.zeros((16, 16)).shard(devices_2, axis=1).contiguous().realize()
+        t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)
+        ones = Tensor.ones((16, 16))
+        t_none.assign(t_zero)
+        np.testing.assert_allclose(t_none.numpy(), ones.numpy())
 
   def test_rand_with_multiple_devices(self):
     with self.assertRaises(ValueError):
