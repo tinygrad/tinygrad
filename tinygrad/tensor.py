@@ -8,7 +8,7 @@ from collections import defaultdict
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_pair, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch
-from tinygrad.multi import MultiLazyBuffer, reshard
+from tinygrad.multi import MultiLazyBuffer, reshard, find_bounds
 from tinygrad.ops import MetaOps, smax, smin, resolve, UOp, UOps, BinaryOps, sint, Variable
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.engine.lazy import LazyBuffer
@@ -356,15 +356,7 @@ class Tensor:
     """
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
     devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
-    if axis is not None:
-      if axis < 0: axis += len(self.shape)
-      if splits is None:
-        if not isinstance(total:=self.shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {self.shape=}, {axis=}")
-        sz = round_up(total, len(devices)) // len(devices)
-        splits = tuple([max(0, min(sz, total - sz*i)) for i in range(len(devices))])
-      assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
-      boundaries = tuple(itertools.accumulate(splits))
-      bounds = tuple(zip((0,) + boundaries, boundaries))
+    bounds = find_bounds(self.shape, len(devices), axis, splits)
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis, bounds), device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None, splits:Optional[Tuple[int, ...]]=None):

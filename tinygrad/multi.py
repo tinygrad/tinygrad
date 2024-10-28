@@ -3,31 +3,36 @@ from typing import Optional, Union, Tuple, List, Dict
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv, round_up
 from tinygrad.dtype import DType
-from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps, MathTrait
+from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps, MathTrait, sint
 from tinygrad.engine.lazy import LazyBuffer
-from tinygrad.shape.shapetracker import sint
-import os
 
-def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[Tuple[Tuple[sint, sint], ...]]=None):
-  if mlb.axis is None:
-    return mlb
-  if axis is None:
-    return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None)
-
-  shape = mlb.shape
-  shards = len(mlb.lbs)
-  originalAxis = mlb.axis
-  if not isinstance(total:=shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {shape=}, {axis=}")
-  sz = round_up(total, shards) // shards
-  splits = tuple([max(0, min(sz, total - sz*i)) for i in range(shards)])
+def find_bounds(shape: Tuple[sint, ...], num_shards: int, axis: Optional[int]=None, splits: Optional[Tuple[int, ...]]=None) -> Tensor:
+  if axis is None: return None
+  if axis < 0: axis += len(shape)
+  if splits is None:
+    if not isinstance(total:=shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {shape=}, {axis=}")
+    sz = round_up(total, num_shards) // num_shards
+    splits = tuple([max(0, min(sz, total - sz*i)) for i in range(num_shards)])
   assert sum(splits) == shape[axis], "specified splits do not sum up to axis shape"
   boundaries = tuple(itertools.accumulate(splits))
-  if bounds is None:
-    bounds = tuple(zip((0,) + boundaries, boundaries))
+  bounds = tuple(zip((0,) + boundaries, boundaries))
+  return bounds
+
+def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[Tuple[Tuple[sint, sint], ...]]=None):
+  print("Reshard", f"{bounds=} {axis=}")
+  if mlb.axis is None: return mlb
+  if axis is None: return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None)
+  shape = mlb.shape
+  shards = len(mlb.lbs)
+  if bounds is None: bounds = find_bounds(mlb.shape, shards, axis)
   if RING < 2:
+    print("Naive reshard")
     gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]
     sharded = to_sharded(gathered, axis, bounds)
     return MultiLazyBuffer(sharded, axis)
+
+  originalAxis = mlb.axis
+  print("Ring reshard")
   chunks: List[Tuple[int, int]] = []
   steps = shape[axis] // shards
   for i in range(shards):

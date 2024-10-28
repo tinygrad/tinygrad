@@ -1,5 +1,5 @@
 import unittest, functools, random
-from typing import List
+from typing import List, Union
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.ops import MetaOps, ReduceOps, BinaryOps, UOps
 from tinygrad.helpers import CI, getenv, prod, Context
@@ -128,12 +128,18 @@ class TestMultiTensor(unittest.TestCase):
   def test_simple_add_XW(self): return self._test_simple_add_axis(0, 0)
 
   def test_four_add(self):
-    X = Tensor.ones(256, 256).contiguous().realize()
-    W = Tensor.ones(256, 256).contiguous().realize()
-    X.shard_(devices_4, 1)
-    W.shard_(devices_4, None)
-    O = X + W
-    np.testing.assert_allclose(O.numpy(), 2)
+    def _test(x_shard: Union[int, None], w_shard: Union[int, None]):
+      X = Tensor.ones(256, 256).contiguous().realize()
+      W = Tensor.ones(256, 256).contiguous().realize()
+      X.shard_(devices_4, x_shard)
+      W.shard_(devices_4, w_shard)
+      O = X + W
+      np.testing.assert_allclose(O.numpy(), 2)
+    _test(0, None)
+    with Context(RING=0):
+      _test(0, 1)
+    with Context(RING=2):
+      _test(0, 1)
 
   def test_elementwise_dtype(self):
     Tensor.manual_seed(0)
@@ -549,11 +555,20 @@ class TestMultiTensor(unittest.TestCase):
     with self.assertRaises(AssertionError): t0.reshape(4, 3, 2, 7, 15)
 
   def test_mlb_assign_change_axis(self):
-    t_none = Tensor.zeros((16, 16)).shard(devices_2).contiguous().realize()
-    t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)
-    with self.assertRaises(AssertionError):
-      # don't allow assigns that change axes
+    with Context(RING=0):
+      t_none = Tensor.zeros((16, 16)).shard(devices_2, axis=1).contiguous().realize()
+      t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)
+      ones = Tensor.ones((16, 16))
       t_none.assign(t_zero)
+      np.testing.assert_allclose(t_none.numpy(), ones.numpy())
+
+  def test_mlb_assign_change_axis_ring(self):
+    with Context(RING=2):
+      t_none = Tensor.zeros((16, 16)).shard(devices_2, axis=1).contiguous().realize()
+      t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)
+      ones = Tensor.ones((16, 16))
+      t_none.assign(t_zero)
+      np.testing.assert_allclose(t_none.numpy(), ones.numpy())
 
   def test_rand_with_multiple_devices(self):
     with self.assertRaises(ValueError):
