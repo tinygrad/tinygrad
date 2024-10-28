@@ -46,8 +46,6 @@ def _test_elementwise(shard1: Union[int, None], shard2: Union[int, None],
   O = t1 + t2
   return O, 2
 
-
-
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestMultiTensor(unittest.TestCase):
   def test_to(self):
