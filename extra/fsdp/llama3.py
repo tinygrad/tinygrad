@@ -151,7 +151,6 @@ def train():
     loss = forward_pass(x_test, y_test)
     return loss
 
-  Device.DEFAULT = GPU_NAME
   test_loss = float('nan')
   for i in (t:= trange(epoch)):
     x, y = next(train_data)
