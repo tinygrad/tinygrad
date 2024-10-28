@@ -1987,22 +1987,109 @@ def mes_v11_0_kiq_setting():
 
 class Amdring:
   def __init__(self):
+    self.pipe = 0
     self.mqd_mv = memoryview(bytearray(ctypes.sizeof(amdgpu_2.struct_v11_compute_mqd)))
     self.mqd = amdgpu_2.struct_v11_compute_mqd.from_address(mv_address(self.mqd_mv))
+    
+    self.rptr_gpu_addr = 0xc0000000
+    self.wptr_gpu_addr = 0xc0001000
+    self.ring_gpu_addr = 0xc0004000
+    self.mqd_gpu_addr = 0xd0000000
+    self.hqd_gpu_addr = 0xd0100000
     self.eop_gpu_addr = 0xe0000000
+    self.doorbell_index = 0
+
+    self.next_ptr = 0x0
+
+  def flush(self):
+    for i, x in enumerate(self.mqd_mv): raw_vram[self.mqd_gpu_addr + i] = x
+
+  def write(self, value):
+    raw_vram.cast('I')[self.ring_gpu_addr // 4 + self.next_ptr] = value
+    raw_vram.cast('I')[self.wptr_gpu_addr // 4] = self.next_ptr
+
+def amdgpu_mm_wdoorbell64(index, value):
+  doorbell_bar[index] = value
 
 def mes_v11_0_mqd_init(ring):
-  ring.mqd.header = 0xC0310800
+  ring.mqd.header = 0xC0310800 # some magic?
   ring.mqd.compute_pipelinestat_enable = 0x00000001
   ring.mqd.compute_static_thread_mgmt_se0 = 0xffffffff
   ring.mqd.compute_static_thread_mgmt_se1 = 0xffffffff
   ring.mqd.compute_static_thread_mgmt_se2 = 0xffffffff
   ring.mqd.compute_static_thread_mgmt_se3 = 0xffffffff
   ring.mqd.compute_misc_reserved = 0x00000007
+  
+  eop_base_addr = ring.eop_gpu_addr >> 8
+
+  ring.mqd.cp_hqd_eop_base_addr_lo = eop_base_addr & 0xffffffff
+  ring.mqd.cp_hqd_eop_base_addr_hi = (eop_base_addr >> 32) & 0xffffffff
+  ring.mqd.cp_hqd_eop_control = 0x8
+
+  ring.mqd.cp_hqd_pq_rptr = 0
+  ring.mqd.cp_hqd_pq_wptr_lo = 0
+  ring.mqd.cp_hqd_pq_wptr_hi = 0
+
+  ring.mqd.cp_mqd_base_addr_lo = ring.mqd_gpu_addr & 0xfffffffc
+  ring.mqd.cp_mqd_base_addr_hi = (ring.mqd_gpu_addr >> 32) & 0xffffffff
+  ring.mqd.cp_mqd_control = 0x40000060 # 
+
+  ring.mqd.cp_hqd_pq_base_lo = ring.hqd_gpu_addr & 0xffffffff
+  ring.mqd.cp_hqd_pq_base_hi = (ring.hqd_gpu_addr >> 32) & 0xffffffff
+
+  ring.mqd.cp_hqd_pq_rptr_report_addr_lo = ring.rptr_gpu_addr & 0xfffffffc
+  ring.mqd.cp_hqd_pq_rptr_report_addr_hi = (ring.rptr_gpu_addr >> 32) & 0xffffffff
+
+  ring.mqd.cp_hqd_pq_wptr_report_addr_lo = ring.wptr_gpu_addr & 0xfffffffc
+  ring.mqd.cp_hqd_pq_wptr_report_addr_hi = (ring.wptr_gpu_addr >> 32) & 0xffffffff
+  ring.mqd.cp_hqd_pq_control = 0xd8308011
+
+  ring.mqd.cp_hqd_pq_doorbell_control = 0x40000060
+  ring.mqd.cp_hqd_vmid = 0
+  ring.mqd.cp_hqd_active = 1
+
+  ring.mqd.cp_hqd_persistent_state = 0xbe05501
+  ring.mqd.cp_hqd_ib_control = 0x300000
+  ring.mqd.cp_hqd_iq_timer = 0x0
+  ring.mqd.cp_hqd_quantum = 0x0
+
+def mes_v11_0_queue_init_register(ring):
+  ring.flush()
+
+  soc21_grbm_select(3, ring.pipe, 0, 0)
+  
+  amdgpu_wreg(0x320c, 0x0) # regCP_HQD_VMID
+  amdgpu_wreg(0x3218, 0x0) # regCP_HQD_PQ_DOORBELL_CONTROL
+
+  amdgpu_wreg(0x3209, ring.mqd.cp_mqd_base_addr_lo) # regCP_MQD_BASE_ADDR
+  amdgpu_wreg(0x320a, ring.mqd.cp_mqd_base_addr_hi) # regCP_MQD_BASE_ADDR_HI
+
+  amdgpu_wreg(0x322b, 0x0) # regCP_MQD_CONTROL
+
+  amdgpu_wreg(0x3211, ring.mqd.cp_hqd_pq_base_lo) # regCP_HQD_PQ_BASE
+  amdgpu_wreg(0x3212, ring.mqd.cp_hqd_pq_base_hi) # regCP_HQD_PQ_BASE_HI
+
+  amdgpu_wreg(0x3214, ring.mqd.cp_hqd_pq_rptr_report_addr_lo) # regCP_HQD_PQ_RPTR_REPORT_ADDR
+  amdgpu_wreg(0x3215, ring.mqd.cp_hqd_pq_rptr_report_addr_hi) # regCP_HQD_PQ_RPTR_REPORT_ADDR_HI
+
+  assert ring.mqd.cp_hqd_pq_control == 0xd8308011
+  amdgpu_wreg(0x321a, ring.mqd.cp_hqd_pq_control) # regCP_HQD_PQ_CONTROL
+
+  amdgpu_wreg(0x3216, ring.mqd.cp_hqd_pq_wptr_poll_addr_lo) # regCP_HQD_PQ_WPTR_POLL_ADDR
+  amdgpu_wreg(0x3217, ring.mqd.cp_hqd_pq_wptr_poll_addr_hi) # regCP_HQD_PQ_WPTR_POLL_ADDR_HI
+
+  amdgpu_wreg(0x3218, ring.mqd.cp_hqd_pq_doorbell_control) # regCP_HQD_PQ_DOORBELL_CONTROL
+
+  amdgpu_wreg(0x320d, ring.mqd.cp_hqd_persistent_state) # regCP_HQD_PERSISTENT_STATE
+
+  amdgpu_wreg(0x320b, ring.mqd.cp_hqd_active) # regCP_HQD_ACTIVE
+
+  soc21_grbm_select(0, 0, 0, 0)
 
 the_ring = Amdring()
 def mes_v11_0_queue_init(ring):
   mes_v11_0_mqd_init(ring)
+  mes_v11_0_queue_init_register(ring)
 
 def mes_v11_0_kiq_hw_init():
   mes_v11_0_enable()
@@ -2018,7 +2105,24 @@ gfx_v11_0_cp_compute_enable()
 gfx_v11_0_cp_gfx_enable()
 mes_v11_0_kiq_hw_init()
 
+from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
+def gfx_v11_0_ring_test_ring():
+  amdgpu_wreg(0x1fc00, 0x0) # hdp flush
+  amdgpu_wreg(0xc040, 0xcafedead)
 
+  the_ring.write(amd_gpu.PACKET3(amd_gpu.PACKET3_WRITE_DATA, 3))
+  the_ring.write((1 << 16)) # kiq cmd?
+  the_ring.write(0xc040)
+  the_ring.write(0)
+  the_ring.write(0xdeadc0de)
+
+  amdgpu_mm_wdoorbell64(the_ring.doorbell_index, the_ring.next_ptr)
+
+  while True:
+    if raw_vram[the_ring.eop_gpu_addr] == 0xdeadc0de:
+      break
+
+gfx_v11_0_ring_test_ring()
 print(raw_vram[0x0])
 
   # tmp = RREG32_SOC15(GC, 0, regCP_ME_CNTL);
