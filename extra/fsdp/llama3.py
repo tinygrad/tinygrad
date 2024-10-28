@@ -26,7 +26,7 @@ SHARD = int(os.environ.get("SHARD", 1))
 GPUS = [f"{Device.DEFAULT}:{i+1}" for i in range(SHARD)]
 
 print(f"Allocating data on {Device.DEFAULT}, Training on {GPUS}")
-B = 4
+B = 16
 T = 16
 vocab_size = 128256
 dim = 4096
