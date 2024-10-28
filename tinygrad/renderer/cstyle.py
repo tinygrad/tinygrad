@@ -190,11 +190,11 @@ class ClangRenderer(CStyleLanguage):
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({(sz:=dt.itemsize)}),vector_size({sz})));"
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix, macros = [self.render_vector_prefix(dt.base if isinstance(dt, PtrDType) else dt) \
-                      for dt in dedup(uop.dtype for uop in uops if uop.dtype.count>1)], []
+    # TODO: copied into AMD
+    prefix = [self.render_vector_prefix(dt) for dt in dedup(u.dtype for u in uops if u.dtype.count > 1 and not isinstance(u.dtype, PtrDType))]
     # https://github.com/corsix/amx
     for name, (N, M, _), dtype_in, _, _, _, _, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
-      macros = [
+      prefix += [
         '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
         '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
       ]
@@ -202,7 +202,7 @@ class ClangRenderer(CStyleLanguage):
   AMX_SET(0);\n  for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(4, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}
   AMX(0, (int *)(&data2), 0ull<<62); AMX(1, (int *)(&data1), 0ull<<62); AMX(12, 0, 0ull);
   for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(5, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}\n  AMX_SET(1);\n  return data0;\n}}"""] # noqa: E501
-    return super().render_kernel(function_name, kernel, bufs, uops, macros + prefix)
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
@@ -424,8 +424,7 @@ class AMDRenderer(CStyleLanguage):
 
     # TODO: add BF16 vec dts
     if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("struct hip_bfloat16 { unsigned short data; };")
-
-    for dtype in dedup(uop.dtype for uop in uops if uop.dtype.count > 1): prefix.append(self.render_vector_prefix(dtype))
+    prefix += [self.render_vector_prefix(dt) for dt in dedup(u.dtype for u in uops if u.dtype.count > 1 and not isinstance(u.dtype, PtrDType))]
 
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
       if arg[3] == dtypes.float: prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
