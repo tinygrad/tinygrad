@@ -30,24 +30,24 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
     return MultiLazyBuffer(sharded, axis)
 
   originalAxis = mlb.axis
-  chunks: List[Tuple[int, int]] = []
   steps = shape[axis] // shards
-  for i in range(shards):
-    chunks.append((i * steps, (i+1) * steps))
-  chunked_lbs: List[List[LazyBuffer]] = []
+
+  chunks = [(i * steps, (i + 1) * steps) for i in range(shards)]
+  chunked: List[List[LazyBuffer]] = []
+    # Sharded on axis 1
+    # A0 B0 C0 D0
+    # A1 B1 C1 D1
+    # A2 B2 C2 D2
+    # A3 B3 C3 D3
   for i, lb in enumerate(mlb.lbs):
     chunks_per_lb: List[LazyBuffer] = []
     for s, e in chunks:
-      shrink_arg = [(0, s) for s in lb.shape]
-      shrink_arg[axis] = (s, e)
-      shrink_arg = tuple(shrink_arg)
-      chunked = lb.shrink(shrink_arg)
-      chunks_per_lb.append(chunked)
-    chunked_lbs.append(chunks_per_lb)
+      chunks_per_lb.append(lb.shrink(tuple([(s, e) if _axis == axis else (0, shape) for _axis, shape in enumerate(lb.shape)])))
+    chunked.append(chunks_per_lb)
 
   n_lbs = len(mlb.lbs)
   reassembled_chunks = []
-  for i, lbs in enumerate(chunked_lbs):
+  for i, lbs in enumerate(chunked):
     reassembled_per_lb = [None] * n_lbs
     reassembled_per_lb[i] = lbs[i]
     reassembled_chunks.append(reassembled_per_lb)
@@ -57,9 +57,13 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
       dst_shard = (src_shard + step + 1) % n_lbs
       dst_chunk = (dst_shard - step - 1) % n_lbs
       dst_shard_stationary_chunk = dst_shard
-      dst_device = chunked_lbs[dst_shard][dst_shard_stationary_chunk].device
-      copied = chunked_lbs[src_shard][src_chunk].copy_to_device(dst_device)
+      dst_device = chunked[dst_shard][dst_shard_stationary_chunk].device
+      copied = chunked[src_shard][src_chunk].copy_to_device(dst_device)
       reassembled_chunks[dst_shard][dst_chunk] = copied
+    # A0 X  X  X      A0 A1 X  X      A0 A1 A2 X      A0 A1 A2 A3
+    # X  B1 X  X  --> X  B1 B2 X  --> X  B1 B2 B3 --> B0 B1 B2 B3
+    # X  X  C2 X      X  X  C2 C3     C0 X  C2 C3     C0 C1 C2 C3
+    # X  X  X  D3     D0 X  X  D3     D0 D1 X  D3     D0 D1 D2 D3
   reassembled_lbs = []
   for i, chunks in enumerate(reassembled_chunks):
     cat_dims =  [s.shape[originalAxis] for s in chunks]
