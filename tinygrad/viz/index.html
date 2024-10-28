@@ -22,7 +22,6 @@
     margin-block-end: initial;
   }
   html, body {
-    background-color: #08090e;
     color: #f0f0f5;
     margin: 0;
     padding: 0;
@@ -79,13 +78,12 @@
   }
   .container {
     background-color: #0f1018;
-    border-radius: 8px;
-    padding: 8px;
   }
   .container > * + *, .rewrite-container > * + * {
     margin-top: 12px;
   }
   .graph {
+    background-color: #08090e;
     position: absolute;
     inset: 0;
     z-index: 1;
@@ -94,9 +92,7 @@
     position: relative;
     width: 15%;
     padding: 50px 20px 20px 20px;
-    background-color: #0f1018;
-    border-right: 1px solid white;
-    border-radius: 8px;
+    border-right: 1px solid #4a4b56;
     z-index: 2;
     height: 100%;
     overflow-y: auto;
@@ -109,8 +105,7 @@
     width: 20%;
     padding: 20px;
     background-color: #0f1018;
-    border-left: 1px solid white;
-    border-radius: 8px;
+    border-left: 1px solid #4a4b56;
     z-index: 2;
     margin-left: auto;
     height: 100%;
@@ -136,8 +131,8 @@
     position: fixed;
     top: 10px;
     left: 20px;
-    background: #1a1b26;
-    border: 1px solid #4a4b57;
+    background-color: #1a1b26;
+    border: 1px solid #4a4b56;
     color: #f0f0f5;
     width: 32px;
     height: 32px;
@@ -176,7 +171,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 19l-7-7 7-7"/></svg>
     </button>
     <div class="container kernel-list"></div>
-    <div class="container graph">
+    <div class="graph">
       <svg id="graph-svg">
         <g id="render"></g>
       </svg>
