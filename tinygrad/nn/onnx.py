@@ -249,14 +249,7 @@ def transform_arguments(op:str, inps:List, opts:Dict, **kwargs):
     "Pad": lambda inps, opts, **_: pad(inps, opts),
     "PRelu": lambda inps, _, **__: (inps, {"channel_dim": None}),
     }
-    # def EyeLike(x: Tensor, dtype: Optional[int]=None, k=0):
-    # tiny_dtype = x.dtype if dtype is None else parse_dtype(dtype)
-    # dim = cast(int, min(x.shape))
-    # if x.size(0) == x.size(1): return Tensor.eye(dim, dtype=tiny_dtype)
-    # padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)
-    # return Tensor.eye(dim, dtype=tiny_dtype).pad(padarg)
   return op_handler.get(op, lambda inps, opts, **_: (inps, opts))(inps, opts, **kwargs)
-  # def Transpose(x: Tensor, perm=None): return x.permute(order=list(range(x.ndim)[::-1]) if perm is None else perm)
 
 # dispatches the op to Tensor.py methods
 def dispatch(op:str):
@@ -275,13 +268,13 @@ def dispatch(op:str):
   # TODO: some of these easy lambdas can go in Tensor.py
   # TODO: hmmm maybe lambdas like this is also not the right idea lol, we're literally losing proper typing for a few lines
   lambda_methods: Dict[str, Callable[..., Tensor]] = {"Identity": lambda x:x, "Add": lambda x,y,**_: x+y, "Sub": lambda x,y:x-y,
-  "Div": lambda x,y:(x/y).cast(x.dtype), "ArrayFeatureExtractor": lambda x,indices: x[..., indices],
-  "ReduceSumSquare": lambda x,axis,keepdim: x.square().sum(axis, keepdim), "ReduceL1": lambda x,axis,keepdim: x.abs().sum(axis, keepdim),
-  "ReduceL2": lambda x,axis,keepdim: x.square().sum(axis, keepdim).sqrt(), "ReduceLogSum": lambda x,axis,keepdim: x.sum(axis, keepdim).log(),
-  "ReduceLogSumExp": lambda x,axis,keepdim: x.exp().sum(axis, keepdim).log(), "And": lambda x,y: (x==y).where(x,False),
-  "Or": lambda x,y: (x==y).where(x,True), "Binarizer": lambda x, threshold: (x>threshold).float(),
-  "Mean": lambda *data: functools.reduce(Tensor.add, data) / len(data), "Min": lambda *data: functools.reduce(Tensor.minimum, data),
-  "Max": lambda *data: functools.reduce(Tensor.maximum, data), "Sum": lambda *data: functools.reduce(Tensor.add, data), }
+    "Div": lambda x,y:(x/y).cast(x.dtype), "ArrayFeatureExtractor": lambda x,indices: x[..., indices],
+    "ReduceSumSquare": lambda x,axis,keepdim: x.square().sum(axis, keepdim), "ReduceL1": lambda x,axis,keepdim: x.abs().sum(axis, keepdim),
+    "ReduceL2": lambda x,axis,keepdim: x.square().sum(axis, keepdim).sqrt(), "ReduceLogSum": lambda x,axis,keepdim: x.sum(axis, keepdim).log(),
+    "ReduceLogSumExp": lambda x,axis,keepdim: x.exp().sum(axis, keepdim).log(), "And": lambda x,y: (x==y).where(x,False),
+    "Or": lambda x,y: (x==y).where(x,True), "Binarizer": lambda x, threshold: (x>threshold).float(),
+    "Mean": lambda *data: functools.reduce(Tensor.add, data) / len(data), "Min": lambda *data: functools.reduce(Tensor.minimum, data),
+    "Max": lambda *data: functools.reduce(Tensor.maximum, data), "Sum": lambda *data: functools.reduce(Tensor.add, data), }
 
   #######################
   # implemented methods #
