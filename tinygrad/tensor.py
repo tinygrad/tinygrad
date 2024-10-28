@@ -367,6 +367,7 @@ class Tensor:
     return self
 
   def reshard_(self, axis: Optional[int]=None):
+    if not isinstance(self.lazydata, MultiLazyBuffer): return self
     self.lazydata = reshard(self.lazydata, axis)
     return self
 

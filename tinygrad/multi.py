@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Union, Tuple, List, Dict
+from typing import Optional, Union, Tuple, List, Dict, cast
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv, round_up, find_paddings_for_concat
 from tinygrad.dtype import DType
@@ -64,10 +64,11 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
       reassembled_chunks[dst_shard][dst_chunk] = copied
 
   reassembled_lbs = []
-  for chunks in reassembled_chunks:
-    slc = find_paddings_for_concat(originalAxis, [chunk.shape for chunk in chunks])
+
+  for _chunks in cast(List[List[LazyBuffer]], reassembled_chunks):
+    slc = find_paddings_for_concat(originalAxis, [c.shape for c in _chunks])
     assembled = functools.reduce(lambda x, y: x.alu(BinaryOps.ADD, y),
-      [arg.pad(tuple(s)) for arg,s in zip(chunks, slc)])
+      [arg.pad(tuple(s)) for arg,s in zip(_chunks, slc)])
     reassembled_lbs.append(assembled)
   return MultiLazyBuffer(reassembled_lbs, axis)
 
@@ -107,7 +108,7 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   return [functools.reduce(lambda x,y: x.alu(BinaryOps.ADD, y),
                            [c.pad(pads[i]) for i,c in enumerate(lb_c)]).reshape(lbs[0].shape) for lb_c in chunked]
 
-def to_sharded(lbs:List[LazyBuffer], axis:int, bounds: Tuple[Tuple[int, int], ...]) -> List[LazyBuffer]:
+def to_sharded(lbs:List[LazyBuffer], axis:int, bounds: Tuple[Tuple[sint, sint], ...]) -> List[LazyBuffer]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
   return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(bounds, lbs))]
 

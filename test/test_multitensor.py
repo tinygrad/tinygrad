@@ -735,7 +735,6 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
     for i in range(4):
-      print(f"{i=}")
       a = t.shrink(((0+2*i,2+2*i),None))
       b = Tensor(t.numpy()[0+2*i:2+2*i])
       assert a.shape == b.shape == (2, 8)
