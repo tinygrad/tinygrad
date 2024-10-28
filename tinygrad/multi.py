@@ -58,7 +58,6 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
       chunks_per_lb.append(lb.shrink(tuple([(s, e) if _axis == axis else (0, shape) for _axis, shape in enumerate(lb.shape)])))
     chunked.append(chunks_per_lb)
 
-  
   reassembled_chunks = [[lbs[i] if _i == i else None for _i in range(n_lbs)] for i, lbs in enumerate(chunked)]
     # [A0 X  X  X ]     [A0 A1 X  X ]     [A0 A1 A2 X ]     [A0 A1 A2 A3]
     # [X  B1 X  X ] --> [X  B1 B2 X ] --> [X  B1 B2 B3] --> [B0 B1 B2 B3]
