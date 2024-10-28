@@ -1,10 +1,18 @@
 from __future__ import annotations
 from typing import Optional, Union, Tuple, List, Dict, cast
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv, round_up, find_paddings_for_concat
+from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv, round_up
 from tinygrad.dtype import DType
 from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps, MathTrait, sint
 from tinygrad.engine.lazy import LazyBuffer
+
+def find_paddings_for_concat(axis: int, shapes: List[Tuple[sint, ...]]):
+  cat_dims = [s[axis] for s in shapes]
+  cat_dim_cumsum = [0, *itertools.accumulate(cat_dims)]
+  slc:List[List[Optional[Tuple[sint, sint]]]] = [[(0,0) for _ in range(len(shapes[0]))] for _ in shapes]
+  for d,k,s in zip(cat_dims, cat_dim_cumsum[:-1], slc):
+    s[axis] = (k, cat_dim_cumsum[-1] - k - d)
+  return slc
 
 def find_bounds(shape: Tuple[sint, ...], num_shards: int, axis: Optional[int]=None, splits: Optional[Tuple[int, ...]]=None):
   if axis is None: return None
