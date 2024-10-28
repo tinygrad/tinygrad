@@ -38,6 +38,13 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmin, -15)
     self.assertEqual(uop.vmax, -6)
 
+  def test_vmin_vmax_with_negative_multiplication2(self):
+    # vmin and vmax when multiplying by a negative number
+    x = UOp.variable('x', -2, 5)
+    uop = x * -3
+    self.assertEqual(uop.vmin, -15)
+    self.assertEqual(uop.vmax, 6)
+
   def test_vmin_vmax_nested_min_max(self):
     # vmin and vmax with nested min/max operations
     x = UOp.variable('x', 0, 10)
