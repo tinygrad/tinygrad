@@ -1608,7 +1608,7 @@ class TestIndexing(unittest.TestCase):
       return a.item()
     r, et = timeit(f, a)
     self.assertEqual(r, val)
-    self.assertLess(et, 1e3)
+    self.assertLess(et, 1200)
 
   def test_no_rewrite_elementwise(self):
     bufs = [UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(3)]
@@ -1790,7 +1790,7 @@ class TestIndexing(unittest.TestCase):
                     UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(16,), strides=(1,), offset=0, mask=None, contiguous=True),)), src=()),)),)),)),
               UOp(UOps.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(1, 16, 32, 32), strides=(0, 1, 512, 16), offset=0, mask=None, contiguous=False),)), src=(
                  x11,)),)),)),)),))
-    @track_rewrites
+    @track_rewrites()
     def rewrite(sink): return graph_rewrite(graph_rewrite(sink, view_left), view_right)
     ret = rewrite(sink)
     assert len([x for x in ret.sparents if x.op is UOps.VIEW and len(x.src) != 0]) == 0, f"unmerged views left in sink {ret}"

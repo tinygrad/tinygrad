@@ -8,6 +8,8 @@ from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
 from hypothesis import given, settings, strategies as strat
 from test.helpers import is_dtype_supported, rand_for_dtype
+import pytest
+pytestmark = pytest.mark.filterwarnings("ignore")
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")

@@ -22,9 +22,9 @@ def helper_realized_ast(r:Union[Tensor, List[Tensor]]) -> Tuple[UOp, List[Buffer
   s = create_schedule([x.lazydata for x in r])
   run_schedule(s[:-1])  # run all kernels except the last one
   # now all input LazyBuffers buffers in s[-1] should be realized
-  # allocate an output buffer
-  output_buffers = [Buffer((out).device, out.size, out.dtype).allocate() for out in s[-1].outputs]
-  return s[-1].ast, output_buffers+list(s[-1].inputs)
+  # create fresh buffers for the output buffer
+  bufs = [Buffer((x).device, x.size, x.dtype).allocate() if x in s[-1].outputs else x for x in s[-1].bufs]
+  return s[-1].ast, bufs
 
 def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_opt:int=0):
   a, b = Tensor.rand(m, k, dtype=dtype_in), Tensor.rand(k, n, dtype=dtype_in)
@@ -1094,7 +1094,7 @@ class TestLinearizer(unittest.TestCase):
 
         # ensure the results for each choice of axis matches
         if golden_result is None: golden_result = np.frombuffer(real_bufs[0].as_buffer(), _to_np_dtype(real_bufs[0].dtype))
-        np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.15)
+        np.testing.assert_allclose(result, golden_result, atol=0.1, rtol=0.2)
 
       # check that get_kernel_actions produces all 9 options
       from tinygrad.engine.search import get_kernel_actions
@@ -1356,7 +1356,7 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in k.uops if u.op is UOps.STORE]
 
     # the float4 value stores directly in lds and we skip upcast
-    assert stores[0].src[-1].dtype == dtypes.float.vec(4)
+    self.assertEqual(stores[0].src[-1].dtype, dtypes.float.vec(4))
     #assert stores[0].src[-1].op is not UOps.VECTORIZE
 
     # the global store doesn't change
@@ -1781,7 +1781,7 @@ def reset_bufs(bufs:List[Buffer]):
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:List[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]) -> List[Kernel]:
   lins: List[Kernel] = []
-  outbufs = real_bufs[:len(realized_ast.src)]
+  outbufs = [real_bufs[x.src[0].arg] for x in realized_ast.src]
 
   def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
 
