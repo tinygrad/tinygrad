@@ -1,12 +1,12 @@
 from __future__ import annotations
-from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, TypeVar, DefaultDict
+from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
 from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp
+from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp, T
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -36,7 +36,6 @@ class MetaOps(FastEnum):
   EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
-T = TypeVar("T")
 class MathTrait:
   # required to implement
   def alu(self:T, arg:Union[UnaryOps, BinaryOps, TernaryOps], *src) -> T: raise NotImplementedError
