@@ -10,6 +10,10 @@ class TestTiny(unittest.TestCase):
     out = Tensor([1.,2,3]) + Tensor([4.,5,6])
     self.assertListEqual(out.tolist(), [5.0, 7.0, 9.0])
 
+  def test_plus_big(self):
+    out = Tensor.ones(16).contiguous() + Tensor.ones(16).contiguous()
+    self.assertListEqual(out.tolist(), [2]*16)
+
   def test_gemm(self):
     N = 4
     a = Tensor.ones(N,N).contiguous()
