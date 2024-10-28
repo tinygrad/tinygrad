@@ -31,8 +31,11 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
   if axis is None: return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None)
   shape = mlb.shape
   shards = len(mlb.lbs)
+  n_lbs = len(mlb.lbs)
   if bounds is None: bounds = find_bounds(mlb.shape, shards, axis)
-  if RING < 2:
+  use_ring = (RING >= 2 or (n_lbs > 2 and len(mlb.lbs[0].shape) > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
+  if DEBUG >= 2: print(f"{'RING RESHARD' if use_ring else 'NAIVE RESHARD'}")
+  if not use_ring:
     gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]
     sharded = to_sharded(gathered, axis, bounds)
     return MultiLazyBuffer(sharded, axis)
@@ -55,7 +58,7 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
       chunks_per_lb.append(lb.shrink(tuple([(s, e) if _axis == axis else (0, shape) for _axis, shape in enumerate(lb.shape)])))
     chunked.append(chunks_per_lb)
 
-  n_lbs = len(mlb.lbs)
+  
   reassembled_chunks = [[lbs[i] if _i == i else None for _i in range(n_lbs)] for i, lbs in enumerate(chunked)]
     # [A0 X  X  X ]     [A0 A1 X  X ]     [A0 A1 A2 X ]     [A0 A1 A2 A3]
     # [X  B1 X  X ] --> [X  B1 B2 X ] --> [X  B1 B2 B3] --> [B0 B1 B2 B3]
