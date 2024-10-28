@@ -99,8 +99,7 @@ class LLVMRenderer(Renderer):
         if_stack.append(endif_bb)
         bb.append(ir.IRBuilder(then_bb))
       elif uop is UOps.ENDIF:
-        if not bb[-1].block.is_terminated:
-          bb[-1].branch(if_stack[-1])
+        bb[-1].branch(if_stack[-1])
         bb.pop()
         bb.append(ir.IRBuilder(if_stack.pop()))
       elif uop is UOps.STORE:
