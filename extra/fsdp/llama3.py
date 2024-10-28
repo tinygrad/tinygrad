@@ -36,10 +36,10 @@ n_kv_heads = 8
 max_context = 8192
 rope_theta=50000
 hidden_dim = 14336
-epoch = 50
+epoch = 500
 lr = 1e-4
 weight_decay=0
-generate_tokens = 10
+generate_tokens = 20
 assert dim % n_heads == 0 and dim % SHARD == 0
 head_dim = dim // n_heads
 shard_dim = dim // SHARD
@@ -49,8 +49,6 @@ TOP_K = 0
 TOP_P = 0.0
 ALPHA_F = 0.0
 ALPHA_P = 0.0
-
-
 
 def shard_model(model, opt):
   seen = set()
@@ -170,9 +168,9 @@ def generate():
     if len(GPUS) > 1:
       idx_next.shard_(GPUS, axis=None)
     tokens = tokens.cat(idx_next, dim=1)
-    t.set_description(f"Tokens generated {start_pos+1}")
+    t.set_description(f"Inferenced tokens {start_pos+1}")
   text = tokenizer.decode(tokens.tolist()[0])
-  print(text)
+  print("Inference: ", text)
   return text
 
 
