@@ -34,7 +34,9 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
 
   chunks = [(i * steps, (i + 1) * steps) for i in range(shards)]
   chunked: List[List[LazyBuffer]] = []
-    # Sharded on axis 1
+    # E.g. four devices A, B, C, D; each holds a chunk of data (0, 1, 2, 3)
+    # Matrix can be thought of being sharded on axis 1, to reshard it to 0, each device will send three chunks to other devices
+    # Device A will send A1, A2, A3 to Device B, C, D respectively and so on
     # A0 B0 C0 D0
     # A1 B1 C1 D1
     # A2 B2 C2 D2
@@ -46,11 +48,11 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
     chunked.append(chunks_per_lb)
 
   n_lbs = len(mlb.lbs)
-  reassembled_chunks = []
-  for i, lbs in enumerate(chunked):
-    reassembled_per_lb = [None] * n_lbs
-    reassembled_per_lb[i] = lbs[i]
-    reassembled_chunks.append(reassembled_per_lb)
+  reassembled_chunks = [[lbs[i] if _i == i else None for _i in range(n_lbs)] for i, lbs in enumerate(chunked)]
+    # A0 X  X  X      A0 A1 X  X      A0 A1 A2 X      A0 A1 A2 A3
+    # X  B1 X  X  --> X  B1 B2 X  --> X  B1 B2 B3 --> B0 B1 B2 B3
+    # X  X  C2 X      X  X  C2 C3     C0 X  C2 C3     C0 C1 C2 C3
+    # X  X  X  D3     D0 X  X  D3     D0 D1 X  D3     D0 D1 D2 D3
   for step in range(n_lbs - 1):
     for src_shard in range(n_lbs):
       src_chunk = (step + src_shard + 1) % n_lbs
@@ -60,10 +62,7 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
       dst_device = chunked[dst_shard][dst_shard_stationary_chunk].device
       copied = chunked[src_shard][src_chunk].copy_to_device(dst_device)
       reassembled_chunks[dst_shard][dst_chunk] = copied
-    # A0 X  X  X      A0 A1 X  X      A0 A1 A2 X      A0 A1 A2 A3
-    # X  B1 X  X  --> X  B1 B2 X  --> X  B1 B2 B3 --> B0 B1 B2 B3
-    # X  X  C2 X      X  X  C2 C3     C0 X  C2 C3     C0 C1 C2 C3
-    # X  X  X  D3     D0 X  X  D3     D0 D1 X  D3     D0 D1 D2 D3
+
   reassembled_lbs = []
   for i, chunks in enumerate(reassembled_chunks):
     cat_dims =  [s.shape[originalAxis] for s in chunks]
