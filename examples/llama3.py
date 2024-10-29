@@ -108,7 +108,7 @@ def NF4Linear(block_size):
     def __call__(self, x: Tensor) -> Tensor:
       high_bits = self.weight
       low_bits = (self.weight * 2 ** 4).contiguous()
-      unpacked = Tensor.stack(high_bits, low_bits, dim=-1).div(2 ** 4, upcast=False)
+      unpacked = Tensor.stack(high_bits, low_bits, dim=-1).idiv(2 ** 4)
       unscaled = CODE[unpacked].to(x.device).reshape(-1, block_size) * self.scale
       return x.linear(unscaled.reshape(self.out_features, self.in_features).T)
 

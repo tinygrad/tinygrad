@@ -28,7 +28,7 @@ class Cast(Function):
 
 class Reciprocal(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.recip()
+    self.ret = x.reciprocal()
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return -grad_output * self.ret * self.ret
@@ -73,7 +73,7 @@ class Sqrt(Function):
 # TODO: have the backend automatically find this
 class Sigmoid(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = (1 + (x * (-1/math.log(2))).exp2()).recip()
+    self.ret = (1 + (x * (-1/math.log(2))).exp2()).reciprocal()
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
