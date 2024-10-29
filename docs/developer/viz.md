@@ -12,6 +12,8 @@ VIZ is a UI for viewing these graph rewrites.
 
 All you need is run tinygrad with `VIZ=1`! For example, it can show all the graph rewrites for an add kernel:
 
+NOTE: make sure you use tinygrad master `pip install git+https://github.com/tinygrad/tinygrad.git`!
+
 ```py
 from tinygrad import Tensor
 
