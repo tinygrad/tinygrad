@@ -494,7 +494,7 @@ reducer = PatternMatcher([
 def idx_load_store(x:UOp):
   idx = x.src[0].index(x.src[1])
   v = x.dtype.count if x.op is UOps.LOAD else x.src[2].dtype.count
-  if v > 1: idx = idx.cast(idx.dtype.base.vec(v).ptr(idx.dtype.local))
+  if v > 1 and not isinstance(x.src[0].dtype, ImageDType): idx = idx.cast(idx.dtype.base.vec(v).ptr(idx.dtype.local))
   return UOp(x.op, x.dtype, (idx,)+x.src[2:], x.arg)
 
 indexing = PatternMatcher([
