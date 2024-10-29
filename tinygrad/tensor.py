@@ -2828,6 +2828,10 @@ class Tensor:
     Equivalent to `self // x`.
     Supports broadcasting to a common shape, type promotion, and integer inputs.
     `idiv` performs integer division.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, 4, 10]).idiv(Tensor([2, 3, 4])).numpy())
+    ```
     """
     return F.IDiv.apply(*self._broadcasted(x, reverse))
 
@@ -2848,9 +2852,6 @@ class Tensor:
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([1, 4, 10]).div(Tensor([2, 3, 4])).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, 4, 10]).div(Tensor([2, 3, 4]), upcast=False).numpy())
     ```
     """
     numerator, denominator = self._broadcasted(x, reverse)
