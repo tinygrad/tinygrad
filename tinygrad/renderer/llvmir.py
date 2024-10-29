@@ -1,4 +1,4 @@
-from typing import Dict, Callable, Any, List, Optional
+from typing import Dict, Callable, List, Optional
 from llvmlite import ir
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps, UOps, UOp
@@ -82,8 +82,7 @@ class LLVMRenderer(Renderer):
     bb = [ir.IRBuilder(func.append_basic_block("entry"))]
     loop_blocks: List = []
     reduce_phis: List = []
-    # TODO: newvar probably shouldn't be optional
-    lvars: Dict[Optional[UOp], Any] = {}  # this Any is an llvm type
+    lvars: Dict[Optional[UOp], ir.Instruction] = {}
 
     for bufname,dtype in buf_to_dtype.items():
       if not isinstance(dtype, PtrDType) and dtype == dtypes.int32: lvars[bufname] = bb[-1].sext(func.args[buf_index[bufname]], ir.IntType(32))
