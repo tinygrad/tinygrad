@@ -2,7 +2,7 @@ from __future__ import annotations
 import math
 from typing import Optional, Union, Tuple, List
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod, make_pair
+from tinygrad.helpers import prod, make_tuple
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm:
@@ -100,7 +100,7 @@ class Conv2d:
     if isinstance(padding, str):
       if padding.lower() != 'same': raise ValueError(f"Invalid padding string {padding!r}, only 'same' is supported")
       if stride != 1: raise ValueError("padding='same' is not supported for strided convolutions")
-      self.padding: Union[int, List[int]] = [p for d,k in zip(make_pair(dilation,len(self.kernel_size)), self.kernel_size[::-1]) for p in (d*(k-1)//2, d*(k-1) - d*(k-1)//2)] #noqa:E501
+      self.padding: Union[int, List[int]] = [p for d,k in zip(make_tuple(dilation,len(self.kernel_size)), self.kernel_size[::-1]) for p in (d*(k-1)//2, d*(k-1) - d*(k-1)//2)] #noqa:E501
     else: self.padding = padding
     self.stride, self.dilation, self.groups = stride, dilation, groups
     scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
