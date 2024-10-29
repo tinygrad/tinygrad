@@ -2265,6 +2265,103 @@ struct_v11_compute_mqd._fields_ = [
     ('gws_63_val', ctypes.c_uint32),
 ]
 
+__AMDGPU_VM_H__ = True # macro
+AMDGPU_VM_MAX_UPDATE_SIZE = 0x3FFFF # macro
+# def AMDGPU_VM_PTE_COUNT(adev):  # macro
+#    return (1<<(adev)->vm_manager.block_size)  
+AMDGPU_PTE_VALID = (1<<0) # macro
+AMDGPU_PTE_SYSTEM = (1<<1) # macro
+AMDGPU_PTE_SNOOPED = (1<<2) # macro
+AMDGPU_PTE_TMZ = (1<<3) # macro
+AMDGPU_PTE_EXECUTABLE = (1<<4) # macro
+AMDGPU_PTE_READABLE = (1<<5) # macro
+AMDGPU_PTE_WRITEABLE = (1<<6) # macro
+def AMDGPU_PTE_FRAG(x):  # macro
+   return ((x&0x1f)<<7)  
+AMDGPU_PTE_PRT = (1<<51) # macro
+AMDGPU_PDE_PTE = (1<<54) # macro
+AMDGPU_PTE_LOG = (1<<55) # macro
+AMDGPU_PTE_TF = (1<<56) # macro
+AMDGPU_PTE_NOALLOC = (1<<58) # macro
+def AMDGPU_PDE_BFS(a):  # macro
+   return ((int64_t)a<<59)  
+AMDGPU_VM_NORETRY_FLAGS = ((1<<4)|(1<<54)|(1<<56)) # macro
+AMDGPU_VM_NORETRY_FLAGS_TF = ((1<<0)|(1<<1)|(1<<51)) # macro
+def AMDGPU_PTE_MTYPE_VG10_SHIFT(mtype):  # macro
+   return ((int64_t)(mtype)<<57)  
+AMDGPU_PTE_MTYPE_VG10_MASK = AMDGPU_PTE_MTYPE_VG10_SHIFT ( 3 ) # macro
+def AMDGPU_PTE_MTYPE_VG10(flags, mtype):  # macro
+   return (((int64_t)(flags)&(~AMDGPU_PTE_MTYPE_VG10_SHIFT(3)))|AMDGPU_PTE_MTYPE_VG10_SHIFT(mtype))  
+AMDGPU_MTYPE_NC = 0 # macro
+AMDGPU_MTYPE_CC = 2 # macro
+AMDGPU_PTE_DEFAULT_ATC = ((1<<1)|(1<<2)|(1<<4)|(1<<5)|(1<<6)|AMDGPU_PTE_MTYPE_VG10(2)) # macro
+def AMDGPU_PTE_MTYPE_NV10_SHIFT(mtype):  # macro
+   return ((int64_t)(mtype)<<48)  
+AMDGPU_PTE_MTYPE_NV10_MASK = AMDGPU_PTE_MTYPE_NV10_SHIFT ( 7 ) # macro
+def AMDGPU_PTE_MTYPE_NV10(flags, mtype):  # macro
+   return (((int64_t)(flags)&(~AMDGPU_PTE_MTYPE_NV10_SHIFT(7)))|AMDGPU_PTE_MTYPE_NV10_SHIFT(mtype))  
+AMDGPU_PTE_PRT_GFX12 = (1<<56) # macro
+# def AMDGPU_PTE_PRT_FLAG(adev):  # macro
+#    return ((amdgpu_ip_version((adev),GC_HWIP,0)>=IP_VERSION(12,0,0))?(1<<56):(1<<51))  
+def AMDGPU_PTE_MTYPE_GFX12_SHIFT(mtype):  # macro
+   return ((int64_t)(mtype)<<54)  
+AMDGPU_PTE_MTYPE_GFX12_MASK = AMDGPU_PTE_MTYPE_GFX12_SHIFT ( 3 ) # macro
+def AMDGPU_PTE_MTYPE_GFX12(flags, mtype):  # macro
+   return (((int64_t)(flags)&(~AMDGPU_PTE_MTYPE_GFX12_SHIFT(3)))|AMDGPU_PTE_MTYPE_GFX12_SHIFT(mtype))  
+AMDGPU_PTE_IS_PTE = (1<<63) # macro
+def AMDGPU_PDE_BFS_GFX12(a):  # macro
+   return ((int64_t)((a)&0x1f)<<58)  
+# def AMDGPU_PDE_BFS_FLAG(adev, a):  # macro
+#    return ((amdgpu_ip_version((adev),GC_HWIP,0)>=IP_VERSION(12,0,0))?AMDGPU_PDE_BFS_GFX12(a):AMDGPU_PDE_BFS(a))  
+AMDGPU_PDE_PTE_GFX12 = (1<<63) # macro
+# def AMDGPU_PDE_PTE_FLAG(adev):  # macro
+#    return ((amdgpu_ip_version((adev),GC_HWIP,0)>=IP_VERSION(12,0,0))?(1<<63):(1<<54))  
+AMDGPU_VM_FAULT_STOP_NEVER = 0 # macro
+AMDGPU_VM_FAULT_STOP_FIRST = 1 # macro
+AMDGPU_VM_FAULT_STOP_ALWAYS = 2 # macro
+AMDGPU_VM_RESERVED_VRAM = (8<<20) # macro
+AMDGPU_MAX_VMHUBS = 13 # macro
+AMDGPU_GFXHUB_START = 0 # macro
+AMDGPU_MMHUB0_START = 8 # macro
+AMDGPU_MMHUB1_START = 12 # macro
+def AMDGPU_GFXHUB(x):  # macro
+   return (0+(x))  
+def AMDGPU_MMHUB0(x):  # macro
+   return (8+(x))  
+def AMDGPU_MMHUB1(x):  # macro
+   return (12+(x))  
+def AMDGPU_IS_GFXHUB(x):  # macro
+   return ((x)>=0 and (x)<8)  
+def AMDGPU_IS_MMHUB0(x):  # macro
+   return ((x)>=8 and (x)<12)  
+def AMDGPU_IS_MMHUB1(x):  # macro
+   return ((x)>=12 and (x)<13)  
+AMDGPU_VA_RESERVED_CSA_SIZE = (2<<20) # macro
+# def AMDGPU_VA_RESERVED_CSA_START(adev):  # macro
+#    return (((adev)->vm_manager.max_pfn<<AMDGPU_GPU_PAGE_SHIFT)-(2<<20))  
+AMDGPU_VA_RESERVED_SEQ64_SIZE = (2<<20) # macro
+def AMDGPU_VA_RESERVED_SEQ64_START(adev):  # macro
+   return (AMDGPU_VA_RESERVED_CSA_START(adev)-(2<<20))  
+AMDGPU_VA_RESERVED_TRAP_SIZE = (2<<12) # macro
+def AMDGPU_VA_RESERVED_TRAP_START(adev):  # macro
+   return (AMDGPU_VA_RESERVED_SEQ64_START(adev)-(2<<12))  
+AMDGPU_VA_RESERVED_BOTTOM = (1<<16) # macro
+AMDGPU_VA_RESERVED_TOP = ((2<<12)+(2<<20)+(2<<20)) # macro
+AMDGPU_VM_USE_CPU_FOR_GFX = (1<<0) # macro
+AMDGPU_VM_USE_CPU_FOR_COMPUTE = (1<<1) # macro
+
+# values for enumeration 'amdgpu_vm_level'
+amdgpu_vm_level__enumvalues = {
+    0: 'AMDGPU_VM_PDB2',
+    1: 'AMDGPU_VM_PDB1',
+    2: 'AMDGPU_VM_PDB0',
+    3: 'AMDGPU_VM_PTB',
+}
+AMDGPU_VM_PDB2 = 0
+AMDGPU_VM_PDB1 = 1
+AMDGPU_VM_PDB0 = 2
+AMDGPU_VM_PTB = 3
+amdgpu_vm_level = ctypes.c_uint32 # enum
 __all__ = \
     ['AMDGPU_CPCE_UCODE_LOADED', 'AMDGPU_CPMEC1_UCODE_LOADED',
     'AMDGPU_CPMEC2_UCODE_LOADED', 'AMDGPU_CPME_UCODE_LOADED',
@@ -2273,14 +2370,24 @@ __all__ = \
     'AMDGPU_FENCE_FLAG_INT', 'AMDGPU_FENCE_FLAG_TC_WB_ONLY',
     'AMDGPU_FW_LOAD_DIRECT', 'AMDGPU_FW_LOAD_PSP',
     'AMDGPU_FW_LOAD_RLC_BACKDOOR_AUTO', 'AMDGPU_FW_LOAD_SMU',
-    'AMDGPU_IB_POOL_DELAYED', 'AMDGPU_IB_POOL_DIRECT',
-    'AMDGPU_IB_POOL_IMMEDIATE', 'AMDGPU_IB_POOL_MAX',
-    'AMDGPU_IB_POOL_SIZE', 'AMDGPU_MAX_COMPUTE_RINGS',
-    'AMDGPU_MAX_GFX_RINGS', 'AMDGPU_MAX_HWIP_RINGS',
-    'AMDGPU_MAX_RINGS', 'AMDGPU_MAX_SW_GFX_RINGS',
-    'AMDGPU_MAX_UVD_ENC_RINGS', 'AMDGPU_MAX_VCE_RINGS',
-    'AMDGPU_MAX_VPE_RINGS', 'AMDGPU_RING_PRIO_0',
-    'AMDGPU_RING_PRIO_1', 'AMDGPU_RING_PRIO_2',
+    'AMDGPU_GFXHUB_START', 'AMDGPU_IB_POOL_DELAYED',
+    'AMDGPU_IB_POOL_DIRECT', 'AMDGPU_IB_POOL_IMMEDIATE',
+    'AMDGPU_IB_POOL_MAX', 'AMDGPU_IB_POOL_SIZE',
+    'AMDGPU_MAX_COMPUTE_RINGS', 'AMDGPU_MAX_GFX_RINGS',
+    'AMDGPU_MAX_HWIP_RINGS', 'AMDGPU_MAX_RINGS',
+    'AMDGPU_MAX_SW_GFX_RINGS', 'AMDGPU_MAX_UVD_ENC_RINGS',
+    'AMDGPU_MAX_VCE_RINGS', 'AMDGPU_MAX_VMHUBS',
+    'AMDGPU_MAX_VPE_RINGS', 'AMDGPU_MMHUB0_START',
+    'AMDGPU_MMHUB1_START', 'AMDGPU_MTYPE_CC', 'AMDGPU_MTYPE_NC',
+    'AMDGPU_PDE_PTE', 'AMDGPU_PDE_PTE_GFX12',
+    'AMDGPU_PTE_DEFAULT_ATC', 'AMDGPU_PTE_EXECUTABLE',
+    'AMDGPU_PTE_IS_PTE', 'AMDGPU_PTE_LOG',
+    'AMDGPU_PTE_MTYPE_GFX12_MASK', 'AMDGPU_PTE_MTYPE_NV10_MASK',
+    'AMDGPU_PTE_MTYPE_VG10_MASK', 'AMDGPU_PTE_NOALLOC',
+    'AMDGPU_PTE_PRT', 'AMDGPU_PTE_PRT_GFX12', 'AMDGPU_PTE_READABLE',
+    'AMDGPU_PTE_SNOOPED', 'AMDGPU_PTE_SYSTEM', 'AMDGPU_PTE_TF',
+    'AMDGPU_PTE_TMZ', 'AMDGPU_PTE_VALID', 'AMDGPU_PTE_WRITEABLE',
+    'AMDGPU_RING_PRIO_0', 'AMDGPU_RING_PRIO_1', 'AMDGPU_RING_PRIO_2',
     'AMDGPU_RING_PRIO_DEFAULT', 'AMDGPU_RING_PRIO_MAX',
     'AMDGPU_SDMA0_UCODE_LOADED', 'AMDGPU_SDMA1_UCODE_LOADED',
     'AMDGPU_UCODE_ID', 'AMDGPU_UCODE_ID_CAP', 'AMDGPU_UCODE_ID_CP_CE',
@@ -2329,6 +2436,14 @@ __all__ = \
     'AMDGPU_UCODE_ID_VPE_CTL', 'AMDGPU_UCODE_ID_VPE_CTX',
     'AMDGPU_UCODE_STATUS', 'AMDGPU_UCODE_STATUS_INVALID',
     'AMDGPU_UCODE_STATUS_LOADED', 'AMDGPU_UCODE_STATUS_NOT_LOADED',
+    'AMDGPU_VA_RESERVED_BOTTOM', 'AMDGPU_VA_RESERVED_CSA_SIZE',
+    'AMDGPU_VA_RESERVED_SEQ64_SIZE', 'AMDGPU_VA_RESERVED_TOP',
+    'AMDGPU_VA_RESERVED_TRAP_SIZE', 'AMDGPU_VM_FAULT_STOP_ALWAYS',
+    'AMDGPU_VM_FAULT_STOP_FIRST', 'AMDGPU_VM_FAULT_STOP_NEVER',
+    'AMDGPU_VM_MAX_UPDATE_SIZE', 'AMDGPU_VM_NORETRY_FLAGS',
+    'AMDGPU_VM_NORETRY_FLAGS_TF', 'AMDGPU_VM_PDB0', 'AMDGPU_VM_PDB1',
+    'AMDGPU_VM_PDB2', 'AMDGPU_VM_PTB', 'AMDGPU_VM_RESERVED_VRAM',
+    'AMDGPU_VM_USE_CPU_FOR_COMPUTE', 'AMDGPU_VM_USE_CPU_FOR_GFX',
     'PSP_FW_TYPE_MAX_INDEX', 'PSP_FW_TYPE_PSP_DBG_DRV',
     'PSP_FW_TYPE_PSP_INTF_DRV', 'PSP_FW_TYPE_PSP_IPKEYMGR_DRV',
     'PSP_FW_TYPE_PSP_KDB', 'PSP_FW_TYPE_PSP_RAS_DRV',
@@ -2340,8 +2455,9 @@ __all__ = \
     'TA_FW_TYPE_PSP_RAP', 'TA_FW_TYPE_PSP_RAS',
     'TA_FW_TYPE_PSP_SECUREDISPLAY', 'TA_FW_TYPE_PSP_XGMI',
     'TA_FW_TYPE_UNKOWN', 'V11_STRUCTS_H_', '__AMDGPU_RING_H__',
-    '__AMDGPU_UCODE_H__', 'amdgpu_firmware_load_type',
-    'amdgpu_ib_pool_type', 'amdgpu_ring_priority_level', 'bool',
+    '__AMDGPU_UCODE_H__', '__AMDGPU_VM_H__',
+    'amdgpu_firmware_load_type', 'amdgpu_ib_pool_type',
+    'amdgpu_ring_priority_level', 'amdgpu_vm_level', 'bool',
     'psp_fw_type', 'struct_amdgpu_bo', 'struct_amdgpu_firmware_info',
     'struct_amdgpu_ring', 'struct_common_firmware_header',
     'struct_dmcu_firmware_header_v1_0',

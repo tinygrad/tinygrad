@@ -255,6 +255,7 @@ generate_amdgpu_2() {
     extra/amdpci/amdgpu_ucode.h \
     extra/amdpci/amdgpu_ring.h \
     extra/amdpci/v11_structs.h \
+    extra/amdpci/amdgpu_vm.h \
     -o $BASE/amdgpu_2.py
 }
 

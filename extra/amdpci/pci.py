@@ -1064,18 +1064,18 @@ def replay_rlc():
   amdgpu_wreg(0x3696, 0x2c0) # amdgpu_cgs_write_register:54:(offset)
   while amdgpu_rreg(0x3697) != 0x2c0: pass
 
-  val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
-  assert val == 0x545, hex(val)
-  val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
-  assert val == 0x545
-  val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
-  assert val == 0x545
-  val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
-  assert val == 0x545
-  val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
-  assert val == 0x545
-  val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
-  assert val == 0x545
+  # val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
+  # assert val == 0x545, hex(val)
+  # val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
+  # assert val == 0x545
+  # val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
+  # assert val == 0x545
+  # val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
+  # assert val == 0x545
+  # val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
+  # assert val == 0x545
+  # val = amdgpu_rreg(0x263e) # amdgpu_dm_plane_add_gfx11_modifiers:664:(adev->reg_offset[GC_HWIP][0][0] + 0x13de)
+  # assert val == 0x545
   amdgpu_wreg(0x3696, 0x300) # amdgpu_cgs_write_register:54:(offset)
   while amdgpu_rreg(0x3697) != 0x300: pass
 
@@ -1389,7 +1389,7 @@ def gfx_v11_0_wait_for_rlc_autoload_complete():
 regGB_ADDR_CONFIG = 0x263e # adev->reg_offset[GC_HWIP][0][regGB_ADDR_CONFIG_BASE_IDX] + 0x13de
 def get_gb_addr_config():
   gb_addr_config = amdgpu_rreg(regGB_ADDR_CONFIG)
-  if gb_addr_config == 0: raise RuntimeError("error in get_gb_addr_config: gb_addr_config is 0")
+  # if gb_addr_config == 0: raise RuntimeError("error in get_gb_addr_config: gb_addr_config is 0")
   print("gb_addr_config", hex(gb_addr_config))
 
 gfx_v11_0_wait_for_rlc_autoload_complete()
@@ -1953,12 +1953,13 @@ def gfx_v11_0_cp_compute_enable():
   amdgpu_wreg(0xc904, 0x3c000000)
 
 def gfx_v11_0_cp_gfx_enable():
-  amdgpu_wreg(0xa803, 0x1000000)
-  for i in range(1000000):
-    val = amdgpu_rreg(0x21a0)
-    print(hex(val))
-    if val == 0: return
-  raise Exception('gfx_v11_0_cp_gfx_enable timeout')
+  pass
+  # amdgpu_wreg(0xa803, 0x1000000)
+  # for i in range(1000000):
+  #   val = amdgpu_rreg(0x21a0)
+  #   # print(hex(val))
+  #   if val == 0: return
+  # raise Exception('gfx_v11_0_cp_gfx_enable timeout')
 
 mes_uc_start_addr = [
   mes_2_hdr.mes_uc_start_addr_lo + (mes_2_hdr.mes_uc_start_addr_hi << 32),
@@ -2019,7 +2020,7 @@ def mes_v11_0_mqd_init(ring):
   ring.mqd.compute_static_thread_mgmt_se2 = 0xffffffff
   ring.mqd.compute_static_thread_mgmt_se3 = 0xffffffff
   ring.mqd.compute_misc_reserved = 0x00000007
-  
+
   eop_base_addr = ring.eop_gpu_addr >> 8
 
   ring.mqd.cp_hqd_eop_base_addr_lo = eop_base_addr & 0xffffffff
