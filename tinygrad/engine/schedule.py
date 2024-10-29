@@ -247,7 +247,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     to_store = tuple(to_uop(out, outs, ctx, cache) for out in outs)
     sink = UOp(UOps.SINK, src=tuple(UOp.store(ctx.buf_uops[x.buffer], ShapeTracker.from_shape(x.shape).to_uop(), u) for x,u in zip(outs,to_store)))
     si_ctx = ScheduleItemContext(ctx.var_vals, {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None},
-                                 ctx.buf_metadata, metadata={m:None for x in to_store if (m:=ctx.buf_metadata.get(x.src[0]))})
+                                 ctx.buf_metadata, metadata={metadata:None for x in to_store if (metadata:=ctx.buf_metadata.get(x.src[0]))})
     small_graphs.append((full_ast_rewrite(sink, si_ctx), si_ctx))
 
   # do BFS
