@@ -80,8 +80,7 @@ class DiskDevice(Compiled):
   def _might_open(self, size: int):
     self.count += 1
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
-    assert self.fd is not None, "fd is not set"
-    if self.size is not None and os.fstat(self.fd).st_nlink > 0: return
+    if self.size is not None and self.fd is not None and os.fstat(self.fd).st_nlink > 0: return
     filename = self.dname[len("disk:"):]
     self.size = size
 
