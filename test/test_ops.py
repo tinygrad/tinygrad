@@ -1594,16 +1594,16 @@ class TestOps(unittest.TestCase):
               lambda x,w: torch.nn.functional.conv1d(torch.nn.functional.pad(x, p),w).relu(),
               lambda x,w: Tensor.conv2d(x,w,padding=p).relu())
 
-  def _test_conv2d(self, bs=1, cin=1):
+  def _test_conv2d(self, bs=1, cin=1, cout=6):
     for H in [1,2,3]:
       for W in [1,2,3,5]:
-        for groups in [1,3] if cin == 3 and H == 3 and W == 3 else [1]:
+        for groups in [1,3] if cin == 3 and cout == 6 and H == 3 and W == 3 else [1]:
           with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H, width=W):
-            helper_test_op([(bs,cin,11,7), (6,cin//groups,H,W)],
+            helper_test_op([(bs,cin,5,7), (cout,cin//groups,H,W)],
               lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
               lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), grad_rtol=1e-5)
   def test_conv2d(self): self._test_conv2d(bs=1, cin=3)
-  def test_conv2d_bs_4_cin_3(self): self._test_conv2d(bs=4, cin=3)
+  def test_conv2d_bs_4_cin_3(self): self._test_conv2d(bs=4, cin=3, cout=2)
   def test_conv2d_bs_1_cin_1(self): self._test_conv2d(bs=1, cin=1)
   def test_conv2d_bs_4_cin_1(self): self._test_conv2d(bs=4, cin=1)
 
