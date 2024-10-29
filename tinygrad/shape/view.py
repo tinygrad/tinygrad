@@ -209,6 +209,7 @@ class View:
         idx = 0
         if len(term) == 0:
           if newe: newe[0] = 0
+          bad = True
           break
         elif len(term) > 1:
           if not all_int([t[1] for t in term]):
