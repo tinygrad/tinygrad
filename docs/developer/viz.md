@@ -23,13 +23,13 @@ b = Tensor.empty(3)
 (a + b).realize()
 ```
 
-The first graph is a generic (device-agnostic) view of the compute. We load `a` and `b` BUFFERs, use BinaryOps.ADD and STORE the result.
+The first graph is generic. We load `a` and `b` BUFFERs, use BinaryOps.ADD and STORE the result.
 
 ![viz_1](viz_1.png)
 
-The last graph, after applying graph rewrite rules, is functionally equivalent but specialized to how GPUs (eg. METAL=1) render code.
+After a sequence of graph rewrites, the graph is functionally equivalent but specialized to how GPUs render code.
 
-See how we're still adding `a` and `b`, but this time using pointers, and METAL's `SPECIAL` lidx0.
+See how we're still adding `a` and `b`, but this time using pointers, and <a href="https://registry.khronos.org/OpenCL/sdk/3.0/docs/man/html/get_group_id.html" target="_blank">OpenCL's `SPECIAL` lidx0</a>.
 
 ![viz_2](viz_2.png)
 
