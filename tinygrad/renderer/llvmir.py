@@ -52,6 +52,7 @@ class LLVMRenderer(Renderer):
   has_local = False
   has_shared = False
   global_max = None
+  indexing = True
   code_for_op: Dict[Op, Callable] = {
     UnaryOps.RECIP: lambda builder, x, dtype: builder.fdiv(const(1, dtype), x, flags=MFLAGS),
     UnaryOps.SQRT: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.sqrt', [x.type]), [x], fastmath=MFLAGS),
@@ -89,12 +90,13 @@ class LLVMRenderer(Renderer):
 
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
-      if uop is UOps.STORE:
-        idx = bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True)
-        if len(src) > 3:
-          with bb[-1].if_then(lvars[src[3]]): bb[-1].store(lvars[src[2]], idx)
+      if uop is UOps.INDEX:
+        lvars[u] = bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True)
+      elif uop is UOps.STORE:
+        if len(src) > 2:
+          with bb[-1].if_then(lvars[src[2]]): bb[-1].store(lvars[src[1]], lvars[src[0]])
         else:
-          bb[-1].store(lvars[src[2]], idx)
+          bb[-1].store(lvars[src[1]], lvars[src[0]])
       elif uop is UOps.ENDRANGE:
         loop_entry_bb, phis = loop_blocks.pop()
         idx_p1 = bb[-1].add(lvars[src[0]], ir.Constant(ir.IntType(32), 1))
@@ -121,18 +123,17 @@ class LLVMRenderer(Renderer):
           lvars[u] = const(src[0].arg, dtype)
           reduce_phis.append(u)
         elif uop is UOps.LOAD:
-          idx = bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True)
-          if len(src) > 2:
-            with bb[-1].if_else(lvars[src[3]]) as (then, otherwise):
+          if len(src) > 1:
+            with bb[-1].if_else(lvars[src[2]]) as (then, otherwise):
               with then:
-                val1 = bb[-1].load(idx)
+                val1 = bb[-1].load(lvars[src[0]])
                 then_blk = bb[-1].block
               with otherwise: otherwise_blk = bb[-1].block
             val = bb[-1].phi(val1.type)
             val.add_incoming(val1, then_blk)
-            val.add_incoming(lvars[src[2]], otherwise_blk)
+            val.add_incoming(lvars[src[1]], otherwise_blk)
           else:
-            val = bb[-1].load(idx)
+            val = bb[-1].load(lvars[src[0]])
           lvars[u] = val
         elif uop is UOps.ASSIGN:
           lvars[u] = lvars[src[1]]
