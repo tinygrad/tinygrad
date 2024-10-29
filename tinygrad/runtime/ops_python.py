@@ -12,12 +12,13 @@ from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
 
 def _load(m, i):
+  if i is None: return 0.0
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
   return m[i]
 
 def load(inp, j=0):
-  if len(inp) == 3: return [_load(m, x+j) if gate else default for (m,x),default,gate in zip(*inp)]
-  return [_load(m, x+j) for m,x in inp[0]]
+  if len(inp) == 3: return [_load(m, x+j if x is not None else None) if gate else default for (m,x),default,gate in zip(*inp)]
+  return [_load(m, x+j if x is not None else None) for m,x in inp[0]]
 
 def _store(m, i, v):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
@@ -46,14 +47,7 @@ class PythonProgram:
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is UOps.STORE:
           if len(inp) == 2: inp.append([True] * len(inp[0]))  # set the gate to True
-          if isinstance(dtp[0], ImageDType):
-            # image store
-            assert dtp[2].count == 4
-            for j,val in enumerate(inp[2]):
-              for m,ox,oy,v,g in zip(inp[0], inp[1][0], inp[1][1], val, inp[3]):
-                assert ox >= 0 and ox < dtp[0].shape[1] and oy >= 0 and oy < dtp[0].shape[0]
-                if g: _store(m, ox*4 + oy*dtp[0].shape[1]*4 + j, v)
-          elif dtp[1].count > 1:
+          if dtp[1].count > 1:
             for j,val in enumerate(inp[1]):
               for (m,o),v,g in zip(inp[0], val, inp[2]):
                 if g: _store(m, o+j, v)
@@ -89,9 +83,12 @@ class PythonProgram:
           ul[i] = [[inp[0][0][0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [inp[0][0]] * warp_size
         elif uop is UOps.INDEX:
           ret = []
-          for m,o in zip(inp[0], inp[1]):
-            if isinstance(dtp[0], ImageDType): assert False
-            ret.append((m,o))
+          if isinstance(dtp[0], ImageDType):
+            for m,ox,oy in zip(inp[0], inp[1][0], inp[1][1]):
+              if ox < 0 or ox >= dtp[0].shape[1] or oy < 0 or oy >= dtp[0].shape[0]: ret.append((m, None))
+              else: ret.append((m, ox*4 + oy*dtp[0].shape[1]*4))
+          else:
+            for m,o in zip(inp[0], inp[1]): ret.append((m,o))
           ul[i] = ret
         elif uop is UOps.CAST and isinstance(dtype, PtrDType):
           ul[i] = inp[0]
@@ -118,16 +115,7 @@ class PythonProgram:
               casted = [truncate.get(dtype, lambda dt: dt)(x) for x in casted]
             ul[i] = list(struct.unpack(unpack_format, struct.pack(unpack_format, *casted)))
         elif uop is UOps.LOAD:
-          if isinstance(dtp[0], ImageDType):
-            assert dtype.count == 4
-            ul[i] = []
-            for j in range(dtype.count):
-              ret = []
-              for m,ox,oy in zip(inp[0], inp[1][0], inp[1][1]):
-                if ox < 0 or ox >= dtp[0].shape[1] or oy < 0 or oy >= dtp[0].shape[0]: ret.append(0)
-                else: ret.append(_load(m, ox*4 + oy*dtp[0].shape[1]*4 + j))
-              ul[i].append(ret)
-          elif dtype.count > 1:
+          if dtype.count > 1:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
           else:
             ul[i] = load(inp)
