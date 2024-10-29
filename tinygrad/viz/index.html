@@ -91,12 +91,15 @@
     inset: 0;
     z-index: 1;
   }
-  .kernel-list {
+  .kernel-list-parent {
     position: relative;
     width: 15%;
     padding: 50px 20px 20px 20px;
     border-right: 1px solid #4a4b56;
     z-index: 2;
+  }
+  .kernel-list {
+    width: 100%;
     height: 100%;
     overflow-y: auto;
   }
@@ -173,7 +176,7 @@
     <button class="collapse-btn">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 19l-7-7 7-7"/></svg>
     </button>
-    <div class="container kernel-list"></div>
+    <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
     <div class="graph">
       <svg id="graph-svg">
         <g id="render"></g>
@@ -257,17 +260,24 @@
       kernels = await (await fetch("/kernels")).json();
       currentKernel = 0;
     }
+    const kernelListParent = document.querySelector(".container.kernel-list-parent");
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
     kernels.forEach((k, i) => {
       const kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "",
         style: "overflow-x: auto; cursor: initial;" });
+      if (i === currentKernel) {
+        requestAnimationFrame(() => kernelUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
+      }
       const p = Object.assign(document.createElement("p"), { id: `kernel-${k[0].kernel_name}`, innerText: k[0].kernel_name ?? "UNPARENTED",
         style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       k.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.upats.length}`, key: `uop-rewrite-${j}`,
           className: (j === currentUOp && i == currentKernel) ? "active" : "" })
+        if (j === currentUOp) {
+          requestAnimationFrame(() => rwUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
+        }
         rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
           e.stopPropagation();
@@ -365,7 +375,7 @@
     collapseBtn.addEventListener("click", () => {
       isCollapsed = !isCollapsed;
       mainContainer.classList.toggle("collapsed", isCollapsed);
-      kernelList.style.display = isCollapsed ? "none" : "block";
+      kernelListParent.style.display = isCollapsed ? "none" : "block";
       metadata.style.display = isCollapsed ? "none" : "block";
       collapseBtn.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
     });
@@ -397,7 +407,7 @@
         }, { once: true });
       });
     }
-    createResizer(kernelList, { minWidth: 15, maxWidth: 50 }, "kernel"); // left resizer
+    createResizer(kernelListParent, { minWidth: 15, maxWidth: 50 }, "kernel"); // left resizer
     createResizer(metadata, { minWidth: 20, maxWidth: 50 }, "metadata"); // right resizer
   }
 
