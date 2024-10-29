@@ -144,11 +144,11 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
 
 class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
   def test_full_graph_rewrite_transcendental_edge_cases(self):
-    optimized_sink = full_graph_rewrite(UOp.const(dtypes.float32, -1.0).log2().sink(UOp.const(dtypes.float32, 0.0).recip()))
+    optimized_sink = full_graph_rewrite(UOp.const(dtypes.float32, -1.0).log2().sink(UOp.const(dtypes.float32, 0.0).reciprocal()))
     optimized_log2_neg, optimized_recip_zero = optimized_sink.src
     self.assertTrue(math.isnan(optimized_log2_neg.arg), f"Expected NaN for log2(-1.0), got {optimized_log2_neg.arg}")
     self.assertTrue(math.isinf(optimized_recip_zero.arg) and optimized_recip_zero.arg > 0,
-                    f"Expected +inf for recip(0.0), got {optimized_recip_zero.arg}")
+                    f"Expected +inf for reciprocal(0.0), got {optimized_recip_zero.arg}")
 
   @unittest.skip("broken")
   def test_full_graph_rewrite_modulo_negative_dividend(self):

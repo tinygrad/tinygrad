@@ -12,7 +12,7 @@ def _lazy_map_numbers(x:UOp, inf:UOp, _inf:UOp, nan:UOp, ratio:UOp):
 def dfadd2_f2_f2_f2(xx:UOp, xy:UOp, yx:UOp, yy:UOp) -> Tuple[UOp, UOp]: return xx + yx, xy + yy
 def dfmul2_f2_f2_f2(xx:UOp, xy:UOp, yx:UOp, yy:UOp) -> Tuple[UOp, UOp]: return xx * yx, xx * yy + xy * yx
 def dfdiv2_f2_f2_f2(nx:UOp, ny:UOp, dx:UOp, dy:UOp) -> Tuple[UOp, UOp]:
-  t = dx.recip()
+  t = dx.reciprocal()
   qx = nx * t
   qy = (ny - qx * dy) * t
   return qx, qy
@@ -257,7 +257,7 @@ def xlog2(d:UOp) -> UOp:
   e = denormal_map.where(e + (-64), e)
 
   if d.dtype == dtypes.float64:
-    x = (m - 1.0) * (m + 1.0).recip()
+    x = (m - 1.0) * (m + 1.0).reciprocal()
     x2 = x * x
     t = polyN(x2, [0.2211941750456081490e+0, 0.2200768693152277689e+0, 0.2623708057488514656e+0, 0.3205977477944495502e+0,
                    0.4121985945485324709e+0, 0.5770780162997058982e+0, 0.96179669392608091449])
@@ -283,4 +283,4 @@ def xlog2(d:UOp) -> UOp:
   # log2(NaN) = NaN
   r = d_orig.ne(d_orig).where(r.const_like(math.nan), r)
   # log2(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.
-  return d_orig.recip().ne(-math.inf).where(r, r.const_like(-math.inf))
+  return d_orig.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))

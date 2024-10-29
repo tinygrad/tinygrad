@@ -48,6 +48,18 @@ class MathTrait:
     dtype = getattr(self, 'dtype', None)
     assert dtype is not None, "MathTraits __neg__ requires a dtype"
     return self.logical_not() if dtype.scalar() == dtypes.bool else self*(-1)
+  def add(self, x): return self+x
+  def sub(self, x): return self-x
+  def mul(self, x): return self*x
+  def xor(self, x): return self^x
+  def bitwise_and(self, x): return self&x
+  def bitwise_or(self, x): return self|x
+  def lshift(self, x): return self<<x
+  def rshift(self, x): return self>>x
+  def div(self, x):
+    dtype = getattr(self, 'dtype', None)
+    assert dtype is not None, "MathTraits div requires a dtype"
+    return self/x if dtypes.is_float(dtype) else self//x
   def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
   def __radd__(self, x): return self.ufix(x).alu(BinaryOps.ADD, self)
   def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))
@@ -82,11 +94,38 @@ class MathTrait:
   def __le__(self, x): return self.le(x)
   def max(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def min(self, x): return -(-self).max(-x)
-  def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
+  def where(self, x, y): return self.alu(TernaryOps.WHERE, self.ufix(x), self.ufix(y))
   def threefry(self, seed): return self.alu(BinaryOps.THREEFRY, seed)
-  def recip(self): return self.alu(UnaryOps.RECIP)
-  def sqrt(self): return self.alu(UnaryOps.SQRT)
-  def sin(self): return self.alu(UnaryOps.SIN)
+  def reciprocal(self):
+    """
+    Compute `1/x` element-wise.
+    """
+    return self.alu(UnaryOps.RECIP)
+  def sqrt(self):
+    """
+    Computes the square root of the tensor element-wise.
+    """
+    return self.alu(UnaryOps.SQRT)
+  def rsqrt(self):
+    """
+    Computes the reciprocal of the square root of the tensor element-wise.
+    """
+    return self.reciprocal().sqrt()
+  def sin(self):
+    """
+    Computes the sine of the tensor element-wise.
+    """
+    return self.alu(UnaryOps.SIN)
+  def cos(self):
+    """
+    Computes the cosine of the tensor element-wise.
+    """
+    return ((math.pi/2)-self).sin()
+  def tan(self):
+    """
+    Computes the tangent of the tensor element-wise.
+    """
+    return self.sin() / self.cos()
   def log2(self): return self.alu(UnaryOps.LOG2)
   def exp2(self): return self.alu(UnaryOps.EXP2)
 
