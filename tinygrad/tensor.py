@@ -293,8 +293,7 @@ class Tensor:
     """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert self.numel() == 1, "must have one element for item"
-    a: memoryview = self._data().cast(cast(Any, self.dtype.fmt))
-    return a[0]
+    return self._data().cast(cast(Any, self.dtype.fmt))[0]
 
   # TODO: should be Tensor.tolist() -> Union[List[ConstType], ConstType]. The List is Sequence because mypy expects memoryview.tolist() -> list[int]
   # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803
