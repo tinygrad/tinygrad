@@ -2386,16 +2386,6 @@ class Tensor(MathTrait):
       return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
     return self + (end - self) * weight
 
-  def square(self):
-    """
-    Squares the tensor element-wise.
-    Equivalent to `self*self`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).square().numpy())
-    ```
-    """
-    return self*self
   def clamp(self, min_=None, max_=None):
     """
     Clips (clamps) the values in the tensor between `min_` and `max_` element-wise.
@@ -2431,15 +2421,6 @@ class Tensor(MathTrait):
     ```
     """
     return self * self.sign()
-  def reciprocal(self):
-    """
-    Compute `1/x` element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3., 4.]).reciprocal().numpy())
-    ```
-    """
-    return F.Reciprocal.apply(self.cast(least_upper_float(self.dtype)))
 
   # ***** activation functions *****
 
@@ -2722,7 +2703,15 @@ class Tensor(MathTrait):
     if arg is BinaryOps.SHR: return self // src[0].exp2()
     if arg is BinaryOps.ADD: return F.Add.apply(*self._broadcasted(src[0]))
     if arg is BinaryOps.MUL: return F.Mul.apply(*self._broadcasted(src[0]))
+    if arg is BinaryOps.OR: return F.BitwiseOr.apply(*self._broadcasted(src[0]))
+    if arg is BinaryOps.AND: return F.BitwiseAnd.apply(*self._broadcasted(src[0]))
+    if arg is BinaryOps.XOR: return F.Xor.apply(*self._broadcasted(src[0]))
+    if arg is BinaryOps.IDIV: return F.IDiv.apply(*self._broadcasted(src[0]))
+    if arg is BinaryOps.CMPLT: return F.Less.apply(*self._broadcasted(src[0]))
+    if arg is BinaryOps.CMPNE: return F.Neq.apply(*self._broadcasted(src[0]))
     if arg is UnaryOps.RECIP: return F.Reciprocal.apply(self.cast(least_upper_float(self.dtype)))
+    if arg is UnaryOps.SQRT: return F.Sqrt.apply(self.cast(least_upper_float(self.dtype)))
+    if arg is UnaryOps.SIN: return F.Sin.apply(self.cast(least_upper_float(self.dtype)))
     raise RuntimeError(f"{arg} isn't supported in alu")
 
   def pow(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:

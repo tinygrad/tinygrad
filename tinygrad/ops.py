@@ -48,9 +48,27 @@ class MathTrait:
     dtype = getattr(self, 'dtype', None)
     assert dtype is not None, "MathTraits __neg__ requires a dtype"
     return self.logical_not() if dtype.scalar() == dtypes.bool else self*(-1)
-  def add(self, x): return self+x
-  def sub(self, x): return self-x
-  def mul(self, x): return self*x
+  def add(self, x):
+    """
+    Adds `self` and `x`.
+    Equivalent to `self + x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+    """
+    return self+x
+  def sub(self, x):
+    """
+    Subtracts `x` from `self`.
+    Equivalent to `self - x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+    """
+    return self-x
+  def mul(self, x):
+    """
+    Multiplies `self` and `x`.
+    Equivalent to `self * x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+    """
+    return self*x
   def xor(self, x): return self^x
   def bitwise_and(self, x): return self&x
   def bitwise_or(self, x): return self|x
@@ -60,6 +78,12 @@ class MathTrait:
     dtype = getattr(self, 'dtype', None)
     assert dtype is not None, "MathTraits div requires a dtype"
     return self/x if dtypes.is_float(dtype) else self//x
+  def square(self):
+    """
+    Squares the tensor element-wise.
+    Equivalent to `self*self`.
+    """
+    return self*self
   def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
   def __radd__(self, x): return self.ufix(x).alu(BinaryOps.ADD, self)
   def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))
