@@ -87,7 +87,7 @@ class TestUOpResolve(unittest.TestCase):
   def test_max(self):
     x = UOp.variable("x", 1, 10)
     y = UOp.variable("y", 5, 10)
-    u = x.max(y)
+    u = x.maximum(y)
     self.assertTrue(u < 20)
     self.assertFalse(u < 3)
 
