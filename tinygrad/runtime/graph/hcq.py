@@ -50,9 +50,17 @@ class HCQGraph(MultiGraphRunner):
 
     for dev, queue in self.comp_queues.items(): dev_access[queue].add(dev)
 
+    enqueue_queue: HWComputeQueue|HWCommandQueue
+
     for j,ji in enumerate(self.jit_cache):
-      enqueue_dev = ji.prg.device if (is_exec_prg:=isinstance(ji.prg, CompiledRunner)) else Device[ji.bufs[1].device] #type:ignore
-      enqueue_queue = self.comp_queues[enqueue_dev] if is_exec_prg else self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
+      is_exec_prg = isinstance(ji.prg, CompiledRunner)
+      if is_exec_prg:
+        enqueue_dev = ji.prg.device
+        enqueue_queue = self.comp_queues[enqueue_dev]
+      else:
+        assert ji.bufs[1], "No buffer found"
+        enqueue_dev = Device[ji.bufs[1].device]
+        enqueue_queue = self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
       out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.signal_t(value=0))
 
       # Get dependencies based on input and output buffers.

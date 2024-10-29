@@ -2,7 +2,8 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib
 from contextlib import ContextDecorator
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Literal
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, \
+  Literal, Any
 from collections import defaultdict
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
@@ -279,7 +280,7 @@ class Tensor:
     """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self._data().cast(self.dtype.fmt, self.shape)
+    return self._data().cast(cast(Any, self.dtype.fmt), cast(Any, self.shape))
 
   def item(self) -> ConstType:
     """
@@ -292,7 +293,8 @@ class Tensor:
     """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert self.numel() == 1, "must have one element for item"
-    return self._data().cast(self.dtype.fmt)[0]
+    a: memoryview = self._data().cast(cast(Any, self.dtype.fmt))
+    return a[0]
 
   # TODO: should be Tensor.tolist() -> Union[List[ConstType], ConstType]. The List is Sequence because mypy expects memoryview.tolist() -> list[int]
   # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803

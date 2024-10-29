@@ -2,7 +2,7 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Tuple, List, Optional, Any, Dict
+from typing import Tuple, List, Optional, Any, Dict, cast
 import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType, truncate
 from tinygrad.helpers import all_same, getenv, flatten
@@ -74,11 +74,11 @@ class PythonProgram:
         dl[i] = dtype
         if uop is UOps.DEFINE_GLOBAL:
           assert dtype.fmt is not None
-          ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
+          ul[i] = [pbufs.pop(0).cast(cast(Any, dtype.fmt))] * warp_size
         elif uop is UOps.DEFINE_LOCAL:
           assert dtype.fmt is not None
           lbuf = memoryview(bytearray(arg[1]*dtype.itemsize))
-          ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
+          ul[i] = [lbuf.cast(cast(Any, dtype.fmt))] * warp_size
         elif uop is UOps.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is UOps.SPECIAL:

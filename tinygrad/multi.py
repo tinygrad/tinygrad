@@ -102,8 +102,10 @@ class MultiLazyBuffer(MathTrait):
     assert all(isinstance(x, MultiLazyBuffer) for x in msrcs), f"all buffers must be MultiLazyBuffer {msrcs}"
     assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"
 
+    axis: int
+    bounds: tuple[tuple[int,int],...]
     # NOTE: they all have to share an axis, we always choose [-1]
-    axis, bounds = axes[-1] if len(axes := dedup([(x.axis, x.bounds) for x in msrcs if x.axis is not None])) else (None, None)
+    axis, bounds = axes[-1] if len(axes := dedup([(x.axis, x.bounds) for x in msrcs if x.axis is not None])) else (0, [])
     srcs:List[List[LazyBuffer]] = []
     not_all_real = any(not all(mlb.real) for mlb in msrcs)
     new_real = [all(transposed) for transposed in zip(*[mlb.real for mlb in msrcs])] if not_all_real else self.real

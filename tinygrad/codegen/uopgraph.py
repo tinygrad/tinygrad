@@ -130,7 +130,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
   return uop
 
 def simplify_valid(valid:UOp) -> Optional[UOp]:
-  ret:List[UOp] = []
+  ret:List[UOp|Any] = []
   something_changed = False
   for stmt in split_uop(valid, BinaryOps.AND):
     ret.append(stmt if not ret else uop_given_valid(functools.reduce(operator.and_, ret), stmt))
