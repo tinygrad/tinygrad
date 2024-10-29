@@ -550,7 +550,7 @@ class TestTypePromotion(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_promo_resulted_higher_than_inputs(self, dtype1, dtype2):
     result = least_upper_dtype(dtype1, dtype2)
-    assert result >= dtype1 and result >= dtype2
+    assert not (result < dtype1) and not (result < dtype2)
 
   def test_dtype_promo(self):
     assert least_upper_dtype(dtypes.bool, dtypes.int8) == dtypes.int8
