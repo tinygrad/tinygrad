@@ -90,13 +90,14 @@ class LLVMRenderer(Renderer):
 
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
-      if uop is UOps.STORE:
-        element = cast(bb, lvars[src[2]], src[2].dtype, src[0].dtype)
-        if len(src) > 3:
-          with bb[-1].if_then(lvars[src[3]]):
-            bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
+      if uop is UOps.INDEX:
+        lvars[u] = bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True)
+      elif uop is UOps.STORE:
+        element = cast(bb, lvars[src[1]], src[1].dtype, src[0].dtype)
+        if len(src) >= 3:
+          with bb[-1].if_then(lvars[src[2]]): bb[-1].store(element, lvars[src[0]])
         else:
-          bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
+          bb[-1].store(element, lvars[src[0]])
       elif uop is UOps.ENDRANGE:
         loop_entry_bb, phis = loop_blocks.pop()
         idx_p1 = bb[-1].add(lvars[src[0]], ir.Constant(ir.IntType(32), 1))
@@ -128,7 +129,7 @@ class LLVMRenderer(Renderer):
             val = bb[-1].load(bb[-1].gep(lvars[src[0]], [aug_idx], inbounds=True))
             val = bb[-1].select(lvars[src[3]], val, lvars[src[2]])
           else:
-            val = bb[-1].load(bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
+            val = bb[-1].load(lvars[src[0]])
           lvars[u] = val
         elif uop is UOps.ASSIGN:
           lvars[u] = lvars[src[1]]

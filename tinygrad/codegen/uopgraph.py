@@ -491,6 +491,17 @@ reducer = PatternMatcher([
   (UPat(UOps.LOAD, name="load"), simplify_buffer_load),
 ])
 
+def idx_load_store(x:UOp):
+  idx = x.src[0].index(x.src[1])
+  v = x.dtype.count if x.op is UOps.LOAD else x.src[2].dtype.count
+  if v > 1: idx = idx.cast(idx.dtype.base.vec(v).ptr(idx.dtype.local))
+  return UOp(x.op, x.dtype, (idx,)+x.src[2:], x.arg)
+
+indexing = PatternMatcher([
+  # use indexing for LOAD/STORE
+  (UPat((UOps.LOAD, UOps.STORE), src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)),), allow_any_len=True, name="x"), idx_load_store),
+])
+
 # *** uop graph ***
 
 linearize_cnt = 0
@@ -510,7 +521,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
       sink = graph_rewrite(sink, sym+just_reduce)
       sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
       sink = graph_rewrite(sink, sym+reducer)
-      sink = graph_rewrite(sink, sym+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
+      sink = graph_rewrite(sink, sym+indexing+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
 
   if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, opts.extra_matcher)
   return sink
