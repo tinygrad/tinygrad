@@ -2822,6 +2822,14 @@ class Tensor:
     """
     return F.Mul.apply(*self._broadcasted(x, reverse))
 
+  def idiv(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
+    """
+    Divides `self` by `x`.
+    Equivalent to `self // x`.
+    Supports broadcasting to a common shape, type promotion, and integer inputs.
+    """
+    return F.IDiv.apply(*self._broadcasted(x, reverse))
+
   def div(self, x:Union[Tensor, ConstType], reverse=False, upcast=True) -> Tensor:
     """
     Divides `self` by `x`.
@@ -3016,7 +3024,7 @@ class Tensor:
   def __mul__(self, x) -> Tensor: return self.mul(x)
   def __pow__(self, x) -> Tensor: return self.pow(x)
   def __truediv__(self, x) -> Tensor: return self.div(x)
-  def __floordiv__(self, x) -> Tensor: return self.div(x, upcast=False)
+  def __floordiv__(self, x) -> Tensor: return self.idiv(x)
   def __matmul__(self, x) -> Tensor: return self.matmul(x)
   def __and__(self, x) -> Tensor: return self.bitwise_and(x)
   def __or__(self, x) -> Tensor: return self.bitwise_or(x)
@@ -3029,7 +3037,7 @@ class Tensor:
   def __rmul__(self, x) -> Tensor: return self.mul(x, True)
   def __rpow__(self, x) -> Tensor: return self.pow(x, True)
   def __rtruediv__(self, x) -> Tensor: return self.div(x, True)
-  def __rfloordiv__(self, x) -> Tensor: return self.div(x, True, upcast=False)
+  def __rfloordiv__(self, x) -> Tensor: return self.idiv(x, True)
   def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
   def __rand__(self, x) -> Tensor: return self.bitwise_and(x, True)
   def __ror__(self, x) -> Tensor: return self.bitwise_or(x, True)
@@ -3040,7 +3048,7 @@ class Tensor:
   def __imul__(self, x) -> Tensor: return self.assign(self.mul(x))
   def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x))
-  def __ifloordiv__(self, x) -> Tensor: return self.assign(self.div(x, upcast=False))
+  def __ifloordiv__(self, x) -> Tensor: return self.assign(self.idiv(x))
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
   def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x))
   def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x))
