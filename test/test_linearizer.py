@@ -1337,7 +1337,7 @@ class TestLinearizer(unittest.TestCase):
     barrier = [u for u in k.uops if u.op is UOps.BARRIER][0]
     # check that the float4 cast collapses for all stores
     for store in local_stores+global_stores:
-      assert store.src[1].dtype.count > 1 # and store.src[2].op is not UOps.VECTORIZE
+      assert store.src[-1].dtype.count > 1 # and store.src[2].op is not UOps.VECTORIZE
     # # check the children's vins
     # TODO: src ALU are not the same, should it?
     # assert barrier.src == tuple(local_stores)
@@ -1357,7 +1357,7 @@ class TestLinearizer(unittest.TestCase):
     #assert stores[0].src[-1].op is not UOps.VECTORIZE
 
     # the global store doesn't change
-    assert stores[1].src[1].dtype == dtypes.float
+    assert stores[1].src[-1].dtype == dtypes.float
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
@@ -1401,11 +1401,11 @@ class TestFloat4(unittest.TestCase):
   @staticmethod
   def count_float4(k, n=4):
     return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.float.vec(n)]),
-            len([uop for uop in k.uops if uop.op is UOps.STORE and len(uop.src) == 2 and uop.src[1].dtype == dtypes.float.vec(n)]))
+            len([uop for uop in k.uops if uop.op is UOps.STORE and uop.src[-1].dtype == dtypes.float.vec(n)]))
   @staticmethod
   def count_half4(k):
     return (len([uop for uop in k.uops if uop.op is UOps.LOAD and uop.dtype == dtypes.half.vec(4)]),
-            len([uop for uop in k.uops if uop.op is UOps.STORE and len(uop.src) == 2 and uop.src[1].dtype == dtypes.half.vec(4)]))
+            len([uop for uop in k.uops if uop.op is UOps.STORE and uop.src[-1].dtype == dtypes.half.vec(4)]))
 
   # TODO: express opts below as auto opts
 
