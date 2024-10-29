@@ -15,8 +15,8 @@ a = MallocAllocator.alloc(4)
 b = MallocAllocator.alloc(4)
 
 # load in some values (little endian)
-MallocAllocator.copyin(a, bytearray([2,0,0,0]))
-MallocAllocator.copyin(b, bytearray([3,0,0,0]))
+MallocAllocator.copyin(a, memoryview(bytearray([2,0,0,0])))
+MallocAllocator.copyin(b, memoryview(bytearray([3,0,0,0])))
 
 # compile a program to a binary
 lib = ClangCompiler().compile("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
@@ -37,7 +37,7 @@ print("******** second, the Device ***********")
 DEVICE = "CLANG"   # NOTE: you can change this!
 
 import struct
-from tinygrad.dtype import PtrDType, dtypes
+from tinygrad.dtype import dtypes
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UOps
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -49,12 +49,12 @@ b = Buffer(DEVICE, 1, dtypes.int32).allocate().copyin(memoryview(bytearray(struc
 # NOTE: a._buf is the same as the return from MallocAllocator.alloc
 
 # describe the computation
-buf_1 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), 1)
-buf_2 = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), 2)
+buf_1 = UOp(UOps.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 1)
+buf_2 = UOp(UOps.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 2)
 ld_1 = UOp(UOps.LOAD, dtypes.int32, (buf_1, ShapeTracker.from_shape((1,)).to_uop()))
 ld_2 = UOp(UOps.LOAD, dtypes.int32, (buf_2, ShapeTracker.from_shape((1,)).to_uop()))
 alu = ld_1 + ld_2
-output_buf = UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.int32), (), 0)
+output_buf = UOp(UOps.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
 st_0 = UOp(UOps.STORE, dtypes.void, (output_buf, ShapeTracker.from_shape((1,)).to_uop(), alu))
 s = UOp(UOps.SINK, dtypes.void, (st_0,))
 
@@ -103,7 +103,7 @@ print(sched[-1].ast)
 run_schedule(sched)
 
 # check the data out
-assert out.realized.as_buffer().cast('I')[0] == 5
+assert out.realized is not None and out.realized.as_buffer().cast('I')[0] == 5
 
 
 print("******** fourth, the Tensor ***********")

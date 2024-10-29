@@ -9,7 +9,7 @@ from tinygrad.ops import UNSAFE_PAD_OPS, BUFFER_UOPS, BinaryOps, KernelInfo, UOp
     graph_rewrite, track_rewrites, Variable, sint
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
-from tinygrad.dtype import ImageDType, PtrDType
+from tinygrad.dtype import ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put
 from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -125,7 +125,7 @@ class Kernel:
     return ret
 
   @property
-  def membufs(self) -> List[UOp]: return list({x.src[0].key:x.src[0] for x in self.bufs if x.op in {UOps.LOAD, UOps.STORE}}.values())
+  def membufs(self) -> List[UOp]: return dedup([x.src[0] for x in self.bufs if x.op in {UOps.LOAD, UOps.STORE}])
 
   # TODO: these need more tests or it might silently be no-op
   def float4_axis(self, i:int): return [x-self.first_upcast for x in self.sts[i].unit_stride_axes() if x >= self.first_upcast and self.sts[i].shape[x]%4 == 0]  # noqa: E501
@@ -190,7 +190,8 @@ class Kernel:
     return colors
 
   def colored_shape(self, pad:Optional[int]=None, dense=False) -> str:
-    ret = ' '.join(colored(s, color) for s,color in zip([f"{s:4d}" if isinstance(s, int) and not dense else s for s in self.full_shape], self.colors()))  # noqa: E501
+    shape_strs = [(s if dense else f"{s:4d}") if isinstance(s, int) else s.render() for s in self.full_shape]
+    ret = ' '.join(colored(s, color) for s,color in zip(shape_strs, self.colors()))
     if pad: ret += ' '*(pad-ansilen(ret))
     return ret
 
@@ -366,7 +367,7 @@ class Kernel:
       return False
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
-    check(not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")
+    if self.dont_use_locals: check(opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")
 
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
@@ -435,7 +436,7 @@ class Kernel:
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
       self.dont_use_locals = True
     elif opt.op is OptOps.SWAP:
-      check(axis < amt and amt < self.global_dims, f"swap is only for globals with axis < amt, getting {amt=}, {axis=}, {self.global_dims=}")
+      check(axis < amt < self.global_dims, f"swap is only for globals with axis < amt, getting {amt=}, {axis=}, {self.global_dims=}")
       permute = list(range(self.shape_len))
       permute[axis], permute[amt] = permute[amt], permute[axis]
       self.reshape_and_permute(None, tuple(permute))
@@ -444,12 +445,12 @@ class Kernel:
       check(axis < self.first_upcast, "cannot pad upcasted")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
       if (r:=self.reduceop) is not None and self.first_reduce <= axis:
-        check(r.arg[0] is BinaryOps.ADD and all(not (u.op is UOps.ALU and u.arg in UNSAFE_PAD_OPS) for u in r.parents), "cannot pad UNSAFE_PAD_OPS")
+        check(r.arg[0] is BinaryOps.ADD and not any(u.op is UOps.ALU and u.arg in UNSAFE_PAD_OPS for u in r.parents), "cannot pad UNSAFE_PAD_OPS")
       padded = False
       for i,st in enumerate(self.sts):
-        if self.sts[i].shape[axis] == 1: continue  # reduced
-        check(self.sts[i].shape[axis] > amt//4, f"pad adds more than quadruple the work {self.sts[i].shape[axis]=} > {amt//4=}")
-        if (ru := round_up(cast(int, self.sts[i].shape[axis]), amt) - self.sts[i].shape[axis]):
+        if (s:=st.shape[axis]) == 1: continue  # reduced
+        check(s > amt//4, f"pad adds more than quadruple the work {st.shape[axis]=} > {amt//4=}")
+        if (ru := round_up(cast(int, s), amt) - s):
           # pad right seems to be faster
           self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
           padded = True
@@ -462,8 +463,8 @@ class Kernel:
   def required_optimizations(self) -> Kernel:
     if isinstance(self.membufs[0].dtype, ImageDType):
       unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
-      assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[0]}"
-      if len(unit_stride_axes_mul_4) and all(x < self.first_upcast for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:  # noqa: E501
+      assert unit_stride_axes_mul_4, f"needs a unit stride axis in {self.bufs[0]}"
+      if all(x < self.first_upcast for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
         self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
     return self
 
@@ -660,7 +661,7 @@ class Kernel:
                 st_load = [self.sts[self.bufs.index(op)].real_strides() for op in rsrc.parents if op.op is UOps.LOAD]
                 local_shape = tuple(s if max(cast(int, x[i]) for x in st_load) != 0 else 1 for i,s in enumerate(ex_shape))
                 st_uop = ShapeTracker.from_shape(local_shape).expand(ex_shape).to_uop()
-                membuf = UOp(UOps.DEFINE_LOCAL, PtrDType(tc.dtype_in, True), (), (f"temp{-(-1-i)}", st_uop.arg.real_size()))
+                membuf = UOp(UOps.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{-(-1-i)}", st_uop.arg.real_size()))
                 local_store = fixup_ast(UOp(UOps.STORE, tc.dtype_in, (membuf, st_uop, src)), fix_st_fxn)
                 srcs.append(UOp(UOps.LOAD, tc.dtype_in, (membuf, st_uop, local_store)))
             else:
@@ -690,7 +691,7 @@ class Kernel:
               for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
-          local_buffer = UOp(UOps.DEFINE_LOCAL, PtrDType(op.dtype, True), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
+          local_buffer = UOp(UOps.DEFINE_LOCAL, op.dtype.ptr(local=True), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
           local_load = UOp(UOps.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, start)))
           grouped_reduce = UOp(UOps.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], second_axis))
           if op is self.reduceops[-1]: return grouped_reduce
@@ -705,7 +706,7 @@ class Kernel:
 
   # **** this is the lowerer ****
 
-  @track_rewrites
+  @track_rewrites()
   def linearize(self) -> Kernel:
     modified_ast = self.get_optimized_ast()
 
@@ -726,7 +727,7 @@ class Kernel:
 
     if getenv("RUN_PROCESS_REPLAY"):
       from test.external.process_replay.helpers import get_process_replay_ctx
-      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, name, get_process_replay_ctx(), src))
+      diskcache_put("kernel_process_replay", str(id(self)), (self.ast, self.opts, self.applied_opts, name, *get_process_replay_ctx(), src))
 
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.

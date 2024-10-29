@@ -399,7 +399,7 @@ class TestTinygrad(unittest.TestCase):
     if is_dtype_supported(dtypes.float16):
       data = [math.nan, -math.inf, 65504, 65519, 65519.999, 65520, 65520.1]
       data = data + [-x for x in data]
-      np.testing.assert_allclose(Tensor(data, dtype=dtypes.float16).numpy(), np.array(data).astype(np.float16))
+      with np.errstate(over='ignore'): np.testing.assert_allclose(Tensor(data, dtype=dtypes.float16).numpy(), np.array(data).astype(np.float16))
 
     # uint32
     data = [1 << 33, 1 << 32, 1 << 32 - 1, 1]
@@ -714,51 +714,51 @@ class TestTensorMetadata(unittest.TestCase):
     x = Tensor.rand(3, requires_grad=True)
     W = Tensor.rand(3, 3, requires_grad=True)
     out = x.matmul(W)
-    assert out.lazydata.metadata.name == "matmul"
+    self.assertEqual(out.lazydata.metadata.name, "matmul")
     s = create_schedule([out.lazydata])
-    assert len(s[-1].metadata) == 1
-    assert s[-1].metadata[0].name == "matmul"
+    self.assertEqual(len(s[-1].metadata), 1)
+    self.assertEqual(s[-1].metadata[0].name, "matmul")
 
   def test_relu(self):
     _METADATA.set(None)
     x = Tensor.rand(3, requires_grad=True)
     out = x.relu()
-    assert out.lazydata.metadata.name == "relu"
+    self.assertEqual(out.lazydata.metadata.name, "relu")
     s = create_schedule([out.lazydata])
-    assert len(s[-1].metadata) == 1
-    assert s[-1].metadata[0].name == "relu"
+    self.assertEqual(len(s[-1].metadata), 1)
+    self.assertEqual(s[-1].metadata[0].name, "relu")
 
   def test_complex(self):
     _METADATA.set(None)
     x = Tensor.rand(3, requires_grad=True)
     y = Tensor.rand(3, requires_grad=True)
     out = x.relu() * y.sigmoid()
-    assert out.lazydata.metadata.name == "__mul__"
-    assert out.lazydata.srcs[0].metadata.name == "relu"
-    assert out.lazydata.srcs[1].metadata.name == "sigmoid"
+    self.assertEqual(out.lazydata.metadata.name, "__mul__")
+    self.assertEqual(out.lazydata.srcs[0].metadata.name, "relu")
+    self.assertEqual(out.lazydata.srcs[1].metadata.name, "sigmoid")
     s = create_schedule([out.lazydata])
-    assert len(s[-1].metadata) == 3
-    assert s[-1].metadata[0].name == "relu"
-    assert s[-1].metadata[1].name == "sigmoid"
-    assert s[-1].metadata[2].name == "__mul__"
+    self.assertEqual(len(s[-1].metadata), 3)
+    self.assertEqual(s[-1].metadata[0].name, "relu")
+    self.assertEqual(s[-1].metadata[1].name, "sigmoid")
+    self.assertEqual(s[-1].metadata[2].name, "__mul__")
 
   def test_complex_backward(self):
     _METADATA.set(None)
     x = Tensor.rand(3, requires_grad=True)
     y = Tensor.rand(3, requires_grad=True)
     out = (x.relu() * y.sigmoid()).sum()
-    assert out.lazydata.metadata.name == "sum"
+    self.assertEqual(out.lazydata.metadata.name, "sum")
     out.backward()
-    assert x.grad.lazydata.metadata.name == "relu"
-    assert x.grad.lazydata.metadata.backward
-    assert y.grad.lazydata.metadata.name == "sigmoid"
-    assert y.grad.lazydata.metadata.backward
+    self.assertEqual(x.grad.lazydata.metadata.name, "relu")
+    self.assertTrue(x.grad.lazydata.metadata.backward)
+    self.assertEqual(y.grad.lazydata.metadata.name, "sigmoid")
+    self.assertTrue(y.grad.lazydata.metadata.backward)
     s = create_schedule([out.lazydata, x.grad.lazydata, y.grad.lazydata])
-    assert len(s[-1].metadata) == 3
-    assert s[-1].metadata[0].name == "sigmoid"
-    assert s[-1].metadata[1].name == "sigmoid"
-    assert s[-1].metadata[1].backward
-    assert s[-1].metadata[2].name == "relu"
+    self.assertEqual(len(s[-1].metadata), 3)
+    self.assertEqual(s[-1].metadata[0].name, "sigmoid")
+    self.assertEqual(s[-1].metadata[1].name, "sigmoid")
+    self.assertTrue(s[-1].metadata[1].backward)
+    self.assertEqual(s[-1].metadata[2].name, "relu")
 
 if __name__ == '__main__':
   unittest.main()

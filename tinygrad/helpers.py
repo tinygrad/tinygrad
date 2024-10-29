@@ -15,6 +15,9 @@ def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.mul, x
 OSX = platform.system() == "Darwin"
 CI = os.getenv("CI", "") != ""
 
+# fix colors on Windows, https://stackoverflow.com/questions/12492810/python-how-can-i-make-the-ansi-escape-codes-to-work-also-in-windows
+if sys.platform == "win32": os.system("")
+
 def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x):
   if x and x[0].__class__ in (tuple, list):
@@ -41,7 +44,9 @@ def fully_flatten(l):
   return [l]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
-def ceildiv(num:int, amt:int) -> int: return -int(num//-amt)
+def ceildiv(num, amt):
+  ret = -(num//-amt)
+  return ret if not isinstance(ret, float) else int(ret)
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
 def data64(data: int) -> Tuple[int, int]: return (data >> 32, data & 0xFFFFFFFF)
 def data64_le(data: int) -> Tuple[int, int]: return (data & 0xFFFFFFFF, data >> 32)
@@ -57,10 +62,6 @@ def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> Tuple[List[T], List[T]
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
-def unwrap2(x:Tuple[T,Any]) -> T:
-  ret, err = x
-  assert err is None, str(err)
-  return ret
 def get_child(obj, key):
   for k in key.split('.'):
     if k.isnumeric(): obj = obj[int(k)]
@@ -100,9 +101,9 @@ class ContextVar:
 
 DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0), ContextVar("JIT", 1)
 WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
-MULTIOUTPUT, PROFILE, PROFILEPATH = ContextVar("MULTIOUTPUT", 1), ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
+PROFILE, PROFILEPATH = ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
 USE_TC, TC_OPT, AMX, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0), ContextVar("TRANSCENDENTAL", 1)
-FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
+FUSE_ARANGE, FUSE_CONV_BW, LAZYCACHE = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0), ContextVar("LAZYCACHE", 1)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
 
 @dataclass(frozen=True)
@@ -306,6 +307,8 @@ class tqdm:
     sz = max(ncols-len(self.desc)-3-2-2-len(suf), 1)
     bar = '\r' + self.desc + (f'{100*prog:3.0f}%|{("█"*int(num:=sz*prog)+" ▏▎▍▌▋▊▉"[int(8*num)%8].strip()).ljust(sz," ")}| ' if self.t else '') + suf
     print(bar[:ncols+1], flush=True, end='\n'*close, file=sys.stderr)
+  @classmethod
+  def write(cls, s:str): print(f"\r\033[K{s}", flush=True, file=sys.stderr)
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)

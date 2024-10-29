@@ -1,5 +1,5 @@
 import sys, time, logging, difflib
-from typing import Callable, Optional, Tuple, TypeVar
+from typing import Callable, Optional, Tuple
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.ops import UOp, UOps, sint
@@ -8,7 +8,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
 from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import CI, OSX, getenv, colored
+from tinygrad.helpers import CI, OSX, T, getenv, colored
 
 def derandomize_model(model):
   for p in get_parameters(model):
@@ -21,7 +21,7 @@ def assert_jit_cache_len(fxn, expected_len):
     return
   # until we have a better way of typing the prg in ExecItem
   if issubclass(type(fxn.jit_cache[0].prg), Runner) and not type(fxn.jit_cache[0].prg).__name__.endswith('Graph'):
-    assert len(fxn.jit_cache) == expected_len, len(fxn.jit_cache)
+    assert len(fxn.jit_cache) == expected_len, f"expected {expected_len}, got {len(fxn.jit_cache)}"
   else:
     assert len(fxn.jit_cache) == 1, len(fxn.jit_cache)
     # until we have a better way of typing the prg in ExecItem
@@ -73,7 +73,6 @@ def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]=(), st:Optional
     st_src = (st.to_uop() if st is not None else ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)
   return UOp(UOps.VALID, dtypes.bool, st_src).where(UOp.const(dtype, val), UOp.const(dtype, 0))
 
-T = TypeVar("T")
 def timeit(fxn:Callable[..., T], *args, **kwargs) -> Tuple[T, float]:
   st = time.perf_counter_ns()
   ret = fxn(*args, **kwargs)

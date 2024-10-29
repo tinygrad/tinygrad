@@ -62,9 +62,6 @@ class Program:
   @functools.cached_property
   def _ops_lds(self) -> Tuple[sint, sint]: return (0,0) if self.uops is None else flops_mem(self.uops, ignore_indexing=True)
 
-  @property
-  def outcount(self) -> int: return len(self.outs)
-
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
 
@@ -87,6 +84,7 @@ class Renderer:
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
   code_for_op: Dict[Op, Callable] = {}
+  indexing: bool = False
 
   def __reduce__(self): return self.__class__, ()
   def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")
