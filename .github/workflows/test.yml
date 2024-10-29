@@ -15,7 +15,7 @@ on:
 
 jobs:
   autogen:
-    name: autogen correctness
+    name: Autogen+Docs
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -25,6 +25,39 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: 3.12
+    - name: Install docs dependencies (no cache)
+      run: pip install -e '.[docs]'
+    - name: Use as an external package
+      run: |
+        mkdir $HOME/test_external_dir
+        cd $HOME/test_external_dir
+        python -m venv venv
+        source venv/bin/activate
+        pip install $GITHUB_WORKSPACE
+        python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
+        pip install mypy
+        mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
+    - name: Run beautiful_mnist without numpy
+      run: |
+        mkdir $HOME/test_no_numpy_dir
+        cd $HOME/test_no_numpy_dir
+        python -m venv venv
+        source venv/bin/activate
+        pip install $GITHUB_WORKSPACE
+        cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
+        PYTHONPATH=$GITHUB_WORKSPACE BS=2 STEPS=10 python beautiful_mnist.py
+    - name: Test Docs Build
+      run: python -m mkdocs build --strict
+    - name: Test Docs
+      run: |
+        python docs/abstractions2.py
+        python docs/abstractions3.py
+    - name: Test Quickstart
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
+    - name: Test README
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
+    - name: Test DEBUG
+      run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
     - name: Install OpenCL
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
@@ -160,7 +193,7 @@ jobs:
       run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1
 
   linter:
-    name: Linters
+    name: Linters+fuzz+unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -178,7 +211,7 @@ jobs:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
         key: linting-packages-${{ hashFiles('**/setup.py') }}-3.8
     - name: Install dependencies
-      run: pip install -e '.[linting,testing,docs]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
@@ -189,16 +222,6 @@ jobs:
       run: python -m pylint tinygrad/
     - name: Run mypy
       run: python -m mypy --strict-equality
-    - name: Test Docs
-      run: |
-        python docs/abstractions2.py
-        python docs/abstractions3.py
-    - name: Test Docs Build
-      run: python -m mkdocs build --strict
-    - name: Test Quickstart
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
-    - name: Test README
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
       run: PYTHONPATH="." python -m pytest -n=auto test/unit/
     - name: Fuzz Test symbolic
@@ -207,27 +230,6 @@ jobs:
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
         PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
-    - name: Use as an external package
-      run: |
-        mkdir $HOME/test_external_dir
-        cd $HOME/test_external_dir
-        python -m venv venv
-        source venv/bin/activate
-        pip install $GITHUB_WORKSPACE
-        python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-        pip install mypy
-        mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-    - name: Run beautiful_mnist without numpy
-      run: |
-        mkdir $HOME/test_no_numpy_dir
-        cd $HOME/test_no_numpy_dir
-        python -m venv venv
-        source venv/bin/activate
-        pip install $GITHUB_WORKSPACE
-        cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
-        PYTHONPATH=$GITHUB_WORKSPACE BS=2 STEPS=10 python beautiful_mnist.py
-    - name: Test DEBUG
-      run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
     - name: Repo line count <= 9999 lines
       run: MAX_LINE_COUNT=9999 python sz.py
 
