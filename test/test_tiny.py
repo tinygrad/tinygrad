@@ -14,6 +14,10 @@ class TestTiny(unittest.TestCase):
     out = Tensor.ones(16).contiguous() + Tensor.ones(16).contiguous()
     self.assertListEqual(out.tolist(), [2]*16)
 
+  def test_cat(self):
+    out = Tensor.cat(Tensor.ones(8).contiguous(), Tensor.ones(8).contiguous())
+    self.assertListEqual(out.tolist(), [1]*16)
+
   def test_gemm(self):
     N = 4
     a = Tensor.ones(N,N).contiguous()

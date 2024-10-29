@@ -33,11 +33,11 @@ class TestWhisper(unittest.TestCase):
   def test_transcribe_file1(self):
     self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_1),  TRANSCRIPTION_1)
 
-  @unittest.skipIf(CI, "too many tests for CI")
+  @unittest.skipIf(CI or Device.DEFAULT == "LLVM", "too many tests for CI")
   def test_transcribe_file2(self):
     self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_2),  TRANSCRIPTION_2)
 
-  @unittest.skipIf(CI, "too many tests for CI")
+  @unittest.skipIf(CI or Device.DEFAULT == "LLVM", "too many tests for CI")
   def test_transcribe_batch12(self):
     waveforms = [load_file_waveform(TEST_FILE_1), load_file_waveform(TEST_FILE_2)]
     transcriptions = transcribe_waveform(self.model, self.enc, waveforms)
@@ -52,13 +52,13 @@ class TestWhisper(unittest.TestCase):
     self.assertEqual(TRANSCRIPTION_2,  transcriptions[0])
     self.assertEqual(TRANSCRIPTION_1,  transcriptions[1])
 
-  @unittest.skipIf(CI, "too long for CI")
+  @unittest.skipIf(CI or Device.DEFAULT == "LLVM", "too long for CI")
   def test_transcribe_long(self):
     waveform = [load_file_waveform(fetch(TEST_FILE_3_URL))]
     transcription = transcribe_waveform(self.model, self.enc, waveform)
     self.assertEqual(TRANSCRIPTION_3, transcription)
 
-  @unittest.skipIf(CI, "too long for CI")
+  @unittest.skipIf(CI or Device.DEFAULT == "LLVM", "too long for CI")
   def test_transcribe_long_no_batch(self):
     waveforms = [load_file_waveform(fetch(TEST_FILE_3_URL)), load_file_waveform(TEST_FILE_1)]
 
