@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  DOWNLOAD_CACHE_VERSION: '6'
+  DOWNLOAD_CACHE_VERSION: '7'
   RUN_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: .
@@ -285,7 +285,7 @@ jobs:
       - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE=2 ops + training
         run: |
-          PYTHONPATH="." GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
+          PYTHONPATH="." GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py --durations=20
           PYTHONPATH="." GPU=1 IMAGE=2 python3 test/models/test_end2end.py TestEnd2End.test_linear_mnist
       - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot model compile and size
