@@ -50,7 +50,7 @@ base_rewrite = PatternMatcher([
 def idx_load_store(x:UOp):
   idx = x.src[0].index(x.src[1])
   v = x.dtype.count if x.op is UOps.LOAD else x.src[2].dtype.count
-  if v > 1: idx = idx.cast(idx.dtype.base.vec(v).ptr(idx.dtype.local))
+  if v > 1 and not isinstance(x.src[0].dtype, ImageDType): idx = idx.cast(idx.dtype.base.vec(v).ptr(idx.dtype.local))
   return UOp(x.op, x.dtype, (idx,)+x.src[2:], x.arg)
 
 extra_pm = PatternMatcher([
@@ -220,11 +220,11 @@ class OpenCLRenderer(CStyleLanguage):
   string_rewrite = PatternMatcher([
     (UPat(UOps.BITCAST, name="x"), lambda r,x: f"as_{r.render_dtype(x.dtype)}({r[x.src[0]]})"),
     # load/store image (OpenCL)
-    (UPat(UOps.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf'), UPat.var('idx', dtypes.int.vec(2)), UPat.var("var"), UPat.var("gate"))),
+    (UPat(UOps.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2))), UPat.var("var"), UPat.var("gate"))),
       lambda r,buf,idx,var,gate: f"({r[gate]}?read_imagef({r[buf]}, smp, {r[idx]}):{r[var]})"),
-    (UPat(UOps.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf'), UPat.var('idx', dtypes.int.vec(2)))),
+    (UPat(UOps.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2))),)),
       lambda r,buf,idx: f"read_imagef({r[buf]}, smp, {r[idx]})"),
-    (UPat(UOps.STORE, src=(UPat.var('buf'), UPat.var('idx', dtypes.int.vec(2)), UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
+    (UPat(UOps.STORE, src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2))), UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
       lambda r,buf,idx,var: f"write_imagef({r[buf]}, {r[idx]}, {r[var]});"),
   ]) + base_rewrite
 
