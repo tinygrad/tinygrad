@@ -27,8 +27,8 @@ base_rewrite = PatternMatcher([
   # const
   (UPat(UOps.CONST, arg=math.inf), lambda r: r.infinity),
   (UPat(UOps.CONST, arg=-math.inf), lambda r: "-"+r.infinity),
-  (UPat(UOps.CONST, dtype=dtypes.double, name="x"), lambda r,x: f"{x.arg}" if not math.isnan(x.arg) else r.nan),
-  (UPat(UOps.CONST, dtype=dtypes.float, name="x"), lambda r,x: f"{x.arg}f" if not math.isnan(x.arg) else r.nan),
+  (UPat(UOps.CONST, dtype=dtypes.floats, name="x"), lambda r,x: r.nan if math.isnan(x.arg) else None),
+  (UPat(UOps.CONST, dtype=dtypes.float, name="x"), lambda r,x: f"{x.arg}f"),
   (UPat(UOps.CONST, dtype=dtypes.int64, name="x"), lambda r,x: f"{x.arg}ll"),
   (UPat(UOps.CONST, dtype=dtypes.uint64, name="x"), lambda r,x: f"{x.arg}ull"),
   (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda r,x: f"{x.arg}u"),

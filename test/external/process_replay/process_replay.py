@@ -29,7 +29,7 @@ if REF == "master": SKIP_PROCESS_REPLAY = True
 # *** recreators
 
 def recreate_sched(sink:UOp, ctx:ScheduleItemContext) -> UOp: return full_ast_rewrite(sink, ctx)
-def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str) -> str:
+def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str, _) -> str:
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)
   # NOTE: replay with the captured renderer, not the one in master

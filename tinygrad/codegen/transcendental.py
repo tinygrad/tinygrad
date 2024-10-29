@@ -21,15 +21,6 @@ def significand_bits(d:DType) -> int: return dtypes.finfo(d)[1]
 def exponent_bias(d:DType) -> int: return {dtypes.float64: 1023, dtypes.float32: 127, dtypes.float16: 15}[d]
 def exponent_mask(d:DType) -> int: return {dtypes.float64: 2047, dtypes.float32: 255, dtypes.float16: 31}[d]
 
-def float_to_bits(d:UOp) -> UOp:
-  assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
-  cast_to = {dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[d.dtype]
-  return d.bitcast(cast_to)
-
-def bits_to_float(d:UOp, float_dtype:DType) -> UOp:
-  assert d.dtype in [dtypes.uint64, dtypes.uint32, dtypes.uint16]
-  cast_to = {dtypes.uint64: dtypes.float64, dtypes.uint32: dtypes.float32, dtypes.uint16: float_dtype}[d.dtype]
-  return d.bitcast(cast_to)
 # **** utils ****
 def shr(x:UOp, y:int) -> UOp: return x // (2**y)
 def shl(x:UOp, y:int) -> UOp: return x * (2**y)
@@ -72,11 +63,11 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
   m1 = {dtypes.float64: 0x000FFFFFFFFFFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3800}[v.dtype]
-  bits = float_to_bits(v)
+  bits = v.bitcast({dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[v.dtype])
   exponent = shr(bits, significand_bits(v.dtype)) & exponent_mask(v.dtype)
   exponent_zero = exponent.ne(0)
   # Set the exponent bits appropriately to normalize the mantissa into the range of [0.5, 1.0).
-  result_f = bits_to_float((bits & m1) | m2, v.dtype)
+  result_f = ((bits & m1) | m2).bitcast(v.dtype)
   value = exponent_zero.where(result_f, v)
   exp = exponent - exponent_bias(v.dtype) + 1
   exp = exponent_zero.where(exp, exp.const_like(0))
@@ -242,13 +233,13 @@ def xexp2(d:UOp) -> UOp:
                   0.6931471805599452862e+0, 0.1000000000000000000e+1])
   else: u = polyN(s, [0.1535920892e-3, 0.1339262701e-2, 0.9618384764e-2, 0.5550347269e-1, 0.2402264476e+0, 0.6931471825e+0, 1.0])
   u = ldexp2k(u, q) # u*2^q
-  upper, lower = {dtypes.float64: (1024, -2000), dtypes.float32: (128, -150), dtypes.float16: (23, -22)}[x.dtype]
+  upper, lower = {dtypes.float64: (1024, -2000), dtypes.float32: (128, -150), dtypes.float16: (23, -22)}[d.dtype]
   # Replace x >= upper with +inf
-  u = x.ge(upper).where(x.const_like(math.inf), u)
+  u = d.ge(upper).where(d.const_like(math.inf), u)
   # Replace x <= lower with zero.
-  u = x.lt(lower).where(x.const_like(0.0), u)
-  # exp2(Inf) = Inf, exp2(-Inf) = 0, exp2(NaN) = NaN
-  return _lazy_map_numbers(d, d.const_like(math.inf), d.const_like(0.0), d.const_like(math.nan), u)
+  u = d.lt(lower).where(d.const_like(0.0), u)
+  # exp2(NaN) = NaN
+  return d.ne(d).where(d.const_like(math.nan), u)
 
 def xlog2(d:UOp) -> UOp:
   """
@@ -289,7 +280,7 @@ def xlog2(d:UOp) -> UOp:
   # log2_zero = the value of unmasked xlog2(0.0).
   log2_zero = {dtypes.float64: -1087, dtypes.float32: -191, dtypes.float16: -79, None: -math.inf}[d.dtype]
   r = r.ne(log2_zero).where(r, r.const_like(-math.inf))
-  # log(NaN) = NaN, using for all real number x, either of x < Inf, x == Inf becomes True.
-  r = d_orig.lt(math.inf).where(r, d_orig.ne(math.inf).where(d.const_like(math.nan), d))
-  # log(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.
+  # log2(NaN) = NaN
+  r = d_orig.ne(d_orig).where(r.const_like(math.nan), r)
+  # log2(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.
   return d_orig.recip().ne(-math.inf).where(r, r.const_like(-math.inf))

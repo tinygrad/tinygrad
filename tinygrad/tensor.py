@@ -58,12 +58,10 @@ def _fromnp(x: 'np.ndarray') -> LazyBuffer:  # type: ignore [name-defined] # noq
   return ret
 
 def get_shape(x) -> Tuple[int, ...]:
-  if not hasattr(x, "__len__") or not hasattr(x, "__getitem__") or isinstance(x, str): return ()
-  if (aapi := (hasattr(x, "shape") and x.shape == ())): return ()
-  subs = [get_shape(xi) for xi in x]
-  if not all_same(subs): raise ValueError(f"inhomogeneous shape from {x}")
-  slen = 1 if aapi else len(subs)
-  return (slen,) + (subs[0] if subs else ())
+  # NOTE: str is special because __getitem__ on a str is still a str
+  if not hasattr(x, "__len__") or not hasattr(x, "__getitem__") or isinstance(x, str) or (hasattr(x, "shape") and x.shape == ()): return ()
+  if not all_same(subs:=[get_shape(xi) for xi in x]): raise ValueError(f"inhomogeneous shape from {x}")
+  return (len(subs),) + (subs[0] if subs else ())
 
 def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> LazyBuffer:
   if isinstance(x, bytes): ret, data = LazyBuffer.metaop(MetaOps.EMPTY, (len(x)//dtype.itemsize,), dtype, "PYTHON"), x
