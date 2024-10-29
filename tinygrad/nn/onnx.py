@@ -46,7 +46,8 @@ def parse_buffer(inp: TensorProto) -> Tensor:
   if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
     return Tensor(dat, dtype=parse_dtype(inp.data_type), requires_grad=False).reshape(tuple(inp.dims))
   if len(inp.raw_data) > 0:
-    return Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).copy().reshape(tuple(inp.dims)), requires_grad=False)
+    return Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).copy().reshape(tuple(inp.dims)),
+                  dtype=parse_dtype(inp.data_type), requires_grad=False)
   raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
 
 # src: onnx/onnx_ml_pb2.pyi

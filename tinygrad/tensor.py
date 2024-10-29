@@ -1369,7 +1369,7 @@ class Tensor:
     ```
     """
     if mode not in {"constant", "reflect", "replicate", "circular"}: raise ValueError(f"{mode=} is not supported")
-    # padding_X (left, right, top, bottom, ...) -> padding_X (..., (top, bottom), (left, right))
+    # padding (left, right, top, bottom, ...) -> padding_X (..., (top, bottom), (left, right))
     X, pX = self, ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2]))
     pads, shrinks = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX), tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, X.shape))
     if mode == "constant": return X.shrink(shrinks).pad(pads, value)
