@@ -92,11 +92,10 @@ class LLVMRenderer(Renderer):
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
       if uop is UOps.STORE:
         idx = bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True)
-        element = cast(bb, lvars[src[2]], src[2].dtype, src[0].dtype)
         if len(src) > 3:
-          with bb[-1].if_then(lvars[src[3]]): bb[-1].store(element, idx)
+          with bb[-1].if_then(lvars[src[3]]): bb[-1].store(lvars[src[2]], idx)
         else:
-          bb[-1].store(element, idx)
+          bb[-1].store(lvars[src[2]], idx)
       elif uop is UOps.ENDRANGE:
         loop_entry_bb, phis = loop_blocks.pop()
         idx_p1 = bb[-1].add(lvars[src[0]], ir.Constant(ir.IntType(32), 1))
