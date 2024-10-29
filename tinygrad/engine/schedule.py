@@ -72,7 +72,7 @@ def to_uop(buf:LazyBuffer, outputs:List[LazyBuffer], ctx:ScheduleContext, metada
   elif buf.op is UnaryOps.CAST: ret = UOp(UOps.CAST, dtype, src)
   elif buf.op is UnaryOps.BITCAST: ret = UOp(UOps.BITCAST, dtype, src)
   else: ret = UOp(UOps.ALU, dtype, src, buf.op)
-  cache[buf] = ret
+  cache[buf] = ret = UOp(UOps.LOAD, dtype, (ubuf, buf.st.to_uop(), UOp.store(ubuf, ShapeTracker.from_shape(buf.shape).to_uop(), ret)))
   if buf.metadata is not None: metadata[ubuf] = buf.metadata
   return ret
 
@@ -190,13 +190,27 @@ to_si = PatternMatcher([
   (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda _,x: x),
 ])
 
+# ** fusion
+
+lazy = PatternMatcher([
+  (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat.var("v"))), lambda b,v: v),
+])
+
+multioutput = PatternMatcher([
+  (UPat.load(UPat.var("b"), UPat()), lambda stores,b: stores.get(b)),
+])
+
 def full_ast_rewrite(pre:UOp, ctx:ScheduleItemContext) -> UOp:
+  # fuse and fold store -> loads
+  sink = graph_rewrite(pre, lazy)
+  # fuse multi output
+  if len(sink.src) > 1: sink = graph_rewrite(sink, multioutput, {x.src[0]:x.src[2] for x in sink.src})
   # assert cyclic dependency
-  for b,reads in itertools.groupby((x for x in pre.sparents if x.op in {UOps.PRELOAD,UOps.LOAD} and x.src[0] in ctx.assigned), key=lambda x:x.src[0]):
-    if not all_same([x.op for x in reads]):
+  for b,ops in itertools.groupby((x for x in sink.sparents if x.op in {UOps.PRELOAD,UOps.LOAD} and x.src[0] in ctx.assigned), key=lambda x:x.src[0]):
+    if not all_same([x.op for x in ops]):
       raise RuntimeError(f"cycle detected in kernel.\nhelp: use .contiguous() to break the part loading pre-assign {b} into a different kernel.")
   # do movementops
-  sink = graph_rewrite(graph_rewrite(pre, view_left), view_right)
+  sink = graph_rewrite(graph_rewrite(sink, view_left), view_right)
   # convert to AST
   sink = graph_rewrite(graph_rewrite(sink, to_si, ctx), append_bufs, ctx)
   # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
