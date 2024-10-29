@@ -1349,10 +1349,11 @@ class Tensor:
     dim = self._resolve_dim(dim, outer=True)
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
-  def pad2d(self, padding:Sequence[int], value:float=0.0) -> Tensor:
+  def pad2d(self, padding:Sequence[int], value:float=0.0, mode:str="constant") -> Tensor:
     """
-    Returns a tensor that pads the last two axes specified by `padding` (padding_left, padding_right, padding_top, padding_bottom).
-    If `value` is specified, the tensor is padded with `value` instead of `0.0`.
+    Returns a tensor that pads from the last axis specified by `padding` (padding_left, padding_right, padding_top, padding_bottom, ...).
+    The padding modes is selected with `mode` which supports 'constant', 'reflect', 'replicate' and 'circular'
+    If 'constant' is selected as `mode` and `value` is specified, the tensor is padded with `value` instead of `0.0`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(9).reshape(1, 1, 3, 3)
@@ -1361,11 +1362,33 @@ class Tensor:
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.pad2d((1, 1, 2, 0), value=-float("inf")).numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.pad2d((2, 2, 2, 0), mode="reflect").numpy())
+    ```
     """
-    pads = tuple((smax(p0, 0), smax(p1, 0)) for p0, p1 in zip(padding[::2], padding[1::2]))[::-1]
-    padded = self.pad((None,) * (self.ndim - len(padding) // 2) + tuple(pads), value=value)
-    shrink = tuple((-smin(p0, 0), smin(p1 + s, s)) for p0, p1, s in zip(padding[::2], padding[1::2], padded.shape[::-1]))[::-1]
-    return padded.shrink((None,) * (self.ndim - len(padding) // 2) + shrink)
+    if mode not in {"constant", "reflect", "replicate", "circular"}: raise ValueError(f"{mode=} is not supported")
+    # padding (left, right, top, bottom, ...) -> padding_X (..., (top, bottom), (left, right))
+    X, pX = self, ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2]))
+    pads, shrinks = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX), tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, X.shape))
+    if mode == "constant": return X.shrink(shrinks).pad(pads, value)
+    if mode == "circular":
+      if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, X.shape)): raise RuntimeError('Padding value causes wrapping around more than once.')
+      # first crop
+      X = X.shrink(shrinks)
+      cropped, X = X.shape, X.repeat(tuple(int(pB > 0) + int(pA > 0) + 1 for pB, pA in pads))
+      # shrink to circular padded shape if repeated shape is larger than circular padded shape else pad 0 to get to padded shape
+      X = X.shrink(tuple((smax(csh-pB, 0) if pB>0 else 0, xsh - smax(csh-pA, 0) if pA>0 else xsh) for (pB,pA),csh,xsh in zip(pX, cropped, X.shape)))
+      return X.pad(tuple((smax(pB-csh, 0), smax(pA-csh, 0)) for (pB,pA),csh in zip(pads,cropped)))
+    for d,(pB,pA) in enumerate(pads):
+      if mode == "reflect":
+        if pB >= (s:=X.shape[d]) or pA>=s: raise RuntimeError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
+        xB = X[[slice(pB,0,-1) if i == d else slice(None) for i in range(X.ndim)]] if pB else None
+        xA = X[[slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1) if i==d else slice(None) for i in range(X.ndim)]] if pA else None
+      if mode == "replicate":
+        xB = X[[slice(None,1) if i==d else slice(None) for i in range(X.ndim)]].expand([pB if i==d else None for i in range(X.ndim)]) if pB else None
+        xA = X[[slice(-1,None) if i==d else slice(None) for i in range(X.ndim)]].expand([pA if i==d else None for i in range(X.ndim)]) if pA else None
+      X = Tensor.cat(*(X_ for X_ in (xB, X, xA) if X_ is not None), dim=d)
+    return X.shrink(tuple((-smin(pB,0), smin(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
 
   @property
   def T(self) -> Tensor:
