@@ -350,8 +350,8 @@ def do_expand(root:UOp):
         new_srcs.append(src.src[0].gep(tuple(lst)))
     else:
       # non-EXPAND input
-      if (root.op in {UOps.LOAD, UOps.STORE} and i == 0) or (root.op is UOps.REDUCE and i != 0):
-        # for the first arg of LOAD/STORE and the RANGE args of REDUCE, just pass them through ignoring EXPANDS
+      if (root.op is UOps.INDEX and i == 0) or (root.op is UOps.REDUCE and i != 0):
+        # for the first arg of INDEX and the RANGE args of REDUCE, just pass them through ignoring EXPANDS
         new_srcs.append(src)
       elif src.dtype.count > 1:
         # put any input dtype > 1 grouped together
@@ -366,7 +366,7 @@ def do_expand(root:UOp):
     assert root.dtype.count == 1
     # is this right?
     new_arg = tuple(range(root.arg[0], new_srcs[0].dtype.count, new_srcs[0].dtype.count // expand_sz))
-  nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz), tuple(new_srcs), new_arg)
+  nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz) if root.op is not UOps.INDEX else root.dtype, tuple(new_srcs), new_arg)
   return UOp(UOps.EXPAND, root.dtype, (nsrc,), expand_args)
 
 acc_number = 0
@@ -407,7 +407,7 @@ def create_gate(root:UOp) -> Optional[UOp]:
     if u.op is UOps.LOAD and u.src[-1].op is UOps.BARRIER:
       return UOp(u.op, u.dtype, u.src[:-1]+(UOp(UOps.IF, dtypes.void, (gate, u.src[-1])),), u.arg)
     return u if (replace_source:=tuple(_gate_srcs(x, gate) for x in u.src)) == u.src else UOp(u.op, u.dtype, replace_source, u.arg)
-  return None if len(root.src) == 3 or (ret:=_gate_srcs(root, root.src[3])) is root else ret
+  return None if len(root.src) == 2 or (ret:=_gate_srcs(root, root.src[2])) is root else ret
 
 expander = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
@@ -418,7 +418,7 @@ expander = PatternMatcher([
   (UPat(UOps.EXPAND, name="outer", src=(UPat(UOps.EXPAND, name="inner"),)),
    lambda outer, inner: UOp(UOps.EXPAND, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
   # do expansion
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE, UOps.INDEX,
          UOps.VECTORIZE, UOps.REDUCE, UOps.IF), name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
   (UPat(UOps.CONTRACT, name="con"), do_contract),
   # remove EXPANDs from SINK
@@ -436,12 +436,13 @@ expander = PatternMatcher([
 ])
 
 def no_vectorized_load_store(ls:UOp):
-  idx = ls.src[1]
-  if idx.dtype.count == 1: return None
+  idx = ls.src[0]
+  if idx.src[1].dtype.count == 1: return None
   # ugh, the meaning of a dtype.count idx is overloaded
-  if ls.op is UOps.LOAD and idx.dtype.count != ls.dtype.count: return None
-  if ls.op is UOps.STORE and idx.dtype.count != ls.src[2].dtype.count: return None
-  tv = [UOp(ls.op, ls.dtype.scalar(), (ls.src[0],) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.dtype.count)]
+  #if ls.op is UOps.LOAD and idx.dtype.count != ls.dtype.count: return None
+  #if ls.op is UOps.STORE and idx.dtype.count != ls.src[2].dtype.count: return None
+  tv = [UOp(ls.op, ls.dtype.scalar(),
+            (idx.src[0].index(idx.src[1].gep(i)),) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.src[1].dtype.count)]
   return UOp(UOps.VECTORIZE, ls.dtype, tuple(tv))
 
 def no_vectorized_acc(acc:UOp):
@@ -516,7 +517,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
     sink = graph_rewrite(sink, sym+expander)
     if getenv("DO_REDUCE", 1):
       sink = graph_rewrite(sink, sym+just_reduce)
-      sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
+      #sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
+      sink = graph_rewrite(sink, sym+devectorize)
       sink = graph_rewrite(sink, sym+reducer)
       sink = graph_rewrite(sink, sym+indexing+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
 
