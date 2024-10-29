@@ -99,7 +99,7 @@ def _broadcast_shape(*shapes:Tuple[sint, ...]) -> Tuple[sint, ...]:
 
 ReductionStr = Literal["mean", "sum", "none"]
 
-class Tensor(SimpleMathTrait):
+class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
@@ -1137,16 +1137,16 @@ class Tensor(SimpleMathTrait):
 
       # for advanced setitem, returns whole tensor with indices replaced
       if v is not None:
-        v = v.cast(self.dtype)._broadcast_to(_broadcast_shape(ret.shape, v.shape))
+        vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(ret.shape, v.shape))
         # add back reduced dims from sum
-        for dim in sum_axis: v = v.unsqueeze(dim)
+        for dim in sum_axis: vb = vb.unsqueeze(dim)
         # axis to be reduced to match self.shape
         axis = tuple(range(first_dim, first_dim + len(big_shape)))
         # apply mask to v(broadcasted) and reduce such that if v contains repeated indices the last one remains
-        v = v * mask
-        for dim in axis: v = functools.reduce(lambda x,y: y.where(y, x), v.split(1, dim))
+        vb = vb * mask
+        for dim in axis: vb = functools.reduce(lambda x,y: y.where(y, x), vb.split(1, dim))
         # reduce mask and select from v(get rid of extra dims from reduce) for each True element in mask else select from self
-        ret = mask.any(axis).where(v.squeeze(), self)
+        ret = mask.any(axis).where(vb.squeeze(), self)
 
     return ret
 
@@ -3017,6 +3017,9 @@ class Tensor(SimpleMathTrait):
   def masked_fill(self:Tensor, mask:Tensor, value:Union[Tensor, ConstType]): return mask.where(value, self)
 
   # ***** op wrappers *****
+
+  def __lshift__(self, x) -> Tensor: return self.lshift(x)
+  def __rshift__(self, x) -> Tensor: return self.rshift(x)
 
   def __pow__(self, x) -> Tensor: return self.pow(x)
   def __matmul__(self, x) -> Tensor: return self.matmul(x)

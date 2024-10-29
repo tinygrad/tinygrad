@@ -44,7 +44,6 @@ class SimpleMathTrait:
   # great functions you get!
   def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
   def _binop(self, op, x, reverse): return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
-
   def logical_not(self): return self.ne(True)
   def neg(self):
     dtype: Optional[DType] = getattr(self, 'dtype', None)
@@ -55,8 +54,6 @@ class SimpleMathTrait:
   def bitwise_and(self, x, reverse=False): return self._binop(BinaryOps.AND, x, reverse)
   def bitwise_or(self, x, reverse=False): return self._binop(BinaryOps.OR, x, reverse)
   def xor(self, x, reverse=False): return self._binop(BinaryOps.XOR, x, reverse)
-  def lshift(self, x, reverse=False): return self._binop(BinaryOps.SHL, x, reverse)
-  def rshift(self, x, reverse=False): return self._binop(BinaryOps.SHR, x, reverse)
   def idiv(self, x, reverse=False): return self._binop(BinaryOps.IDIV, x, reverse)
   def sub(self, x, reverse=False): return self.ufix(x).alu(BinaryOps.ADD, -self) if reverse else self.alu(BinaryOps.ADD, self.ufix(-x))
   def div(self, x, reverse=False): return (self.ufix(x)*self.alu(UnaryOps.RECIP)) if reverse else (self*self.ufix(x).alu(UnaryOps.RECIP))
@@ -71,8 +68,6 @@ class SimpleMathTrait:
   def __and__(self, x): return self.bitwise_and(x)
   def __or__(self, x): return self.bitwise_or(x)
   def __xor__(self, x): return self.xor(x)
-  def __lshift__(self, x): return self.lshift(x)
-  def __rshift__(self, x): return self.rshift(x)
 
   def __radd__(self, x): return self.add(x, True)
   def __rsub__(self, x): return self.sub(x, True)
@@ -82,8 +77,6 @@ class SimpleMathTrait:
   def __rand__(self, x): return self.bitwise_and(x, True)
   def __ror__(self, x): return self.bitwise_or(x, True)
   def __rxor__(self, x): return self.xor(x, True)
-  def __rlshift__(self, x): return self.lshift(x, True)
-  def __rrshift__(self, x): return self.rshift(x, True)
 
   def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
   def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
@@ -99,7 +92,15 @@ class SimpleMathTrait:
   def __le__(self, x): return self.le(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
-class MathTrait(SimpleMathTrait):
+class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
+  # TODO: move to Tensor when new backward is done
+  def lshift(self, x, reverse=False): return self._binop(BinaryOps.SHL, x, reverse)
+  def rshift(self, x, reverse=False): return self._binop(BinaryOps.SHR, x, reverse)
+  def __lshift__(self, x): return self.lshift(x)
+  def __rshift__(self, x): return self.rshift(x)
+  def __rlshift__(self, x): return self.lshift(x, True)
+  def __rrshift__(self, x): return self.rshift(x, True)
+
   # not in Tensor
   def __mod__(self, x): return self.alu(BinaryOps.MOD, self.ufix(x))
   def __rmod__(self, x): return self.ufix(x).alu(BinaryOps.MOD, self)
