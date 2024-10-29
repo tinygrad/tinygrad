@@ -212,9 +212,6 @@ class View:
           bad = True
           break
         elif len(term) > 1:
-          if not all_int([t[1] for t in term]):
-            bad = True
-            continue
           idx = max(range(len(term)), key=functools.partial(lambda t,i: abs(cast(int, t[i][1])), term))
           d1, s1 = term[idx]
           next_s1 = vm1.shape[d1] * s1
