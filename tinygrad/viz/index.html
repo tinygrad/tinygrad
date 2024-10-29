@@ -244,12 +244,8 @@
 
   // **** extra helpers
   const toPath = ([fp, lineno]) => `${fp.replaceAll("\\", "/").split("/").pop()}:${lineno}`;
-
-  function vsCodeOpener(parts) {
-    const linkElement = Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
-      href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" })
-    return linkElement;
-  }
+  const vsCodeOpener = (parts) => Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
+      href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
 
   // **** main loop
   var ret = {};
