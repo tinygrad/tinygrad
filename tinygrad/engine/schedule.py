@@ -163,6 +163,7 @@ view_right = merge_views+PatternMatcher([
 class ScheduleItemContext:
   var_vals: Dict[Variable, int]
   assigned: Set[UOp]
+  buf_metadata: Dict[UOp, Metadata]
   sts: Set[ShapeTracker] = field(default_factory=set)
   bufs: List[UOp] = field(default_factory=list)
   assign_preloads: List[UOp] = field(default_factory=list)
@@ -193,8 +194,11 @@ to_si = PatternMatcher([
 
 # ** fusion
 
+def _fold_load(ctx:ScheduleItemContext, b:UOp, v:UOp) -> UOp:
+  if (m:=ctx.buf_metadata.get(b)) is not None: ctx.metadata[m] = None
+  return v
 lazy = PatternMatcher([
-  (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat.var("v"))), lambda b,v: v),
+  (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat.var("v"))), _fold_load),
 ])
 
 multioutput = PatternMatcher([
@@ -203,7 +207,7 @@ multioutput = PatternMatcher([
 
 def full_ast_rewrite(pre:UOp, ctx:ScheduleItemContext) -> UOp:
   # fuse and fold store -> loads
-  sink = graph_rewrite(pre, lazy)
+  sink = graph_rewrite(pre, lazy, ctx)
   # fuse multi output
   if len(sink.src) > 1: sink = graph_rewrite(sink, multioutput, {x.src[0]:x.src[2] for x in sink.src})
   # assert cyclic dependency
@@ -220,7 +224,7 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleItemContext) -> UOp:
         and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in sink.sparents if x.op is UOps.LOAD and x.src[0] in assign_targets):
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  PROCESS_REPLAY_CAPTURE.append((pre, ScheduleItemContext(ctx.var_vals, ctx.assigned), sink))
+  PROCESS_REPLAY_CAPTURE.append((pre, ScheduleItemContext(ctx.var_vals, ctx.assigned, ctx.buf_metadata), sink))
   return sink
 
 PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, ScheduleItemContext, UOp]] = []
@@ -243,7 +247,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     to_store = tuple(to_uop(out, outs, ctx, cache) for out in outs)
     sink = UOp(UOps.SINK, src=tuple(UOp.store(ctx.buf_uops[x.buffer], ShapeTracker.from_shape(x.shape).to_uop(), u) for x,u in zip(outs,to_store)))
     si_ctx = ScheduleItemContext(ctx.var_vals, {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None},
-                                 metadata={x:None for x in ctx.buf_metadata.values()})
+                                 ctx.buf_metadata, metadata={m:None for x in to_store if (m:=ctx.buf_metadata.get(x.src[0]))})
     small_graphs.append((full_ast_rewrite(sink, si_ctx), si_ctx))
 
   # do BFS

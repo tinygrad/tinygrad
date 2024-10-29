@@ -738,9 +738,9 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(out.lazydata.srcs[1].metadata.name, "sigmoid")
     s = create_schedule([out.lazydata])
     self.assertEqual(len(s[-1].metadata), 3)
-    self.assertEqual(s[-1].metadata[0].name, "relu")
-    self.assertEqual(s[-1].metadata[1].name, "sigmoid")
-    self.assertEqual(s[-1].metadata[2].name, "__mul__")
+    self.assertEqual(s[-1].metadata[0].name, "__mul__")
+    self.assertEqual(s[-1].metadata[1].name, "relu")
+    self.assertEqual(s[-1].metadata[2].name, "sigmoid")
 
   def test_complex_backward(self):
     _METADATA.set(None)
@@ -757,7 +757,7 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(len(s[-1].metadata), 3)
     self.assertEqual(s[-1].metadata[0].name, "sigmoid")
     self.assertEqual(s[-1].metadata[1].name, "sigmoid")
-    self.assertTrue(s[-1].metadata[1].backward)
+    self.assertTrue(s[-1].metadata[0].backward)
     self.assertEqual(s[-1].metadata[2].name, "relu")
 
 if __name__ == '__main__':
