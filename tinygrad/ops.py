@@ -36,50 +36,75 @@ class MetaOps(FastEnum):
   EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
-class MathTrait:
+class SimpleMathTrait:
   # required to implement
   def alu(self:T, arg:Union[UnaryOps, BinaryOps, TernaryOps], *src) -> T: raise NotImplementedError
   def const_like(self, b:ConstType|Variable|Tuple[ConstType]): raise NotImplementedError
 
   # great functions you get!
   def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
+  def _binop(self, op, x, reverse): return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
   def logical_not(self): return self.ne(True)
-  def __neg__(self):
-    dtype = getattr(self, 'dtype', None)
+  def neg(self):
+    dtype: Optional[DType] = getattr(self, 'dtype', None)
     assert dtype is not None, "MathTraits __neg__ requires a dtype"
     return self.logical_not() if dtype.scalar() == dtypes.bool else self*(-1)
-  def __add__(self, x): return self.alu(BinaryOps.ADD, self.ufix(x))
-  def __radd__(self, x): return self.ufix(x).alu(BinaryOps.ADD, self)
-  def __sub__(self, x): return self.alu(BinaryOps.ADD, self.ufix(-x))
-  def __rsub__(self, x): return self.ufix(x).alu(BinaryOps.ADD, -self)
-  def __mul__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x))
-  def __rmul__(self, x): return self.ufix(x).alu(BinaryOps.MUL, self)
-  def __lshift__(self, x): return self.alu(BinaryOps.SHL, self.ufix(x))
-  def __rlshift__(self, x): return self.ufix(x).alu(BinaryOps.SHL, self)
-  def __rshift__(self, x): return self.alu(BinaryOps.SHR, self.ufix(x))
-  def __rrshift__(self, x): return self.ufix(x).alu(BinaryOps.SHR, self)
-  def __floordiv__(self, x): return self.alu(BinaryOps.IDIV, self.ufix(x))
-  def __rfloordiv__(self, x): return self.ufix(x).alu(BinaryOps.IDIV, self)
-  def __truediv__(self, x): return self.alu(BinaryOps.MUL, self.ufix(x).alu(UnaryOps.RECIP))
-  def __rtruediv__(self, x): return self.ufix(x).alu(BinaryOps.MUL, self.alu(UnaryOps.RECIP))
-  def __mod__(self, x): return self.alu(BinaryOps.MOD, self.ufix(x))
-  def __rmod__(self, x): return self.ufix(x).alu(BinaryOps.MOD, self)
-  def __xor__(self, x): return self.alu(BinaryOps.XOR, self.ufix(x))
-  def __and__(self, x): return self.alu(BinaryOps.AND, self.ufix(x))
-  def __rand__(self, x): return self.ufix(x).alu(BinaryOps.AND, self)
-  def __or__(self, x): return self.alu(BinaryOps.OR, self.ufix(x))
-  def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
-  def eq(self, x): return self.ne(x).logical_not()
+  def add(self, x, reverse=False): return self._binop(BinaryOps.ADD, x, reverse)
+  def mul(self, x, reverse=False): return self._binop(BinaryOps.MUL, x, reverse)
+  def bitwise_and(self, x, reverse=False): return self._binop(BinaryOps.AND, x, reverse)
+  def bitwise_or(self, x, reverse=False): return self._binop(BinaryOps.OR, x, reverse)
+  def xor(self, x, reverse=False): return self._binop(BinaryOps.XOR, x, reverse)
+  def idiv(self, x, reverse=False): return self._binop(BinaryOps.IDIV, x, reverse)
+  def sub(self, x, reverse=False): return self.ufix(x).alu(BinaryOps.ADD, -self) if reverse else self.alu(BinaryOps.ADD, self.ufix(-x))
+  def div(self, x, reverse=False): return (self.ufix(x)*self.alu(UnaryOps.RECIP)) if reverse else (self*self.ufix(x).alu(UnaryOps.RECIP))
+
+  def __neg__(self): return self.neg()
+
+  def __add__(self, x): return self.add(x)
+  def __sub__(self, x): return self.sub(x)
+  def __mul__(self, x): return self.mul(x)
+  def __truediv__(self, x): return self.div(x)
+  def __floordiv__(self, x): return self.idiv(x)
+  def __and__(self, x): return self.bitwise_and(x)
+  def __or__(self, x): return self.bitwise_or(x)
+  def __xor__(self, x): return self.xor(x)
+
+  def __radd__(self, x): return self.add(x, True)
+  def __rsub__(self, x): return self.sub(x, True)
+  def __rmul__(self, x): return self.mul(x, True)
+  def __rtruediv__(self, x): return self.div(x, True)
+  def __rfloordiv__(self, x): return self.idiv(x, True)
+  def __rand__(self, x): return self.bitwise_and(x, True)
+  def __ror__(self, x): return self.bitwise_or(x, True)
+  def __rxor__(self, x): return self.xor(x, True)
+
   def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
   def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
+  def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
   def ge(self, x): return self.lt(x).logical_not()
   def le(self, x): return self.gt(x).logical_not()
-  # NOTE: __eq__ can't be overridden, and means the same thing as is
-  def __ne__(self, x): return self.ne(x)
+  def eq(self, x): return self.ne(x).logical_not()
+
   def __lt__(self, x): return self.lt(x)
   def __gt__(self, x): return self.gt(x)
+  def __ne__(self, x): return self.ne(x)
   def __ge__(self, x): return self.ge(x)
   def __le__(self, x): return self.le(x)
+  # NOTE: __eq__ isn't overridden, and means the same thing as is by default
+
+class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
+  # TODO: move to Tensor when new backward is done
+  def lshift(self, x, reverse=False): return self._binop(BinaryOps.SHL, x, reverse)
+  def rshift(self, x, reverse=False): return self._binop(BinaryOps.SHR, x, reverse)
+  def __lshift__(self, x): return self.lshift(x)
+  def __rshift__(self, x): return self.rshift(x)
+  def __rlshift__(self, x): return self.lshift(x, True)
+  def __rrshift__(self, x): return self.rshift(x, True)
+
+  # not in Tensor
+  def __mod__(self, x): return self.alu(BinaryOps.MOD, self.ufix(x))
+  def __rmod__(self, x): return self.ufix(x).alu(BinaryOps.MOD, self)
+
   def max(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
