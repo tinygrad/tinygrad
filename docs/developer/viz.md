@@ -10,10 +10,11 @@ VIZ is a UI for viewing these graph rewrites.
 
 ## Quickstart
 
-All you need is run tinygrad with `VIZ=1`! For example, it can show all the graph rewrites for an add kernel:
+All you need is run tinygrad with `VIZ=1`!
 
-NOTE: make sure you use tinygrad master `pip install git+https://github.com/tinygrad/tinygrad.git`!
+NOTE: Make sure you use tinygrad master `pip install git+https://github.com/tinygrad/tinygrad.git`
 
+For example, it can show all the graph rewrites for an add kernel:
 ```py
 from tinygrad import Tensor
 
@@ -22,19 +23,19 @@ b = Tensor.empty(3)
 (a + b).realize()
 ```
 
-The first graph shows we loaded `a` and `b` BUFFERs, used BinaryOps.ADD and stored the result.
+The first graph is a generic (device-agnostic) view of the compute. We load `a` and `b` BUFFERs, use BinaryOps.ADD and STORE the result.
 
 ![viz_1](viz_1.png)
 
-The last graph, after applying graph rewrite rules, is functionally equivalent but specialized to how GPUs render code.
+The last graph, after applying graph rewrite rules, is functionally equivalent but specialized to how GPUs (eg. METAL=1) render code.
 
-See how we're still adding `a` and `b`, but this time using pointers, and the GPU's `SPECIAL` lidx. 
+See how we're still adding `a` and `b`, but this time using pointers, and METAL's `SPECIAL` lidx0.
 
 ![viz_2](viz_2.png)
 
 VIZ displays all graph rewrites using 3 parts:
 
-1. Left sidebar kernel list: Groups rewrites by their kernel name. Rewrites from schedule.py don't belong to a kernel so we categorize them as "unparented".
+1. Left sidebar kernel list: Groups rewrites by the schedule or kernel they belong to.
 2. Middle UOp graph: DAG visualization of all the nodes.
 3. Right sidebar rewrite list: info about what got rewritten.
 
@@ -43,7 +44,7 @@ For example, the third rewrite of kernel E_3 shows 2 graph rewrites. See how the
 ![viz_3](viz_3.png)
 ![viz_4](viz_4.png)
 
-The first rewrite deletes an extra multiply by 1.
+The first rewrite deletes a multiply by 1.
 
 The second rewrite deletes an addition by 0.
 
