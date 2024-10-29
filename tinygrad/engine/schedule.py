@@ -194,20 +194,16 @@ to_si = PatternMatcher([
 # ** fusion
 
 lazy = PatternMatcher([
-  (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat.var("v"))), lambda b,v: v),
+  (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat.var("v"))), lambda _,b,v: v),
 ])
 
-multioutput = PatternMatcher([
-  (UPat.load(UPat.var("b"), UPat()), lambda stores,b: stores.get(b)),
-])
+multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda stores,b: stores.get(b)),])
 
 def full_ast_rewrite(pre:UOp, var_vals:Dict[Variable, int], assigned:Set[UOp], ubuf_metadata:Dict[UOp, Metadata]) -> Tuple[UOp, ScheduleItemContext]:
   metadata = {mx:None for x in pre.sparents if x.op in BUFFER_UOPS and len(x.src) > 2 and (mx:=ubuf_metadata.get(x.src[0]))}
   ctx = ScheduleItemContext(var_vals, assigned, metadata=metadata)
   # fuse and fold store -> loads
-  sink = graph_rewrite(pre, lazy)
-  # fuse multi output
-  if len(sink.src) > 1: sink = graph_rewrite(sink, multioutput, {x.src[0]:x.src[2] for x in sink.src})
+  sink = graph_rewrite(pre, lazy+multioutput if len(pre.src) >1 else lazy, {x.src[0]:x.src[2] for x in pre.src})
   # assert cyclic dependency
   for b,ops in itertools.groupby((x for x in sink.sparents if x.op in {UOps.PRELOAD,UOps.LOAD} and x.src[0] in ctx.assigned), key=lambda x:x.src[0]):
     if not all_same([x.op for x in ops]):
