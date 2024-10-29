@@ -190,7 +190,6 @@ class PythonProgram:
 
 class PythonRenderer(Renderer):
   device = "PYTHON"
-  indexing = True
   def __init__(self):
     if getenv("EMULATE_METAL"): self.device, self.tensor_cores = "METAL", MetalRenderer.tensor_cores
     if getenv("EMULATE_AMD"): self.device, self.tensor_cores = "AMD", AMDRenderer.tensor_cores

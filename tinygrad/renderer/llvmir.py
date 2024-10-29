@@ -52,7 +52,6 @@ class LLVMRenderer(Renderer):
   has_local = False
   has_shared = False
   global_max = None
-  indexing = True
   code_for_op: Dict[Op, Callable] = {
     UnaryOps.RECIP: lambda builder, x, dtype: builder.fdiv(const(1, dtype), x, flags=MFLAGS),
     UnaryOps.SQRT: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.sqrt', [x.type]), [x], fastmath=MFLAGS),

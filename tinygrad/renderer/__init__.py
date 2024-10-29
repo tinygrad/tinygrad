@@ -84,7 +84,6 @@ class Renderer:
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
   code_for_op: Dict[Op, Callable] = {}
-  indexing: bool = False
 
   def __reduce__(self): return self.__class__, ()
   def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")
