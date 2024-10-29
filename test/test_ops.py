@@ -1,11 +1,10 @@
-import time, math, unittest
+import time, math, unittest, functools
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-import functools
 
 if CI:
   import warnings
@@ -452,9 +451,9 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x,y: x//y, forward_only=True, vals=np.array([[5, 6, 7],[1, 2, 3]], dtype=np.int32))
     helper_test_op(None, lambda x: x/2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
     helper_test_op(None, lambda x: x//2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
-    torch_idiv, tiny_idiv = functools.partial(torch.div, rounding_mode="trunc"), functools.partial(Tensor.div, upcast=False)
+    torch_idiv, tiny_idiv = functools.partial(torch.div, rounding_mode="trunc"), Tensor.idiv
     helper_test_op(None, torch_idiv, tiny_idiv, forward_only=True, vals=np.array([[5, -6, 7],[1, 2, 3]], dtype=np.int32))
-    x = Tensor(2**64 - 1, dtype=dtypes.uint64).div(1, upcast=False)
+    x = Tensor(2**64 - 1, dtype=dtypes.uint64).idiv(1)
     np.testing.assert_equal(x.numpy(), 2**64 - 1)
   def test_scalar_div(self):
     helper_test_op([(45,65)], lambda x: x/255)
@@ -605,18 +604,24 @@ class TestOps(unittest.TestCase):
   def test_abs_exact(self):
     helper_test_op(None, torch.abs, Tensor.abs, vals=[[-1.,0,1]])
 
+  @unittest.skipIf(TRANSCENDENTAL and Device.DEFAULT=="AMD", "TODO: remu crashes")
   def test_log(self):
     helper_test_op([(45,65)], torch.log, Tensor.log)
+    helper_test_op(None, torch.log, Tensor.log, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.log, Tensor.log)
   def test_log2(self):
     helper_test_op([(45,65)], torch.log2, Tensor.log2)
+    helper_test_op(None, torch.log2, Tensor.log2, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.log2, Tensor.log2)
 
+  @unittest.skipIf(TRANSCENDENTAL and Device.DEFAULT=="AMD", "TODO: remu crashes")
   def test_exp(self):
     helper_test_op([(45,65)], torch.exp, Tensor.exp)
+    helper_test_op(None, torch.exp, Tensor.exp, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.exp, Tensor.exp)
   def test_exp2(self):
     helper_test_op([(45,65)], torch.exp2, Tensor.exp2)
+    helper_test_op(None, torch.exp2, Tensor.exp2, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.exp2, Tensor.exp2)
 
   def test_sign(self):
@@ -1589,16 +1594,16 @@ class TestOps(unittest.TestCase):
               lambda x,w: torch.nn.functional.conv1d(torch.nn.functional.pad(x, p),w).relu(),
               lambda x,w: Tensor.conv2d(x,w,padding=p).relu())
 
-  def _test_conv2d(self, bs=1, cin=1):
+  def _test_conv2d(self, bs=1, cin=1, cout=6):
     for H in [1,2,3]:
       for W in [1,2,3,5]:
-        for groups in [1,3] if cin == 3 and H == 3 and W == 3 else [1]:
+        for groups in [1,3] if cin == 3 and cout == 6 and H == 3 and W == 3 else [1]:
           with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H, width=W):
-            helper_test_op([(bs,cin,11,7), (6,cin//groups,H,W)],
+            helper_test_op([(bs,cin,5,7), (cout,cin//groups,H,W)],
               lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
               lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), grad_rtol=1e-5)
   def test_conv2d(self): self._test_conv2d(bs=1, cin=3)
-  def test_conv2d_bs_4_cin_3(self): self._test_conv2d(bs=4, cin=3)
+  def test_conv2d_bs_4_cin_3(self): self._test_conv2d(bs=4, cin=3, cout=2)
   def test_conv2d_bs_1_cin_1(self): self._test_conv2d(bs=1, cin=1)
   def test_conv2d_bs_4_cin_1(self): self._test_conv2d(bs=4, cin=1)
 

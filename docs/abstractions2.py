@@ -15,8 +15,8 @@ a = MallocAllocator.alloc(4)
 b = MallocAllocator.alloc(4)
 
 # load in some values (little endian)
-MallocAllocator.copyin(a, bytearray([2,0,0,0]))
-MallocAllocator.copyin(b, bytearray([3,0,0,0]))
+MallocAllocator.copyin(a, memoryview(bytearray([2,0,0,0])))
+MallocAllocator.copyin(b, memoryview(bytearray([3,0,0,0])))
 
 # compile a program to a binary
 lib = ClangCompiler().compile("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
@@ -103,7 +103,7 @@ print(sched[-1].ast)
 run_schedule(sched)
 
 # check the data out
-assert out.realized.as_buffer().cast('I')[0] == 5
+assert out.realized is not None and out.realized.as_buffer().cast('I')[0] == 5
 
 
 print("******** fourth, the Tensor ***********")
