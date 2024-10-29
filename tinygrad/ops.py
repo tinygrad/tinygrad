@@ -36,7 +36,7 @@ class MetaOps(FastEnum):
   EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 
-class MathTrait:
+class SimpleMathTrait:
   # required to implement
   def alu(self:T, arg:Union[UnaryOps, BinaryOps, TernaryOps], *src) -> T: raise NotImplementedError
   def const_like(self, b:ConstType|Variable|Tuple[ConstType]): raise NotImplementedError
@@ -85,22 +85,25 @@ class MathTrait:
   def __rlshift__(self, x): return self.lshift(x, True)
   def __rrshift__(self, x): return self.rshift(x, True)
 
+  def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
+  def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
+  def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
+  def ge(self, x): return self.lt(x).logical_not()
+  def le(self, x): return self.gt(x).logical_not()
+  def eq(self, x): return self.ne(x).logical_not()
+
+  def __lt__(self, x): return self.lt(x)
+  def __gt__(self, x): return self.gt(x)
+  def __ne__(self, x): return self.ne(x)
+  def __ge__(self, x): return self.ge(x)
+  def __le__(self, x): return self.le(x)
+  # NOTE: __eq__ isn't overridden, and means the same thing as is by default
+
+class MathTrait(SimpleMathTrait):
   # not in Tensor
   def __mod__(self, x): return self.alu(BinaryOps.MOD, self.ufix(x))
   def __rmod__(self, x): return self.ufix(x).alu(BinaryOps.MOD, self)
 
-  def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
-  def eq(self, x): return self.ne(x).logical_not()
-  def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
-  def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
-  def ge(self, x): return self.lt(x).logical_not()
-  def le(self, x): return self.gt(x).logical_not()
-  # NOTE: __eq__ can't be overridden, and means the same thing as is
-  def __ne__(self, x): return self.ne(x)
-  def __lt__(self, x): return self.lt(x)
-  def __gt__(self, x): return self.gt(x)
-  def __ge__(self, x): return self.ge(x)
-  def __le__(self, x): return self.le(x)
   def max(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
