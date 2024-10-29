@@ -206,8 +206,8 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleItemContext) -> UOp:
   # fuse multi output
   if len(sink.src) > 1: sink = graph_rewrite(sink, multioutput, {x.src[0]:x.src[2] for x in sink.src})
   # assert cyclic dependency
-  for b,reads in itertools.groupby((x for x in sink.sparents if x.op in {UOps.PRELOAD,UOps.LOAD} and x.src[0] in ctx.assigned), key=lambda x:x.src[0]):
-    if not all_same([x.op for x in reads]):
+  for b,ops in itertools.groupby((x for x in sink.sparents if x.op in {UOps.PRELOAD,UOps.LOAD} and x.src[0] in ctx.assigned), key=lambda x:x.src[0]):
+    if not all_same([x.op for x in ops]):
       raise RuntimeError(f"cycle detected in kernel.\nhelp: use .contiguous() to break the part loading pre-assign {b} into a different kernel.")
   # do movementops
   sink = graph_rewrite(graph_rewrite(sink, view_left), view_right)
