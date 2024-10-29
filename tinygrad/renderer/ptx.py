@@ -33,12 +33,6 @@ asm_for_op: Dict[Op, Callable] = {
     f"@{a} mov.{name} {d}, {b};\n@!{a} mov.{name} {d}, {c};" if name == "pred" else f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
 }
 
-def load_store_ptr_arithmetic(x:UOp, buf:UOp, alu:Optional[UOp]=None, const:Optional[UOp]=None) -> UOp:
-  src = list(x.src)
-  src[0] = buf.cast(dtypes.int64) if alu is None else (buf.cast(dtypes.int64) + alu.cast(dtypes.int64)*buf.dtype.itemsize)
-  src[1] = UOp.const(dtypes.int64, 0 if const is None else const.arg*buf.dtype.itemsize)
-  return x.replace(src=tuple(src))
-
 supports_half: List[Op] = [UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
 ptx_matcher = sym+PatternMatcher([
   # bool CMPNE is XOR, bool CMPLT is XOR+AND (universal makes this slow, this is for renderer only)
@@ -53,7 +47,7 @@ ptx_matcher = sym+PatternMatcher([
    lambda x: UOp(x.op, dtypes.uint8, x.src[0:1] + ((x.src[1].cast(dtypes.uint8),) if len(x.src) >= 3 else ()) + x.src[3:]).cast(dtypes.bool)),
   (UPat(UOps.STORE, src=(UPat(dtype=dtypes.int64), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
    lambda x: UOp(x.op, dtypes.void, x.src[0:1] + (x.src[1].cast(dtypes.uint8),) + x.src[3:])),
-  # load/store use pointer arithmetic
+  # load/store use pointer arithmetic, and the cast does nothing
   (UPat(UOps.INDEX, name="x"), lambda x: x.src[0].cast(dtypes.int64) + x.src[1].cast(dtypes.int64)*x.src[0].dtype.itemsize),
   (UPat(UOps.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) else None),
 ])
@@ -104,9 +98,6 @@ class PTXRenderer(Renderer):
     assert dtype != dtypes.bool
     if gate: return [f"@{gate} ld{ss}.{self.mem_types[dtype]} {dest}, [{loc}+{offset}];", f"@!{gate} mov.b{self.types[dtype][1:]} {dest}, {alt};"]
     return [f"ld{ss}.{self.mem_types[dtype]} {dest}, [{loc}+{offset}];"]
-
-  def render_store(self, loc, val, dtype, gate=None, ss="", offset=0) -> List[str]:
-    return [(f"@{gate} " if gate else "") + f"st{ss}.{self.mem_types[dtype]} [{loc}+{offset}], {val};"]
 
   def render_cast(self, d:str, a:str, dtype:DType, atype:DType, bitcast=False, pred=False) -> List[str]:
     if bitcast: return [f"mov.b{self.types[dtype][1:]} {d}, {a};"]
@@ -167,12 +158,11 @@ class PTXRenderer(Renderer):
       elif uop is UOps.STORE:
         assert src[0].dtype == dtypes.int64, "store isn't int64"
         mem_type = '.shared' if src[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in src[0].parents) else '.global'
+        gate = f"@{r[src[2]]} " if len(src)>2 and src[2].op is not UOps.IF else ""
         if src[1].dtype.count > 1:
-          kk((f"@{r[src[2]]} " if len(src)>2 else "") + \
-              f"st{mem_type}.v{src[1].dtype.count}.{self.mem_types[src[1].dtype.scalar()]} [{r[src[0]]}+0], {{{', '.join(r[src[1]])}}};")
+          kk(gate + f"st{mem_type}.v{src[1].dtype.count}.{self.mem_types[src[1].dtype.scalar()]} [{r[src[0]]}+0], {{{', '.join(r[src[1]])}}};")
         else:
-          kk(*self.render_store(r[src[0]], r[src[1]], src[1].dtype,
-                                gate=r[src[2]] if len(src)>2 and src[2].op is not UOps.IF else None, ss=mem_type, offset=0))
+          kk(gate + f"st{mem_type}.{self.mem_types[src[1].dtype]} [{r[src[0]]}+0], {r[src[1]]};")
       else:
         if uop is UOps.RANGE: kk(*self.render_loop(loop:=ssa('ridx', u), r[src[0]], "LOOP_"+loop[1:]))
         elif uop is UOps.ALU:
