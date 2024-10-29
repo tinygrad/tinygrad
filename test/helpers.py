@@ -63,11 +63,6 @@ def print_diff(s0, s1, unified=getenv("UNIFIED_DIFF",1)):
     diff = ocdiff.console_diff(str(s0), str(s1))
   logging.info(diff)
 
-def assert_equiv_uops(u1:UOp, u2:UOp) -> None:
-  if u1 is not u2:
-    print_diff(u1, u2)
-    raise AssertionError("uops aren't equal.")
-
 def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]=(), st:Optional[ShapeTracker]=None, st_src:Optional[Tuple[UOp]]=None) -> UOp:
   if st_src is None:
     st_src = (st.to_uop() if st is not None else ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)
