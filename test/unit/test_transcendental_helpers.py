@@ -10,7 +10,7 @@ from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCom
 class TestReduction(unittest.TestCase):
   def _run_uop(self, uop:UOp):
     g = UOp(UOps.DEFINE_GLOBAL, uop.dtype.ptr(), arg=0, src=())
-    rw = full_graph_rewrite(UOp.store(g, UOp.const(dtypes.int, 0), uop).sink())
+    rw = full_graph_rewrite(UOp.store(g, UOp.const(dtypes.int, 0), uop).sink(), PythonRenderer)
     prog = PythonProgram("run", PythonCompiler().compile(PythonRenderer().render("run", linearize_uop(rw))))
     buf = PythonAllocator().alloc(uop.dtype.itemsize)
     prog(buf)
