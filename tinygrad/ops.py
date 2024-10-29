@@ -105,7 +105,7 @@ class MathTrait:
   def min(self, x): return -(-self).max(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
   def threefry(self, seed): return self.alu(BinaryOps.THREEFRY, seed)
-  def recip(self): return self.alu(UnaryOps.RECIP)
+  def reciprocal(self): return self.alu(UnaryOps.RECIP)
   def sqrt(self): return self.alu(UnaryOps.SQRT)
   def sin(self): return self.alu(UnaryOps.SIN)
   def log2(self): return self.alu(UnaryOps.LOG2)
