@@ -77,7 +77,6 @@ class CStyleLanguage(Renderer):
   type_map: Dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
-  indexing: bool = True
   code_for_op: Dict = {
     UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.RECIP: lambda x,dtype: f"(1/{x})",

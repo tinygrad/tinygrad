@@ -261,7 +261,7 @@ class TestUOpGraph(unittest.TestCase):
     # possible
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
     xyzw = tuple(UOp(UOps.GEP, dtypes.float, (val,), (i,)) for i in range(4))
-    self.assertEqual(_test_vec(xyzw), val)
+    self.assertIs(_test_vec(xyzw).op, UOps.LOAD)
 
     # unaligned
     val = UOp(UOps.LOAD, dtypes.float.vec(4), (d1, idx))
@@ -392,11 +392,11 @@ class TestUOpGraph(unittest.TestCase):
     ld0 = UOp(UOps.LOAD, dtypes.int, (glbl1, idx, UOp.const(dtypes.int, 2), UOp.const(dtypes.bool, False)))
     ld1 = UOp(UOps.LOAD, dtypes.int, (glbl2, idx, UOp.const(dtypes.int, 3), UOp.const(dtypes.bool, True)))
     uops = to_uops_list([UOp(UOps.STORE, dtypes.void, (glbl0, idx, ld1+ld0))])
-    ld0, ld1 = uops[-1].src[2].src
+    ld0, ld1 = uops[-1].src[-1].src
     # ld0 becomes the invalid value
     self.assertEqual(ld1, UOp.const(dtypes.int, 2))
     # the gate and invalid value are deleted from ld1
-    self.assertEqual(ld0, UOp.load(glbl2, idx, dtype=dtypes.int))
+    self.assertEqual(ld0, UOp.load(glbl2.index(idx), dtype=dtypes.int))
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
@@ -407,11 +407,11 @@ class TestUOpGraph(unittest.TestCase):
     ld0 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+1, UOp.const(dtypes.int, 2), UOp.const(dtypes.bool, False), barrier))
     ld1 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+2, UOp.const(dtypes.int, 3), UOp.const(dtypes.bool, True), barrier))
     uops = to_uops_list([UOp(UOps.STORE, dtypes.void, (glbl0, lidx, ld1+ld0))])
-    ld0, ld1 = uops[-1].src[2].src
+    ld0, ld1 = uops[-1].src[-1].src
     # ld0 becomes the invalid value
     self.assertEqual(ld1, UOp.const(dtypes.int, 2))
     # the gate and invalid value are deleted from ld1
-    self.assertEqual(ld0, UOp.load(smem, lidx+2, barrier, dtype=dtypes.int))
+    self.assertEqual(ld0.src[0], smem.index(lidx+2))
 
   def test_fold_gated_store(self):
     glbl = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
@@ -422,8 +422,8 @@ class TestUOpGraph(unittest.TestCase):
     st1 = UOp(UOps.STORE, dtypes.void, (glbl, idx1, val, UOp.const(dtypes.bool, True)))
     uops = to_uops_list([st0, st1])
     # only the second store happens
-    self.assertEqual(len(uops), 4)
-    self.assertEqual(uops[-1], UOp.store(glbl, idx1, val))
+    self.assertEqual(len(uops), 5)
+    self.assertEqual(uops[-1], UOp.store(glbl.index(idx1), val))
 
   @unittest.skip("this is a uop type error")
   def test_asserts_bad_gate(self):
