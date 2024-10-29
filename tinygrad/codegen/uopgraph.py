@@ -350,7 +350,7 @@ def do_expand(root:UOp):
         new_srcs.append(src.src[0].gep(tuple(lst)))
     else:
       # non-EXPAND input
-      if (root.op is UOps.INDEX and i == 0) or (root.op is UOps.REDUCE and i != 0):
+      if (root.op is UOps.REDUCE and i != 0):
         # for the first arg of INDEX and the RANGE args of REDUCE, just pass them through ignoring EXPANDS
         new_srcs.append(src)
       elif src.dtype.count > 1:
@@ -366,7 +366,7 @@ def do_expand(root:UOp):
     assert root.dtype.count == 1
     # is this right?
     new_arg = tuple(range(root.arg[0], new_srcs[0].dtype.count, new_srcs[0].dtype.count // expand_sz))
-  nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz) if root.op is not UOps.INDEX else root.dtype, tuple(new_srcs), new_arg)
+  nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz), tuple(new_srcs), new_arg)
   return UOp(UOps.EXPAND, root.dtype, (nsrc,), expand_args)
 
 acc_number = 0
@@ -396,8 +396,8 @@ def do_contract(con:UOp):
   return UOp(UOps.EXPAND, con.dtype, (ex.src[0].gep(tuple(idxs)),), new_ex_args)
 
 def no_vectorized_alu(alu):
-  if alu.dtype.count == 1: return None
-  alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
+  if alu.dtype.vcount == 1: return None
+  alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
 def create_gate(root:UOp) -> Optional[UOp]:
@@ -437,12 +437,13 @@ expander = PatternMatcher([
 
 def no_vectorized_load_store(ls:UOp):
   idx = ls.src[0]
-  if idx.src[1].dtype.count == 1: return None
+  assert isinstance(idx.dtype, PtrDType)
+  if idx.dtype.v == 1: return None
+
   # ugh, the meaning of a dtype.count idx is overloaded
   #if ls.op is UOps.LOAD and idx.dtype.count != ls.dtype.count: return None
   #if ls.op is UOps.STORE and idx.dtype.count != ls.src[2].dtype.count: return None
-  tv = [UOp(ls.op, ls.dtype.scalar(),
-            (idx.src[0].index(idx.src[1].gep(i)),) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.src[1].dtype.count)]
+  tv = [UOp(ls.op, ls.dtype.scalar(), tuple(j.gep(i) for j in ls.src)) for i in range(idx.dtype.v)]
   return UOp(UOps.VECTORIZE, ls.dtype, tuple(tv))
 
 def no_vectorized_acc(acc:UOp):
@@ -466,7 +467,7 @@ just_reduce = PatternMatcher([
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.INDEX), name="alu"), no_vectorized_alu),
   (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
