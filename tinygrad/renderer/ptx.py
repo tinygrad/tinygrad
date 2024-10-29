@@ -49,13 +49,13 @@ ptx_matcher = sym+PatternMatcher([
     lambda x: (UOp(x.op, dtypes.float32, tuple(vv.cast(dtypes.float32) for vv in x.src), x.arg).cast(dtypes.half)))
     for op in asm_for_op.keys() if op not in supports_half],
   # load/store bool -> uint8
-  (UPat(UOps.LOAD, dtypes.bool, name="x"),
-   lambda x: UOp(x.op, dtypes.uint8, x.src[0:2] + ((x.src[2].cast(dtypes.uint8),) if len(x.src) >= 3 else ()) + x.src[3:]).cast(dtypes.bool)),
-  (UPat(UOps.STORE, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
-   lambda x: UOp(x.op, dtypes.void, x.src[0:2] + (x.src[2].cast(dtypes.uint8),) + x.src[3:])),
+  (UPat(UOps.LOAD, dtypes.bool, src=(UPat(dtype=dtypes.int64),), name="x", allow_any_len=True),
+   lambda x: UOp(x.op, dtypes.uint8, x.src[0:1] + ((x.src[1].cast(dtypes.uint8),) if len(x.src) >= 3 else ()) + x.src[3:]).cast(dtypes.bool)),
+  (UPat(UOps.STORE, src=(UPat(dtype=dtypes.int64), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
+   lambda x: UOp(x.op, dtypes.void, x.src[0:1] + (x.src[1].cast(dtypes.uint8),) + x.src[3:])),
   # load/store use pointer arithmetic
-  (UPat((UOps.LOAD, UOps.STORE), name="x", allow_any_len=True, src=(UPat((UOps.DEFINE_LOCAL,UOps.DEFINE_GLOBAL), name="buf"),
-    UPat.any(UPat.var("alu")+UPat.cvar("const"), UPat.cvar("const"), UPat.var("alu")))), load_store_ptr_arithmetic),
+  (UPat(UOps.INDEX, name="x"), lambda x: x.src[0].cast(dtypes.int64) + x.src[1].cast(dtypes.int64)*x.src[0].dtype.itemsize),
+  (UPat(UOps.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) else None),
 ])
 
 class PTXRenderer(Renderer):
@@ -65,6 +65,7 @@ class PTXRenderer(Renderer):
   tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
+  indexing = True
   def __init__(self, arch:str, device="CUDA"):
     self.device, self.tensor_cores, self.arch = device, PTXRenderer.tensor_cores if int(arch[3:]) >= 80 else [], arch
   def __reduce__(self): return self.__class__, (self.arch, self.device)
@@ -165,14 +166,13 @@ class PTXRenderer(Renderer):
         kk(f"IF_{r[src[0].src[0]][1:]}_{uops.index(src[0])}:")
       elif uop is UOps.STORE:
         assert src[0].dtype == dtypes.int64, "store isn't int64"
-        assert src[1].op is UOps.CONST, f"store isn't const {u}"
         mem_type = '.shared' if src[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in src[0].parents) else '.global'
-        if src[2].dtype.count > 1:
-          kk((f"@{r[src[3]]} " if len(src)>3 else "") + \
-              f"st{mem_type}.v{src[2].dtype.count}.{self.mem_types[src[2].dtype.scalar()]} [{r[src[0]]}+{src[1].arg}], {{{', '.join(r[src[2]])}}};")
+        if src[1].dtype.count > 1:
+          kk((f"@{r[src[2]]} " if len(src)>2 else "") + \
+              f"st{mem_type}.v{src[1].dtype.count}.{self.mem_types[src[1].dtype.scalar()]} [{r[src[0]]}+0], {{{', '.join(r[src[1]])}}};")
         else:
-          kk(*self.render_store(r[src[0]], r[src[2]], src[2].dtype,
-                                gate=r[src[3]] if len(src)>3 and src[3].op is not UOps.IF else None, ss=mem_type, offset=src[1].arg))
+          kk(*self.render_store(r[src[0]], r[src[1]], src[1].dtype,
+                                gate=r[src[2]] if len(src)>2 and src[2].op is not UOps.IF else None, ss=mem_type, offset=0))
       else:
         if uop is UOps.RANGE: kk(*self.render_loop(loop:=ssa('ridx', u), r[src[0]], "LOOP_"+loop[1:]))
         elif uop is UOps.ALU:
@@ -198,18 +198,17 @@ class PTXRenderer(Renderer):
           r[u] = r[src[0]][u.arg[0]]
         elif uop is UOps.LOAD:
           assert src[0].dtype == dtypes.int64, "load isn't int64"
-          assert src[1].op is UOps.CONST, f"load isn't const {u}"
           mem_type = '.shared' if src[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in src[0].parents) else '.global'
-          has_gate = len(src) > 3 and src[3].op is UOps.ALU
+          has_gate = len(src) > 2 and src[2].op is UOps.ALU
           if dtype.count > 1:
             r[u] = [ssa('val', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
             if has_gate:
               for v in r[u]: kk(f"mov.{self.mem_types[dtype.scalar()]} {v}, {render_val(0, dtype.scalar())};")
-            kk((f"@{r[src[3]]}"if has_gate else "")
-              + f" ld{mem_type}.v{dtype.count}.{self.mem_types[dtype.scalar()]} {{{', '.join(r[u])}}}, [{r[src[0]]}+{src[1].arg}];")
+            kk((f"@{r[src[2]]}"if has_gate else "")
+              + f" ld{mem_type}.v{dtype.count}.{self.mem_types[dtype.scalar()]} {{{', '.join(r[u])}}}, [{r[src[0]]}+0];")
           else:
-            kk(*self.render_load(r[src[0]], ssa('val', u), dtype, gate=r[src[3]] if has_gate else None,
-                                alt=r[src[2]] if has_gate else None, ss=mem_type, offset=src[1].arg))
+            kk(*self.render_load(r[src[0]], ssa('val', u), dtype, gate=r[src[2]] if has_gate else None,
+                                alt=r[src[1]] if has_gate else None, ss=mem_type, offset=0))
         elif uop is UOps.ASSIGN:
           if dtype.count > 1:
             for x0, x1 in zip(r[src[0]], r[src[1]]): kk(f"mov.b{self.types[dtype.scalar()][1:]} {x0}, {x1};")

@@ -487,7 +487,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   if ignore_indexing:
     for u in uops:
       if u.op in {UOps.LOAD, UOps.STORE}:
-        offset = 0 if u.src[0].op not in {UOps.INDEX, UOps.CAST} else -1
+        offset = 0 if u.src[0].op not in {UOps.INDEX, UOps.CAST} and u.src[0].dtype != dtypes.int64 else -1
         dont_count = dont_count.union(u.src[offset+1].sparents)
         if len(u.src) > offset+3: dont_count = dont_count.union(u.src[offset+3].sparents)
       elif u.op is UOps.IF:
@@ -503,7 +503,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
     elif u.op is UOps.LOAD:
       mem += u.dtype.itemsize * mults
     elif u.op is UOps.STORE:
-      mem += u.src[2 if u.src[0].op not in {UOps.INDEX, UOps.CAST} else 1].dtype.itemsize * mults
+      mem += u.src[2 if u.src[0].op not in {UOps.INDEX, UOps.CAST} and u.src[0].dtype != dtypes.int64 else 1].dtype.itemsize * mults
     elif u.op is UOps.ALU and u not in dont_count:
       flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
     elif u.op is UOps.WMMA and u not in dont_count:
