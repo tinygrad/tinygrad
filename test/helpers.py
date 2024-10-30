@@ -9,6 +9,9 @@ from tinygrad.engine.realize import Runner
 from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import CI, OSX, T, getenv, colored
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite
+from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler, PythonAllocator
 
 def derandomize_model(model):
   for p in get_parameters(model):
@@ -72,3 +75,11 @@ def timeit(fxn:Callable[..., T], *args, **kwargs) -> Tuple[T, float]:
   st = time.perf_counter_ns()
   ret = fxn(*args, **kwargs)
   return ret, (time.perf_counter_ns()-st)*1e-6
+
+def eval_uop(uop:UOp):
+  g = UOp(UOps.DEFINE_GLOBAL, uop.dtype.ptr(), arg=0, src=())
+  rw = full_graph_rewrite(UOp.store(g, UOp.const(dtypes.int, 0), uop).sink(), PythonRenderer)
+  prog = PythonProgram("run", PythonCompiler().compile(PythonRenderer().render("run", linearize_uop(rw))))
+  buf = PythonAllocator().alloc(uop.dtype.itemsize)
+  prog(buf)
+  return buf.cast(uop.dtype.fmt).tolist()[0]
