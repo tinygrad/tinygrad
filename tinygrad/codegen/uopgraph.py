@@ -119,7 +119,6 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> Optional[UOp]:
   new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in split_uop(valid, BinaryOps.AND) if s not in drop_stmt]) else None
   return buf.index(idx, new_valid)
 
-
 # ***** optional patterns *****
 
 transcendental_patterns = [
@@ -359,8 +358,8 @@ def do_expand(root:UOp):
         new_srcs.append(src.src[0].gep(tuple(lst)))
     else:
       # non-EXPAND input
-      if (root.op in {UOps.LOAD, UOps.STORE} and i == 0) or (root.op is UOps.REDUCE and i != 0):
-        # for the first arg of LOAD/STORE and the RANGE args of REDUCE, just pass them through ignoring EXPANDS
+      if (root.op is UOps.IF) or (root.op is UOps.REDUCE and i != 0):
+        # for the first arg of IF and the RANGE args of REDUCE, just pass them through ignoring EXPANDS
         new_srcs.append(src)
       elif src.dtype.count > 1:
         # put any input dtype > 1 grouped together
@@ -423,8 +422,6 @@ def create_gate(root:UOp) -> Optional[UOp]:
 expander = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
-  # create gate MUST BE BEFORE expander
-  #(UPat(UOps.STORE, name="root"), create_gate),
   # double expand
   (UPat(UOps.EXPAND, name="outer", src=(UPat(UOps.EXPAND, name="inner"),)),
    lambda outer, inner: UOp(UOps.EXPAND, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
@@ -492,6 +489,8 @@ def idx_load_store(x:UOp):
 migrate_indexing = PatternMatcher([
   # use indexing for LOAD/STORE
   (UPat((UOps.LOAD, UOps.STORE), src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)),), allow_any_len=True, name="x"), idx_load_store),
+  # create gate MUST BE BEFORE expander
+  (UPat(UOps.STORE, name="root"), create_gate),
 ])
 
 def move_mask(x:UOp, buf:UOp, idx:UOp, mask:UOp, cast:Optional[UOp]=None) -> UOp:
@@ -526,10 +525,6 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   global acc_number
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
 
-  # do graph rewrite
-  acc_number = 0
-  sink = graph_rewrite(sink, sym)
-
   # temp for indexing migration
   sink = graph_rewrite(sink, sym+migrate_indexing)
 
@@ -537,7 +532,10 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   sink = graph_rewrite(sink, sym+expander)
 
   # convert REDUCE to DEFINE_ACC + ASSIGN
+  acc_number = 0   # TODO: this should be ctx
   sink = graph_rewrite(sink, sym+just_reduce)
+
+  # devectorize
   sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
 
   # cleanups
