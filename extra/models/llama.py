@@ -1,6 +1,7 @@
 from typing import Tuple, Union, Optional, Dict, Any
 from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
 from tinygrad.helpers import getenv
+import tinygrad.function as F
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, dtype=dtypes.half) -> Tensor:
@@ -135,7 +136,7 @@ def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
 
     # approximate top p
     # because we are already limited to top k elements we can do top p "without sorting"
-    output_cumsum = output[::-1]._cumsum()[::-1] + t.sum()
+    output_cumsum = output[::-1]._associative_scan_(F.Sum)[::-1] + t.sum()
     output = (output_cumsum >= (1 - p)) * output
     output_indices = (output_cumsum >= (1 - p)) * output_indices
 
