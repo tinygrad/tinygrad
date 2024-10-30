@@ -565,13 +565,14 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x.sin())
     # works on real CUDA but not CI
     if not (getenv("MOCKGPU") and Device.DEFAULT == "NV"):
-      helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf]])
+      helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.sin(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   def test_cos(self):
     helper_test_op([(45,65)], lambda x: x.cos())
     helper_test_op([()], lambda x: x.cos())
     if not (getenv("MOCKGPU") and Device.DEFAULT == "NV"):
+      helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   def test_tan(self):
@@ -580,6 +581,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.tan(), low=-5, high=5, forward_only=True)
     helper_test_op([()], lambda x: x.tan())
     if not (getenv("MOCKGPU") and Device.DEFAULT == "NV"):
+      helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
 
