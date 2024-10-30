@@ -206,6 +206,7 @@ generate_libc() {
     $(dpkg -L libc6-dev | grep sys/mman.h) \
     $(dpkg -L libc6-dev | grep sys/syscall.h) \
     /usr/include/elf.h \
+    /usr/include/string.h \
     /usr/include/unistd.h \
     -o $BASE/libc.py
 
