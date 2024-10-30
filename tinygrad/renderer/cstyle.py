@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Callable, cast
 import os, math
 from collections import defaultdict, Counter
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat, cast_float_to_bf16
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
@@ -352,12 +352,6 @@ class CUDARenderer(CStyleLanguage):
     # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
     return f"__launch_bounds__({maxThreadsPerBlock}) "
 
-def cast_float_to_bf16(x: UOp) -> UOp:
-  assert x.dtype == dtypes.float, "cast float -> bf16 must start with float"
-  x = x.bitcast(dtypes.uint)
-  x = (-x & 0x7f800000).where(x + ((x >> 16) & 1) + 0x7fff, (x & 0xffff).where((x | 0x10000), x))
-  return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
-
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
@@ -399,7 +393,7 @@ class AMDRenderer(CStyleLanguage):
     (UPat(UOps.CAST, dtypes.bfloat16, UPat.var("x")),lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype!=dtypes.float else None),
     # bfloat16 casting
     (UPat(UOps.CAST, dtype=dtypes.float, src=UPat.var("x", dtype=dtypes.bfloat16)),
-     lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
+      lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
     (UPat(UOps.CAST, dtype=dtypes.bfloat16, src=UPat.var("x", dtype=dtypes.float)), cast_float_to_bf16)]) + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
