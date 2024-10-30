@@ -252,7 +252,7 @@
   var cache = {};
   var kernels = null;
   var currentUOp = 0;
-  var currentKernel = 0;
+  var currentKernel = -1;
   var currentRewrite = 0;
   var expandKernel = true;
   async function main() {
@@ -260,7 +260,7 @@
     // ***** LHS kernels list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
-      currentKernel = 0;
+      currentKernel = -1;
     }
     const kernelListParent = document.querySelector(".container.kernel-list-parent");
     const kernelList = document.querySelector(".container.kernel-list");
@@ -305,15 +305,17 @@
       kernelList.appendChild(kernelUl);
     });
     // ***** UOp graph
-    const cacheKey = `${currentKernel}-${currentUOp}`;
-    if (cacheKey in cache) {
-      ret = cache[cacheKey];
+    if (currentKernel != -1) {
+      const cacheKey = `${currentKernel}-${currentUOp}`;
+      if (cacheKey in cache) {
+        ret = cache[cacheKey];
+      }
+      else {
+        ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`)).json();
+        cache[cacheKey] = ret;
+      }
+      renderGraph(ret.graphs[currentRewrite], currentRewrite == 0 ? [] : ret.changed_nodes[currentRewrite-1]);
     }
-    else {
-      ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`)).json();
-      cache[cacheKey] = ret;
-    }
-    renderGraph(ret.graphs[currentRewrite], currentRewrite == 0 ? [] : ret.changed_nodes[currentRewrite-1]);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
