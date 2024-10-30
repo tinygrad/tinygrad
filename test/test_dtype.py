@@ -348,14 +348,9 @@ class TestEqStrDType(unittest.TestCase):
     assert dtypes.imageh((1,2,4)) != dtypes.imageh((1,4,2)), "different shape doesn't match"
     assert dtypes.imageh((1,2,4)) == dtypes.imageh((1,2,4)), "same shape matches"
     assert isinstance(dtypes.imageh((1,2,4)), ImageDType)
-  def test_ptr_ne(self):
-    if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
-    # TODO: is this the wrong behavior?
-    assert dtypes.float32.ptr() == dtypes.float32
-    assert not (dtypes.float32.ptr() != dtypes.float32)
+  def test_ptr_eq(self):
     assert dtypes.float32.ptr() == dtypes.float32.ptr()
     assert not (dtypes.float32.ptr() != dtypes.float32.ptr())
-    #assert dtypes.float32.ptr() != dtypes.float32
   def test_strs(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
