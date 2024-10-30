@@ -1,6 +1,7 @@
-import math, functools
-from typing import Tuple, List
+import math
+from typing import Tuple
 from tinygrad.dtype import dtypes, DType
+from tinygrad.helpers import polyN
 from tinygrad.ops import UOp
 
 TRANSCENDENTAL_SUPPORTED_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
@@ -73,8 +74,6 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   exp = exponent.ne(0).where(exp, exp.const_like(0))
   if v.dtype == dtypes.float16: exp = exp.bitcast(dtypes.int16)
   return mantissa, exp
-
-def polyN(s:UOp, coeffs:List[float]) -> UOp: return functools.reduce(lambda acc,c: acc*s+c, coeffs, s.const_like(0))
 
 # *** reduction algorithms for sine ***
 def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
