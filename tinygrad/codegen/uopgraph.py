@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Tuple, Dict, List, cast, TYPE_CHECKING, Any, DefaultDict, Callable
 import functools, itertools, operator
 from collections import defaultdict
-from tinygrad.dtype import dtypes, ImageDType
+from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOp, UOps, UPat, PatternMatcher, symbolic_flat
 from tinygrad.ops import graph_rewrite, is_irreducible, split_uop, identity_element, uop_given_valid, parse_valid, is_increasing, simplify_valid
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
@@ -21,8 +21,8 @@ def fold_expanded(ex, buf):
   # first, extract all the relevant offsets
   offsets_rootsrc: DefaultDict[Any, dict] = defaultdict(dict)
   for i,s in enumerate(new_srcs):
-    if s.dtype.count != 1 or (is_image and s.src[1].dtype.count == 2): continue
-    idx = s.src[1]
+    idx = s.src[0].src[1]
+    if s.dtype.count != 1 or (is_image and idx.dtype.count == 2): continue
     if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is UOps.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
@@ -40,13 +40,17 @@ def fold_expanded(ex, buf):
         if all((rootsrc,o+i) not in used and o+i in offsets for i in range(fold_length)):
           load_1 = new_srcs[offsets[o]]
           new_src = list(load_1.src)
-          if new_src[1].divides(fold_length) is None: continue
-          # for images, we rewrite the index. it must evenly divide 4 from the above check
+          oidx = new_src[0].src[1]
+          if oidx.divides(fold_length) is None: continue
           if is_image:
-            new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((new_src[1] // 4) % buf.dtype.shape[1], (new_src[1] // (4 * buf.dtype.shape[1]))))
-          # vectorize the store/loadconst
-          if not is_load or len(new_src) >= 4:
-            new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[2] for i in range(fold_length)))
+            # for images, we rewrite the index. it must evenly divide 4 from the above check
+            new_src[0] = buf.index(UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((oidx // 4) % buf.dtype.shape[1], (oidx // (4*buf.dtype.shape[1])))))
+          else:
+            # for non image, we upcast the index pointer
+            new_src[0] = new_src[0].cast(new_src[0].dtype.base.vec(fold_length).ptr(new_src[0].dtype.local))
+          # vectorize the store
+          if not is_load:
+            new_src[1] = UOp(UOps.VECTORIZE, new_src[1].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[1] for i in range(fold_length)))
           # generate the folded new_srcs
           if is_load:
             new_load = UOp(UOps.LOAD, load_1.dtype.vec(fold_length), tuple(new_src))
@@ -71,9 +75,10 @@ def fix_unfoldable_image_load(load:UOp, buf:UOp):
   vec_load = UOp(UOps.LOAD, load.dtype.vec(4), tuple(new_src))
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), load.const_like(float('nan')))
 
+buf_idx_pat = UPat(UOps.INDEX, src=(UPat.var("buf"),), allow_any_len=True)
 float4_folding = PatternMatcher([
-  (UPat(UOps.VECTORIZE, src=UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True), name="ex"), fold_expanded),
-  (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(UPat.var("buf"), UPat(), UPat()), allow_any_len=True), name="ex"), fold_expanded),
+  (UPat(UOps.VECTORIZE, src=UPat(UOps.LOAD, src=(buf_idx_pat,), allow_any_len=True), name="ex"), fold_expanded),
+  (UPat((UOps.BARRIER, UOps.SINK), src=UPat(UOps.STORE, src=(buf_idx_pat,), allow_any_len=True), name="ex"), fold_expanded),
 ])
 
 # ***** image load valid simplification *****
@@ -398,8 +403,8 @@ def do_contract(con:UOp):
   return UOp(UOps.EXPAND, con.dtype, (ex.src[0].gep(tuple(idxs)),), new_ex_args)
 
 def no_vectorized_alu(alu):
-  if alu.dtype.count == 1: return None
-  alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.count))
+  if alu.dtype.vcount == 1: return None
+  alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(UOps.VECTORIZE, alu.dtype, alus)
 
 def create_gate(root:UOp) -> Optional[UOp]:
@@ -415,12 +420,12 @@ expander = PatternMatcher([
   (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
   (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
   # create gate MUST BE BEFORE expander
-  (UPat(UOps.STORE, name="root"), create_gate),
+  #(UPat(UOps.STORE, name="root"), create_gate),
   # double expand
   (UPat(UOps.EXPAND, name="outer", src=(UPat(UOps.EXPAND, name="inner"),)),
    lambda outer, inner: UOp(UOps.EXPAND, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
   # do expansion
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE,
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.GEP, UOps.WMMA, UOps.LOAD, UOps.STORE, UOps.INDEX,
          UOps.VECTORIZE, UOps.REDUCE, UOps.IF), name="root", custom_early_reject=set([(UOps.EXPAND, None)])), do_expand),
   (UPat(UOps.CONTRACT, name="con"), do_contract),
   # remove EXPANDs from SINK
@@ -438,12 +443,10 @@ expander = PatternMatcher([
 ])
 
 def no_vectorized_load_store(ls:UOp):
-  idx = ls.src[1]
-  if idx.dtype.count == 1: return None
-  # ugh, the meaning of a dtype.count idx is overloaded
-  if ls.op is UOps.LOAD and idx.dtype.count != ls.dtype.count: return None
-  if ls.op is UOps.STORE and idx.dtype.count != ls.src[2].dtype.count: return None
-  tv = [UOp(ls.op, ls.dtype.scalar(), (ls.src[0],) + tuple(j.gep(i) for j in ls.src[1:])) for i in range(idx.dtype.count)]
+  idx = ls.src[0]
+  assert isinstance(idx.dtype, PtrDType)
+  if idx.dtype.v == 1: return None
+  tv = [UOp(ls.op, ls.dtype.scalar(), tuple(j.gep(i) for j in ls.src)) for i in range(idx.dtype.v)]
   return UOp(UOps.VECTORIZE, ls.dtype, tuple(tv))
 
 def no_vectorized_acc(acc:UOp):
@@ -459,7 +462,7 @@ just_reduce = PatternMatcher([
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
-  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN), name="alu"), no_vectorized_alu),
+  (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.INDEX), name="alu"), no_vectorized_alu),
   (UPat(UOps.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(UOps.DEFINE_ACC, name="acc"), no_vectorized_acc),
   (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
@@ -523,15 +526,15 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   acc_number = 0
   sink = graph_rewrite(sink, sym)
 
+  # temp for indexing migration
+  sink = graph_rewrite(sink, sym+migrate_indexing)
+
   # expand
   sink = graph_rewrite(sink, sym+expander)
 
   # convert REDUCE to DEFINE_ACC + ASSIGN
   sink = graph_rewrite(sink, sym+just_reduce)
   sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
-
-  # temp for indexing migration
-  sink = graph_rewrite(sink, sym+migrate_indexing)
 
   # cleanups
   sink = graph_rewrite(sink, sym+reducer)
