@@ -16,6 +16,8 @@ class DType:
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
   def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
   @property
+  def base(self): return self
+  @property
   def vcount(self): return self.count
   def vec(self, sz:int) -> DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
@@ -27,9 +29,11 @@ class DType:
 
 @dataclass(frozen=True)
 class PtrDType(DType):
-  base: DType
+  _base: DType
   local: bool = False
   v: int = 1
+  @property
+  def base(self): return self._base
   def scalar(self) -> PtrDType: return replace(self, v=1)
   def vec(self, sz:int) -> PtrDType: return replace(self, v=sz)
   def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
@@ -40,18 +44,15 @@ class PtrDType(DType):
 @dataclass(frozen=True)
 class ImageDType(PtrDType):
   shape: Tuple[int, ...] = ()   # shape of the Image
-  # NOTE: scalar/vec are wrong
-  def scalar(self): return self.base
-  def vec(self, sz:int): return self.base.vec(sz)
   def ptr(self, local=False) -> Union[PtrDType, ImageDType]:
     assert not local, "images can't be local"
     return self
-  def __repr__(self): return f"dtypes.{self.name}({self.shape})"
+  def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
 
 class dtypes:
   @staticmethod
   @functools.lru_cache(None)
-  def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats
+  def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats or isinstance(x, ImageDType)
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   @functools.lru_cache(None)
   def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints
@@ -113,9 +114,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, shape=shp, base=dtypes.float32)
+  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, shape=shp, _base=dtypes.float32)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, shape=shp, base=dtypes.float32)
+  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, shape=shp, _base=dtypes.float32)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
