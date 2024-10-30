@@ -239,6 +239,8 @@ def _add_realize(realizes:Dict[UOp, UOp], b:UOp, store:UOp, load:UOp) -> Optiona
   return UOp(UOps.LOAD, load.dtype, (b, load.st_arg.to_uop()))
 break_sched = PatternMatcher([(UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat(), name="store"), name="load"), _add_realize),])
 
+
+schedule_cache: Dict[UOp, List[Tuple[UOp, ScheduleItemContext]]] = {}
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   store_groups, lazybufs_to_realize, assigns = get_realizes(outs)
@@ -248,10 +250,12 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   cache: Dict[LazyBuffer, UOp] = {}
   big_graph = UOp.sink(*(to_uop(x.base, realizes, ctx, cache) for x in outs if x.realized is None and x.base.op is not MetaOps.CONST))
   # split realizes into small graphs
-  graph_rewrite(big_graph, break_sched, realizes)
-  assigned = {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None}
-  small_graphs = [full_ast_rewrite(UOp.sink(*(realizes[ctx.buf_uops[b]] for b in stores)),
-                                   ctx.var_vals, assigned, ctx.ubuf_metadata) for stores in store_groups]
+  if (cret:=schedule_cache.get(big_graph)) is None:
+    graph_rewrite(big_graph, break_sched, realizes)
+    assigned = {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None}
+    schedule_cache[big_graph] = small_graphs = [full_ast_rewrite(UOp.sink(*(realizes[ctx.buf_uops[b]] for b in stores)),
+                                                                 ctx.var_vals, assigned, ctx.ubuf_metadata) for stores in store_groups]
+  else: small_graphs = cret
 
   # do BFS
   prescheduled = [ScheduleItem(u, tuple(b for u in c.bufs if (b:=ctx.uop_bufs[u]).size != 0),
