@@ -41,8 +41,8 @@ class PtrDType(DType):
   local: bool
   v: int
   def __hash__(self): return super().__hash__()
-  def scalar(self) -> DType: return self.ptr(self.local, 1)
-  def vec(self, sz:int) -> DType: return self.ptr(self.local, sz)
+  def scalar(self) -> DType: return self.base.ptr(self.local, 1)
+  def vec(self, sz:int) -> DType: return self.base.ptr(self.local, sz)
   @property
   def vcount(self): return self.v
   # local isn't used in the compare
