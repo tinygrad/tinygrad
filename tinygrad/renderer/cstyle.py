@@ -330,7 +330,7 @@ class CUDARenderer(CStyleLanguage):
     used_dtypes = uops_to_dtypes(uops)
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#include <cuda_fp16.h>")
     if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("#include <cuda_bf16.h>")
-    prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 1 and dt.scalar() in {dtypes.half, dtypes.bfloat16}]
+    prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count in (4,8) and dt.scalar() in {dtypes.half, dtypes.bfloat16}]
 
     dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
