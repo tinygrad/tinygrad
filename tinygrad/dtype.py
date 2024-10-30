@@ -30,10 +30,6 @@ class PtrDType(DType):
   base: DType
   local: bool = False
   v: int = 1
-  # TODO: this compare shouldn't be here
-  def __hash__(self): return super().__hash__()
-  def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.count==dt.count
-  def __ne__(self, dt): return not (self == dt)
   def scalar(self) -> PtrDType: return replace(self, v=1)
   def vec(self, sz:int) -> PtrDType: return replace(self, v=sz)
   def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
