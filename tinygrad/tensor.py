@@ -2012,6 +2012,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.conv2d(w).numpy())
     ```
     """
+    if IMAGE: return self.image_conv2d(weight, bias, groups, stride, dilation, padding, acc_dtype)
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"  # noqa: E501
     if isinstance(padding, (tuple,list)): assert len(padding) == 2*len(HW) or len(padding) == len(HW), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {self.shape}"  # noqa: E501
@@ -2097,6 +2098,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(a.dot(b).numpy())
     ```
     """
+    if IMAGE: return self.image_dot(w, acc_dtype)
     n1, n2 = len(self.shape), len(w.shape)
     assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
     if (L:=self.shape[-1]) != (R:=w.shape[-min(n2, 2)]): raise AssertionError(f"shapes {self.shape} and {w.shape} cannot be multiplied ({L} != {R})")
@@ -3438,7 +3440,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
   # *** image Tensor function replacements ***
 
-  def image_dot(self, w:Tensor, acc_dtype=None):
+  def image_dot(self, w:Tensor, acc_dtype=None) -> Tensor:
     # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
     n1, n2 = len(self.shape), len(w.shape)
     assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
@@ -3453,7 +3455,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     cw = w.transpose(w.ndim-1, w.ndim-2).reshape((groups*cout, cin, 1, 1))
     return cx.image_conv2d(cw, groups=groups, acc_dtype=acc_dtype).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
 
-  def image_conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, acc_dtype=None):
+  def image_conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, acc_dtype=None) -> Tensor:
     base_image_type = dtypes.imageh if getenv("FLOAT16", 0) else dtypes.imagef
 
     (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
@@ -3512,11 +3514,6 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
-
-if IMAGE:
-  # if IMAGE>0 we install these replacement functions in Tensor (hack!)
-  setattr(Tensor, "conv2d", Tensor.image_conv2d)
-  setattr(Tensor, "dot", Tensor.image_dot)
 
 def _metadata_wrapper(fn):
   def _wrapper(*args, **kwargs):
