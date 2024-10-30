@@ -41,18 +41,16 @@ class PtrDType(DType):
   local: bool
   v: int
   def __hash__(self): return super().__hash__()
-  def scalar(self) -> DType: return self.ptr(self.local, 1)
-  def vec(self, sz:int) -> DType: return self.ptr(self.local, sz)
+  def scalar(self) -> DType: return self.base.ptr(self.local, 1)
+  def vec(self, sz:int) -> DType: return self.base.ptr(self.local, sz)
   @property
   def vcount(self): return self.v
   # local isn't used in the compare
   def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.count==dt.count
   def __ne__(self, dt): return not (self == dt)
   def __repr__(self):
-    arg = []
-    if self.local: arg.append("local=true")
-    if self.v != 1: arg.append(f"v={self.v}")
-    return f"{super().__repr__()}.ptr({','.join(arg)})"
+    arg = (["local=true"] if self.local else []) + ([f"v={self.v}"] if self.v != 1 else [])
+    return f"{self.base.__repr__()}.ptr({','.join(arg)})"
 
 class dtypes:
   @staticmethod
