@@ -10,13 +10,13 @@ from weakref import ref, ReferenceType, WeakValueDictionary
 
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-                      base:Optional[LazyBuffer]=None, enable_cache=bool(LAZYCACHE)):
+                      base:Optional[LazyBuffer]=None, enable_cache=True):
   if st.size == 0: op, arg, srcs, base = MetaOps.CONST, 0, (), None
   dtype = to_dtype(dtype)
   if op is MetaOps.CONST: arg, enable_cache = dtypes.as_const(arg, dtype) if not isinstance(arg, UOp) else arg, True
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs)) if base is None else (st, ref(base))
-  if enable_cache and (rret := lazycache.get(cache_key, None)) is not None: return rret
+  if enable_cache and LAZYCACHE and (rret := lazycache.get(cache_key, None)) is not None: return rret
 
   ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, metadata=_METADATA.get())
   if enable_cache: lazycache[cache_key] = ret

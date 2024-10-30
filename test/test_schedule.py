@@ -13,7 +13,7 @@ from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, UOps, graph_rewrite, track_rewrites
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, LAZYCACHE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, view_right, st_fixup, view_left
 from tinygrad.engine.realize import CompiledRunner, run_schedule
@@ -1794,6 +1794,22 @@ class TestIndexing(unittest.TestCase):
     def rewrite(sink): return graph_rewrite(graph_rewrite(sink, view_left), view_right)
     ret = rewrite(sink)
     assert len([x for x in ret.sparents if x.op is UOps.VIEW and len(x.src) != 0]) == 0, f"unmerged views left in sink {ret}"
+
+class TestScheduleCache(unittest.TestCase):
+  def setUp(self) -> None:
+    self.real_lazycache = LAZYCACHE.value
+    LAZYCACHE.value = 0
+  def tearDown(self) -> None: LAZYCACHE.value = self.real_lazycache
+
+  def test_tiny_add(self):
+    x = Tensor.empty(4, 4).realize()
+    y = Tensor.empty(4, 4).realize()
+    add1 = x+y
+    add2 = x+y
+    self.assertIsNot(add1.lazydata, add2.lazydata)
+    s1 = add1.schedule()[0]
+    s2 = add2.schedule()[0]
+    self.assertEqual(s1.ast, s2.ast)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
