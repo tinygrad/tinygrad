@@ -291,7 +291,6 @@ sym = symbolic_flat+PatternMatcher([
   (UPat.store(UPat(UOps.INDEX, name="index"), UPat.load(UPat(UOps.INDEX, name="index"))), lambda index: UOp(UOps.NOOP)),
   (UPat.store(UPat(UOps.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"), UPat.load(UPat(UOps.INDEX, name="index")))),
    lambda index, gate, alt: UOp.store(index.src[0].index(index.src[1], gate), alt)),
-  # lambda buf, idx, gate, alt: UOp.store(buf, idx, alt, gate)),
   # fold gated LOAD/STORE
   (UPat().index(UPat(), UPat.const(dtypes.bool, True)).named("idx"), lambda idx: idx.replace(src=idx.src[0:2])), # remove True
   (UPat().index(UPat(), UPat.const(dtypes.bool, False)).named("idx"), lambda idx: idx.const_like(0)),      # False -> NULL pointer
