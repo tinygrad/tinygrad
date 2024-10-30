@@ -61,12 +61,13 @@ def fold_expanded(ex, buf):
   return UOp(ex.op, ex.dtype, tuple(x for x in new_srcs if x is not None), ex.arg) if len(used) else None
 
 def fix_unfoldable_image_load(load:UOp, buf:UOp):
-  if not isinstance(buf.dtype, ImageDType) or load.src[0].src[1].dtype.count == 2: return None
-  oidx = load.src[0].src[1]
+  if not isinstance(buf.dtype, ImageDType) or (oidx:=load.src[0].src[1]).dtype.count == 2: return None
   id4 = oidx % 4
   new_src = list(load.src)
   # TODO: copied logic from above
-  new_src[0] = load.src[0].src[0].index(UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((oidx // 4) % buf.dtype.shape[1], (oidx // (4*buf.dtype.shape[1])))))
+  new_src[0] = load.src[0].src[0].index(
+    UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((oidx // 4) % buf.dtype.shape[1], (oidx // (4*buf.dtype.shape[1])))),
+    load.src[0].src[2] if len(load.src[0].src) == 3 else None)
   vec_load = UOp(UOps.LOAD, load.dtype.vec(4), tuple(new_src))
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), load.const_like(float('nan')))
 
@@ -80,6 +81,9 @@ float4_folding = PatternMatcher([
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> Optional[UOp]:
   if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.const_like(0)
   if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx, valid)
+
+  # wait for it to be image indexed before running simplification
+  if start_idx.dtype.count != 2: return None
 
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
