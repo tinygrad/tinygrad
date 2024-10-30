@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
-from typing import List, Any, Tuple, Optional, cast, TypeVar
-from tinygrad.helpers import prod, getenv, DEBUG
+from typing import List, Any, Tuple, Optional, cast
+from tinygrad.helpers import prod, getenv, DEBUG, T
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -32,7 +32,6 @@ libobjc.sel_registerName.restype = objc_id
 libmetal.MTLCreateSystemDefaultDevice.restype = objc_instance
 libdispatch.dispatch_data_create.restype = objc_instance
 
-T = TypeVar("T")
 # Ignore mypy error reporting incompatible default, because typevar default only works on python 3.12
 def msg(ptr: objc_id, selector: str, /, *args: Any, restype: type[T] = objc_id) -> T: # type: ignore [assignment]
   sender = libobjc["objc_msgSend"] # Using attribute access returns a new reference so setting restype is safe

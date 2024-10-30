@@ -1,4 +1,4 @@
-from typing import Dict, Callable, Any, List, Optional
+from typing import Dict, Callable, List, Optional
 from llvmlite import ir
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps, UOps, UOp
@@ -82,21 +82,20 @@ class LLVMRenderer(Renderer):
     bb = [ir.IRBuilder(func.append_basic_block("entry"))]
     loop_blocks: List = []
     reduce_phis: List = []
-    # TODO: newvar probably shouldn't be optional
-    lvars: Dict[Optional[UOp], Any] = {}  # this Any is an llvm type
+    lvars: Dict[Optional[UOp], ir.Instruction] = {}
 
     for bufname,dtype in buf_to_dtype.items():
       if not isinstance(dtype, PtrDType) and dtype == dtypes.int32: lvars[bufname] = bb[-1].sext(func.args[buf_index[bufname]], ir.IntType(32))
 
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
-      if uop is UOps.STORE:
-        element = cast(bb, lvars[src[2]], src[2].dtype, src[0].dtype)
-        if len(src) > 3:
-          with bb[-1].if_then(lvars[src[3]]):
-            bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
+      if uop is UOps.INDEX:
+        lvars[u] = bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True)
+      elif uop is UOps.STORE:
+        if len(src) > 2:
+          with bb[-1].if_then(lvars[src[2]]): bb[-1].store(lvars[src[1]], lvars[src[0]])
         else:
-          bb[-1].store(element, bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
+          bb[-1].store(lvars[src[1]], lvars[src[0]])
       elif uop is UOps.ENDRANGE:
         loop_entry_bb, phis = loop_blocks.pop()
         idx_p1 = bb[-1].add(lvars[src[0]], ir.Constant(ir.IntType(32), 1))
@@ -123,12 +122,17 @@ class LLVMRenderer(Renderer):
           lvars[u] = const(src[0].arg, dtype)
           reduce_phis.append(u)
         elif uop is UOps.LOAD:
-          if len(src) > 2:
-            aug_idx = bb[-1].select(lvars[src[3]], lvars[src[1]], ir.Constant(ir.IntType(32), 0))
-            val = bb[-1].load(bb[-1].gep(lvars[src[0]], [aug_idx], inbounds=True))
-            val = bb[-1].select(lvars[src[3]], val, lvars[src[2]])
+          if len(src) > 1:
+            with bb[-1].if_else(lvars[src[2]]) as (then, otherwise):
+              with then:
+                val1 = bb[-1].load(lvars[src[0]])
+                then_blk = bb[-1].block
+              with otherwise: otherwise_blk = bb[-1].block
+            val = bb[-1].phi(val1.type)
+            val.add_incoming(val1, then_blk)
+            val.add_incoming(lvars[src[1]], otherwise_blk)
           else:
-            val = bb[-1].load(bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True))
+            val = bb[-1].load(lvars[src[0]])
           lvars[u] = val
         elif uop is UOps.ASSIGN:
           lvars[u] = lvars[src[1]]

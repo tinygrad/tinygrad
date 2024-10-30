@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, TinyJit, Variable, dtypes
+from tinygrad import Device, Tensor, TinyJit, Variable, dtypes
 import numpy as np
 
 class TestSetitem(unittest.TestCase):
@@ -114,6 +114,13 @@ class TestSetitem(unittest.TestCase):
       f(t, a, v)
       np.testing.assert_allclose(t.numpy(), n)
     np.testing.assert_allclose(t.numpy(), [[1,1,1,1,1,1],[2,2,2,2,2,2],[3,3,3,3,3,3],[4,4,4,4,4,4],[5,5,5,5,5,5],[6,6,6,6,6,6]])
+
+  @unittest.skipUnless(Device.DEFAULT in {"LLVM", "AMD"}, "only fails on LLVM and AMD")
+  @unittest.expectedFailure
+  def test_setitem_overlapping_inplace(self):
+    t = Tensor([[3.0], [2.0], [1.0]]).contiguous()
+    t[1:] = t[:-1]
+    assert t.tolist() == [[3.0], [3.0], [2.0]]
 
 class TestWithGrad(unittest.TestCase):
   def test_no_requires_grad_works(self):

@@ -277,7 +277,7 @@ if __name__ == "__main__":
   elif args.beamreplay is not None:
     print(f"loading BEAM replay from file '{args.beamreplay}'")
     with open(args.beamreplay, 'r') as file: fdata = file.readlines()
-    ast_strs, opts_list = [x.split(' :: ')[0] for x in fdata], [x.split(' :: ')[1] for x in fdata]
+    ast_strs, opts_list = [x.split(' :: ')[0] for x in fdata if not x.startswith("#")], [x.split(' :: ')[1] for x in fdata if not x.startswith("#")]
 
     # dedup ast_strs and opts_list
     dct = defaultdict(list)

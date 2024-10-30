@@ -6,7 +6,7 @@ from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True)
 class DType:
   priority: int  # this determines when things get upcasted
   itemsize: int
@@ -14,6 +14,7 @@ class DType:
   fmt: Optional[str]
   count: int
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
+  def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
   def vec(self, sz:int):
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self.name == 'void': return self  # void doesn't vectorize, and sz=1 is scalar
@@ -22,7 +23,7 @@ class DType:
     return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, local)
   def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
 
-@dataclass(frozen=True, repr=False)
+@dataclass(frozen=True)
 class ImageDType(DType):
   shape: Tuple[int, ...]   # arbitrary arg for the dtype, used in image for the shape
   base: DType
@@ -32,7 +33,7 @@ class ImageDType(DType):
   def ptr(self, local=False) -> Union[PtrDType, ImageDType]: return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
-@dataclass(frozen=True, repr=False)
+@dataclass(frozen=True)
 class PtrDType(DType):
   base: DType
   local: bool
@@ -78,7 +79,8 @@ class dtypes:
     if dtypes.is_int(dtype): return (2**(dtype.itemsize*8-(0 if dtypes.is_unsigned(dtype) else 1)))-1
     return float("inf") if dtypes.is_float(dtype) else True
   @staticmethod
-  def finfo(dtype:DType) -> Tuple[int, int]:  # (exponent, mantissa)
+  def finfo(dtype:DType) -> Tuple[int, int]:
+    """(exponent, mantissa)"""
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
   @staticmethod

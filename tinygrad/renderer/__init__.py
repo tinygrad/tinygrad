@@ -62,9 +62,6 @@ class Program:
   @functools.cached_property
   def _ops_lds(self) -> Tuple[sint, sint]: return (0,0) if self.uops is None else flops_mem(self.uops, ignore_indexing=True)
 
-  @property
-  def outcount(self) -> int: return len(self.outs)
-
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
 

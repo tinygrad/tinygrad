@@ -1,5 +1,6 @@
-import unittest
-from tinygrad.ops import UOp, dtypes
+import unittest, math
+from tinygrad.ops import UOp, UOps
+from tinygrad.dtype import dtypes
 
 class TestVminVmaxProperties(unittest.TestCase):
   def test_vmin_vmax_constant(self):
@@ -31,6 +32,15 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmin, -6)
     self.assertEqual(uop.vmax, 8)
 
+  def test_vmin_vmax_multiplication_0_inf(self):
+    # vmin and vmax for multiplication with a variable
+    x = UOp.const(dtypes.float, 0.0)
+    y = UOp.load(UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0), UOp.const(dtypes.int, 0), dtype=dtypes.float)
+    uop = x * y
+    # TODO: these should be 0, but definitely should not be nan
+    self.assertEqual(uop.vmin, -math.inf)
+    self.assertEqual(uop.vmax, math.inf)
+
   def test_vmin_vmax_with_negative_multiplication(self):
     # vmin and vmax when multiplying by a negative number
     x = UOp.variable('x', 2, 5)
@@ -38,10 +48,17 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmin, -15)
     self.assertEqual(uop.vmax, -6)
 
+  def test_vmin_vmax_with_negative_multiplication2(self):
+    # vmin and vmax when multiplying by a negative number
+    x = UOp.variable('x', -2, 5)
+    uop = x * -3
+    self.assertEqual(uop.vmin, -15)
+    self.assertEqual(uop.vmax, 6)
+
   def test_vmin_vmax_nested_min_max(self):
     # vmin and vmax with nested min/max operations
     x = UOp.variable('x', 0, 10)
-    uop = x.max(5).min(8)
+    uop = x.maximum(5).minimum(8)
     self.assertEqual(uop.vmin, 5)
     self.assertEqual(uop.vmax, 8)
 
