@@ -158,13 +158,7 @@ def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
 # *** approximate sine on small angle. ***
 def trig_poly(d:UOp, coeff32, coeff64):
   s = d * d
-  if d.dtype == dtypes.float64:
-    def __poly4(x:UOp, x2:UOp, c3, c2, c1, c0) -> UOp: return x2 * (x*c3+c2) + (x*c1+c0)
-    def __poly8(x, x2, x4, c7, c6, c5, c4, c3, c2, c1, c0) -> UOp: return x4 * __poly4(x, x2, c7, c6, c5, c4) + __poly4(x, x2, c3, c2, c1, c0)
-    s2 = s * s
-    s4 = s2 * s2
-    u = __poly8(s, s2, s4, *coeff64[:-1]) * s + coeff64[-1]
-  else: u = polyN(s, coeff32)
+  u = polyN(s, coeff64) if d.dtype == dtypes.float64 else polyN(s, coeff32)
   return s * (u * d) + d
 # approximate sine on [-pi/2, pi/2]
 def sin_poly(d:UOp) -> UOp:
