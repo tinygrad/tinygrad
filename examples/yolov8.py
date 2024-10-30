@@ -61,7 +61,7 @@ def compute_nms(boxes, scores, iou_threshold):
     if order.size == 1:
       break
     iou = box_iou(boxes[i][None, :], boxes[order[1:]])
-    inds = np.where(iou.squeeze() <= iou_threshold)[0]
+    inds = np.where(np.atleast_1d(iou.squeeze()) <= iou_threshold)[0]
     order = order[inds + 1]
   return np.array(keep)
 
