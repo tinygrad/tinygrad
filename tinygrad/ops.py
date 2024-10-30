@@ -302,7 +302,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
     return ret
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
-  def index(self, idx:UOp): return UOp(UOps.INDEX, self.dtype, (self,idx))
+  def index(self, idx:UOp, valid:Optional[UOp]=None): return UOp(UOps.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
   def view(self, st:ShapeTracker): return UOp(UOps.VIEW, self.dtype, (self,), st)
   def const_like(self, b:ConstType|Variable|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
@@ -767,6 +767,7 @@ spec = PatternMatcher([
 
   # INDEX is used in new style load/store
   (UPat(UOps.INDEX, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat())), lambda: True),
+  (UPat(UOps.INDEX, src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
 
   # LOAD takes a <bufidx, alt?, gate?, barrier?>
   (UPat(UOps.LOAD, src=(UPat((UOps.INDEX, UOps.CAST)),)), lambda: True),
