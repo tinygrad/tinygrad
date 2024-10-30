@@ -26,22 +26,9 @@ class DType:
   def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
 
 @dataclass(frozen=True)
-class ImageDType(DType):
-  shape: Tuple[int, ...]   # arbitrary arg for the dtype, used in image for the shape
-  base: DType
-  local: bool = False  # images are never local
-  v: int = 1
-  def ptr(self, local=False):
-    assert not local, "images can't be local"
-    return self
-  def scalar(self) -> DType: return replace(self, v=1)
-  def vec(self, sz:int) -> DType: return replace(self, v=sz)
-  def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
-
-@dataclass(frozen=True)
 class PtrDType(DType):
   base: DType
-  local: bool
+  local: bool = False
   v: int = 1
   def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
   def scalar(self) -> PtrDType: return replace(self, v=1)
@@ -49,6 +36,14 @@ class PtrDType(DType):
   @property
   def vcount(self): return self.v
   def __repr__(self): return f"{self.base.__repr__()}.ptr({'local=true' if self.local else ''})" + (f'.vec({self.v})' if self.v != 1 else '')
+
+@dataclass(frozen=True)
+class ImageDType(PtrDType):
+  shape: Tuple[int, ...] = ()   # shape of the Image
+  def ptr(self, local=False):
+    assert not local, "images can't be local"
+    return self
+  def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
 
 class dtypes:
   @staticmethod
