@@ -166,7 +166,6 @@ class ScheduleItemContext:
   sts: Set[ShapeTracker] = field(default_factory=set)
   bufs: List[UOp] = field(default_factory=list)
   assign_preloads: List[UOp] = field(default_factory=list)
-  metadata: Dict[Metadata, None] = field(default_factory=dict)
 
 def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
   if (st:=unwrap(x.st)) in ctx.sts: return None
@@ -199,19 +198,17 @@ lazy = PatternMatcher([
 
 multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda stores,b: stores.get(b)),])
 
-def full_ast_rewrite(pre:UOp, var_vals:Dict[Variable, int], assigned:Set[UOp], ubuf_metadata:Dict[UOp, Metadata]) -> Tuple[UOp, ScheduleItemContext]:
-  metadata = {mx:None for x in pre.sparents if x.op in BUFFER_UOPS and len(x.src) > 2 and (mx:=ubuf_metadata.get(x.src[0]))}
-  ctx = ScheduleItemContext(var_vals, assigned, metadata=metadata)
+def full_ast_rewrite(pre:UOp, var_vals:Dict[Variable, int], assigned:Set[UOp]) -> Tuple[UOp, ScheduleItemContext]:
   # fuse and fold store -> loads
-  sink = graph_rewrite(pre, lazy+multioutput if len(pre.src) >1 else lazy, {x.src[0]:x.src[2] for x in pre.src})
+  sink = graph_rewrite(pre, lazy+multioutput if len(pre.src)>1 else lazy, {x.src[0]:x.src[2] for x in pre.src})
   # assert cyclic dependency
-  for b,ops in itertools.groupby((x for x in sink.sparents if x.op in {UOps.PRELOAD,UOps.LOAD} and x.src[0] in ctx.assigned), key=lambda x:x.src[0]):
+  for b,ops in itertools.groupby((x for x in sink.sparents if x.op in {UOps.PRELOAD,UOps.LOAD} and x.src[0] in assigned), key=lambda x:x.src[0]):
     if not all_same([x.op for x in ops]):
       raise RuntimeError(f"cycle detected in kernel.\nhelp: use .contiguous() to break the part loading pre-assign {b} into a different kernel.")
   # do movementops
   sink = graph_rewrite(graph_rewrite(sink, view_left), view_right)
   # convert to AST
-  sink = graph_rewrite(graph_rewrite(sink, to_si, ctx), append_bufs, ctx)
+  sink = graph_rewrite(graph_rewrite(sink, to_si, ctx:=ScheduleItemContext(var_vals, assigned)), append_bufs, ctx)
   # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
   if len(assign_targets:=[x.src[0] for x in sink.sparents if x.op is UOps.ASSIGN]) != 0:
     if not all((s:=x.st_arg).contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \
@@ -246,12 +243,16 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   # split realizes into small graphs
   graph_rewrite(big_graph, break_sched, realizes)
   assigned = {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None}
-  small_graphs = [full_ast_rewrite(UOp.sink(*(realizes[ctx.buf_uops[b]] for b in stores)),
-                                   ctx.var_vals, assigned, ctx.ubuf_metadata) for stores in store_groups]
+  small_graphs: List[Tuple[UOp, ScheduleItemContext]] = []
+  metadata: List[Set[Metadata]] = []
+  for stores in store_groups:
+    sink = UOp.sink(*(realizes[ctx.buf_uops[b]] for b in stores))
+    metadata.append({mx for x in sink.sparents if x.op in BUFFER_UOPS and len(x.src) > 2 and (mx:=ctx.ubuf_metadata.get(x.src[0]))})
+    small_graphs.append(full_ast_rewrite(sink, ctx.var_vals, assigned))
 
   # do BFS
   prescheduled = [ScheduleItem(u, tuple(b for u in c.bufs if (b:=ctx.uop_bufs[u]).size != 0),
-                           tuple(c.metadata), tuple(c.assign_preloads)) for u,c in small_graphs]
+                               tuple(m), tuple(c.assign_preloads)) for (u,c),m in zip(small_graphs, metadata)]
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
   in_degree: DefaultDict[ScheduleItem, int] = defaultdict(int)
