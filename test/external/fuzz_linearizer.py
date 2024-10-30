@@ -116,7 +116,7 @@ def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None) -> Tuple[str, Any]:
 
 def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=None, rtol=1e-2, atol=1e-2):
   # TODO: for bfloat16 it compiles linearizer, but it does not run because numpy cannot generate bf16 buffer.
-  has_bf16 = any(b.dtype == dtypes.bfloat16 for b in lin.membufs)
+  has_bf16 = any(b.dtype.base == dtypes.bfloat16 for b in lin.membufs)
 
   # TODO: raise specific fuzzing errors instead of str, and propagate the error message
   try:
