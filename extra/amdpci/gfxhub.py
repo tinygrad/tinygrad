@@ -11,7 +11,7 @@ regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32 = 0x2974
 regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32 = 0x2993
 regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32 = 0x2994
 def gfxhub_v3_0_init_gart_aperture_regs(adev):
-  gfxhub_v3_0_setup_vm_pt_regs(pt_base, 0)
+  gfxhub_v3_0_setup_vm_pt_regs(adev.vmm.pdb0_base, 0)
   adev.wreg(regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, gart_base & 0xffffffff)
   adev.wreg(regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, (gart_base >> 32) & 0xffffffff)
   adev.wreg(regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, (gart_base + gart_size) & 0xffffffff)

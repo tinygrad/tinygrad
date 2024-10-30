@@ -961,15 +961,15 @@ struct_amdgpu_firmware_info._fields_ = [
 ]
 
 __AMDGPU_RING_H__ = True # macro
-uint32_t = True # macro
-uint8_t = True # macro
-uint16_t = True # macro
-uint64_t = True # macro
-u32 = True # macro
-u8 = True # macro
-u16 = True # macro
-u64 = True # macro
-bool = True # macro
+# uint32_t = True # macro
+# uint8_t = True # macro
+# uint16_t = True # macro
+# uint = True # macro
+# u32 = True # macro
+# u8 = True # macro
+# u16 = True # macro
+# u64 = True # macro
+# bool = True # macro
 AMDGPU_MAX_RINGS = 124 # macro
 AMDGPU_MAX_HWIP_RINGS = 64 # macro
 AMDGPU_MAX_GFX_RINGS = 2 # macro
@@ -2284,33 +2284,33 @@ AMDGPU_PTE_LOG = (1<<55) # macro
 AMDGPU_PTE_TF = (1<<56) # macro
 AMDGPU_PTE_NOALLOC = (1<<58) # macro
 def AMDGPU_PDE_BFS(a):  # macro
-   return ((int64_t)a<<59)  
+   return ((int)(a)<<59)  
 AMDGPU_VM_NORETRY_FLAGS = ((1<<4)|(1<<54)|(1<<56)) # macro
 AMDGPU_VM_NORETRY_FLAGS_TF = ((1<<0)|(1<<1)|(1<<51)) # macro
 def AMDGPU_PTE_MTYPE_VG10_SHIFT(mtype):  # macro
-   return ((int64_t)(mtype)<<57)  
+   return ((int)(mtype)<<57)  
 AMDGPU_PTE_MTYPE_VG10_MASK = AMDGPU_PTE_MTYPE_VG10_SHIFT ( 3 ) # macro
 def AMDGPU_PTE_MTYPE_VG10(flags, mtype):  # macro
-   return (((int64_t)(flags)&(~AMDGPU_PTE_MTYPE_VG10_SHIFT(3)))|AMDGPU_PTE_MTYPE_VG10_SHIFT(mtype))  
+   return (((int)(flags)&(~AMDGPU_PTE_MTYPE_VG10_SHIFT(3)))|AMDGPU_PTE_MTYPE_VG10_SHIFT(mtype))  
 AMDGPU_MTYPE_NC = 0 # macro
 AMDGPU_MTYPE_CC = 2 # macro
-AMDGPU_PTE_DEFAULT_ATC = ((1<<1)|(1<<2)|(1<<4)|(1<<5)|(1<<6)|AMDGPU_PTE_MTYPE_VG10(2)) # macro
+# AMDGPU_PTE_DEFAULT_ATC = ((1<<1)|(1<<2)|(1<<4)|(1<<5)|(1<<6)|AMDGPU_PTE_MTYPE_VG10(2)) # macro
 def AMDGPU_PTE_MTYPE_NV10_SHIFT(mtype):  # macro
-   return ((int64_t)(mtype)<<48)  
+   return ((int)(mtype)<<48)  
 AMDGPU_PTE_MTYPE_NV10_MASK = AMDGPU_PTE_MTYPE_NV10_SHIFT ( 7 ) # macro
 def AMDGPU_PTE_MTYPE_NV10(flags, mtype):  # macro
-   return (((int64_t)(flags)&(~AMDGPU_PTE_MTYPE_NV10_SHIFT(7)))|AMDGPU_PTE_MTYPE_NV10_SHIFT(mtype))  
+   return (((int)(flags)&(~AMDGPU_PTE_MTYPE_NV10_SHIFT(7)))|AMDGPU_PTE_MTYPE_NV10_SHIFT(mtype))  
 AMDGPU_PTE_PRT_GFX12 = (1<<56) # macro
 # def AMDGPU_PTE_PRT_FLAG(adev):  # macro
 #    return ((amdgpu_ip_version((adev),GC_HWIP,0)>=IP_VERSION(12,0,0))?(1<<56):(1<<51))  
 def AMDGPU_PTE_MTYPE_GFX12_SHIFT(mtype):  # macro
-   return ((int64_t)(mtype)<<54)  
+   return ((int)(mtype)<<54)  
 AMDGPU_PTE_MTYPE_GFX12_MASK = AMDGPU_PTE_MTYPE_GFX12_SHIFT ( 3 ) # macro
 def AMDGPU_PTE_MTYPE_GFX12(flags, mtype):  # macro
-   return (((int64_t)(flags)&(~AMDGPU_PTE_MTYPE_GFX12_SHIFT(3)))|AMDGPU_PTE_MTYPE_GFX12_SHIFT(mtype))  
+   return (((int)(flags)&(~AMDGPU_PTE_MTYPE_GFX12_SHIFT(3)))|AMDGPU_PTE_MTYPE_GFX12_SHIFT(mtype))  
 AMDGPU_PTE_IS_PTE = (1<<63) # macro
 def AMDGPU_PDE_BFS_GFX12(a):  # macro
-   return ((int64_t)((a)&0x1f)<<58)  
+   return ((int)((a)&0x1f)<<58)  
 # def AMDGPU_PDE_BFS_FLAG(adev, a):  # macro
 #    return ((amdgpu_ip_version((adev),GC_HWIP,0)>=IP_VERSION(12,0,0))?AMDGPU_PDE_BFS_GFX12(a):AMDGPU_PDE_BFS(a))  
 AMDGPU_PDE_PTE_GFX12 = (1<<63) # macro
@@ -2497,5 +2497,5 @@ __all__ = \
     'struct_umsch_mm_firmware_header_v1_0', 'struct_v11_compute_mqd',
     'struct_v11_gfx_mqd', 'struct_v11_sdma_mqd',
     'struct_vpe_firmware_header_v1_0', 'ta_fw_type', 'u16', 'u32',
-    'u64', 'u8', 'uint16_t', 'uint32_t', 'uint64_t', 'uint8_t',
+    'u64', 'u8', 'uint16_t', 'uint32_t', 'uint', 'uint8_t',
     'union_amdgpu_firmware_header']

@@ -1,5 +1,5 @@
 import os, ctypes
-from tinygrad.runtime.autogen import libpciaccess, amdgpu_2
+from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_ip_offset, amdgpu_mp_13_0_0_offset
 from tinygrad.helpers import to_mv, mv_address
 
 def check(x): assert x == 0
@@ -34,7 +34,7 @@ class AMDDev:
     aper_base = pcidev.regions[0].base_addr
     aper_size = pcidev.regions[0].size
     libpciaccess.pci_device_map_range(ctypes.byref(pcidev), aper_base, aper_size, libpciaccess.PCI_DEV_MAP_FLAG_WRITABLE, ctypes.byref(vram_bar_mem:=ctypes.c_void_p()))
-    self.vram_cpu_addr = vram_bar_mem
+    self.vram_cpu_addr = vram_bar_mem.value
     self.raw_vram = to_mv(vram_bar_mem, 24 << 30)
 
     doorbell_bar_region_addr = pcidev.regions[2].base_addr
@@ -50,50 +50,70 @@ class AMDDev:
 
     from extra.amdpci.vmm import VMM
     self.vmm = VMM(self)
-    self.setup()
 
-    def rreg(self, reg): return self.pci_mmio[reg]
-    def wreg(self, reg, val): self.pci_mmio[reg] = val
+    from extra.amdpci.psp import PSP_IP
+    self.psp = PSP_IP(self)
 
-    def setup(self):
-      from extra.amdpci.rlc import replay_rlc
-      
-      self.gfx_v11_0_wait_for_rlc_autoload_complete()
+  def rreg(self, reg): return self.pci_mmio[reg]
+  def wreg(self, reg, val): self.pci_mmio[reg] = val
 
-    def hw_init(self): # gfx_v11_0_hw_init
-      replay_rlc(self) # TODO: Split into functions, but this is the same regs setup...
+  def rreg_ip(self, ip, inst, reg, seg):
+    off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
+    return self.rreg(off + reg)
 
-      self.gfx_v11_0_wait_for_rlc_autoload_complete()
-      self.get_gb_addr_config() # raises if something wrong
-      self.gfx_v11_0_gfxhub_enable()
+  def wreg_ip(self, ip, inst, reg, seg, val):
+    off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
+    self.wreg(off + reg, val)
 
-    def hdp_v6_0_flush_hdp(self): self.wreg(0x1fc00, 0x0)
-    def gmc_v11_0_flush_gpu_tlb(self):
-      self.wreg(0x291c, 0xf80001)
-      while self.rreg(0x292e) != 1: pass
+  def setup(self):
+    from extra.amdpci.rlc import replay_rlc
 
-    def gfx_v11_0_gfxhub_enable(self):
-      from extra.amdpci.gfxhub import gfxhub_v3_0_gart_enable
-      if DEBUG >= 2: print("start gfx_v11_0_gfxhub_enable")
-      gfxhub_v3_0_gart_enable(self)
-      self.hdp_v6_0_flush_hdp()
+    self.hw_init()
 
-      self.gmc_v11_0_flush_gpu_tlb()
-      self.hdp_v6_0_flush_hdp()
-    
-    def get_gb_addr_config(self):
-      gb_addr_config = self.rreg(regGB_ADDR_CONFIG)
-      if gb_addr_config == 0: raise RuntimeError("error in get_gb_addr_config: gb_addr_config is 0")
+  def hw_init(self): # gfx_v11_0_hw_init
+    replay_rlc(self) # TODO: Split into functions, but this is the same regs setup...
 
-    def gfx_v11_0_wait_for_rlc_autoload_complete(self):
-      while True:
-        cp_status = self.rreg(regCP_STAT)
-        # TODO: some exceptions here for other gpus
-        if True:
-          bootload_status = self.rreg(regRLC_RLCS_BOOTLOAD_STATUS)
+    self.gfx_v11_0_wait_for_rlc_autoload_complete()
+    self.get_gb_addr_config() # raises if something wrong
+    self.gfx_v11_0_gfxhub_enable()
 
-        if cp_status == 0 and ((bootload_status & RLC_RLCS_BOOTLOAD_STATUS__BOOTLOAD_COMPLETE_MASK) >> RLC_RLCS_BOOTLOAD_STATUS__BOOTLOAD_COMPLETE__SHIFT) == 1:
-          break
+  def soc21_grbm_select(self, me, pipe, queue, vmid):
+    regGRBM_GFX_CNTL = 0xa900 # (adev->reg_offset[GC_HWIP][0][1] + 0x0900)
+    GRBM_GFX_CNTL__PIPEID__SHIFT=0x0
+    GRBM_GFX_CNTL__MEID__SHIFT=0x2
+    GRBM_GFX_CNTL__VMID__SHIFT=0x4
+    GRBM_GFX_CNTL__QUEUEID__SHIFT=0x8
+
+    grbm_gfx_cntl = (me << GRBM_GFX_CNTL__MEID__SHIFT) | (pipe << GRBM_GFX_CNTL__PIPEID__SHIFT) | (vmid << GRBM_GFX_CNTL__VMID__SHIFT) | (queue << GRBM_GFX_CNTL__QUEUEID__SHIFT)
+    self.wreg(regGRBM_GFX_CNTL, grbm_gfx_cntl)
+
+  def hdp_v6_0_flush_hdp(self): self.wreg(0x1fc00, 0x0)
+  def gmc_v11_0_flush_gpu_tlb(self):
+    self.wreg(0x291c, 0xf80001)
+    while self.rreg(0x292e) != 1: pass
+
+  def gfx_v11_0_gfxhub_enable(self):
+    from extra.amdpci.gfxhub import gfxhub_v3_0_gart_enable
+    if DEBUG >= 2: print("start gfx_v11_0_gfxhub_enable")
+    gfxhub_v3_0_gart_enable(self)
+    self.hdp_v6_0_flush_hdp()
+
+    self.gmc_v11_0_flush_gpu_tlb()
+    self.hdp_v6_0_flush_hdp()
+  
+  def get_gb_addr_config(self):
+    gb_addr_config = self.rreg(regGB_ADDR_CONFIG)
+    if gb_addr_config == 0: raise RuntimeError("error in get_gb_addr_config: gb_addr_config is 0")
+
+  def gfx_v11_0_wait_for_rlc_autoload_complete(self):
+    while True:
+      cp_status = self.rreg(regCP_STAT)
+      # TODO: some exceptions here for other gpus
+      if True:
+        bootload_status = self.rreg(regRLC_RLCS_BOOTLOAD_STATUS)
+
+      if cp_status == 0 and ((bootload_status & RLC_RLCS_BOOTLOAD_STATUS__BOOTLOAD_COMPLETE_MASK) >> RLC_RLCS_BOOTLOAD_STATUS__BOOTLOAD_COMPLETE__SHIFT) == 1:
+        break
 
 
 

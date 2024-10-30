@@ -251,12 +251,24 @@ generate_pciaccess() {
 }
 
 generate_amdgpu_2() {
+  # clang2py -k cdefstum \
+  #   extra/amdpci/amdgpu_ucode.h \
+  #   extra/amdpci/amdgpu_ring.h \
+  #   extra/amdpci/v11_structs.h \
+  #   extra/amdpci/amdgpu_vm.h \
+  #   -o $BASE/amdgpu_2.py
+
+  # clang2py -k cdefstum \
+  #   extra/amdpci/navi14_ip_offset.h \
+  #   -o $BASE/amdgpu_ip_offset.py
+
+  # clang2py -k cdefstum \
+  #   extra/amdpci/mp_13_0_0_offset.h \
+  #   -o $BASE/amdgpu_mp_13_0_0_offset.py
+
   clang2py -k cdefstum \
-    extra/amdpci/amdgpu_ucode.h \
-    extra/amdpci/amdgpu_ring.h \
-    extra/amdpci/v11_structs.h \
-    extra/amdpci/amdgpu_vm.h \
-    -o $BASE/amdgpu_2.py
+    extra/amdpci/psp_gfx_if.h \
+    -o $BASE/amdgpu_psp_gfx_if.py
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
