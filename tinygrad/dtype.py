@@ -30,9 +30,9 @@ class PtrDType(DType):
   base: DType
   local: bool = False
   v: int = 1
-  def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
   def scalar(self) -> PtrDType: return replace(self, v=1)
   def vec(self, sz:int) -> PtrDType: return replace(self, v=sz)
+  def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
   @property
   def vcount(self): return self.v
   def __repr__(self): return f"{self.base.__repr__()}.ptr({'local=true' if self.local else ''})" + (f'.vec({self.v})' if self.v != 1 else '')
@@ -40,10 +40,13 @@ class PtrDType(DType):
 @dataclass(frozen=True)
 class ImageDType(PtrDType):
   shape: Tuple[int, ...] = ()   # shape of the Image
-  def ptr(self, local=False):
+  # NOTE: scalar/vec are wrong
+  def scalar(self): return self.base
+  def vec(self, sz:int): return self.base.vec(sz)
+  def ptr(self, local=False) -> Union[PtrDType, ImageDType]:
     assert not local, "images can't be local"
     return self
-  def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
+  def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
 class dtypes:
   @staticmethod
