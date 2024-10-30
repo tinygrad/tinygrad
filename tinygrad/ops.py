@@ -835,6 +835,14 @@ def type_verify(uops:List[UOp]):
       print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[x.op for x in u.src]} {u.arg}")
 
+# *** uop helpers ***
+
+def cast_float_to_bf16(x: UOp) -> UOp:
+  assert x.dtype == dtypes.float, "cast float -> bf16 must start with float"
+  x = x.bitcast(dtypes.uint)
+  x = (-x & 0x7f800000).where(x + ((x >> 16) & 1) + 0x7fff, (x & 0xffff).where((x | 0x10000), x))
+  return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
+
 # *** most of symbolic lives here now ***
 
 def split_uop(x:UOp, sep:BinaryOps):
