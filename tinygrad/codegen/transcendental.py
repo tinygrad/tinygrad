@@ -74,7 +74,7 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   if v.dtype == dtypes.float16: exp = exp.bitcast(dtypes.int16)
   return mantissa, exp
 
-def polyN(s:UOp, coeffs:List[float]) -> UOp: return functools.reduce(lambda u,c: u*s+c, coeffs, s.const_like(0))
+def polyN(s:UOp, coeffs:List[float]) -> UOp: return functools.reduce(lambda acc,c: acc*s+c, coeffs, s.const_like(0))
 
 # *** reduction algorithms for sine ***
 def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
