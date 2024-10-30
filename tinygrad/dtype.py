@@ -40,18 +40,15 @@ class PtrDType(DType):
 @dataclass(frozen=True)
 class ImageDType(PtrDType):
   shape: Tuple[int, ...] = ()   # shape of the Image
-  # NOTE: scalar/vec are wrong
-  def scalar(self): return self.base
-  def vec(self, sz:int): return self.base.vec(sz)
   def ptr(self, local=False) -> Union[PtrDType, ImageDType]:
     assert not local, "images can't be local"
     return self
-  def __repr__(self): return f"dtypes.{self.name}({self.shape})"
+  def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
 
 class dtypes:
   @staticmethod
   @functools.lru_cache(None)
-  def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats
+  def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats or isinstance(x, ImageDType)
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   @functools.lru_cache(None)
   def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints
