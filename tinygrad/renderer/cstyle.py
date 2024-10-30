@@ -185,7 +185,7 @@ class ClangRenderer(CStyleLanguage):
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({(sz:=dt.itemsize)}),vector_size({sz})));"
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix = [self.render_vector_prefix(dt) for dt in uops_to_dtypes(uops) if dt.dtype.count > 1]
+    prefix = [self.render_vector_prefix(dt) for dt in uops_to_dtypes(uops) if dt.count > 1]
     # https://github.com/corsix/amx
     for name, (N, M, _), dtype_in, _, _, _, _, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
       prefix += [
@@ -330,7 +330,7 @@ class CUDARenderer(CStyleLanguage):
     used_dtypes = uops_to_dtypes(uops)
     if any(d.scalar() == dtypes.half for d in used_dtypes): prefix.append("#include <cuda_fp16.h>")
     if any(d.scalar() == dtypes.bfloat16 for d in used_dtypes): prefix.append("#include <cuda_bf16.h>")
-    prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.dtype.count > 1]
+    prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 1 and dt.scalar() in {dtypes.half, dtypes.bfloat16}]
 
     dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]):
@@ -409,7 +409,7 @@ class AMDRenderer(CStyleLanguage):
 
     used_dtypes = uops_to_dtypes(uops)
     if any(d.scalar() == dtypes.bfloat16 for d in used_dtypes): prefix.append("struct hip_bfloat16 { unsigned short data; };")
-    prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.dtype.count > 1]
+    prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 1]
 
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
       if arg[3] == dtypes.float: prefix.append(f"#define __{arg[0]} __builtin_amdgcn_wmma_f32_16x16x16_f16_w32")
