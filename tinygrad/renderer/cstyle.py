@@ -328,8 +328,8 @@ class CUDARenderer(CStyleLanguage):
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
 
     used_dtypes = uops_to_dtypes(uops)
-    if any(d.scalar() == dtypes.half for d in used_dtypes): prefix.append("#include <cuda_fp16.h>")
-    if any(d.scalar() == dtypes.bfloat16 for d in used_dtypes): prefix.append("#include <cuda_bf16.h>")
+    if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#include <cuda_fp16.h>")
+    if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("#include <cuda_bf16.h>")
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 1 and dt.scalar() in {dtypes.half, dtypes.bfloat16}]
 
     dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16" }
@@ -408,7 +408,7 @@ class AMDRenderer(CStyleLanguage):
     prefix = ["#define INFINITY (__builtin_inff())","#define NAN (__builtin_nanf(\"\"))","typedef long unsigned int size_t;","#define half _Float16"]
 
     used_dtypes = uops_to_dtypes(uops)
-    if any(d.scalar() == dtypes.bfloat16 for d in used_dtypes): prefix.append("struct hip_bfloat16 { unsigned short data; };")
+    if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("struct hip_bfloat16 { unsigned short data; };")
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count > 1]
 
     for arg in dedup([uop.arg for uop in uops if uop.op is UOps.WMMA]): # TODO: handle TCs f32_bf16 and bf16_bf16 w/ wrapper
