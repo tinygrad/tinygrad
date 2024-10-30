@@ -318,8 +318,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if self.op is UOps.VCONST: return UOp.const(self.dtype.scalar(), self.arg[i])
       if self.op is UOps.CONST: return UOp.const(self.dtype.scalar(), self.arg)
       i = (i,)
-    if self.dtype == dtypes.void or (i == tuple(range(len(i))) and self.dtype.vcount == len(i)): return self
-    assert len(i) >= 1 and all(x < self.dtype.vcount for x in i), f"bad GEP on {self.dtype}, {i}"
+    if self.dtype == dtypes.void or (i == tuple(range(len(i))) and self.dtype.count == len(i)): return self
+    assert len(i) >= 1 and all(x < self.dtype.count for x in i), f"bad GEP on {self.dtype}, {i}"
     return UOp(UOps.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   @staticmethod
   def load(*src:UOp, dtype:DType): return UOp(UOps.LOAD, dtype, src)
