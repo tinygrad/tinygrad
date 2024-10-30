@@ -2,7 +2,7 @@ from __future__ import annotations
 import math
 from typing import Optional, Union, Tuple, List
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod, make_tuple
+from tinygrad.helpers import prod, make_tuple, flatten
 from tinygrad.nn import optim, state, datasets  # noqa: F401
 
 class BatchNorm:
@@ -94,15 +94,15 @@ class Conv2d:
   print(t.numpy())
   ```
   """
-  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int, Tuple[int, ...]], stride=1, padding:Union[int, str]=0,
-                dilation=1, groups=1, bias=True):
-    self.kernel_size: Tuple[int, ...] = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
+  def __init__(self, in_channels:int, out_channels:int, kernel_size:Union[int, Tuple[int, ...]], stride=1, padding:Union[int, Tuple[int, ...], str]=0,
+               dilation=1, groups=1, bias=True):
+    self.kernel_size = make_tuple(kernel_size, 2)
     if isinstance(padding, str):
       if padding.lower() != 'same': raise ValueError(f"Invalid padding string {padding!r}, only 'same' is supported")
       if stride != 1: raise ValueError("padding='same' is not supported for strided convolutions")
-      self.padding: Union[int, List[int]] = [p for d,k in zip(make_tuple(dilation,len(self.kernel_size)), self.kernel_size[::-1]) for p in (d*(k-1)//2, d*(k-1) - d*(k-1)//2)] #noqa:E501
-    else: self.padding = padding
-    self.stride, self.dilation, self.groups = stride, dilation, groups
+      pad = [(d*(k-1)//2, d*(k-1) - d*(k-1)//2) for d,k in zip(make_tuple(dilation, len(self.kernel_size)), self.kernel_size[::-1])]
+      padding = tuple(flatten(pad))
+    self.stride, self.dilation, self.groups, self.padding = stride, dilation, groups, padding
     scale = 1 / math.sqrt(in_channels * prod(self.kernel_size))
     self.weight = Tensor.uniform(out_channels, in_channels//groups, *self.kernel_size, low=-scale, high=scale)
     self.bias: Optional[Tensor] = Tensor.uniform(out_channels, low=-scale, high=scale) if bias else None

@@ -17,7 +17,7 @@ def dfdiv2_f2_f2_f2(nx:UOp, ny:UOp, dx:UOp, dy:UOp) -> Tuple[UOp, UOp]:
   qy = (ny - qx * dy) * t
   return qx, qy
 # *** helper functions for bit manipulation ***
-def significand_bits(d:DType) -> int: return dtypes.finfo(d)[1]
+def mantissa_bits(d:DType) -> int: return dtypes.finfo(d)[1]
 def exponent_bias(d:DType) -> int: return {dtypes.float64: 1023, dtypes.float32: 127, dtypes.float16: 15}[d]
 def exponent_mask(d:DType) -> int: return {dtypes.float64: 2047, dtypes.float32: 255, dtypes.float16: 31}[d]
 
@@ -35,21 +35,21 @@ def pow2if(q:UOp, float_dtype:DType):
   """cast(2^q, float_dtype) where q is any integer in the range of [-126, 127]"""
   assert q.dtype in (dtypes.int64, dtypes.int32, dtypes.int16, dtypes.uint32)
   final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype, dtypes.uint32: dtypes.float32}[q.dtype]
-  return shl(q + exponent_bias(final_dtype), significand_bits(final_dtype)).bitcast(final_dtype)
+  return shl(q + exponent_bias(final_dtype), mantissa_bits(final_dtype)).bitcast(final_dtype)
 
 def ilogb2k(d:UOp) -> UOp:
   """calculate the integer part of log2(d), where d is normalized fp value in the range of [0, +inf)."""
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   dint = d.bitcast({dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype])
   # -1 <= ilog2bk(d) <= 128
-  return (shr(dint, significand_bits(d.dtype)) & exponent_mask(d.dtype)) - exponent_bias(d.dtype)
+  return (shr(dint, mantissa_bits(d.dtype)) & exponent_mask(d.dtype)) - exponent_bias(d.dtype)
 
 def ldexp3k(d:UOp, e:UOp) -> UOp:
   """d*2^e. e is a number obtained by casting an integer in the range [-127, 127] to a float. d is any float number."""
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   cast_map = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}
   m1 = d.bitcast(cast_map[d.dtype])
-  m2 = shl(e.cast(cast_map[d.dtype]), significand_bits(d.dtype))
+  m2 = shl(e.cast(cast_map[d.dtype]), mantissa_bits(d.dtype))
   return (m1 + m2).bitcast(d.dtype).cast(d.dtype)
 
 def ldexp2k(d:UOp, e:UOp) -> UOp:
@@ -64,17 +64,17 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   m1 = {dtypes.float64: 0x000FFFFFFFFFFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
   m2 = {dtypes.float64: 0x3FE0000000000000, dtypes.float32: 0x3F000000, dtypes.float16: 0x3800}[v.dtype]
   bits = v.bitcast({dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[v.dtype])
-  exponent = shr(bits, significand_bits(v.dtype)) & exponent_mask(v.dtype)
-  exponent_zero = exponent.ne(0)
+  exponent = shr(bits, mantissa_bits(v.dtype)) & exponent_mask(v.dtype)
   # Set the exponent bits appropriately to normalize the mantissa into the range of [0.5, 1.0).
-  result_f = ((bits & m1) | m2).bitcast(v.dtype)
-  value = exponent_zero.where(result_f, v)
+  mantissa = ((bits & m1) | m2).bitcast(v.dtype)
   exp = exponent - exponent_bias(v.dtype) + 1
-  exp = exponent_zero.where(exp, exp.const_like(0))
+  # special case of 0  # TODO: can we remove this case?
+  mantissa = exponent.ne(0).where(mantissa, v)
+  exp = exponent.ne(0).where(exp, exp.const_like(0))
   if v.dtype == dtypes.float16: exp = exp.bitcast(dtypes.int16)
-  return value, exp
+  return mantissa, exp
 
-def polyN(s:UOp, coeffs:List[float]) -> UOp: return functools.reduce(lambda u,c: u*s+c, coeffs, s.const_like(0))
+def polyN(s:UOp, coeffs:List[float]) -> UOp: return functools.reduce(lambda acc,c: acc*s+c, coeffs, s.const_like(0))
 
 # *** reduction algorithms for sine ***
 def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
@@ -91,9 +91,8 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   # 190 bits of 2/pi for Payne-Hanek style argument reduction
   two_over_pi_f = [0x00000000,0x28be60db,0x9391054a,0x7f09d5f4,0x7d4d3770,0x36d8a566,0x4f10e410]
 
-  input_dtype: DType = d.dtype
+  input_dtype = d.dtype
   dtype_via = dtypes.float32 if d.dtype == dtypes.float16 else d.dtype
-  acc_dtype = dtypes.uint64
 
   f, e = frexp(d)
   ia = (f.cast(dtype_via) * 4.294967296e9).cast(dtypes.uint64)
@@ -108,18 +107,14 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
     if count+offset <= len(two_over_pi_f[0:-2]):
       an = _eq(i, count).where(_take(an, offset, count=count+1), an.const_like(two_over_pi_f[count+offset]))
     return an
-  def _exact_pow2if(x): return pow2if(x, input_dtype).cast(acc_dtype)
-  def _shl_lazy(x, y): return (x.cast(acc_dtype) * _exact_pow2if(y)).cast(dtypes.uint32)
-  def _shr_lazy(x, y): return (x.cast(acc_dtype) // _exact_pow2if(y)).cast(dtypes.uint32)
+  def _shl_lazy(x, y): return (x.cast(dtypes.uint64) * pow2if(y, input_dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
+  def _shr_lazy(x, y): return (x.cast(dtypes.uint64) // pow2if(y, input_dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
   # a_n = (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
-  a1 = _take(UOp.const(dtypes.uint32, 0), 0)
-  a2 = _take(UOp.const(dtypes.uint32, 0), 1)
-  a3 = _take(UOp.const(dtypes.uint32, 0), 2)
-  a4 = _take(UOp.const(dtypes.uint32, 0), 3)
+  a = [_take(UOp.const(dtypes.uint32, 0), i) for i in range(4)]
   # Note: e >= 1 for all numbers d >= 1.0. assume e != 0
-  hi = _shl_lazy(a1, e) | _shr_lazy(a2, offset)
-  mi = _shl_lazy(a2, e) | _shr_lazy(a3, offset)
-  lo = _shl_lazy(a3, e) | _shr_lazy(a4, offset)
+  hi = _shl_lazy(a[0], e) | _shr_lazy(a[1], offset)
+  mi = _shl_lazy(a[1], e) | _shr_lazy(a[2], offset)
+  lo = _shl_lazy(a[2], e) | _shr_lazy(a[3], offset)
 
   def _hp_mul(x:UOp, y:UOp) -> UOp: return x.cast(dtypes.uint64) * y.cast(dtypes.uint64)
   p = shl(_hp_mul(ia, hi), 32) + _hp_mul(ia, mi) + shr(_hp_mul(ia, lo), 32)
@@ -163,13 +158,7 @@ def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
 # *** approximate sine on small angle. ***
 def trig_poly(d:UOp, coeff32, coeff64):
   s = d * d
-  if d.dtype == dtypes.float64:
-    def __poly4(x:UOp, x2:UOp, c3, c2, c1, c0) -> UOp: return x2 * (x*c3+c2) + (x*c1+c0)
-    def __poly8(x, x2, x4, c7, c6, c5, c4, c3, c2, c1, c0) -> UOp: return x4 * __poly4(x, x2, c7, c6, c5, c4) + __poly4(x, x2, c3, c2, c1, c0)
-    s2 = s * s
-    s4 = s2 * s2
-    u = __poly8(s, s2, s4, *coeff64[:-1]) * s + coeff64[-1]
-  else: u = polyN(s, coeff32)
+  u = polyN(s, coeff64) if d.dtype == dtypes.float64 else polyN(s, coeff32)
   return s * (u * d) + d
 # approximate sine on [-pi/2, pi/2]
 def sin_poly(d:UOp) -> UOp:
