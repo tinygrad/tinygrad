@@ -90,7 +90,8 @@ class dtypes:
     if dtypes.is_int(dtype): return (2**(dtype.itemsize*8-(0 if dtypes.is_unsigned(dtype) else 1)))-1
     return float("inf") if dtypes.is_float(dtype) else True
   @staticmethod
-  def finfo(dtype:DType) -> Tuple[int, int]:  # (exponent, mantissa)
+  def finfo(dtype:DType) -> Tuple[int, int]:
+    """(exponent, mantissa)"""
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
   @staticmethod
