@@ -82,17 +82,10 @@ float4_folding = PatternMatcher([
 
 # ***** image load valid simplification *****
 
-def simplify_buffer_load(load:UOp) -> Optional[UOp]:
-  if not isinstance(load.src[0].dtype, PtrDType) or len(load.src) != 3: return None
-  oidx, invalid_val, valid = load.src
-  buf, start_idx = oidx.src
-  if (idx:=uop_given_valid(valid, start_idx)) is None: return load.replace(src=(oidx, invalid_val, valid.const_like(False)))
-  return None if idx is start_idx else load.replace(src=((buf.index(idx), invalid_val, valid)))
-
 def simplify_image_load(load:UOp) -> Optional[UOp]:
   if not isinstance(buf_dtype:=load.src[0].dtype, ImageDType) or len(load.src) != 3: return None
-  oidx, invalid_val, valid = load.src
-  buf, start_idx = oidx.src
+  oidx, invalid_val = load.src
+  buf, start_idx, valid = oidx.src
   if (idx:=uop_given_valid(valid, start_idx)) is None: return load.replace(src=(oidx, invalid_val, valid.const_like(False)))
 
   # can drop valid if idx is out of bound when valid is False
@@ -491,27 +484,26 @@ reducer = PatternMatcher([
   # simplify valid
   (UPat(UOps.ALU, name="valid", arg=BinaryOps.AND), simplify_valid),
   # image load valid idx simplification
-  (UPat(UOps.LOAD, name="load"), simplify_image_load),
+  #(UPat(UOps.LOAD, name="load"), simplify_image_load),
   # buffer load valid idx simplification
-  (UPat(UOps.LOAD, name="load"), simplify_buffer_load),
+  (UPat(UOps.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat.var("valid"))), lambda buf, start_idx, valid:
+   buf.index(start_idx) if (idx:=uop_given_valid(valid, start_idx)) is None else (None if idx is start_idx else buf.index(idx, valid))),
 ])
 
+def move_mask(x:UOp, buf:UOp, idx:UOp, mask:UOp, cast:Optional[UOp]=None):
+  nidx = buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx)
+  if x.op is UOps.STORE: return UOp.store(nidx, x.src[1], mask, *x.src[2:])
+  return UOp.load(nidx, x.const_like(0), mask, *x.src[1:], dtype=x.dtype)
+
+masked_index = UPat(UOps.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask")))
 move_masks = PatternMatcher([
   # NOTE: this shouldn't be here
   (UPat(UOps.CONST, name='c'),
    lambda c: UOp(UOps.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.count) if c.dtype.count > 1 else None),
-  # fix up loads
-  (UPat(UOps.LOAD, src=(UPat(UOps.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))),), allow_any_len=True, name="x"),
-    lambda x,buf,idx,mask: UOp.load(buf.index(idx), x.const_like(0), mask, *x.src[1:], dtype=x.dtype)),
-  (UPat(UOps.LOAD, src=(UPat(UOps.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))).cast(None).named("cast"),),
-        allow_any_len=True, name="x"),
-    lambda x,buf,idx,mask,cast: UOp.load(buf.index(idx).cast(cast.dtype), x.const_like(0), mask, *x.src[1:], dtype=x.dtype)),
+  # fix up loads/stores
   # TODO: this should be an IF instead of a masked STORE
-  (UPat(UOps.STORE, src=(UPat(UOps.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))),), allow_any_len=True, name="x"),
-    lambda x,buf,idx,mask: UOp.store(buf.index(idx), x.src[1], mask, *x.src[2:])),
-  (UPat(UOps.STORE, src=(UPat(UOps.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))).cast(None).named("cast"),),
-        allow_any_len=True, name="x"),
-    lambda x,buf,idx,mask,cast: UOp.store(buf.index(idx).cast(cast.dtype), x.src[1], mask, *x.src[2:])),
+  (UPat((UOps.LOAD, UOps.STORE), src=(masked_index,), allow_any_len=True, name="x"), move_mask),
+  (UPat((UOps.LOAD, UOps.STORE), src=(masked_index.cast(None).named("cast"),), allow_any_len=True, name="x"), move_mask),
 ])
 
 # *** uop graph ***
