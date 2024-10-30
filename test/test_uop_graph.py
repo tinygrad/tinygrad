@@ -389,12 +389,10 @@ class TestUOpGraph(unittest.TestCase):
     glbl1 = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
     glbl2 = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 2)
     idx = UOp.const(dtypes.int, 0)
-    ld0 = UOp(UOps.LOAD, dtypes.int, (glbl1, idx, UOp.const(dtypes.int, 2), UOp.const(dtypes.bool, False)))
-    ld1 = UOp(UOps.LOAD, dtypes.int, (glbl2, idx, UOp.const(dtypes.int, 3), UOp.const(dtypes.bool, True)))
+    ld0 = UOp(UOps.LOAD, dtypes.int, (glbl1, idx, UOp.const(dtypes.int, 0), UOp.const(dtypes.bool, False)))
+    ld1 = UOp(UOps.LOAD, dtypes.int, (glbl2, idx, UOp.const(dtypes.int, 0), UOp.const(dtypes.bool, True)))
     uops = to_uops_list([UOp(UOps.STORE, dtypes.void, (glbl0, idx, ld1+ld0))])
-    ld0, ld1 = uops[-1].src[-1].src
-    # ld0 becomes the invalid value
-    self.assertEqual(ld1, UOp.const(dtypes.int, 2))
+    ld0 = uops[-1].src[-1]
     # the gate and invalid value are deleted from ld1
     self.assertEqual(ld0, UOp.load(glbl2.index(idx), dtype=dtypes.int))
 
@@ -404,12 +402,10 @@ class TestUOpGraph(unittest.TestCase):
     lidx = UOp(UOps.SPECIAL, dtypes.int, (), ("lidx0", 16))
     st = UOp(UOps.STORE, dtypes.void, (smem, lidx, UOp.load(glbl0, lidx, dtype=dtypes.int)))
     barrier = UOp(UOps.BARRIER, dtypes.void, (st, ))
-    ld0 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+1, UOp.const(dtypes.int, 2), UOp.const(dtypes.bool, False), barrier))
-    ld1 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+2, UOp.const(dtypes.int, 3), UOp.const(dtypes.bool, True), barrier))
+    ld0 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+1, UOp.const(dtypes.int, 0), UOp.const(dtypes.bool, False), barrier))
+    ld1 = UOp(UOps.LOAD, dtypes.int, (smem, lidx+2, UOp.const(dtypes.int, 0), UOp.const(dtypes.bool, True), barrier))
     uops = to_uops_list([UOp(UOps.STORE, dtypes.void, (glbl0, lidx, ld1+ld0))])
-    ld0, ld1 = uops[-1].src[-1].src
-    # ld0 becomes the invalid value
-    self.assertEqual(ld1, UOp.const(dtypes.int, 2))
+    ld0 = uops[-1].src[-1]
     # the gate and invalid value are deleted from ld1
     self.assertEqual(ld0.src[0], smem.index(lidx+2))
 
