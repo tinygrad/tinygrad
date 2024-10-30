@@ -21,8 +21,8 @@ def fold_expanded(ex, buf):
   # first, extract all the relevant offsets
   offsets_rootsrc: DefaultDict[Any, dict] = defaultdict(dict)
   for i,s in enumerate(new_srcs):
-    if s.dtype.count != 1 or (is_image and s.src[1].dtype.count == 2): continue
     idx = s.src[0].src[1]
+    if s.dtype.count != 1 or (is_image and idx.dtype.count == 2): continue
     if idx.arg is BinaryOps.ADD and idx.src[1].op is UOps.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is UOps.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
@@ -44,7 +44,7 @@ def fold_expanded(ex, buf):
           if oidx.divides(fold_length) is None: continue
           if is_image:
             # for images, we rewrite the index. it must evenly divide 4 from the above check
-            new_src[0] = buf.index(UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((oidx // 4) % buf.dtype.shape[1], (oidx // (4 * buf.dtype.shape[1])))))
+            new_src[0] = buf.index(UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((oidx // 4) % buf.dtype.shape[1], (oidx // (4*buf.dtype.shape[1])))))
           else:
             # fot non image, we upcast the index pointer
             new_src[0] = new_src[0].cast(new_src[0].dtype.base.vec(fold_length).ptr(new_src[0].dtype.local))
@@ -65,13 +65,12 @@ def fold_expanded(ex, buf):
   return UOp(ex.op, ex.dtype, tuple(x for x in new_srcs if x is not None), ex.arg) if len(used) else None
 
 def fix_unfoldable_image_load(load:UOp, buf:UOp):
-  if not isinstance(buf.dtype, ImageDType) or load.src[1].dtype.count == 2: return None
-  id4 = load.src[1] % 4
+  if not isinstance(buf.dtype, ImageDType) or load.src[0].src[1].dtype.count == 2: return None
+  oidx = load.src[0].src[1]
+  id4 = oidx % 4
   new_src = list(load.src)
   # TODO: copied logic from above
-  new_src[1] = UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((load.src[1] // 4) % buf.dtype.shape[1], (load.src[1] // (4 * buf.dtype.shape[1]))))
-  if len(new_src) >= 4:
-    new_src[2] = UOp(UOps.VECTORIZE, new_src[2].dtype.vec(4), tuple(new_src[2] for _ in range(4)))
+  new_src[0] = load.src[0].src[0].index(UOp(UOps.VECTORIZE, dtypes.int.vec(2), ((oidx // 4) % buf.dtype.shape[1], (oidx // (4*buf.dtype.shape[1])))))
   vec_load = UOp(UOps.LOAD, load.dtype.vec(4), tuple(new_src))
   return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), load.const_like(float('nan')))
 
@@ -510,6 +509,9 @@ move_masks = PatternMatcher([
   # TODO: this should be an IF instead of a masked STORE
   (UPat(UOps.STORE, src=(UPat(UOps.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))),), allow_any_len=True, name="x"),
     lambda x,buf,idx,mask: UOp.store(buf.index(idx), x.src[1], mask, *x.src[2:])),
+  (UPat(UOps.STORE, src=(UPat(UOps.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))).cast(None).named("cast"),),
+        allow_any_len=True, name="x"),
+    lambda x,buf,idx,mask,cast: UOp.store(buf.index(idx).cast(cast.dtype), x.src[1], mask, *x.src[2:])),
 ])
 
 # *** uop graph ***
