@@ -18,11 +18,11 @@ class TestTiny(unittest.TestCase):
     out = Tensor.cat(Tensor.ones(8).contiguous(), Tensor.ones(8).contiguous())
     self.assertListEqual(out.tolist(), [1]*16)
 
-  def test_gemm(self):
-    N = 4
-    a = Tensor.ones(N,N).contiguous()
-    b = Tensor.eye(N).contiguous()
-    self.assertListEqual((a@b).flatten().tolist(), [1.0]*(N*N))
+  def test_gemm(self, N=4, device=None):
+    a = Tensor.ones(N,N,device=device).contiguous()
+    b = Tensor.eye(N,device=device).contiguous()
+    self.assertListEqual((out:=a@b).flatten().tolist(), [1.0]*(N*N))
+    return out
 
   # *** JIT (for Python speed) ***
 
@@ -56,6 +56,16 @@ class TestTiny(unittest.TestCase):
     for s in [2,5]:
       ret = Tensor.ones(s).contiguous().reshape(i.bind(s)).sum()
       self.assertEqual(ret.item(), s)
+
+  # *** image ***
+
+  def test_image(self):
+    with Context(IMAGE=2):
+      out = self.test_gemm(device="GPU")
+      assert 'imagef' in str(out.dtype)
+
+  def test_beam_image(self):
+    with Context(BEAM=1): self.test_image()
 
 if __name__ == '__main__':
   unittest.main()
