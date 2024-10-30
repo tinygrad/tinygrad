@@ -351,8 +351,8 @@ class TestEqStrDType(unittest.TestCase):
   def test_ptr_ne(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     # TODO: is this the wrong behavior?
-    assert dtypes.float32.ptr() == dtypes.float32
-    assert not (dtypes.float32.ptr() != dtypes.float32)
+    assert dtypes.float32.ptr() != dtypes.float32
+    assert not (dtypes.float32.ptr() == dtypes.float32)
     assert dtypes.float32.ptr() == dtypes.float32.ptr()
     assert not (dtypes.float32.ptr() != dtypes.float32.ptr())
     #assert dtypes.float32.ptr() != dtypes.float32

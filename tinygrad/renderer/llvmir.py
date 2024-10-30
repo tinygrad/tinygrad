@@ -74,7 +74,7 @@ class LLVMRenderer(Renderer):
     buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
 
     # create llvm function
-    func_dtypes = [(dtype_to_llvm_dtype[dtype],dtype) for dtype in buf_to_dtype.values()]
+    func_dtypes = [(dtype_to_llvm_dtype[dtype.base if isinstance(dtype, PtrDType) else dtype],dtype) for dtype in buf_to_dtype.values()]
     func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() if isinstance(dt, PtrDType) else x for x,dt in func_dtypes]), name=name)
     for a in func.args:
       if a.type.is_pointer: a.add_attribute("noalias")
