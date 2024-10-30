@@ -660,8 +660,6 @@ class TestLoadStoreFolder(unittest.TestCase):
     print(sink)
     assert len([x for x in sink.sparents if x.op is UOps.STORE]) == 3
 
-def gate_rewrite(sink): return graph_rewrite(sink, sym + expander + reducer)
-
 class TestIFUOps(unittest.TestCase):
   def test_create_ifs(self):
     gbuf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
@@ -675,12 +673,12 @@ class TestIFUOps(unittest.TestCase):
     lbuf = UOp(UOps.LOAD, dtypes.float, (sbuf, UOp.const(dtypes.int, 0), barrier))
     store = UOp(UOps.STORE, dtypes.void, (gbuf, UOp.const(dtypes.int, 0), lbuf, gate))
     sink = UOp(UOps.SINK, dtypes.void, (store,))
-    sink = gate_rewrite(sink)
+    sink = full_graph_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
     for st in sink.src:
-      self.assertEqual(len(st.src), 3)
+      self.assertEqual(len(st.src), 2)
 
   def test_expand_ifs_one_gate(self):
     gbuf = UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
@@ -693,12 +691,12 @@ class TestIFUOps(unittest.TestCase):
     lbufs = [UOp(UOps.LOAD, dtypes.float, (sbuf, UOp.const(dtypes.int, i), barrier)) for i in range(4)]
     stores = [UOp(UOps.STORE, dtypes.void, (gbuf, UOp.const(dtypes.int, i), lbufs[i], gate)) for i in range(4)]
     sink = UOp(UOps.SINK, dtypes.void, tuple(stores))
-    sink = gate_rewrite(sink)
+    sink = full_graph_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
     for st in sink.src:
-      self.assertEqual(len(st.src), 3)
+      self.assertEqual(len(st.src), 2)
 
   # this will be fixed with the merge gated stores bounty
   @unittest.expectedFailure
@@ -709,12 +707,12 @@ class TestIFUOps(unittest.TestCase):
     gate = valid&(lidx.ne(2))
     stores = [UOp(UOps.STORE, dtypes.void, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate)) for i in range(4)]
     sink = UOp(UOps.SINK, dtypes.void, tuple(stores))
-    sink = gate_rewrite(sink)
+    sink = full_graph_rewrite(sink)
     if_uops = [u for u in sink.parents if u.op is UOps.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
     for st in sink.src:
-      self.assertEqual(len(st.src), 3)
+      self.assertEqual(len(st.src), 2)
 
 
 if __name__ == '__main__':
