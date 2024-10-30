@@ -278,7 +278,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
   # confirm everything was scheduled correctly
-  if len(schedule) != (ps:=len(prescheduled)): raise RuntimeError(f"cycle detected in graph, prescheduled {ps} but only scheduled {len(schedule)}")
+  if len(schedule) != (groups:=len(store_groups)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, ctx.var_vals
 
