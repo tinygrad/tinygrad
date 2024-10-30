@@ -7,16 +7,14 @@ from tinygrad.ops import UOp, UOps, simplify_valid
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(UOps.LOAD, dtypes.float, (
-    UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0),
-    idx,
+    UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0).index(idx),
     UOp.const(dtypes.float, 0.0),
     valid
   ))
 
 def get_load_image_uop(image_shape:Tuple[int, ...], valid:UOp, idx:Tuple[UOp, UOp]):
   return UOp(UOps.LOAD, dtypes.float.vec(4), (
-    UOp(UOps.DEFINE_GLOBAL, dtypes.imagef(image_shape), arg=0),
-    UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx),
+    UOp(UOps.DEFINE_GLOBAL, dtypes.imagef(image_shape), arg=0).index(UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx)),
     UOp(UOps.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0),)*4),
     valid
   ))
