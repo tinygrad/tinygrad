@@ -288,7 +288,7 @@ class MetalRenderer(CStyleLanguage):
 
       prefix.append(f"""{wmma_dtype_out} __{name}({wmma_dtype_in} a, {wmma_dtype_in} b, {wmma_dtype_out} c) {{
   simdgroup_{self.render_dtype(dtype_in)}8x8 mat_a, mat_b; simdgroup_{self.render_dtype(dtype_out)}8x8 mat_c;
-  {"\n  ".join([f"mat_{var}.thread_elements()[{i}] = {var}[{i}];" for var in 'abc' for i in range(2)])}
+{os.linesep.join([f'  mat_{var}.thread_elements()[{i}] = {var}[{i}];' for var in 'abc' for i in range(2)])}
   simdgroup_multiply_accumulate(mat_c, mat_a, mat_b, mat_c);
   return {wmma_dtype_out}(mat_c.thread_elements()[0], mat_c.thread_elements()[1]);\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
