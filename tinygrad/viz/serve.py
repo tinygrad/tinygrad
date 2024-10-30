@@ -71,7 +71,9 @@ def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
   replaces[base] = ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
   return ret
 @functools.lru_cache(None)
-def _prg(k:Optional[Kernel]) -> Optional[str]: return k.to_program().src if isinstance(k, Kernel) else None
+def _prg(k:Optional[Kernel]) -> Optional[str]:
+  try: return k.to_program().src if isinstance(k, Kernel) else None
+  except Exception: return None
 def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
   g = GraphRewriteDetails(**asdict(metadata), graphs=[ctx.sink], diffs=[], changed_nodes=[], kernel_code=pcall(_prg, k))
   replaces: Dict[UOp, UOp] = {}
