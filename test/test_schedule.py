@@ -1305,16 +1305,12 @@ class TestSchedule(unittest.TestCase):
 
   def test_conv2d(self): _test_conv2d(7)
   def test_conv2d_fused(self): _test_conv2d(6, FUSE_CONV_BW=1)
-  def test_conv2d_fused_ast_rewrite(self): _test_conv2d(6, FUSE_CONV_BW=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_conv2d_half(self): _test_conv2d(7, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.expectedFailure
   def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
-  @unittest.expectedFailure
-  def test_conv2d_fused_ast_rewrite_half(self): _test_conv2d(6, FUSE_CONV_BW=1, dtype=dtypes.half)
 
   def _test_buf_cnt(self, cnt:int, allowed:int):
     if (m:=BUF_LIMIT.get(Device.DEFAULT)) is None or m != 32: self.skipTest(f"test needs a buf_max of 32 {Device.DEFAULT}")
