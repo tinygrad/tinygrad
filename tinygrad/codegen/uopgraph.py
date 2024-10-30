@@ -369,20 +369,20 @@ def do_expand(root:UOp):
   nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz), tuple(new_srcs), new_arg)
   return UOp(UOps.EXPAND, root.dtype, (nsrc,), expand_args)
 
-acc_number = 0
-def do_reduce(root:UOp):
-  global acc_number
+def do_reduce(acc_number:List[int], root:UOp):
   reduce_parented, reduce_unparented = partition(root.src[1:], lambda x: x in root.src[0].sparents)
   ret = root.src[0]
   if len(reduce_parented):
     acc = UOp(UOps.DEFINE_ACC, root.dtype,
-              (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(reduce_parented), (acc_number,))
-    acc_number += 1
+              (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(reduce_parented), (acc_number[0],))
+    acc_number[0] += 1
     ret = UOp(UOps.ASSIGN, root.dtype, (acc, acc.alu(root.arg, ret)))
   # for MAX, we can just ignore the unparented
   if root.arg is BinaryOps.ADD:
     for r in reduce_unparented:ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
+
+just_reduce = PatternMatcher([(UPat(UOps.REDUCE, name="root"), do_reduce),])
 
 def do_contract(con:UOp):
   ex = con.src[0]
@@ -448,11 +448,6 @@ def no_vectorized_acc(acc:UOp):
     tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
   return UOp(UOps.VECTORIZE, acc.dtype, alus)
 
-just_reduce = PatternMatcher([
-  # do reduce
-  (UPat(UOps.REDUCE, name="root"), do_reduce),
-])
-
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
   (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.INDEX), name="alu"), no_vectorized_alu),
@@ -514,18 +509,16 @@ finalize = PatternMatcher([
 # *** uop graph ***
 
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
-  global acc_number
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
 
-  # temp for indexing migration
+  # sym (first pass) + indexing migration (remove when fixed) + create gate
   sink = graph_rewrite(sink, sym+migrate_indexing)
 
   # expand
   sink = graph_rewrite(sink, sym+expander)
 
-  # convert REDUCE to DEFINE_ACC + ASSIGN
-  acc_number = 0   # TODO: this should be ctx
-  sink = graph_rewrite(sink, sym+just_reduce)
+  # convert REDUCE to DEFINE_ACC + ASSIGN (contextual)
+  sink = graph_rewrite(sink, just_reduce, ctx=[0])
 
   # devectorize
   sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
