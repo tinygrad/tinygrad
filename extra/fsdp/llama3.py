@@ -34,18 +34,21 @@ GPUS = [f"{Device.DEFAULT}:{i+1}" for i in range(SHARD)]
 
 print(f"Allocating data on {Device.DEFAULT}, Training on {GPUS}")
 B = 16
-# dim = 4096
-# n_layers = 16
-# n_heads = 32
-# n_kv_heads = 8
-# hidden_dim = 14336
-epoch = 100
-eval_interval = 10
-dim = 64
-n_layers = 2
-n_heads = 4
-n_kv_heads = 4 
-hidden_dim = 64
+dim = 4096
+n_layers = 16
+n_heads = 32
+n_kv_heads = 8
+hidden_dim = 14336
+epoch = 2000
+eval_interval = 50
+
+# small for testing
+# dim = 64
+# n_layers = 2
+# n_heads = 4
+# n_kv_heads = 4 
+# hidden_dim = 64
+
 T = 16
 vocab_size = 128256
 max_context = 8192
