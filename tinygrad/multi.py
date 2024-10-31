@@ -14,8 +14,8 @@ def find_paddings_for_concat(axis: int, shapes: List[Tuple[sint, ...]]):
     s[axis] = (k, cat_dim_cumsum[-1] - k - d)
   return slc
 
-def find_bounds(shape: Tuple[sint, ...], num_shards: int, axis: Optional[int]=None, splits: Optional[Tuple[int, ...]]=None):
-  if axis is None: return None
+def find_axis_bounds(shape: Tuple[sint, ...], num_shards: int, axis: Optional[int]=None, splits: Optional[Tuple[int, ...]]=None):
+  if axis is None: return None, None
   if axis < 0: axis += len(shape)
   if splits is None:
     if not isinstance(total:=shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {shape=}, {axis=}")
@@ -24,7 +24,7 @@ def find_bounds(shape: Tuple[sint, ...], num_shards: int, axis: Optional[int]=No
   assert sum(splits) == shape[axis], "specified splits do not sum up to axis shape"
   boundaries = tuple(itertools.accumulate(splits))
   bounds = tuple(zip((0,) + boundaries, boundaries))
-  return bounds
+  return axis, bounds
 
 def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[Tuple[Tuple[sint, sint], ...]]=None):
   if mlb.axis is None: return mlb
@@ -32,7 +32,7 @@ def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[T
   shape = mlb.shape
   shards = len(mlb.lbs)
   n_lbs = len(mlb.lbs)
-  if bounds is None: bounds = find_bounds(mlb.shape, shards, axis)
+  if bounds is None: axis, bounds = find_axis_bounds(mlb.shape, shards, axis)
   use_ring = (RING >= 2 or (n_lbs > 2 and len(mlb.lbs[0].shape) > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   if DEBUG >= 2: print(f"{'RING RESHARD' if use_ring else 'NAIVE RESHARD'}")
   if not use_ring:
@@ -144,6 +144,7 @@ class MultiLazyBuffer(MathTrait):
 
   @staticmethod
   def from_sharded(lb:LazyBuffer, devices:Tuple[str, ...], axis:Optional[int], bounds:Optional[Tuple[Tuple[int, int], ...]]):
+    print(f"2 {axis=}")
     assert (axis is None) == (bounds is None), "must specify bounds iff axis is specified"
     lbs = [lb] * len(devices)
     sharded_lbs = [lb.copy_to_device(d) for lb,d in zip(to_sharded(lbs, axis, bounds) if axis is not None and bounds is not None else lbs, devices)]
