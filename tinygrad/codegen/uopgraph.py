@@ -271,10 +271,10 @@ sym = symbolic_flat+PatternMatcher([
   # threefry
   (UPat(UOps.ALU, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key")), arg=BinaryOps.THREEFRY), threefry2x32),
   # arange loop folding
-  (acc_pat.assign(acc_pat+UPat.any(arange_m, arange_m+UPat.var("extra"))), loop_collapse),
+  (acc_pat.assign(UPat.any(arange_m, arange_m+UPat.var("extra"))+acc_pat), loop_collapse),
   # indexing, with cast or where
-  (acc_pat.assign(acc_pat+UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*index_load), index_collapse),
-  (acc_pat.assign(acc_pat+UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).where(index_load, UPat.const(None, 0.0))), index_collapse),
+  (acc_pat.assign(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*index_load+acc_pat), index_collapse),
+  (acc_pat.assign(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).where(index_load, UPat.const(None, 0.0))+acc_pat), index_collapse),
   # GEP/CAST const rules
   (UPat(UOps.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   # ** self folding **
