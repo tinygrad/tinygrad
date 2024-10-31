@@ -452,6 +452,11 @@ devectorize = PatternMatcher([
   (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
 ])
 
+def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:Optional[UOp]=None) -> Optional[UOp]:
+  if store_gate not in [gate.src[0] for gate in val.sparents if gate.op is UOps.IF]: return None
+  # remove the gate from the index
+  return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val)
+
 reducer = PatternMatcher([
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
@@ -459,6 +464,9 @@ reducer = PatternMatcher([
   (UPat(UOps.ALU, name="valid", arg=BinaryOps.AND), simplify_valid),
   # image load valid idx simplification
   (UPat(UOps.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat.var("valid"))), simplify_valid_load),
+  # delete_redundant_gates (after expand)
+  (UPat(UOps.STORE, src=(UPat.any(stidx:=UPat.var("buf").index(UPat.var("idx"), UPat.var("store_gate")), stidx.cast().named("cast")),
+                                  UPat.var("val"))), delete_redundant_gates),
 ])
 
 def idx_load_store(x:UOp):
@@ -481,30 +489,16 @@ def move_mask(x:UOp, buf:UOp, idx:UOp, mask:UOp, cast:Optional[UOp]=None) -> UOp
   nidx = buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx)
   return UOp.load(nidx, x.const_like(0), mask, *x.src[1:], dtype=x.dtype) if x.op is UOps.LOAD else UOp.store(nidx, x.src[1], mask, *x.src[2:])
 
-def delete_redundant_gates(root:UOp) -> Optional[UOp]:
-  @functools.lru_cache(None)
-  def find_gate(x:UOp) -> Optional[UOp]:
-    if x.op is UOps.IF: return x
-    return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
-  if len(root.src) == 2 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[2]: return None
-  return UOp(UOps.STORE, root.dtype, root.src[:2], root.arg)
-
-finalize = PatternMatcher([
-  # move masks of loads/stores
-  # TODO: this should be an IF instead of a masked STORE
-  (UPat((UOps.LOAD, UOps.STORE), src=(UPat.any(masked_index:=UPat(UOps.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))),
-                                               masked_index.cast(None).named("cast")),), allow_any_len=True, name="x"), move_mask),
-  # delete_redundant_gates (after expand)
-  (UPat(UOps.STORE, name="root"), delete_redundant_gates),
-])
-
-# for rendering, we don't use vector
 pm_render = PatternMatcher([
+  # for rendering, we use explicit VECTORIZE
   (UPat(UOps.CONST, name='c'),
    lambda c: UOp(UOps.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
   (UPat(UOps.VCONST, name='c'), lambda c: UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
   (UPat(UOps.GEP, name='gep'), lambda gep: UOp(UOps.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
   (UPat(UOps.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
+  # move masks of loads/stores
+  (UPat((UOps.LOAD, UOps.STORE), src=(UPat.any(masked_index:=UPat(UOps.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))),
+                                               masked_index.cast(None).named("cast")),), allow_any_len=True, name="x"), move_mask),
 ])
 
 # *** uop graph ***
@@ -527,9 +521,9 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # cleanups
   sink = graph_rewrite(sink, sym+reducer)
 
-  # finalize
-  sink = graph_rewrite(sink, sym+finalize+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
+  # add extra patterns
+  sink = graph_rewrite(sink, sym+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
 
   # for rendering without sym (including the rules from the renderer)
-  sink = graph_rewrite(sink, (pm_render+opts.extra_matcher if opts is not None and opts.extra_matcher is not None else pm_render))
+  sink = graph_rewrite(sink, pm_render+opts.extra_matcher if opts is not None and opts.extra_matcher is not None else pm_render)
   return sink
