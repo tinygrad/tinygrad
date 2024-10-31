@@ -1,7 +1,7 @@
 from typing import Dict, Callable, List, Optional
 from llvmlite import ir
 from tinygrad.dtype import DType, PtrDType, dtypes
-from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps, UOps, UOp, PatternMatcher, UPat
+from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps, UOps, UOp
 from tinygrad.renderer import Renderer
 
 MFLAGS = ('nsz', 'arcp', 'contract', 'afn', 'reassoc') # All from fast math, but nnan and ninf
@@ -65,10 +65,6 @@ class LLVMRenderer(Renderer):
     BinaryOps.XOR: lambda builder, x, y, dtype: builder.xor(x, y), BinaryOps.AND: lambda builder, x, y, dtype: builder.and_(x, y), BinaryOps.OR: lambda builder, x, y, dtype: builder.or_(x, y), # noqa: E501
     BinaryOps.SHL: lambda builder, x, y, dtype: builder.shl(x,y), BinaryOps.SHR: lambda builder, x, y, dtype: builder.lshr(x,y) if dtypes.is_unsigned(dtype) else builder.ashr(x,y), # noqa: E501
     TernaryOps.WHERE: lambda builder, x, y, z, dtype: builder.select(x, y, z)}
-  extra_matcher = PatternMatcher([
-    (UPat(UOps.ALU, arg=BinaryOps.SHL, src=(UPat.var("x"), UPat.var("y"))), lambda x, y: x << y.cast(x.dtype) if x.dtype != y.dtype else None),
-    (UPat(UOps.ALU, arg=BinaryOps.SHR, src=(UPat.var("x"), UPat.var("y"))), lambda x, y: x >> y.cast(x.dtype) if x.dtype != y.dtype else None),
-  ])
 
   def render(self, name:str, uops:List[UOp]) -> str:
     # all llvm stuff goes into a module
