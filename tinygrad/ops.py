@@ -203,7 +203,8 @@ def smax(*lst): return _suop(lst[0] if isinstance(lst[0], (tuple, list)) else ls
 def smin(*lst): return _suop(lst[0] if isinstance(lst[0], (tuple, list)) else lst, UOp.minimum, min)
 
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
-def sym_infer(uop: Union[UOp, int, float], var_vals: Dict[UOp, int]) -> Union[int, float]: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
+def sym_infer(uop: Union[UOp, int, float], var_vals: Dict[UOp, int]) -> Union[int, float]:
+  return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
 # used for UOp and UPat
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
