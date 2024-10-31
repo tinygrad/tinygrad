@@ -50,7 +50,7 @@ def ldexp2k(d:UOp, e:UOp) -> UOp:
   return (d * pow2if(shr(e, 1), d.dtype)) * pow2if(e - shr(e, 1), d.dtype)
 
 def frexp(v:UOp) -> Tuple[UOp, UOp]:
-  """frexp(v) -> (mantissa, exponent)"""
+  """frexp(v) -> (mantissa, exponent) assuming v != 0"""
   assert v.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
   m1 = {dtypes.float64: 0x000FFFFFFFFFFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
@@ -60,10 +60,6 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   # Set the exponent bits appropriately to normalize the mantissa into the range of [0.5, 1.0).
   mantissa = ((bits & m1) | m2).bitcast(v.dtype)
   exp = exponent - exponent_bias(v.dtype) + 1
-  # special case of 0  # TODO: can we remove this case?
-  mantissa = exponent.ne(0).where(mantissa, v)
-  exp = exponent.ne(0).where(exp, exp.const_like(0))
-  if v.dtype == dtypes.float16: exp = exp.bitcast(dtypes.int16)
   return mantissa, exp
 
 # *** reduction algorithms for sine ***

@@ -19,25 +19,23 @@ class TestTranscendentalFunctions(unittest.TestCase):
     np.testing.assert_equal(q, 12)
 
   def test_frexp(self):
-    mantissa, exponent = (eval_uop(u) for u in frexp(UOp.const(dtypes.float64, 0.0)))
-    np.testing.assert_equal(mantissa, 0.0)
-    np.testing.assert_equal(exponent, 0)
+    for x in (1, -1):
+      mantissa, exponent = (eval_uop(u) for u in frexp(UOp.const(dtypes.float64, x)))
+      np.testing.assert_equal(mantissa, 0.5)
+      np.testing.assert_equal(exponent, 1)
 
-    mantissa, exponent = (eval_uop(u) for u in frexp(UOp.const(dtypes.float64, 1.0)))
-    np.testing.assert_equal(mantissa, 0.5)
-    np.testing.assert_equal(exponent, 1)
-
-    mantissa, exponent = (eval_uop(u) for u in frexp(UOp.const(dtypes.float64, -1.0)))
-    np.testing.assert_equal(mantissa, 0.5)
-    np.testing.assert_equal(exponent, 1)
-
-    mantissa, exponent = (eval_uop(u) for u in frexp(UOp.const(dtypes.float64, 2.0)))
-    np.testing.assert_equal(mantissa, 0.5)
-    np.testing.assert_equal(exponent, 2)
+    for x in (2, -2):
+      mantissa, exponent = (eval_uop(u) for u in frexp(UOp.const(dtypes.float64, 2.0)))
+      np.testing.assert_equal(mantissa, 0.5)
+      np.testing.assert_equal(exponent, 2)
 
     mantissa, exponent = (eval_uop(u) for u in frexp(UOp.const(dtypes.float64, 5.0)))
     np.testing.assert_equal(mantissa, 0.625)
     np.testing.assert_equal(exponent, 3)
+
+    mantissa, exponent = (eval_uop(u) for u in frexp(UOp.const(dtypes.float64, 1000.0)))
+    np.testing.assert_allclose(mantissa, 0.9765625)
+    np.testing.assert_equal(exponent, 10)
 
   def test_rintk(self):
     np.testing.assert_allclose(eval_uop(rintk(UOp.const(dtypes.float, 0.0))), 0)
