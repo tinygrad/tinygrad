@@ -522,7 +522,7 @@ def lines(fn) -> List[str]:
   with open(fn) as f: return f.readlines()
 
 class UPat(MathTrait):
-  __slots__ = ["op", "dtype", "arg", "name", "src", "_any"]
+  __slots__ = ["op", "dtype", "arg", "name", "src"]
   def __init__(self, op:Optional[Union[UOps, Tuple[UOps, ...]]]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None,
                src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
                name:Optional[str]=None, allow_any_len:bool=False, location=None,
