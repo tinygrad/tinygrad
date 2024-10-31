@@ -513,7 +513,8 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
 def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
   # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
-  while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "uopgraph.py", "schedule.py", "lowerer.py"}:
+  while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "uopgraph.py", "schedule.py",
+                                                                                        "lowerer.py", "cstyle.py"}:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
@@ -1003,7 +1004,7 @@ def max_var_const(x:UOp, c1:UOp, c2:UOp):
   if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
 
-symbolic = PatternMatcher([
+symbolic_simple = PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
@@ -1036,6 +1037,12 @@ symbolic = PatternMatcher([
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y'), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y'), lambda x,y: x|y),
   (UPat.var('x', dtype=dtypes.bool).maximum(UPat.var('y')), lambda x,y: x|y),
+  # *** cast ***
+  (UPat(UOps.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
+  (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
+])
+
+symbolic = symbolic_simple+PatternMatcher([
   # group like
   ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
   # ** combine terms **
@@ -1091,9 +1098,6 @@ symbolic = PatternMatcher([
   # ** mod **
   # mod folding
   (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
-  # *** cast ***
-  (UPat(UOps.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
-  (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
 ])
 
 symbolic_flat = symbolic+PatternMatcher([

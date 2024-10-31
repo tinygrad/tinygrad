@@ -1,7 +1,7 @@
 from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
 import struct
 from collections import defaultdict
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp, PatternMatcher, UPat, symbolic
+from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp, PatternMatcher, UPat
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -33,7 +33,7 @@ asm_for_op: Dict[Op, Callable] = {
 }
 
 supports_half: List[Op] = [UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
-ptx_matcher = symbolic+PatternMatcher([
+ptx_matcher = PatternMatcher([
   # bool CMPNE is XOR, bool CMPLT is XOR+AND (universal makes this slow, this is for renderer only)
   (UPat.var('x', dtype=dtypes.bool).ne(UPat.var('y')), lambda x,y: x^y),
   (UPat.var('x', dtype=dtypes.bool).lt(UPat.var('y')), lambda x,y: (x^True)&y),
@@ -47,7 +47,7 @@ ptx_matcher = symbolic+PatternMatcher([
   (UPat(UOps.STORE, src=(UPat(dtype=dtypes.int64), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
    lambda x: UOp(x.op, dtypes.void, x.src[0:1] + (x.src[1].cast(dtypes.uint8),) + x.src[2:])),
   # load/store use pointer arithmetic, and the cast does nothing
-  (UPat(UOps.INDEX, name="x"), lambda x: x.src[0].cast(dtypes.int64) + x.src[1].cast(dtypes.int64)*x.src[0].dtype.itemsize),
+  (UPat(UOps.INDEX, src=(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx: buf.cast(dtypes.int64) + idx.cast(dtypes.int64)*buf.dtype.itemsize),
   (UPat(UOps.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) else None),
 ])
 
