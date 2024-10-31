@@ -1331,9 +1331,9 @@ class TestOps(unittest.TestCase):
     # TODO: fix backward when circular negative pad comes before and positive comes after when internal more than once wraps happen
     # ((1,1,5,5), (3,-3,0,0)) works
     # ((1,1,5,5), (-3,3,0,0)) fails
-    # helper_test_op([(1,1,5,5)],
-    #                lambda x: torch.nn.functional.pad(x, (-3,3,0,0), mode="circular"),
-    #                lambda x: x.pad2d((-3,3,0,0), mode="circular"))
+    helper_test_op([(1,1,5,5)],
+                   lambda x: torch.nn.functional.pad(x, (-3,3,0,0), mode="circular"),
+                   lambda x: x.pad2d((-3,3,0,0), mode="circular"), forward_only=True)
 
   def test_pad(self):
     helper_test_op([(3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)),lambda x: x.pad(((3,4),(1,2))))
