@@ -222,6 +222,8 @@ def xlog2(d:UOp) -> UOp:
   Paper: https://arxiv.org/pdf/2001.09258
   """
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
+  # TODO: float16 denormal need float32 to achieve precision
+  if d.dtype == dtypes.float16: return xlog2(d.cast(dtypes.float32)).cast(dtypes.float16)
   FLT_MIN = d.const_like(1e-6 if d.dtype == dtypes.float16 else 1e-4)
   d_orig = d
   denormal_map = d.lt(FLT_MIN)
