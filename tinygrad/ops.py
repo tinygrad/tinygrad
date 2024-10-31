@@ -339,6 +339,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
                                              UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=idx)
   def reduce(self, op:BinaryOps, *rng:UOp): return UOp(UOps.REDUCE, self.dtype, (self,) + rng, op)
   def r(self, op, axis): return UOp(UOps.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op] if op in ReduceOps else op, axis))
+  def assign(self, x:UOp): return UOp(UOps.ASSIGN, self.dtype, (self,x))
 
   # *** uop Variable stuff ***
 
@@ -566,6 +567,7 @@ class UPat(MathTrait):
   def gep(self, i:int): return UPat(UOps.GEP, None, (self,), (i,))
   def load(self, *src:UPat, **kwargs): return UPat(UOps.LOAD, src=(self,)+src, **kwargs)
   def store(self, *src:UPat, **kwargs): return UPat(UOps.STORE, dtypes.void, (self,)+src, **kwargs)
+  def assign(self, x:UPat): return UPat(UOps.ASSIGN, self.dtype, (self,x))
 
   def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return UPat.const(self.dtype, cast(ConstType, b))
   def alu(self, arg, *src:UPat):

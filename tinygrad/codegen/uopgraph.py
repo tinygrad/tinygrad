@@ -370,10 +370,10 @@ def do_reduce(ctx:List[int], root:UOp):
     acc = UOp(UOps.DEFINE_ACC, root.dtype,
               (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(reduce_parented), (ctx[0],))
     ctx[0] += 1
-    ret = UOp(UOps.ASSIGN, root.dtype, (acc, acc.alu(root.arg, ret)))
+    ret = acc.assign(acc.alu(root.arg, ret))
   # for MAX, we can just ignore the unparented
   if root.arg is BinaryOps.ADD:
-    for r in reduce_unparented:ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+    for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
 def do_contract(con:UOp):
