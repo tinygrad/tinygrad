@@ -1,5 +1,8 @@
+import argparse
+import pathlib
 import os
 from tinygrad import Tensor, nn, Device, TinyJit
+import tinygrad.nn as nn
 from tinygrad.helpers import prod, trange, fetch
 import math
 from extra.models.llama import Transformer
@@ -173,6 +176,33 @@ def generate():
   print("Inference: ", text)
   return text
 
-
-train()
-generate()
+if __name__ == "__main__":
+  parser = argparse.ArgumentParser(description="""
+Default mode is train the model, save the weights into WEIGHT_DIR and do inference with trained weights in memory
+Optionally you can skip saving the weights, specify a different weight directory, or do inference only
+with the weights on disk.
+""")
+  parser.add_argument("--weights_dir", type=str, default="weights")
+  parser.add_argument("--weights_name", type=str, default="llama3_fsdp")
+  parser.add_argument("--no_save_weights", action="store_true")
+  parser.add_argument("--infer_only_with_saved_weights", action="store_true", help="Load the saved weights in WEIGHT_DIR and do inference only")
+  args = parser.parse_args()
+  weights_dir = args.weights_dir
+  weights_name = args.weights_name
+  weights_path = pathlib.Path(weights_dir).joinpath(f"{weights_name}.safetensors")
+  print(f"{weights_path=}")
+  no_save_weights = args.no_save_weights
+  infer_only_with_saved_weights = args.infer_only_with_saved_weights
+  if not os.path.exists(weights_dir):
+    print("creating directory to save weights:", weights_dir)
+    os.mkdir(weights_dir)
+  if infer_only_with_saved_weights:
+    state_dict = nn.state.safe_load(weights_path)
+    nn.state.load_state_dict(model, )
+    generate()
+  else:
+    train()
+    if not no_save_weights:
+      nn.state.safe_save(model, weights_path)
+    generate()
+  
