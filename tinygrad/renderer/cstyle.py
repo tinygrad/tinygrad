@@ -34,6 +34,11 @@ base_rewrite = PatternMatcher([
   (UPat(UOps.CONST, dtype=dtypes.uint64, name="x"), lambda ctx,x: f"{x.arg}ull"),
   (UPat(UOps.CONST, dtype=dtypes.uint32, name="x"), lambda ctx,x: f"{x.arg}u"),
   (UPat(UOps.CONST, dtype=dtypes.bool, name="x"), lambda ctx,x: "1" if x.arg else "0"),
+  # consts are rendered to larger type and casted
+  (UPat(UOps.CONST, (dtypes.bfloat16, dtypes.half), name="x"), lambda ctx,x: f"({ctx.render_dtype(x.dtype)})({x.arg}f)"),
+  (UPat(UOps.CONST, (dtypes.uint8, dtypes.uint16), name="x"), lambda ctx,x: f"({ctx.render_dtype(x.dtype)})({x.arg}u)"),
+  (UPat(UOps.CONST, (dtypes.int8, dtypes.int16), name="x"), lambda ctx,x: f"({ctx.render_dtype(x.dtype)})({x.arg})"),
+  # default const render
   (UPat(UOps.CONST, name="x"), lambda ctx,x: str(x.arg)),
   # new load/store
   (UPat(UOps.INDEX, src=(UPat.var("buf"), UPat.var('idx'))),
@@ -49,10 +54,6 @@ base_rewrite = PatternMatcher([
 ])
 
 extra_pm = PatternMatcher([
-  # consts are rendered to larger type and casted
-  (UPat(UOps.CONST, (dtypes.bfloat16, dtypes.half), name="c"), lambda c: UOp.const(dtypes.float, c.arg).cast(c.dtype)),
-  (UPat(UOps.CONST, (dtypes.uint8, dtypes.uint16), name="c"), lambda c: UOp.const(dtypes.uint32, c.arg).cast(c.dtype)),
-  (UPat(UOps.CONST, (dtypes.int8, dtypes.int16), name="c"), lambda c: UOp.const(dtypes.int32, c.arg).cast(c.dtype)),
   # insert a NOOP before BITCAST to force it to be rendered. not needed on all backends?
   (UPat(UOps.BITCAST, name="x"),
    lambda x: UOp(UOps.BITCAST, x.dtype, (UOp(UOps.NOOP, x.src[0].dtype, x.src),)) if x.src[0].op is not UOps.NOOP else None),
