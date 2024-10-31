@@ -2,8 +2,8 @@ import sys
 from collections import defaultdict, deque
 from typing import Tuple, List, Dict, DefaultDict
 from tinygrad.ops import UNSAFE_PAD_OPS, MetaOps, ReduceOps, UnaryOps, resolve
-from tinygrad.helpers import DEBUG, FUSE_CONV_BW, FUSE_ARANGE, prod, dedup, all_int, merge_dicts
-from tinygrad.dtype import ImageDType, dtypes
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, prod, dedup, all_int, merge_dicts
+from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.device import Buffer
