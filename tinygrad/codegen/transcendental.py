@@ -27,16 +27,14 @@ def shr(x:UOp, y:int) -> UOp: return x // (2**y)
 def shl(x:UOp, y:int) -> UOp: return x * (2**y)
 
 def rintk(d:UOp) -> UOp:
-  """ceiling(d:float) -> int"""
-  assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
-  return_t = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype]
-  return (d + d.lt(0.0).where(d.const_like(-0.5), d.const_like(0.5))).cast(return_t)
+  """round d:float to int away from 0"""
+  out_dtype = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype]
+  return (d + d.lt(0.0).where(d.const_like(-0.5), d.const_like(0.5))).cast(out_dtype)
 
 def pow2if(q:UOp, float_dtype:DType):
   """cast(2^q, float_dtype) where q is any integer in the range of [-126, 127]"""
-  assert q.dtype in (dtypes.int64, dtypes.int32, dtypes.int16, dtypes.uint32)
-  final_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype, dtypes.uint32: dtypes.float32}[q.dtype]
-  return shl(q + exponent_bias(final_dtype), mantissa_bits(final_dtype)).bitcast(final_dtype)
+  out_dtype = {dtypes.int64: dtypes.float64, dtypes.int32: dtypes.float32, dtypes.int16: float_dtype}[q.dtype]
+  return shl(q + exponent_bias(out_dtype), mantissa_bits(out_dtype)).bitcast(out_dtype)
 
 def ilogb2k(d:UOp) -> UOp:
   """calculate the integer part of log2(d), where d is normalized fp value in the range of [0, +inf)."""
@@ -97,14 +95,13 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   ia = (f.cast(dtype_via) * 4.294967296e9).cast(dtypes.uint64)
   # extract 96 relevant bits of 2/pi based on magnitude of argument
   i = shr(e.cast(dtypes.uint64), 5)
-  e = (e.cast(dtypes.uint64) & 31).cast(dtypes.uint32)
-  offset = -e + 32
+  e = e.cast(dtypes.int32) & 31
+  offset = 32 - e
 
-  def _eq(arr:UOp, eq_to:int) -> UOp: return arr.ne(eq_to)
   def _take(an:UOp, offset:int, count:int=0) -> UOp:
     """an = two_over_pi_f[i+offset]"""
     if count+offset <= len(two_over_pi_f[0:-2]):
-      an = _eq(i, count).where(_take(an, offset, count=count+1), an.const_like(two_over_pi_f[count+offset]))
+      an = i.ne(count).where(_take(an, offset, count=count+1), an.const_like(two_over_pi_f[count+offset]))
     return an
   def _shl_lazy(x, y): return (x.cast(dtypes.uint64) * pow2if(y, input_dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
   def _shr_lazy(x, y): return (x.cast(dtypes.uint64) // pow2if(y, input_dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
