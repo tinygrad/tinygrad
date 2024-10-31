@@ -168,24 +168,23 @@ def threefry2x32(x: UOp, key: UOp):
 # ***** main rewriter *****
 
 def loop_collapse(compval, multconst, rng:UOp, acc:UOp, idx2=None,idx3=None,extra=None,vec=None,ne=None,
-                  idx=UOp.const(dtypes.int, 0), mval:UOp=UOp.const(dtypes.int32, 1)):
+                  add=UOp.const(dtypes.int, 0), mul:UOp=UOp.const(dtypes.int, 1)):
   if getenv("DISABLE_LOOP_COLLAPSE") or rng not in acc.src: return None  # must be the right REDUCE
   loop_start, loop_end = rng.src
-  mval_arg = mval.arg
   if loop_start.arg != 0:
-    # TODO: support and test this with other mvals and loop_starts
-    if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mval:{mval.arg} loop_start:{loop_start.arg}")
+    # TODO: support and test this with other mul and loop_starts
+    if DEBUG >= 1: print(f"WARNING, NOT FOLDING: mul:{mul.arg} loop_start:{loop_start.arg}")
     return None
-  if idx2 is not None: idx = idx + idx2
-  if idx3 is not None: idx = idx + idx3
+  if idx2 is not None: add = add + idx2
+  if idx3 is not None: add = add + idx3
   if vec is not None:
-    # idx, mval, loop_start, loop_end
+    # add, mul, loop_start, loop_end
     def dvec(x): return UOp(UOps.VECTORIZE, x.dtype.vec(vec.dtype.count), src=(x,)*vec.dtype.count)
-    idx, mval, loop_start, loop_end = dvec(idx), dvec(mval), dvec(loop_start), dvec(loop_end)
-  if mval_arg > 0 and ne is not None:
-    comprange = UOp.minimum(loop_end, UOp.maximum((idx-compval)//mval + (loop_end-loop_start), loop_start))
-  elif mval_arg < 0 and ne is None:
-    comprange = UOp.minimum(loop_end, UOp.maximum((idx-compval-mval)//mval + (loop_end-loop_start), loop_start))
+    add, mul, loop_start, loop_end = dvec(add), dvec(mul), dvec(loop_start), dvec(loop_end)
+  if mul.vmin > 0 and ne is not None:
+    comprange = UOp.minimum(loop_end, UOp.maximum((add-compval)//mul + (loop_end-loop_start), loop_start))
+  elif mul.vmax < 0 and ne is None:
+    comprange = UOp.minimum(loop_end, UOp.maximum((add-compval-mul)//mul + (loop_end-loop_start), loop_start))
   else:
     return None
   new_reduce_op = comprange.cast(multconst.dtype) * multconst
@@ -227,14 +226,12 @@ def no_vectorized_wmma(wmma:UOp):
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 acc_pat, rng_pat = UPat(UOps.DEFINE_ACC, name="acc"), UPat(UOps.RANGE, name="rng")
+rng_aug = UPat.any(rng_pat, UPat.var("add")+rng_pat, UPat.var("mul")*rng_pat, UPat.var("add")+UPat.var("mul")*rng_pat)
 
-index_load = UPat.var("buf").index(UPat.any(UPat.var("add")+UPat.var("mul")*rng_pat, rng_pat)).load(name="ld")
+index_load = UPat.var("buf").index(rng_aug).load(name="ld")
 
-arange_rng = UPat.any(rng_pat, UPat.var("idx")+rng_pat, UPat.var("idx")+UPat.cvar("mval")*rng_pat)
-arange_augrng = UPat.any(arange_rng, arange_rng+UPat.var("idx2"), arange_rng+UPat.var("idx2")+UPat.var("idx3"),
-                         UPat(UOps.VECTORIZE, name="vec", src=arange_rng))
+arange_augrng = UPat.any(rng_aug, rng_aug+UPat.var("idx2"), rng_aug+UPat.var("idx2")+UPat.var("idx3"), UPat(UOps.VECTORIZE, name="vec", src=rng_aug))
 arange_m = arange_augrng.lt(UPat.cvar("compval")).ne(UPat(UOps.CONST, name="ne", arg=True)).where(UPat.cvar("multconst"), UPat.const(None, 0))
-
 
 # this is symbolic 2.0
 sym = symbolic_flat+PatternMatcher([
