@@ -10,6 +10,7 @@ import math
 from extra.models.llama import Transformer
 from examples.llama3 import Tokenizer
 from typing import List, Callable, Union
+from tinygrad.multi import MultiLazyBuffer
 Tensor.manual_seed(2)
 
 def get_size(tensors: List[Tensor],
@@ -38,7 +39,7 @@ B = 16
 # n_heads = 32
 # n_kv_heads = 8
 # hidden_dim = 14336
-epoch = 500
+epoch = 100
 eval_interval = 10
 dim = 64
 n_layers = 2
@@ -62,9 +63,11 @@ TOP_P = 0.0
 ALPHA_F = 0.0
 ALPHA_P = 0.0
 
-def shard_model(model, opt):
+def shard_model(model):
   seen = set()
   for k, p in nn.state.get_state_dict(model).items():
+    if isinstance(p.lazydata, MultiLazyBuffer):
+      continue
     if p in seen: continue
     seen.add(p)
     axis = 0
@@ -74,14 +77,16 @@ def shard_model(model, opt):
       axis = None
     elif p.shape[0] == 1:
       axis = None
-    p.shard_(GPUS, axis)
-  for k, p in nn.state.get_state_dict(opt).items():
-    if p in seen: continue
-    seen.add(p)
-    axis = None if prod(p.shape) <= 1 else 0
-    if p.shape[0] == 1:
+    elif prod(p.shape) <= 1:
       axis = None
     p.shard_(GPUS, axis)
+  # for k, p in nn.state.get_state_dict(opt).items():
+  #   if p in seen: continue
+  #   seen.add(p)
+  #   axis = None if prod(p.shape) <= 1 else 0
+  #   if p.shape[0] == 1:
+  #     axis = None
+  #   p.shard_(GPUS, axis)
 
 tokenizer = Tokenizer(fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir="llama3-8b-sfr").as_posix())
 def tokenize_data():
@@ -126,7 +131,8 @@ model = Transformer(
 def train():
   opt = nn.optim.AdamW(nn.state.get_parameters(model), lr=lr, weight_decay=weight_decay)
   if len(GPUS) > 1:
-    shard_model(model, opt)
+    shard_model(model)
+    shard_model(opt)
   model_size, model_size_unit = get_size(nn.state.get_parameters(model))
   opt_size, opt_size_unit = get_size(nn.state.get_parameters(opt))
   print(f"Model {model_size:.2f} {model_size_unit} Optimizer: {opt_size:.2f} {opt_size_unit}")
@@ -177,6 +183,7 @@ def generate():
     p.requires_grad = False
   tokens = Tensor([tokenizer.encode("<|begin_of_text|>", allow_special=True)])
   if len(GPUS) > 1:
+    shard_model(model)
     tokens.shard_(GPUS, axis=None)
   for start_pos in (t:= trange(generate_tokens)):
     idx_next = model(tokens, start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).unsqueeze(0)
