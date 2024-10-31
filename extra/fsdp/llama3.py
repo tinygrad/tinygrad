@@ -1,4 +1,5 @@
 import argparse
+import time
 import pathlib
 import os
 from tinygrad import Tensor, nn, Device, TinyJit
@@ -7,23 +8,24 @@ from tinygrad.helpers import prod, trange, fetch
 import math
 from extra.models.llama import Transformer
 from examples.llama3 import Tokenizer
-from typing import List, Callable
+from typing import List, Callable, Union
 Tensor.manual_seed(2)
 
 def get_size(tensors: List[Tensor],
              getter: Callable[[Tensor], int]=lambda t: t.nbytes(),
-             units: List[str]=["bytes", "KB", "MB", "GB"]):
+             units: List[str]=["bytes", "KB", "MB", "GB"],
+             divisor: int=1000):
   size = sum([getter(t) if isinstance(t, Tensor) else t.size for t in tensors])
-  for i, unit in enumerate(units):
-    if size < 1000 or i == len(units) - 1: break
-    size /= 1000
+  size, unit = size_unit(size, units, divisor)
   return size, unit
 
-def size_unit(size: int):
-  for unit in ['bytes', 'KB', 'MB', 'GB']:
-    if size < 1000 or unit == 'GB': break
-    size /= 1000
-  return float(size), unit
+def size_unit(size: Union[float, int],
+              units: List[str]=["bytes", "KB", "MB", "GB"],
+              divisor: int=1000):
+  for i, unit in enumerate(units):
+    if size < divisor or i == len(units) - 1: break
+    size /= divisor
+  return size, unit
 
 SHARD = int(os.environ.get("SHARD", 1))
 GPUS = [f"{Device.DEFAULT}:{i+1}" for i in range(SHARD)]
@@ -153,12 +155,14 @@ def train():
     return loss
 
   test_loss = float('nan')
+  start_time = time.time()
   for i in range(epoch):
     x, y = next(train_data)
     loss = train_step(x.contiguous(), y.contiguous())
     if i % 10 == 9:
       test_loss = test_step().item()
-      print(f"Epoch {i} loss: {loss.item():6.2f} test_loss: {test_loss:5.2f}")
+      time_elapsed, unit = size_unit(time.time() - start_time, ["s", "min", "hr"], 60)
+      print(f"Epoch {i} loss: {loss.item():6.2f} test_loss: {test_loss:5.2f} elapsed time: {time_elapsed: .1f} {unit}")
   opt.zero_grad()
 
 def generate():
