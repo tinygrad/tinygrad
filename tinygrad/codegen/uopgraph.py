@@ -179,7 +179,9 @@ def loop_collapse(compval, multconst, rng:UOp, acc:UOp, idx2=None,idx3=None,extr
   if idx3 is not None: add = add + idx3
   if vec is not None:
     # add, mul, loop_start, loop_end
-    def dvec(x): return UOp(UOps.VECTORIZE, x.dtype.vec(vec.dtype.count), src=(x,)*vec.dtype.count)
+    def dvec(x:UOp):
+      if x.op is UOps.CONST: return UOp.const(x.dtype.vec(vec.dtype.count), x.arg)
+      return UOp(UOps.VECTORIZE, x.dtype.vec(vec.dtype.count), src=(x,)*vec.dtype.count)
     add, mul, loop_start, loop_end = dvec(add), dvec(mul), dvec(loop_start), dvec(loop_end)
   if mul.vmin > 0 and ne is not None:
     comprange = UOp.minimum(loop_end, UOp.maximum((add-compval)//mul + (loop_end-loop_start), loop_start))
