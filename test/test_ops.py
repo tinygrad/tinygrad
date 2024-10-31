@@ -1267,17 +1267,21 @@ class TestOps(unittest.TestCase):
   def test_pad2d_modes(self):
     for mode in ("reflect", "replicate", "circular"):
       helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (1,2,3,4), mode=mode),lambda x: x.pad2d((1,2,3,4), mode=mode))
-      # TODO: negative pads with modes has odd numerical errors in torch CI
-      # helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,-3,0,0), mode=mode), lambda x: x.pad2d(padding=(3,-3,0,0), mode=mode))
-      # helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,-4,0,-3), mode=mode), lambda x: x.pad2d(padding=(3,-4,0,-3), mode=mode))
-      # helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,-5,0,-5), mode=mode), lambda x: x.pad2d(padding=(3,-5,0,-5), mode=mode))
       helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (1,0,0,4), mode=mode),lambda x: x.pad2d((1,0,0,4), mode=mode))
+      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (0,4,1,0), mode=mode),lambda x: x.pad2d((0,4,1,0), mode=mode))
       helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (4,4,4,4), mode=mode),lambda x: x.pad2d((4,4,4,4), mode=mode))
+
+  @unittest.skipIf(CI, "negative pads with modes has odd numerical errors in torch CI")
+  def test_pad2d_modes_negative_padding(self):
+    for mode in ("reflect", "replicate", "circular"):
+      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,-3,0,0), mode=mode), lambda x: x.pad2d(padding=(3,-3,0,0), mode=mode))
+      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,-4,0,-3), mode=mode), lambda x: x.pad2d(padding=(3,-4,0,-3), mode=mode))
+      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,-5,0,-5), mode=mode), lambda x: x.pad2d(padding=(3,-5,0,-5), mode=mode))
 
   def test_pad2d_edge_cases(self):
     # large than shape pad
-    for mode in ("constant", "replicate", "circular"):
-      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,5,0,0), mode=mode), lambda x: x.pad2d(padding=(3,5,0,0), mode=mode))
+    for mode in ("constant", "replicate"):
+      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,11,0,0), mode=mode), lambda x: x.pad2d(padding=(3,11,0,0), mode=mode))
     # error triggers on larger than full shape
     self.helper_test_exception([(1,1,5,5)],
                                 lambda x: torch.nn.functional.pad(x, (3,6,0,0),mode="circular"), lambda x: x.pad2d(padding=(3,6,0,0),mode="circular"),
