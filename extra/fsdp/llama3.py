@@ -153,11 +153,12 @@ def train():
     return loss
 
   test_loss = float('nan')
-  for i in (t:= trange(epoch)):
+  for i in range(epoch):
     x, y = next(train_data)
     loss = train_step(x.contiguous(), y.contiguous())
-    if i % 10 == 9: test_loss = test_step().item()
-    t.set_description(f"loss: {loss.item():6.2f} test_loss: {test_loss:5.2f}")
+    if i % 10 == 9:
+      test_loss = test_step().item()
+      print(f"Epoch {i} loss: {loss.item():6.2f} test_loss: {test_loss:5.2f}")
   opt.zero_grad()
 
 def generate():
