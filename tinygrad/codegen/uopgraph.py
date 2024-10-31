@@ -457,7 +457,7 @@ devectorize = PatternMatcher([
   (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
 ])
 
-reducer = PatternMatcher([
+load_store_indexing = PatternMatcher([
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
   # simplify valid
@@ -526,11 +526,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # convert REDUCE to DEFINE_ACC + ASSIGN (contextual, belongs in lowerer)
   sink = graph_rewrite(sink, sym+just_reduce, ctx=[0])
 
-  # devectorize
-  sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
-
-  # cleanups after devectorization
-  sink = graph_rewrite(sink, sym+reducer)
+  # devectorize + load/store indexing
+  sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing)
 
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, pm_render+get_extra_patterns(supported_ops)+extra_matcher)
