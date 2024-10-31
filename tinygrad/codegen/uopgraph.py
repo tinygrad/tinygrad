@@ -224,6 +224,11 @@ def no_vectorized_wmma(wmma:UOp):
 
 index_load = UPat.var("buf").index(UPat.any(UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE,name="rng"), UPat(UOps.RANGE,name="rng"))).load(name="ld")
 
+arange_rng = UPat.var("idx") + UPat.any(UPat.cvar("mval") * UPat(UOps.RANGE, name="rng"), UPat(UOps.RANGE, name="rng"))
+arange_augrng = UPat.any(arange_rng, arange_rng+UPat.var("idx2"), arange_rng+UPat.var("idx2")+UPat.var("idx3"),
+                         UPat(UOps.VECTORIZE, name="vec", src=arange_rng))
+arange_m = arange_augrng.lt(UPat.cvar("compval")).ne(UPat(UOps.CONST, name="ne", arg=True)).where(UPat.cvar("multconst"), UPat.const(None, 0))
+
 # this is symbolic 2.0
 sym = symbolic_flat+PatternMatcher([
   # self ASSIGN is just self
@@ -262,12 +267,7 @@ sym = symbolic_flat+PatternMatcher([
   # threefry
   (UPat(UOps.ALU, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key")), arg=BinaryOps.THREEFRY), threefry2x32),
   # arange loop folding
-  (UPat(UOps.REDUCE, src=(UPat.any(m2:=UPat.any(
-    m1:=(UPat.var("idx") + UPat.any(UPat.cvar("mval") * UPat(UOps.RANGE, name="rng"), UPat(UOps.RANGE, name="rng"))),
-    m1 + UPat.var("idx2"), m1 + UPat.var("idx2") + UPat.var("idx3"), UPat(UOps.VECTORIZE, name="vec", src=m1))
-    .lt(UPat.cvar("compval")).ne(UPat(UOps.CONST, name="ne", arg=True))
-    .where(UPat.cvar("multconst"), UPat.const(None, 0)), m2 + UPat.var("extra")),),
-    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
+  (UPat(UOps.REDUCE, src=(UPat.any(arange_m, arange_m+UPat.var("extra")),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
   # indexing, with cast or where
   (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*index_load,),
         arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
