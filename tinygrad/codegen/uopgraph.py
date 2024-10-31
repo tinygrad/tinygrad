@@ -100,8 +100,8 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> Optional[UOp]:
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
     if not is_upper_bound and c == 1 and all(is_irreducible(u) and u.vmin == 0 for u in split_uop(X, BinaryOps.ADD)):
       testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), split_uop(X, BinaryOps.ADD), idx)
-      testidx = graph_rewrite(testidx, sym)
-      if testidx.src[0].vmax < 0 or testidx.src[1].vmax < 0:
+      testidx = testidx.simplify()
+      if testidx.gep(0).vmax < 0 or testidx.gep(1).vmax < 0:
         drop_stmt.append(stmt)
         continue
 
@@ -110,7 +110,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> Optional[UOp]:
     test_value = c + 1 if is_upper_bound else c - 1
     for i,b in zip(idx.src, (buf.dtype.shape[1], buf.dtype.shape[0])):
       if is_increasing(i):
-        rw = graph_rewrite(i.substitute({X:X.const_like(test_value)}), sym)
+        rw = i.substitute({X:X.const_like(test_value)}).simplify()
         if rw.vmin >= b or rw.vmax < 0:
           drop_stmt.append(stmt)
           break
@@ -241,9 +241,9 @@ sym = symbolic_flat+PatternMatcher([
   (UPat(UOps.ASSIGN, src=(UPat.var('x'), UPat.var('x'))), lambda x: x),
   # ASSIGN to global is just self
   (UPat(UOps.ASSIGN, src=(UPat(UOps.DEFINE_GLOBAL), UPat.var("x"))), lambda x: x),
-  # VECTORIZE/GEP: the expander rule allows tuple GEP creation, this is just for removal
-  (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"),
-   lambda vec,x: x if x.dtype == vec.dtype and tuple(y.arg[0] for y in vec.src) == tuple(range(len(vec.src))) else None),
+  # VECTORIZE/CONST, VECTORIZE/GEP
+  (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
+  (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
   # reorder ALU/VECTORIZE
   (UPat(UOps.ALU, src=(UPat(UOps.VECTORIZE, src=UPat(name='x')), UPat(UOps.VECTORIZE, src=UPat(name='y'))), name='alu'),
    lambda x,y,alu: UOp(UOps.VECTORIZE, alu.dtype, (UOp(UOps.ALU, alu.dtype.scalar(), (x,y), alu.arg),)*alu.dtype.count)),
@@ -277,11 +277,7 @@ sym = symbolic_flat+PatternMatcher([
   # indexing, with cast or where
   (acc_pat.assign(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*index_load+acc_pat), index_collapse),
   (acc_pat.assign(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).where(index_load, UPat.const(None, 0.0))+acc_pat), index_collapse),
-  # GEP/CAST const rules
-  (UPat(UOps.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   # ** self folding **
-  # cast NOOP (NOTE: it's str to deal with PtrDType)
-  (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   (UPat(UOps.DEFINE_ACC, src=(UPat.var("x"),)), lambda x: x),            # a DEFINE_ACC without ranges is a CONST
   (UPat(UOps.ASSIGN, src=(UPat.cvar(),UPat.var("x"))), lambda x: x),     # an ASSIGN to a const is a NOOP
   # x!=0 -> (bool)x
@@ -409,8 +405,6 @@ def create_gate(root:UOp) -> Optional[UOp]:
   return None if idx.op is not UOps.INDEX or len(idx.src) == 2 or (ret:=_gate_srcs(root, idx.src[2])) is root else ret
 
 expander = PatternMatcher([
-  (UPat(UOps.VECTORIZE, src=UPat(UOps.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
-  (UPat(UOps.VECTORIZE, src=UPat(UOps.GEP, src=(UPat(name="x"),)), name="vec"), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
   # double expand
   (UPat(UOps.EXPAND, name="outer", src=(UPat(UOps.EXPAND, name="inner"),)),
    lambda outer, inner: UOp(UOps.EXPAND, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
@@ -496,16 +490,21 @@ def delete_redundant_gates(root:UOp) -> Optional[UOp]:
   return UOp(UOps.STORE, root.dtype, root.src[:2], root.arg)
 
 finalize = PatternMatcher([
-  (UPat(UOps.CONST, name='c'),
-   lambda c: UOp(UOps.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
-  (UPat(UOps.VCONST, name='c'), lambda c: UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
-  (UPat(UOps.GEP, name='gep'), lambda gep: UOp(UOps.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
   # move masks of loads/stores
   # TODO: this should be an IF instead of a masked STORE
   (UPat((UOps.LOAD, UOps.STORE), src=(UPat.any(masked_index:=UPat(UOps.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))),
                                                masked_index.cast(None).named("cast")),), allow_any_len=True, name="x"), move_mask),
   # delete_redundant_gates (after expand)
   (UPat(UOps.STORE, name="root"), delete_redundant_gates),
+])
+
+# for rendering, we don't use vector
+pm_render = PatternMatcher([
+  (UPat(UOps.CONST, name='c'),
+   lambda c: UOp(UOps.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
+  (UPat(UOps.VCONST, name='c'), lambda c: UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
+  (UPat(UOps.GEP, name='gep'), lambda gep: UOp(UOps.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
+  (UPat(UOps.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
 ])
 
 # *** uop graph ***
@@ -531,5 +530,6 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # finalize
   sink = graph_rewrite(sink, sym+finalize+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
 
-  if opts is not None and opts.extra_matcher is not None: sink = graph_rewrite(sink, opts.extra_matcher)
+  # for rendering without sym (including the rules from the renderer)
+  sink = graph_rewrite(sink, (pm_render+opts.extra_matcher if opts is not None and opts.extra_matcher is not None else pm_render))
   return sink
