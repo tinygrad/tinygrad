@@ -228,11 +228,11 @@ break_sched = PatternMatcher([(UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b,
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+  if len(outs:=dedup(x.base for x in outs if x.realized is None and x.base.op is not MetaOps.CONST)) == 0: return [], {}
   store_groups, lazybufs_to_realize, assigns = get_realizes(outs)
-  if len(store_groups) == 0: return [], {} # nothing to schedule
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
-  big_graph = UOp.sink(*(to_uop(x.base, ctx, cache) for x in outs if x.realized is None and x.base.op is not MetaOps.CONST))
+  big_graph = UOp.sink(*(to_uop(x, ctx, cache) for x in outs))
   # split realizes into small graphs
   graph_rewrite(big_graph, break_sched, realizes:={(u:=ctx.buf_uops[b]):u for b in lazybufs_to_realize})
   assigned = {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None}
