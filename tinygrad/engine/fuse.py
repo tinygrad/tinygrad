@@ -89,13 +89,13 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
 def get_realizes(outs:List[LazyBuffer]) -> Tuple[List[List[Buffer]], Dict[Buffer, LazyBuffer], Dict[LazyBuffer, LazyBuffer]]:
   """search the graph for all the LazyBuffers that need to realize"""
   # start by just realizing the buffers passed in
-  realizes: Dict[LazyBuffer, None] = {x.base:None for x in outs if x.base.realized is None}
+  realizes: Dict[LazyBuffer, None] = {x:None for x in outs}
   allbufs: Dict[LazyBuffer, None] = {}
   simple_pads: Dict[LazyBuffer, None] = {}
   children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
   assign_targets: Dict[LazyBuffer, LazyBuffer] = {}
   double_reduces: Dict[LazyBuffer, None] = {}
-  for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
+  for out in outs: _recurse_lb(out, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
 
   # check if we have to realize pads
   for p in simple_pads:
