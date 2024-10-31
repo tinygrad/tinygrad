@@ -434,6 +434,7 @@
     }
     if (event.key == "Enter") {
       event.preventDefault()
+      if (currentKernel === -1) currentKernel = 0;
       currentUOp = 0;
       currentRewrite = 0;
       expandKernel = !expandKernel;
