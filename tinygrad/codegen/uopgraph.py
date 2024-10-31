@@ -489,17 +489,14 @@ def delete_redundant_gates(store:UOp, addr:UOp, val:UOp, store_gate:UOp) -> Opti
   if (gate:=find_gate(store)) is None or gate.src[0] is not store_gate: return None
   return UOp.store(addr, val)
 
-finalize = PatternMatcher([
+pm_render = PatternMatcher([
   # move masks of loads/stores
   # TODO: this should be an IF instead of a masked STORE
   (UPat((UOps.LOAD, UOps.STORE), src=(UPat.any(masked_index:=UPat(UOps.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))),
                                                masked_index.cast(None).named("cast")),), allow_any_len=True, name="x"), move_mask),
   # delete_redundant_gates (after expand)
   (UPat(UOps.STORE, src=(UPat.var("addr"), UPat.var("val"), UPat.var("store_gate")), name="store"), delete_redundant_gates),
-])
-
-# for rendering, we don't use vector
-pm_render = PatternMatcher([
+  # for rendering, we use explicit VECTORIZE
   (UPat(UOps.CONST, name='c'),
    lambda c: UOp(UOps.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
   (UPat(UOps.VCONST, name='c'), lambda c: UOp(UOps.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
@@ -527,9 +524,9 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # cleanups
   sink = graph_rewrite(sink, sym+reducer)
 
-  # finalize
+  # add extra patterns
   sink = graph_rewrite(sink, sym+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
 
   # for rendering without sym (including the rules from the renderer)
-  sink = graph_rewrite(sink, finalize+(pm_render+opts.extra_matcher if opts is not None and opts.extra_matcher is not None else pm_render))
+  sink = graph_rewrite(sink, pm_render+opts.extra_matcher if opts is not None and opts.extra_matcher is not None else pm_render)
   return sink
