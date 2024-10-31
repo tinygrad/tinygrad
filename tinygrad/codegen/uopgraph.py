@@ -134,7 +134,7 @@ def get_transcendental_patterns(ops, force_transcendental=False):
 
 powers_of_two = {2**i:i for i in range(64)}
 @functools.lru_cache(None)
-def get_extra_patterns(ops):
+def get_late_rewrite_patterns(ops):
   pat: List[Tuple[UPat, Callable]] = []
   # rewrite MOD to AND (which should always be supported, but not for generic in tests)
   if BinaryOps.AND in ops:
@@ -513,7 +513,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
 
-  # initial symbolic + migrate indexing (remove this) + early transcendental
+  # initial symbolic + migrate indexing (remove this) + transcendental
   sink = graph_rewrite(sink, sym+migrate_indexing+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2))
 
   # expand
@@ -526,5 +526,5 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing)
 
   # final rules for the renderer (without sym)
-  sink = graph_rewrite(sink, symbolic_simple+get_extra_patterns(supported_ops)+pm_render+extra_matcher)
+  sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops)+pm_render+extra_matcher)
   return sink
