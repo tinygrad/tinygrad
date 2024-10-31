@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -531,6 +531,7 @@ class UPat(MathTrait):
     self.dtype: Optional[Tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
     self.src: Any = None
+    assert self.name != "ctx", "UPat can't be named ctx"
 
     # try all permutations if it's a list
     if isinstance(src, list): self.src = list(itertools.permutations(src)) if not all_same(src) else [src]
@@ -622,14 +623,14 @@ class PatternMatcher:
   def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     self.patterns = patterns
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: Dict[Tuple[UOps, Any], List[Tuple[UPat, Callable, Set]]] = {}
+    self.pdict: Dict[Tuple[UOps, Any], List[Tuple[UPat, Callable, Set, bool]]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
       tuple_fxn[1]['__builtins__'] = __builtins__  # NOTE: Python 3.8 requires this for "all" and "len" and friends
       real_fxn = types.FunctionType(*tuple_fxn)
-      for uop in p.op: self.pdict.setdefault((uop, p.arg), []).append((p, real_fxn, p.early_reject))
+      for uop in p.op: self.pdict.setdefault((uop, p.arg), []).append((p, real_fxn, p.early_reject, 'ctx' in inspect.signature(real_fxn).parameters))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -638,10 +639,10 @@ class PatternMatcher:
 
   def rewrite(self, uop:UOp, ctx=None) -> Optional[UOp]:
     ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
-    for p,fxn,early_reject in self.pdict.get((uop.op, uop.arg), []) + ([] if uop.arg is None else self.pdict.get((uop.op, None), [])):
+    for p,fxn,early_reject,has_ctx in self.pdict.get((uop.op, uop.arg), []) + ([] if uop.arg is None else self.pdict.get((uop.op, None), [])):
       if not early_reject.issubset(ler): continue
       for match in p.match(uop, {}):
-        if (ret:=(fxn(ctx, **match) if ctx is not None else fxn(**match))) is not None: return ret
+        if (ret:=(fxn(ctx=ctx, **match) if has_ctx else fxn(**match))) is not None: return ret
     return None
 
 # *** tracking pattern matcher ***
@@ -679,13 +680,13 @@ class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None) -> Optional[UOp]:
     ret = None
     ler = set([v for u in uop.src for v in ((u.op, u.arg), (u.op, None))])
-    for p,fxn,early_reject in self.pdict.get((uop.op, uop.arg), []) + ([] if uop.arg is None else self.pdict.get((uop.op, None), [])):
+    for p,fxn,early_reject,has_ctx in self.pdict.get((uop.op, uop.arg), []) + ([] if uop.arg is None else self.pdict.get((uop.op, None), [])):
       st = time.perf_counter()
       if not early_reject.issubset(ler):
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
-      if (matches := p.match(uop, {})) and (ret:=(fxn(ctx, **matches[0]) if ctx is not None else fxn(**matches[0]))) is not None:
+      if (matches := p.match(uop, {})) and (ret:=(fxn(ctx=ctx, **matches[0]) if has_ctx else fxn(**matches[0]))) is not None:
         match_stats[p][0] += 1
         match_stats[p][2] += (et:=time.perf_counter()-st)
         match_stats[p][3] += et

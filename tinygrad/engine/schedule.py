@@ -186,17 +186,17 @@ def _append_preload(ctx:ScheduleItemContext, x:UOp, b:UOp) -> UOp:
 to_si = PatternMatcher([
   (UPat(UOps.VIEW, name="x"), _append_st_vars),
   (UPat(UOps.PRELOAD, src=(UPat.var("b"), UPat()), name="x"), _append_preload),
-  (UPat(UOps.CONTIGUOUS, src=(UPat.var("x"),)), lambda _,x: x),
-  (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda _,x: x),
+  (UPat(UOps.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
+  (UPat(UOps.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda ctx,x: x),
 ])
 
 # ** fusion
 
 lazy = PatternMatcher([
-  (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat.var("v"))), lambda _,b,v: v),
+  (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat.var("v"))), lambda ctx,b,v: v),
 ])
 
-multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda stores,b: stores.get(b)),])
+multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.get(b)),])
 
 def full_ast_rewrite(pre:UOp, var_vals:Dict[Variable, int], assigned:Set[UOp]) -> Tuple[UOp, ScheduleItemContext]:
   # fuse and fold store -> loads
@@ -226,9 +226,9 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 # **** Schedule creation and BFS toposort
 
-def _add_realize(realizes:Dict[UOp, UOp], b:UOp, store:UOp, load:UOp) -> Optional[UOp]:
-  if b not in realizes: return None
-  realizes[b] = store
+def _add_realize(ctx:Dict[UOp, UOp], b:UOp, store:UOp, load:UOp) -> Optional[UOp]:
+  if b not in ctx: return None
+  ctx[b] = store
   return UOp(UOps.LOAD, load.dtype, (b, load.st_arg.to_uop()))
 break_sched = PatternMatcher([(UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat(), name="store"), name="load"), _add_realize),])
 
