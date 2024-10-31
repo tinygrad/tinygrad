@@ -7,7 +7,7 @@ from collections import defaultdict
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch
+from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN
 from tinygrad.multi import MultiLazyBuffer, reshard, find_axis_bounds
 from tinygrad.ops import MetaOps, smax, smin, resolve, UOp, UOps, BinaryOps, sint, Variable, SimpleMathTrait
 from tinygrad.device import Device, Buffer, BufferOptions
@@ -2648,6 +2648,20 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     return self.clip(min_val, max_val)
+
+  def erf(self):
+    """
+    Applies error function element-wise.
+
+    - Described: https://en.wikipedia.org/wiki/Error_function
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1.5, -1.0, -0.5, 0., 0.5, 1.0, 1.5]).erf().numpy())
+    ```
+    """
+    # https://personal.math.ubc.ca/~cbm/aands/page_299.htm 7.1.26
+    t = 1.0 / (1.0 + 0.3275911 * self.abs())
+    return self.sign() * (1.0 - t * polyN(t, [1.061405429, -1.453152027, 1.421413741, -0.284496736, 0.254829592]) * (-self.square()).exp())
 
   def gelu(self):
     """
