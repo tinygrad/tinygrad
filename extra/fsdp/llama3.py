@@ -42,6 +42,7 @@ n_kv_heads = 8
 hidden_dim = 14336
 epoch = 2000
 eval_interval = 50
+eval_interval_mod = eval_interval - 1
 
 # small for testing
 # dim = 64
@@ -176,7 +177,7 @@ def train():
   for i in range(epoch):
     x, y = next(train_data)
     loss = train_step(x.contiguous(), y.contiguous())
-    if i % eval_interval == 9:
+    if i % eval_interval == eval_interval_mod:
       test_loss = test_step().item()
       time_elapsed, unit = size_unit(time.time() - start_time, ["s", "min", "hr"], 60)
       print(f"Epoch {i+1:4} loss: {loss.item():6.2f} test_loss: {test_loss:6.2f} elapsed time: {time_elapsed: 2.1f} {unit}")
