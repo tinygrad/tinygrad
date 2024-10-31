@@ -52,11 +52,10 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   # make things that can't be images not images
   if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
                                             not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
-    if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
-    buf.dtype = dtypes.float32
+    if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to {buf.dtype.base}")
     # hack the underlying buffer too
-    assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
-    buf.buffer.dtype = dtypes.float32
+    buf.dtype = buf.buffer.dtype = buf.dtype.base
+    assert not buf.is_realized(), "can't fixup allocated buffer"
     buf.buffer.options = None
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
   # consts are always fused and generated
@@ -253,6 +252,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     sink = UOp.sink(*(realizes[ctx.buf_uops[b]] for b in stores))
     metadata.append({mx for x in sink.sparents if x.op in BUFFER_UOPS and len(x.src) > 2 and (mx:=ctx.ubuf_metadata.get(x.src[0]))})
     small_graphs.append(full_ast_rewrite(sink, ctx.var_vals, assigned))
+
   # do BFS
   bufs = list(ctx.buf_uops)
   prescheduled = [ScheduleItem(u, tuple(b for u in c.bufs if (b:=bufs[u.arg[0]]).size != 0),
