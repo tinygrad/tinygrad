@@ -363,15 +363,13 @@ def do_expand(root:UOp):
   nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz), tuple(new_srcs), new_arg)
   return UOp(UOps.EXPAND, root.dtype, (nsrc,), expand_args)
 
-acc_number = 0
-def do_reduce(root:UOp):
-  global acc_number
+def do_reduce(ctx:List[int], root:UOp):
   reduce_parented, reduce_unparented = partition(root.src[1:], lambda x: x in root.src[0].sparents)
   ret = root.src[0]
   if len(reduce_parented):
     acc = UOp(UOps.DEFINE_ACC, root.dtype,
-              (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(reduce_parented), (acc_number,))
-    acc_number += 1
+              (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(reduce_parented), (ctx[0],))
+    ctx[0] += 1
     ret = UOp(UOps.ASSIGN, root.dtype, (acc, acc.alu(root.arg, ret)))
   # for MAX, we can just ignore the unparented
   if root.arg is BinaryOps.ADD:
@@ -508,7 +506,6 @@ finalize = PatternMatcher([
 # *** uop graph ***
 
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
-  global acc_number
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
 
   # temp for indexing migration
@@ -517,9 +514,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # expand
   sink = graph_rewrite(sink, sym+expander)
 
-  # convert REDUCE to DEFINE_ACC + ASSIGN
-  acc_number = 0   # TODO: this should be ctx
-  sink = graph_rewrite(sink, sym+just_reduce)
+  # convert REDUCE to DEFINE_ACC + ASSIGN (contextual)
+  sink = graph_rewrite(sink, sym+just_reduce, ctx=[0])
 
   # devectorize
   sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize))
