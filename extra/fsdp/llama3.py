@@ -175,7 +175,7 @@ def train():
     if i % eval_interval == 9:
       test_loss = test_step().item()
       time_elapsed, unit = size_unit(time.time() - start_time, ["s", "min", "hr"], 60)
-      print(f"Epoch {i:4} loss: {loss.item():6.2f} test_loss: {test_loss:6.2f} elapsed time: {time_elapsed: 2.1f} {unit}")
+      print(f"Epoch {i+1:4} loss: {loss.item():6.2f} test_loss: {test_loss:6.2f} elapsed time: {time_elapsed: 2.1f} {unit}")
   opt.zero_grad()
 
 def generate():
