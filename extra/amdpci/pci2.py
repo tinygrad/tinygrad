@@ -51,6 +51,39 @@ class AMDDev:
     from extra.amdpci.vmm import VMM
     self.vmm = VMM(self)
 
+    regMMVM_CONTEXT0_CNTL = 0x0740
+    regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32 = 0x07ab
+    regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32 = 0x07ac
+    regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32 = 0x07cb
+    regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32 = 0x07cc
+    regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32 = 0x07eb
+    regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32 = 0x07ec
+    print("ccc", hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0)))
+    # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0)))
+    # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, 0)))
+
+    # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0)))
+    # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32, 0)))
+
+    # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0)))
+    # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32, 0)))
+
+    # just reset
+    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0, 0)
+    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, 0, 0)
+
+    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, (512 << 20) - 1)
+    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32, 0, 0)
+
+    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0, self.vmm.pdb0_base & 0xffffffff)
+    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32, 0, (self.vmm.pdb0_base >> 32) & 0xffffffff)
+
+    v = self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0)
+    # print(v, "CC")
+    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0, 0x1fffe03)
+    # hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0))
+    # print("ccc", hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0)))
+
     from extra.amdpci.psp import PSP_IP
     self.psp = PSP_IP(self)
 
