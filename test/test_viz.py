@@ -46,9 +46,9 @@ class TestViz(unittest.TestCase):
   def test_rewrite_with_ctx(self):
     a = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
     b = UOp(UOps.LOAD, dtypes.int, (UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1), UOp.const(dtypes.int, 0)))
-    def store_load(visited:Dict[UOp, None], x:UOp) -> Optional[UOp]:
-      if x in visited: return None
-      visited[x] = None
+    def store_load(ctx:Dict[UOp, None], x:UOp) -> Optional[UOp]:
+      if x in ctx: return None
+      ctx[x] = None
       return UOp.store(*x.src, x)
     pm = PatternMatcher([
       (UPat(UOps.LOAD, name="x"), store_load),
