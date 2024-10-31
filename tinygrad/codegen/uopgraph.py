@@ -382,8 +382,6 @@ def do_reduce(acc_number:List[int], root:UOp):
     for r in reduce_unparented:ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
-just_reduce = PatternMatcher([(UPat(UOps.REDUCE, name="root"), do_reduce),])
-
 def do_contract(con:UOp):
   ex = con.src[0]
   # CONTRACT without EXPAND repeats the element VECTORIZED
@@ -447,6 +445,11 @@ def no_vectorized_acc(acc:UOp):
   alus = tuple(UOp(acc.op, acc.dtype.scalar(),
     tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
   return UOp(UOps.VECTORIZE, acc.dtype, alus)
+
+just_reduce = PatternMatcher([
+  # do reduce
+  (UPat(UOps.REDUCE, name="root"), do_reduce),
+])
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
