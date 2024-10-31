@@ -453,11 +453,8 @@ devectorize = PatternMatcher([
 ])
 
 def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:Optional[UOp]=None) -> Optional[UOp]:
-  @functools.lru_cache(None)
-  def find_gate(x:UOp) -> Optional[UOp]:
-    if x.op is UOps.IF: return x
-    return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
-  if (gate:=find_gate(val)) is None or gate.src[0] is not store_gate: return None
+  if store_gate not in [gate.src[0] for gate in val.sparents if gate.op is UOps.IF]: return None
+  # remove the gate from the index
   return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val)
 
 reducer = PatternMatcher([
