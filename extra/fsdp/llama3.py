@@ -1,3 +1,4 @@
+# CUDA=1 LRU=0 SHARD=4 RING=2 PYTHONPATH='.' python extra/fsdp/llama3.py
 import argparse
 import time
 import pathlib
@@ -32,18 +33,18 @@ GPUS = [f"{Device.DEFAULT}:{i+1}" for i in range(SHARD)]
 
 print(f"Allocating data on {Device.DEFAULT}, Training on {GPUS}")
 B = 16
-dim = 4096
-n_layers = 16
-n_heads = 32
-n_kv_heads = 8
-hidden_dim = 14336
-epoch = 500
-# dim = 64
-# n_layers = 2
-# n_heads = 16
+# dim = 4096
+# n_layers = 16
+# n_heads = 32
 # n_kv_heads = 8
-# hidden_dim = 64
-# epoch = 50
+# hidden_dim = 14336
+epoch = 500
+eval_interval = 10
+dim = 64
+n_layers = 2
+n_heads = 4
+n_kv_heads = 4 
+hidden_dim = 64
 T = 16
 vocab_size = 128256
 max_context = 8192
@@ -165,10 +166,10 @@ def train():
   for i in range(epoch):
     x, y = next(train_data)
     loss = train_step(x.contiguous(), y.contiguous())
-    if i % 10 == 9:
+    if i % eval_interval == 9:
       test_loss = test_step().item()
       time_elapsed, unit = size_unit(time.time() - start_time, ["s", "min", "hr"], 60)
-      print(f"Epoch {i} loss: {loss.item():6.2f} test_loss: {test_loss:5.2f} elapsed time: {time_elapsed: .1f} {unit}")
+      print(f"Epoch {i:4} loss: {loss.item():6.2f} test_loss: {test_loss:6.2f} elapsed time: {time_elapsed: 2.1f} {unit}")
   opt.zero_grad()
 
 def generate():
@@ -196,17 +197,17 @@ with the weights on disk.
   parser.add_argument("--weights_dir", type=str, default="weights")
   parser.add_argument("--weights_name", type=str, default="llama3_fsdp")
   parser.add_argument("--no_save_weights", action="store_true")
-  parser.add_argument("--infer_only_with_saved_weights", action="store_true", help="Load the saved weights in WEIGHT_DIR and do inference only")
+  parser.add_argument("--infer_only", action="store_true", help="Load the saved weights in WEIGHT_DIR and do inference only")
   args = parser.parse_args()
   weights_dir = args.weights_dir
   weights_name = args.weights_name
   weights_path = pathlib.Path(weights_dir).joinpath(f"{weights_name}.safetensors").as_posix()
   no_save_weights = args.no_save_weights
-  infer_only_with_saved_weights = args.infer_only_with_saved_weights
+  infer_only = args.infer_only
   if not os.path.exists(weights_dir):
     print("creating directory to save weights:", weights_dir)
     os.mkdir(weights_dir)
-  if infer_only_with_saved_weights:
+  if infer_only:
     print("Loading weights from", weights_path)
     state_dict = nn.state.safe_load(weights_path)
     nn.state.load_state_dict(model, state_dict)
