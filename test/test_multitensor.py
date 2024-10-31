@@ -120,6 +120,12 @@ class TestMultiTensor(unittest.TestCase):
     X.shard_((d0, d2), 0)
     (X + 1).sum().realize()
 
+  def test_shard_last_axis(self):
+    X = Tensor.ones(4, 8)
+    X.shard_((d0, d1), -1)
+    assert X.lazydata.lbs[0].shape == (4, 4)
+    assert X.lazydata.lbs[1].shape == (4, 4)
+
   def test_numpy(self):
     X = Tensor.ones(256)
     X.shard_((d1, d2), 0)
