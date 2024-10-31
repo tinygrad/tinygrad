@@ -101,7 +101,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> Optional[UOp]:
     if not is_upper_bound and c == 1 and all(is_irreducible(u) and u.vmin == 0 for u in split_uop(X, BinaryOps.ADD)):
       testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), split_uop(X, BinaryOps.ADD), idx)
       testidx = testidx.simplify()
-      if testidx.src[0].vmax < 0 or testidx.src[1].vmax < 0:
+      if testidx.gep(0).vmax < 0 or testidx.gep(1).vmax < 0:
         drop_stmt.append(stmt)
         continue
 
