@@ -110,7 +110,7 @@ model = Transformer(
   vocab_size=vocab_size,
   n_kv_heads=n_kv_heads,
   max_context=max_context,
-  jit=False
+  jit=True
 )
 
 @Tensor.train()
@@ -189,20 +189,21 @@ with the weights on disk.
   args = parser.parse_args()
   weights_dir = args.weights_dir
   weights_name = args.weights_name
-  weights_path = pathlib.Path(weights_dir).joinpath(f"{weights_name}.safetensors")
-  print(f"{weights_path=}")
+  weights_path = pathlib.Path(weights_dir).joinpath(f"{weights_name}.safetensors").as_posix()
   no_save_weights = args.no_save_weights
   infer_only_with_saved_weights = args.infer_only_with_saved_weights
   if not os.path.exists(weights_dir):
     print("creating directory to save weights:", weights_dir)
     os.mkdir(weights_dir)
   if infer_only_with_saved_weights:
+    print("Loading weights from", weights_path)
     state_dict = nn.state.safe_load(weights_path)
-    nn.state.load_state_dict(model, )
+    nn.state.load_state_dict(model, state_dict)
     generate()
   else:
     train()
     if not no_save_weights:
-      nn.state.safe_save(model, weights_path)
+      nn.state.safe_save(nn.state.get_state_dict(model), weights_path)
+      print(f"Saved weights to {weights_path}")
     generate()
   
