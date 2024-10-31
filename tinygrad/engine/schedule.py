@@ -40,7 +40,6 @@ class ScheduleItem:
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  realizes: Dict[Buffer, LazyBuffer]
   buf_uops: Dict[Buffer, UOp] = field(default_factory=dict)
   ubuf_metadata: Dict[UOp, Metadata] = field(default_factory=dict)
   var_vals: Dict[Variable, int] = field(default_factory=dict)
