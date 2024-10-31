@@ -222,6 +222,8 @@ def no_vectorized_wmma(wmma:UOp):
   wmma_ex = flatten([[e.gep(i) for i in range(out_sz)] for e in wmmas])
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
+index_load = UPat.var("buf").index(UPat.any(UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE,name="rng"), UPat(UOps.RANGE,name="rng"))).load(name="ld")
+
 # this is symbolic 2.0
 sym = symbolic_flat+PatternMatcher([
   # self ASSIGN is just self
@@ -261,24 +263,16 @@ sym = symbolic_flat+PatternMatcher([
   (UPat(UOps.ALU, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key")), arg=BinaryOps.THREEFRY), threefry2x32),
   # arange loop folding
   (UPat(UOps.REDUCE, src=(UPat.any(m2:=UPat.any(
-    m1:=(UPat.var("idx") + UPat.cvar("mval") * UPat(UOps.RANGE, name="rng")),
-    m1 + UPat.var("idx2"), m1 + UPat.var("idx2") + UPat.var("idx3"), UPat(UOps.VECTORIZE, name="vec", src=m1))
-    .lt(UPat.cvar("compval")).where(UPat.cvar("multconst"), UPat.const(None, 0)), m2 + UPat.var("extra")),),
-    arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
-  # arange loop folding (new ge)
-  (UPat(UOps.REDUCE, src=(UPat.any(m2:=UPat.any(
     m1:=(UPat.var("idx") + UPat.any(UPat.cvar("mval") * UPat(UOps.RANGE, name="rng"), UPat(UOps.RANGE, name="rng"))),
     m1 + UPat.var("idx2"), m1 + UPat.var("idx2") + UPat.var("idx3"), UPat(UOps.VECTORIZE, name="vec", src=m1))
     .lt(UPat.cvar("compval")).ne(UPat(UOps.CONST, name="ne", arg=True))
     .where(UPat.cvar("multconst"), UPat.const(None, 0)), m2 + UPat.var("extra")),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
   # indexing, with cast or where
-  (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*
-    UPat(UOps.LOAD, src=(UPat.var("buf").index(UPat.any(UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE,name="rng"), UPat(UOps.RANGE,name="rng"))),),
-         name="ld"),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
-  (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).where(
-    UPat(UOps.LOAD, src=(UPat.var("buf").index(UPat.any(UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE,name="rng"), UPat(UOps.RANGE,name="rng"))),),
-         name="ld"), UPat.const(None, 0.0)),), arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
+  (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*index_load,),
+        arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
+  (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).where(index_load, UPat.const(None, 0.0)),),
+        arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
   # GEP/CAST const rules
   (UPat(UOps.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   # ** self folding **
