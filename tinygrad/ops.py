@@ -1098,6 +1098,8 @@ symbolic = symbolic_simple+PatternMatcher([
   # ** mod **
   # mod folding
   (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  # simplify valid (generic AND)
+  (UPat(UOps.ALU, name="valid", arg=BinaryOps.AND), simplify_valid),
 ])
 
 symbolic_flat = symbolic+PatternMatcher([
