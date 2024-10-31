@@ -192,10 +192,12 @@ def loop_collapse(compval, idx, multconst, rng:UOp, reduce, idx2=None, idx3=None
   if extra is not None: ret = ret + UOp(UOps.REDUCE, reduce.dtype, (extra,) + reduce.src[1:], reduce.arg)
   return ret
 
-def index_collapse(idx:UOp,rng:UOp,buf:UOp,ld:UOp,reduce:UOp,add=UOp.const(dtypes.int, 0),mul=UOp.const(dtypes.int, 1)):
-  if rng not in reduce.src: return None
+def index_collapse(idx:UOp,rng:UOp,buf:UOp,ld:UOp,acc:UOp,add=UOp.const(dtypes.int, 0),mul=UOp.const(dtypes.int, 1)):
+  if rng not in acc.src: return None
   new_load = UOp.load(buf.index(add+mul*idx, idx.ge(rng.src[0]) & idx.lt(rng.src[1])), dtype=ld.dtype)
-  return UOp(reduce.op, reduce.dtype, (new_load,)+tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
+  new_acc = acc.replace(src=acc.src[0:1]+tuple(x for x in acc.src[1:] if x is not rng))
+  return new_acc.assign(new_load+new_acc)
+  #return UOp(reduce.op, reduce.dtype, (new_load,)+tuple(x for x in reduce.src[1:] if x is not rng), reduce.arg)
 
 # TODO: there's a lot shared with no_vectorized_wmma here
 def gep_through_wmma(gep:UOp, wmma:UOp):
@@ -223,6 +225,7 @@ def no_vectorized_wmma(wmma:UOp):
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 index_load = UPat.var("buf").index(UPat.any(UPat.var("add")+UPat.var("mul")*UPat(UOps.RANGE,name="rng"), UPat(UOps.RANGE,name="rng"))).load(name="ld")
+acc_pat = UPat(UOps.DEFINE_ACC, name="acc")
 
 # this is symbolic 2.0
 sym = symbolic_flat+PatternMatcher([
@@ -262,6 +265,11 @@ sym = symbolic_flat+PatternMatcher([
   # threefry
   (UPat(UOps.ALU, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key")), arg=BinaryOps.THREEFRY), threefry2x32),
   # arange loop folding
+  #(acc_pat.assign(UPat.any(m2:=UPat.any(
+  #  m1:=(UPat.var("idx") + UPat.any(UPat.cvar("mval") * UPat(UOps.RANGE, name="rng"), UPat(UOps.RANGE, name="rng"))),
+  #  m1 + UPat.var("idx2"), m1 + UPat.var("idx2") + UPat.var("idx3"), UPat(UOps.VECTORIZE, name="vec", src=m1))
+  #  .lt(UPat.cvar("compval")).ne(UPat(UOps.CONST, name="ne", arg=True))
+  #  .where(UPat.cvar("multconst"), UPat.const(None, 0)), m2 + UPat.var("extra"))+acc_pat), loop_collapse),
   (UPat(UOps.REDUCE, src=(UPat.any(m2:=UPat.any(
     m1:=(UPat.var("idx") + UPat.any(UPat.cvar("mval") * UPat(UOps.RANGE, name="rng"), UPat(UOps.RANGE, name="rng"))),
     m1 + UPat.var("idx2"), m1 + UPat.var("idx2") + UPat.var("idx3"), UPat(UOps.VECTORIZE, name="vec", src=m1))
@@ -269,16 +277,17 @@ sym = symbolic_flat+PatternMatcher([
     .where(UPat.cvar("multconst"), UPat.const(None, 0)), m2 + UPat.var("extra")),),
     arg=BinaryOps.ADD, name="reduce", allow_any_len=True), loop_collapse),
   # indexing, with cast or where
-  (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*index_load,),
-        arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
-  (UPat(UOps.REDUCE, src=(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).where(index_load, UPat.const(None, 0.0)),),
-        arg=BinaryOps.ADD, name="reduce", allow_any_len=True), index_collapse),
+  (acc_pat.assign(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*index_load+acc_pat), index_collapse),
+  (acc_pat.assign(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).where(index_load, UPat.const(None, 0.0))+acc_pat), index_collapse),
   # GEP/CAST const rules
   (UPat(UOps.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   # ** self folding **
   # cast NOOP (NOTE: it's str to deal with PtrDType)
   (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if str(root.dtype) == str(root.src[0].dtype) else None),
   (UPat(UOps.REDUCE, src=(UPat.var("x"),)), lambda x: x),  # a REDUCE without ranges is a NOOP
+  # fix DEFINE_ACC
+  (UPat(UOps.DEFINE_ACC, src=(UPat.var("x"),)), lambda x: x),            # a DEFINE_ACC without ranges is a CONST
+  (UPat(UOps.ASSIGN, src=(UPat.cvar(),UPat.var("x"))), lambda x: x),     # an ASSIGN to a const is a NOOP
   # x!=0 -> (bool)x
   (UPat.var("x").ne(0), lambda x: x.cast(dtypes.bool.vec(x.dtype.count))),
   # ** load/store folding **
