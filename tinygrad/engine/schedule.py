@@ -58,7 +58,7 @@ def to_uop(buf:LazyBuffer, realizes:Dict[UOp, UOp], ctx:ScheduleContext, cache:D
     return UOp(UOps.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(dtype, buf.arg), v.const_like(0))
   # everything else has BUFFER
   if (b:=buf.buffer) not in ctx.buf_uops:
-    ctx.buf_uops[b] = ubuf = UOp(UOps.BUFFER, buf.buffer.dtype.ptr(), (), (len(ctx.buf_uops), (buf.buffer.device, buf.buffer.size, buf.buffer.dtype)))
+    ctx.buf_uops[b] = ubuf = UOp(UOps.BUFFER, b.dtype.ptr(), (), (len(ctx.buf_uops), (b.device, b.size, b.dtype)))
     ctx.uop_bufs[ubuf] = b
     if b in ctx.realizes: realizes[ubuf] = ubuf
   else: ubuf = ctx.buf_uops[b]
