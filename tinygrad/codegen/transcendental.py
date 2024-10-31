@@ -113,6 +113,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   lo = _shl_lazy(a[2], e) | _shr_lazy(a[3], offset)
 
   def _hp_mul(x:UOp, y:UOp) -> UOp: return x.cast(dtypes.uint64) * y.cast(dtypes.uint64)
+  # compute x * 2/pi
   p = shl(_hp_mul(ia, hi), 32) + _hp_mul(ia, mi) + shr(_hp_mul(ia, lo), 32)
 
   # round quotient to nearest
@@ -151,17 +152,15 @@ def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
       d = q * -1.2154201256553420762e-10 + d
     return d
   return _reduce_d(d, (q := _quadrant(d))), q.cast(dtypes.int32)
+
 # *** approximate sine on small angle. ***
-def trig_poly(d:UOp, coeff32, coeff64):
-  s = d * d
-  u = polyN(s, coeff64) if d.dtype == dtypes.float64 else polyN(s, coeff32)
-  return s * (u * d) + d
+def trig_poly(d:UOp, coeff32, coeff64): return d * (polyN(d*d, coeff64) if d.dtype == dtypes.float64 else polyN(d*d, coeff32))
 # approximate sine on [-pi/2, pi/2]
 def sin_poly(d:UOp) -> UOp:
-  return trig_poly(d, [2.6083159809786593541503e-06, -0.0001981069071916863322258, 0.00833307858556509017944336, -0.166666597127914428710938],
+  return trig_poly(d, [2.6083159809786593541503e-06, -0.0001981069071916863322258, 0.00833307858556509017944336, -0.166666597127914428710938, 1.0],
                       [-7.97255955009037868891952e-18, 2.81009972710863200091251e-15, -7.64712219118158833288484e-13, 1.60590430605664501629054e-10,
                        -2.50521083763502045810755e-08, 2.75573192239198747630416e-06, -0.000198412698412696162806809, 0.00833333333333332974823815,
-                       -0.166666666666666657414808])
+                       -0.166666666666666657414808,    1.0])
 
 def _ifand(q:UOp, n:int): return (q & n).ne(0)
 
