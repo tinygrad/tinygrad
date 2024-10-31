@@ -1271,7 +1271,7 @@ class TestOps(unittest.TestCase):
       helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (0,4,1,0), mode=mode),lambda x: x.pad2d((0,4,1,0), mode=mode))
       helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (4,4,4,4), mode=mode),lambda x: x.pad2d((4,4,4,4), mode=mode))
 
-  @unittest.skipIf(CI, "negative pads with modes has odd numerical errors in torch CI")
+  @unittest.skipIf(CI, "non-constant modes with negative pads have odd numerical errors in torch CI")
   def test_pad2d_modes_negative_padding(self):
     for mode in ("reflect", "replicate", "circular"):
       helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,-3,0,0), mode=mode), lambda x: x.pad2d(padding=(3,-3,0,0), mode=mode))
