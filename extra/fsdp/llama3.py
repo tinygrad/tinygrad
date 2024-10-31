@@ -1,4 +1,5 @@
 # CUDA=1 LRU=0 SHARD=4 RING=2 PYTHONPATH='.' python extra/fsdp/llama3.py
+# CUDA=1 LRU=0 SHARD=4 RING=2 PYTHONPATH='.' setsid python -u extra/fsdp/llama3.py > tmp/llama_fsdp_log.txt 2>&1 &
 import argparse
 import time
 import pathlib
