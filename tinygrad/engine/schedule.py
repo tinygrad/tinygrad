@@ -49,6 +49,15 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
     return ret
+  # make things that can't be images not images
+  if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
+                                            not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
+    if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
+    buf.dtype = dtypes.float32
+    # hack the underlying buffer too
+    assert not hasattr(buf.buffer, '_buf'), "can't fixup allocated buffer"
+    buf.buffer.dtype = dtypes.float32
+    buf.buffer.options = None
   dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
   # consts are always fused and generated
   if buf.op is MetaOps.CONST:
