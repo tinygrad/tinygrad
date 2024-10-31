@@ -9,6 +9,9 @@ from tinygrad.engine.realize import Runner
 from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import CI, OSX, T, getenv, colored
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite
+from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler, PythonAllocator
 
 def derandomize_model(model):
   for p in get_parameters(model):
@@ -63,11 +66,6 @@ def print_diff(s0, s1, unified=getenv("UNIFIED_DIFF",1)):
     diff = ocdiff.console_diff(str(s0), str(s1))
   logging.info(diff)
 
-def assert_equiv_uops(u1:UOp, u2:UOp) -> None:
-  if u1 is not u2:
-    print_diff(u1, u2)
-    raise AssertionError("uops aren't equal.")
-
 def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]=(), st:Optional[ShapeTracker]=None, st_src:Optional[Tuple[UOp]]=None) -> UOp:
   if st_src is None:
     st_src = (st.to_uop() if st is not None else ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)
@@ -77,3 +75,11 @@ def timeit(fxn:Callable[..., T], *args, **kwargs) -> Tuple[T, float]:
   st = time.perf_counter_ns()
   ret = fxn(*args, **kwargs)
   return ret, (time.perf_counter_ns()-st)*1e-6
+
+def eval_uop(uop:UOp):
+  g = UOp(UOps.DEFINE_GLOBAL, uop.dtype.ptr(), arg=0, src=())
+  rw = full_graph_rewrite(UOp.store(g, UOp.const(dtypes.int, 0), uop).sink(), PythonRenderer)
+  prog = PythonProgram("run", PythonCompiler().compile(PythonRenderer().render("run", linearize_uop(rw))))
+  buf = PythonAllocator().alloc(uop.dtype.itemsize)
+  prog(buf)
+  return buf.cast(uop.dtype.fmt).tolist()[0]

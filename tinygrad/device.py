@@ -1,18 +1,19 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple, Any, Iterator
+from typing import Optional, Dict, Tuple, Any, Iterator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib
 from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
-from tinygrad.dtype import DType, ImageDType
+from tinygrad.dtype import DType, ImageDType, PtrDType
 from tinygrad.renderer import Renderer
 
 # **************** Device ****************
 
 class _Device:
-  def __init__(self) -> None: self._devices: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]  # noqa: E501
+  def __init__(self) -> None:
+    self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def _canonicalize(self, device:str) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")   # noqa: E501
+  def _canonicalize(self, device:str) -> str: return ((d:=device.split(":", 1)[0].upper()) + device[len(d):]).replace(":0", "")
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
   def canonicalize(self, device:Optional[str]) -> str: return self._canonicalize(device) if device is not None else Device.DEFAULT
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
@@ -21,7 +22,8 @@ class _Device:
     cpn = multiprocessing.current_process().name
     assert (cpn == "MainProcess") or ix.split(":")[0] in ["DISK", "NPY"], f"can only open device {ix} from parent, not {cpn}"
     x = ix.split(":")[0].upper()
-    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{__name__.split(".")[0]}.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
+    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{__name__.split(".")[0]}.runtime.ops_{x.lower()}')) \
+           if (cname.lower() == x.lower() + "device")][0](ix)
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
     return ret
   @property
@@ -53,8 +55,8 @@ class BufferOptions:
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None,
                initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
-    assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
+    else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
     self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
     if base is None:
       assert offset == 0, "base buffers can't have offset"

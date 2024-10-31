@@ -42,6 +42,7 @@ Elementwise ops operate on a per element basis. They don't change the shape of t
 ::: tinygrad.Tensor.asinh
 ::: tinygrad.Tensor.acosh
 ::: tinygrad.Tensor.hardtanh
+::: tinygrad.Tensor.erf
 ::: tinygrad.Tensor.gelu
 ::: tinygrad.Tensor.quick_gelu
 ::: tinygrad.Tensor.leakyrelu
