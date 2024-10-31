@@ -127,10 +127,15 @@ transcendental_patterns = [
   (UPat(UOps.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),), arg=UnaryOps.SIN), xsin),
 ]
 
+@functools.lru_cache(None)
+def get_transcendental_patterns(ops, force_transcendental=False):
+  pat = [(p[0], cast(Callable, p[1])) for p in transcendental_patterns if p[0].arg not in ops or force_transcendental]
+  return PatternMatcher(pat)
+
 powers_of_two = {2**i:i for i in range(64)}
 @functools.lru_cache(None)
-def get_extra_patterns(ops, force_transcendental=False):
-  pat = [(p[0], cast(Callable, p[1])) for p in transcendental_patterns if p[0].arg not in ops or force_transcendental]
+def get_extra_patterns(ops):
+  pat: List[Tuple[UPat, Callable]] = []
   # rewrite MOD to AND (which should always be supported, but not for generic in tests)
   if BinaryOps.AND in ops:
     pat += [(UPat(UOps.ALU, arg=BinaryOps.MOD, src=(UPat.var('base'), UPat.cvar("const"))),
@@ -505,9 +510,11 @@ pm_render = PatternMatcher([
 
 def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
+  supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
+  extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
 
-  # temp for indexing migration
-  sink = graph_rewrite(sink, sym+migrate_indexing)
+  # initial symbolic + migrate indexing (remove this) + early transcendental
+  sink = graph_rewrite(sink, sym+migrate_indexing+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2))
 
   # expand
   sink = graph_rewrite(sink, sym+expander)
@@ -522,8 +529,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   sink = graph_rewrite(sink, sym+reducer)
 
   # add extra patterns
-  sink = graph_rewrite(sink, sym+get_extra_patterns(tuple(opts.code_for_op.keys()) if opts is not None else (), TRANSCENDENTAL>=2))
+  sink = graph_rewrite(sink, sym+get_extra_patterns(supported_ops))
 
-  # for rendering without sym (including the rules from the renderer)
-  sink = graph_rewrite(sink, pm_render+opts.extra_matcher if opts is not None and opts.extra_matcher is not None else pm_render)
+  # final rules for the renderer (without sym)
+  sink = graph_rewrite(sink, get_extra_patterns(supported_ops)+pm_render+extra_matcher)
   return sink
