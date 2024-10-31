@@ -457,6 +457,14 @@ devectorize = PatternMatcher([
   (UPat((UOps.LOAD, UOps.STORE), name="ls"), no_vectorized_load_store),
 ])
 
+def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, store_gate:UOp) -> Optional[UOp]:
+  @functools.lru_cache(None)
+  def find_gate(x:UOp) -> Optional[UOp]:
+    if x.op is UOps.IF: return x
+    return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
+  if (gate:=find_gate(store)) is None or gate.src[0] is not store_gate: return None
+  return UOp.store(buf.index(idx), *store.src[1:])
+
 load_store_indexing = PatternMatcher([
   # late fixup of unfoldable image loads
   (UPat(UOps.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
@@ -464,6 +472,8 @@ load_store_indexing = PatternMatcher([
   (UPat(UOps.ALU, name="valid", arg=BinaryOps.AND), simplify_valid),
   # image load valid idx simplification
   (UPat(UOps.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat.var("valid"))), simplify_valid_load),
+  # delete_redundant_gates (after expand)
+  (UPat(UOps.STORE, src=(UPat.var("buf").index(UPat.var("idx"), UPat.var("store_gate")),), allow_any_len=True, name="store"), delete_redundant_gates),
 ])
 
 def idx_load_store(x:UOp):
@@ -486,14 +496,6 @@ def move_mask(x:UOp, buf:UOp, idx:UOp, mask:UOp, cast:Optional[UOp]=None) -> UOp
   nidx = buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx)
   return UOp.load(nidx, x.const_like(0), mask, *x.src[1:], dtype=x.dtype) if x.op is UOps.LOAD else UOp.store(nidx, x.src[1], mask, *x.src[2:])
 
-def delete_redundant_gates(root:UOp) -> Optional[UOp]:
-  @functools.lru_cache(None)
-  def find_gate(x:UOp) -> Optional[UOp]:
-    if x.op is UOps.IF: return x
-    return next((ret for s in x.src if (ret:=find_gate(s)) is not None), None)
-  if len(root.src) == 2 or (gate:=find_gate(root)) is None or gate.src[0] is not root.src[2]: return None
-  return UOp(UOps.STORE, root.dtype, root.src[:2], root.arg)
-
 pm_render = PatternMatcher([
   # renderers can't deal with VCONST or multiGEP
   (UPat(UOps.CONST, name='c'),
@@ -506,8 +508,6 @@ pm_render = PatternMatcher([
   # TODO: this should be an IF instead of a masked STORE
   (UPat((UOps.LOAD, UOps.STORE), src=(UPat.any(masked_index:=UPat(UOps.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))),
                                                masked_index.cast(None).named("cast")),), allow_any_len=True, name="x"), move_mask),
-  # delete_redundant_gates (after expand)
-  (UPat(UOps.STORE, name="root"), delete_redundant_gates),
 ])
 
 # *** uop graph ***

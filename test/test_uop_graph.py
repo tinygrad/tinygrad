@@ -6,7 +6,7 @@ from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, UOps, UOp, KernelInfo
 from tinygrad.ops import UPat, PatternMatcher
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
-from tinygrad.codegen.uopgraph import full_graph_rewrite, graph_rewrite, expander, reducer, sym, float4_folding, migrate_indexing
+from tinygrad.codegen.uopgraph import full_graph_rewrite, graph_rewrite, expander, load_store_indexing, sym, float4_folding, migrate_indexing
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.shape.shapetracker import ShapeTracker, View
 
@@ -446,7 +446,7 @@ class TestUOpGraph(unittest.TestCase):
 
 def expander_rewrite(sink):
   sink = graph_rewrite(sink, sym + expander)
-  return graph_rewrite(sink, sym + reducer)
+  return graph_rewrite(sink, sym + load_store_indexing)
 def float4_rewrite(sink):
   sink = graph_rewrite(sink, sym + migrate_indexing)
   return graph_rewrite(sink, sym + expander + float4_folding)
