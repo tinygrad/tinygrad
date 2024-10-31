@@ -2514,6 +2514,28 @@ class Tensor:
     """
     return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
 
+  def prelu(self, weight: Tensor, channel_dim:Optional[int]=1):
+    """
+    Applies the Parametric Rectified Linear Unit (PReLU) function element-wise.
+    NOTE: if `weight` is a non-scalar 1-D Tensor, prelu follows unconventional broadcasting rules determined by `channel_dim`
+    When `channel_dim` is `1`, the behavior matches that of pytorch's prelu
+    When `channel_dim` is `None`, `channel_dim` is selected as the first dimension of target tensor that has the same shape as weight
+
+    - Described: https://paperswithcode.com/method/prelu
+    - Paper: https://arxiv.org/abs/1502.01852v1
+    - See: https://pytorch.org/docs/stable/generated/torch.nn.functional.prelu.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).prelu().numpy())
+    ```
+    """
+    if weight.ndim > 1: raise ValueError("weight must be a scalar or a 1-D Tensor")
+    if self.ndim <= 2 and weight.ndim != 0: raise ValueError("weight must be scalar if there are no channels")
+    if channel_dim is not None and weight.shape and self.size(channel_dim) != weight.size(0): raise ValueError("weight size must equal channel size")
+    if weight.numel() != 1:
+      weight = weight.reshape(*(self.size(i) if i == (channel_dim or self.shape.index(weight.size(0))) else 1 for i in range(self.ndim)))
+    return (self > 0).where(self, self * weight)
+
   def swish(self):
     """
     See `.silu()`
