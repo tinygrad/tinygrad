@@ -330,7 +330,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(UOps.ALU, out_dtype, (self,)+src, arg)
   @staticmethod
   def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
-    if isinstance(b, UOp): return b.unbind()[0] if b.op is UOps.BIND else b
+    if isinstance(b, UOp): return b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
   @staticmethod
