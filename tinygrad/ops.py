@@ -1091,6 +1091,9 @@ symbolic = PatternMatcher([
   # ** mod **
   # mod folding
   (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  # *** cast ***
+  (UPat(UOps.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
+  (UPat(UOps.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
 ])
 
 symbolic_flat = symbolic+PatternMatcher([
