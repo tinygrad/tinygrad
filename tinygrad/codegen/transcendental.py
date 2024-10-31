@@ -190,12 +190,10 @@ def xsin(d:UOp, fast:bool=False, switch_over:float=30.0) -> UOp:
   if fast: result = sin_poly_small(r, q)
   else:
     # Payne Hanek Reduction assumes abs(x) >= pi/4, so for smaller values, use cody_waite_reduction.
-    switch_over_map = x_abs.lt(switch_over)
-    r_fast, q_fast = cody_waite_reduction(x_abs)
-    r = switch_over_map.where(r_fast, r)
-    q = switch_over_map.where(q_fast, q)
-    result = switch_over_map.where(sin_poly_small(r, q), sin_poly_large(r, q))
-  result = result * x_sign # adjusts the sign for abs(x).
+    r_small, q_small = cody_waite_reduction(x_abs)
+    result = x_abs.lt(switch_over).where(sin_poly_small(r_small, q_small), sin_poly_large(r, q))
+  # adjusts the sign for abs(x)
+  result = result * x_sign
   # sin(Inf) = NaN, sin(-Inf) = NaN, sin(NaN) = NaN
   return _lazy_map_numbers(d, d.const_like(math.nan), d.const_like(math.nan), d.const_like(math.nan), result)
 
