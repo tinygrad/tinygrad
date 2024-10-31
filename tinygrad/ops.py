@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -630,7 +630,7 @@ class PatternMatcher:
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
       tuple_fxn[1]['__builtins__'] = __builtins__  # NOTE: Python 3.8 requires this for "all" and "len" and friends
       real_fxn = types.FunctionType(*tuple_fxn)
-      for uop in p.op: self.pdict.setdefault((uop, p.arg), []).append((p, real_fxn, p.early_reject, 'ctx' in tuple_fxn[0].co_varnames))
+      for uop in p.op: self.pdict.setdefault((uop, p.arg), []).append((p, real_fxn, p.early_reject, 'ctx' in inspect.signature(real_fxn).parameters))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
