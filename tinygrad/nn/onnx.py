@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Dict, Tuple, Sequence, Callable, Union, Optional, List, cast, Literal, Any
 import functools, io, math, inspect
 from tinygrad.tensor import Tensor, Device, _broadcast_shape, ConstType
-from tinygrad.helpers import getenv, CI, OSX, prod, flatten, make_pair
+from tinygrad.helpers import getenv, CI, OSX, prod, flatten, make_tuple
 from tinygrad.dtype import dtypes, DType
 from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
 
@@ -192,7 +192,7 @@ def transform_arguments(op:str, inps:List, opts:Dict, **kwargs):
   # pool
   def resolve_pool_pads(inps, opts, **_):
     p_,k_,d_,s_ = opts.get('pads', 0), opts.get('kernel_shape') or inps[1].shape[2:], opts.get('dilations',1), opts.get('strides',1),
-    i_,(s_,d_,p_) = inps[0].shape[-len(k_):], (make_pair(x, len(k_)*2) for x in (s_, d_, p_))
+    i_,(s_,d_,p_) = inps[0].shape[-len(k_):], (make_tuple(x, len(k_)*2) for x in (s_, d_, p_))
     if (auto_pad:=opts.get('auto_pad', "NOTSET"))=="NOTSET": return inps,{**opts, "pads":_onnx_pads_to_pad2d_pads(p_ if len(p_)==len(k_)*2 else p_*2)}
     o_ = [((i - (1 if auto_pad in ("SAME_UPPER", "SAME_LOWER") else k)) // s + 1) for i,k,s in zip(i_, k_, s_)]
     return inps, {**opts, "pads": _onnx_pads_to_pad2d_pads(_auto_pad([(o-1)*s+k-i for o,i,k,s in zip(o_, i_, k_, s_)], auto_pad))}
@@ -413,7 +413,7 @@ def dispatch(op:str):
   def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None,
                     output_shape=None, output_padding=0, strides=1):
     input_shape, kernel_shape = X.shape[2:], (kernel_shape or W.shape[2:])
-    strides, dilations, output_padding = (make_pair(x, len(input_shape)) for x in (strides, dilations, output_padding))
+    strides, dilations, output_padding = (make_tuple(x, len(input_shape)) for x in (strides, dilations, output_padding))
     if output_shape is not None: # we pad according to output_shape
       X = X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=0, output_padding=0)
       return X.pad((None, None, *((0, out-xs) for out, xs in zip(output_shape, X.shape[2:]))))  # TODO: unsure about this

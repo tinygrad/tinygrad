@@ -137,7 +137,7 @@ class TestBEAM(unittest.TestCase):
     lin = Kernel(ast)
 
     bufs = bufs_from_lin(lin)
-    best_lin = beam_search(lin, bufs, 3)
+    best_lin = beam_search(lin, bufs, 2)
     assert best_lin
     # need disable_cache to trigger.
     tm = time_linearizer(best_lin, bufs, allow_test_size=False, cnt=2, disable_cache=True)
