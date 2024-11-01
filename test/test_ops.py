@@ -643,6 +643,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=300, high=400)
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=-400, high=-300)
     helper_test_op([()], torch.sigmoid, Tensor.sigmoid)
+  def test_hardsigmoid(self):
+    helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
+    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=300, high=400)
+    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=-400, high=-300)
+    helper_test_op([()], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
   def test_softplus(self):
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
     helper_test_op([()], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)

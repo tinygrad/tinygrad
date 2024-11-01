@@ -6,7 +6,7 @@ from typing import List, Tuple, cast, Optional
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import variable_to_uop
 from tinygrad.dtype import dtypes
-from tinygrad.ops import KernelInfo, BinaryOps, UOp, UOps, graph_rewrite, PatternMatcher, UPat, sint
+from tinygrad.ops import KernelInfo, BinaryOps, UOp, UOps, graph_rewrite, PatternMatcher, UPat, sint, identity_element
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten
 
@@ -133,4 +133,19 @@ pm_lowerer = PatternMatcher([
   (UPat((UOps.LOAD, UOps.STORE), src=(UPat(), UPat(UOps.VIEW)), allow_any_len=True, name="x"), lower_load_store),
 ])
 
-def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp: return graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
+def do_reduce(ctx:List[int], root:UOp):
+  acc = UOp(UOps.DEFINE_ACC, root.dtype,
+            (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(root.src[1:]), (ctx[0],))
+  ctx[0] += 1
+  return acc.assign(acc.alu(root.arg, root.src[0]))
+
+just_reduce = PatternMatcher([
+  # do reduce
+  (UPat(UOps.REDUCE, name="root"), do_reduce),
+])
+
+def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
+  sink = graph_rewrite(ast, pm_lowerer, ctx=get_index(ast, opts))
+  # convert REDUCE to DEFINE_ACC + ASSIGN (contextual)
+  sink = graph_rewrite(sink, just_reduce, ctx=[0])
+  return sink
