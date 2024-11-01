@@ -512,8 +512,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # initial symbolic + migrate indexing (remove this) + transcendental
   sink = graph_rewrite(sink, sym+migrate_indexing+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2))
 
-  # expand
-  sink = graph_rewrite(sink, sym+expander)
+  # expand (no sym here)
+  sink = graph_rewrite(sink, expander)
 
   # devectorize + load_store_indexing
   sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing)
