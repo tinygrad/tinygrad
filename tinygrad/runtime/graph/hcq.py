@@ -51,7 +51,12 @@ class HCQGraph(MultiGraphRunner):
     for dev, queue in self.comp_queues.items(): dev_access[queue].add(dev)
 
     for j,ji in enumerate(self.jit_cache):
-      enqueue_dev = ji.prg.device if (is_exec_prg:=isinstance(ji.prg, CompiledRunner)) else Device[ji.bufs[1].device] #type:ignore
+      if (is_exec_prg:=isinstance(ji.prg, CompiledRunner)): enqueue_dev = ji.prg.device
+      else:
+        assert ji.bufs[1] is not None, "can't select device"
+        enqueue_dev = Device[ji.bufs[1].device]
+      assert enqueue_dev.hw_copy_queue_t is not None, "no hw copy queue"
+      enqueue_queue: HWCommandQueue
       enqueue_queue = self.comp_queues[enqueue_dev] if is_exec_prg else self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
       out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.signal_t(value=0))
 
