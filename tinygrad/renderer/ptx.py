@@ -49,6 +49,9 @@ ptx_matcher = PatternMatcher([
   # load/store use pointer arithmetic, and the cast does nothing
   (UPat(UOps.INDEX, src=(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx: buf.cast(dtypes.int64) + idx.cast(dtypes.int64)*buf.dtype.itemsize),
   (UPat(UOps.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) else None),
+  # ptx shr and shl instructions require y to be uint
+  (UPat.var("x") << UPat.var("y"), lambda x,y: UOp(UOps.ALU, x.dtype, (x,y.cast(dtypes.uint)), BinaryOps.SHL) if y.dtype != dtypes.uint else None),
+  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(UOps.ALU, x.dtype, (x,y.cast(dtypes.uint)), BinaryOps.SHR) if y.dtype != dtypes.uint else None),
 ])
 
 class PTXRenderer(Renderer):
