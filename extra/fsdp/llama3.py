@@ -225,9 +225,17 @@ with the weights on disk.
     nn.state.load_state_dict(model, state_dict)
     generate()
   else:
-    train()
-    if not no_save_weights:
-      nn.state.safe_save(nn.state.get_state_dict(model), weights_path)
-      print(f"Saved weights to {weights_path}")
+    try:
+      train()
+    except KeyboardInterrupt:
+      print("Training interrupted by SIGINT")
+    except Exception as e:
+      print("Training failed due to unknown error")
+      print(e)
+    finally:
+      if not no_save_weights:
+        print("Saving weights")
+        nn.state.safe_save(nn.state.get_state_dict(model), weights_path)
+        print(f"Saved weights to {weights_path}")
     generate()
   
