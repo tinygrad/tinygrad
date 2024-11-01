@@ -285,7 +285,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
   def __float__(self): return self._eval(dtypes.floats, float)
-  def substitute(self, dvars:Dict[UOp, UOp]): return graph_rewrite(self, _substitute, dvars)
+  def substitute(self, dvars:Dict[UOp, UOp]):
+    with Context(TRACK_MATCH_STATS=0):
+      return graph_rewrite(self, _substitute, dvars)
 
   # *** uop syntactic sugar ***
 
