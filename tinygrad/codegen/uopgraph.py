@@ -232,6 +232,15 @@ def no_vectorized_wmma(wmma:UOp):
   wmma_ex = flatten([[e.gep(i) for i in range(out_sz)] for e in wmmas])
   return UOp(UOps.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
+def reduce_collapse(acc:UOp, ret:UOp, alu:UOp):
+  reduce_parented, reduce_unparented = partition(acc.src[1:], lambda x: x in ret.sparents)
+  if len(reduce_unparented) == 0: return None
+  new_acc = acc.replace(src=acc.src[0:1]+tuple(reduce_parented))
+  ret = new_acc.assign(new_acc.alu(alu.arg, ret))
+  if alu.arg is BinaryOps.ADD:
+    for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+  return ret
+
 acc_pat, rng_pat = UPat(UOps.DEFINE_ACC, name="acc"), UPat(UOps.RANGE, name="rng")
 rng_aug = UPat.any(rng_pat, UPat.var("add")+rng_pat, UPat.var("mul")*rng_pat, UPat.var("add")+UPat.var("mul")*rng_pat)
 
@@ -282,6 +291,9 @@ sym = symbolic_flat+PatternMatcher([
   # indexing, with cast or where
   (acc_pat.assign(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).cast()*index_load+acc_pat), index_collapse),
   (acc_pat.assign(UPat.var("idx").eq(UPat(UOps.RANGE, name="rng")).where(index_load, UPat.const(None, 0.0))+acc_pat), index_collapse),
+  # parentless reduce
+  (acc_pat.assign(UPat(UOps.ALU, src=[acc_pat, UPat.var("ret")], arg=BinaryOps.ADD, name="alu")), reduce_collapse),
+  (acc_pat.assign(UPat(UOps.ALU, src=[acc_pat, UPat.var("ret")], arg=BinaryOps.MAX, name="alu")), reduce_collapse),
   # ** self folding **
   (UPat(UOps.DEFINE_ACC, src=(UPat.var("x"),)), lambda x: x),            # a DEFINE_ACC without ranges is a CONST
   (UPat(UOps.ASSIGN, src=(UPat.cvar(),UPat.var("x"))), lambda x: x),     # an ASSIGN to a const is a NOOP
@@ -496,6 +508,9 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
+
+  # convert REDUCE to DEFINE_ACC + ASSIGN (contextual)
+  sink = graph_rewrite(sink, just_reduce, ctx=[0])
 
   # initial symbolic + migrate indexing (remove this) + transcendental
   sink = graph_rewrite(sink, sym+migrate_indexing+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2))
