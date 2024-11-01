@@ -13,6 +13,11 @@ class VMM:
     self.pdb0_cpu_addr = self.adev.vram_cpu_addr + self.pdb0_base
     self.pdb0_view = to_mv(self.pdb0_cpu_addr, self.pdb0_size)
 
+    self.shared_aperture_start = 0x2000000000000000
+    self.shared_aperture_end = self.shared_aperture_start + (4 << 30) - 1
+    self.private_aperture_start = 0x1000000000000000
+    self.private_aperture_end = self.private_aperture_start + (4 << 30) - 1
+
     regGCVM_CONTEXT0_CNTL = 0x28e8
     print(hex(self.adev.rreg(regGCVM_CONTEXT0_CNTL)))
 

@@ -133,14 +133,14 @@ class PSP_IP:
     write_loc.fence_addr_lo = self.fence_buf & 0xffffffff
     write_loc.fence_value = 0x1
 
-    print(prev_wptr)
+    print(prev_wptr, hex(self.fence_buf))
     self.ring_set_wptr(prev_wptr + ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_rb_frame) // 4)
     
     fence_view = to_mv(self.adev.vmm.vram_to_cpu_addr(self.fence_buf), 4).cast('I')
     while fence_view[0] != 0x1:
       # WREG32_SOC15_NO_KIQ(HDP, 0, mmHDP_READ_CACHE_INVALIDATE, 1);
       self.adev.wreg_ip("HDP", 0, 0x00d1, 0x0, 1)
-      print("now", fence_view[0])
+      # print("now", fence_view[0])
   
   def execute_ip_fw_load(self):
     pass

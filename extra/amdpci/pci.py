@@ -1389,7 +1389,7 @@ def gfx_v11_0_wait_for_rlc_autoload_complete():
 regGB_ADDR_CONFIG = 0x263e # adev->reg_offset[GC_HWIP][0][regGB_ADDR_CONFIG_BASE_IDX] + 0x13de
 def get_gb_addr_config():
   gb_addr_config = amdgpu_rreg(regGB_ADDR_CONFIG)
-  # if gb_addr_config == 0: raise RuntimeError("error in get_gb_addr_config: gb_addr_config is 0")
+  if gb_addr_config == 0: raise RuntimeError("error in get_gb_addr_config: gb_addr_config is 0")
   print("gb_addr_config", hex(gb_addr_config))
 
 gfx_v11_0_wait_for_rlc_autoload_complete()

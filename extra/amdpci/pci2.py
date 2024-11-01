@@ -18,7 +18,7 @@ while True:
   
   if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c:
     dev_fmt = "{:04x}:{:02x}:{:02x}.{:d}".format(pcidev.contents.domain_16, pcidev.contents.bus, pcidev.contents.dev, pcidev.contents.func)
-    if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
+    # if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
     break
 
 assert pcidev is not None
@@ -58,7 +58,7 @@ class AMDDev:
     regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32 = 0x07cc
     regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32 = 0x07eb
     regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32 = 0x07ec
-    print("ccc", hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0)))
+    # print("ccc", hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0)))
     # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0)))
     # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, 0)))
 
@@ -87,16 +87,19 @@ class AMDDev:
     from extra.amdpci.psp import PSP_IP
     self.psp = PSP_IP(self)
 
+    from extra.amdpci.gfx import GFX_IP
+    self.gfx = GFX_IP(self)
+
   def rreg(self, reg): return self.pci_mmio[reg]
   def wreg(self, reg, val): self.pci_mmio[reg] = val
 
-  def rreg_ip(self, ip, inst, reg, seg):
+  def rreg_ip(self, ip, inst, reg, seg, offset=0):
     off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
-    return self.rreg(off + reg)
+    return self.rreg(off + reg + offset)
 
-  def wreg_ip(self, ip, inst, reg, seg, val):
+  def wreg_ip(self, ip, inst, reg, seg, val, offset=0):
     off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
-    self.wreg(off + reg, val)
+    self.wreg(off + reg + offset, val)
 
   def setup(self):
     from extra.amdpci.rlc import replay_rlc

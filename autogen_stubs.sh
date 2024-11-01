@@ -266,9 +266,13 @@ generate_amdgpu_2() {
   #   extra/amdpci/mp_13_0_0_offset.h \
   #   -o $BASE/amdgpu_mp_13_0_0_offset.py
 
+  # clang2py -k cdefstum \
+  #   extra/amdpci/psp_gfx_if.h \
+  #   -o $BASE/amdgpu_psp_gfx_if.py
+
   clang2py -k cdefstum \
-    extra/amdpci/psp_gfx_if.h \
-    -o $BASE/amdgpu_psp_gfx_if.py
+    extra/amdpci/gc_11_0_0_offset.h \
+    -o $BASE/amdgpu_gc_11_0_0.py
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
