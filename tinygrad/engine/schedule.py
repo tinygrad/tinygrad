@@ -78,6 +78,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   else: ret = UOp(UOps.ALU, dtype, src, buf.op)
   cache[buf] = ret = UOp(UOps.LOAD, dtype, (ubuf, buf.st.to_uop(), UOp.store(ubuf, ShapeTracker.from_shape(buf.shape).to_uop(), ret)))
   if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
+  if buf.forced_realize: ctx.realizes[ubuf] = ubuf
   return ret
 
 # **** AST graph rewrite
