@@ -134,17 +134,10 @@ pm_lowerer = PatternMatcher([
 ])
 
 def do_reduce(ctx:List[int], root:UOp):
-  reduce_parented, reduce_unparented = partition(root.src[1:], lambda x: x in root.src[0].sparents)
-  ret = root.src[0]
-  if len(reduce_parented):
-    acc = UOp(UOps.DEFINE_ACC, root.dtype,
-              (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(reduce_parented), (ctx[0],))
-    ctx[0] += 1
-    ret = acc.assign(acc.alu(root.arg, ret))
-  # for MAX, we can just ignore the unparented
-  if root.arg is BinaryOps.ADD:
-    for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
-  return ret
+  acc = UOp(UOps.DEFINE_ACC, root.dtype,
+            (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(root.src[1:]), (ctx[0],))
+  ctx[0] += 1
+  return acc.assign(acc.alu(root.arg, root.src[0]))
 
 just_reduce = PatternMatcher([
   # do reduce
