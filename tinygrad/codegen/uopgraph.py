@@ -418,10 +418,6 @@ expander = PatternMatcher([
   (UPat(UOps.CONTRACT, name="con"), do_contract),
   # vectorize DEFINE_ACC
   (UPat(UOps.VECTORIZE, src=UPat(UOps.DEFINE_ACC, name="acc"), name="v"), lambda acc,v: acc.replace(dtype=v.dtype)),
-  # remove EXPANDs from SINK
-  (UPat(UOps.SINK, name="root"),
-   lambda root: UOp(UOps.SINK, root.dtype, a, root.arg)
-    if len(a:=tuple(flatten(x.src if x.op is UOps.EXPAND else (x,) for x in root.src))) != len(root.src) else None),
   # BARRIERs aren't actually expanded
   (UPat(UOps.BARRIER, src=(UPat(UOps.EXPAND, name="ex"),)),
    lambda ex: UOp(UOps.EXPAND, dtypes.void, (UOp(UOps.BARRIER, dtypes.void, ex.src),)*len(ex.src), ex.arg)),
@@ -512,8 +508,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   # initial symbolic + migrate indexing (remove this) + transcendental
   sink = graph_rewrite(sink, sym+migrate_indexing+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2))
 
-  # expand (no sym here)
-  sink = graph_rewrite(sink, expander)
+  # expand
+  sink = graph_rewrite(sink, sym+expander)
 
   # devectorize + load_store_indexing
   sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing)
