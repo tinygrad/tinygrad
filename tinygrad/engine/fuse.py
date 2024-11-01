@@ -34,7 +34,6 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   if buf.op is not MetaOps.CONST and ctx.buf_uops[buf.buffer] in ctx.realizes: realizes[buf] = None
   if buf.op in ReduceOps and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[buf] = None
   allbufs[buf] = None
-  if buf.op in MetaOps: realizes[buf] = None
   if buf.op is MetaOps.ASSIGN:
     assign_targets[(target:=buf.srcs[0])] = buf
     assert target._base is None, f"assign must be to base {target}"
