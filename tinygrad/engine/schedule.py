@@ -226,13 +226,22 @@ if getenv("RUN_PROCESS_REPLAY"):
   def save_process_replay():
     for x,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(x[0].key), (x, {}, ret))
 
-# **** Schedule creation and BFS toposort
+# **** Schedule creation and toposort
 
-def _add_realize(ctx:Dict[UOp, UOp], b:UOp, store:UOp, load:UOp) -> Optional[UOp]:
-  if b not in ctx: return None
-  ctx[b] = store
+@dataclass(frozen=True)
+class ToposortContext:
+  assigned: Set[UOp]                   # this is all the UOps.BUFFERs that have a different PRELOAD and LOAD value
+  toposort: List[UOp]                  # this is the final toposort of all UOps.SINKs
+  realizes: Dict[UOp, UOp]             # this maps UOps.BUFFER to UOps.STORE
+  buf_sink: Dict[UOp, Tuple[UOp, ...]] # this maps UOps.BUFFER to all the UOps.BUFFERs it sinks with
+
+def _add_realize(ctx:ToposortContext, b:UOp, store:UOp, load:UOp) -> Optional[UOp]:
+  if b not in ctx.realizes: return None
+  ctx.realizes[b] = store
   return UOp(UOps.LOAD, load.dtype, (b, load.st_arg.to_uop()))
-break_sched = PatternMatcher([(UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat(), name="store"), name="load"), _add_realize),])
+break_sched = PatternMatcher([
+  (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat(), name="store"), name="load"), _add_realize),
+])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
@@ -244,8 +253,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   # get realizes
   store_groups, lazybufs_to_realize, assigns = get_realizes(outs)
   # split realizes into small graphs
-  graph_rewrite(big_graph, break_sched, realizes:={(u:=ctx.buf_uops[b]):u for b in lazybufs_to_realize})
-  assigned = {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None}
+  assigned = {}
+  graph_rewrite(big_graph, break_sched)
   small_graphs: List[Tuple[UOp, ScheduleItemContext]] = []
   metadata: List[Set[Metadata]] = []
   for stores in store_groups:
