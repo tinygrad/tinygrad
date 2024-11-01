@@ -58,7 +58,7 @@ class TestVminVmaxProperties(unittest.TestCase):
   def test_vmin_vmax_nested_min_max(self):
     # vmin and vmax with nested min/max operations
     x = UOp.variable('x', 0, 10)
-    uop = x.max(5).min(8)
+    uop = x.maximum(5).minimum(8)
     self.assertEqual(uop.vmin, 5)
     self.assertEqual(uop.vmax, 8)
 

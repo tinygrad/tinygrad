@@ -194,6 +194,7 @@ class TestFromFuzzer(unittest.TestCase):
     _test_value(np.pi / 2)
      # worst case of ulp 1.5
     _test_value(np.pi * 2, unit=1.5)
+
   @given(strat.sampled_from(dtypes_float))
   def test_log2(self, dtype):
     if not is_dtype_supported(dtype): return
@@ -210,6 +211,7 @@ class TestFromFuzzer(unittest.TestCase):
       _test_value(fmin * scale)
       _test_value(-fmin * scale)
     _test_value(0)
+    _test_value(0.0000009)
 
 if __name__ == '__main__':
   unittest.main()
