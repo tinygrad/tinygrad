@@ -143,7 +143,7 @@ def get_late_rewrite_patterns(ops):
   # rewrite MUL/IDIV to SHL+SHR
   if BinaryOps.SHL in ops and BinaryOps.SHR in ops:
     pat += [
-    # *** enforce type alignment for shl ad shr ***
+    # *** enforce type alignment for shl and shr ***
     (UPat.var("x") << UPat.var("y"), lambda x, y: x << y.cast(x.dtype) if x.dtype != y.dtype else None),
     (UPat.var("x") >> UPat.var("y"), lambda x, y: x >> y.cast(x.dtype) if x.dtype != y.dtype else None),
     # *** (x  * (2**y)) -> shl(x,y) ***
