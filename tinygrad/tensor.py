@@ -2344,6 +2344,20 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     return F.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
+  def hardsigmoid(self, alpha:float=1/6, beta:float=0.5):
+    """
+    Applies the Hardsigmoid function element-wise.
+    NOTE: default `alpha` and `beta` values is taken from torch
+
+    - Described: https://paperswithcode.com/method/hard-sigmoid
+    - See: https://pytorch.org/docs/stable/generated/torch.nn.functional.hardsigmoid.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).hardsigmoid().numpy())
+    ```
+    """
+    return (alpha * self + beta).relu() - (alpha * self + beta - 1).relu()
+
   def sqrt(self):
     """
     Computes the square root of the tensor element-wise.
