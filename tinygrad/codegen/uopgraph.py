@@ -418,10 +418,6 @@ expander = PatternMatcher([
   (UPat(UOps.CONTRACT, name="con"), do_contract),
   # vectorize DEFINE_ACC
   (UPat(UOps.VECTORIZE, src=UPat(UOps.DEFINE_ACC, name="acc"), name="v"), lambda acc,v: acc.replace(dtype=v.dtype)),
-  # remove EXPANDs from SINK
-  (UPat(UOps.SINK, name="root"),
-   lambda root: UOp(UOps.SINK, root.dtype, a, root.arg)
-    if len(a:=tuple(flatten(x.src if x.op is UOps.EXPAND else (x,) for x in root.src))) != len(root.src) else None),
   # BARRIERs aren't actually expanded
   (UPat(UOps.BARRIER, src=(UPat(UOps.EXPAND, name="ex"),)),
    lambda ex: UOp(UOps.EXPAND, dtypes.void, (UOp(UOps.BARRIER, dtypes.void, ex.src),)*len(ex.src), ex.arg)),
