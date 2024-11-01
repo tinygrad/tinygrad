@@ -237,9 +237,10 @@ def reduce_collapse(acc:UOp, ret:UOp, alu:UOp):
   reduce_parented, reduce_unparented = partition(acc.src[1:], lambda x: x in ret.sparents)
   if len(reduce_unparented) == 0: return None
   new_acc = acc.replace(src=acc.src[0:1]+tuple(reduce_parented))
+  ret = new_acc.assign(new_acc.alu(alu.arg, ret))
   if alu.arg is BinaryOps.ADD:
     for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
-  return new_acc.assign(new_acc.alu(alu.arg, ret))
+  return ret
 
 acc_pat, rng_pat = UPat(UOps.DEFINE_ACC, name="acc"), UPat(UOps.RANGE, name="rng")
 rng_aug = UPat.any(rng_pat, UPat.var("add")+rng_pat, UPat.var("mul")*rng_pat, UPat.var("add")+UPat.var("mul")*rng_pat)
