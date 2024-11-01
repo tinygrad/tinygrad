@@ -43,6 +43,7 @@ class ScheduleContext:
   buf_uops: Dict[Buffer, UOp] = field(default_factory=dict)        # this maps Buffers to BUFFER uops
   ubuf_metadata: Dict[UOp, Metadata] = field(default_factory=dict) # this maps BUFFER uops to Metadata
   var_vals: Dict[Variable, int] = field(default_factory=dict)      # this maps a BIND's DEFINE_VAR to its value
+  realizes: Dict[UOp, UOp] = field(default_factory=dict)           # this maps a UOps.BUFFER changing in this schedule to its uop
 
 def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
@@ -228,11 +229,15 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 # **** Schedule creation and BFS toposort
 
-def _add_realize(ctx:Dict[UOp, UOp], b:UOp, store:UOp, load:UOp) -> Optional[UOp]:
-  if b not in ctx: return None
+def realize(ctx:Dict[UOp, UOp], b:UOp, load:UOp, store:UOp) -> UOp:
+  assert b in ctx, f"trying to realize {b} while not realized"
   ctx[b] = store
   return UOp(UOps.LOAD, load.dtype, (b, load.st_arg.to_uop()))
-break_sched = PatternMatcher([(UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat(), name="store"), name="load"), _add_realize),])
+
+def UPatLoadStore(to_store=UPat()): return UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), to_store, name="store"), name="load")
+break_sched = PatternMatcher([
+  (UPatLoadStore(), lambda ctx,b,store,load: realize(ctx, b, load, store) if b in ctx else None),
+])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
@@ -245,12 +250,12 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   # get realizes
   store_groups, lazybufs_to_realize, assigns = get_realizes(outs, ctx)
   # split realizes into small graphs
-  graph_rewrite(big_graph, break_sched, realizes:={(u:=ctx.buf_uops[b]):u for b in lazybufs_to_realize})
+  graph_rewrite(big_graph, break_sched, ctx.realizes)
   assigned = {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None}
   small_graphs: List[Tuple[UOp, ScheduleItemContext]] = []
   metadata: List[Set[Metadata]] = []
   for stores in store_groups:
-    sink = UOp.sink(*(realizes[u] for u in stores))
+    sink = UOp.sink(*(ctx.realizes[u] for u in stores))
     metadata.append({mx for x in sink.sparents if x.op in BUFFER_UOPS and len(x.src) > 2 and (mx:=ctx.ubuf_metadata.get(x.src[0]))})
     small_graphs.append(full_ast_rewrite(sink, ctx.var_vals, assigned))
 

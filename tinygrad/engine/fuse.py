@@ -163,5 +163,6 @@ def get_realizes(outs:List[LazyBuffer], ctx) -> Tuple[List[List[UOp]], Dict[Buff
       if (dup:=lazybufs_to_realize.get(buf.buffer)) is not None:
         raise RuntimeError(f"can't double realize in one schedule, Buffer is realizing both {dup} and {buf}")
       lazybufs_to_realize[buf.buffer] = buf
-      output_groups[reduce_for_op.get(buf, buf)].append(ctx.buf_uops[buf.buffer])
+      output_groups[reduce_for_op.get(buf, buf)].append(ubuf:=ctx.buf_uops[buf.buffer])
+      ctx.realizes[ubuf] = ubuf
   return list(output_groups.values()), lazybufs_to_realize, assign_targets
