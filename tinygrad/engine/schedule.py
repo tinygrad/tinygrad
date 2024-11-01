@@ -243,7 +243,9 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   cache: Dict[LazyBuffer, UOp] = {}
   big_graph = UOp.sink(*(to_uop(x, ctx, cache) for x in outs))
   # get realizes
+  realizes: Dict[UOp, UOp] = {}
   store_groups, lazybufs_to_realize, assigns = get_realizes(outs, ctx)
+  realizes.update((u:=ctx.buf_uops[b], u) for b in lazybufs_to_realize)
   # split realizes into small graphs
   graph_rewrite(big_graph, break_sched, realizes:={(u:=ctx.buf_uops[b]):u for b in lazybufs_to_realize})
   assigned = {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None}
