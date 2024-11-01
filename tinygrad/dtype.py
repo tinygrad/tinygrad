@@ -1,11 +1,10 @@
 from __future__ import annotations
-from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable, Literal
+from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable
 import math, struct, ctypes, functools
 from dataclasses import dataclass, replace
 from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
-DtypeFmtType = Literal['?','b','B','h','H','i','I','q','Q','f','d']
 
 @dataclass(frozen=True)
 class DType:
