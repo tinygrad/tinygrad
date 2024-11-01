@@ -320,6 +320,15 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
 
+  def clone(self) -> Tensor:
+    """
+    Creates a clone of this tensor allocating a seperate buffer for the data.
+    """
+    ret = Tensor(self.lazydata.clone(), self.device, requires_grad=self.requires_grad)
+    if self.grad is not None: ret.grad = self.grad.clone()
+    if hasattr(self, '_ctx'): ret._ctx = self._ctx
+    return ret
+
   def to(self, device:Optional[Union[str, Tuple[str, ...]]]) -> Tensor:
     """
     Moves the tensor to the given device.
