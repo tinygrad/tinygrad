@@ -228,7 +228,7 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 # **** Schedule creation and BFS toposort
 
-def realize(ctx:Dict[UOp, UOp], b:UOp, store:UOp, load:UOp) -> UOp:
+def realize(ctx:Dict[UOp, UOp], b:UOp, load:UOp, store:UOp) -> UOp:
   assert b in ctx, f"trying to realize {b} while not realized"
   ctx[b] = store
   return UOp(UOps.LOAD, load.dtype, (b, load.st_arg.to_uop()))
