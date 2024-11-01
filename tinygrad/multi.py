@@ -40,8 +40,7 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
 
   # Assemble chunks back
   pads = [((s,dim-e),) for s,e in chunks]
-  return [functools.reduce(lambda x,y: x.alu(BinaryOps.ADD, y),
-                           [c.pad(pads[i]) for i,c in enumerate(lb_c)]).reshape(lbs[0].shape) for lb_c in chunked]
+  return [functools.reduce(operator.add, [c.pad(pads[i]) for i,c in enumerate(lb_c)]).reshape(lbs[0].shape) for lb_c in chunked]
 
 def to_sharded(lbs:List[LazyBuffer], axis:int, bounds: Tuple[Tuple[int, int], ...]) -> List[LazyBuffer]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
@@ -86,7 +85,7 @@ class MultiLazyBuffer(MathTrait):
       if not real: continue
       pad_arg = tuple((0,0) if a != self.axis else (start, self.bounds[-1][1]-end) for a in range(len(lb.shape)))
       llbs.append(lb.copy_to_device(device).pad(pad_arg))
-    return functools.reduce(lambda x,y: x.alu(BinaryOps.ADD, y), llbs)
+    return functools.reduce(operator.add, llbs)
 
   # passthroughs
   def is_realized(self) -> bool: return all(lb.base.realized is not None for lb, r in zip(self.lbs, self.real) if r is True)
@@ -95,6 +94,7 @@ class MultiLazyBuffer(MathTrait):
   def const_like(self, b) -> MultiLazyBuffer: return MultiLazyBuffer([x.const_like(b) for x in self.lbs], self.axis, self.real)
   def assign(self, x:MultiLazyBuffer): return MultiLazyBuffer([s.assign(d) for s,d in zip(self.lbs, x.lbs)], self.axis, self.real)
   def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs], self.axis, self.real)
+  def clone(self) -> MultiLazyBuffer: return MultiLazyBuffer([lb.clone() for lb in self.lbs], self.axis, self.real)
 
   # elementwise is simple
   def alu(self, op:Union[MetaOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:MultiLazyBuffer) -> MultiLazyBuffer:
@@ -121,7 +121,9 @@ class MultiLazyBuffer(MathTrait):
     if self.axis is not None and self.axis in axis:
       # all-reduce on sharded axes
       reduced_parts = [(x if r else x.const_like(0)).r(op, axis) for x,r in zip(self.lbs, self.real)]
+      # if all partitions are real, do all_reduce
       if all(self.real): return MultiLazyBuffer(all_reduce(op, reduced_parts), None)
+      # only one partition is real, keep it
       return MultiLazyBuffer(reduced_parts, None, self.real)
     # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
     return MultiLazyBuffer([x.r(op, axis) for x in self.lbs], self.axis, self.real)
@@ -168,6 +170,7 @@ class MultiLazyBuffer(MathTrait):
     assert self.axis is None or arg[self.axis] == (0, self.shape[self.axis]) or arg[self.axis] in self.bounds, f"shrinking not supported for {arg=}"
     if self.axis is not None and arg[self.axis] in self.bounds and arg[self.axis] != (0, self.shape[self.axis]):
       assert all(arg[i] == (0, s) or i == self.axis for i,s in enumerate(self.shape)), "cannot shrink sharded and non-sharded axis at the same time"
+      # NOTE: shrink on the shard axis is only allowed when result is a single partition, denoted by the new real
       idx = self.bounds.index(arg[self.axis])
       # zero out other lbs to not create lb reference
       return MultiLazyBuffer([lb if i==idx else lb.const_like(0) for i,lb in enumerate(self.lbs)], self.axis, [i==idx for i in range(len(self.lbs))])

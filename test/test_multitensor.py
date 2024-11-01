@@ -642,6 +642,13 @@ class TestMultiTensor(unittest.TestCase):
     t.shard_(devices, axis=0)
     assert all([lb is lb.base and lb.buffer.base.size == 4 * 16 for lb in t.lazydata.lbs])
 
+  def test_clone(self):
+    t = Tensor.rand(16, 16).shard(devices_2, axis=None)
+    np.testing.assert_allclose(t.numpy(), t.clone().numpy())
+
+    t = Tensor.rand(16, 16).shard(devices_2, axis=0)
+    np.testing.assert_allclose(t.numpy(), t.clone().numpy())
+
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestHandleData(unittest.TestCase):
   def test_copied_to_device(self):
@@ -765,6 +772,8 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
     a = t.shrink(((2, 4), None))
     b = t.shrink(((6, 8), None))
+    self.assertEqual(a.lazydata.real, [False, True, False, False])
+    self.assertEqual(b.lazydata.real, [False, False, False, True])
     na = t.numpy()[2:4]
     nb = t.numpy()[6:8]
     np.testing.assert_equal(a.numpy(), na)
@@ -774,6 +783,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       c = a + b
 
     c = a.pad(((2, 4), None)) + b.pad(((6, 0), None))
+    self.assertEqual(c.lazydata.real, [True, True, True, True])
     expected = np.concatenate([np.zeros_like(t.numpy()[0:2]), na, np.zeros_like(t.numpy()[4:6]), nb])
     np.testing.assert_equal(c.numpy(), expected)
 

@@ -9,14 +9,7 @@ TRANSCENDENTAL_SUPPORTED_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float6
 def _lazy_map_numbers(x:UOp, inf:UOp, _inf:UOp, nan:UOp, ratio:UOp):
   """replace inf -> inf, -inf -> _inf, nan -> nan, otherwise -> ratio"""
   return x.ne(math.inf).where(x.ne(x).where(nan, x.ne(-math.inf).where(ratio, _inf)), inf)
-# *** helper functions for double/quad precision arithmetics ***
-def dfadd2_f2_f2_f2(xx:UOp, xy:UOp, yx:UOp, yy:UOp) -> Tuple[UOp, UOp]: return xx + yx, xy + yy
-def dfmul2_f2_f2_f2(xx:UOp, xy:UOp, yx:UOp, yy:UOp) -> Tuple[UOp, UOp]: return xx * yx, xx * yy + xy * yx
-def dfdiv2_f2_f2_f2(nx:UOp, ny:UOp, dx:UOp, dy:UOp) -> Tuple[UOp, UOp]:
-  t = dx.reciprocal()
-  qx = nx * t
-  qy = (ny - qx * dy) * t
-  return qx, qy
+
 # *** helper functions for bit manipulation ***
 def mantissa_bits(d:DType) -> int: return dtypes.finfo(d)[1]
 def exponent_bias(d:DType) -> int: return {dtypes.float64: 1023, dtypes.float32: 127, dtypes.float16: 15}[d]
@@ -57,7 +50,7 @@ def ldexp2k(d:UOp, e:UOp) -> UOp:
   return (d * pow2if(shr(e, 1), d.dtype)) * pow2if(e - shr(e, 1), d.dtype)
 
 def frexp(v:UOp) -> Tuple[UOp, UOp]:
-  """frexp(v) -> (mantissa, exponent)"""
+  """frexp(v) -> (mantissa, exponent) assuming v != 0"""
   assert v.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   # m1 = masks for mantissa, m2 = masks to normalize the mantissa.
   m1 = {dtypes.float64: 0x000FFFFFFFFFFFFF, dtypes.float32: 0x807FFFFF, dtypes.float16: 0x83FF}[v.dtype]
@@ -67,10 +60,6 @@ def frexp(v:UOp) -> Tuple[UOp, UOp]:
   # Set the exponent bits appropriately to normalize the mantissa into the range of [0.5, 1.0).
   mantissa = ((bits & m1) | m2).bitcast(v.dtype)
   exp = exponent - exponent_bias(v.dtype) + 1
-  # special case of 0  # TODO: can we remove this case?
-  mantissa = exponent.ne(0).where(mantissa, v)
-  exp = exponent.ne(0).where(exp, exp.const_like(0))
-  if v.dtype == dtypes.float16: exp = exp.bitcast(dtypes.int16)
   return mantissa, exp
 
 # *** reduction algorithms for sine ***
@@ -80,19 +69,17 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
     39800.0 <= d <= +Inf
   Returns a tuple of `(r, q)`:
   - `r`[d.dtype] is the reminder value corresponding to `round_to_nearest(x % pi/2)`.
-    ensuring that `r` is in the range of [0, pi/2).
-  - `q`[int32] is an integer taking values 0,1,2 or 3, corresponding to the quadrant of the original angle `d`.
+  - `q`[int32] is an integer, and q % 4 is corresponding to the quadrant of the original angle `d`.
   """
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   # https://stackoverflow.com/questions/30463616/payne-hanek-algorithm-implementation-in-c/30465751#30465751
   # 190 bits of 2/pi for Payne-Hanek style argument reduction
-  two_over_pi_f = [0x00000000,0x28be60db,0x9391054a,0x7f09d5f4,0x7d4d3770,0x36d8a566,0x4f10e410]
+  two_over_pi_f = [0x00000000, 0x28be60db, 0x9391054a, 0x7f09d5f4, 0x7d4d3770, 0x36d8a566, 0x4f10e410]
 
-  input_dtype = d.dtype
-  dtype_via = dtypes.float32 if d.dtype == dtypes.float16 else d.dtype
+  intermediate_dtype = dtypes.float32 if d.dtype == dtypes.float16 else d.dtype
 
   f, e = frexp(d)
-  ia = (f.cast(dtype_via) * 4.294967296e9).cast(dtypes.uint64)
+  ia = (f.cast(intermediate_dtype) * 4.294967296e9).cast(dtypes.uint64)
   # extract 96 relevant bits of 2/pi based on magnitude of argument
   i = shr(e.cast(dtypes.uint64), 5)
   e = e.cast(dtypes.int32) & 31
@@ -100,13 +87,14 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
 
   def _take(an:UOp, offset:int, count:int=0) -> UOp:
     """an = two_over_pi_f[i+offset]"""
-    if count+offset <= len(two_over_pi_f[0:-2]):
+    if count+offset < len(two_over_pi_f) - 1:
       an = i.ne(count).where(_take(an, offset, count=count+1), an.const_like(two_over_pi_f[count+offset]))
     return an
-  def _shl_lazy(x, y): return (x.cast(dtypes.uint64) * pow2if(y, input_dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
-  def _shr_lazy(x, y): return (x.cast(dtypes.uint64) // pow2if(y, input_dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
-  # a_n = (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
+  def _shl_lazy(x, y): return (x.cast(dtypes.uint64) * pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
+  def _shr_lazy(x, y): return (x.cast(dtypes.uint64) // pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
+
   a = [_take(UOp.const(dtypes.uint32, 0), i) for i in range(4)]
+  #  (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
   # Note: e >= 1 for all numbers d >= 1.0. assume e != 0
   hi = _shl_lazy(a[0], e) | _shr_lazy(a[1], offset)
   mi = _shl_lazy(a[1], e) | _shr_lazy(a[2], offset)
@@ -119,10 +107,10 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   # round quotient to nearest
   q = shr(p, 62).cast(dtypes.int32)
   p = p & 0x3fffffffffffffff
-  r = (p.cast(dtype_via) * (3.4061215800865545e-19)).cast(input_dtype)
+  r = (p.cast(intermediate_dtype) * (3.4061215800865545e-19)).cast(d.dtype)
 
   # if fraction >= 0.5, r -= pi/2, q += 1
-  return f.lt(0.5).where(r, r + (-math.pi / 2)), f.lt(0.5).where(q, q + 1)
+  return f.lt(0.5).where(r, r - math.pi/2), f.lt(0.5).where(q, q + 1)
 
 def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
   """
@@ -130,28 +118,33 @@ def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
       0 <= abs(d) <= 39800.0
   Returns a tuple of `(r, q)`, where the output format is the same as that of `payne_hanek_reduction`.
   """
-  m_1_pi = 0.318309886183790671537767526745028724
-  qdh = (d * (m_1_pi / 16777216)).cast(dtypes.int64).cast(d.dtype) * 16777216.0
-  def _quadrant(x:UOp) -> UOp: return rintk(d * m_1_pi -qdh).cast(x.dtype) if x.dtype == dtypes.float64 else rintk(x * m_1_pi).cast(x.dtype)
   def _reduce_d(x:UOp, q:UOp):
+    # https://github.com/shibatch/sleef/blob/4e08851f59fc2b545f9c393c6a23dfd311a26308/src/libm/sleefdp.c#L789-L823
     if x.dtype == dtypes.float64:
-      d = qdh * -3.1415926218032836914 + x
-      d = q * -3.1415926218032836914 + d
-      d = qdh * -3.1786509424591713469e-08 + d
-      d = q * -3.1786509424591713469e-08 + d
-      d = qdh * -1.2246467864107188502e-16 + d
-      d = q * -1.2246467864107188502e-16 + d
-      d = (qdh + q) * -1.2736634327021899816e-24 + d
+      # https://github.com/shibatch/sleef/blob/f6d8a841fbfddd26ce712834d4da220cd76048fb/src/common/misc.h#L77
+      PI_A, PI_B, PI_C, PI_D = 3.1415926218032836914, 3.1786509424591713469e-08, 1.2246467864107188502e-16, 1.2736634327021899816e-24
+      d = qdh * -PI_A + x
+      d = q * -PI_A + d
+      d = qdh * -PI_B + d
+      d = q * -PI_B + d
+      d = qdh * -PI_C + d
+      d = q * -PI_C + d
+      d = (qdh + q) * -PI_D + d
     elif x.dtype == dtypes.float16:
       # [FIXME] when reducing `d`, FP16 needs FP32 precision to achieve 1.0 ULP precision.
       d = _reduce_d(x.cast(dtypes.float32), q.cast(dtypes.float32)).cast(dtypes.float16)
     else:
+      # https://github.com/shibatch/sleef/blob/4e08851f59fc2b545f9c393c6a23dfd311a26308/src/libm/sleefsp.c#L464-L503
       d = q * -3.1414794921875 + x
       d = q * -0.00011315941810607910156 + d
       d = q * -1.9841872589410058936e-09 + d
       d = q * -1.2154201256553420762e-10 + d
     return d
-  return _reduce_d(d, (q := _quadrant(d))), q.cast(dtypes.int32)
+
+  m_1_pi = 0.318309886183790671537767526745028724
+  qdh = (d * (m_1_pi / 2.0**24)).cast(dtypes.int64).cast(d.dtype) * (2.0**24)
+  quadrant = rintk(d * m_1_pi -qdh) if d.dtype == dtypes.float64 else rintk(d * m_1_pi)
+  return _reduce_d(d, quadrant.cast(d.dtype)), quadrant.cast(dtypes.int32)
 
 # *** approximate sine on small angle. ***
 def trig_poly(d:UOp, coeff32, coeff64): return d * (polyN(d*d, coeff64) if d.dtype == dtypes.float64 else polyN(d*d, coeff32))
@@ -226,43 +219,39 @@ def xexp2(d:UOp) -> UOp:
 def xlog2(d:UOp) -> UOp:
   """
   Implements a 1.0 ULP approximation for UnaryOps.LOG2
-  Paper: https://arxiv.org/pdf/2001.09258
+  Paper: https://arxiv.org/pdf/2001.09258 5.5
   """
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
+  # TODO: float16 denormal need float32 to achieve precision
+  if d.dtype == dtypes.float16: return xlog2(d.cast(dtypes.float32)).cast(dtypes.float16)
   FLT_MIN = d.const_like(1e-6 if d.dtype == dtypes.float16 else 1e-4)
-  d_orig = d
-  denormal_map = d.lt(FLT_MIN)
-  for _ in range(8): d = denormal_map.where(d * (2 ** 8), d)
+  is_denormal = d.lt(FLT_MIN)
+  a = is_denormal.where(d * (2 ** 64), d)
 
-  e = ilogb2k(d * (1.0 / 0.75)).cast(d.dtype)
-  m = ldexp3k(d, -e)
-  e = denormal_map.where(e + (-64), e)
+  e = ilogb2k(a * (1.0 / 0.75)).cast(a.dtype)
+  m = ldexp3k(a, -e)
+  e = is_denormal.where(e - 64, e)
 
+  x = (m - 1.0) / (m + 1.0)
+  x2 = x * x
   if d.dtype == dtypes.float64:
-    x = (m - 1.0) * (m + 1.0).reciprocal()
-    x2 = x * x
     t = polyN(x2, [0.2211941750456081490e+0, 0.2200768693152277689e+0, 0.2623708057488514656e+0, 0.3205977477944495502e+0,
                    0.4121985945485324709e+0, 0.5770780162997058982e+0, 0.96179669392608091449])
-    s_hi, s_lo = dfadd2_f2_f2_f2(e, e.const_like(0), *dfmul2_f2_f2_f2(t.const_like(2.885390081777926774), t.const_like(0), x, x.const_like(0)))
-    r = t * (x * x2) + (s_hi + s_lo)
+    s_hi, s_lo = e+x*2.885390081777926774, e.const_like(0)
   else:
-    xx, xy = dfdiv2_f2_f2_f2(*dfadd2_f2_f2_f2(m.const_like(-1), m.const_like(0), m, m.const_like(0)),
-                             *dfadd2_f2_f2_f2(m.const_like(1), m.const_like(0), m, m.const_like(0)))
-    x2 = xx * xx
     t = polyN(x2, [0.4374550283e+0, 0.5764790177e+0, 0.9618012905120])
-    sx, sy = dfadd2_f2_f2_f2(e, e.const_like(0),
-                             *dfmul2_f2_f2_f2(xx, xy, xx.const_like(2.8853900432586669922), xy.const_like(3.2734474483568488616e-08)))
-    sx, sy = dfadd2_f2_f2_f2(sx, sy, x2.const_like(0), (x2 * xx) * t)
-    r = sx + sy
+    s_hi, s_lo = e+x*2.8853900432586669922, x*3.2734474483568488616e-08
+  r = t * (x * x2) + (s_hi + s_lo)
+
   # log2(Inf) = Inf
-  r = d_orig.ne(math.inf).where(r, r.const_like(math.inf))
-  # log2(x=-0.01) = NaN. where x < 0
-  r = d_orig.lt(-0.0).where(r.const_like(math.nan), r)
+  r = d.ne(math.inf).where(r, r.const_like(math.inf))
+  # log2(x) = NaN for x < 0
+  r = d.lt(-0.0).where(r.const_like(math.nan), r)
   # log2(0) = -Inf, but we will compare using the value of y because 1e-200==0 is true.
   # log2_zero = the value of unmasked xlog2(0.0).
-  log2_zero = {dtypes.float64: -1087, dtypes.float32: -191, dtypes.float16: -79, None: -math.inf}[d.dtype]
+  log2_zero = {dtypes.float64: -1087, dtypes.float32: -191, dtypes.float16: -79}[d.dtype]
   r = r.ne(log2_zero).where(r, r.const_like(-math.inf))
   # log2(NaN) = NaN
-  r = d_orig.ne(d_orig).where(r.const_like(math.nan), r)
+  r = d.ne(d).where(r.const_like(math.nan), r)
   # log2(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.
-  return d_orig.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
+  return d.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
