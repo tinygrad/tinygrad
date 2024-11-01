@@ -226,7 +226,7 @@ if getenv("RUN_PROCESS_REPLAY"):
   def save_process_replay():
     for x,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(x[0].key), (x, {}, ret))
 
-# **** Schedule creation and toposort
+# **** Schedule creation and BFS toposort
 
 @dataclass(frozen=True)
 class ToposortContext:
@@ -238,14 +238,10 @@ class ToposortContext:
 def _add_realize(ctx:ToposortContext, b:UOp, store:UOp, load:UOp) -> Optional[UOp]:
   if (sink:=ctx.buf_sink.get(b)) is None: return None
   ctx.realizes[b] = store
-  realizes = [ctx.realizes.get(u) for u in sink]
-  if all(x is not None for x in realizes): ctx.toposort.append(UOp.sink(*cast(List[UOp], realizes)))
+  if len(sink) == len(realized:=[r for u in sink if (r:=ctx.realizes.get(u)) is not None]): ctx.toposort.append(UOp.sink(*realized))
   return UOp(UOps.LOAD, load.dtype, (b, load.st_arg.to_uop()))
 
-
-break_sched = PatternMatcher([
-  (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat(), name="store"), name="load"), _add_realize),
-])
+break_sched = PatternMatcher([(UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat(), name="store"), name="load"), _add_realize),])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
