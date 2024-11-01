@@ -4,7 +4,7 @@ import functools, itertools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOp, UOps, UPat, PatternMatcher, symbolic_flat, symbolic_simple
-from tinygrad.ops import graph_rewrite, is_irreducible, split_uop, identity_element, uop_given_valid, parse_valid, is_increasing, simplify_valid
+from tinygrad.ops import graph_rewrite, is_irreducible, split_uop, uop_given_valid, parse_valid, is_increasing, simplify_valid
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
@@ -381,12 +381,6 @@ def do_expand(root:UOp):
   nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz), tuple(new_srcs), new_arg)
   return UOp(UOps.EXPAND, root.dtype, (nsrc,), expand_args)
 
-def do_reduce(ctx:List[int], root:UOp):
-  acc = UOp(UOps.DEFINE_ACC, root.dtype,
-            (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(root.src[1:]), (ctx[0],))
-  ctx[0] += 1
-  return acc.assign(acc.alu(root.arg, root.src[0]))
-
 def do_contract(con:UOp):
   ex = con.src[0]
   # CONTRACT without EXPAND repeats the element VECTORIZED
@@ -451,11 +445,6 @@ def no_vectorized_acc(acc:UOp):
     tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
   return UOp(UOps.VECTORIZE, acc.dtype, alus)
 
-just_reduce = PatternMatcher([
-  # do reduce
-  (UPat(UOps.REDUCE, name="root"), do_reduce),
-])
-
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
   (UPat((UOps.ALU, UOps.CAST, UOps.BITCAST, UOps.ASSIGN, UOps.INDEX), name="alu"), no_vectorized_alu),
@@ -519,9 +508,6 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   assert sink.op is UOps.SINK, f"sink isn't sink, it's {sink.op}"
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
-
-  # convert REDUCE to DEFINE_ACC + ASSIGN (contextual)
-  sink = graph_rewrite(sink, just_reduce, ctx=[0])
 
   # initial symbolic + migrate indexing (remove this) + transcendental
   sink = graph_rewrite(sink, sym+migrate_indexing+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2))
