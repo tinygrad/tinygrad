@@ -12,7 +12,7 @@ from tinygrad.device import Buffer
 sys.setrecursionlimit(10000)
 
 def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None], simple_pads:Dict[LazyBuffer, None], \
-    children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer], double_reduces:Dict[LazyBuffer, None]):
+  children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer], double_reduces:Dict[LazyBuffer, None], ctx):
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs: return None
   if buf.base.realized is not None: return realizes.setdefault(buf.base)
@@ -30,10 +30,11 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
       else: realizes[buf.base] = None
     # check all other pads for safe fusion
     elif any(v.mask is not None for v in buf.st.views): simple_pads[buf.base] = None
-    return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
+    return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
+  if buf.op is not MetaOps.CONST and ctx.buf_uops[buf.buffer] in ctx.realizes: realizes[buf] = None
   if buf.op in ReduceOps and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[buf] = None
   allbufs[buf] = None
-  if buf.forced_realize or buf.op in MetaOps: realizes[buf] = None
+  if buf.op in MetaOps: realizes[buf] = None
   if buf.op is MetaOps.ASSIGN:
     assign_targets[(target:=buf.srcs[0])] = buf
     assert target._base is None, f"assign must be to base {target}"
@@ -44,7 +45,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   if buf.op is MetaOps.VIEW: realizes[buf.srcs[0].base] = None
   for x in buf.srcs:
     if x.base.realized is None: children[x.base][buf] = None
-    _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
+    _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
 
 def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict[LazyBuffer, bool]) -> bool:
   if (n:=cache.get(buf)) is not None: return n
@@ -94,7 +95,7 @@ def get_realizes(outs:List[LazyBuffer], ctx) -> Tuple[List[List[UOp]], Dict[Buff
   children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
   assign_targets: Dict[LazyBuffer, LazyBuffer] = {}
   double_reduces: Dict[LazyBuffer, None] = {}
-  for out in outs: _recurse_lb(out, realizes, allbufs, simple_pads, children, assign_targets, double_reduces)
+  for out in outs: _recurse_lb(out, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
 
   # check if we have to realize pads
   for p in simple_pads:
