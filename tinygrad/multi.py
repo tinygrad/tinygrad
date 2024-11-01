@@ -40,8 +40,7 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
 
   # Assemble chunks back
   pads = [((s,dim-e),) for s,e in chunks]
-  return [functools.reduce(lambda x,y: x.alu(BinaryOps.ADD, y),
-                           [c.pad(pads[i]) for i,c in enumerate(lb_c)]).reshape(lbs[0].shape) for lb_c in chunked]
+  return [functools.reduce(operator.add, [c.pad(pads[i]) for i,c in enumerate(lb_c)]).reshape(lbs[0].shape) for lb_c in chunked]
 
 def to_sharded(lbs:List[LazyBuffer], axis:int, bounds: Tuple[Tuple[int, int], ...]) -> List[LazyBuffer]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
@@ -86,7 +85,7 @@ class MultiLazyBuffer(MathTrait):
       if not real: continue
       pad_arg = tuple((0,0) if a != self.axis else (start, self.bounds[-1][1]-end) for a in range(len(lb.shape)))
       llbs.append(lb.copy_to_device(device).pad(pad_arg))
-    return functools.reduce(lambda x,y: x.alu(BinaryOps.ADD, y), llbs)
+    return functools.reduce(operator.add, llbs)
 
   def clone(self) -> MultiLazyBuffer: return MultiLazyBuffer([lb.clone() for lb in self.lbs], self.axis, self.real)
 
