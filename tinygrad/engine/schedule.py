@@ -230,15 +230,19 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 @dataclass(frozen=True)
 class ToposortContext:
-  assigned: Set[UOp]                   # this is all the UOps.BUFFERs that have a different PRELOAD and LOAD value
-  toposort: List[UOp]                  # this is the final toposort of all UOps.SINKs
-  realizes: Dict[UOp, UOp]             # this maps UOps.BUFFER to UOps.STORE
-  buf_sink: Dict[UOp, Tuple[UOp, ...]] # this maps UOps.BUFFER to all the UOps.BUFFERs it sinks with
+  assigned: Set[UOp]             # this is all the UOps.BUFFERs that have a different PRELOAD and LOAD value
+  toposort: List[UOp]            # this is the final toposort of all UOps.SINKs
+  realizes: Dict[UOp, UOp]       # this maps UOps.BUFFER to UOps.STORE
+  buf_sink: Dict[UOp, List[UOp]] # this maps UOps.BUFFER to all the UOps.BUFFERs it sinks with
 
 def _add_realize(ctx:ToposortContext, b:UOp, store:UOp, load:UOp) -> Optional[UOp]:
-  if b not in ctx.realizes: return None
+  if (sink:=ctx.buf_sink.get(b)) is None: return None
   ctx.realizes[b] = store
+  realizes = [ctx.realizes.get(u) for u in sink]
+  if all(x is not None for x in realizes): ctx.toposort.append(UOp.sink(*cast(List[UOp], realizes)))
   return UOp(UOps.LOAD, load.dtype, (b, load.st_arg.to_uop()))
+
+
 break_sched = PatternMatcher([
   (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat(), name="store"), name="load"), _add_realize),
 ])
@@ -253,14 +257,13 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   # get realizes
   store_groups, lazybufs_to_realize, assigns = get_realizes(outs, ctx)
   # split realizes into small graphs
-  assigned = {}
-  graph_rewrite(big_graph, break_sched)
+  ts_ctx = ToposortContext({ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None}, [], {}, {u:g for g in store_groups for u in g})
+  graph_rewrite(big_graph, break_sched, ts_ctx)
   small_graphs: List[Tuple[UOp, ScheduleItemContext]] = []
   metadata: List[Set[Metadata]] = []
-  for stores in store_groups:
-    sink = UOp.sink(*(realizes[u] for u in stores))
+  for sink in ts_ctx.toposort:
     metadata.append({mx for x in sink.sparents if x.op in BUFFER_UOPS and len(x.src) > 2 and (mx:=ctx.ubuf_metadata.get(x.src[0]))})
-    small_graphs.append(full_ast_rewrite(sink, ctx.var_vals, assigned))
+    small_graphs.append(full_ast_rewrite(sink, ctx.var_vals, ts_ctx.assigned))
 
   # do BFS
   bufs = list(ctx.buf_uops)
