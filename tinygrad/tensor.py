@@ -2336,7 +2336,7 @@ class Tensor:
   def hardsigmoid(self, alpha:float=1/6, beta:float=0.5):
     """
     Applies the Hardsigmoid function element-wise.
-    NOTE: default `alpha` and `beta` values is taken from torch and differs from other common implementations
+    NOTE: default `alpha` and `beta` values is taken from torch
 
     - Described: https://paperswithcode.com/method/hard-sigmoid
     - See: https://pytorch.org/docs/stable/generated/torch.nn.functional.hardsigmoid.html
@@ -2345,7 +2345,8 @@ class Tensor:
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).hardsigmoid().numpy())
     ```
     """
-    return (alpha * self + beta).clip(0, 1)
+    return (self + beta/alpha).relu6() / 6
+
   def sqrt(self):
     """
     Computes the square root of the tensor element-wise.
