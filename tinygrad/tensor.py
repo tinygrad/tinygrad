@@ -2345,7 +2345,7 @@ class Tensor:
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).hardsigmoid().numpy())
     ```
     """
-    return (6 * alpha * self + 6 * beta).relu6() / 6
+    return (alpha * self + beta).relu() - (alpha * self + beta - 1).relu()
 
   def sqrt(self):
     """
