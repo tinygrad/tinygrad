@@ -51,6 +51,7 @@ class TestArithmeticSimplifications(unittest.TestCase):
 
 
 class TestFoldingAndReduction(unittest.TestCase):
+  @unittest.skip("reduce is removed now")
   def test_full_graph_rewrite_constant_reduction_folding(self):
     const1 = UOp.const(dtypes.int32, 5)
     const2 = UOp.const(dtypes.int32, 10)
@@ -59,6 +60,7 @@ class TestFoldingAndReduction(unittest.TestCase):
     expected_sum = 5 + 10 + 20
     self.assertEqual(optimized_sink.arg, expected_sum)
 
+  @unittest.skip("reduce is removed now")
   def test_full_graph_rewrite_reduction_with_unused_range(self):
     const1 = UOp.const(dtypes.int32, 15)
     const2 = UOp.const(dtypes.int32, 25)

@@ -4,8 +4,8 @@ import functools, itertools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOp, UOps, UPat, PatternMatcher, symbolic_flat, symbolic_simple
-from tinygrad.ops import graph_rewrite, is_irreducible, split_uop, identity_element, uop_given_valid, parse_valid, is_increasing, simplify_valid
-from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
+from tinygrad.ops import graph_rewrite, is_irreducible, split_uop, uop_given_valid, parse_valid, is_increasing, simplify_valid
+from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
@@ -369,19 +369,6 @@ def do_expand(root:UOp):
   nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz), tuple(new_srcs), new_arg)
   return UOp(UOps.EXPAND, root.dtype, (nsrc,), expand_args)
 
-def do_reduce(ctx:List[int], root:UOp):
-  reduce_parented, reduce_unparented = partition(root.src[1:], lambda x: x in root.src[0].sparents)
-  ret = root.src[0]
-  if len(reduce_parented):
-    acc = UOp(UOps.DEFINE_ACC, root.dtype,
-              (root.const_like(identity_element(root.arg, root.dtype.scalar())),) + tuple(reduce_parented), (ctx[0],))
-    ctx[0] += 1
-    ret = acc.assign(acc.alu(root.arg, ret))
-  # for MAX, we can just ignore the unparented
-  if root.arg is BinaryOps.ADD:
-    for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
-  return ret
-
 def do_contract(con:UOp):
   ex = con.src[0]
   # CONTRACT without EXPAND repeats the element VECTORIZED
@@ -445,11 +432,6 @@ def no_vectorized_acc(acc:UOp):
   alus = tuple(UOp(acc.op, acc.dtype.scalar(),
     tuple(s.gep(i) if j == 0 else s for j,s in enumerate(acc.src)), acc.arg+(i,)) for i in range(acc.dtype.count))
   return UOp(UOps.VECTORIZE, acc.dtype, alus)
-
-just_reduce = PatternMatcher([
-  # do reduce
-  (UPat(UOps.REDUCE, name="root"), do_reduce),
-])
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
@@ -517,9 +499,6 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
 
   # initial symbolic + migrate indexing (remove this) + transcendental
   sink = graph_rewrite(sink, sym+migrate_indexing+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2))
-
-  # convert REDUCE to DEFINE_ACC + ASSIGN (contextual)
-  sink = graph_rewrite(sink, sym+just_reduce, ctx=[0])
 
   # expand
   sink = graph_rewrite(sink, sym+expander)
