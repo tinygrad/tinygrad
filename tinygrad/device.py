@@ -77,9 +77,9 @@ class Buffer:
   def lb_refcount(self): return self.base._lb_refcount
   def ref(self, cnt): self.base._lb_refcount += cnt
   def is_allocated(self) -> bool: return hasattr(self, '_buf')
-  def ensure_allocated(self) -> Buffer: return self.allocate() if not hasattr(self, '_buf') else self
+  def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
-    assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
+    assert not self.is_allocated(), "can't allocate already allocated buffer"
     self.allocator = Device[self.device].allocator
     if external_ptr is not None:
       self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferOptions(external_ptr=external_ptr)
@@ -94,7 +94,7 @@ class Buffer:
   def __reduce__(self):
     buf = None
     if self._base is not None:
-      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, hasattr(self, '_buf'))
+      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
     if self.is_allocated():
       buf = bytearray(self.nbytes)
@@ -103,14 +103,13 @@ class Buffer:
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
-    if not hasattr(self, '_buf'): return
+    if not self.is_allocated(): return
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self):
-    return f"<buf real:{hasattr(self, '_buf')} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
-           (f" offset:{self.offset}" if hasattr(self, "base") else "") + \
-           (">" if self.options is None else f" {self.options=}>")
+    return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
+           (f" offset:{self.offset}" if hasattr(self, "base") else "") + (f" {self.options=}" if self.options is not None else "") + ">"
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer') and (self.options is None or self.options.image is None):
