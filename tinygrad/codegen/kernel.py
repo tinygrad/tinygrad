@@ -601,15 +601,14 @@ class Kernel:
   @functools.cached_property
   def name(self) -> str:
     # kernel name (before late upcast)
-    name = ("r" if self.reduceop is not None else ("C" if all(x.op in BUFFER_UOPS for x in self.ast.parents) else "E")) + \
-                 (f"{len(self.ast.src)}_" if len(self.ast.src) > 1 else "_") + \
-                 colored('_', 'BLACK').join([colored(str(x.render() if isinstance(x, UOp) else x), c) \
-                                             for x,c in zip(self.full_shape, self.colors())])
+    kernel_type = "r" if self.reduceop is not None else ("C" if all(x.op in BUFFER_UOPS for x in self.ast.parents) else "E")
+    suffix = colored('_', 'BLACK').join([colored(str(x.render() if isinstance(x, UOp) else x), c) for x,c in zip(self.full_shape, self.colors())])
+    name = kernel_type + (f"{len(self.ast.src)}" if len(self.ast.src) > 1 else "") + "_" + suffix
 
     # name the function something unique
     Kernel.kernel_cnt[(function_name := to_function_name(name))] += 1
-    suffix = f"{'n'+str(Kernel.kernel_cnt[function_name]-1)}" if Kernel.kernel_cnt[function_name] > 1 else ""
-    return name+colored(suffix, 'BLACK')
+    num = f"n{Kernel.kernel_cnt[function_name]-1}" if Kernel.kernel_cnt[function_name] > 1 else ""
+    return name + colored(num, 'BLACK')
 
   def get_optimized_ast(self) -> UOp:
     # set the shapetrackers to the optimized ones, fixup reduceop
