@@ -8,7 +8,7 @@ from collections import defaultdict
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN
-from tinygrad.multi import MultiLazyBuffer
+from tinygrad.multi import MultiLazyBuffer, reshard, find_axis_bounds
 from tinygrad.ops import MetaOps, smax, smin, resolve, UOp, UOps, BinaryOps, sint, Variable, SimpleMathTrait
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.engine.lazy import LazyBuffer
@@ -246,7 +246,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
-    assert not isinstance(self.lazydata, MultiLazyBuffer) or self.lazydata.axis == x.lazydata.axis, "axis must match on MultiLazyBuffer"
+    if isinstance(self.lazydata, MultiLazyBuffer) and self.lazydata.axis != x.lazydata.axis:
+      x.reshard_(self.lazydata.axis)
     assert not x.requires_grad  # self requires_grad is okay?
     if not self.lazydata.is_realized(): return self.replace(x)
     self.lazydata = self.lazydata.assign(x.lazydata)
@@ -362,15 +363,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
     devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
-    if axis is not None:
-      if axis < 0: axis += len(self.shape)
-      if splits is None:
-        if not isinstance(total:=self.shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {self.shape=}, {axis=}")
-        sz = round_up(total, len(devices)) // len(devices)
-        splits = tuple([max(0, min(sz, total - sz*i)) for i in range(len(devices))])
-      assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
-      boundaries = tuple(itertools.accumulate(splits))
-      bounds = tuple(zip((0,) + boundaries, boundaries))
+    axis, bounds = find_axis_bounds(self.shape, len(devices), axis, splits)
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis, bounds), device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None, splits:Optional[Tuple[int, ...]]=None):
@@ -378,6 +371,11 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     Shards the tensor across the given devices in place.
     """
     self.lazydata = self.shard(devices, axis, splits).lazydata
+    return self
+
+  def reshard_(self, axis: Optional[int]=None):
+    if not isinstance(self.lazydata, MultiLazyBuffer): return self
+    self.lazydata = reshard(self.lazydata, axis)
     return self
 
   @staticmethod

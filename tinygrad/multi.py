@@ -1,11 +1,86 @@
 from __future__ import annotations
-from typing import Optional, Union, Tuple, List, Dict
+from typing import Optional, Union, Tuple, List, Dict, cast
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
+from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv, round_up
 from tinygrad.dtype import DType
-from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps, MathTrait
+from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps, MathTrait, sint
 from tinygrad.engine.lazy import LazyBuffer
-from tinygrad.shape.shapetracker import sint
+
+def find_paddings_for_concat(axis: int, shapes: List[Tuple[sint, ...]]):
+  cat_dims = [s[axis] for s in shapes]
+  cat_dim_cumsum = [0, *itertools.accumulate(cat_dims)]
+  slc:List[List[Optional[Tuple[sint, sint]]]] = [[(0,0) for _ in range(len(shapes[0]))] for _ in shapes]
+  for d,k,s in zip(cat_dims, cat_dim_cumsum[:-1], slc):
+    s[axis] = (k, cat_dim_cumsum[-1] - k - d)
+  return slc
+
+def find_axis_bounds(shape: Tuple[sint, ...], num_shards: int, axis: Optional[int]=None, splits: Optional[Tuple[int, ...]]=None):
+  if axis is None: return None, None
+  if axis < 0: axis += len(shape)
+  if splits is None:
+    if not isinstance(total:=shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {shape=}, {axis=}")
+    sz = round_up(total, num_shards) // num_shards
+    splits = tuple([max(0, min(sz, total - sz*i)) for i in range(num_shards)])
+  assert sum(splits) == shape[axis], "specified splits do not sum up to axis shape"
+  boundaries = tuple(itertools.accumulate(splits))
+  bounds = tuple(zip((0,) + boundaries, boundaries))
+  return axis, bounds
+
+def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[Tuple[Tuple[sint, sint], ...]]=None):
+  if mlb.axis is None: return mlb
+  if axis is None: return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None)
+  shape = mlb.shape
+  shards = len(mlb.lbs)
+  n_lbs = len(mlb.lbs)
+  if bounds is None: axis, bounds = find_axis_bounds(mlb.shape, shards, axis)
+  use_ring = (RING >= 2 or (n_lbs > 2 and len(mlb.lbs[0].shape) > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
+  if DEBUG >= 2: print(f"{'RING RESHARD' if use_ring else 'NAIVE RESHARD'}")
+  if not use_ring:
+    gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]
+    sharded = to_sharded(gathered, axis, bounds)
+    return MultiLazyBuffer(sharded, axis)
+
+  originalAxis = mlb.axis
+  steps = shape[axis] // shards
+
+  chunks = [(i * steps, (i + 1) * steps) for i in range(shards)]
+  chunked: List[List[LazyBuffer]] = []
+    # E.g. four devices A, B, C, D; each holds a chunk of data (0, 1, 2, 3)
+    # Matrix can be thought of being sharded on axis 1, to reshard it to 0, each device will send three chunks to other devices
+    # Device A will send A1, A2, A3 to Device B, C, D respectively and so on
+    # A0 B0 C0 D0
+    # A1 B1 C1 D1
+    # A2 B2 C2 D2
+    # A3 B3 C3 D3
+  for i, lb in enumerate(mlb.lbs):
+    chunks_per_lb: List[LazyBuffer] = []
+    for s, e in chunks:
+      chunks_per_lb.append(lb.shrink(tuple([(s, e) if _axis == axis else (0, shape) for _axis, shape in enumerate(lb.shape)])))
+    chunked.append(chunks_per_lb)
+
+  reassembled_chunks = [[lbs[i] if _i == i else None for _i in range(n_lbs)] for i, lbs in enumerate(chunked)]
+    # [A0 X  X  X ]     [A0 A1 X  X ]     [A0 A1 A2 X ]     [A0 A1 A2 A3]
+    # [X  B1 X  X ] --> [X  B1 B2 X ] --> [X  B1 B2 B3] --> [B0 B1 B2 B3]
+    # [X  X  C2 X ]     [X  X  C2 C3]     [C0 X  C2 C3]     [C0 C1 C2 C3]
+    # [X  X  X  D3]     [D0 X  X  D3]     [D0 D1 X  D3]     [D0 D1 D2 D3]
+  for step in range(n_lbs - 1):
+    for src_shard in range(n_lbs):
+      src_chunk = (step + src_shard + 1) % n_lbs
+      dst_shard = (src_shard + step + 1) % n_lbs
+      dst_chunk = (dst_shard - step - 1) % n_lbs
+      dst_shard_stationary_chunk = dst_shard
+      dst_device = chunked[dst_shard][dst_shard_stationary_chunk].device
+      copied = chunked[src_shard][src_chunk].copy_to_device(dst_device)
+      reassembled_chunks[dst_shard][dst_chunk] = copied
+
+  reassembled_lbs = []
+
+  for _chunks in cast(List[List[LazyBuffer]], reassembled_chunks):
+    slc = find_paddings_for_concat(originalAxis, [c.shape for c in _chunks])
+    assembled = functools.reduce(lambda x, y: x.alu(BinaryOps.ADD, y),
+      [arg.pad(tuple(s)) for arg,s in zip(_chunks, slc)])
+    reassembled_lbs.append(assembled)
+  return MultiLazyBuffer(reassembled_lbs, axis)
 
 def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
@@ -42,7 +117,7 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   pads = [((s,dim-e),) for s,e in chunks]
   return [functools.reduce(operator.add, [c.pad(pads[i]) for i,c in enumerate(lb_c)]).reshape(lbs[0].shape) for lb_c in chunked]
 
-def to_sharded(lbs:List[LazyBuffer], axis:int, bounds: Tuple[Tuple[int, int], ...]) -> List[LazyBuffer]:
+def to_sharded(lbs:List[LazyBuffer], axis:int, bounds: Tuple[Tuple[sint, sint], ...]) -> List[LazyBuffer]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
   return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(bounds, lbs))]
 
@@ -111,7 +186,7 @@ class MultiLazyBuffer(MathTrait):
     for mlb in msrcs:
       if (mlb.axis == axis and (mlb.axis is None or mlb.bounds == bounds)) or not_all_real: srcs.append(mlb.lbs)
       elif mlb.axis is None and axis is not None: srcs.append(to_sharded(mlb.lbs, axis, bounds))
-      else: srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis, bounds))
+      else: srcs.append(reshard(mlb, axis, bounds).lbs)
     new_real_lbs:Dict[int,LazyBuffer] = {i:lsrcs[0].alu(op, *lsrcs[1:]) for i,(lsrcs,r) in enumerate(zip(zip(*srcs), new_real)) if r}
     # NOTE: const dtype should match real
     real_dtype = next(iter(new_real_lbs.values())).dtype
@@ -159,7 +234,7 @@ class MultiLazyBuffer(MathTrait):
 
   def expand(self, arg:Tuple[sint, ...]):
     # NOTE: this assert isn't needed, sharded axis can have dim 1
-    assert self.axis is None or arg[self.axis] == self.shape[self.axis], f"expand not supported on sharded axis {arg=}"
+    # assert self.axis is None or arg[self.axis] == self.shape[self.axis], f"expand not supported on sharded axis {arg=}"
     return MultiLazyBuffer([x.expand(self._shape_to_single_shard(arg, x)) for x in self.lbs], self.axis, self.real)
 
   def permute(self, arg:Tuple[int, ...]):

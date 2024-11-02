@@ -1,5 +1,5 @@
 import unittest, functools, random
-from typing import List
+from typing import List, Union, Optional, Tuple
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.ops import MetaOps, ReduceOps, BinaryOps, UOps
 from tinygrad.helpers import CI, getenv, prod, Context
@@ -34,6 +34,17 @@ def _test_allreduce(t:Tensor):
   b = Tensor(MultiLazyBuffer(all_reduce(ReduceOps.SUM, ts.lazydata.lbs), 0))
   b.realize()
   return aa, b
+
+def _test_elementwise(shard1: Union[int, None], shard2: Union[int, None],
+                      t1_shape: Optional[Tuple[int, ...]]=(256, 256),
+                      t2_shape: Optional[Tuple[int, ...]]=(256, 256)
+                      ):
+  t1 = Tensor.ones(*t1_shape).contiguous().realize()
+  t2 = Tensor.ones(*t2_shape).contiguous().realize()
+  t1.shard_(devices_4, shard1)
+  t2.shard_(devices_4, shard2)
+  O = t1 + t2
+  return O, 2
 
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestMultiTensor(unittest.TestCase):
@@ -109,6 +120,12 @@ class TestMultiTensor(unittest.TestCase):
     X.shard_((d0, d2), 0)
     (X + 1).sum().realize()
 
+  def test_shard_last_axis(self):
+    X = Tensor.ones(4, 8)
+    X.shard_((d0, d1), -1)
+    assert X.lazydata.lbs[0].shape == (4, 4)
+    assert X.lazydata.lbs[1].shape == (4, 4)
+
   def test_numpy(self):
     X = Tensor.ones(256)
     X.shard_((d1, d2), 0)
@@ -128,12 +145,31 @@ class TestMultiTensor(unittest.TestCase):
   def test_simple_add_XW(self): return self._test_simple_add_axis(0, 0)
 
   def test_four_add(self):
-    X = Tensor.ones(256, 256).contiguous().realize()
-    W = Tensor.ones(256, 256).contiguous().realize()
-    X.shard_(devices_4, 1)
-    W.shard_(devices_4, None)
-    O = X + W
-    np.testing.assert_allclose(O.numpy(), 2)
+    a, b = _test_elementwise(0, None)
+    np.testing.assert_allclose(a.numpy(), b)
+
+  def test_four_add_reshard_naive(self):
+    with Context(RING=0):
+      a, b = _test_elementwise(0, 1)
+      np.testing.assert_allclose(a.numpy(), b)
+
+  def test_four_add_reshard_ring(self):
+    with Context(RING=2):
+      a, b = _test_elementwise(0, 1)
+      np.testing.assert_allclose(a.numpy(), b)
+
+  def test_four_add_reshard_ring_rect(self):
+    with Context(RING=2):
+      a, b = _test_elementwise(0, 1, (256, 512), (256, 512))
+      np.testing.assert_allclose(a.numpy(), b)
+
+  def test_four_add_reshard_jit(self):
+    for ring in [0, 2]:
+      with Context(RING=ring):
+        jit_reshard = TinyJit(_test_elementwise)
+        for _ in range(5):
+          a, b = jit_reshard(0, 1)
+          np.testing.assert_allclose(a.numpy(), b)
 
   def test_elementwise_dtype(self):
     Tensor.manual_seed(0)
@@ -549,11 +585,13 @@ class TestMultiTensor(unittest.TestCase):
     with self.assertRaises(AssertionError): t0.reshape(4, 3, 2, 7, 15)
 
   def test_mlb_assign_change_axis(self):
-    t_none = Tensor.zeros((16, 16)).shard(devices_2).contiguous().realize()
-    t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)
-    with self.assertRaises(AssertionError):
-      # don't allow assigns that change axes
-      t_none.assign(t_zero)
+    for ring in [0, 2]:
+      with Context(RING=ring):
+        t_none = Tensor.zeros((16, 16)).shard(devices_2, axis=1).contiguous().realize()
+        t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)
+        ones = Tensor.ones((16, 16))
+        t_none.assign(t_zero)
+        np.testing.assert_allclose(t_none.numpy(), ones.numpy())
 
   def test_rand_with_multiple_devices(self):
     with self.assertRaises(ValueError):
@@ -708,7 +746,6 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
     for i in range(4):
-      print(f"{i=}")
       a = t.shrink(((0+2*i,2+2*i),None))
       b = Tensor(t.numpy()[0+2*i:2+2*i])
       assert a.shape == b.shape == (2, 8)
