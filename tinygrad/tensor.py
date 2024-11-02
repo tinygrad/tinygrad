@@ -2430,7 +2430,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
 
-  def isinf(self:Tensor, detect_positive=True, detect_negative=True):
+  def isinf(self:Tensor, detect_positive:bool=True, detect_negative:bool=True):
     """
     Checks the tensor element-wise to return True where the element is infinity, otherwise returns False
 
