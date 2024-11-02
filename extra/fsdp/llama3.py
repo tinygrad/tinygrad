@@ -40,8 +40,8 @@ n_layers = 16
 n_heads = 32
 n_kv_heads = 8
 hidden_dim = 14336
-epoch = 2000
-eval_interval = 50
+epoch = 20000
+eval_interval = 100
 eval_interval_mod = eval_interval - 1
 
 # small for testing
@@ -55,7 +55,7 @@ T = 16
 vocab_size = 128256
 max_context = 8192
 rope_theta=50000
-lr = 1e-4
+lr = 4e-5
 weight_decay=0
 generate_tokens = 20
 assert dim % n_heads == 0 and dim % SHARD == 0
