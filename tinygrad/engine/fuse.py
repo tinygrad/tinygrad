@@ -38,10 +38,6 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     assign_targets[(target:=buf.srcs[0])] = buf
     assert target._base is None, f"assign must be to base {target}"
     assert target.is_realized(), f"assign must be already realized to schedule {target}"
-  if buf.op is MetaOps.COPY:
-    assert buf.srcs[0].st.contiguous and buf.srcs[0].size == buf.srcs[0].base.size, "can only copy contig"
-    realizes[buf.srcs[0].base] = None
-  if buf.op is MetaOps.VIEW: realizes[buf.srcs[0].base] = None
   for x in buf.srcs:
     if x.base.realized is None: children[x.base][buf] = None
     _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
