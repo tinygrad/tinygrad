@@ -17,12 +17,6 @@ OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/comm
 OUTPUT = "/tmp/openpilot.pkl"
 
 def compile():
-  # hack to fix GPU on OSX: max doesn't work on half, see test/external/external_gpu_fail_osx.py
-  if OSX:
-    from tinygrad.ops import BinaryOps
-    from tinygrad.renderer.cstyle import ClangRenderer, CStyleLanguage
-    CStyleLanguage.code_for_op[BinaryOps.MAX] = ClangRenderer.code_for_op[BinaryOps.MAX]
-
   Tensor.no_grad = True
   Tensor.training = False
 
