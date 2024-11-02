@@ -27,7 +27,7 @@ class GFX_IP:
         break
 
   def gb_addr_config(self):
-    return self.adev.rreg_ip("GC", 0, , amdgpu_gc_11_0_0_offset.regGB_ADDR_CONFIG, amdgpu_gc_11_0_0_offset.regGB_ADDR_CONFIG_BASE_IDX)
+    return self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0_offset.regGB_ADDR_CONFIG, amdgpu_gc_11_0_0_offset.regGB_ADDR_CONFIG_BASE_IDX)
 
   def init_golden_registers(self):
     val = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0_offset.regTCP_CNTL, amdgpu_gc_11_0_0_offset.regTCP_CNTL_BASE_IDX)
@@ -66,6 +66,3 @@ class GFX_IP:
 
     self.init_golden_registers()
     self.constants_init()
-
-  def init_sos(self):
-    pass

@@ -65,6 +65,15 @@ class PSP_IP:
     self.sos_fw_version = self.adev.rreg_ip("MP0", 0, amdgpu_mp_13_0_0_offset.regMP0_SMN_C2PMSG_58, amdgpu_mp_13_0_0_offset.regMP0_SMN_C2PMSG_58_BASE_IDX)
     
   def ring_create(self):
+    # Remove all rings, will setup our new rings...
+    self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0_offset.regMP0_SMN_C2PMSG_64, amdgpu_mp_13_0_0_offset.regMP0_SMN_C2PMSG_64_BASE_IDX, amdgpu_psp_gfx_if.GFX_CTRL_CMD_ID_DESTROY_RINGS)
+    time.sleep(100 / 1000) # 20 ms orignally
+
+    reg = 0
+    while reg & 0x8000FFFF != 0x80000000:
+      reg = self.adev.rreg_ip("MP0", 0, amdgpu_mp_13_0_0_offset.regMP0_SMN_C2PMSG_64, amdgpu_mp_13_0_0_offset.regMP0_SMN_C2PMSG_64_BASE_IDX)
+      print(reg)
+
     # Wait till the ring is ready
     reg = 0
     while reg & 0x80000000 != 0x80000000:
@@ -83,16 +92,8 @@ class PSP_IP:
 
     # Wait for response flag
     reg = 0
-    while reg & 0x80000000 != 0x80000000:
+    while reg & 0x8000FFFF != 0x80000000: # last 16 bits are status, should be 0
       reg = self.adev.rreg_ip("MP0", 0, amdgpu_mp_13_0_0_offset.regMP0_SMN_C2PMSG_64, amdgpu_mp_13_0_0_offset.regMP0_SMN_C2PMSG_64_BASE_IDX)
-
-    self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0_offset.regMP0_SMN_C2PMSG_64, amdgpu_mp_13_0_0_offset.regMP0_SMN_C2PMSG_64_BASE_IDX, amdgpu_psp_gfx_if.GFX_CTRL_CMD_ID_DESTROY_RINGS)
-    time.sleep(100 / 1000) # 20 ms orignally
-
-    reg = 0
-    while reg & 0x80000000 != 0x80000000:
-      reg = self.adev.rreg_ip("MP0", 0, amdgpu_mp_13_0_0_offset.regMP0_SMN_C2PMSG_64, amdgpu_mp_13_0_0_offset.regMP0_SMN_C2PMSG_64_BASE_IDX)
-      print(reg)
 
     print("sOS ring created")
 
@@ -131,16 +132,19 @@ class PSP_IP:
     write_loc.cmd_buf_addr_lo = self.cmd_buf & 0xffffffff
     write_loc.fence_addr_hi = self.fence_buf >> 32
     write_loc.fence_addr_lo = self.fence_buf & 0xffffffff
-    write_loc.fence_value = 0x1
+    write_loc.fence_value = 0x2
 
     print(prev_wptr, hex(self.fence_buf))
     self.ring_set_wptr(prev_wptr + ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_rb_frame) // 4)
     
     fence_view = to_mv(self.adev.vmm.vram_to_cpu_addr(self.fence_buf), 4).cast('I')
-    while fence_view[0] != 0x1:
+
+    print(fence_view[0])
+    while fence_view[0] != 0x2:
       # WREG32_SOC15_NO_KIQ(HDP, 0, mmHDP_READ_CACHE_INVALIDATE, 1);
       self.adev.wreg_ip("HDP", 0, 0x00d1, 0x0, 1)
       # print("now", fence_view[0])
+    print(fence_view[0])
   
   def execute_ip_fw_load(self):
     pass
