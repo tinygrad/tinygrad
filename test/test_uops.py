@@ -12,7 +12,7 @@ from tinygrad.engine.schedule import create_schedule, to_si
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
-from test.helpers import is_dtype_supported, assert_equiv_uops
+from test.helpers import is_dtype_supported
 
 def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
 
@@ -395,7 +395,7 @@ class TestUOpStr(unittest.TestCase):
     # nice big complicated uop
     with Context(NOOPT=1):
       sink = UOp(UOps.SINK, dtypes.void, (get_kernel(Device[Device.DEFAULT].renderer, t.schedule()[-1].ast).linearize().uops[-1],))
-    assert_equiv_uops(sink, eval(str(sink)))
+    self.assertEqual(sink, eval(str(sink)))
 
   def test_vectorized_str(self):
     vec = UOp(UOps.VECTORIZE, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))

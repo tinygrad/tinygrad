@@ -19,7 +19,7 @@ def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
   uops: List[UOp] = []
   def _recursive_add(uop:UOp) -> List[UOp]: return flatten([_recursive_add(x) for x in uop.src])+[uop]
   uops = dedup(flatten(_recursive_add(st) for st in stores))
-  outbufs = [Buffer(Device.DEFAULT, sz:=(1 if local_size is None else prod(local_size)), (dtype:=u.src[2].dtype), \
+  outbufs = [Buffer(Device.DEFAULT, sz:=(1 if local_size is None else prod(local_size)), (dtype:=u.src[1].dtype), \
       initial_value=np.zeros(sz, dtype=_to_np_dtype(dtype)).data) for u in uops if u.op is UOps.STORE]
   inbufs = [cast(LazyBuffer,x.lazydata).base.buffer for x in inputs]
   src = Device[Device.DEFAULT].renderer.render("test", uops)
@@ -42,7 +42,7 @@ class TestCStyleFailures(unittest.TestCase):
     ret = _test_uop_result([Tensor([1])], uops)[0]
     self.assertEqual(ret[0], 1)
 
-@unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
+@unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local and Device.DEFAULT == "PTX", "need local")
 class TestPTXFailures(unittest.TestCase):
   def test_gated_store_with_alu(self):
     a = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
