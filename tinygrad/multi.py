@@ -117,8 +117,9 @@ def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   pads = [((s,dim-e),) for s,e in chunks]
   return [functools.reduce(operator.add, [c.pad(pads[i]) for i,c in enumerate(lb_c)]).reshape(lbs[0].shape) for lb_c in chunked]
 
-def to_sharded(lbs:List[LazyBuffer], axis:int, bounds: Tuple[Tuple[sint, sint], ...]) -> List[LazyBuffer]:
-  if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
+def to_sharded(lbs:List[LazyBuffer], axis:Union[None, int], bounds: Tuple[Tuple[sint, sint], ...]) -> List[LazyBuffer]:
+  if DEBUG >= 3 and axis is not None and lbs[0].shape[axis] % len(lbs) != 0:
+    print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}, bounds={bounds}")
   return [lb.shrink(tuple((0,s) if a != axis else bound for a,s in enumerate(lb.shape))) for i, (bound, lb) in enumerate(zip(bounds, lbs))]
 
 class MultiLazyBuffer(MathTrait):
