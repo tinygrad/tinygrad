@@ -238,6 +238,11 @@ def UPatLoadStore(to_store=UPat()): return UPat.load(b:=UPat.var("b"), UPat(), U
 do_realize = PatternMatcher([
   # always realize meta ops
   (UPatLoadStore(UPat((UOps.ASSIGN, UOps.CONTIGUOUS, *METAOPS.values()))), realize),
+  (UPat((UOps.COPY, UOps.BUFFER_VIEW), src=(UPat.var("u"), UPatLoadStore()), name="root"),
+   lambda ctx,root,u,**kwargs:root.replace(src=(u, realize(ctx, **kwargs)))),
+
+  (UPat((UOps.COPY, UOps.BUFFER_VIEW), src=(UPat.var("u"), UPat(UOps.VIEW, src=(UPatLoadStore(),), name="view")), name="root"),
+   lambda ctx,root,u,view,**kwargs:root.replace(src=(u, realize(ctx, **kwargs).view(view.st)))),
 ])
 break_sched = PatternMatcher([(UPatLoadStore(), lambda ctx,b,store,load: realize(ctx, b, load, store) if b in ctx else None),])
 
