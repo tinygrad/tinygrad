@@ -25,6 +25,7 @@ class DType:
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
   def ptr(self, local=False) -> Union[PtrDType, ImageDType]:
     return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, local)
+  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
 
 @dataclass(frozen=True)
@@ -34,7 +35,8 @@ class PtrDType(DType):
   v: int = 1
   @property
   def base(self): return self._base
-  def scalar(self) -> PtrDType: return replace(self, v=1)
+  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
+  def scalar(self) -> DType: return replace(self, v=1)
   def vec(self, sz:int) -> PtrDType: return replace(self, v=sz)
   def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
   @property
