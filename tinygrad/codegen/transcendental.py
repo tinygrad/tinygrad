@@ -47,7 +47,9 @@ def ldexp3k(d:UOp, e:UOp) -> UOp:
 def ldexp2k(d:UOp, e:UOp) -> UOp:
   """d*2^e. much faster than ldexp3k but risky. d > 0 and d is not denormal."""
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES and e.dtype in (dtypes.int16, dtypes.int32, dtypes.int64)
-  return (d * pow2if(shr(e, 1), d.dtype)) * pow2if(e - shr(e, 1), d.dtype)
+  cast_map = {dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}
+  # bitcast to preserve multiply order
+  return pow2if(e - shr(e, 1), d.dtype) * (d * pow2if(shr(e, 1), d.dtype)).bitcast(cast_map[d.dtype]).bitcast(d.dtype)
 
 def frexp(v:UOp) -> Tuple[UOp, UOp]:
   """frexp(v) -> (mantissa, exponent) assuming v != 0"""

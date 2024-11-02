@@ -12,6 +12,15 @@ settings.register_profile("my_profile", max_examples=200, deadline=None, derando
 settings.load_profile("my_profile")
 
 class TestTranscendentalMath(unittest.TestCase):
+  @given(strat.sampled_from([(dtypes.float64, 709.5), (dtypes.float32, 88.7), (dtypes.float16, 11)]))
+  def test_exp_near_inf(self, dtype_x):
+    dtype, x = dtype_x
+    if not is_dtype_supported(dtype, Device.DEFAULT): raise unittest.SkipTest(f"no {dtype.name} on {Device.DEFAULT}")
+    with Context(TRANSCENDENTAL=2):
+      y = Tensor([x], dtype=dtype).exp()
+      if dtype == dtypes.float16: y = y.float()  # can't read out half
+      self.assertTrue(y.item() < float("inf"))
+
   @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT), f"no float64 on {Device.DEFAULT}")
   @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashed")
   @given(ht.float64, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
