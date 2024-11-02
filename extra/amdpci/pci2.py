@@ -18,7 +18,14 @@ while True:
   
   if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c:
     dev_fmt = "{:04x}:{:02x}:{:02x}.{:d}".format(pcidev.contents.domain_16, pcidev.contents.bus, pcidev.contents.dev, pcidev.contents.func)
-    # if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
+    if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
+    if dev_fmt == "0000:86:00.0": continue # skip it, use for kernel hacking.
+    # if dev_fmt == "0000:c6:00.0": continue # skip it, use for kernel hacking.
+    if dev_fmt == "0000:44:00.0": continue # skip it, use for kernel hacking.
+    if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
+    if dev_fmt == "0000:c3:00.0": continue # skip it, use for kernel hacking.
+    # print(dev_fmt)
+    # exit(0)
     break
 
 assert pcidev is not None
@@ -41,6 +48,7 @@ class AMDDev:
     doorbell_bar_region_size = pcidev.regions[2].size
     x = libpciaccess.pci_device_map_range(ctypes.byref(pcidev), doorbell_bar_region_addr, doorbell_bar_region_size, libpciaccess.PCI_DEV_MAP_FLAG_WRITABLE, ctypes.byref(doorbell_bar_mem:=ctypes.c_void_p()))
     self.doorbell = to_mv(doorbell_bar_mem, doorbell_bar_region_size).cast('I')
+    self.doorbell64 = to_mv(doorbell_bar_mem, doorbell_bar_region_size).cast('Q')
 
     pci_region_addr = pcidev.regions[5].base_addr
     pci_region_size = pcidev.regions[5].size
