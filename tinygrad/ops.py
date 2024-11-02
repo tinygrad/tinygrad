@@ -1139,4 +1139,4 @@ renderer = PatternMatcher([
 sint = Union[int, UOp]
 Variable = UOp
 
-ConstLike = ConstType|Variable|Tuple[ConstType, ...]
+ConstLike = Union[ConstType, Variable, Tuple[ConstType, ...]]
