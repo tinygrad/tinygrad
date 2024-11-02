@@ -602,7 +602,7 @@ class Kernel:
   def name(self) -> str:
     # kernel name (before late upcast)
     kernel_type = "r" if self.reduceop is not None else ("C" if all(x.op in BUFFER_UOPS for x in self.ast.parents) else "E")
-    suffix = colored('_', 'BLACK').join([colored(str(x.render() if isinstance(x, UOp) else x), c) for x,c in zip(self.full_shape, self.colors())])
+    suffix = colored('_', 'BLACK').join([colored(x.render() if isinstance(x, UOp) else str(x), c) for x,c in zip(self.full_shape, self.colors())])
     name = kernel_type + (f"{len(self.ast.src)}" if len(self.ast.src) > 1 else "") + "_" + suffix
 
     # name the function something unique
