@@ -35,11 +35,11 @@ def _test_to_np(a:Tensor, np_dtype, target):
   except AssertionError as e:
     raise AssertionError(f"\ntensor {a.numpy()} does not match target {target} with np_dtype {np_dtype}") from e
 
-def _assert_eq(tensor:Tensor, target_dtype:DType, target):
+def _assert_eq(tensor:Tensor, target_dtype:DType, target, tol_target_dtype:float=1e-7):
   if DEBUG >= 2: print(tensor.numpy())
   try:
     assert tensor.dtype == target_dtype
-    np.testing.assert_allclose(tensor.numpy(), target, rtol={dtypes.float16:1e-3, dtypes.bfloat16:1e-2}.get(target_dtype, 1e-7))
+    np.testing.assert_allclose(tensor.numpy(), target, rtol={dtypes.float16:1e-3, dtypes.bfloat16:1e-2}.get(target_dtype, tol_target_dtype))
   except AssertionError as e:
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 
@@ -474,7 +474,6 @@ class TestTypeSpec(unittest.TestCase):
     np.testing.assert_equal(Tensor(n).sum(acc_dtype="int16").numpy(), Tensor(n).sum(acc_dtype=dtypes.int16).numpy())
 
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "No 'long' on WEBGPU")
   def test_creation(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
     _assert_eq(Tensor(True), dtypes.bool, True)
@@ -493,7 +492,6 @@ class TestTypeSpec(unittest.TestCase):
       _assert_eq(Tensor.eye(3, dtype=dtypes.float16), dtypes.float16, np.eye(3))
 
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "No 'long' on WEBGPU")
   def test_full(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
 
@@ -528,7 +526,6 @@ class TestTypeSpec(unittest.TestCase):
     _assert_eq(Tensor.ones((2,3,0), dtype=dtypes.int32).sum(2), dtypes.int32, np.zeros((2, 3)))
 
   @given(strat.sampled_from(dtype_ints), strat.sampled_from(dtype_floats))
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "No 'short' on WEBGPU")
   def test_arange(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
 
@@ -541,7 +538,7 @@ class TestTypeSpec(unittest.TestCase):
       _assert_eq(Tensor.arange(5, dtype=dtypes.int64), dtypes.int64, np.arange(5))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.arange(5, dtype=dtypes.float16), dtypes.float16, np.arange(5))
-    _assert_eq(Tensor.arange(3, 9, 0.7), dtypes.default_float, np.arange(3, 9, 0.7))
+    _assert_eq(Tensor.arange(3, 9, 0.7), dtypes.default_float, np.arange(3, 9, 0.7), 1e-6 if Device.DEFAULT == "WEBGPU" else 1e-7)
     _assert_eq(Tensor.arange(3, 8.5, 3), dtypes.default_float, np.arange(3, 8.5, 3))
     # stop-start and step have different signs
     _assert_eq(Tensor.arange(3, 5, -2), dtypes.default_int, np.arange(3, 5, -2))
@@ -848,7 +845,6 @@ class TestTensorMethod(unittest.TestCase):
     np.testing.assert_allclose(ret.numpy(), np.abs(a.numpy()-b.numpy()))
 
 class TestDtypeUsage(unittest.TestCase):
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "No 'uchar' on WEBGPU")
   def test_max_w_alu(self):
     for d in dtypes.ints:
       if is_dtype_supported(d):
