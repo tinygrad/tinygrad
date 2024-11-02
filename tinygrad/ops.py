@@ -567,6 +567,7 @@ class UPat(MathTrait):
 
   # copied from UOp
   def index(self, idx:UPat, valid:Optional[UPat]=None): return UPat(UOps.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
+  def view(self, st=None, **kwargs): return UPat(UOps.VIEW, self.dtype, (self,), st, **kwargs)
   def cast(self, dtype=None): return UPat(UOps.CAST, dtype, (self,))
   def bitcast(self, dtype=None): return UPat(UOps.BITCAST, dtype, (self,))
   def gep(self, i:int): return UPat(UOps.GEP, None, (self,), (i,))
