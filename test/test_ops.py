@@ -1818,12 +1818,12 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), rtol=1e-5)
 
-  # TODO: fix
+  # TODO fix edge case
   @unittest.expectedFailure
   def test_avgpool2d_failure(self):
-    helper_test_op([(1,1,32,32)],
-      lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(1,2), padding=(0,1), stride=(5,1), count_include_pad=False),
-      lambda x: Tensor.avg_pool2d(x, kernel_size=(1,2), padding=(0,1), stride=(5,1), count_include_pad=False), rtol=1e-5)
+    helper_test_op([(1,1,8,8)],
+      lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(1,2), padding=(0,1), stride=(5,1)),
+      lambda x: Tensor.avg_pool2d(x, kernel_size=(1,2), padding=(0,1), stride=(5,1)), rtol=1e-5)
 
   def test_avgpool2d_padding(self):
     shape = (32,2,111,28)
