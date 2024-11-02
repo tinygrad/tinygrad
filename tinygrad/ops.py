@@ -39,7 +39,7 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
 class SimpleMathTrait:
   # required to implement
   def alu(self:T, arg:Union[UnaryOps, BinaryOps, TernaryOps], *src) -> T: raise NotImplementedError
-  def const_like(self:T, b:ConstType|Variable|Tuple[ConstType]) -> T: raise NotImplementedError
+  def const_like(self:T, b:ConstLike) -> T: raise NotImplementedError
 
   # great functions you get!
   def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
@@ -306,7 +306,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def sink(self, *srcs:UOp): return UOp(UOps.SINK, dtypes.void, (self,)+srcs)
   def index(self, idx:UOp, valid:Optional[UOp]=None): return UOp(UOps.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
   def view(self, st:ShapeTracker): return UOp(UOps.VIEW, self.dtype, (self,), st)
-  def const_like(self, b:ConstType|Variable|Tuple[ConstType, ...]): return UOp.const(self.dtype, b)
+  def const_like(self, b:ConstLike): return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
@@ -331,7 +331,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(UOps.ALU, out_dtype, (self,)+src, arg)
   @staticmethod
-  def const(dtype:DType, b:Tuple[ConstType, ...]|ConstType|Variable):
+  def const(dtype:DType, b:ConstLike):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is UOps.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(UOps.VCONST if isinstance(b, tuple) else UOps.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
@@ -575,7 +575,7 @@ class UPat(MathTrait):
   def store(self, *src:UPat, **kwargs): return UPat(UOps.STORE, dtypes.void, (self,)+src, **kwargs)
   def assign(self, x:UPat): return UPat(UOps.ASSIGN, self.dtype, (self,x))
 
-  def const_like(self, b:ConstType|Variable|Tuple[ConstType]): return UPat.const(self.dtype, cast(ConstType, b))
+  def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
   def alu(self, arg, *src:UPat):
     asrc = (self,)+src
     return UPat(UOps.ALU, None if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else asrc[-1].dtype, list(asrc) if arg in COMMUTATIVE else asrc, arg)
@@ -1138,3 +1138,5 @@ renderer = PatternMatcher([
 
 sint = Union[int, UOp]
 Variable = UOp
+
+ConstLike = ConstType|Variable|Tuple[ConstType, ...]
