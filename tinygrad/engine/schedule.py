@@ -295,6 +295,18 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       if in_degree[x] == 0: queue.append(x)
   # confirm everything was scheduled correctly
   if len(schedule) != (groups:=len(store_groups)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
+
+  i = 0
+  while i < len(schedule):
+    j = i
+    if schedule[j].ast.op is UOps.COPY:
+      # TODO: need to check these copies does not have dependency
+      while j < len(schedule) and schedule[j].ast.op is UOps.COPY: j += 1
+      devices = sorted(set(s.bufs[0].device for s in schedule[i:j])|set(s.bufs[1].device for s in schedule[i:j]))
+      schedule[i:j] = sorted(schedule[i:j], key=lambda s: (devices.index(s.bufs[0].device)-devices.index(s.bufs[1].device))%len(devices))
+      i = j
+    else: i += 1
+
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, ctx.var_vals
 
