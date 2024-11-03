@@ -109,7 +109,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
 
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
-  # TODO: check has_valid in Pat, not here
+  # TODO: check has_valid in UPat, not here
   has_valid = valid.op is not Ops.CONST or valid.arg is not True
   buf = x.src[0]
   if x.op is Ops.LOAD:
