@@ -40,7 +40,6 @@ class TestTranscendentalMath(unittest.TestCase):
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float16))),
                                  atol=1e-2, rtol=5e-3)  # exp can have bigger rtol
 
-  @unittest.skipIf(Device.DEFAULT=="LLVM", "FIXME: LLVM might change compute")
   @given(strat.sampled_from([(dtypes.float64, 709.5), (dtypes.float32, 88.7), (dtypes.float16, 11)]))
   def test_exp_near_inf(self, dtype_x):
     # reordering compute might return inf
