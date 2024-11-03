@@ -12,6 +12,9 @@ def _get_iter_per_second(raw:str) -> float:
   if raw.endswith("M"): return float(raw[:-1])*1e6
   return float(raw)
 
+# TODO: _get_iter_per_second in test_unit_scale might fail if lower bound is too small
+NCOLS_RANGE = [80, 240]
+
 class TestProgressBar(unittest.TestCase):
   def _compare_bars(self, bar1, bar2):
     prefix1, prog1, suffix1 = bar1.split("|")
@@ -43,7 +46,7 @@ class TestProgressBar(unittest.TestCase):
   @patch('shutil.get_terminal_size')
   def test_tqdm_output_iter(self, mock_terminal_size, mock_stderr):
     for _ in range(10):
-      total, ncols = random.randint(5, 30), random.randint(80, 240)
+      total, ncols = random.randint(5, 30), random.randint(*NCOLS_RANGE)
       mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
       mock_stderr.truncate(0)
 
@@ -70,8 +73,8 @@ class TestProgressBar(unittest.TestCase):
       # NOTE: numpy comparison raises TypeError if exponent > 22
       for exponent in range(1, 22, 3):
         low, high = 10 ** exponent, 10 ** (exponent+1)
-        for _ in range(3):
-          total, ncols = random.randint(low, high), random.randint(80, 240)
+        for _ in range(5):
+          total, ncols = random.randint(low, high), random.randint(*NCOLS_RANGE)
           mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
           mock_stderr.truncate(0)
 
@@ -93,7 +96,7 @@ class TestProgressBar(unittest.TestCase):
   @patch('shutil.get_terminal_size')
   def test_set_description(self, mock_terminal_size, mock_stderr):
     for _ in range(10):
-      total, ncols = random.randint(5, 30), random.randint(80, 240)
+      total, ncols = random.randint(5, 30), random.randint(*NCOLS_RANGE)
       mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
       mock_stderr.truncate(0)
 
@@ -120,7 +123,7 @@ class TestProgressBar(unittest.TestCase):
   @patch('shutil.get_terminal_size')
   def test_trange_output_iter(self, mock_terminal_size, mock_stderr):
     for _ in range(5):
-      total, ncols = random.randint(5, 30), random.randint(80, 240)
+      total, ncols = random.randint(5, 30), random.randint(*NCOLS_RANGE)
       mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
       mock_stderr.truncate(0)
 
@@ -144,7 +147,7 @@ class TestProgressBar(unittest.TestCase):
   @patch('shutil.get_terminal_size')
   def test_tqdm_output_custom(self, mock_terminal_size, mock_stderr):
     for _ in range(10):
-      total, ncols = random.randint(10000, 100000), random.randint(80, 120)
+      total, ncols = random.randint(10000, 1000000), random.randint(*NCOLS_RANGE)
       mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
       mock_stderr.truncate(0)
 
@@ -152,7 +155,7 @@ class TestProgressBar(unittest.TestCase):
       bar = tinytqdm(total=total, desc="Test")
       n = 0
       while n < total:
-        incr = (total // 10) + random.randint(0, 100)
+        incr = (total // 100) + random.randint(0, 1000)
         if n + incr > total: incr = total - n
         bar.update(incr, close=n+incr==total)
         n += incr
@@ -168,7 +171,7 @@ class TestProgressBar(unittest.TestCase):
   @patch('shutil.get_terminal_size')
   def test_tqdm_output_custom_0_total(self, mock_terminal_size, mock_stderr):
     for _ in range(10):
-      total, ncols = random.randint(10000, 100000), random.randint(80, 120)
+      total, ncols = random.randint(10000, 100000), random.randint(*NCOLS_RANGE)
       mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
       mock_stderr.truncate(0)
 
@@ -192,9 +195,9 @@ class TestProgressBar(unittest.TestCase):
   @patch('shutil.get_terminal_size')
   def test_tqdm_output_custom_nolen_total(self, mock_terminal_size, mock_stderr):
     for unit_scale in [True, False]:
-      for _ in range(3):
+      for _ in range(5):
         gen = itertools.count(0)
-        ncols = random.randint(80, 120)
+        ncols = random.randint(*NCOLS_RANGE)
         mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
         mock_stderr.truncate(0)
 
@@ -215,17 +218,18 @@ class TestProgressBar(unittest.TestCase):
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
   def test_tqdm_write(self, mock_terminal_size, mock_stderr):
-    ncols, tqdm_fp = random.randint(80, 120), StringIO()
-    mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
-    mock_stderr.truncate(0)
-    tqdm_fp.truncate(0)
-    for i in tinytqdm(range(10)):
-      time.sleep(0.01)
-      tinytqdm.write(str(i))
-      tqdm.write(str(i), file=tqdm_fp)
-      tinytqdm_out, tqdm_out = mock_stderr.getvalue(), tqdm_fp.getvalue()
-      self.assertEqual(tinytqdm_out.split("\r\033[K")[-1], tqdm_out.split(f"{i-1}\n")[-1])
-    self.assertEqual(tinytqdm_out, tinytqdm_out)
+    for _ in range(5):
+      ncols, tqdm_fp = random.randint(*NCOLS_RANGE), StringIO()
+      mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
+      mock_stderr.truncate(0)
+      tqdm_fp.truncate(0)
+      for i in tinytqdm(range(10)):
+        time.sleep(0.01)
+        tinytqdm.write(str(i))
+        tqdm.write(str(i), file=tqdm_fp)
+        tinytqdm_out, tqdm_out = mock_stderr.getvalue(), tqdm_fp.getvalue()
+        self.assertEqual(tinytqdm_out.split("\r\033[K")[-1], tqdm_out.split(f"{i-1}\n")[-1])
+      self.assertEqual(tinytqdm_out, tinytqdm_out)
 
   def test_tqdm_perf(self):
     st = time.perf_counter()
