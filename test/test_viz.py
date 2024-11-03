@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional
 import unittest
 from tinygrad.dtype import dtypes
-from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, TrackedPatternMatcher as PatternMatcher, UOp, Ops, UPat, \
+from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, TrackedPatternMatcher as PatternMatcher, UOp, Ops, Pat, \
     graph_rewrite, contexts, track_rewrites
 from tinygrad.viz.serve import get_details, get_metadata, uop_to_json
 
@@ -25,7 +25,7 @@ class TestViz(unittest.TestCase):
 
   def test_viz_simple(self):
     pm = PatternMatcher([
-      (UPat.var("x")*1, lambda x:x),
+      (Pat.var("x")*1, lambda x:x),
     ])
     a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
     uops = helper_test_viz(a*1, pm)
@@ -34,8 +34,8 @@ class TestViz(unittest.TestCase):
 
   def test_rewrite_twice(self):
     pm = PatternMatcher([
-      (UPat.var("x")+UPat.var("x"), lambda x:x*2),
-      (UPat.var("x", dtypes.int)*2, lambda x:x.alu(BinaryOps.SHL, UOp.const(dtypes.int, 1))),
+      (Pat.var("x")+Pat.var("x"), lambda x:x*2),
+      (Pat.var("x", dtypes.int)*2, lambda x:x.alu(BinaryOps.SHL, UOp.const(dtypes.int, 1))),
     ])
     a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
     uops = helper_test_viz(a+a, pm)
@@ -51,14 +51,14 @@ class TestViz(unittest.TestCase):
       ctx[x] = None
       return UOp.store(*x.src, x)
     pm = PatternMatcher([
-      (UPat(Ops.LOAD, name="x"), store_load),
+      (Pat(Ops.LOAD, name="x"), store_load),
     ])
     uops = helper_test_viz(a+b, pm, {})
     self.assertEqual(len(uops), 2)
     self.assertEqual(uops[-1], graph_rewrite(a+b, pm, {}))
 
   def test_track_rewrites(self):
-    simple = PatternMatcher([(UPat.var("x")*1, lambda x:x)])
+    simple = PatternMatcher([(Pat.var("x")*1, lambda x:x)])
     @track_rewrites(named=True)
     def do_rewrite(x:UOp): return graph_rewrite(x, simple)
     ld = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1), UOp.const(dtypes.int, 0)))
@@ -74,7 +74,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(m.upats), 0)
 
   def test_track_rewrites_with_exception(self):
-    simple = PatternMatcher([(UPat.var("x")*1, lambda x:x)])
+    simple = PatternMatcher([(Pat.var("x")*1, lambda x:x)])
     @track_rewrites()
     def do_rewrite(x:UOp):
       x = graph_rewrite(x, simple) # NOTE: viz tracks this

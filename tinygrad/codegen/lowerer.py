@@ -6,7 +6,7 @@ from typing import List, Tuple, cast, Optional
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import variable_to_uop
 from tinygrad.dtype import dtypes
-from tinygrad.ops import KernelInfo, BinaryOps, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element
+from tinygrad.ops import KernelInfo, BinaryOps, UOp, Ops, graph_rewrite, PatternMatcher, Pat, sint, identity_element
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten
 
@@ -109,7 +109,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
 
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
-  # TODO: check has_valid in UPat, not here
+  # TODO: check has_valid in Pat, not here
   has_valid = valid.op is not Ops.CONST or valid.arg is not True
   buf = x.src[0]
   if x.op is Ops.LOAD:
@@ -127,10 +127,10 @@ def lower_load_store(ctx: IndexContext, x: UOp):
   return UOp(Ops.STORE, dtypes.void, (buf, idx, x.src[2]) + ((valid,) if has_valid else ()))
 
 pm_lowerer = PatternMatcher([
-  (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
-  (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
+  (Pat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
+  (Pat(Ops.VALID, src=(Pat(Ops.VIEW),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
   # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
+  (Pat((Ops.LOAD, Ops.STORE), src=(Pat(), Pat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
 ])
 
 def do_reduce(ctx:List[int], root:UOp):
@@ -141,7 +141,7 @@ def do_reduce(ctx:List[int], root:UOp):
 
 just_reduce = PatternMatcher([
   # do reduce
-  (UPat(Ops.REDUCE, name="root"), do_reduce),
+  (Pat(Ops.REDUCE, name="root"), do_reduce),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:
