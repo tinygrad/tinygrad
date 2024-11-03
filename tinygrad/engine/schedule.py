@@ -2,8 +2,9 @@ import sys, atexit, functools, itertools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Callable, Set, Tuple, List, Dict, Optional, DefaultDict, cast
-from tinygrad.ops import BUFOPS, MetaOps, ReduceOps, UnaryOps, UOp, Ops, PatternMatcher, Pat, Variable, graph_rewrite, track_rewrites, sint
-from tinygrad.helpers import DEBUG, Metadata, all_same, colored, diskcache_put, prod, dedup, getenv, unwrap
+from tinygrad.ops import BUFOPS, UNSAFE_PAD_OPS, MetaOps, ReduceOps, UnaryOps, UOp, Ops, PatternMatcher, Pat, Variable, sint, resolve, \
+    graph_rewrite, track_rewrites
+from tinygrad.helpers import DEBUG, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, getenv, unwrap
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -234,10 +235,24 @@ def realize(ctx:Dict[UOp, UOp], b:UOp, load:UOp, store:UOp) -> UOp:
   ctx[b] = store
   return UOp(Ops.LOAD, load.dtype, (b, load.st_arg.to_uop()))
 
+def can_fold_pad(u:UOp) -> bool: return not any(x.op is Ops.ALU and x.arg in UNSAFE_PAD_OPS for x in u.sparents)
+def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, **kwargs) -> Optional[UOp]:
+  base_shape = unwrap(base.st).shape
+  st = unwrap(view.st)
+  # fold simple pads
+  if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(base_shape) and resolve(prod(base_shape) >= prod([y-x for x,y in m])):
+    return None if can_fold_pad(base) else realize(ctx, **kwargs).view(st)
+  # early realize before expand
+  if resolve(prod(base_shape) < prod(st.shape)): return realize(ctx, **kwargs).view(st)
+  # otherwise safety check pads
+  return None if (all(v.mask is None for v in st.views) or can_fold_pad(base)) else realize(ctx, **kwargs).view(st)
+
 def PatLoadStore(to_store=Pat()): return Pat.load(b:=Pat.var("b"), Pat(), Pat.store(b, Pat(), to_store, name="store"), name="load")
 do_realize = PatternMatcher([
   # always realize meta ops
   (PatLoadStore(Pat((Ops.ASSIGN, Ops.CONTIGUOUS, *METAOPS.values()))), realize),
+  # early realize some movementops
+  (PatLoadStore(Pat.var("base")).view(name="view"), realize_view),
   (Pat((Ops.COPY, Ops.BUFFER_VIEW), src=(Pat.var("u"), Pat.any(PatLoadStore(), PatLoadStore().view(name="v"))), name="root"),
    lambda ctx,root,u,v=None,**kwargs: root.replace(src=(u, realize(ctx,**kwargs) if v is None else realize(ctx,**kwargs).view(v.st))),)
 ])
