@@ -6,7 +6,7 @@ from typing import List, Tuple, cast, Optional
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import variable_to_uop
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.ops import KernelInfo, BinaryOps, UOp, UOps, graph_rewrite, PatternMatcher, UPat, sint, identity_element
+from tinygrad.ops import KernelInfo, BinaryOps, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten
 
@@ -127,18 +127,18 @@ def lower_load_store(ctx: IndexContext, x: UOp):
   return UOp(Ops.STORE, dtypes.void, (buf, idx, x.src[2]) + ((valid,) if has_valid else ()))
 
 pm_lowerer = PatternMatcher([
-  (Pat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
-  (Pat(Ops.VALID, src=(Pat(Ops.VIEW),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
+  (UPat(Ops.REDUCE_AXIS, name="x"), lower_reduce_axis),
+  (UPat(Ops.VALID, src=(UPat(Ops.VIEW),), name="x"), lambda ctx,x: x.st_arg.to_indexed_uops(ctx.idxs)[1]),
   # rewrite LOAD/STORE VIEW to LOAD/STORE with indexed
-  (Pat((Ops.LOAD, Ops.STORE), src=(Pat(), Pat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(Ops.VIEW)), allow_any_len=True, name="x"), lower_load_store),
 ])
 
 def idx_load_store(x:UOp):
   idx = x.src[0].index(x.src[1], x.src[3] if len(x.src) > 3 else None)
-  v = x.dtype.count if x.op is UOps.LOAD else x.src[2].dtype.count
+  v = x.dtype.count if x.op is Ops.LOAD else x.src[2].dtype.count
   if v > 1 and not isinstance(x.src[0].dtype, ImageDType): idx = idx.cast(idx.dtype.base.vec(v).ptr(idx.dtype.local))
-  post_mask = x.src[4:] if len(x.src) > 3 else (x.src[2:] if x.op is UOps.LOAD else x.src[3:])
-  if x.op is UOps.LOAD: return UOp(x.op, x.dtype, (idx,)+post_mask, x.arg)
+  post_mask = x.src[4:] if len(x.src) > 3 else (x.src[2:] if x.op is Ops.LOAD else x.src[3:])
+  if x.op is Ops.LOAD: return UOp(x.op, x.dtype, (idx,)+post_mask, x.arg)
   return UOp(x.op, x.dtype, (idx,x.src[2])+post_mask, x.arg)
 
 def do_reduce(ctx:List[int], root:UOp):
@@ -149,9 +149,9 @@ def do_reduce(ctx:List[int], root:UOp):
 
 just_reduce = PatternMatcher([
   # use indexing for LOAD/STORE
-  (UPat((UOps.LOAD, UOps.STORE), src=(UPat((UOps.DEFINE_GLOBAL, UOps.DEFINE_LOCAL)),), allow_any_len=True, name="x"), idx_load_store),
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)),), allow_any_len=True, name="x"), idx_load_store),
   # do reduce
-  (Pat(Ops.REDUCE, name="root"), do_reduce),
+  (UPat(Ops.REDUCE, name="root"), do_reduce),
 ])
 
 def rewrite_shapetracker_with_index(ast:UOp, opts:Renderer) -> UOp:

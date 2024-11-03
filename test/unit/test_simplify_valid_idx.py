@@ -6,15 +6,15 @@ from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Ops, simplify_valid
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
-  return UOp(UOps.LOAD, dtypes.float, (
-    UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0).index(idx, valid),
+  return UOp(Ops.LOAD, dtypes.float, (
+    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0).index(idx, valid),
     UOp.const(dtypes.float, 0.0)
   ))
 
 def get_load_image_uop(image_shape:Tuple[int, ...], valid:UOp, idx:Tuple[UOp, UOp]):
-  return UOp(UOps.LOAD, dtypes.float.vec(4), (
-    UOp(UOps.DEFINE_GLOBAL, dtypes.imagef(image_shape), arg=0).index(UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx), valid),
-    UOp(UOps.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
+  return UOp(Ops.LOAD, dtypes.float.vec(4), (
+    UOp(Ops.DEFINE_GLOBAL, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.VECTORIZE, dtypes.int.vec(2), idx), valid),
+    UOp(Ops.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
 def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.int, (), (expr, nmax))

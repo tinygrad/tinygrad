@@ -33,10 +33,10 @@ class TestCStyleFailures(unittest.TestCase):
     a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     b = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
     idx = UOp.const(dtypes.int, 0)
-    ld = UOp(UOps.LOAD, dtypes.int, (b.index(idx),))
+    ld = UOp(Ops.LOAD, dtypes.int, (b.index(idx),))
     alu = ld.alu(BinaryOps.MAX, UOp.const(dtypes.int, dtypes.min(dtypes.int)+1))
     store = UOp.store(a.index(idx), alu)
-    sink = UOp(UOps.SINK, dtypes.void, (store,))
+    sink = UOp(Ops.SINK, dtypes.void, (store,))
     uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
     # CLANG doesn't use the max function
     ret = _test_uop_result([Tensor([1])], uops)[0]
@@ -45,10 +45,10 @@ class TestCStyleFailures(unittest.TestCase):
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local and Device.DEFAULT == "PTX", "need local")
 class TestPTXFailures(unittest.TestCase):
   def test_gated_store_with_alu(self):
-    a = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    gate_alu = (lidx0:=UOp(UOps.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
-    gated_alu_store = UOp(UOps.STORE, dtypes.void, (a.index(lidx0, gate_alu), UOp.const(dtypes.int, 1)))
-    sink = UOp(UOps.SINK, dtypes.void, (gated_alu_store,))
+    a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
+    gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
+    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0, gate_alu), UOp.const(dtypes.int, 1)))
+    sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
     uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
@@ -57,9 +57,9 @@ class TestPTXFailures(unittest.TestCase):
     a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
     val = UOp.const(dtypes.int, 1)
-    if_uop = UOp(UOps.IF, dtypes.void, (gate_alu,))
-    gated_alu_store = UOp(UOps.STORE, dtypes.void, (a.index(lidx0, if_uop), val))
-    sink = UOp(UOps.SINK, dtypes.void, (gated_alu_store,))
+    if_uop = UOp(Ops.IF, dtypes.void, (gate_alu,))
+    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0, if_uop), val))
+    sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
     uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
