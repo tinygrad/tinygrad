@@ -9,7 +9,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN
 from tinygrad.multi import MultiLazyBuffer
-from tinygrad.ops import MetaOps, smax, smin, resolve, UOp, UOps, BinaryOps, sint, Variable, SimpleMathTrait
+from tinygrad.ops import MetaOps, smax, smin, resolve, UOp, Ops, BinaryOps, sint, Variable, SimpleMathTrait
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule
@@ -136,7 +136,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, get_args(ConstType)): data = _metaop(MetaOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, UOp):
-      assert data.op is UOps.BIND and data.src[0].op is UOps.DEFINE_VAR and data.src[1].op is UOps.CONST, f"can't create tensor from UOp {data}"
+      assert data.op is Ops.BIND and data.src[0].op is Ops.DEFINE_VAR and data.src[1].op is Ops.CONST, f"can't create tensor from UOp {data}"
       data = _metaop(MetaOps.CONST, tuple(), dtype or data.dtype, device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
     elif isinstance(data, (list, tuple)):
@@ -382,9 +382,9 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
-    if y.op is UOps.BIND: return Tensor(y, **kwargs, requires_grad=False)   # this is the only UOp allowed in Tensor
-    if y.op is UOps.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
-    if y.op is UOps.ALU:
+    if y.op is Ops.BIND: return Tensor(y, **kwargs, requires_grad=False)   # this is the only UOp allowed in Tensor
+    if y.op is Ops.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
+    if y.op is Ops.ALU:
       if y.arg is BinaryOps.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
       if y.arg is BinaryOps.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
       if y.arg is BinaryOps.MAX: return Tensor.from_uop(y.src[0]).maximum(Tensor.from_uop(y.src[1]))

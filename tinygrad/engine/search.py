@@ -2,7 +2,7 @@ from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
 from collections import defaultdict
 from dataclasses import replace
-from tinygrad.ops import UOp, UOps, Variable, sym_infer
+from tinygrad.ops import UOp, Ops, Variable, sym_infer
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType, PtrDType
@@ -88,7 +88,7 @@ def _ensure_buffer_alloc(bufs:List[Buffer]) -> List[Buffer]: return [buf.ensure_
 def bufs_from_lin(lin:Kernel, allocate:bool=True) -> List[Buffer]:
   bufsts: DefaultDict[int, List[UOp]] = defaultdict(list)
   for x in lin.bufs:
-    if x.src[0].op is UOps.DEFINE_GLOBAL: bufsts[x.src[0].arg].append(x)
+    if x.src[0].op is Ops.DEFINE_GLOBAL: bufsts[x.src[0].arg].append(x)
   rawbufs: List[Optional[Buffer]] = [None]*len(bufsts)
   for k,lx in bufsts.items():
     buf_size = prod(dtype.shape) if isinstance(dtype:=lx[0].src[0].dtype, ImageDType) else max(y.st_arg.real_size() for y in lx)
