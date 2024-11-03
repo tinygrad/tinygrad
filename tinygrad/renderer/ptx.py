@@ -1,7 +1,7 @@
 from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
 import struct
 from collections import defaultdict
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, UOps, UOp, PatternMatcher, UPat
+from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, Ops, UOp, PatternMatcher, UPat
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -38,20 +38,20 @@ ptx_matcher = PatternMatcher([
   (UPat.var('x', dtype=dtypes.bool).ne(UPat.var('y')), lambda x,y: x^y),
   (UPat.var('x', dtype=dtypes.bool).lt(UPat.var('y')), lambda x,y: (x^True)&y),
   # upcast to float32 all the ops that don't support half
-  *[(UPat(UOps.ALU, arg=op, dtype=dtypes.half, name="x"),
+  *[(UPat(Ops.ALU, arg=op, dtype=dtypes.half, name="x"),
     lambda x: (UOp(x.op, dtypes.float32, tuple(vv.cast(dtypes.float32) for vv in x.src), x.arg).cast(dtypes.half)))
     for op in asm_for_op.keys() if op not in supports_half],
   # load/store bool -> uint8
-  (UPat(UOps.LOAD, dtypes.bool, src=(UPat(dtype=dtypes.int64),), name="x", allow_any_len=True),
+  (UPat(Ops.LOAD, dtypes.bool, src=(UPat(dtype=dtypes.int64),), name="x", allow_any_len=True),
    lambda x: UOp(x.op, dtypes.uint8, x.src[0:1] + ((x.src[1].cast(dtypes.uint8),) if len(x.src) >= 2 else ()) + x.src[2:]).cast(dtypes.bool)),
-  (UPat(UOps.STORE, src=(UPat(dtype=dtypes.int64), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
+  (UPat(Ops.STORE, src=(UPat(dtype=dtypes.int64), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
    lambda x: UOp(x.op, dtypes.void, x.src[0:1] + (x.src[1].cast(dtypes.uint8),) + x.src[2:])),
   # load/store use pointer arithmetic, and the cast does nothing
-  (UPat(UOps.INDEX, src=(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx: buf.cast(dtypes.int64) + idx.cast(dtypes.int64)*buf.dtype.itemsize),
-  (UPat(UOps.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) else None),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx: buf.cast(dtypes.int64) + idx.cast(dtypes.int64)*buf.dtype.itemsize),
+  (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) else None),
   # ptx shr and shl instructions require y to be uint
-  (UPat.var("x") << UPat.var("y"), lambda x,y: UOp(UOps.ALU, x.dtype, (x,y.cast(dtypes.uint)), BinaryOps.SHL) if y.dtype != dtypes.uint else None),
-  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(UOps.ALU, x.dtype, (x,y.cast(dtypes.uint)), BinaryOps.SHR) if y.dtype != dtypes.uint else None),
+  (UPat.var("x") << UPat.var("y"), lambda x,y: UOp(Ops.ALU, x.dtype, (x,y.cast(dtypes.uint)), BinaryOps.SHL) if y.dtype != dtypes.uint else None),
+  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.ALU, x.dtype, (x,y.cast(dtypes.uint)), BinaryOps.SHR) if y.dtype != dtypes.uint else None),
 ])
 
 class PTXRenderer(Renderer):
@@ -146,51 +146,51 @@ class PTXRenderer(Renderer):
 
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
-      if uop is UOps.IF:
+      if uop is Ops.IF:
         pred_reg = _cast(r[src[0]], dtypes.bool, src[0].dtype, u=u, pred=True)
         kk(*self.render_bra(f"IF_{r[src[0]][1:]}_{uops.index(u)}", pred_reg, invert=True))
-      elif uop is UOps.BARRIER and self.barrier: kk(self.barrier)
-      elif uop is UOps.ENDRANGE:
+      elif uop is Ops.BARRIER and self.barrier: kk(self.barrier)
+      elif uop is Ops.ENDRANGE:
         kk(self.code_for_op[BinaryOps.ADD](r[src[0]], r[src[0]], "1", dtypes.int, self.types[dtypes.int]),
             self.code_for_op[BinaryOps.CMPLT](pred:=ssa("pred", dtype="pred"), r[src[0]], r[src[0].src[1]], dtypes.int, self.types[dtypes.int]))
         kk(*self.render_bra(f"LOOP_{r[src[0]][1:]}", pred))
-      elif uop is UOps.ENDIF:
+      elif uop is Ops.ENDIF:
         kk(f"IF_{r[src[0].src[0]][1:]}_{uops.index(src[0])}:")
-      elif uop is UOps.STORE:
+      elif uop is Ops.STORE:
         assert src[0].dtype == dtypes.int64, "store isn't int64"
-        mem_type = '.shared' if src[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in src[0].parents) else '.global'
-        gate = f"@{r[src[2]]} " if len(src)>2 and src[2].op is not UOps.IF else ""
+        mem_type = '.shared' if src[0].op is Ops.DEFINE_LOCAL or any(x.op is Ops.DEFINE_LOCAL for x in src[0].parents) else '.global'
+        gate = f"@{r[src[2]]} " if len(src)>2 and src[2].op is not Ops.IF else ""
         if src[1].dtype.count > 1:
           kk(gate + f"st{mem_type}.v{src[1].dtype.count}.{self.mem_types[src[1].dtype.scalar()]} [{r[src[0]]}+0], {{{', '.join(r[src[1]])}}};")
         else:
           kk(gate + f"st{mem_type}.{self.mem_types[src[1].dtype]} [{r[src[0]]}+0], {r[src[1]]};")
       else:
-        if uop is UOps.RANGE: kk(*self.render_loop(loop:=ssa('ridx', u), r[src[0]], "LOOP_"+loop[1:]))
-        elif uop is UOps.ALU:
+        if uop is Ops.RANGE: kk(*self.render_loop(loop:=ssa('ridx', u), r[src[0]], "LOOP_"+loop[1:]))
+        elif uop is Ops.ALU:
           src_dtype = src[0].dtype if args in {BinaryOps.CMPLT, BinaryOps.CMPNE} else dtype
           kk(self.code_for_op[args](ssa("alu", u), *[r[x] for x in src], src_dtype, self.types[src_dtype]))
-        elif uop is UOps.DEFINE_ACC:
+        elif uop is Ops.DEFINE_ACC:
           if dtype.count > 1:
             r[u] = [ssa('acc', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
             for uu in r[u]: kk(f"mov.b{self.types[dtype.scalar()][1:]} {uu}, {const(src[0].src[0].arg, dtype.scalar())};")
           else: kk(f"mov.{f'b{self.types[dtype][1:]}' if dtype != dtypes.bool else 'pred'} {ssa('acc', u)}, {const(src[0].arg, dtype)};")
-        elif uop is UOps.SPECIAL:
+        elif uop is Ops.SPECIAL:
           assert args[0][0] != "i", "idx not supported"
           kk(f"mov.u32 %{args[0]}, %{'ctaid' if args[0][0] == 'g' else 'tid'}.{chr(120+int(args[0][-1]))};")
           r[u] = "%" + args[0]
           kernel = [f".reg .u32 %{args[0]};"] + kernel
-        elif uop is UOps.DEFINE_VAR:
+        elif uop is Ops.DEFINE_VAR:
           bufs.append((args[0], dtype))
           r[u] = f"%{args[0]}"
           kk(*self.render_load(args[0], ssa('dat', u, self.types[dtype]), dtype, ss=".param"))
-        elif uop is UOps.CONST: r[u] = const(args, dtype, mov=True)
-        elif uop is UOps.GEP:
+        elif uop is Ops.CONST: r[u] = const(args, dtype, mov=True)
+        elif uop is Ops.GEP:
           assert len(u.arg) == 1
           r[u] = r[src[0]][u.arg[0]]
-        elif uop is UOps.LOAD:
+        elif uop is Ops.LOAD:
           assert src[0].dtype == dtypes.int64, "load isn't int64"
-          mem_type = '.shared' if src[0].op is UOps.DEFINE_LOCAL or any(x.op is UOps.DEFINE_LOCAL for x in src[0].parents) else '.global'
-          has_gate = len(src) > 2 and src[2].op is UOps.ALU
+          mem_type = '.shared' if src[0].op is Ops.DEFINE_LOCAL or any(x.op is Ops.DEFINE_LOCAL for x in src[0].parents) else '.global'
+          has_gate = len(src) > 2 and src[2].op is Ops.ALU
           if dtype.count > 1:
             r[u] = [ssa('val', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
             if has_gate:
@@ -200,25 +200,25 @@ class PTXRenderer(Renderer):
           else:
             kk(*self.render_load(r[src[0]], ssa('val', u), dtype, gate=r[src[2]] if has_gate else None,
                                 alt=r[src[1]] if has_gate else None, ss=mem_type, offset=0))
-        elif uop is UOps.ASSIGN:
+        elif uop is Ops.ASSIGN:
           if dtype.count > 1:
             for x0, x1 in zip(r[src[0]], r[src[1]]): kk(f"mov.b{self.types[dtype.scalar()][1:]} {x0}, {x1};")
           else: kk(f"mov.{f'b{self.types[dtype][1:]}' if dtype != dtypes.bool else 'pred'} {r[src[0]]}, {r[src[1]]};")
           r[u] = r[src[0]]
         # NOTE: casting to str is fine because you can't vectorize a vectorize
-        elif uop is UOps.VECTORIZE: r[u] = [cast(str,r[x]) for x in src]
-        elif uop in {UOps.CAST, UOps.BITCAST}:
-          _cast(r[src[0]], dtype, src[0].dtype, bitcast=uop is UOps.BITCAST, u=u)
-        elif uop is UOps.DEFINE_LOCAL:
+        elif uop is Ops.VECTORIZE: r[u] = [cast(str,r[x]) for x in src]
+        elif uop in {Ops.CAST, Ops.BITCAST}:
+          _cast(r[src[0]], dtype, src[0].dtype, bitcast=uop is Ops.BITCAST, u=u)
+        elif uop is Ops.DEFINE_LOCAL:
           # TODO: we should sum these, and fetch 0xC000 from somewhere
           assert args[1]*dtype.itemsize <= 0xC000, "too large local"
           kk(*self.render_local(ssa('local', u, self.types[dtypes.ulong]), args[0], args[1], dtype))
-        elif uop is UOps.DEFINE_GLOBAL:
+        elif uop is Ops.DEFINE_GLOBAL:
           bufs.append((nm:=f"data{args}", dtype))
           r[u] = f"%{nm}"
           dt = dtypes.ulong if dtype.__class__ == PtrDType else dtype
           kk(*self.render_load(nm, ssa('dat', u, self.types[dt]), dt, ss=".param"))
-        elif uop is UOps.WMMA:
+        elif uop is Ops.WMMA:
           _, (N, M, K), dtype_in, _, _, _, upcast_axes, _ = args
           wmma, n_operands = [], tuple(prod(sz for _, sz in upc)*dtype_in.itemsize//4 for upc in upcast_axes[:2])
           dt_map = { dtypes.half: "f16" }

@@ -1,6 +1,6 @@
 import unittest, math
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.ops import UOps
+from tinygrad.ops import Ops
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import CI
 import numpy as np
@@ -9,7 +9,7 @@ from test.helpers import is_dtype_supported
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
   schedule = create_schedule(t.lazydata.lbs)
-  asts = [s for s in schedule if s.ast.op is UOps.SINK]
+  asts = [s for s in schedule if s.ast.op is Ops.SINK]
   assert len(asts) == desired_count
 
 class TestUnaryOpsConstFolding(unittest.TestCase):
