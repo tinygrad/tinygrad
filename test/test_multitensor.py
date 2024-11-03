@@ -1,7 +1,7 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
-from tinygrad.ops import MetaOps, ReduceOps, BinaryOps, UOps
+from tinygrad.ops import MetaOps, ReduceOps, BinaryOps, Ops
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
@@ -617,24 +617,24 @@ class TestMultiTensor(unittest.TestCase):
       t = t + 1
       for si in t.schedule():
         ast = si.ast.src[0]
-        assert ast.op is UOps.STORE
+        assert ast.op is Ops.STORE
         assert ast.src[2].arg is BinaryOps.ADD
-        assert ast.src[2].src[0].op is UOps.LOAD
-        assert ast.src[2].src[1].src[1].op is UOps.CONST and ast.src[2].src[1].src[1].arg == 1
+        assert ast.src[2].src[0].op is Ops.LOAD
+        assert ast.src[2].src[1].src[1].op is Ops.CONST and ast.src[2].src[1].src[1].arg == 1
       t = 2 * t
       for si in t.schedule():
         ast = si.ast.src[0]
-        assert ast.op is UOps.STORE
+        assert ast.op is Ops.STORE
         assert ast.src[2].arg is BinaryOps.MUL
-        assert ast.src[2].src[0].src[1].op is UOps.CONST and ast.src[2].src[0].src[1].arg == 2
-        assert ast.src[2].src[1].op is UOps.LOAD
+        assert ast.src[2].src[0].src[1].op is Ops.CONST and ast.src[2].src[0].src[1].arg == 2
+        assert ast.src[2].src[1].op is Ops.LOAD
       t = t + t.full_like(3)
       for si in t.schedule():
         ast = si.ast.src[0]
-        assert ast.op is UOps.STORE
+        assert ast.op is Ops.STORE
         assert ast.src[2].arg is BinaryOps.ADD
-        assert ast.src[2].src[0].op is UOps.LOAD
-        assert ast.src[2].src[1].src[1].op is UOps.CONST and ast.src[2].src[1].src[1].arg == 3
+        assert ast.src[2].src[0].op is Ops.LOAD
+        assert ast.src[2].src[1].src[1].op is Ops.CONST and ast.src[2].src[1].src[1].arg == 3
 
   def test_shard_memory(self):
     devices = (d0, d1, d2, d3)
