@@ -3,7 +3,7 @@ import unittest, time
 from tinygrad import dtypes, Device
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, Ops, UOp, KernelInfo
-from tinygrad.ops import Pat, PatternMatcher
+from tinygrad.ops import UPat, PatternMatcher
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.codegen.uopgraph import full_graph_rewrite, graph_rewrite, expander, sym
@@ -11,10 +11,10 @@ from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.shape.shapetracker import ShapeTracker, View
 
 simple_pm = PatternMatcher([
-  (Pat.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
-  (Pat.cvar('x') + Pat.cvar('y'), lambda x,y: UOp.const(dtypes.float, x.arg+y.arg)),
-  (Pat.cvar('x') * Pat.cvar('y') * Pat.cvar('z'), lambda x,y,z: UOp.const(dtypes.float, x.arg*y.arg*z.arg)),
-  ((Pat.var('x') + Pat.cvar('c1')) + Pat.cvar('c2'), lambda x,c1,c2: x + (c1.arg+c2.arg)),
+  (UPat.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
+  (UPat.cvar('x') + UPat.cvar('y'), lambda x,y: UOp.const(dtypes.float, x.arg+y.arg)),
+  (UPat.cvar('x') * UPat.cvar('y') * UPat.cvar('z'), lambda x,y,z: UOp.const(dtypes.float, x.arg*y.arg*z.arg)),
+  ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.arg+c2.arg)),
 ])
 
 def to_uops_list(u:List[UOp]) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u)))

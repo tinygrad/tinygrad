@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context
 from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import Ops, UOp, Pat, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu, spec # noqa F401
+from tinygrad.ops import Ops, UOp, UPat, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu, spec # noqa F401
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule, to_si
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
@@ -441,13 +441,13 @@ class TestIndexingOrdering(unittest.TestCase):
     stores = [st for st in uops if st.op is Ops.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
-class TestPatHelpers(unittest.TestCase):
+class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
     self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "uopgraph.py")
     self.assertEqual(to_si.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "schedule.py")
     self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "ops.py")
-    with self.assertRaises(AssertionError): # TODO: location Pat files created in test/*?
-      test_upat = Pat(Ops.CONST, dtypes.bool)
+    with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?
+      test_upat = UPat(Ops.CONST, dtypes.bool)
       self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])
 
 if __name__ == '__main__':
