@@ -45,6 +45,8 @@ def _sample_tree(node:MCTSNode, best_tm:float) -> MCTSNode:
         ucb_explored_children.append(ucb)
   if len(unexplored_children): return random.choice(unexplored_children)
   if not len(explored_children): return node
+  # safe softmax
+  ucb_explored_children -= np.max(ucb_explored_children)
   ucb_exp = np.exp(np.array(ucb_explored_children)/TEMP)
   return _sample_tree(explored_children[np.random.choice(len(ucb_exp), p=ucb_exp/np.sum(ucb_exp))], best_tm)
 
