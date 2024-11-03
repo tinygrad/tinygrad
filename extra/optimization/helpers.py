@@ -7,6 +7,7 @@ from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 inf, nan = float('inf'), float('nan')
+UOps = Ops
 
 # kernel unpacker
 from tinygrad.codegen.kernel import Kernel
