@@ -1039,8 +1039,6 @@ symbolic_simple = PatternMatcher([
   # ** constant folding **
   (Pat(Ops.ALU, name="root", src=Pat((Ops.VCONST, Ops.CONST))),
    lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src], truncate_output=False))),
-  # ** COMMUTATIVE flipping **
-  *[(Pat(Ops.ALU, arg=op, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None) for op in COMMUTATIVE],
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (Pat.var('x', dtype=dtypes.bool) * Pat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (Pat.var('x', dtype=dtypes.bool) + Pat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
@@ -1051,6 +1049,8 @@ symbolic_simple = PatternMatcher([
 ])
 
 symbolic = symbolic_simple+PatternMatcher([
+  # ** COMMUTATIVE flipping **
+  *[(Pat(Ops.ALU, arg=op, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None) for op in COMMUTATIVE],
   # group like
   ((Pat.var("x") + Pat.var("y")) + Pat.var("x") * Pat.cvar("c"), lambda x,y,c: (x+x*c)+y),
   # ** combine terms **

@@ -40,6 +40,17 @@ class TestTranscendentalMath(unittest.TestCase):
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float16))),
                                  atol=1e-2, rtol=5e-3)  # exp can have bigger rtol
 
+  @unittest.skipIf(Device.DEFAULT=="LLVM", "FIXME: LLVM might change computer")
+  @given(strat.sampled_from([(dtypes.float64, 709.5), (dtypes.float32, 88.7), (dtypes.float16, 11)]))
+  def test_exp_near_inf(self, dtype_x):
+    # reordering compute might give inf result
+    dtype, x = dtype_x
+    if not is_dtype_supported(dtype): return
+    with Context(TRANSCENDENTAL=2):
+      y = Tensor([x], dtype=dtype).exp().numpy()
+      expected = np.exp(np.array([x], dtype=_to_np_dtype(dtype)))
+      np.testing.assert_allclose(y, expected, rtol=5e-3)
+
 class TestTranscendentalSchedule(unittest.TestCase):
   # w/ payne_hanek_reduction (fp32)
   def test_transcendental_sin_fusion(self):
