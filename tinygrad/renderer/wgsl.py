@@ -32,11 +32,15 @@ wgsl_matcher = PatternMatcher([
 
 type_map = {dtypes.float: "f32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.ulong: "vec2<u32>"}
 
-def gep_ulong(r, val): return f"{r[val]}.x" if val.dtype == dtypes.ulong else f"{r[val]}"
 def render_load_store(r, bidx):
   sbidx = strip_parens(r[bidx])
   buf, idx = sbidx.split("+")[0], '+'.join(sbidx.split("+")[1:])
   return f"{buf}[{idx}]"
+
+def render_ushift(r, v, am, left):
+  v, am = r[v], f"{r[am]}.x" if am.dtype == dtypes.ulong else f"{r[am]}"
+  if left: return f"select(vec2<u32>({v}.x << {am}, ({v}.y << {am}) | ({v}.x >> (32u-{am}))), vec2<u32>(0u, {v}.x << ({am}-32u)), {am} >= 32u)"
+  else: return f"select(vec2<u32>(({v}.x >> {am}) | ({v}.y << (32u - {am})), {v}.y >> {am}), vec2<u32>({v}.y >> ({am} - 32u), 0u), {am} >= 32u)"
 
 class WGSLRenderer(CStyleLanguage):
   device = "WEBGPU"
@@ -68,8 +72,8 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(UOps.LOAD, src=(UPat.var('bidx'),), allow_any_len=True), lambda ctx,bidx: f"{render_load_store(ctx, bidx)}"),
     (UPat(UOps.STORE, src=(UPat.var('bidx'), UPat.var("var")), allow_any_len=True),
      lambda ctx,bidx,var: f"{render_load_store(ctx,bidx)} = {ctx[var]};"), ]) + base_rewrite + PatternMatcher([
-    (UPat(UOps.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHL), lambda ctx,x: f"ushl({ctx[x.src[0]]},u32({gep_ulong(ctx, x.src[1])}))"),
-    (UPat(UOps.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHR), lambda ctx,x: f"ushr({ctx[x.src[0]]},u32({gep_ulong(ctx, x.src[1])}))"),
+    (UPat(UOps.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHL), lambda ctx,x: render_ushift(ctx, x.src[0], x.src[1], left=True)),
+    (UPat(UOps.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHR), lambda ctx,x: render_ushift(ctx, x.src[0], x.src[1], left=False)),
   ])
 
   def render_dtype(self, dt:DType, mutable=True) -> str: return "var"
@@ -78,10 +82,6 @@ class WGSLRenderer(CStyleLanguage):
     if not local_size: local_size = [1]
     bind_it = iter(range(len(bufs)))
     prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
-    prg += "fn ushl(v: vec2<u32>, shift: u32) -> vec2<u32> {\n"
-    prg += "return select(vec2<u32>(v.x << shift, (v.y << shift) | (v.x >> (32u - shift))), vec2<u32>(0u, v.x << (shift - 32u)), shift >= 32u); }\n"
-    prg += "fn ushr(v: vec2<u32>, shift: u32) -> vec2<u32> {\n"
-    prg += "return select(vec2<u32>((v.x >> shift) | (v.y << (32u - shift)), v.y >> shift), vec2<u32>(v.y >> (shift - 32u), 0u), shift >= 32u); }\n"
     prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
     prg += "\n".join((prefix or [])+[f"@group(0) @binding({next(bind_it)+1}) {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}: {f'array<{self.type_map[dtype.base]}>' if isinstance(dtype, PtrDType) else 'i32'};" for name,(dtype,rw) in bufs])  # noqa: E501
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501
