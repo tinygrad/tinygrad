@@ -106,14 +106,7 @@ class PythonProgram:
           assert dtp[0].fmt and dtype.fmt
           pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
           if uop is Ops.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
-          else:
-            casted = [dtypes.as_const(x, dtype) for x in inp[0]]
-            if dtypes.is_int(dtype):
-              overflow_adjust = 2**(dtype.itemsize*8 - 1) if not dtypes.is_unsigned(dtype) else 0
-              casted = [((x + overflow_adjust) % 2**(dtype.itemsize*8) - overflow_adjust) for x in casted]
-            elif dtypes.is_float(dtype):
-              casted = [truncate.get(dtype, lambda dt: dt)(x) for x in casted]
-            ul[i] = list(struct.unpack(unpack_format, struct.pack(unpack_format, *casted)))
+          else: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
         elif uop is Ops.LOAD:
           if dtype.count > 1:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
