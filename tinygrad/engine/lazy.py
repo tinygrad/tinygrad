@@ -118,6 +118,7 @@ class LazyBuffer(MathTrait):
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
 
   def _copy(self, device:str) -> LazyBuffer:
+    assert self.st.contiguous and self.size == self.base.size, f"can only copy contig {self} {self.base}"
     return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, MetaOps.COPY, self.buffer.nbytes, (self,), enable_cache=False)
 
   def copy_to_device(self, device:str, force:bool=False, clone:bool=False) -> LazyBuffer:
