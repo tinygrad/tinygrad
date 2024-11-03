@@ -144,14 +144,18 @@ def get_realizes(outs:List[LazyBuffer], ctx) -> Tuple[List[List[UOp]], Dict[Buff
   if FUSE_CONV_BW:
     for reduceop in double_reduces:
       top_reduce = reduceop.base.srcs[0].base
-      if len(children[top_reduce]) == 1: del realizes[top_reduce]
+      if len(children[top_reduce]) == 1:
+        del realizes[top_reduce]
+        if (ubuf:=ctx.buf_uops[top_reduce.buffer]) in ctx.realizes: del ctx.realizes[ubuf]
 
   for r in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is r}
     if any(tr.forced_realize for tr in group) or any(x.base in group for x in outs): continue
     kernel_children = {c for tr in group for c in children[tr] if c.op not in {MetaOps.COPY, MetaOps.VIEW}}
     if len(kernel_children) == 0: continue
-    for tr in group: del realizes[tr]
+    for tr in group:
+      del realizes[tr]
+      if (ubuf:=ctx.buf_uops[tr.buffer]) in ctx.realizes: del ctx.realizes[ubuf]
   output_groups: DefaultDict[LazyBuffer, List[UOp]] = defaultdict(list)
   lazybufs_to_realize: Dict[Buffer, LazyBuffer] = {}
   for buf in realizes:
