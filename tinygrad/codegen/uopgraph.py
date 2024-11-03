@@ -500,8 +500,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
 
-  # initial symbolic + migrate indexing (remove this) + transcendental
-  sink = graph_rewrite(sink, sym+migrate_indexing+get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2))
+  # initial symbolic + migrate indexing (remove this)
+  sink = graph_rewrite(sink, sym+migrate_indexing)
 
   # expand
   sink = graph_rewrite(sink, sym+expander)
@@ -511,4 +511,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
 
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops)+pm_render+extra_matcher)
+
+  # transcendental without symbolic_simple
+  sink = graph_rewrite(sink, get_transcendental_patterns(supported_ops, TRANSCENDENTAL>=2)+extra_matcher)
+
   return sink
