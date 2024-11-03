@@ -2,7 +2,7 @@ import sys, atexit, functools, itertools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Callable, Set, Tuple, List, Dict, Optional, DefaultDict, cast
-from tinygrad.ops import BUFOPS, MetaOps, ReduceOps, UnaryOps, UOp, Ops, PatternMatcher, UPat, Variable, graph_rewrite, track_rewrites, sint
+from tinygrad.ops import BUFOPS, MetaOps, ReduceOps, UnaryOps, UOp, Ops, PatternMatcher, Pat, Variable, graph_rewrite, track_rewrites, sint
 from tinygrad.helpers import DEBUG, Metadata, all_same, colored, diskcache_put, prod, dedup, getenv, unwrap
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -138,27 +138,27 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert not any(x.op is Ops.REDUCE_AXIS for x in first_reduce.parents), "can't merge more than two reduceops at a time"
   return first_reduce.src[0].r(first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg)
 
-merge_views = PatternMatcher([(UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="s0"),), name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st))])
+merge_views = PatternMatcher([(Pat(Ops.VIEW, src=(Pat(Ops.VIEW, name="s0"),), name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st))])
 
 # push VIEW to loads
 view_left = merge_views+PatternMatcher([
   # view before ALU
-  (UPat(Ops.VIEW, src=(UPat((Ops.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, *BUFOPS), name="e"),), name="v"),
+  (Pat(Ops.VIEW, src=(Pat((Ops.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, *BUFOPS), name="e"),), name="v"),
    lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
 ])
 
 # push VIEW to stores
 view_right = merge_views+PatternMatcher([
   # ASSIGN can override st
-  (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.ASSIGN, name="a"))),
+  (Pat(Ops.STORE, src=(Pat.var("b"), Pat.var("st"), Pat(Ops.ASSIGN, name="a"))),
    lambda a,b,st: UOp.store(b, (a.arg[0]+st.arg).to_uop(), a.replace(arg=())) if a.arg else None),
   # VIEW on a reduce creates a new VIEW
-  (UPat(Ops.VIEW, src=(UPat(Ops.REDUCE_AXIS, src=UPat.var("rsrc"), name="r"),), name="view"), view_r),
+  (Pat(Ops.VIEW, src=(Pat(Ops.REDUCE_AXIS, src=Pat.var("rsrc"), name="r"),), name="view"), view_r),
   # push a VIEW down to STORE, through a reduce (ONLY reshapes)
-  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
+  (Pat(Ops.REDUCE_AXIS, src=(Pat(Ops.VIEW, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
   # push VIEW(s) down to STORE, through an elementwise op (ONLY reshapes)
-  (UPat((Ops.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
-  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
+  (Pat((Ops.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
+  (Pat(Ops.REDUCE_AXIS, src=(Pat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
 # ** ScheduleItem context builder
@@ -181,26 +181,26 @@ def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
 def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
   ctx.bufs.append(x)
   return UOp(Ops.DEFINE_GLOBAL, x.dtype, (), len(ctx.bufs)-1)
-append_bufs = PatternMatcher([(UPat(Ops.BUFFER, name="x"), _append_buf)])
+append_bufs = PatternMatcher([(Pat(Ops.BUFFER, name="x"), _append_buf)])
 
 def _append_preload(ctx:ScheduleItemContext, x:UOp, b:UOp) -> UOp:
   if b in ctx.assigned: ctx.assign_preloads.append(b)
   return x.replace(op=Ops.LOAD)
 
 to_si = PatternMatcher([
-  (UPat(Ops.VIEW, name="x"), _append_st_vars),
-  (UPat(Ops.PRELOAD, src=(UPat.var("b"), UPat()), name="x"), _append_preload),
-  (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
-  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(tuple(METAOPS.values()), name="x")),)), lambda ctx,x: x),
+  (Pat(Ops.VIEW, name="x"), _append_st_vars),
+  (Pat(Ops.PRELOAD, src=(Pat.var("b"), Pat()), name="x"), _append_preload),
+  (Pat(Ops.CONTIGUOUS, src=(Pat.var("x"),)), lambda ctx,x: x),
+  (Pat(Ops.SINK, src=(Pat.store(Pat(), Pat(), Pat(tuple(METAOPS.values()), name="x")),)), lambda ctx,x: x),
 ])
 
 # ** fusion
 
 lazy = PatternMatcher([
-  (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat.var("v"))), lambda ctx,b,v: v),
+  (Pat.load(b:=Pat.var("b"), Pat(), Pat.store(b, Pat(), Pat.var("v"))), lambda ctx,b,v: v),
 ])
 
-multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.get(b)),])
+multioutput = PatternMatcher([(Pat.load(Pat.var("b"), Pat()), lambda ctx,b: ctx.get(b)),])
 
 def full_ast_rewrite(pre:UOp, var_vals:Dict[Variable, int], assigned:Set[UOp]) -> Tuple[UOp, ScheduleItemContext]:
   # fuse and fold store -> loads
@@ -234,14 +234,14 @@ def realize(ctx:Dict[UOp, UOp], b:UOp, load:UOp, store:UOp) -> UOp:
   ctx[b] = store
   return UOp(Ops.LOAD, load.dtype, (b, load.st_arg.to_uop()))
 
-def UPatLoadStore(to_store=UPat()): return UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), to_store, name="store"), name="load")
+def PatLoadStore(to_store=Pat()): return Pat.load(b:=Pat.var("b"), Pat(), Pat.store(b, Pat(), to_store, name="store"), name="load")
 do_realize = PatternMatcher([
   # always realize meta ops
-  (UPatLoadStore(UPat((Ops.ASSIGN, Ops.CONTIGUOUS, *METAOPS.values()))), realize),
-  (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.var("u"), UPat.any(UPatLoadStore(), UPatLoadStore().view(name="v"))), name="root"),
+  (PatLoadStore(Pat((Ops.ASSIGN, Ops.CONTIGUOUS, *METAOPS.values()))), realize),
+  (Pat((Ops.COPY, Ops.BUFFER_VIEW), src=(Pat.var("u"), Pat.any(PatLoadStore(), PatLoadStore().view(name="v"))), name="root"),
    lambda ctx,root,u,v=None,**kwargs: root.replace(src=(u, realize(ctx,**kwargs) if v is None else realize(ctx,**kwargs).view(v.st))),)
 ])
-break_sched = PatternMatcher([(UPatLoadStore(), lambda ctx,b,store,load: realize(ctx, b, load, store) if b in ctx else None),])
+break_sched = PatternMatcher([(PatLoadStore(), lambda ctx,b,store,load: realize(ctx, b, load, store) if b in ctx else None),])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:

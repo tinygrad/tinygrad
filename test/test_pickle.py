@@ -2,7 +2,7 @@ import unittest, pickle, types
 import numpy as np
 from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.ops import PatternMatcher, UPat, UOp
+from tinygrad.ops import PatternMatcher, Pat, UOp
 
 class TestPickle(unittest.TestCase):
   def test_pickle_code_object(self):
@@ -12,7 +12,7 @@ class TestPickle(unittest.TestCase):
     self.assertEqual(fxn(2), 4)
 
   def test_pickle_pattern_matcher(self):
-    pm = PatternMatcher([(UPat.cvar('x'), lambda x: x*2)])
+    pm = PatternMatcher([(Pat.cvar('x'), lambda x: x*2)])
     sink = UOp.const(dtypes.int, 2)
     tt = pm.rewrite(sink)
     pm_str = pickle.dumps(pm)

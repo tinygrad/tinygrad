@@ -25,7 +25,7 @@ class GraphRewriteMetadata:
   kernel_name: Optional[str]
   """The kernel calling graph_rewrite"""
   upats: List[Tuple[Tuple[str, int], str, float]]
-  """List of all the applied UPats"""
+  """List of all the applied Pats"""
 
 @dataclass
 class GraphRewriteDetails(GraphRewriteMetadata):
