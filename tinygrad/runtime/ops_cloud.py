@@ -9,8 +9,9 @@ from typing import Tuple, Optional, Dict, Any, DefaultDict
 from collections import defaultdict
 import multiprocessing, functools, http.client, hashlib, json, time, contextlib, os, binascii
 from dataclasses import dataclass, field
-from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap
-from tinygrad.device import Compiled, Allocator, Compiler, Device
+from tinygrad.dtype import dtypes
+from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, prod
+from tinygrad.device import Compiled, Allocator, Compiler, Device, BufferOptions
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ***** backend *****
@@ -18,7 +19,8 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 @dataclass
 class CloudSession:
   programs: Dict[Tuple[str, str], Any] = field(default_factory=dict)
-  buffers: Dict[int, Tuple[Any, int]] = field(default_factory=dict)
+  # TODO: the buffer should track this internally
+  buffers: Dict[int, Tuple[Any, int, Optional[BufferOptions]]] = field(default_factory=dict)
   buffer_num = 0
 
 class CloudHandler(BaseHTTPRequestHandler):
@@ -49,16 +51,20 @@ class CloudHandler(BaseHTTPRequestHandler):
       ret = json.dumps((cls.__module__, cls.__name__, args)).encode()
     elif self.path.startswith("/alloc") and method == "POST":
       size = int(self.path.split("=")[-1])
+      buffer_options: Optional[BufferOptions] = None
+      if 'image' in self.path:
+        image_shape = tuple([int(x) for x in self.path.split("=")[-2].split("&")[0].split(",")])
+        buffer_options = BufferOptions(image=dtypes.imageh(image_shape) if prod(image_shape)*2 == size else dtypes.imagef(image_shape))
       session.buffer_num += 1
-      session.buffers[session.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(size), size)
+      session.buffers[session.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(size, buffer_options), size, buffer_options)
       ret = str(session.buffer_num).encode()
     elif self.path.startswith("/buffer"):
       key = int(self.path.split("/")[-1])
-      buf,sz = session.buffers[key]
+      buf,sz,buffer_options = session.buffers[key]
       if method == "GET": Device[CloudHandler.dname].allocator.copyout(memoryview(ret:=bytearray(sz)), buf)
       elif method == "PUT": Device[CloudHandler.dname].allocator.copyin(buf, memoryview(bytearray(self.get_data())))
       elif method == "DELETE":
-        Device[CloudHandler.dname].allocator.free(buf,sz)
+        Device[CloudHandler.dname].allocator.free(buf,sz,buffer_options)
         del session.buffers[key]
       else: return self._fail()
     elif self.path.startswith("/program"):
@@ -100,7 +106,10 @@ class CloudAllocator(Allocator):
   def __init__(self, device:CloudDevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size:int, options) -> int: return int(self.device.send("POST", f"alloc?size={size}"))
+  def _alloc(self, size:int, options) -> int:
+    # TODO: ideally we shouldn't have to deal with images here
+    extra = ("image="+','.join([str(x) for x in options.image.shape])+"&") if options.image is not None else ""
+    return int(self.device.send("POST", f"alloc?{extra}size={size}"))
   def _free(self, opaque, options):
     with contextlib.suppress(ConnectionRefusedError, http.client.CannotSendRequest, http.client.RemoteDisconnected):
       self.device.send("DELETE", f"buffer/{opaque}", data=b"")

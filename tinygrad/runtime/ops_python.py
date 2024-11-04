@@ -7,7 +7,7 @@ import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
-from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, UOps, UOp
+from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, Ops, UOp
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
 
@@ -26,7 +26,7 @@ def _store(m, i, v):
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
-    self.uops: List[Tuple[UOps, Optional[DType], List[int], Any]] = pickle.loads(lib)
+    self.uops: List[Tuple[Ops, Optional[DType], List[int], Any]] = pickle.loads(lib)
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
@@ -40,12 +40,12 @@ class PythonProgram:
       loop_ends: Dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        void_ops = {UOps.STORE, UOps.ENDRANGE, UOps.BARRIER, UOps.IF, UOps.ENDIF}
-        if uop is UOps.DEFINE_ACC: idp = [idp[0]]
+        void_ops = {Ops.STORE, Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF}
+        if uop is Ops.DEFINE_ACC: idp = [idp[0]]
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
-        if uop is UOps.STORE:
+        if uop is Ops.STORE:
           if len(inp) == 2: inp.append([True] * len(inp[0]))  # set the gate to True
           if dtp[1].count > 1:
             for j,val in enumerate(inp[1]):
@@ -56,32 +56,32 @@ class PythonProgram:
               if g: _store(m, o, v)
           i += 1
           continue
-        if uop is UOps.ENDRANGE:
+        if uop is Ops.ENDRANGE:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
-        if uop in (UOps.BARRIER, UOps.IF, UOps.ENDIF):
+        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
-        if uop is UOps.DEFINE_GLOBAL:
+        if uop is Ops.DEFINE_GLOBAL:
           assert dtype.fmt is not None
           ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
-        elif uop is UOps.DEFINE_LOCAL:
+        elif uop is Ops.DEFINE_LOCAL:
           assert dtype.fmt is not None
           lbuf = memoryview(bytearray(arg[1]*dtype.itemsize))
           ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
-        elif uop is UOps.DEFINE_VAR:
+        elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
-        elif uop is UOps.SPECIAL:
+        elif uop is Ops.SPECIAL:
           if arg[0][0] == 'g': ul[i] = [idxs[2-int(arg[0][-1])]] * warp_size
           elif arg[0][0] == 'l': ul[i] = [x[2-int(arg[0][-1])] for x in warp]
-        elif uop is UOps.CONST: ul[i] = [arg] * warp_size
-        elif uop is UOps.DEFINE_ACC:
+        elif uop is Ops.CONST: ul[i] = [arg] * warp_size
+        elif uop is Ops.DEFINE_ACC:
           ul[i] = [[inp[0][0][0]] * warp_size for _ in range(dtype.count)] if dtype.count > 1 else [inp[0][0]] * warp_size
-        elif uop is UOps.INDEX:
+        elif uop is Ops.INDEX:
           ret = []
           if isinstance(dtp[0], ImageDType):
             for m,ox,oy in zip(inp[0], inp[1][0], inp[1][1]):
@@ -90,9 +90,9 @@ class PythonProgram:
           else:
             for m,o in zip(inp[0], inp[1]): ret.append((m,o))
           ul[i] = ret
-        elif uop is UOps.CAST and isinstance(dtype, PtrDType):
+        elif uop is Ops.CAST and isinstance(dtype, PtrDType):
           ul[i] = inp[0]
-        elif uop is UOps.RANGE:
+        elif uop is Ops.RANGE:
           if i not in ul: ul[i] = [inp[0][0]] * warp_size
           else:
             for j in range(len(ul[i])):
@@ -101,31 +101,24 @@ class PythonProgram:
               del ul[i]
               i = loop_ends[i] + 1
               continue
-        elif uop is UOps.VECTORIZE: ul[i] = inp
-        elif uop in {UOps.CAST, UOps.BITCAST}:
+        elif uop is Ops.VECTORIZE: ul[i] = inp
+        elif uop in {Ops.CAST, Ops.BITCAST}:
           assert dtp[0].fmt and dtype.fmt
           pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
-          if uop is UOps.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
-          else:
-            casted = [dtypes.as_const(x, dtype) for x in inp[0]]
-            if dtypes.is_int(dtype):
-              overflow_adjust = 2**(dtype.itemsize*8 - 1) if not dtypes.is_unsigned(dtype) else 0
-              casted = [((x + overflow_adjust) % 2**(dtype.itemsize*8) - overflow_adjust) for x in casted]
-            elif dtypes.is_float(dtype):
-              casted = [truncate.get(dtype, lambda dt: dt)(x) for x in casted]
-            ul[i] = list(struct.unpack(unpack_format, struct.pack(unpack_format, *casted)))
-        elif uop is UOps.LOAD:
+          if uop is Ops.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
+          else: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
+        elif uop is Ops.LOAD:
           if dtype.count > 1:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
           else:
             ul[i] = load(inp)
-        elif uop is UOps.ASSIGN:
+        elif uop is Ops.ASSIGN:
           for j in range(len(inp[0])): inp[0][j] = inp[1][j]
           ul[i] = inp[0]
-        elif uop is UOps.GEP:
+        elif uop is Ops.GEP:
           assert len(arg) == 1
           ul[i] = inp[0][arg[0]]
-        elif uop is UOps.WMMA:
+        elif uop is Ops.WMMA:
           # here are the models for the WMMA instruction on the different hardware
           def wmma_helper(WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_elem, b_elem, c_map):
             assert len(inp[0]) == NUM_A, f"A must have {NUM_A} elements per thread, it has {len(inp[0])}"
@@ -180,7 +173,7 @@ class PythonProgram:
             def c_map(_, elem): return (elem%16, elem//16)
             ul[i] = wmma_helper(1, 1, 16, 16, 256, elem, elem, c_map)
           else: raise NotImplementedError(f"unimplemented tensor core {arg}")
-        elif uop is UOps.ALU:
+        elif uop is Ops.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {arg}"
           assert all_same([dtype] + dtp) or arg in {BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE}, f"dtype mismatch on {arg}"
           ul[i] = [exec_alu(arg, dtype, p) for p in zip(*inp)]

@@ -69,19 +69,17 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
     39800.0 <= d <= +Inf
   Returns a tuple of `(r, q)`:
   - `r`[d.dtype] is the reminder value corresponding to `round_to_nearest(x % pi/2)`.
-    ensuring that `r` is in the range of [0, pi/2).
-  - `q`[int32] is an integer taking values 0,1,2 or 3, corresponding to the quadrant of the original angle `d`.
+  - `q`[int32] is an integer, and q % 4 is corresponding to the quadrant of the original angle `d`.
   """
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
   # https://stackoverflow.com/questions/30463616/payne-hanek-algorithm-implementation-in-c/30465751#30465751
   # 190 bits of 2/pi for Payne-Hanek style argument reduction
-  two_over_pi_f = [0x00000000,0x28be60db,0x9391054a,0x7f09d5f4,0x7d4d3770,0x36d8a566,0x4f10e410]
+  two_over_pi_f = [0x00000000, 0x28be60db, 0x9391054a, 0x7f09d5f4, 0x7d4d3770, 0x36d8a566, 0x4f10e410]
 
-  input_dtype = d.dtype
-  dtype_via = dtypes.float32 if d.dtype == dtypes.float16 else d.dtype
+  intermediate_dtype = dtypes.float32 if d.dtype == dtypes.float16 else d.dtype
 
   f, e = frexp(d)
-  ia = (f.cast(dtype_via) * 4.294967296e9).cast(dtypes.uint64)
+  ia = (f.cast(intermediate_dtype) * 4.294967296e9).cast(dtypes.uint64)
   # extract 96 relevant bits of 2/pi based on magnitude of argument
   i = shr(e.cast(dtypes.uint64), 5)
   e = e.cast(dtypes.int32) & 31
@@ -89,13 +87,14 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
 
   def _take(an:UOp, offset:int, count:int=0) -> UOp:
     """an = two_over_pi_f[i+offset]"""
-    if count+offset <= len(two_over_pi_f[0:-2]):
+    if count+offset < len(two_over_pi_f) - 1:
       an = i.ne(count).where(_take(an, offset, count=count+1), an.const_like(two_over_pi_f[count+offset]))
     return an
-  def _shl_lazy(x, y): return (x.cast(dtypes.uint64) * pow2if(y, input_dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
-  def _shr_lazy(x, y): return (x.cast(dtypes.uint64) // pow2if(y, input_dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
-  # a_n = (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
+  def _shl_lazy(x, y): return (x.cast(dtypes.uint64) * pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
+  def _shr_lazy(x, y): return (x.cast(dtypes.uint64) // pow2if(y, d.dtype).cast(dtypes.uint64)).cast(dtypes.uint32)
+
   a = [_take(UOp.const(dtypes.uint32, 0), i) for i in range(4)]
+  #  (two_over_pi_f[Int(i) + n] << e) | (two_over_pi_f[Int(i) + n+1] >> (nbits - e))
   # Note: e >= 1 for all numbers d >= 1.0. assume e != 0
   hi = _shl_lazy(a[0], e) | _shr_lazy(a[1], offset)
   mi = _shl_lazy(a[1], e) | _shr_lazy(a[2], offset)
@@ -108,10 +107,10 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   # round quotient to nearest
   q = shr(p, 62).cast(dtypes.int32)
   p = p & 0x3fffffffffffffff
-  r = (p.cast(dtype_via) * (3.4061215800865545e-19)).cast(input_dtype)
+  r = (p.cast(intermediate_dtype) * (3.4061215800865545e-19)).cast(d.dtype)
 
   # if fraction >= 0.5, r -= pi/2, q += 1
-  return f.lt(0.5).where(r, r + (-math.pi / 2)), f.lt(0.5).where(q, q + 1)
+  return f.lt(0.5).where(r, r - math.pi/2), f.lt(0.5).where(q, q + 1)
 
 def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
   """

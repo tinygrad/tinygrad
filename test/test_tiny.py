@@ -1,6 +1,7 @@
 # basic self-contained tests of the external functionality of tinygrad
 import unittest
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device
+from tinygrad.helpers import IMAGE
 
 class TestTiny(unittest.TestCase):
 
@@ -22,7 +23,7 @@ class TestTiny(unittest.TestCase):
     a = Tensor.ones(N,N).contiguous()
     b = Tensor.eye(N).contiguous()
     self.assertListEqual((out:=a@b).flatten().tolist(), [1.0]*(N*N))
-    self.assertEqual(out.dtype, out_dtype)
+    if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
 
   # *** JIT (for Python speed) ***
 

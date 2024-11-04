@@ -9,7 +9,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN
 from tinygrad.multi import MultiLazyBuffer, reshard, find_axis_bounds
-from tinygrad.ops import MetaOps, smax, smin, resolve, UOp, UOps, BinaryOps, sint, Variable, SimpleMathTrait
+from tinygrad.ops import MetaOps, smax, smin, resolve, UOp, Ops, BinaryOps, sint, Variable, SimpleMathTrait
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule
@@ -136,7 +136,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, get_args(ConstType)): data = _metaop(MetaOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, UOp):
-      assert data.op is UOps.BIND and data.src[0].op is UOps.DEFINE_VAR and data.src[1].op is UOps.CONST, f"can't create tensor from UOp {data}"
+      assert data.op is Ops.BIND and data.src[0].op is Ops.DEFINE_VAR and data.src[1].op is Ops.CONST, f"can't create tensor from UOp {data}"
       data = _metaop(MetaOps.CONST, tuple(), dtype or data.dtype, device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
     elif isinstance(data, (list, tuple)):
@@ -262,7 +262,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
     # NOTE: this realizes on the object from as_buffer being a Python object
-    cpu = self.cast(self.dtype.scalar()).contiguous().to("CLANG").realize()
+    cpu = self.cast(self.dtype.base).contiguous().to("CLANG").realize()
     buf = cast(Buffer, cast(LazyBuffer, cpu.lazydata).base.realized)
     if self.device != "CLANG": buf.options = BufferOptions(nolru=True)
     return buf.as_buffer(allow_zero_copy=True if self.device != "CLANG" else False)
@@ -321,6 +321,15 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
 
+  def clone(self) -> Tensor:
+    """
+    Creates a clone of this tensor allocating a seperate buffer for the data.
+    """
+    ret = Tensor(self.lazydata.clone(), self.device, requires_grad=self.requires_grad)
+    if self.grad is not None: ret.grad = self.grad.clone()
+    if hasattr(self, '_ctx'): ret._ctx = self._ctx
+    return ret
+
   def to(self, device:Optional[Union[str, Tuple[str, ...]]]) -> Tensor:
     """
     Moves the tensor to the given device.
@@ -371,9 +380,9 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
-    if y.op is UOps.BIND: return Tensor(y, **kwargs, requires_grad=False)   # this is the only UOp allowed in Tensor
-    if y.op is UOps.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
-    if y.op is UOps.ALU:
+    if y.op is Ops.BIND: return Tensor(y, **kwargs, requires_grad=False)   # this is the only UOp allowed in Tensor
+    if y.op is Ops.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
+    if y.op is Ops.ALU:
       if y.arg is BinaryOps.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
       if y.arg is BinaryOps.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
       if y.arg is BinaryOps.MAX: return Tensor.from_uop(y.src[0]).maximum(Tensor.from_uop(y.src[1]))
@@ -1208,7 +1217,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     cat_dim_cumsum = [0, *itertools.accumulate(cat_dims)]
     slc:List[List[Optional[Tuple[sint, sint]]]] = [[None for _ in self.shape] for _ in catargs]
     for d,k,s in zip(cat_dims, cat_dim_cumsum[:-1], slc): s[dim] = (k, cat_dim_cumsum[-1] - k - d)
-    return functools.reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
+    return functools.reduce(Tensor.add, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
   def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
@@ -1426,10 +1435,11 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     The rolling operation is circular, meaning that elements that go beyond the edge are wrapped around to the beginning of the dimension.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.rand(3, 4, 1).roll(shifts=1, dims=0))
+    t = Tensor.arange(4)
+    print(t.roll(shifts=1, dims=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.rand(3, 4, 1).roll(shifts=-1, dims=0))
+    print(t.roll(shifts=-1, dims=0).numpy())
     ```
     """
     dims, rolled = tuple(self._resolve_dim(d) for d in make_tuple(dims, 1)), self
@@ -2333,6 +2343,20 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     return F.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
+  def hardsigmoid(self, alpha:float=1/6, beta:float=0.5):
+    """
+    Applies the Hardsigmoid function element-wise.
+    NOTE: default `alpha` and `beta` values is taken from torch
+
+    - Described: https://paperswithcode.com/method/hard-sigmoid
+    - See: https://pytorch.org/docs/stable/generated/torch.nn.functional.hardsigmoid.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).hardsigmoid().numpy())
+    ```
+    """
+    return (alpha * self + beta).relu() - (alpha * self + beta - 1).relu()
+
   def sqrt(self):
     """
     Computes the square root of the tensor element-wise.
@@ -2417,6 +2441,25 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
+
+  def isinf(self:Tensor, detect_positive:bool=True, detect_negative:bool=True):
+    """
+    Checks the tensor element-wise to return True where the element is infinity, otherwise returns False
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isinf().numpy())
+    ```
+    """
+    return (self == float("inf")) * detect_positive + (self == float("-inf")) * detect_negative
+  def isnan(self:Tensor):
+    """
+    Checks the tensor element-wise to return True where the element is NaN, otherwise returns False
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isnan().numpy())
+    ```
+    """
+    return self != self
 
   def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor:
     """

@@ -434,9 +434,15 @@
     }
     if (event.key == "Enter") {
       event.preventDefault()
+      if (currentKernel === -1) {
+        currentKernel = 0;
+        expandKernel = true;
+      }
+      else {
+        expandKernel = !expandKernel;
+      }
       currentUOp = 0;
       currentRewrite = 0;
-      expandKernel = !expandKernel;
       main();
     }
     if (event.key == "ArrowUp") {
