@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Tuple, Union, DefaultDict, Literal, Cal
 import os, math
 from collections import defaultdict, Counter
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Ops, UOp, PatternMatcher, UPat, cast_float_to_bf16
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, all_same
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer, TensorCore
 
@@ -200,6 +200,12 @@ class ClangRenderer(CStyleLanguage):
   for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(5, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}\n  AMX_SET(1);\n  return data0;\n}}"""] # noqa: E501
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
+def revectorize(v:UOp):
+  if len(v.src) != 4: return None
+  if v.src[0].op is Ops.ALU and not all_same([x.arg for x in v.src]): return None
+  new_srcs = [UOp(Ops.VECTORIZE, v.src[0].src[i].dtype.vec(v.dtype.count), tuple(x.src[i] for x in v.src)) for i in range(len(v.src[0].src))]
+  return UOp(v.src[0].op, v.dtype, tuple(new_srcs), v.src[0].arg)
+
 class OpenCLRenderer(CStyleLanguage):
   device = "GPU"
 
@@ -212,6 +218,17 @@ class OpenCLRenderer(CStyleLanguage):
   float4 = "(float4)"
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong", dtypes.bfloat16: "ushort" }
+
+  # revectorize
+  extra_matcher = PatternMatcher([
+    (UPat(Ops.VECTORIZE, src=UPat((Ops.ALU, Ops.ASSIGN)), name="v"), revectorize),
+    # vectorize DEFINE_ACC (similar to expander)
+    (UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_ACC), name="v"),
+     lambda v: UOp(Ops.DEFINE_ACC, v.dtype, (UOp.const(v.dtype, v.src[0].src[0].arg),)+v.src[0].src[1:], v.src[0].arg)),
+    # vectorize increasing GEPs = nothing
+    (UPat(Ops.VECTORIZE, src=UPat(Ops.GEP), name="v"),
+     lambda v: v.src[0].src[0] if all_same([x.src for x in v.src]) and [x.arg for x in v.src] == list(range(v.dtype.count)) else None),
+  ]) + CStyleLanguage.extra_matcher
 
   string_rewrite = PatternMatcher([
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_{ctx.render_dtype(x.dtype)}({ctx[x.src[0]]})"),
