@@ -187,6 +187,7 @@ class Compiler:
       lib = self.compile(src)
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
+  def disassemble(self, lib:bytes): pass
 
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):

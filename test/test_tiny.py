@@ -19,6 +19,10 @@ class TestTiny(unittest.TestCase):
     out = Tensor.cat(Tensor.ones(8).contiguous(), Tensor.ones(8).contiguous())
     self.assertListEqual(out.tolist(), [1]*16)
 
+  def test_sum(self):
+    out = Tensor.ones(256).contiguous().sum()
+    self.assertEqual(out.item(), 256)
+
   def test_gemm(self, N=4, out_dtype=dtypes.float):
     a = Tensor.ones(N,N).contiguous()
     b = Tensor.eye(N).contiguous()

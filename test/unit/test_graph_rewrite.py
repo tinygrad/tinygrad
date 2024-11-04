@@ -1,7 +1,7 @@
 import unittest, math
 from tinygrad import dtypes
 from tinygrad.helpers import all_same
-from tinygrad.ops import UOp, Ops, BinaryOps, exec_alu
+from tinygrad.ops import GroupOp, UOp, Ops, BinaryOps, exec_alu
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 
 # Helper function to apply the graph rewrite
@@ -14,9 +14,9 @@ def evaluate_uop(uop, variables):
   elif uop.op == Ops.DEFINE_VAR:
     var_name = uop.arg[0]
     return variables[var_name]
-  elif uop.op == Ops.ALU:
+  elif uop.op in GroupOp.ALU:
     src_values = [evaluate_uop(src, variables) for src in uop.src]
-    return exec_alu(uop.arg, uop.dtype, src_values)
+    return exec_alu(uop.op, uop.dtype, src_values)
   else:
     raise NotImplementedError(f"Unsupported UOp {uop.op}")
 
@@ -104,8 +104,7 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
   def test_full_graph_rewrite_division_folding_with_define_var(self):
     n_var_uop = UOp.variable('n', 1, 1000)
     optimized_div_uop = apply_rewrite((n_var_uop * 6) // 3)
-    self.assertEqual(optimized_div_uop.op, Ops.ALU)
-    self.assertEqual(optimized_div_uop.arg, BinaryOps.MUL)
+    self.assertEqual(optimized_div_uop.op, BinaryOps.MUL)
     self.assertEqual(optimized_div_uop.src[1].arg, 2)
 
   def test_full_graph_rewrite_complex_mod_div_folding(self):
@@ -115,7 +114,7 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
     self.assertEqual(optimized_div_uop.arg, 1)
 
   def test_graph_rewrite_div_folding_bug(self):
-    lhs = UOp(Ops.ALU, dtypes.int.vec(4), arg=BinaryOps.ADD, src=(
+    lhs = UOp(Ops.ADD, dtypes.int.vec(4), src=(
       UOp(Ops.VECTORIZE, dtypes.int.vec(4), arg=None, src=(UOp(Ops.SPECIAL, dtypes.int, arg=('lidx0', 32), src=()),)*4),
       UOp(Ops.VCONST, dtypes.int.vec(4), arg=(0, 256, 512, 768), src=())))
     rhs = UOp.const(dtypes.int.vec(4), 2)
