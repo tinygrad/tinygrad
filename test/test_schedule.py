@@ -1347,6 +1347,15 @@ class TestSchedule(unittest.TestCase):
     constv = Tensor.empty(2, 2).lazydata.const_like(10).contiguous()
     self.assertEqual(len(create_schedule([constv])), 1)
 
+  @unittest.skipIf(Device.DEFAULT != "GPU", "image only supported on GPU")
+  def test_image_matmul(self):
+    with Context(IMAGE=2):
+      x = Tensor.randn((9, 9)).realize()
+      y = Tensor.randn((9, 9)).realize()
+      out = x@y
+      run_schedule(check_schedule(out, 4))
+      np.testing.assert_allclose(out.numpy(), x.numpy()@y.numpy(), atol=1e-4, rtol=1e-4)
+
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
     with Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1)):
