@@ -114,7 +114,7 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
     self.assertEqual(optimized_div_uop.arg, 1)
 
   def test_graph_rewrite_div_folding_bug(self):
-    lhs = UOp(Ops.ALU, dtypes.int.vec(4), arg=BinaryOps.ADD, src=(
+    lhs = UOp(Ops.ADD, dtypes.int.vec(4), src=(
       UOp(Ops.VECTORIZE, dtypes.int.vec(4), arg=None, src=(UOp(Ops.SPECIAL, dtypes.int, arg=('lidx0', 32), src=()),)*4),
       UOp(Ops.VCONST, dtypes.int.vec(4), arg=(0, 256, 512, 768), src=())))
     rhs = UOp.const(dtypes.int.vec(4), 2)
