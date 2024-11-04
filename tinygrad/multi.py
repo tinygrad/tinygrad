@@ -7,20 +7,13 @@ from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, R
 from tinygrad.engine.lazy import LazyBuffer
 
 def reshard(mlb: "MultiLazyBuffer", axis: int, bounds: Tuple[Tuple[int, int], ...]):
-  shape = mlb.shape
-  shards = len(mlb.lbs)
-  n_lbs = len(mlb.lbs)
+  shape, n_lbs, original_axis = mlb.shape, len(mlb.lbs), mlb.axis
   use_ring = (RING >= 2 or (n_lbs > 2 and len(mlb.lbs[0].shape) > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   if DEBUG >= 2: print(f"{'RING RESHARD' if use_ring else 'NAIVE RESHARD'}")
-  if not use_ring:
-    gathered = [mlb.copy_to_device(lb.device) for lb in mlb.lbs]
-    sharded = to_sharded(gathered, axis, bounds)
-    return MultiLazyBuffer(sharded, axis)
+  if not use_ring: return MultiLazyBuffer(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis, bounds), axis)
 
-  originalAxis = mlb.axis
-  steps = shape[axis] // shards
-
-  chunks = [(i * steps, (i + 1) * steps) for i in range(shards)]
+  steps = shape[axis] // n_lbs
+  chunks = [(i * steps, (i + 1) * steps) for i in range(n_lbs)]
   chunked: List[List[LazyBuffer]] = []
     # E.g. four devices A, B, C, D; each holds a chunk of data (0, 1, 2, 3)
     # Matrix can be thought of being sharded on axis 1, to reshard it to 0, each device will send three chunks to other devices
@@ -45,13 +38,11 @@ def reshard(mlb: "MultiLazyBuffer", axis: int, bounds: Tuple[Tuple[int, int], ..
       src_chunk = (step + src_shard + 1) % n_lbs
       dst_shard = (src_shard + step + 1) % n_lbs
       dst_chunk = (dst_shard - step - 1) % n_lbs
-      dst_shard_stationary_chunk = dst_shard
-      dst_device = chunked[dst_shard][dst_shard_stationary_chunk].device
-      copied = chunked[src_shard][src_chunk].copy_to_device(dst_device)
+      copied = chunked[src_shard][src_chunk].copy_to_device(chunked[dst_shard][dst_shard].device)
       reassembled_chunks[dst_shard][dst_chunk] = copied
   reassembled_lbs = []
   for _chunks in cast(List[List[LazyBuffer]], reassembled_chunks):
-    pads = [[(i * shape, (shape * (n_lbs-1-i))) if _axis == originalAxis else (0, 0) for _axis, shape in enumerate(chunk.shape)]
+    pads = [[(i * shape, (shape * (n_lbs-1-i))) if _axis == original_axis else (0, 0) for _axis, shape in enumerate(chunk.shape)]
             for i, chunk in enumerate(_chunks)]
     assembled = functools.reduce(lambda x, y: x.alu(BinaryOps.ADD, y),
       [arg.pad(tuple(s)) for arg,s in zip(_chunks, pads)]
