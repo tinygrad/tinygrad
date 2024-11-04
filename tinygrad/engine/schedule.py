@@ -1,7 +1,7 @@
 import sys, atexit, functools, itertools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Callable, Set, Tuple, List, Dict, Optional, DefaultDict, cast
+from typing import Callable, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import BUFOPS, MetaOps, GroupOp, UnaryOps, UOp, Ops, PatternMatcher, UPat, Variable, graph_rewrite, track_rewrites, sint
 from tinygrad.helpers import DEBUG, Metadata, all_same, colored, diskcache_put, prod, dedup, getenv, unwrap
 from tinygrad.dtype import ImageDType, dtypes
@@ -72,7 +72,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   if buf.op in GroupOp.Reduce: ret = src[0].r(buf.op, buf.arg)
   elif buf.op is MetaOps.CONTIGUOUS: ret = UOp(Ops.CONTIGUOUS, dtype, src)
   elif buf.op is MetaOps.ASSIGN: ret = UOp(Ops.ASSIGN, dtype, (ubuf, src[1]), buf.arg)
-  elif buf.op in METAOPS: ret = UOp(METAOPS[cast(MetaOps, buf.op)], buf.dtype, (ubuf, *src), buf.arg)
+  elif buf.op in METAOPS: ret = UOp(METAOPS[buf.op], buf.dtype, (ubuf, *src), buf.arg)
   elif buf.op is UnaryOps.CAST: ret = UOp(Ops.CAST, dtype, src)
   elif buf.op is UnaryOps.BITCAST: ret = UOp(Ops.BITCAST, dtype, src)
   else: ret = UOp(Ops.ALU, dtype, src, buf.op)

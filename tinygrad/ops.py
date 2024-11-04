@@ -18,7 +18,7 @@ class FastEnum(IntEnum):
 
 class SimpleMathTrait:
   # required to implement
-  def alu(self:T, arg:Union[UnaryOps, BinaryOps, TernaryOps], *src) -> T: raise NotImplementedError
+  def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
   def const_like(self:T, b:ConstLike) -> T: raise NotImplementedError
 
   # great functions you get!
@@ -178,10 +178,10 @@ Op = UnaryOps = BinaryOps = ReduceOps = MetaOps = TernaryOps = Ops
 # do not preserve f(0) = 0
 UNSAFE_PAD_OPS = {UnaryOps.RECIP, UnaryOps.LOG2, UnaryOps.EXP2, BinaryOps.IDIV}
 
-REDUCE_ALU: Dict[ReduceOps, BinaryOps] = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.REDUCE_MAX:BinaryOps.MAX}
+REDUCE_ALU: Dict[Ops, Ops] = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.REDUCE_MAX:BinaryOps.MAX}
 
 # https://en.wikipedia.org/wiki/Identity_element
-def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
+def identity_element(op:Ops, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
 
 BUFOPS = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID}
 COMMUTATIVE = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR}
@@ -339,7 +339,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
                                              UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=idx)
-  def reduce(self, op:BinaryOps, *rng:UOp): return UOp(Ops.REDUCE, self.dtype, (self,) + rng, op)
+  def reduce(self, op:Ops, *rng:UOp): return UOp(Ops.REDUCE, self.dtype, (self,) + rng, op)
   def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op] if op in GroupOp.Reduce else op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
 
@@ -456,7 +456,7 @@ def hook_overflow(dv, fxn):
     except OverflowError: return dv
   return wfxn
 
-python_alu: Dict[Op, Callable]  = {
+python_alu: Dict[Ops, Callable]  = {
   UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, UnaryOps.EXP2: hook_overflow(math.inf, lambda x: 2**x),
   UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
   UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
@@ -466,7 +466,7 @@ python_alu: Dict[Op, Callable]  = {
   BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_, BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
   TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
-def exec_alu(op:Op, dtype:DType, operands, truncate_output=True):
+def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
   if dtype.count > 1:
     return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
   alu = python_alu[op](*operands)
@@ -842,7 +842,7 @@ def cast_float_to_bf16(x: UOp) -> UOp:
 
 # *** most of symbolic lives here now ***
 
-def split_uop(x:UOp, sep:BinaryOps):
+def split_uop(x:UOp, sep:Ops):
   if x.op is Ops.ALU and x.arg is sep:
     for s in x.src: yield from split_uop(s, sep)
   else: yield x

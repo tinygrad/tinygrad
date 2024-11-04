@@ -622,7 +622,7 @@ class Kernel:
         return op.replace(src=(op.src[0], st_uop, *[fixup_ast(x, apply_to_st) for x in op.src[2:]]))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
-        alu_op: BinaryOps = op.arg[0]
+        alu_op: Ops = op.arg[0]
         axis = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
                     if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):

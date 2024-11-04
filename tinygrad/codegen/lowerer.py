@@ -6,7 +6,7 @@ from typing import List, Tuple, cast, Optional
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import variable_to_uop
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.ops import KernelInfo, BinaryOps, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element
+from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten
 
@@ -100,7 +100,7 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
   # NOTE: always using ridxs is fine here
   reduce_range, reduce_expand = partition([ctx.ridxs[i] for i in x.axis_arg], lambda y: y.op is Ops.RANGE)
   assert all(x.op is Ops.EXPAND for x in reduce_expand), f"not all EXPANDS in {reduce_expand} for {x.axis_arg}"
-  alu_op: BinaryOps = x.arg[0]
+  alu_op: Ops = x.arg[0]
   ret = x.src[0]
   if len(contract_axis:=flatten(x.arg for x in reduce_expand)):
     ret = UOp(Ops.CONTRACT, x.dtype.vec(prod(x[1] for x in contract_axis)), (ret,), tuple(contract_axis))
