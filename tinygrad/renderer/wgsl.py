@@ -1,35 +1,35 @@
 from typing import List, Tuple
 from tinygrad.dtype import DType, PtrDType, dtypes
-from tinygrad.ops import UOp, Ops, UnaryOps, TernaryOps, BinaryOps, PatternMatcher, UPat
+from tinygrad.ops import UOp, Ops, UnaryOps, TernaryOps, PatternMatcher, UPat, GroupOp
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite
 from tinygrad.helpers import strip_parens
 import math
 
 def fixup_binops(c,a,b):
-  if c.arg == BinaryOps.CMPLT and a.dtype == dtypes.bool: return UOp(c.op, c.dtype, (a.cast(dtypes.int), b.cast(dtypes.int)), c.arg)
-  if c.arg in (BinaryOps.MAX, BinaryOps.XOR) and c.dtype == dtypes.bool:
-    return UOp(c.op, dtypes.int, (a.cast(dtypes.int), b.cast(dtypes.int)), c.arg).cast(dtypes.bool)
+  if c.op == Ops.CMPLT and a.dtype == dtypes.bool: return UOp(c.op, c.dtype, (a.cast(dtypes.int), b.cast(dtypes.int)))
+  if c.op in (Ops.XOR, Ops.MAX) and c.dtype == dtypes.bool:
+    return UOp(c.op, dtypes.int, (a.cast(dtypes.int), b.cast(dtypes.int))).cast(dtypes.bool)
 
 wgsl_matcher = PatternMatcher([
   (UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), dtype=dtypes.bool.ptr(), name="a"), lambda a: UOp(a.op, dtypes.int32.ptr(), a.src, a.arg)),
   (UPat(Ops.LOAD, name="root", dtype=dtypes.bool, src=(UPat.var("x"),UPat.var("y"),UPat.var("g", dtype=dtypes.bool))),
     lambda root,x,y,g: UOp(root.op, dtypes.int, (x,y.cast(dtypes.int), g), root.arg).cast(dtypes.bool)),
   (UPat(Ops.LOAD, name="root", dtype=dtypes.bool, src=(UPat())), lambda root: UOp(root.op, dtypes.int, root.src, root.arg).cast(dtypes.bool)),
-  (UPat(Ops.ALU, src=(UPat(name="a"), UPat(name="b")), name="c"), fixup_binops),
-  *[(UPat(Ops.ALU, src=(UPat(name="b", dtype=(dtypes.uint, dtypes.int, dtypes.bool))), arg=a, name="a"),
-     lambda a,b: UOp(a.op, dtypes.float, (b.cast(dtypes.float),), a.arg).cast(b.dtype))
+  (UPat(GroupOp.ALU, src=(UPat(name="a"), UPat(name="b")), name="c"), fixup_binops),
+  *[(UPat(a, src=(UPat(name="b", dtype=(dtypes.uint, dtypes.int, dtypes.bool))), name="a"),
+     lambda a,b: UOp(a, dtypes.float, (b.cast(dtypes.float),)).cast(b.dtype))
     for a in (UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2, UnaryOps.SQRT)],
   (UPat.store(UPat.var("bidx"), UPat.var("var", dtype=dtypes.bool), UPat.var("gate")),
    lambda bidx,val,gate: UOp.store(bidx, val.cast(dtypes.int), gate)),
   (UPat.store(UPat.var("bidx"), UPat.var("var", dtype=dtypes.bool)), lambda bidx,var: UOp.store(bidx, var.cast(dtypes.int))),
-  (UPat(Ops.ALU, name="m", arg=BinaryOps.MAX), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
-  (UPat(Ops.ALU, name="m", src=(UPat(name="a"), UPat(Ops.ALU, arg=TernaryOps.WHERE, src=(UPat.var("g"), \
-    UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2")))), dtype=dtypes.ulong,  arg=BinaryOps.MUL), \
-    lambda m,a,g,c1,c2: UOp(Ops.ALU, arg=TernaryOps.WHERE, dtype=m.dtype, src=(g, a << 32, UOp.const(dtype=m.dtype, b=0))) \
+  (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
+  (UPat(Ops.MUL, name="m", src=(UPat(name="a"), UPat(TernaryOps.WHERE, src=(UPat.var("g"), \
+    UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2")))), dtype=dtypes.ulong), \
+    lambda m,a,g,c1,c2: UOp(TernaryOps.WHERE, dtype=m.dtype, src=(g, a << 32, UOp.const(dtype=m.dtype, b=0))) \
     if c1.arg == 4294967296 and c2.arg == 0 else None),
-  (UPat(Ops.ALU, name="m", src=(UPat(name="a"), UPat(Ops.ALU, arg=TernaryOps.WHERE, src=(UPat.var("g"), \
-    UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2")))), arg=BinaryOps.MUL), \
-    lambda m,a,g,c1,c2: UOp(Ops.ALU, arg=TernaryOps.WHERE, dtype=m.dtype, src=(g, UOp.const(dtype=dtypes.float, b=float('nan')), a)) \
+  (UPat(Ops.MUL, name="m", src=(UPat(name="a"), UPat(TernaryOps.WHERE, src=(UPat.var("g"), \
+    UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2"))))), \
+    lambda m,a,g,c1,c2: UOp(TernaryOps.WHERE, dtype=m.dtype, src=(g, UOp.const(dtype=dtypes.float, b=float('nan')), a)) \
     if math.isnan(c1.arg) and c2.arg == 1.0 else None),
   ])
 
@@ -74,11 +74,11 @@ class WGSLRenderer(CStyleLanguage):
       lambda ctx,bidx,var,gate: f"select({ctx[var]}, {render_load_store(ctx, bidx)}, {ctx[gate]})"),
     (UPat(Ops.LOAD, src=(UPat.var('bidx'),), allow_any_len=True), lambda ctx,bidx: f"{render_load_store(ctx, bidx)}"),
     (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var")), allow_any_len=True),
-     lambda ctx,bidx,var: f"{render_load_store(ctx,bidx)} = {ctx[var]};"), ]) + base_rewrite + PatternMatcher([
-    (UPat(Ops.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHL), lambda ctx,x: render_ushift(ctx, x.src[0], x.src[1], left=True)),
-    (UPat(Ops.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHR), lambda ctx,x: render_ushift(ctx, x.src[0], x.src[1], left=False)),
-    (UPat(Ops.ALU, arg=BinaryOps.CMPNE, src=(UPat.var("a"), UPat.var("b"))), lambda ctx,a,b: f"is_nan({ctx[a]})" if a == b else None),
-  ])
+     lambda ctx,bidx,var: f"{render_load_store(ctx,bidx)} = {ctx[var]};"),
+    (UPat(Ops.CMPNE, src=(UPat.var("a"), UPat.var("b"))), lambda ctx,a,b: f"is_nan({ctx[a]})" if a == b else None),
+    (UPat(Ops.SHL, name="x", dtype=dtypes.ulong), lambda ctx,x: render_ushift(ctx, x.src[0], x.src[1], left=True)),
+    (UPat(Ops.SHR, name="x", dtype=dtypes.ulong), lambda ctx,x: render_ushift(ctx, x.src[0], x.src[1], left=False)),
+  ]) + base_rewrite
 
   def render_dtype(self, dt:DType, mutable=True) -> str: return "var"
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
