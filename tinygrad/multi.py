@@ -6,26 +6,6 @@ from tinygrad.dtype import DType
 from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps, MathTrait, sint
 from tinygrad.engine.lazy import LazyBuffer
 
-def find_paddings_for_concat(axis: int, shapes: List[Tuple[sint, ...]]):
-  cat_dims = [s[axis] for s in shapes]
-  cat_dim_cumsum = [0, *itertools.accumulate(cat_dims)]
-  slc:List[List[Optional[Tuple[sint, sint]]]] = [[(0,0) for _ in range(len(shapes[0]))] for _ in shapes]
-  for d,k,s in zip(cat_dims, cat_dim_cumsum[:-1], slc):
-    s[axis] = (k, cat_dim_cumsum[-1] - k - d)
-  return slc
-
-def find_axis_bounds(shape: Tuple[sint, ...], num_shards: int, axis: Optional[int]=None, splits: Optional[Tuple[int, ...]]=None):
-  if axis is None: return None, None
-  if axis < 0: axis += len(shape)
-  if splits is None:
-    if not isinstance(total:=shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {shape=}, {axis=}")
-    sz = round_up(total, num_shards) // num_shards
-    splits = tuple([max(0, min(sz, total - sz*i)) for i in range(num_shards)])
-  assert sum(splits) == shape[axis], "specified splits do not sum up to axis shape"
-  boundaries = tuple(itertools.accumulate(splits))
-  bounds = tuple(zip((0,) + boundaries, boundaries))
-  return axis, bounds
-
 def reshard(mlb: "MultiLazyBuffer", axis: int, bounds: Tuple[Tuple[sint, sint], ...]):
   shape = mlb.shape
   shards = len(mlb.lbs)
