@@ -509,7 +509,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
     elif u.op is Ops.STORE:
       mem += u.src[1].dtype.itemsize * mults
     elif u.op in GroupOp.ALU and u not in dont_count:
-      flops += (mults * (2 if u.arg == TernaryOps.MULACC else 1)) * u.dtype.count
+      flops += (mults * (2 if u.op is TernaryOps.MULACC else 1)) * u.dtype.count
     elif u.op is Ops.WMMA and u not in dont_count:
       flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
   return flops, mem
