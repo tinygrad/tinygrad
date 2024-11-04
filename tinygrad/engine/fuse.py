@@ -2,7 +2,7 @@ import sys
 from collections import defaultdict, deque
 from typing import Set, Tuple, List, Dict, DefaultDict
 from tinygrad.ops import GroupOp, MetaOps, ReduceOps, UOp, UnaryOps, resolve
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, getenv, prod, dedup, all_int, merge_dicts
+from tinygrad.helpers import DEBUG, FUSE_CONV_BW, FUSE_ARANGE, getenv, prod, dedup, all_int, merge_dicts
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.engine.lazy import LazyBuffer
@@ -92,9 +92,9 @@ def get_realizes(outs:List[LazyBuffer], ctx) -> Tuple[List[List[UOp]], Dict[Buff
 
   # check if we have to realize pads
   for p in simple_pads:
-    y = _is_padding_okay(p, realizes, {})
-    print(p, y)
-    if not y:
+    can_pad = _is_padding_okay(p, realizes, {})
+    if DEBUG >= 3: print(p, can_pad, ctx.buf_uops[p.buffer].arg[0])
+    if not can_pad:
       realizes[p] = None
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
