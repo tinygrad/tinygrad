@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
 from typing import List, Any, Tuple, Optional, cast
-from tinygrad.helpers import prod, getenv, DEBUG, T
+from tinygrad.helpers import prod, getenv, T
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -24,7 +24,6 @@ class MTLPipelineOption:
 
 libobjc = ctypes.CDLL("/usr/lib/libobjc.dylib")
 libmetal = ctypes.CDLL("/System/Library/Frameworks/Metal.framework/Metal")
-# Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
 ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
 libdispatch = ctypes.CDLL("/usr/lib/libSystem.dylib") # libdispatch is part of libSystem on mac
 libobjc.objc_getClass.restype = objc_id
@@ -56,39 +55,36 @@ def error_check(error: objc_instance, error_constructor: type[Exception] = Runti
   if error.value is None: return None
   raise error_constructor(bytes(msg(msg(error, "localizedDescription", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode())
 
-class MetalCompiler(Compiler):
-  def __init__(self, device:Optional[MetalDevice]):
-    self.device = device
-    super().__init__("compile_metal")
+class MetalXCodeCompiler(Compiler):
+  def __init__(self): super().__init__("compile_metal_xcode")
   def compile(self, src:str) -> bytes:
-    if self.device is None:
-      # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
-      air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
-      return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-    options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
-    msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
-    compileError = objc_instance()
-    library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(src),
-                  options, ctypes.byref(compileError), restype=objc_instance)
-    error_check(compileError, CompileError)
-    library_contents = msg(library, "libraryDataContents", restype=objc_instance)
-    return ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
+    air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
+    return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+  def disassemble(self, lib:bytes):
+    with tempfile.NamedTemporaryFile(delete=True) as shader:
+      shader.write(lib)
+      shader.flush()
+      ret = os.system(f"cd {pathlib.Path(__file__).parents[2]}/extra/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
+      if ret:
+        print("Error running disassembler: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
-    if DEBUG >= 6:
-      with tempfile.NamedTemporaryFile(delete=True) as shader:
-        shader.write(lib)
-        shader.flush()
-        ret = os.system(f"cd {pathlib.Path(__file__).parents[2]}/extra/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
-        if ret:
-          print("Error running disassembler: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
-    assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
-    data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-    error_library_creation = objc_instance()
-    self.library = msg(self.device.device, "newLibraryWithData:error:", data, ctypes.byref(error_library_creation), restype=objc_instance)
-    error_check(error_library_creation)
+    if lib[:4] == b"MTLB":
+      # binary metal library from xcode
+      data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
+      error_library_creation = objc_instance()
+      self.library = msg(self.device.device, "newLibraryWithData:error:", data, ctypes.byref(error_library_creation), restype=objc_instance)
+      error_check(error_library_creation)
+    else:
+      # metal source. rely on OS caching
+      options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
+      msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
+      compileError = objc_instance()
+      self.library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(lib.decode()),
+                    options, ctypes.byref(compileError), restype=objc_instance)
+      error_check(compileError, CompileError)
     self.fxn = msg(self.library, "newFunctionWithName:", to_ns_str(name), restype=objc_instance)
     descriptor = msg(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"), "new", restype=objc_instance)
     msg(descriptor, "setComputeFunction:", self.fxn)
@@ -171,7 +167,7 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler(None if getenv("METAL_XCODE") else self),
+    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalXCodeCompiler() if getenv("METAL_XCODE") else Compiler(),
                      functools.partial(MetalProgram, self), MetalGraph)
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
