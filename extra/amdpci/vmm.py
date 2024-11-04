@@ -1,4 +1,4 @@
-from tinygrad.runtime.autogen import libpciaccess, amdgpu_2
+from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_gc_11_0_0
 from tinygrad.helpers import to_mv, mv_address, round_up
 
 class VMM:
@@ -38,6 +38,15 @@ class VMM:
   def vram_to_cpu_addr(self, addr, size=0): return self.adev.vram_cpu_addr + addr
   def vram_to_cpu_mv(self, addr, size): return to_mv(self.adev.vram_cpu_addr + addr, size)
 
+  def collect_pfs(self):
+    gfx = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_PROTECTION_FAULT_STATUS, 0)
+    mmhub = self.adev.rreg_ip("MMHUB", 0, 0x070c, 0) ## MMVM_L2_PROTECTION_FAULT_STATUS
+
+    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_PROTECTION_FAULT_STATUS, 0, 0)
+    # self.adev.wreg_ip("MMHUB", 0, 0x070c, 0, 0)
+    # mmhub = self.adev.rreg_ip("MMHUB", 0, 0x070c, 0) ## MMVM_L2_PROTECTION_FAULT_STATUS
+    return gfx, mmhub
+
   def amdgpu_gmc_init_pdb0(self):
     # idenity mapping for the whole vram, not sure how we can map system pages, we need dma_addresses (are they just cpu's physical addr?)
     vmid0_page_table_block_size = 0
@@ -50,7 +59,8 @@ class VMM:
     flags |= amdgpu_2.AMDGPU_PTE_FRAG((vmid0_page_table_block_size + 9*1))
     flags |= amdgpu_2.AMDGPU_PDE_PTE
 
-    pde0_page_size = (1<<vmid0_page_table_block_size)<<21 # 2mb
+    # pde0_page_size = (1<<vmid0_page_table_block_size)<<21 # 2mb
+    pde0_page_size = 1 << 30 # 1gb
 
     vram_base = 0
     # vram_size = 512 << 20

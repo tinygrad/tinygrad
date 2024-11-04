@@ -1,6 +1,10 @@
 import os, ctypes, time
 from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_mp_13_0_0_offset, amdgpu_psp_gfx_if
 from tinygrad.helpers import to_mv, mv_address
+from extra.amdpci.firmware import Firmware
+
+# smu = Firmware()
+# mes = Firmware()
 
 class PSP_IP:
   SOS_PATH = "/lib/firmware/amdgpu/psp_13_0_0_sos.bin"
@@ -97,16 +101,15 @@ class PSP_IP:
 
     print("sOS ring created")
 
-  def prep_load_ip_fw_cmd_buf(self, phys_addr):
+  def prep_load_ip_fw_cmd_buf(self, phys_addr, phys_size, fw_type):
     assert ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp) == 1024
     ctypes.memset(self.adev.vmm.vram_to_cpu_addr(self.cmd_buf, 0x1000), 0, 0x1000)
     cmd = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.adev.vmm.vram_to_cpu_addr(self.cmd_buf))
     cmd.cmd_id = amdgpu_psp_gfx_if.GFX_CMD_ID_LOAD_IP_FW
     cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = phys_addr & 0xffffffff
     cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi = phys_addr >> 32
-    # psp_gfx_cmd_resp
-    # TODO
-    pass
+    cmd.cmd.cmd_load_ip_fw.fw_size = phys_size
+    cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
 
   def prep_boot_config_get(self):
     assert ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp) == 1024
@@ -145,15 +148,13 @@ class PSP_IP:
       self.adev.wreg_ip("HDP", 0, 0x00d1, 0x0, 1)
       # print("now", fence_view[0])
     print(fence_view[0])
-  
+
   def execute_ip_fw_load(self):
     pass
 
-  
   def load_smu_fw(self):
     self.prep_boot_config_get()
     self.cmd_submit_buf()
-    pass
 
   def hw_start(self):
     self.bootloader_load_sos()

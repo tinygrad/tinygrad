@@ -20,9 +20,9 @@ while True:
     dev_fmt = "{:04x}:{:02x}:{:02x}.{:d}".format(pcidev.contents.domain_16, pcidev.contents.bus, pcidev.contents.dev, pcidev.contents.func)
     if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:86:00.0": continue # skip it, use for kernel hacking.
-    # if dev_fmt == "0000:c6:00.0": continue # skip it, use for kernel hacking.
+    if dev_fmt == "0000:c6:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:44:00.0": continue # skip it, use for kernel hacking.
-    if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
+    # if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:c3:00.0": continue # skip it, use for kernel hacking.
     # print(dev_fmt)
     # exit(0)
@@ -80,7 +80,7 @@ class AMDDev:
     self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0, 0)
     self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, 0, 0)
 
-    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, (512 << 20) - 1)
+    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, (1 << 30) - 1)
     self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32, 0, 0)
 
     self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0, self.vmm.pdb0_base & 0xffffffff)
@@ -88,7 +88,7 @@ class AMDDev:
 
     v = self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0)
     # print(v, "CC")
-    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0, 0x1fffe03)
+    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0, 0x1fffe05)
     # hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0))
     # print("ccc", hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0)))
 
@@ -100,6 +100,10 @@ class AMDDev:
 
   def rreg(self, reg): return self.pci_mmio[reg]
   def wreg(self, reg, val): self.pci_mmio[reg] = val
+
+  def reg_off(self, ip, inst, seg):
+    off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
+    return off
 
   def rreg_ip(self, ip, inst, reg, seg, offset=0):
     off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
@@ -139,11 +143,12 @@ class AMDDev:
   def gfx_v11_0_gfxhub_enable(self):
     from extra.amdpci.gfxhub import gfxhub_v3_0_gart_enable
     if DEBUG >= 2: print("start gfx_v11_0_gfxhub_enable")
-    gfxhub_v3_0_gart_enable(self)
-    self.hdp_v6_0_flush_hdp()
+    # gfxhub_v3_0_gart_enable(self)
+    # self.hdp_v6_0_flush_hdp()
 
     self.gmc_v11_0_flush_gpu_tlb()
     self.hdp_v6_0_flush_hdp()
+    print("start gfx_v11_0_gfxhub_enable")
   
   def get_gb_addr_config(self):
     gb_addr_config = self.rreg(regGB_ADDR_CONFIG)

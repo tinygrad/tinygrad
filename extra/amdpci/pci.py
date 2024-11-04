@@ -1975,6 +1975,8 @@ def mes_v11_0_enable():
   # print([hex(x >> 2) for x in mes_uc_start_addr])
   amdgpu_wreg(0xc807, 0x40030000)  # regCP_MES_CNTL
   for pipe in range(2):
+    print("st", hex(mes_uc_start_addr[pipe]))
+
     soc21_grbm_select(3, pipe, 0, 0)
     amdgpu_wreg(0xc800, (mes_uc_start_addr[pipe] >> 2) & 0xffffffff) # mes_v11_0_enable:685:((adev->reg_offset[GC_HWIP][0][1] + 0x2800))
     amdgpu_wreg(0xc89d, (mes_uc_start_addr[pipe] >> 34)) # mes_v11_0_enable:687:((adev->reg_offset[GC_HWIP][0][1] + 0x289d))
@@ -2041,8 +2043,8 @@ def mes_v11_0_mqd_init(ring):
   ring.mqd.cp_hqd_pq_rptr_report_addr_lo = ring.rptr_gpu_addr & 0xfffffffc
   ring.mqd.cp_hqd_pq_rptr_report_addr_hi = (ring.rptr_gpu_addr >> 32) & 0xffffffff
 
-  ring.mqd.cp_hqd_pq_wptr_report_addr_lo = ring.wptr_gpu_addr & 0xfffffffc
-  ring.mqd.cp_hqd_pq_wptr_report_addr_hi = (ring.wptr_gpu_addr >> 32) & 0xffffffff
+  ring.mqd.cp_hqd_pq_wptr_poll_addr_lo = ring.wptr_gpu_addr & 0xfffffffc
+  ring.mqd.cp_hqd_pq_wptr_poll_addr_hi = (ring.wptr_gpu_addr >> 32) & 0xffffffff
   ring.mqd.cp_hqd_pq_control = 0xd8308011
 
   ring.mqd.cp_hqd_pq_doorbell_control = 0x40000060
@@ -2119,7 +2121,7 @@ def gfx_v11_0_ring_test_ring():
   amdgpu_mm_wdoorbell64(the_ring.doorbell_index, the_ring.next_ptr)
 
   while True:
-    print("now", hex(amdgpu_rreg(0xc040)))
+    # print("now", hex(amdgpu_rreg(0xc040)))
     if amdgpu_rreg(0xc040) == 0xdeadc0de:
       break
 
