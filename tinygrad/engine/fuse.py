@@ -1,7 +1,7 @@
 import sys
 from collections import defaultdict, deque
 from typing import Tuple, List, Dict, DefaultDict
-from tinygrad.ops import UNSAFE_PAD_OPS, MetaOps, ReduceOps, UOp, UnaryOps, resolve, GroupOp
+from tinygrad.ops import GroupOp, MetaOps, ReduceOps, UOp, UnaryOps, resolve
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, prod, dedup, all_int, merge_dicts
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -46,7 +46,7 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict
   if (n:=cache.get(buf)) is not None: return n
   if buf in realizes: return True
   # NOTE: this broke to_image_idx and coder with JIT
-  if buf.op in UNSAFE_PAD_OPS: return False
+  if buf.op in GroupOp.UnsafePad: return False
   cache[buf] = ret = all(_is_padding_okay(x.base, realizes, cache) for x in buf.srcs)
   return ret
 
