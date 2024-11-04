@@ -73,6 +73,7 @@ class WGSLRenderer(CStyleLanguage):
      lambda ctx,bidx,var: f"{render_load_store(ctx,bidx)} = {ctx[var]};"), ]) + base_rewrite + PatternMatcher([
     (UPat(Ops.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHL), lambda ctx,x: render_ushift(ctx, x.src[0], x.src[1], left=True)),
     (UPat(Ops.ALU, name="x", dtype=dtypes.ulong, arg=BinaryOps.SHR), lambda ctx,x: render_ushift(ctx, x.src[0], x.src[1], left=False)),
+    (UPat(Ops.ALU, arg=BinaryOps.CMPNE, src=(UPat.var("a"), UPat.var("b"))), lambda ctx,a,b: f"is_nan({ctx[a]})" if a == b else None),
   ])
 
   def render_dtype(self, dt:DType, mutable=True) -> str: return "var"
@@ -81,6 +82,8 @@ class WGSLRenderer(CStyleLanguage):
     if not local_size: local_size = [1]
     bind_it = iter(range(len(bufs)))
     prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
+    # trick to obfuscate compiler so that nan is detected properly
+    prg += "fn is_nan(v:f32) -> bool { return min(v, 1.0) == 1.0 && max(v, -1.0) == -1.0; }\n"
     prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
     prg += "\n".join((prefix or [])+[f"@group(0) @binding({next(bind_it)+1}) {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}: {f'array<{self.type_map[dtype.base]}>' if isinstance(dtype, PtrDType) else 'i32'};" for name,(dtype,rw) in bufs])  # noqa: E501
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501

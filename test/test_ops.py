@@ -361,7 +361,6 @@ class TestOps(unittest.TestCase):
     np.testing.assert_equal(Tensor(val).isinf(detect_positive=True, detect_negative=False).numpy(), [False, False, True, False, False])
     np.testing.assert_equal(Tensor(val).isinf(detect_positive=False, detect_negative=True).numpy(), [True, False, False, False, False])
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "nan behavior is strange on WebGPU")
   def test_isnan(self):
     helper_test_op(None, torch.isnan, Tensor.isnan, vals=[[float('-inf'), 0., float('inf'), float('nan'), 1.1]], forward_only=True)
 
