@@ -61,7 +61,7 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   for u in x.sparents:
     if u.op is Ops.CONST: continue
-    label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
+    label = f"{str(u.op).split(".")[1]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
       if x.op is Ops.CONST: label += f"\nCONST{idx} {x.arg:g}"
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x.op is not Ops.CONST], str(u.arg), uops_colors.get(u.op, "#ffffff"))
