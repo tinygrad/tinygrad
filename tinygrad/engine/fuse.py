@@ -1,7 +1,7 @@
 import sys
 from collections import defaultdict, deque
 from typing import Set, Tuple, List, Dict, DefaultDict
-from tinygrad.ops import GroupOp, MetaOps, Ops, ReduceOps, UOp, UnaryOps, resolve
+from tinygrad.ops import GroupOp, MetaOps, ReduceOps, UOp, UnaryOps, resolve
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, prod, dedup, all_int, merge_dicts
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -147,7 +147,7 @@ def get_realizes(outs:List[LazyBuffer], ctx) -> Tuple[List[List[UOp]], Dict[Buff
 
   for r in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is r}
-    if any(tr.op is Ops.CONTIGUOUS for tr in group) or any(x.base in group for x in outs): continue
+    if any(tr.forced_realize for tr in group) or any(x.base in group for x in outs): continue
     kernel_children = {c for tr in group for c in children[tr] if c.op not in {MetaOps.COPY, MetaOps.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group:

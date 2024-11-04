@@ -77,6 +77,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   else: ret = UOp(Ops.ALU, dtype, src, buf.op)
   cache[buf] = ret = UOp(Ops.LOAD, dtype, (ubuf, buf.st.to_uop(), UOp.store(ubuf, ShapeTracker.from_shape(buf.shape).to_uop(), ret)))
   if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
+  if buf.forced_realize: ctx.realizes[ubuf] = ubuf
   return ret
 
 # **** AST graph rewrite
@@ -244,12 +245,12 @@ break_sched = PatternMatcher([(UPatLoadStore(), lambda ctx,b,store,load: realize
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if len(outs:=dedup(x.base for x in outs if x.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
+  for out in outs: out.forced_realize = True
   # create the big graph
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
   big_graph = UOp.sink(*(to_uop(x, ctx, cache) for x in outs))
   # get realizes
-  ctx.realizes.update(((u:=ctx.buf_uops[x.buffer]), u) for x in outs)
   graph_rewrite(big_graph, do_realize, ctx.realizes)
   store_groups, lazybufs_to_realize, assigns = get_realizes(outs, ctx)
   # split realizes into small graphs

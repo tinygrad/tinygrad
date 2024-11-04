@@ -41,6 +41,7 @@ class LazyBuffer(MathTrait):
         self.buffer = srcs[0].base.buffer if self.op is MetaOps.ASSIGN else Buffer(device, self.size, self.dtype)
       self.buffer.ref(1)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
+      self.forced_realize = False
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
@@ -92,7 +93,8 @@ class LazyBuffer(MathTrait):
       ret = self.alu(MetaOps.BUFFER_VIEW) if allow_buffer_view and self.can_view() else self.alu(MetaOps.CONTIGUOUS)
       if (sti := self.st.invert(self.base.shape)) is not None: self.base.contiguous_child = ref(ret), sti
       return ret
-    return self.alu(MetaOps.CONTIGUOUS)
+    self.base.forced_realize = True
+    return self
 
   def bitcast(self, dtype:DType) -> LazyBuffer: return self.cast(dtype, bitcast=True)
   def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True) -> LazyBuffer:
