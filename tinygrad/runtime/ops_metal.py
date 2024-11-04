@@ -78,15 +78,14 @@ class MetalCompiler(Compiler):
       library = metal_src_to_library(self.device, src)
       library_contents = msg(library, "libraryDataContents", restype=objc_instance)
       lib = ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
-    assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
+    assert lib[:4] == b"MTLB", "Invalid Metal library. Using conda? Corrupt XCode?"
     return lib
   def disassemble(self, lib:bytes):
     with tempfile.NamedTemporaryFile(delete=True) as shader:
       shader.write(lib)
       shader.flush()
       ret = os.system(f"cd {pathlib.Path(__file__).parents[2]}/extra/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
-      if ret:
-        print("Error running disassembler: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
+      if ret: print("Disassembler Error: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
