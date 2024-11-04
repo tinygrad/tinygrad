@@ -28,7 +28,7 @@ if REF == "master": SKIP_PROCESS_REPLAY = True
 
 # *** recreators
 
-def recreate_sched(*args) -> UOp: return full_ast_rewrite(*args[0], ubuf_metadata={})[0]
+def recreate_sched(*args) -> UOp: return full_ast_rewrite(*args[0])[0]
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str, _) -> str:
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)

@@ -295,13 +295,50 @@ class TestUint64DType(TestDType):
 
 class TestBoolDType(TestDType): DTYPE = dtypes.bool
 
+class TestPtrDType(unittest.TestCase):
+  def test_vec_double(self):
+    dt1 = dtypes.float.vec(4).ptr().vec(4)
+    dt2 = dtypes.float.vec(4).ptr().vec(4)
+    self.assertEqual(dt1, dt2)
+    self.assertEqual(str(dt1), str(dt2))
+
+  def test_scalar(self):
+    dt = dtypes.float.vec(4).ptr().scalar()
+    self.assertEqual(dt.base, dtypes.float.vec(4))
+
+    dt = dtypes.float.vec(4).ptr().vec(4).scalar()
+    self.assertEqual(dt.base, dtypes.float.vec(4))
+
+    dt = dtypes.float.vec(4).scalar()
+    self.assertEqual(dt, dtypes.float)
+
+  def test_serialize(self):
+    dt = dtypes.float.vec(4).ptr().vec(4)
+    self.assertEqual(dt, eval(str(dt)))
+
+  def test_vcount(self):
+    dt = dtypes.float.ptr().vec(4)
+    self.assertEqual(dt.vcount, 4)
+    self.assertEqual(dt.v, 4)
+    self.assertEqual(dt.count, 1)
+
+    dt = dtypes.float.vec(4).ptr()
+    self.assertEqual(dt.vcount, 1)
+    self.assertEqual(dt.v, 1)
+    self.assertEqual(dt.count, 4)
+
+    dt = dtypes.float.vec(4).ptr().vec(4)
+    self.assertEqual(dt.vcount, 4)
+    self.assertEqual(dt.v, 4)
+    self.assertEqual(dt.count, 4)
+
 class TestImageDType(unittest.TestCase):
   def test_image_scalar(self):
-    assert dtypes.imagef((10,10)).scalar() == dtypes.float32
-    assert dtypes.imageh((10,10)).scalar() == dtypes.float32
+    assert dtypes.imagef((10,10)).base.scalar() == dtypes.float32
+    assert dtypes.imageh((10,10)).base.scalar() == dtypes.float32
   def test_image_vec(self):
-    assert dtypes.imagef((10,10)).vec(4) == dtypes.float32.vec(4)
-    assert dtypes.imageh((10,10)).vec(4) == dtypes.float32.vec(4)
+    assert dtypes.imagef((10,10)).base.vec(4) == dtypes.float32.vec(4)
+    assert dtypes.imageh((10,10)).base.vec(4) == dtypes.float32.vec(4)
 
 class TestEqStrDType(unittest.TestCase):
   def test_image_ne(self):
@@ -311,14 +348,9 @@ class TestEqStrDType(unittest.TestCase):
     assert dtypes.imageh((1,2,4)) != dtypes.imageh((1,4,2)), "different shape doesn't match"
     assert dtypes.imageh((1,2,4)) == dtypes.imageh((1,2,4)), "same shape matches"
     assert isinstance(dtypes.imageh((1,2,4)), ImageDType)
-  def test_ptr_ne(self):
-    if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
-    # TODO: is this the wrong behavior?
-    assert dtypes.float32.ptr() == dtypes.float32
-    assert not (dtypes.float32.ptr() != dtypes.float32)
+  def test_ptr_eq(self):
     assert dtypes.float32.ptr() == dtypes.float32.ptr()
     assert not (dtypes.float32.ptr() != dtypes.float32.ptr())
-    #assert dtypes.float32.ptr() != dtypes.float32
   def test_strs(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")

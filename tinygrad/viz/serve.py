@@ -5,13 +5,13 @@ from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Tuple, Optional
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
-from tinygrad.ops import TrackedRewriteContext, UOp, UOps, lines
+from tinygrad.ops import TrackedRewriteContext, UOp, Ops, lines
 from tinygrad.codegen.kernel import Kernel
 
-uops_colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.CONST: "#e0e0e0", UOps.VCONST: "#e0e0e0",
-               UOps.DEFINE_GLOBAL: "#ffe0b0", UOps.DEFINE_LOCAL: "#ffe0d0", UOps.DEFINE_ACC: "#f0ffe0", UOps.REDUCE: "#C4A484",
-               UOps.RANGE: "#c8a0e0", UOps.ASSIGN: "#e0ffc0", UOps.BARRIER: "#ff8080", UOps.IF: "#c8b0c0", UOps.SPECIAL: "#c0c0ff",
-               UOps.WMMA: "#efefc0", UOps.VIEW: "#C8F9D4", UOps.REDUCE_AXIS: "#f58488"}
+uops_colors = {Ops.ALU: "#ffffc0", Ops.LOAD: "#ffc0c0", Ops.STORE: "#c0ffc0", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0",
+               Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_ACC: "#f0ffe0", Ops.REDUCE: "#C4A484",
+               Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#e0ffc0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
+               Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", Ops.REDUCE_AXIS: "#f58488"}
 
 # ** API spec
 
@@ -50,7 +50,7 @@ def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List
   for k,ctxs in contexts:
     name = to_function_name(k.name) if isinstance(k, Kernel) else k
     for ctx in ctxs:
-      if ctx.sink.op is UOps.CONST: continue
+      if ctx.sink.op is Ops.CONST: continue
       upats = [(upat.location, upat.printable(), tm) for _,_,upat,tm in ctx.matches if upat is not None]
       if name not in kernels: kernels[name] = []
       kernels[name].append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
@@ -60,18 +60,20 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
   for u in x.sparents:
-    if u.op is UOps.CONST: continue
+    if u.op is Ops.CONST: continue
     label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
-      if x.op is UOps.CONST: label += f"\nCONST{idx} {x.arg:g}"
-    graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x.op is not UOps.CONST], str(u.arg), uops_colors.get(u.op, "#ffffff"))
+      if x.op is Ops.CONST: label += f"\nCONST{idx} {x.arg:g}"
+    graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x.op is not Ops.CONST], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
 def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
   if (found:=replaces.get(base)) is not None: return found
   replaces[base] = ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
   return ret
 @functools.lru_cache(None)
-def _prg(k:Optional[Kernel]) -> Optional[str]: return k.to_program().src if isinstance(k, Kernel) else None
+def _prg(k:Optional[Kernel]) -> Optional[str]:
+  try: return k.to_program().src if isinstance(k, Kernel) else None
+  except Exception: return None
 def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata) -> GraphRewriteDetails:
   g = GraphRewriteDetails(**asdict(metadata), graphs=[ctx.sink], diffs=[], changed_nodes=[], kernel_code=pcall(_prg, k))
   replaces: Dict[UOp, UOp] = {}
@@ -86,7 +88,7 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
     if new_sink is sink:
       raise AssertionError(f"rewritten sink wasn't rewritten! {i} {unwrap(upat).location}")
     # update ret data
-    g.changed_nodes.append([id(x) for x in u1.sparents if x.op is not UOps.CONST])
+    g.changed_nodes.append([id(x) for x in u1.sparents if x.op is not Ops.CONST])
     g.diffs.append(list(difflib.unified_diff(pcall(str, u0).splitlines(), pcall(str, u1).splitlines())))
     g.graphs.append(sink:=new_sink)
   return g
