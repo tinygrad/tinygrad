@@ -442,7 +442,7 @@ class Kernel:
       check(axis < self.first_upcast, "cannot pad upcasted")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
       if (r:=self.reduceop) is not None and self.first_reduce <= axis:
-        check(r.arg[0] is BinaryOps.ADD and not any(u.op is Ops.ALU and u.arg in GroupOp.UnsafePad for u in r.parents), "cannot pad UnsafePad")
+        check(r.arg[0] is BinaryOps.ADD and not any(u.op in GroupOp.UnsafePad for u in r.parents), "cannot pad UnsafePad")
       padded = False
       for i,st in enumerate(self.sts):
         if (s:=st.shape[axis]) == 1: continue  # reduced
@@ -628,7 +628,7 @@ class Kernel:
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
           rsrc = op.src[0]
           if rsrc.op is Ops.CAST: rsrc = rsrc.src[0]
-          assert rsrc.op is Ops.ALU and rsrc.arg is BinaryOps.MUL
+          assert rsrc.op is Ops.MUL
 
           def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
             wd, tcd = self.global_dims, self.first_upcast
