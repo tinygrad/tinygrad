@@ -48,7 +48,7 @@ eval_interval_mod = eval_interval - 1
 # dim = 64
 # n_layers = 2
 # n_heads = 4
-# n_kv_heads = 4 
+# n_kv_heads = 4
 # hidden_dim = 64
 
 T = 16
