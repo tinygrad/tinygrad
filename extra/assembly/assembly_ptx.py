@@ -1,7 +1,7 @@
 from typing import List
 import struct
 from tinygrad.codegen.assembly import uops_to_asmstyle, AssemblyLanguage
-from tinygrad.codegen.kernel import UOps, UOp
+from tinygrad.codegen.kernel import Ops, UOp
 from tinygrad import dtypes
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.runtime.ops_cuda import arch
@@ -37,11 +37,11 @@ def specialize_to_ptx(lang, function_name):
          UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
          TernaryOps.MULACC: "fma.rn", TernaryOps.WHERE: "selp"}
   for uop, out, vin, arg in lang.ins:
-    if uop == UOps.ENDLOOP:
+    if uop == Ops.ENDLOOP:
       ins.append("bar.sync 0;")
-    elif uop == UOps.DEFINE_LOCAL:
+    elif uop == Ops.DEFINE_LOCAL:
       ins.append(f".shared .align 4 .b8 {arg[0]}[{arg[1]*4}];")
-    elif uop == UOps.SPECIAL:
+    elif uop == Ops.SPECIAL:
       if arg.startswith('data'):
         param_cnt += 1
         ins.append(f"ld.param.u64 {out}, [{arg}];")
@@ -51,7 +51,7 @@ def specialize_to_ptx(lang, function_name):
         ins.append(f"mov.u32 {out}, %ctaid.{'xyz'[int(arg[3:])]};")
       elif arg.startswith('lid'):
         ins.append(f"mov.u32 {out}, %tid.{'xyz'[int(arg[3:])]};")
-    elif uop == UOps.ALU:
+    elif uop == Ops.ALU:
       if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
         ins.append(f"and.pred {out}, {', '.join(str(x) for x in vin)};")
       else:
@@ -64,7 +64,7 @@ def specialize_to_ptx(lang, function_name):
             ins.append(f"setp.ne.{dtype_to_nvtype[vin[0].dtype]} {reg}, {'0f00000000' if dtypes.is_float(vin[0].dtype) else '0'}, {vin[0]};")
           vin = vin[1:] + [reg]
         ins.append(f"{alu[arg]}{'.lo' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''}{'.rn' if arg == BinaryOps.DIV and out.dtype == dtypes.float32 else ''}.{dtype_to_nvtype[otype]} {out}, {', '.join(str(x) for x in vin)};")
-    elif uop == UOps.LOAD:
+    elif uop == Ops.LOAD:
       if arg.__class__ in (int, float):
         ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {'0f'+float_to_hex(arg) if dtypes.is_float(out.dtype) else int(arg)};")
       elif arg[2] is not None and (arg[2] == dtypes.bool or arg[2] != out.dtype):
@@ -74,7 +74,7 @@ def specialize_to_ptx(lang, function_name):
         render_cast(ins, reg, out)
       else:
         ins.append(f"ld.{arg[1]}.{dtype_to_nvtype[dtypes.float if arg[2] is None else arg[2]]} {out}, [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}];")
-    elif uop == UOps.STORE:
+    elif uop == Ops.STORE:
       if ptx_needs_cast(dtypes.float if arg[2] is None else arg[2], vin[1].dtype) or arg[2] == dtypes.bool:
         if arg[2] == dtypes.bool != vin[1].dtype:
           prereg = lang.newreg((vin[1],'bool'), dtype=dtypes.bool)
@@ -85,11 +85,11 @@ def specialize_to_ptx(lang, function_name):
         ins.append(f"st.{arg[1]}.{dtype_to_nvtype['bits16' if arg[2] == dtypes.float16 else dtypes.uint8 if arg[2] == dtypes.bool else dtypes.float if arg[2] is None else arg[2]]} [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {reg};")
       else:
         ins.append(f"st.{arg[1]}.{dtype_to_nvtype[dtypes.float if arg[2] is None else arg[2]]} [{vin[0]}{f'+{arg[0]}' if arg[0] is not None else ''}], {vin[1]};")
-    elif uop == UOps.CAST:
+    elif uop == Ops.CAST:
       render_cast(ins, vin[0], out)
-    elif uop == UOps.LABEL:
+    elif uop == Ops.LABEL:
       ins.append(f"{arg}:")
-    elif uop == UOps.COND_BRANCH:
+    elif uop == Ops.COND_BRANCH:
       ins.append(f"@{'!' if not arg[1] else ''}{vin[0]} bra {arg[0]};")
 
   ins_prefix = [".version 7.8", ".target " + arch(), ".address_size 64",

@@ -1,10 +1,10 @@
 from typing import Dict, Callable, List, Optional
 from llvmlite import ir
 from tinygrad.dtype import DType, PtrDType, dtypes
-from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps, UOps, UOp
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 
-MFLAGS = ('nsz', 'arcp', 'contract', 'afn', 'reassoc') # All from fast math, but nnan and ninf
+MFLAGS = ('nsz', 'arcp', 'contract', 'afn') # All from fast math, but nnan and ninf and reassoc
 
 def is_bool_or_unsigned(dtype: DType): return dtype == dtypes.bool or dtypes.is_unsigned(dtype)
 
@@ -52,7 +52,7 @@ class LLVMRenderer(Renderer):
   has_local = False
   has_shared = False
   global_max = None
-  code_for_op: Dict[Op, Callable] = {
+  code_for_op: Dict[Ops, Callable] = {
     UnaryOps.RECIP: lambda builder, x, dtype: builder.fdiv(const(1, dtype), x, flags=MFLAGS),
     UnaryOps.SQRT: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.sqrt', [x.type]), [x], fastmath=MFLAGS),
     BinaryOps.ADD: lambda builder, x, y, dtype: builder.or_(x, y) if dtype == dtypes.bool else builder.add(x, y) if dtypes.is_int(dtype) else builder.fadd(x, y, flags=MFLAGS),  # noqa: E501
@@ -71,7 +71,7 @@ class LLVMRenderer(Renderer):
     module = ir.Module(name=__file__)
 
     # extract global buffers (NOTE: this isn't right if DEFINE_GLOBAL is out of order)
-    buf_to_dtype = {u.arg:u.dtype for u in uops if u.op in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}}
+    buf_to_dtype = {u.arg:u.dtype for u in uops if u.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR}}
     buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
 
     # create llvm function
@@ -90,14 +90,14 @@ class LLVMRenderer(Renderer):
 
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
-      if uop is UOps.INDEX:
+      if uop is Ops.INDEX:
         lvars[u] = bb[-1].gep(lvars[src[0]], [lvars[src[1]]], inbounds=True)
-      elif uop is UOps.STORE:
+      elif uop is Ops.STORE:
         if len(src) > 2:
           with bb[-1].if_then(lvars[src[2]]): bb[-1].store(lvars[src[1]], lvars[src[0]])
         else:
           bb[-1].store(lvars[src[1]], lvars[src[0]])
-      elif uop is UOps.ENDRANGE:
+      elif uop is Ops.ENDRANGE:
         loop_entry_bb, phis = loop_blocks.pop()
         idx_p1 = bb[-1].add(lvars[src[0]], ir.Constant(ir.IntType(32), 1))
         lvars[src[0]].add_incoming(idx_p1, bb[-1].block)
@@ -105,7 +105,7 @@ class LLVMRenderer(Renderer):
         bb.append(ir.IRBuilder(func.append_basic_block(f"loop_exit_{len(loop_blocks)}")))
         bb[-2].cbranch(bb[-2].icmp_unsigned("<", idx_p1, lvars[src[0].src[1]]), loop_entry_bb, bb[-1].block)
       else:
-        if uop is UOps.RANGE:
+        if uop is Ops.RANGE:
           bb.append(ir.IRBuilder(func.append_basic_block(f"loop_body_{len(loop_blocks)}")))
           bb[-2].branch(bb[-1].block)
 
@@ -119,10 +119,10 @@ class LLVMRenderer(Renderer):
           lvars[u] = bb[-1].phi(ir.IntType(32), name=f"loop{len(loop_blocks)}")
           lvars[u].add_incoming(lvars[src[0]], bb[-2].block)
           loop_blocks.append((bb[-1].block, phis))
-        elif uop is UOps.DEFINE_ACC:
+        elif uop is Ops.DEFINE_ACC:
           lvars[u] = const(src[0].arg, dtype)
           reduce_phis.append(u)
-        elif uop is UOps.LOAD:
+        elif uop is Ops.LOAD:
           if len(src) > 1:
             with bb[-1].if_else(lvars[src[2]]) as (then, otherwise):
               with then:
@@ -135,17 +135,17 @@ class LLVMRenderer(Renderer):
           else:
             val = bb[-1].load(lvars[src[0]])
           lvars[u] = val
-        elif uop is UOps.ASSIGN:
+        elif uop is Ops.ASSIGN:
           lvars[u] = lvars[src[1]]
           # ASSIGN UOps can link to other ASSIGN Uops, backtrace this to DEFINE_ACC
           backward = src[0]
-          while backward.op is UOps.ASSIGN: backward = backward.src[0]
+          while backward.op is Ops.ASSIGN: backward = backward.src[0]
           lvars[backward] = lvars[u]
-        elif uop is UOps.ALU:
-          lvars[u] = self.code_for_op[args](bb[-1], *[lvars[x] for x in src], src[0].dtype if args in {BinaryOps.CMPLT, BinaryOps.CMPNE} else dtype)
-        elif uop in {UOps.CAST, UOps.BITCAST}: lvars[u] = cast(bb, lvars[src[0]], src[0].dtype, dtype, bitcast=uop is UOps.BITCAST)
-        elif uop in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}: lvars[u] = func.args[buf_index[args]]
-        elif uop is UOps.CONST: lvars[u] = const(args, dtype)
+        elif uop in GroupOp.ALU:
+          lvars[u] = self.code_for_op[uop](bb[-1], *[lvars[x] for x in src], src[0].dtype if uop in {BinaryOps.CMPLT, BinaryOps.CMPNE} else dtype)
+        elif uop in {Ops.CAST, Ops.BITCAST}: lvars[u] = cast(bb, lvars[src[0]], src[0].dtype, dtype, bitcast=uop is Ops.BITCAST)
+        elif uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR}: lvars[u] = func.args[buf_index[args]]
+        elif uop is Ops.CONST: lvars[u] = const(args, dtype)
         else: raise RuntimeError(f"failed to render {uop}")
 
     bb[-1].ret_void()

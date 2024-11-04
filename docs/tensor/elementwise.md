@@ -17,6 +17,8 @@ Elementwise ops operate on a per element basis. They don't change the shape of t
 ::: tinygrad.Tensor.ceil
 ::: tinygrad.Tensor.floor
 ::: tinygrad.Tensor.round
+::: tinygrad.Tensor.isinf
+::: tinygrad.Tensor.isnan
 ::: tinygrad.Tensor.lerp
 ::: tinygrad.Tensor.square
 ::: tinygrad.Tensor.clamp
