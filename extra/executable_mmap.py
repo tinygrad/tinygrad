@@ -1,22 +1,30 @@
-from mmap import mmap, PROT_EXEC, PROT_WRITE
-from mmap import MAP_JIT, MAP_PRIVATE
-from extra.macho import extract_offset_and_symbols
+from mmap import mmap, PROT_EXEC, PROT_WRITE, MAP_PRIVATE
+from extra.clang_parsers import MyMachO
 import ctypes
+import sys
 
-libc = ctypes.CDLL("libc.dylib")
+if sys.platform == "darwin":
+    from mmap import MAP_JIT 
+    libc = ctypes.CDLL("libc.dylib")
+
 
 def allocate_executable_memory(data, name):
-    libc.pthread_jit_write_protect_np(0)
-    mem = mmap(-1, len(data), flags=MAP_PRIVATE | MAP_JIT, prot=PROT_WRITE | PROT_EXEC)
-    mem.write(data)
-    libc.pthread_jit_write_protect_np(1)
+    if sys.platform == "darwin":
+        libc.pthread_jit_write_protect_np(0)
+        mem = mmap(-1, len(data), flags=MAP_PRIVATE | MAP_JIT, prot=PROT_WRITE | PROT_EXEC)
+        mem.write(data)
+        libc.pthread_jit_write_protect_np(1)
+    else:
+        mem = mmap(-1, len(data), flags=MAP_PRIVATE, prot=PROT_WRITE | PROT_EXEC)
+        mem.write(data)
 
-    offset, symbol_table = extract_offset_and_symbols(data)    
-    base = ctypes.addressof(ctypes.c_char.from_buffer(mem)) + offset
-
-    functions = {} 
+    if sys.platform == "darwin":
+        macho = MyMachO(data)
+        offset, symbol_table = macho.extract_offset_and_symbols()
+        symbol_addr = symbol_table["_"+name] + offset
+    
+    base = ctypes.addressof(ctypes.c_char.from_buffer(mem))
     func_type = ctypes.CFUNCTYPE(ctypes.c_int)
-    for symbol_name, symbol_addr in symbol_table:
-        functions[symbol_name[1:]] = func_type(base + symbol_addr)
+    fn = func_type(base + symbol_addr)
 
-    return functions[name], mem
+    return fn, mem
