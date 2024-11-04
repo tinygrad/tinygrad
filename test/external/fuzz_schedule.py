@@ -50,7 +50,7 @@ def fuzz_schedule(outs:List[LazyBuffer]):
     rawbufs: Dict[LazyBuffer, Buffer] = {}
     for lsi in ts:
       for out in lsi.outputs:
-        base = rawbufs[lsi.inputs[0]].base if out.op is MetaOps.VIEW else None
+        base = rawbufs[lsi.inputs[0]].base if out.op is MetaOps.BUFFER_VIEW else None
         rawbufs[out] = Buffer(out.buffer.device, out.buffer.size, out.buffer.dtype, base=base)
         if out.op is MetaOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
       for x in lsi.inputs:

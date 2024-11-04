@@ -48,7 +48,7 @@ class TestVerifyAST(unittest.TestCase):
   def test_no_implicit_broadcasting(self):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), i) for i in range(2)]
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1], ShapeTracker.from_shape((4, 32)).to_uop()))
-    b = a + UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (ReduceOps.MAX, (1,)))
+    b = a + UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (ReduceOps.REDUCE_MAX, (1,)))
     st = UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape((4, 32)).to_uop(), b))
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
 

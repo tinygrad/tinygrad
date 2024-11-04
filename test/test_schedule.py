@@ -1495,7 +1495,7 @@ class TestIndexing(unittest.TestCase):
   def test_arange_view_op(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
     assert isinstance(a.lazydata, LazyBuffer)
-    self.assertIs(a.lazydata.base.op, MetaOps.VIEW)
+    self.assertIs(a.lazydata.base.op, MetaOps.BUFFER_VIEW)
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 

@@ -34,7 +34,7 @@ class LazyBuffer(MathTrait):
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a UOp, except the src is LazyBuffers and not UOps
       assert self.op is not MetaOps.ASSIGN or srcs[0].base.realized is not None, "assign target must be realized"
 
-      if self.op is MetaOps.VIEW:
+      if self.op is MetaOps.BUFFER_VIEW:
         # some LazyBuffers can be processed with only a view, no AST required
         self.buffer: Buffer = srcs[0].base.buffer.view(st.size, self.dtype, srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
       else:
@@ -89,7 +89,7 @@ class LazyBuffer(MathTrait):
 
   def contiguous(self, allow_buffer_view=True):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
-      ret = self.alu(MetaOps.VIEW) if allow_buffer_view and self.can_view() else self.alu(MetaOps.CONTIGUOUS)
+      ret = self.alu(MetaOps.BUFFER_VIEW) if allow_buffer_view and self.can_view() else self.alu(MetaOps.CONTIGUOUS)
       if (sti := self.st.invert(self.base.shape)) is not None: self.base.contiguous_child = ref(ret), sti
       return ret
     self.base.forced_realize = True
@@ -111,7 +111,8 @@ class LazyBuffer(MathTrait):
     elif getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self is not self.base:
       # TODO: applying this makes gpt2 slower
       return self.base.cast(dtype, bitcast)._view(self.st)
-    cast_op: Union[MetaOps, UnaryOps] = (MetaOps.VIEW if self.can_view() and allow_buffer_view else UnaryOps.BITCAST) if bitcast else UnaryOps.CAST
+    cast_op: Union[MetaOps, UnaryOps] = \
+      (MetaOps.BUFFER_VIEW if self.can_view() and allow_buffer_view else UnaryOps.BITCAST) if bitcast else UnaryOps.CAST
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, dtype, (self,))
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is MetaOps.CONST and not isinstance(self.base.arg, UOp)
@@ -188,7 +189,7 @@ class LazyBuffer(MathTrait):
     if self.is_unrealized_unmasked_const() and all_int(self.shape):
       if op is ReduceOps.SUM: return self.const_with_shape(self.base.arg * prod(self.shape[i] for i in axis), new_shape)
       if op is ReduceOps.PROD: return self.const_with_shape(self.base.arg ** prod(self.shape[i] for i in axis), new_shape)
-      if op is ReduceOps.MAX: return self.const_with_shape(self.base.arg, new_shape)
+      if op is ReduceOps.REDUCE_MAX: return self.const_with_shape(self.base.arg, new_shape)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not SPLIT_REDUCEOP or not all_int(self.shape) or (0 in self.shape) or \
