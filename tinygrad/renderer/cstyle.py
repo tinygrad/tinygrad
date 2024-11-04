@@ -227,7 +227,8 @@ class OpenCLRenderer(CStyleLanguage):
      lambda v: UOp(Ops.DEFINE_ACC, v.dtype, (UOp.const(v.dtype, v.src[0].src[0].arg),)+v.src[0].src[1:], v.src[0].arg)),
     # vectorize increasing GEPs = nothing
     (UPat(Ops.VECTORIZE, src=UPat(Ops.GEP), name="v"),
-     lambda v: v.src[0].src[0] if all_same([x.src for x in v.src]) and [x.arg for x in v.src] == list(range(v.dtype.count)) else None),
+     lambda v: v.src[0].src[0] if all_same([x.src for x in v.src]) and \
+      [x.arg[0] if len(x.arg) == 1 else None for x in v.src] == list(range(v.dtype.count)) else None),
   ]) + CStyleLanguage.extra_matcher
 
   string_rewrite = PatternMatcher([
