@@ -26,13 +26,10 @@ def find_axis_bounds(shape: Tuple[sint, ...], num_shards: int, axis: Optional[in
   bounds = tuple(zip((0,) + boundaries, boundaries))
   return axis, bounds
 
-def reshard(mlb: "MultiLazyBuffer", axis: Optional[int]=None, bounds: Optional[Tuple[Tuple[sint, sint], ...]]=None):
-  if mlb.axis is None: return mlb
-  if axis is None: return MultiLazyBuffer([mlb.copy_to_device(lb.device) for lb in mlb.lbs], None)
+def reshard(mlb: "MultiLazyBuffer", axis: int, bounds: Tuple[Tuple[sint, sint], ...]):
   shape = mlb.shape
   shards = len(mlb.lbs)
   n_lbs = len(mlb.lbs)
-  if bounds is None: axis, bounds = find_axis_bounds(mlb.shape, shards, axis)
   use_ring = (RING >= 2 or (n_lbs > 2 and len(mlb.lbs[0].shape) > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   if DEBUG >= 2: print(f"{'RING RESHARD' if use_ring else 'NAIVE RESHARD'}")
   if not use_ring:
