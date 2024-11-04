@@ -56,8 +56,7 @@ def error_check(error: objc_instance, error_constructor: type[Exception] = Runti
   if error.value is None: return None
   raise error_constructor(bytes(msg(msg(error, "localizedDescription", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode())
 
-def metal_src_to_library(device:MetalDevice, src:str):
-  # metal source. rely on OS caching
+def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
   msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
   library = msg(device.device, "newLibraryWithSource:options:error:", to_ns_str(src), options,
@@ -97,6 +96,7 @@ class MetalProgram:
       self.library = msg(self.device.device, "newLibraryWithData:error:", data, ctypes.byref(error_library_creation), restype=objc_instance)
       error_check(error_library_creation)
     else:
+      # metal source. rely on OS caching
       self.library = metal_src_to_library(self.device, lib.decode())
     self.fxn = msg(self.library, "newFunctionWithName:", to_ns_str(name), restype=objc_instance)
     descriptor = msg(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"), "new", restype=objc_instance)
