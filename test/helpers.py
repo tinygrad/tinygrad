@@ -2,7 +2,7 @@ import sys, time, logging, difflib
 from typing import Callable, Optional, Tuple
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.ops import UOp, UOps, sint
+from tinygrad.ops import UOp, Ops, sint
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
@@ -42,7 +42,8 @@ def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
   if dtype == dtypes.half:
     if device == "GPU": return not CI and not OSX
-    if device in ["LLVM", "CUDA", "NV"]: return not CI
+    if device in ["CUDA", "NV"]: return not CI
+    if device == "LLVM": return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
   return True
@@ -69,7 +70,7 @@ def print_diff(s0, s1, unified=getenv("UNIFIED_DIFF",1)):
 def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]=(), st:Optional[ShapeTracker]=None, st_src:Optional[Tuple[UOp]]=None) -> UOp:
   if st_src is None:
     st_src = (st.to_uop() if st is not None else ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)
-  return UOp(UOps.VALID, dtypes.bool, st_src).where(UOp.const(dtype, val), UOp.const(dtype, 0))
+  return UOp(Ops.VALID, dtypes.bool, st_src).where(UOp.const(dtype, val), UOp.const(dtype, 0))
 
 def timeit(fxn:Callable[..., T], *args, **kwargs) -> Tuple[T, float]:
   st = time.perf_counter_ns()
@@ -77,8 +78,8 @@ def timeit(fxn:Callable[..., T], *args, **kwargs) -> Tuple[T, float]:
   return ret, (time.perf_counter_ns()-st)*1e-6
 
 def eval_uop(uop:UOp):
-  g = UOp(UOps.DEFINE_GLOBAL, uop.dtype.ptr(), arg=0, src=())
-  rw = full_graph_rewrite(UOp.store(g, UOp.const(dtypes.int, 0), uop).sink(), PythonRenderer)
+  g = UOp(Ops.DEFINE_GLOBAL, uop.dtype.ptr(), arg=0, src=())
+  rw = full_graph_rewrite(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(), PythonRenderer)
   prog = PythonProgram("run", PythonCompiler().compile(PythonRenderer().render("run", linearize_uop(rw))))
   buf = PythonAllocator().alloc(uop.dtype.itemsize)
   prog(buf)

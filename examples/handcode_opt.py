@@ -4,7 +4,7 @@ from extra.mcts_search import mcts_search
 from examples.mlperf.helpers import get_mlperf_bert_model
 from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.ops import UOps, sym_infer
+from tinygrad.ops import Ops, sym_infer
 from tinygrad.device import Compiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, beam_search, bufs_from_lin
@@ -66,7 +66,7 @@ if __name__ == "__main__":
   print(f"optimizing for {Device.DEFAULT}")
 
   sched = globals()[f"get_sched_{getenv('MODEL', 'resnet')}"]()
-  sched = [x for x in sched if x.ast.op is UOps.SINK]
+  sched = [x for x in sched if x.ast.op is Ops.SINK]
 
   # focus on one kernel
   if getenv("KERNEL", -1) >= 0: sched = sched[getenv("KERNEL", -1):getenv("KERNEL", -1)+1]

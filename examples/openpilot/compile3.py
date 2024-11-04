@@ -5,8 +5,8 @@ if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
 if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
 if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
 
-from tinygrad import fetch, Tensor, TinyJit, Device, Context, GlobalCounters
-from tinygrad.helpers import OSX, DEBUG, getenv
+from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters
+from tinygrad.helpers import DEBUG, getenv
 from tinygrad.tensor import _from_np_dtype
 
 import onnx
@@ -17,12 +17,6 @@ OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/comm
 OUTPUT = "/tmp/openpilot.pkl"
 
 def compile():
-  # hack to fix GPU on OSX: max doesn't work on half, see test/external/external_gpu_fail_osx.py
-  if OSX:
-    from tinygrad.ops import BinaryOps
-    from tinygrad.renderer.cstyle import ClangRenderer, CStyleLanguage
-    CStyleLanguage.code_for_op[BinaryOps.MAX] = ClangRenderer.code_for_op[BinaryOps.MAX]
-
   Tensor.no_grad = True
   Tensor.training = False
 

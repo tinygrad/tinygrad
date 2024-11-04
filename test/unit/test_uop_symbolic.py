@@ -9,15 +9,15 @@ from typing import Tuple
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
-from tinygrad.ops import UOp, UOps, graph_rewrite, sym_infer
+from tinygrad.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
 import functools
 
 def render(self) -> Tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
-  glbl = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
-  uops = linearize_uop(full_graph_rewrite(UOp(UOps.STORE, dtypes.void, (glbl, UOp.const(dtypes.int, 0), self)).sink()))
-  rewritten_uop = [uop for uop in uops if uop.op is UOps.STORE][0].src[-1]
+  glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
+  uops = linearize_uop(full_graph_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), self)).sink()))
+  rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[-1]
   return rewritten_uop.render(simplify=False), rewritten_uop.vmin, rewritten_uop.vmax
 
 def NumNode(val): return UOp.const(dtypes.int, val)
