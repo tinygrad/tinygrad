@@ -4,7 +4,7 @@ import functools, itertools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOp, Ops, UPat, PatternMatcher, symbolic_flat, symbolic_simple
-from tinygrad.ops import graph_rewrite, is_irreducible, split_uop, uop_given_valid, parse_valid, is_increasing, simplify_valid
+from tinygrad.ops import graph_rewrite, is_irreducible, split_uop, uop_given_valid, parse_valid, is_increasing, simplify_valid, GroupOp
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
 
@@ -23,7 +23,7 @@ def fold_expanded(ex, buf):
   for i,s in enumerate(new_srcs):
     idx = s.src[0].src[1]
     if s.dtype.count != 1 or (is_image and idx.dtype.count == 2): continue
-    if idx.arg is BinaryOps.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
+    if idx.op is BinaryOps.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
     # add gates for gated
@@ -124,18 +124,18 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> Optional[UOp]:
 powers_of_two = {2**i:i for i in range(64)}
 @functools.lru_cache(None)
 def get_late_rewrite_patterns(ops, force_transcendental=False):
-  pat: List[Tuple[UPat, Callable]] = [(UPat(Ops.ALU, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),), arg=op), f) for op,f in \
+  pat: List[Tuple[UPat, Callable]] = [(UPat(op, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),)), f) for op,f in \
            ((UnaryOps.EXP2, xexp2), (UnaryOps.LOG2, xlog2), (UnaryOps.SIN, xsin)) if op not in ops or force_transcendental]
   # rewrite MOD to AND (which should always be supported, but not for generic in tests)
   if BinaryOps.AND in ops:
-    pat += [(UPat(Ops.ALU, arg=BinaryOps.MOD, src=(UPat.var('base'), UPat.cvar("const"))),
+    pat += [(UPat(Ops.MOD, src=(UPat.var('base'), UPat.cvar("const"))),
             lambda base,const: base & (const.arg-1) if const.arg in powers_of_two else None)]
   # rewrite MUL/IDIV to SHL+SHR
   if BinaryOps.SHL in ops and BinaryOps.SHR in ops:
     pat += [
-    (UPat(Ops.ALU, arg=BinaryOps.MUL, dtype=dtypes.ints, src=[UPat.cvar("const"), UPat.var("mul")]), lambda mul, const:
+    (UPat(Ops.MUL, dtype=dtypes.ints, src=[UPat.cvar("const"), UPat.var("mul")]), lambda mul, const:
       mul << powers_of_two[const.arg] if const.arg in powers_of_two else None), # (x  * (2**y)) -> shl(x,y)
-    (UPat(Ops.ALU, arg=BinaryOps.IDIV, src=(UPat.var("div"), UPat.cvar("const"))), lambda div, const:
+    (UPat(Ops.IDIV, src=(UPat.var("div"), UPat.cvar("const"))), lambda div, const:
       div >> powers_of_two[const.arg] if const.arg in powers_of_two else None)] # (x // (2**y)) -> shr(x,y)
   if UnaryOps.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(UnaryOps.NEG))]
@@ -226,8 +226,8 @@ def reduce_collapse(acc:UOp, ret:UOp, alu:UOp):
   reduce_parented, reduce_unparented = partition(acc.src[1:], lambda x: x in ret.sparents)
   if len(reduce_unparented) == 0: return None
   new_acc = acc.replace(src=acc.src[0:1]+tuple(reduce_parented))
-  ret = new_acc.assign(new_acc.alu(alu.arg, ret))
-  if alu.arg is BinaryOps.ADD:
+  ret = new_acc.assign(new_acc.alu(alu.op, ret))
+  if alu.op is BinaryOps.ADD:
     for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
@@ -249,8 +249,8 @@ sym = symbolic_flat+PatternMatcher([
   (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
   (UPat(Ops.VECTORIZE, src=UPat(Ops.GEP, src=(UPat(name="x"),)), name="vec"), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
   # reorder ALU/VECTORIZE
-  (UPat(Ops.ALU, src=(UPat(Ops.VECTORIZE, src=UPat(name='x')), UPat(Ops.VECTORIZE, src=UPat(name='y'))), name='alu'),
-   lambda x,y,alu: UOp(Ops.VECTORIZE, alu.dtype, (UOp(Ops.ALU, alu.dtype.scalar(), (x,y), alu.arg),)*alu.dtype.count)),
+  (UPat(GroupOp.ALU, src=(UPat(Ops.VECTORIZE, src=UPat(name='x')), UPat(Ops.VECTORIZE, src=UPat(name='y'))), name='alu'),
+   lambda x,y,alu: UOp(Ops.VECTORIZE, alu.dtype, (UOp(alu.op, alu.dtype.scalar(), (x,y)),)*alu.dtype.count)),
   # VECTORIZE of a single element is just that element
   (UPat(Ops.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
   # VECTORIZE void is SINK
@@ -264,7 +264,7 @@ sym = symbolic_flat+PatternMatcher([
   (UPat(Ops.GEP, src=(UPat.cvar("c", vec=False),), name="gep"), lambda gep, c: gep.const_like(c.arg)),
   (UPat(Ops.GEP, src=(UPat(Ops.VCONST, name="c"),), name="gep"), lambda gep, c: gep.const_like(tuple(c.arg[x] for x in gep.arg))),
   # push all GEPs through ALUs (fix arange stuff)
-  (UPat(Ops.GEP, src=(UPat((Ops.ALU, Ops.CAST, Ops.BITCAST), name='alu'),), name='gep'),
+  (UPat(Ops.GEP, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name='alu'),), name='gep'),
    lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg)),
   # push some GEPs through WMMAs
   (UPat(Ops.GEP, src=(UPat(Ops.WMMA, name="wmma"),), name="gep"), gep_through_wmma),
@@ -275,15 +275,15 @@ sym = symbolic_flat+PatternMatcher([
   (UPat.var("add") + UPat(Ops.WMMA, name="wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry
-  (UPat(Ops.ALU, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key")), arg=BinaryOps.THREEFRY), threefry2x32),
+  (UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32),
   # arange loop folding
   (acc_pat.assign(UPat.any(arange_m, arange_m+UPat.var("extra"))+acc_pat), loop_collapse),
   # indexing, with cast or where
   (acc_pat.assign(UPat.var("idx").eq(UPat(Ops.RANGE, name="rng")).cast()*index_load+acc_pat), index_collapse),
   (acc_pat.assign(UPat.var("idx").eq(UPat(Ops.RANGE, name="rng")).where(index_load, UPat.const(None, 0.0))+acc_pat), index_collapse),
   # parentless reduce
-  (acc_pat.assign(UPat(Ops.ALU, src=[acc_pat, UPat.var("ret")], arg=BinaryOps.ADD, name="alu")), reduce_collapse),
-  (acc_pat.assign(UPat(Ops.ALU, src=[acc_pat, UPat.var("ret")], arg=BinaryOps.MAX, name="alu")), reduce_collapse),
+  (acc_pat.assign(UPat(Ops.ADD, src=[acc_pat, UPat.var("ret")], name="alu")), reduce_collapse),
+  (acc_pat.assign(UPat(Ops.MAX, src=[acc_pat, UPat.var("ret")], name="alu")), reduce_collapse),
   # ** self folding **
   (UPat(Ops.DEFINE_ACC, src=(UPat.var("x"),)), lambda x: x),            # a DEFINE_ACC without ranges is a CONST
   (UPat(Ops.ASSIGN, src=(UPat.cvar(),UPat.var("x"))), lambda x: x),     # an ASSIGN to a const is a NOOP
@@ -403,8 +403,8 @@ expander = PatternMatcher([
   (UPat(Ops.EXPAND, name="outer", src=(UPat(Ops.EXPAND, name="inner"),)),
    lambda outer, inner: UOp(Ops.EXPAND, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
   # do expansion
-  (UPat((Ops.ALU, Ops.CAST, Ops.BITCAST, Ops.GEP, Ops.WMMA, Ops.LOAD, Ops.STORE, Ops.INDEX, Ops.ASSIGN,
-         Ops.VECTORIZE, Ops.REDUCE, Ops.IF), name="root", custom_early_reject=set([(Ops.EXPAND, None)])), do_expand),
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.GEP, Ops.WMMA, Ops.LOAD, Ops.STORE, Ops.INDEX, Ops.ASSIGN,
+         Ops.VECTORIZE, Ops.REDUCE, Ops.IF), name="root", custom_early_reject=set([Ops.EXPAND])), do_expand),
   (UPat(Ops.CONTRACT, name="con"), do_contract),
   # vectorize DEFINE_ACC
   (UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_ACC, name="acc"), name="v"), lambda acc,v: acc.replace(dtype=v.dtype)),
@@ -433,7 +433,7 @@ def no_vectorized_acc(acc:UOp):
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes
-  (UPat((Ops.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.INDEX), name="alu"), no_vectorized_alu),
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.INDEX), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat(Ops.DEFINE_ACC, name="acc"), no_vectorized_acc),
   (UPat((Ops.LOAD, Ops.STORE), name="ls"), no_vectorized_load_store),
@@ -448,7 +448,7 @@ load_store_indexing = PatternMatcher([
   # late fixup of unfoldable image loads
   (UPat(Ops.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
   # simplify valid
-  (UPat(Ops.ALU, name="valid", arg=BinaryOps.AND), simplify_valid),
+  (UPat(Ops.AND, name="valid"), simplify_valid),
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat.var("valid"))), simplify_valid_load),
   # delete_redundant_gates (after expand)
