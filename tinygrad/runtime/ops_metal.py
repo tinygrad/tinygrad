@@ -60,19 +60,24 @@ def metal_src_to_library(device:MetalDevice, src:str):
   # metal source. rely on OS caching
   options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
   msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
-  compileError = objc_instance()
-  library = msg(device.device, "newLibraryWithSource:options:error:", to_ns_str(src), options, ctypes.byref(compileError), restype=objc_instance)
+  library = msg(device.device, "newLibraryWithSource:options:error:", to_ns_str(src), options,
+                ctypes.byref(compileError:=objc_instance()), restype=objc_instance)
   error_check(compileError, CompileError)
   return library
 
 class MetalCompiler(Compiler):
-  def __init__(self, device:MetalDevice):
+  def __init__(self, device:Optional[MetalDevice]=None):
     self.device = device
-    super().__init__("compile_metal")
+    super().__init__("compile_metal_xcode" if self.device is None else "compile_metal")
   def compile(self, src:str) -> bytes:
-    library = metal_src_to_library(self.device, src)
-    library_contents = msg(library, "libraryDataContents", restype=objc_instance)
-    lib = ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
+    if self.device is None:
+      # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
+      air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
+      lib = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+    else:
+      library = metal_src_to_library(self.device, src)
+      library_contents = msg(library, "libraryDataContents", restype=objc_instance)
+      lib = ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
     assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
     return lib
   def disassemble(self, lib:bytes):
@@ -82,13 +87,6 @@ class MetalCompiler(Compiler):
       ret = os.system(f"cd {pathlib.Path(__file__).parents[2]}/extra/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
       if ret:
         print("Error running disassembler: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
-
-class MetalXCodeCompiler(Compiler):
-  def __init__(self): super().__init__("compile_metal_xcode")
-  def compile(self, src:str) -> bytes:
-    air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
-    return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-  disassemble = MetalCompiler.disassemble
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
@@ -105,9 +103,8 @@ class MetalProgram:
     descriptor = msg(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"), "new", restype=objc_instance)
     msg(descriptor, "setComputeFunction:", self.fxn)
     msg(descriptor, "setSupportIndirectCommandBuffers:", True)
-    error_pipeline_creation = objc_instance()
     self.pipeline_state = msg(self.device.device, "newComputePipelineStateWithDescriptor:options:reflection:error:",
-      descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation), restype=objc_instance)
+      descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()), restype=objc_instance)
     error_check(error_pipeline_creation)
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
@@ -183,7 +180,7 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalXCodeCompiler() if getenv("METAL_XCODE") else Compiler(),
+    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_XCODE") else Compiler(),
                      functools.partial(MetalProgram, self), MetalGraph)
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
