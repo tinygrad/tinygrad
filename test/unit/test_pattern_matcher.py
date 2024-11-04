@@ -59,7 +59,7 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c2), None)
 
   def test_uop_set(self):
-    matcher = PatternMatcher([(UPat({Ops.CONST, Ops.CAST}, name="x"), lambda x: x)])
+    matcher = PatternMatcher([(UPat((Ops.CONST, Ops.CAST), name="x"), lambda x: x)])
     c1 = UOp(Ops.CONST, dtypes.bool, arg=False)
     c2 = UOp(Ops.CAST, dtypes.int, (c1,))
     c3 = UOp(Ops.CONST, dtypes.float, arg=1.0)
