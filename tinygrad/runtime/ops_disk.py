@@ -24,7 +24,7 @@ class DiskAllocator(Allocator):
     if self.device.size is None or (self.device.fd is not None and os.fstat(self.device.fd).st_nlink): self.device._open(size)
     self.device.count += 1
     return DiskBuffer(self.device, size)
-  def _free(self, opaque, options): 
+  def _free(self, opaque, options):
     self.device.count -= 1
     if self.device.count == 0:
       self.device._close()
