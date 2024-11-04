@@ -23,12 +23,11 @@ wgsl_matcher = PatternMatcher([
    lambda bidx,val,gate: UOp.store(bidx, val.cast(dtypes.int), gate)),
   (UPat.store(UPat.var("bidx"), UPat.var("var", dtype=dtypes.bool)), lambda bidx,var: UOp.store(bidx, var.cast(dtypes.int))),
   (UPat(Ops.ALU, name="m", arg=BinaryOps.MAX), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
-  # This has to be constrained to just the "a * 2 ** 32", and "a // 2 ** 32" cases
-  (UPat(Ops.ALU, name="x", dtype=dtypes.ulong,  arg=BinaryOps.MUL), lambda x: UOp(x.op, x.dtype, \
-    (x.src[0], UOp(Ops.CONST, dtypes.uint32, arg=32)), BinaryOps.SHL)),
-  (UPat(Ops.ALU, name="x", dtype=dtypes.ulong,  arg=BinaryOps.IDIV), lambda x: UOp(x.op, x.dtype, \
-    (x.src[0], UOp(Ops.CONST, dtypes.uint32, arg=32)), BinaryOps.SHR)),
-])
+  (UPat(Ops.ALU, name="m", src=(UPat(name="a"), UPat(Ops.ALU, arg=TernaryOps.WHERE, src=(UPat.var("g"), \
+    UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2")))), dtype=dtypes.ulong,  arg=BinaryOps.MUL), \
+    lambda m,a,g,c1,c2: UOp(Ops.ALU, arg=TernaryOps.WHERE, dtype=m.dtype, src=(g, a << 32, UOp.const(dtype=m.dtype, b=0))) \
+    if c1.arg == 4294967296 and c2.arg == 0 else None),
+  ])
 
 type_map = {dtypes.float: "f32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.ulong: "vec2<u32>"}
 
