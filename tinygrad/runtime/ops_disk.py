@@ -19,9 +19,15 @@ MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0
 class DiskAllocator(Allocator):
   def __init__(self, device:DiskDevice): self.device = device
   def _alloc(self, size:int, options):
-    self.device._might_open(size)
+    if self.device.size is not None and size > self.device.size:
+      raise ValueError(f"can't reopen Disk tensor with larger size, opened with {self.device.size}, tried to open with {size}")
+    if self.device.size is None or (self.device.fd is not None and os.fstat(self.device.fd).st_nlink): self.device._open(size)
+    self.device.count += 1
     return DiskBuffer(self.device, size)
-  def _free(self, opaque, options): self.device._might_close()
+  def _free(self, opaque, options): 
+    self.device.count -= 1
+    if self.device.count == 0:
+      self.device._close()
   def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def copyout(self, dest:memoryview, src:DiskBuffer):
@@ -77,10 +83,8 @@ class DiskDevice(Compiled):
     self.fd: Optional[int] = None
     self.count = 0
     super().__init__(device, DiskAllocator(self), None, None, None)
-  def _might_open(self, size: int):
-    self.count += 1
-    assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
-    if self.size is not None and self.fd is not None and os.fstat(self.fd).st_nlink > 0: return
+
+  def _open(self, size: int):
     filename = self.dname[len("disk:"):]
     self.size = size
 
@@ -95,11 +99,11 @@ class DiskDevice(Compiled):
       self.mem = mmap.mmap(self.fd, self.size)
     if hasattr(self.mem, 'madvise') and (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None:
       with contextlib.suppress(OSError): self.mem.madvise(hp) # some systems have transparent_hugepage disabled
-  def _might_close(self):
-    self.count -= 1
-    if self.count == 0:
-      if self.fd is not None: os.close(self.fd)
-      self.size = None
+
+  def _close(self):
+    if self.fd is not None: os.close(self.fd)
+    self.size = None
+
   def _iouring_setup(self):
     DiskDevice._tried_io_uring_init = True
 
