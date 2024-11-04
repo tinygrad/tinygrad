@@ -34,10 +34,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   if ctx.buf_uops[buf.buffer] in ctx.realizes: realizes[buf] = None
   if buf.op in GroupOp.Reduce and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[buf] = None
   allbufs[buf] = None
-  if buf.op is MetaOps.ASSIGN:
-    assign_targets[(target:=buf.srcs[0])] = buf
-    assert target._base is None, f"assign must be to base {target}"
-    assert target.is_realized(), f"assign must be already realized to schedule {target}"
+  if buf.op is MetaOps.ASSIGN: assign_targets[buf.srcs[0]] = buf
   for x in buf.srcs:
     if x.base.realized is None: children[x.base][buf] = None
     _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
