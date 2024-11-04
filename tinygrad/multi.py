@@ -69,13 +69,13 @@ def reshard(mlb: "MultiLazyBuffer", axis: int, bounds: Tuple[Tuple[sint, sint], 
       dst_device = chunked[dst_shard][dst_shard_stationary_chunk].device
       copied = chunked[src_shard][src_chunk].copy_to_device(dst_device)
       reassembled_chunks[dst_shard][dst_chunk] = copied
-
   reassembled_lbs = []
-
   for _chunks in cast(List[List[LazyBuffer]], reassembled_chunks):
-    slc = find_paddings_for_concat(originalAxis, [c.shape for c in _chunks])
+    pads = [[(i * shape, (shape * (n_lbs-1-i))) if _axis == originalAxis else (0, 0) for _axis, shape in enumerate(chunk.shape)]
+            for i, chunk in enumerate(_chunks)]
     assembled = functools.reduce(lambda x, y: x.alu(BinaryOps.ADD, y),
-      [arg.pad(tuple(s)) for arg,s in zip(_chunks, slc)])
+      [arg.pad(tuple(s)) for arg,s in zip(_chunks, pads)]
+    )
     reassembled_lbs.append(assembled)
   return MultiLazyBuffer(reassembled_lbs, axis)
 
