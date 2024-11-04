@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import HCQBuffer, HWComputeQueue, HCQProgram, 
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
-from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le, prod, DEBUG, fromimport
+from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le, prod, fromimport
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
@@ -33,6 +33,7 @@ def pkt4_hdr(reg: int, cnt: int): return adreno.CP_TYPE4_PKT | cnt & 0x7F | pari
 
 class QCOMCompiler(CLCompiler):
   def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
+  def disassemble(self, lib:bytes): fromimport('extra.disassemblers.adreno', 'disasm')(lib)
 
 class QCOMSignal(HCQSignal):
   def __init__(self, value=0, is_timeline=False):
@@ -209,7 +210,6 @@ class QCOMArgsState(HCQArgsState):
 class QCOMProgram(HCQProgram):
   def __init__(self, device: QCOMDevice, name: str, lib: bytes):
     self.device, self.name, self.lib = device, name, lib
-    if DEBUG >= 5: fromimport('extra.disassemblers.adreno', 'disasm')(lib)
     self._parse_lib()
 
     self.lib_gpu = self.device.allocator.alloc(self.image_size, options=BufferOptions(cpu_access=True, nolru=True))

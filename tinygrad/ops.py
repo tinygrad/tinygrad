@@ -16,29 +16,9 @@ class FastEnum(IntEnum):
   @staticmethod
   def _generate_next_value_(_, __, ___, last_values): return 1 + max([0, *last_values, *[max(c) for c in FastEnum.__subclasses__()]])
 
-# the Enum class doesn't work with mypy, this is static. sorry it's ugly
-# NOTE: MOD, CMPLT don't have to be implemented on vectors, just scalars
-# NOTE: many GPUs don't have DIV, but UnaryOps.RECIP doesn't work for integer division
-class UnaryOps(FastEnum):
-  """A -> A (elementwise)"""
-  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
-class BinaryOps(FastEnum):
-  """A + A -> A (elementwise)"""
-  ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto() # noqa: E702
-class TernaryOps(FastEnum):
-  """A + A + A -> A (elementwise)"""
-  WHERE = auto(); MULACC = auto() # noqa: E702
-class ReduceOps(FastEnum):
-  """A -> B (reduce)"""
-  SUM = auto(); PROD = auto(); MAX = auto() # noqa: E702
-class MetaOps(FastEnum):
-  EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); ASSIGN = auto(); VIEW = auto() # noqa: E702
-Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
-
 class SimpleMathTrait:
   # required to implement
-  def alu(self:T, arg:Union[UnaryOps, BinaryOps, TernaryOps], *src) -> T: raise NotImplementedError
+  def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
   def const_like(self:T, b:ConstLike) -> T: raise NotImplementedError
 
   # great functions you get!
@@ -115,14 +95,6 @@ class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
   def log2(self): return self.alu(UnaryOps.LOG2)
   def exp2(self): return self.alu(UnaryOps.EXP2)
 
-# do not preserve f(0) = 0
-UNSAFE_PAD_OPS = {UnaryOps.RECIP, UnaryOps.LOG2, UnaryOps.EXP2, BinaryOps.IDIV}
-
-REDUCE_ALU: Dict[ReduceOps, BinaryOps] = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.MAX:BinaryOps.MAX}
-
-# https://en.wikipedia.org/wiki/Identity_element
-def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
-
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
@@ -130,7 +102,7 @@ class Ops(FastEnum):
   CONTIGUOUS = auto()
   PRELOAD = auto()
 
-  # metaops
+  # MetaOps
   COPY = auto()
   EMPTY = auto()
   BUFFER_VIEW = auto()
@@ -146,14 +118,20 @@ class Ops(FastEnum):
   VALID = auto()
   SPECIAL = auto()
   NOOP = auto()
+
+  # reduce
   REDUCE = auto()
   REDUCE_AXIS = auto()
+
+  # ReduceOps
+  SUM = auto(); PROD = auto(); REDUCE_MAX = auto() # noqa: E702
 
   # helper ops
   GEP = auto()
   VECTORIZE = auto()
-  CAST = auto()
-  BITCAST = auto()
+
+  # UnaryOps
+  CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 
   # loads before math
   LOAD = auto()
@@ -161,6 +139,13 @@ class Ops(FastEnum):
   # math ops
   ALU = auto()
   WMMA = auto()
+
+  # BinaryOps
+  ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
+  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto() # noqa: E702
+
+  # TernaryOps
+  WHERE = auto(); MULACC = auto() # noqa: E702
 
   # assignment ops
   STORE = auto()
@@ -183,8 +168,28 @@ class Ops(FastEnum):
   VCONST = auto()
   CONST = auto()
 
-BUFOPS = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID}
-COMMUTATIVE = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR}
+class GroupOp:
+  Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB}
+  Reduce = {Ops.SUM, Ops.PROD, Ops.REDUCE_MAX}
+
+  # meta ops
+  Meta = {Ops.COPY, Ops.EMPTY, Ops.BUFFER_VIEW}
+  Buffer = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID}
+
+  # BinaryOps that can be flipped
+  Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.XOR, Ops.AND, Ops.OR}
+
+  # do not preserve f(0) = 0
+  UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV}
+
+# TODO: remove this?
+UnaryOps = BinaryOps = ReduceOps = MetaOps = TernaryOps = Ops
+
+REDUCE_ALU: Dict[Ops, Ops] = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.REDUCE_MAX:BinaryOps.MAX}
+
+# https://en.wikipedia.org/wiki/Identity_element
+def identity_element(op:Ops, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
+
 END_FOR_UOP = {Ops.IF:(Ops.STORE, Ops.ENDIF), Ops.RANGE:(Ops.ASSIGN, Ops.ENDRANGE)}
 
 # With True as the default, this matches the old symbolic behavior
@@ -205,7 +210,7 @@ def smin(*lst): return _suop(lst[0] if isinstance(lst[0], (tuple, list)) else ls
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: Union[UOp, int], var_vals: Dict[UOp, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
-# used for UOp and Pat
+# used for UOp and UPat
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
   def dfs(x:Any, cache:dict):
     for s in srcfn(x) or []:
@@ -260,7 +265,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
     if not self.has_st: return None
-    if self.op in BUFOPS: return self.st_arg
+    if self.op in GroupOp.Buffer: return self.st_arg
     if self.op is Ops.VIEW: return self.arg
     src_sts = [x.st for x in self.src if x.st is not None]
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
@@ -293,7 +298,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def st_arg(self) -> ShapeTracker:
-    assert self.op in BUFOPS, f"st_arg called on {self.op}"
+    assert self.op in GroupOp.Buffer, f"st_arg called on {self.op}"
     ret = self.src[0 if self.op is Ops.VALID else 1]
     assert ret.op is Ops.VIEW, f"st_arg trying to return {ret}"
     return ret.arg
@@ -339,8 +344,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
                                              UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=idx)
-  def reduce(self, op:BinaryOps, *rng:UOp): return UOp(Ops.REDUCE, self.dtype, (self,) + rng, op)
-  def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op] if op in ReduceOps else op, axis))
+  def reduce(self, op:Ops, *rng:UOp): return UOp(Ops.REDUCE, self.dtype, (self,) + rng, op)
+  def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op] if op in GroupOp.Reduce else op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
 
   # *** uop Variable stuff ***
@@ -368,7 +373,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     all_vars = set([x for x in self.sparents if x.op is Ops.DEFINE_VAR])
     return bound_vars.union(set([x for x in all_vars if x not in bound_var_base]))
   def variables(self) -> List[Variable]:
-    st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in BUFOPS]
+    st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in GroupOp.Buffer]
     return sorted(set.union(*st_vars, [x.unbind()[0] if x.op is not Ops.DEFINE_VAR else x for x in self.vars()]), key=lambda v: v.arg)
 
   # *** uop symbolic stuff ***
@@ -456,7 +461,7 @@ def hook_overflow(dv, fxn):
     except OverflowError: return dv
   return wfxn
 
-python_alu: Dict[Op, Callable]  = {
+python_alu: Dict[Ops, Callable]  = {
   UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, UnaryOps.EXP2: hook_overflow(math.inf, lambda x: 2**x),
   UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
   UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
@@ -466,7 +471,7 @@ python_alu: Dict[Op, Callable]  = {
   BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_, BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
   TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
 
-def exec_alu(op:Op, dtype:DType, operands, truncate_output=True):
+def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
   if dtype.count > 1:
     return tuple([exec_alu(op, dtype.scalar(), [x[i] if isinstance(x, tuple) else x for x in operands]) for i in range(dtype.count)])
   alu = python_alu[op](*operands)
@@ -514,7 +519,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
 
 def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
-  # find the real frame in the file that has the Pat, TODO: is there a better way to do this?
+  # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
   while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "uopgraph.py", "schedule.py",
                                                                                         "lowerer.py", "cstyle.py"}:
     frm = frm.f_back
@@ -523,75 +528,76 @@ def get_location() -> Tuple[str, int]:
 def lines(fn) -> List[str]:
   with open(fn) as f: return f.readlines()
 
-class Pat(MathTrait):
+class UPat(MathTrait):
   __slots__ = ["op", "dtype", "arg", "name", "src"]
-  def __init__(self, op:Optional[Union[Ops, Tuple[Ops, ...]]]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None,
-               src:Optional[Union[Tuple[Pat, ...], List[Pat], Pat]]=None, arg:Any=None,
+  def __init__(self, op:Optional[Union[Ops, Tuple[Ops, ...], Set[Ops]]]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None,
+               src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
                name:Optional[str]=None, allow_any_len:bool=False, location=None,
                custom_early_reject:Optional[Set[Tuple[Ops, Any]]]=None):
-    self.op: Optional[Tuple[Ops, ...]] = (op,) if isinstance(op, Ops) else op
+    assert op is None or isinstance(op, Ops) or isinstance(op, tuple) or isinstance(op, set), "op must be Ops or tuple of Ops"
+    self.op: Optional[Tuple[Ops, ...]] = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
     self.dtype: Optional[Tuple[DType, ...]] = (dtype,) if isinstance(dtype, DType) else dtype
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
     self.src: Any = None
-    assert self.name != "ctx", "Pat can't be named ctx"
+    assert self.name != "ctx", "UPat can't be named ctx"
 
     # try all permutations if it's a list
     if isinstance(src, list): self.src = list(itertools.permutations(src)) if not all_same(src) else [src]
     # only one if it's a tuple
     elif isinstance(src, tuple): self.src = [src]
-    # repeat if it's a Pat
-    elif isinstance(src, Pat): self.src = [itertools.repeat(src)]
+    # repeat if it's a UPat
+    elif isinstance(src, UPat): self.src = [itertools.repeat(src)]
 
-    self.allowed_len: int = -1 if allow_any_len or isinstance(src, Pat) or src is None else len(src)
+    self.allowed_len: int = -1 if allow_any_len or isinstance(src, UPat) or src is None else len(src)
     self.location = location or get_location()
 
     if custom_early_reject is not None: self.early_reject = custom_early_reject
     else:
-      upat_match = [src] if isinstance(src, Pat) else ([] if src is None else self.src[0])
+      upat_match = [src] if isinstance(src, UPat) else ([] if src is None else self.src[0])
       self.early_reject = set((pp.op[0], pp.arg) for pp in upat_match if pp.op is not None and len(pp.op) == 1)
 
-  def named(self, name:str): return Pat(self.op, self.dtype, self._in_src, self.arg, name, self.allowed_len == -1, self.custom_early_reject)
+  def named(self, name:str): return UPat(self.op, self.dtype, self._in_src, self.arg, name, self.allowed_len == -1, self.custom_early_reject)
 
   @staticmethod
-  def any(*src): return PatAny(src=src)
+  def any(*src): return UPatAny(src=src)
 
   @staticmethod
   @functools.lru_cache(None)
-  def var(name:Optional[str]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None): return Pat(dtype=dtype, name=name)
+  def var(name:Optional[str]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None): return UPat(dtype=dtype, name=name)
   @staticmethod
   @functools.lru_cache(None)
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None, vec=True):
-    return Pat((Ops.CONST, Ops.VCONST) if vec else Ops.CONST, dtype=dtype, name=name)
+    return UPat((Ops.CONST, Ops.VCONST) if vec else Ops.CONST, dtype=dtype, name=name)
   @staticmethod
-  def const(dtype:Optional[Union[DType, Tuple[DType, ...]]], b:ConstType): return Pat(Ops.CONST, dtype=dtype, arg=b)
+  def const(dtype:Optional[Union[DType, Tuple[DType, ...]]], b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
   # copied from UOp
-  def index(self, idx:Pat, valid:Optional[Pat]=None): return Pat(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
-  def view(self, st=None, **kwargs): return Pat(Ops.VIEW, self.dtype, (self,), st, **kwargs)
-  def cast(self, dtype=None): return Pat(Ops.CAST, dtype, (self,))
-  def bitcast(self, dtype=None): return Pat(Ops.BITCAST, dtype, (self,))
-  def gep(self, i:int): return Pat(Ops.GEP, None, (self,), (i,))
-  def load(self, *src:Pat, **kwargs): return Pat(Ops.LOAD, src=(self,)+src, **kwargs)
-  def store(self, *src:Pat, **kwargs): return Pat(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
-  def assign(self, x:Pat): return Pat(Ops.ASSIGN, self.dtype, (self,x))
+  def index(self, idx:UPat, valid:Optional[UPat]=None): return UPat(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
+  def view(self, st=None, **kwargs): return UPat(Ops.VIEW, self.dtype, (self,), st, **kwargs)
+  def cast(self, dtype=None): return UPat(Ops.CAST, dtype, (self,))
+  def bitcast(self, dtype=None): return UPat(Ops.BITCAST, dtype, (self,))
+  def gep(self, i:int): return UPat(Ops.GEP, None, (self,), (i,))
+  def load(self, *src:UPat, **kwargs): return UPat(Ops.LOAD, src=(self,)+src, **kwargs)
+  def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
+  def assign(self, x:UPat): return UPat(Ops.ASSIGN, self.dtype, (self,x))
 
-  def const_like(self, b:ConstLike): return Pat.const(self.dtype, cast(ConstType, b))
-  def alu(self, arg, *src:Pat):
+  def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
+  def alu(self, arg, *src:UPat):
     asrc = (self,)+src
-    return Pat(Ops.ALU, None if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} else asrc[-1].dtype, list(asrc) if arg in COMMUTATIVE else asrc, arg)
+    return UPat(Ops.ALU, None if arg in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].dtype, list(asrc) if arg in GroupOp.Commutative else asrc, arg)
 
-  def printable(self:Pat) -> str:
+  def printable(self:UPat) -> str:
     try: return lines(self.location[0])[self.location[1]-1].strip()
     except FileNotFoundError: return "<missing>"
 
   def __repr__(self):
     def rep(x):
-      form = "Pat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=%s)"
+      form = "UPat(%s, %s, name=%s, dtype=%s, allow_any_len=%s, src=%s)"
       return form % (None if x.op is None else ('(%s)'%', '.join(map(str, x.op))), x.arg, repr(x.name),
         set(x.dtype) if x.dtype else None, x.allowed_len == 0, "[%s]" if x.src and len(x.src)>1 else "(%s)")
     return pretty_print(self, rep, srcfn=lambda x:None if x.src is None else [next(x.src[0])] if isinstance(x.src[0], itertools.repeat) else x.src[0])
 
-  def match(self:Pat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
+  def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
     if (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
       (self.dtype is not None and uop.dtype not in self.dtype and uop.dtype.scalar() not in self.dtype) or \
       (self.arg is not None and self.arg != uop.arg) or \
@@ -607,8 +613,8 @@ class Pat(MathTrait):
       res.extend(stores)
     return res
 
-class PatAny(Pat):
-  def match(self:Pat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
+class UPatAny(UPat):
+  def match(self:UPat, uop:UOp, store:Dict[str, UOp]) -> List[Dict[str, UOp]]:
     ret = []
     for x in self.src[0]:
       if (match:=x.match(uop, store.copy())): ret.extend(match)
@@ -624,10 +630,10 @@ def deconstruct_function(fxn:Callable) -> Tuple:
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
 class PatternMatcher:
-  def __init__(self, patterns:List[Tuple[Pat, Callable]]):
+  def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     self.patterns = patterns
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: Dict[Tuple[Ops, Any], List[Tuple[Pat, Callable, Set, bool]]] = {}
+    self.pdict: Dict[Tuple[Ops, Any], List[Tuple[UPat, Callable, Set, bool]]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
@@ -652,12 +658,12 @@ class PatternMatcher:
 # *** tracking pattern matcher ***
 
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if getenv("VIZ") else 0)
-match_stats:Dict[Pat, List[Union[int, float]]] = dict()
+match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 @dataclass(frozen=True)
 class TrackedRewriteContext:
   loc: Tuple[str, int]                                                                              # location that called graph_rewrite
   sink: UOp                                                                                         # the sink passed into the rewrite
-  matches: List[Tuple[UOp, Optional[UOp], Optional[Pat], float]] = field(default_factory=list)     # all matches of sparents
+  matches: List[Tuple[UOp, Optional[UOp], Optional[UPat], float]] = field(default_factory=list)     # all matches of sparents
 
 rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
 contexts: List[Tuple[Any, List[TrackedRewriteContext]]] = []
@@ -676,7 +682,7 @@ def track_rewrites(named=False):
   return _decorator
 
 class TrackedPatternMatcher(PatternMatcher):
-  def __init__(self, patterns:List[Tuple[Pat, Callable]]):
+  def __init__(self, patterns:List[Tuple[UPat, Callable]]):
     super().__init__(patterns)
     for p,_ in self.patterns:
       if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
@@ -745,84 +751,84 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
 spec = PatternMatcher([
-  (Pat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
-  (Pat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
-  (Pat(Ops.DEFINE_ACC, src=(Pat.var("c"),), name="x", allow_any_len=True),
+  (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
+  (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
+  (UPat(Ops.DEFINE_ACC, src=(UPat.var("c"),), name="x", allow_any_len=True),
    lambda x,c: all(y.op is Ops.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
-  (Pat(Ops.DEFINE_VAR, src=(), name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
+  (UPat(Ops.DEFINE_VAR, src=(), name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
-  (Pat(Ops.RANGE, src=(Pat(name="x"), Pat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
-  (Pat(Ops.SPECIAL, src=()), lambda: True),
+  (UPat(Ops.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
+  (UPat(Ops.SPECIAL, src=()), lambda: True),
 
   # TODO: confirm the args of both of these are shapetrackers
-  (Pat(Ops.VIEW, src=()), lambda: True),
-  (Pat(Ops.VIEW, src=(Pat(),)), lambda: True),
+  (UPat(Ops.VIEW, src=()), lambda: True),
+  (UPat(Ops.VIEW, src=(UPat(),)), lambda: True),
 
-  (Pat(Ops.VALID, dtypes.bool, (Pat(Ops.VIEW),)), lambda: True),
-  (Pat(Ops.CONST, name="x"), lambda x: x.dtype == x.dtype.scalar() and (type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)))),
+  (UPat(Ops.VALID, dtypes.bool, (UPat(Ops.VIEW),)), lambda: True),
+  (UPat(Ops.CONST, name="x"), lambda x: x.dtype == x.dtype.scalar() and (type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)))),
 
   # early LOAD has a <buf, shapetracker, store?>
-  (Pat(Ops.LOAD, src=(Pat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), Pat(Ops.VIEW))), lambda: True),
-  (Pat(Ops.LOAD, src=(Pat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), Pat(Ops.VIEW), Pat(Ops.STORE))), lambda: True),
+  (UPat(Ops.LOAD, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(Ops.VIEW))), lambda: True),
+  (UPat(Ops.LOAD, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(Ops.VIEW), UPat(Ops.STORE))), lambda: True),
 
   # early STORE has a <buf, shapetracker, val>
-  (Pat(Ops.STORE, src=(Pat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), Pat(Ops.VIEW), Pat())), lambda: True),
+  (UPat(Ops.STORE, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(Ops.VIEW), UPat())), lambda: True),
 
   # **** new style load/store ****
 
   # INDEX is used in new style load/store
-  (Pat(Ops.INDEX, src=(Pat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), Pat())), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat())), lambda: True),
 
   # LOAD takes a <bufidx, alt?, gate?, barrier?>
-  (Pat(Ops.LOAD, src=(Pat((Ops.INDEX, Ops.CAST)),)), lambda: True),
-  (Pat(Ops.LOAD, src=(Pat((Ops.INDEX, Ops.CAST)), Pat((Ops.IF, Ops.BARRIER)))), lambda: True),
-  (Pat(Ops.LOAD, src=(Pat((Ops.INDEX, Ops.CAST)), Pat(name="alt"), Pat(dtype=dtypes.bool)), name="ld"), lambda ld,alt: ld.dtype == alt.dtype),
+  (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)),)), lambda: True),
+  (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)), UPat((Ops.IF, Ops.BARRIER)))), lambda: True),
+  (UPat(Ops.LOAD, src=(UPat((Ops.INDEX, Ops.CAST)), UPat(name="alt"), UPat(dtype=dtypes.bool)), name="ld"), lambda ld,alt: ld.dtype == alt.dtype),
 
   # STORE takes a <bufidx, val, gate?>
-  (Pat(Ops.STORE, dtype=dtypes.void, src=(Pat((Ops.INDEX, Ops.CAST)), Pat())), lambda: True),
-  (Pat(Ops.STORE, dtype=dtypes.void, src=(Pat((Ops.INDEX, Ops.CAST)), Pat(), Pat(dtype=dtypes.bool))), lambda: True),
-  (Pat(Ops.STORE, dtype=dtypes.void, src=(Pat((Ops.INDEX, Ops.CAST)), Pat(), Pat(Ops.IF))), lambda: True),
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat((Ops.INDEX, Ops.CAST)), UPat())), lambda: True),
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat((Ops.INDEX, Ops.CAST)), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat((Ops.INDEX, Ops.CAST)), UPat(), UPat(Ops.IF))), lambda: True),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
-  (Pat(Ops.ALU, name="w", src=(Pat(dtype=dtypes.bool), Pat(name="x"), Pat(name="y")), arg=TernaryOps.WHERE),
+  (UPat(Ops.ALU, name="w", src=(UPat(dtype=dtypes.bool), UPat(name="x"), UPat(name="y")), arg=TernaryOps.WHERE),
    lambda w,x,y: w.dtype == x.dtype == y.dtype),
-  (Pat(Ops.ALU, dtype=dtypes.bool, src=(Pat(name="x"), Pat(name="y")), arg=BinaryOps.CMPLT), lambda x,y: x.dtype == y.dtype),
-  (Pat(Ops.ALU, dtype=dtypes.bool, src=(Pat(name="x"), Pat(name="y")), arg=BinaryOps.CMPNE), lambda x,y: x.dtype == y.dtype),
+  (UPat(Ops.ALU, dtype=dtypes.bool, src=(UPat(name="x"), UPat(name="y")), arg=BinaryOps.CMPLT), lambda x,y: x.dtype == y.dtype),
+  (UPat(Ops.ALU, dtype=dtypes.bool, src=(UPat(name="x"), UPat(name="y")), arg=BinaryOps.CMPNE), lambda x,y: x.dtype == y.dtype),
   # and SHL/SHR, the shift distance is an int
-  (Pat(Ops.ALU, src=(Pat(name="x"), Pat(name="y")), name="alu", arg=BinaryOps.SHL),
+  (UPat(Ops.ALU, src=(UPat(name="x"), UPat(name="y")), name="alu", arg=BinaryOps.SHL),
    lambda alu,x,y: alu.dtype == x.dtype and (x.dtype == y.dtype or y.dtype == dtypes.uint)),
-  (Pat(Ops.ALU, src=(Pat(name="x"), Pat(name="y")), name="alu", arg=BinaryOps.SHR),
+  (UPat(Ops.ALU, src=(UPat(name="x"), UPat(name="y")), name="alu", arg=BinaryOps.SHR),
    lambda alu,x,y: alu.dtype == x.dtype and (x.dtype == y.dtype or y.dtype == dtypes.uint)),
-  (Pat(Ops.ALU, arg=BinaryOps.IDIV, name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
-  (Pat(Ops.ALU, name="x"), lambda x: all(x.dtype == y.dtype for y in x.src)),
+  (UPat(Ops.ALU, arg=BinaryOps.IDIV, name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
+  (UPat(Ops.ALU, name="x"), lambda x: all(x.dtype == y.dtype for y in x.src)),
 
-  (Pat(Ops.ASSIGN, src=(Pat((Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL)), Pat())), lambda: True),
-  (Pat(Ops.ENDRANGE, dtype=dtypes.void, src=(Pat(Ops.RANGE),)), lambda: True),
+  (UPat(Ops.ASSIGN, src=(UPat((Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL)), UPat())), lambda: True),
+  (UPat(Ops.ENDRANGE, dtype=dtypes.void, src=(UPat(Ops.RANGE),)), lambda: True),
 
   # all WMMA has 3 args, <x, w, acc>
-  (Pat(Ops.WMMA, src=(Pat(), Pat(), Pat())), lambda: True),
-  (Pat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
-  (Pat(Ops.EXPAND, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
+  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat())), lambda: True),
+  (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
+  (UPat(Ops.EXPAND, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
 
   # if has a <gate, barrier?>
-  (Pat(Ops.IF, dtype=dtypes.void, src=(Pat(),)), lambda: True),
-  (Pat(Ops.IF, dtype=dtypes.void, src=(Pat(), Pat(Ops.BARRIER))), lambda: True),
-  (Pat(Ops.ENDIF, dtype=dtypes.void, src=(Pat(Ops.IF),)), lambda: True),
+  (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(),)), lambda: True),
+  (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(), UPat(Ops.BARRIER))), lambda: True),
+  (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
 
-  (Pat(Ops.REDUCE_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in REDUCE_ALU.values()),
-  (Pat(Ops.GEP, src=(Pat(name="src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
-  (Pat(Ops.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.count and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
-  (Pat((Ops.BITCAST, Ops.CAST), src=(Pat(),), name="x"), lambda x: x.arg is None),
-  (Pat(Ops.BARRIER, dtypes.void, src=Pat(Ops.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
+  (UPat(Ops.REDUCE_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in REDUCE_ALU.values()),
+  (UPat(Ops.GEP, src=(UPat(name="src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
+  (UPat(Ops.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.count and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
+  (UPat((Ops.BITCAST, Ops.CAST), src=(UPat(),), name="x"), lambda x: x.arg is None),
+  (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
 
   # NOTE: for testing, we let sinks be anything
-  #(Pat(UOps.SINK, src=Pat(UOps.STORE)), lambda: True),
-  (Pat(Ops.SINK, dtypes.void), lambda: True),
-  (Pat(Ops.NOOP), lambda: True),
+  #(UPat(UOps.SINK, src=UPat(UOps.STORE)), lambda: True),
+  (UPat(Ops.SINK, dtypes.void), lambda: True),
+  (UPat(Ops.NOOP), lambda: True),
 
   # PTX LOAD/STORE
-  (Pat((Ops.LOAD, Ops.STORE), src=(Pat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
-  (Pat(Ops.BARRIER, dtypes.void, src=Pat(Ops.STORE, src=(Pat(dtype=dtypes.int64),), allow_any_len=True)), lambda: True),
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(dtype=dtypes.int64),), allow_any_len=True), lambda: True),
+  (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, src=(UPat(dtype=dtypes.int64),), allow_any_len=True)), lambda: True),
 ])
 
 def type_verify(uops:List[UOp]):
@@ -841,7 +847,7 @@ def cast_float_to_bf16(x: UOp) -> UOp:
 
 # *** most of symbolic lives here now ***
 
-def split_uop(x:UOp, sep:BinaryOps):
+def split_uop(x:UOp, sep:Ops):
   if x.op is Ops.ALU and x.arg is sep:
     for s in x.src: yield from split_uop(s, sep)
   else: yield x
@@ -1013,125 +1019,126 @@ def max_var_const(x:UOp, c1:UOp, c2:UOp):
 
 symbolic_simple = PatternMatcher([
   # ** self folding **
-  (Pat.var("x") + 0, lambda x: x),    # x+0 -> x
-  (Pat.var("x") * 1, lambda x: x),    # x*1 -> x
-  (Pat.var("x") // Pat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
-  (Pat.var("x") // 1, lambda x: x),   # x//1 -> x
-  (Pat.var("x") // -1, lambda x: -x), # x//-1 -> -x
-  (Pat.var("x") / Pat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
-  ((Pat.var("x") * Pat.var("x2")) / Pat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
-  ((Pat.var() % Pat.var("y")).named("base") % Pat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
-  (Pat.var("x")%Pat.cvar("c")+(Pat.var("x")//Pat.cvar("c"))*Pat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
-  (Pat.var("x", dtype=dtypes.bool) & Pat.cvar("c", vec=False), lambda x,c: x if c.arg else c),
-  (Pat.var("x", dtype=dtypes.bool) | Pat.cvar("c", vec=False), lambda x,c: c if c.arg else x),
-  (Pat.var("x").maximum(Pat.var("x")), lambda x: x),
-  ((Pat.var("x") & Pat.var("x")), lambda x: x),
-  ((Pat.var("x") | Pat.var("x")), lambda x: x),
-  (Pat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
+  (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
+  (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
+  (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
+  (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
+  (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
+  (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
+  ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
+  ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
+  (UPat.var("x")%UPat.cvar("c")+(UPat.var("x")//UPat.cvar("c"))*UPat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
+  (UPat.var("x", dtype=dtypes.bool) & UPat.cvar("c", vec=False), lambda x,c: x if c.arg else c),
+  (UPat.var("x", dtype=dtypes.bool) | UPat.cvar("c", vec=False), lambda x,c: c if c.arg else x),
+  (UPat.var("x").maximum(UPat.var("x")), lambda x: x),
+  ((UPat.var("x") & UPat.var("x")), lambda x: x),
+  ((UPat.var("x") | UPat.var("x")), lambda x: x),
+  (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
   # ** zero folding **
-  (Pat.var("x") < Pat.var("x"), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x < x -> False
-  (Pat.var("x", dtype=dtypes.ints) != Pat.var("x", dtype=dtypes.ints),
+  (UPat.var("x") < UPat.var("x"), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x < x -> False
+  (UPat.var("x", dtype=dtypes.ints) != UPat.var("x", dtype=dtypes.ints),
    lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x != x -> False (only ints)
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
-  (Pat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
+  (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # ** constant folding **
-  (Pat(Ops.ALU, name="root", src=Pat((Ops.VCONST, Ops.CONST))),
+  (UPat(Ops.ALU, name="root", src=UPat((Ops.VCONST, Ops.CONST))),
    lambda root: root.const_like(exec_alu(root.arg, root.dtype, [x.arg for x in root.src], truncate_output=False))),
-  # ** COMMUTATIVE flipping **
-  *[(Pat(Ops.ALU, arg=op, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None) for op in COMMUTATIVE],
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
-  (Pat.var('x', dtype=dtypes.bool) * Pat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
-  (Pat.var('x', dtype=dtypes.bool) + Pat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
-  (Pat.var('x', dtype=dtypes.bool).maximum(Pat.var('y', dtype=dtypes.bool)), lambda x,y: x|y),
+  (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
+  (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
+  (UPat.var('x', dtype=dtypes.bool).maximum(UPat.var('y', dtype=dtypes.bool)), lambda x,y: x|y),
   # *** cast ***
-  (Pat(Ops.CAST, name="root", src=Pat.cvar("c")), lambda root, c: root.const_like(c.arg)),
-  (Pat(Ops.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
+  (UPat(Ops.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
+  (UPat(Ops.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
 ])
 
 symbolic = symbolic_simple+PatternMatcher([
+  # ** COMMUTATIVE flipping **
+  *[(UPat(Ops.ALU, arg=op, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None) \
+    for op in GroupOp.Commutative],
   # group like
-  ((Pat.var("x") + Pat.var("y")) + Pat.var("x") * Pat.cvar("c"), lambda x,y,c: (x+x*c)+y),
+  ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
   # ** combine terms **
-  (Pat.var("x") * Pat.cvar("c0") + Pat.var("x") * Pat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
-  (Pat.var("x") + Pat.var("x") * Pat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
-  (Pat.var("x") + Pat.var("x"), lambda x: x*2), # (x+x)-> x*2
-  ((Pat.var("x") / Pat.var("x2")) / Pat.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
-  (-1 * (Pat.var("x") + Pat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
+  (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
+  (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
+  (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
+  ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
+  (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
   # a conditional with the same results either way is a noop, also fold const conditionals
-  (Pat.var().where(Pat.var("val"), Pat.var("val")), lambda val: val),
-  (Pat.cvar("gate", vec=False).where(Pat.var("c0"), Pat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
+  (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # ALU min==max -> CONST (slow!)
-  (Pat(Ops.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
+  (UPat(Ops.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
-  (Pat.maximum(Pat.var("x"), Pat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
+  (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # TODO: why does this rule break beautiful_mnist?
-  #((Pat.var("x")+Pat.var("z")).maximum(Pat.var("y")+Pat.var("z")), lambda x,y,z: x.maximum(y) + z),
-  ((Pat.var("x")*Pat.cvar("c1")).maximum(Pat.var("x")*Pat.cvar("c2")), max_var_const),
+  #((UPat.var("x")+UPat.var("z")).maximum(UPat.var("y")+UPat.var("z")), lambda x,y,z: x.maximum(y) + z),
+  ((UPat.var("x")*UPat.cvar("c1")).maximum(UPat.var("x")*UPat.cvar("c2")), max_var_const),
   # ** two stage ALU folding **
-  ((Pat.var("x") + Pat.cvar("c1")) + Pat.cvar("c2"), lambda x,c1,c2: x+(c1+c2)),
-  ((Pat.var("x") * Pat.cvar("c1")) * Pat.cvar("c2"), lambda x,c1,c2: x*(c1*c2)),
-  ((Pat.var("x") & Pat.cvar("c1")) & Pat.cvar("c2"), lambda x,c1,c2: x&(c1&c2)),
-  ((Pat.var("x") | Pat.cvar("c1")) | Pat.cvar("c2"), lambda x,c1,c2: x|(c1|c2)),
-  ((Pat.cvar("c0") + Pat.var("x")) < Pat.cvar("c1"), lambda x,c0,c1: x<(c1-c0)),  # c0 + x < c1 -> x < c1 - c0
-  ((Pat.var("x") // Pat.cvar("c1")) // Pat.cvar("c2"), lambda x,c1,c2: x//(c1*c2)), # (x//c1)//c2 -> x//(c1*c2)
+  ((UPat.var("x") + UPat.cvar("c1")) + UPat.cvar("c2"), lambda x,c1,c2: x+(c1+c2)),
+  ((UPat.var("x") * UPat.cvar("c1")) * UPat.cvar("c2"), lambda x,c1,c2: x*(c1*c2)),
+  ((UPat.var("x") & UPat.cvar("c1")) & UPat.cvar("c2"), lambda x,c1,c2: x&(c1&c2)),
+  ((UPat.var("x") | UPat.cvar("c1")) | UPat.cvar("c2"), lambda x,c1,c2: x|(c1|c2)),
+  ((UPat.cvar("c0") + UPat.var("x")) < UPat.cvar("c1"), lambda x,c0,c1: x<(c1-c0)),  # c0 + x < c1 -> x < c1 - c0
+  ((UPat.var("x") // UPat.cvar("c1")) // UPat.cvar("c2"), lambda x,c1,c2: x//(c1*c2)), # (x//c1)//c2 -> x//(c1*c2)
   # ** lt **
   # c0*x<c1 for positive int c0,c1
-  ((Pat.cvar("c0", vec=False)*Pat.var("x", dtype=dtypes.ints)).lt(Pat.cvar("c1", vec=False)),
+  ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints)).lt(UPat.cvar("c1", vec=False)),
    lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if c0.arg > 0 and c1.arg > 0 else None),
   # c0*x<c1 for negative int c0 and non-positive c1
-  ((Pat.cvar("c0", vec=False)*Pat.var("x", dtype=dtypes.ints)).lt(Pat.cvar("c1", vec=False)),
+  ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints)).lt(UPat.cvar("c1", vec=False)),
    lambda x,c0,c1: (-x).lt(-(math.floor(-c1.arg/-c0.arg))) if c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
   # x//c0<c1 for positive int c0
-  ((Pat.var("x", dtype=dtypes.ints)//Pat.cvar("c0", vec=False)).lt(Pat.cvar("c1", vec=False)),
+  ((UPat.var("x", dtype=dtypes.ints)//UPat.cvar("c0", vec=False)).lt(UPat.cvar("c1", vec=False)),
    lambda x,c0,c1: x.lt(c1.arg*c0.arg) if c0.arg > 0 else None),
   # mul add lt
-  (((Pat.cvar("c0", vec=False)*Pat.var("x"))+Pat.var("x2")).lt(Pat.cvar("c1", vec=False)),
+  (((UPat.cvar("c0", vec=False)*UPat.var("x"))+UPat.var("x2")).lt(UPat.cvar("c1", vec=False)),
    lambda x,x2,c0,c1: x.lt(c1//c0) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax and x2.vmin >= 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
-  (Pat(Ops.ALU, arg=BinaryOps.ADD, src=(Pat.var("x"), Pat.cvar("c1"))) + Pat.var("y"), lambda x,c1,y: (x+y)+c1),
-  (Pat(Ops.ALU, arg=BinaryOps.MUL, src=(Pat.var("x"), Pat.cvar("c1"))) * Pat.var("y"), lambda x,c1,y: (x*y)*c1),
+  (UPat(Ops.ALU, arg=BinaryOps.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
+  (UPat(Ops.ALU, arg=BinaryOps.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
   # *** rules from symbolic ***
   # unrolled arange div folding
-  (Pat(Ops.ALU, name="divs", src=[Pat(), Pat(Ops.ALU, arg=BinaryOps.IDIV)], arg=BinaryOps.ADD), fold_unrolled_divs),
+  (UPat(Ops.ALU, name="divs", src=[UPat(), UPat(Ops.ALU, arg=BinaryOps.IDIV)], arg=BinaryOps.ADD), fold_unrolled_divs),
   # generic lt folding
-  (Pat.var("x", dtypes.sints).lt(Pat.cvar("c", vec=False)), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
+  (UPat.var("x", dtypes.sints).lt(UPat.cvar("c", vec=False)), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   # canonicalize a simplex with positive coefficients > 0
   # not x < 1 -> X > 0
-  (Pat.var("x", dtypes.ints).lt(1).ne(True), lambda x: newx.lt(1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
+  (UPat.var("x", dtypes.ints).lt(1).ne(True), lambda x: newx.lt(1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # ** div **
   # # div folding
-  (Pat.var("x", dtypes.sints) // Pat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=div_folding(x,c.arg)) is not None else None),
+  (UPat.var("x", dtypes.sints) // UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=div_folding(x,c.arg)) is not None else None),
   # ** mod **
   # mod folding
-  (Pat.var("x") % Pat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
+  (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: newx if 0 < c.arg and (newx:=mod_folding(x,c.arg)) is not None else None),
 ])
 
 symbolic_flat = symbolic+PatternMatcher([
   # ** combine terms (opinionated) **
-  (-1 * (Pat.var("x") + Pat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
+  (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
-  ((Pat.var("x", dtypes.ints) + Pat.var("y")) * Pat.cvar("c"), lambda x,y,c: x*c+y*c),
+  ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
 ])
 
-_substitute = PatternMatcher([(Pat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
+_substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 
 # for debug
 syms = { BinaryOps.ADD: "+", BinaryOps.SUB: "-", BinaryOps.IDIV: "//", BinaryOps.MOD: "%", BinaryOps.SHL: "<<", BinaryOps.SHR: ">>",
          BinaryOps.MUL: "*", BinaryOps.CMPLT: "<", BinaryOps.CMPNE: "!=", BinaryOps.AND: "&", BinaryOps.OR: "|", BinaryOps.XOR: "^"}
 renderer = PatternMatcher([
-  (Pat((Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg[0])),
-  (Pat(Ops.RANGE, name="x"), lambda x: UOp(Ops.NOOP, arg=f"ridx{x.arg[0]}")),
-  (Pat(Ops.CONST, name="x"), lambda x: UOp(Ops.NOOP, arg=str(x.arg))),
-  (Pat(Ops.BIND, src=Pat(Ops.NOOP), name="x"), lambda x: x.src[0]),
-  (Pat(Ops.ALU, src=Pat(Ops.NOOP), name="x", arg=UnaryOps.NEG), lambda x: UOp(Ops.NOOP, arg=f"(-{x.src[0].arg})")),
-  (Pat(Ops.ALU, src=Pat(Ops.NOOP), name="x", arg=BinaryOps.MAX), lambda x: UOp(Ops.NOOP, arg=f"max({x.src[0].arg}, {x.src[1].arg})")),
-  (Pat(Ops.ALU, src=Pat(Ops.NOOP), name="x", arg=TernaryOps.MULACC),
+  (UPat((Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg[0])),
+  (UPat(Ops.RANGE, name="x"), lambda x: UOp(Ops.NOOP, arg=f"ridx{x.arg[0]}")),
+  (UPat(Ops.CONST, name="x"), lambda x: UOp(Ops.NOOP, arg=str(x.arg))),
+  (UPat(Ops.BIND, src=UPat(Ops.NOOP), name="x"), lambda x: x.src[0]),
+  (UPat(Ops.ALU, src=UPat(Ops.NOOP), name="x", arg=UnaryOps.NEG), lambda x: UOp(Ops.NOOP, arg=f"(-{x.src[0].arg})")),
+  (UPat(Ops.ALU, src=UPat(Ops.NOOP), name="x", arg=BinaryOps.MAX), lambda x: UOp(Ops.NOOP, arg=f"max({x.src[0].arg}, {x.src[1].arg})")),
+  (UPat(Ops.ALU, src=UPat(Ops.NOOP), name="x", arg=TernaryOps.MULACC),
    lambda x: UOp(Ops.NOOP, arg=f"({x.src[0].arg}*{x.src[1].arg}+{x.src[2].arg})")),
-  (Pat(Ops.ALU, src=Pat(Ops.NOOP), name="x", arg=TernaryOps.WHERE),
+  (UPat(Ops.ALU, src=UPat(Ops.NOOP), name="x", arg=TernaryOps.WHERE),
    lambda x: UOp(Ops.NOOP, arg=f"({x.src[1].arg} if {x.src[0].arg} else {x.src[2].arg})")),
-  (Pat(Ops.ALU, src=Pat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[0].arg}{syms[x.arg]}{x.src[1].arg})")),
+  (UPat(Ops.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[0].arg}{syms[x.arg]}{x.src[1].arg})")),
 ])
 
 # *** what was symbolic.py ***

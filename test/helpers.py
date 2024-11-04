@@ -42,7 +42,8 @@ def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
   if dtype == dtypes.half:
     if device == "GPU": return not CI and not OSX
-    if device in ["LLVM", "CUDA", "NV"]: return not CI
+    if device in ["CUDA", "NV"]: return not CI
+    if device == "LLVM": return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
   return True
@@ -78,7 +79,7 @@ def timeit(fxn:Callable[..., T], *args, **kwargs) -> Tuple[T, float]:
 
 def eval_uop(uop:UOp):
   g = UOp(Ops.DEFINE_GLOBAL, uop.dtype.ptr(), arg=0, src=())
-  rw = full_graph_rewrite(UOp.store(g, UOp.const(dtypes.int, 0), uop).sink(), PythonRenderer)
+  rw = full_graph_rewrite(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(), PythonRenderer)
   prog = PythonProgram("run", PythonCompiler().compile(PythonRenderer().render("run", linearize_uop(rw))))
   buf = PythonAllocator().alloc(uop.dtype.itemsize)
   prog(buf)

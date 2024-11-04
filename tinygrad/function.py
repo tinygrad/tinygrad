@@ -156,7 +156,7 @@ class Prod(Function):
 
 class Max(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
-    self.x, self.ret, self.axis = x, x.r(ReduceOps.MAX, axis), axis
+    self.x, self.ret, self.axis = x, x.r(ReduceOps.REDUCE_MAX, axis), axis
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
