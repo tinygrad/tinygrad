@@ -75,7 +75,7 @@ class TestLinearizerDumb(unittest.TestCase):
     for opt in opts: k.apply_opt(opt)
     prg = k.to_program()
     print(prg.src)
-    assert prg.uops is not None and not any(uop.op is Ops.ALU and uop.arg is BinaryOps.MAX for uop in prg.uops), "leftover MAX"
+    assert prg.uops is not None and not any(uop.op is BinaryOps.MAX for uop in prg.uops), "leftover MAX"
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
   def test_expander_new_srcs(self):
