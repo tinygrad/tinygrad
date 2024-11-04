@@ -16,21 +16,6 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs or buf.base.op is MetaOps.CONST: return None
   if buf.base.realized is not None: return realizes.setdefault(buf.base)
-  # check if we need to realize views
-  if buf is not buf.base:
-    # fuse some pads
-    if len(buf.st.views) == 1 and buf.st.views[-1].mask is not None and all_int(buf.base.st.shape) and \
-        resolve(prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask])):
-      simple_pads[buf.base] = None
-    # realize all expands
-    elif resolve(prod(buf.base.st.shape) < prod(buf.st.shape)):
-      # this was causing "test_lil_model" to fail
-      if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
-        simple_pads[buf.base] = None # don't realize image to image casts. this is part of a larger problem
-      else: realizes[buf.base] = None
-    # check all other pads for safe fusion
-    elif any(v.mask is not None for v in buf.st.views): simple_pads[buf.base] = None
-    return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
   if ctx.buf_uops[buf.buffer] in ctx.realizes: realizes[buf] = None
   if buf.op in GroupOp.Reduce and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[buf] = None
   allbufs[buf] = None
@@ -40,7 +25,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     assert target.is_realized(), f"assign must be already realized to schedule {target}"
   for x in buf.srcs:
     if x.base.realized is None: children[x.base][buf] = None
-    _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
+    _recurse_lb(x.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
 
 def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict[LazyBuffer, bool]) -> bool:
   if (n:=cache.get(buf)) is not None: return n
