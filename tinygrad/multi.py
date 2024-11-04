@@ -46,10 +46,7 @@ def reshard_mlb(mlb: "MultiLazyBuffer", axis: int, bounds: Tuple[Tuple[int, int]
   for _chunks in cast(List[List[LazyBuffer]], reassembled_chunks):
     pads = [[(i * shape, (shape * (n_lbs-1-i))) if _axis == original_axis else (0, 0) for _axis, shape in enumerate(chunk.shape)]
             for i, chunk in enumerate(_chunks)]
-    assembled = functools.reduce(lambda x, y: x.alu(BinaryOps.ADD, y),
-      [arg.pad(tuple(s)) for arg,s in zip(_chunks, pads)]
-    )
-    reassembled_lbs.append(assembled)
+    reassembled_lbs.append(functools.reduce(lambda x, y: x.alu(BinaryOps.ADD, y), [arg.pad(tuple(s)) for arg,s in zip(_chunks, pads)]))
   return MultiLazyBuffer(reassembled_lbs, axis)
 
 def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
