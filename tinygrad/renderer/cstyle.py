@@ -229,6 +229,9 @@ class OpenCLRenderer(CStyleLanguage):
     (UPat(Ops.VECTORIZE, src=UPat(Ops.GEP), name="v"),
      lambda v: v.src[0].src[0] if all_same([x.src for x in v.src]) and \
       [x.arg[0] if len(x.arg) == 1 else None for x in v.src] == list(range(v.dtype.count)) else None),
+    # broadcasting floats
+    (UPat(Ops.ALU, src=(UPat(Ops.VECTORIZE, src=UPat.var("x")), UPat.var("y")), name="a"), lambda a,x,y: UOp(Ops.ALU, a.dtype, (x,y), a.arg)),
+    (UPat(Ops.ALU, src=(UPat.var("y"), UPat(Ops.VECTORIZE, src=UPat.var("x"))), name="a"), lambda a,x,y: UOp(Ops.ALU, a.dtype, (y,x), a.arg)),
   ]) + CStyleLanguage.extra_matcher
 
   string_rewrite = PatternMatcher([
