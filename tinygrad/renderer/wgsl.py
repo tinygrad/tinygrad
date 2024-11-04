@@ -27,6 +27,10 @@ wgsl_matcher = PatternMatcher([
     UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2")))), dtype=dtypes.ulong,  arg=BinaryOps.MUL), \
     lambda m,a,g,c1,c2: UOp(Ops.ALU, arg=TernaryOps.WHERE, dtype=m.dtype, src=(g, a << 32, UOp.const(dtype=m.dtype, b=0))) \
     if c1.arg == 4294967296 and c2.arg == 0 else None),
+  (UPat(Ops.ALU, name="m", src=(UPat(name="a"), UPat(Ops.ALU, arg=TernaryOps.WHERE, src=(UPat.var("g"), \
+    UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2")))), arg=BinaryOps.MUL), \
+    lambda m,a,g,c1,c2: UOp(Ops.ALU, arg=TernaryOps.WHERE, dtype=m.dtype, src=(g, UOp.const(dtype=dtypes.float, b=float('nan')), a)) \
+    if math.isnan(c1.arg) and c2.arg == 1.0 else None),
   ])
 
 type_map = {dtypes.float: "f32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.ulong: "vec2<u32>"}

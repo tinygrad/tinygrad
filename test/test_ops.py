@@ -501,12 +501,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: (-math.inf)/x)
     helper_test_op([(45,65)], lambda x: math.nan/x)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "nan location mismatch")
   def test_pow_full(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x**y)
     helper_test_op([(45,65), (45,65)], lambda x,y: x.pow(y))
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "nan location mismatch")
   def test_pow(self):
     helper_test_op([(45,65)], lambda x: x**0)
     helper_test_op([(45,65)], lambda x: x**1)
