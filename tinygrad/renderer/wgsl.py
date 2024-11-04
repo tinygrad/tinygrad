@@ -39,8 +39,8 @@ def render_load_store(r, bidx):
 
 def render_ushift(r, v, am, left):
   v, am = r[v], f"{r[am]}.x" if am.dtype == dtypes.ulong else f"{r[am]}"
-  if left: return f"select(vec2<u32>({v}.x << {am}, ({v}.y << {am}) | ({v}.x >> (32u-{am}))), vec2<u32>(0u, {v}.x << ({am}-32u)), {am} >= 32u)"
-  else: return f"select(vec2<u32>(({v}.x >> {am}) | ({v}.y << (32u - {am})), {v}.y >> {am}), vec2<u32>({v}.y >> ({am} - 32u), 0u), {am} >= 32u)"
+  return f"select(vec2<u32>({v}.x << {am}, ({v}.y << {am}) | ({v}.x >> (32u-{am}))), vec2<u32>(0u, {v}.x << ({am}-32u)), {am} >= 32u)" \
+  if left else f"select(vec2<u32>(({v}.x >> {am}) | ({v}.y << (32u - {am})), {v}.y >> {am}), vec2<u32>({v}.y >> ({am} - 32u), 0u), {am} >= 32u)"
 
 class WGSLRenderer(CStyleLanguage):
   device = "WEBGPU"
