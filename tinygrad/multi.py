@@ -6,7 +6,7 @@ from tinygrad.dtype import DType
 from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps, MathTrait, sint
 from tinygrad.engine.lazy import LazyBuffer
 
-def reshard(mlb: "MultiLazyBuffer", axis: int, bounds: Tuple[Tuple[int, int], ...]):
+def reshard_mlb(mlb: "MultiLazyBuffer", axis: int, bounds: Tuple[Tuple[int, int], ...]):
   shape, n_lbs, original_axis = mlb.shape, len(mlb.lbs), mlb.axis
   use_ring = (RING >= 2 or (n_lbs > 2 and len(mlb.lbs[0].shape) > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   if DEBUG >= 2: print(f"{'RING RESHARD' if use_ring else 'NAIVE RESHARD'}")
@@ -153,7 +153,7 @@ class MultiLazyBuffer(MathTrait):
     for mlb in msrcs:
       if (mlb.axis == axis and (mlb.axis is None or mlb.bounds == bounds)) or not_all_real: srcs.append(mlb.lbs)
       elif mlb.axis is None and axis is not None: srcs.append(to_sharded(mlb.lbs, axis, bounds))
-      else: srcs.append(reshard(mlb, axis, bounds).lbs)
+      else: srcs.append(reshard_mlb(mlb, axis, bounds).lbs)
     new_real_lbs:Dict[int,LazyBuffer] = {i:lsrcs[0].alu(op, *lsrcs[1:]) for i,(lsrcs,r) in enumerate(zip(zip(*srcs), new_real)) if r}
     # NOTE: const dtype should match real
     new_dtype = next(iter(new_real_lbs.values())).dtype

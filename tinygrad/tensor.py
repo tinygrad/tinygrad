@@ -8,7 +8,7 @@ from collections import defaultdict
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN
-from tinygrad.multi import MultiLazyBuffer, reshard as _reshard
+from tinygrad.multi import MultiLazyBuffer, reshard_mlb
 from tinygrad.ops import MetaOps, smax, smin, resolve, UOp, Ops, BinaryOps, sint, Variable, SimpleMathTrait
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.engine.lazy import LazyBuffer
@@ -389,7 +389,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
       if axis < 0: axis += len(self.shape)
       gap = self.shape[axis] // len(self.device)
       bounds = tuple([(c * gap, (c + 1) * gap) for c in range(gap)])
-      lazydata = _reshard(self.lazydata, axis, bounds)
+      lazydata = reshard_mlb(self.lazydata, axis, bounds)
     return Tensor(lazydata, device=self.device, requires_grad=self.requires_grad)
 
   def reshard_(self, axis: Optional[int]=None):
