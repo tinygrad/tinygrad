@@ -620,21 +620,21 @@ class TestMultiTensor(unittest.TestCase):
       for si in t.schedule():
         ast = si.ast.src[0]
         assert ast.op is Ops.STORE
-        assert ast.src[2].arg is BinaryOps.ADD
+        assert ast.src[2].op is BinaryOps.ADD
         assert ast.src[2].src[0].op is Ops.LOAD
         assert ast.src[2].src[1].src[1].op is Ops.CONST and ast.src[2].src[1].src[1].arg == 1
       t = 2 * t
       for si in t.schedule():
         ast = si.ast.src[0]
         assert ast.op is Ops.STORE
-        assert ast.src[2].arg is BinaryOps.MUL
+        assert ast.src[2].op is BinaryOps.MUL
         assert ast.src[2].src[0].src[1].op is Ops.CONST and ast.src[2].src[0].src[1].arg == 2
         assert ast.src[2].src[1].op is Ops.LOAD
       t = t + t.full_like(3)
       for si in t.schedule():
         ast = si.ast.src[0]
         assert ast.op is Ops.STORE
-        assert ast.src[2].arg is BinaryOps.ADD
+        assert ast.src[2].op is BinaryOps.ADD
         assert ast.src[2].src[0].op is Ops.LOAD
         assert ast.src[2].src[1].src[1].op is Ops.CONST and ast.src[2].src[1].src[1].arg == 3
 
