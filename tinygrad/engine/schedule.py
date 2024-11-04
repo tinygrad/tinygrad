@@ -269,7 +269,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   store_groups, lazybufs_to_realize, assigns = get_realizes(outs, ctx)
   # split realizes into small graphs
   graph_rewrite(big_graph, break_sched, ctx.realizes)
-  assigned = {ubuf for x in assigns if (ubuf:=ctx.buf_uops.get(x.buffer)) is not None}
+  assigned = {ubuf for b in assigns if (ubuf:=ctx.buf_uops.get(b)) is not None}
   small_graphs: List[Tuple[UOp, ScheduleItemContext]] = []
   metadata: List[Set[Metadata]] = []
   for stores in store_groups:
