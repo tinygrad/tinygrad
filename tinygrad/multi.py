@@ -1,13 +1,13 @@
 from __future__ import annotations
-from typing import Optional, Union, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict
 import functools, itertools, operator
 from tinygrad.helpers import all_same, all_int, dedup, prod, DEBUG, RING, getenv
 from tinygrad.dtype import DType
-from tinygrad.ops import REDUCE_ALU, BinaryOps, MetaOps, UnaryOps, TernaryOps, ReduceOps, MathTrait
+from tinygrad.ops import REDUCE_ALU, Ops, MathTrait
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
 
-def all_reduce(op: ReduceOps, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
+def all_reduce(op: Ops, lbs: List[LazyBuffer]) -> List[LazyBuffer]:
   assert all_int(lbs[0].shape), f"does not support symbolic shape {lbs[0].shape}"
   assert all_same([lb.shape[0] for lb in lbs]), "allreduce with uneven shards is undefined"
   bop = REDUCE_ALU[op]
@@ -94,7 +94,7 @@ class MultiLazyBuffer(MathTrait):
   def clone(self) -> MultiLazyBuffer: return MultiLazyBuffer([lb.clone() for lb in self.lbs], self.axis, self.real)
 
   # elementwise is simple
-  def alu(self, op:Union[MetaOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:MultiLazyBuffer) -> MultiLazyBuffer:
+  def alu(self, op:Ops, *in_srcs:MultiLazyBuffer) -> MultiLazyBuffer:
     msrcs = (self,)+in_srcs
     assert all(isinstance(x, MultiLazyBuffer) for x in msrcs), f"all buffers must be MultiLazyBuffer {msrcs}"
     assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"
@@ -114,7 +114,7 @@ class MultiLazyBuffer(MathTrait):
     new_dtype = next(iter(new_real_lbs.values())).dtype
     return MultiLazyBuffer([new_real_lbs.get(i, lsrcs[0].const_like(0).cast(new_dtype)) for i,lsrcs in enumerate(zip(*srcs))], axis, new_real)
 
-  def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> MultiLazyBuffer:
+  def r(self, op:Ops, axis:Tuple[int, ...]) -> MultiLazyBuffer:
     if self.axis is not None and self.axis in axis:
       # all-reduce on sharded axes
       reduced_parts = [(x if r else x.const_like(0)).r(op, axis) for x,r in zip(self.lbs, self.real)]

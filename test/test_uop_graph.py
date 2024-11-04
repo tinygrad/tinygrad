@@ -161,7 +161,7 @@ class TestGraphRewrite(unittest.TestCase):
     c1 = UOp.const(dtypes.float, 1.0)
     c2 = UOp.const(dtypes.float, 2.0)
     nout = graph_rewrite(v+c1+c2, simple_pm)
-    self.assertEqual(nout.op, Ops.ALU)
+    self.assertEqual(nout.op, Ops.ADD)
     self.assertEqual(nout.src[0].op, Ops.DEFINE_VAR)
     self.assertEqual(nout.src[1].op, Ops.CONST)
     self.assertEqual(nout.src[1].arg, 3.0)
@@ -182,11 +182,11 @@ class TestGraphRewrite(unittest.TestCase):
     b = UOp.variable('b', 0, 1)
     c = UOp.variable('c', 0, 1)
     d = UOp.variable('d', 0, 1)
-    outs = [2+a, 2+a+d+3+b+c+4, UOp(Ops.ALU, a.dtype, src=(a.const_like(2), a), arg=BinaryOps.ADD), (4+d)+c+(2+a)+b]
+    outs = [2+a, 2+a+d+3+b+c+4, UOp(Ops.ADD, a.dtype, src=(a.const_like(2), a)), (4+d)+c+(2+a)+b]
     for out in outs:
       sink = graph_rewrite(out, sym)
       print(sink.render())
-      self.assertEqual(sink.op, Ops.ALU)
+      self.assertEqual(sink.op, Ops.ADD)
       self.assertEqual(sink.src[1].op, Ops.CONST)
       self.assertEqual(len([x for x in sink.sparents if x.op is Ops.CONST]), 1)
 
@@ -380,8 +380,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 3)
     out = uops[-1]
-    self.assertEqual(out.op, Ops.ALU)
-    self.assertEqual(out.arg, BinaryOps.ADD)
+    self.assertEqual(out.op, BinaryOps.ADD)
     self.assertEqual(out.src[1].op, Ops.CONST)
     self.assertEqual(out.src[1].arg, 6)
 

@@ -6,7 +6,7 @@ from dataclasses import replace
 from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
-from tinygrad.ops import UOp, Ops, BinaryOps, TernaryOps, UnaryOps
+from tinygrad.ops import UOp, Ops, BinaryOps, TernaryOps, UnaryOps, GroupOp
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -865,9 +865,9 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[24])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is Ops.RANGE]
     # RANGE -> ALU -> RANGE -> ALU + LOAD -> ASSIGN
-    assert any(x.op is Ops.ALU for x in lin.uops[ranges[0]:ranges[1]])
+    assert any(x.op in GroupOp.ALU for x in lin.uops[ranges[0]:ranges[1]])
     assert not any(x.op is Ops.LOAD for x in lin.uops[ranges[0]:ranges[1]])
-    assert any(x.op in {Ops.ALU, Ops.LOAD} for x in lin.uops[ranges[1]:])
+    assert any(x.op in {*GroupOp.ALU, Ops.LOAD} for x in lin.uops[ranges[1]:])
 
   def test_range_outer_op_before_phi(self):
     a = Tensor.randn(4, 1).realize()
@@ -902,7 +902,7 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[a.numpy().sum()*a.numpy().sum()])[0]
     # RANGE -> LOAD -> ASSIGN -> ALU
     end = max(i for i,u in enumerate(lin.uops) if u.op is Ops.ENDRANGE)
-    assert lin.uops[end+1].op is Ops.ALU
+    assert lin.uops[end+1].op in GroupOp.ALU
 
   def test_range_outer_op_after_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -910,7 +910,7 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3))).sum()*2])[0]
     # RANGE -> LOAD -> ASSIGN -> ALU
     end = max(i for i,u in enumerate(lin.uops) if u.op is Ops.ENDRANGE)
-    assert lin.uops[end+1].op is Ops.ALU
+    assert lin.uops[end+1].op in GroupOp.ALU
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
@@ -1141,7 +1141,7 @@ class TestLinearizer(unittest.TestCase):
     # the uops graph is RANGE -> DEFINE_ACC -> 4x ALU -> 4x ASSIGN -> ENDRANGE
     for u in k.uops:
       if u.op is Ops.ASSIGN:
-        assert u.src[1].op is Ops.ALU
+        assert u.src[1].op in GroupOp.ALU
       # children of ASSIGN are placed after ENDRANGE
       if any(x.op is Ops.ASSIGN for x in u.src):
         end_range = [i for i, x in enumerate(k.uops) if x.op is Ops.ENDRANGE][0]
@@ -1219,7 +1219,7 @@ class TestLinearizer(unittest.TestCase):
       assert len(sched) == 1
 
       lin = Kernel(sched[0].ast)
-      assert sum(u.arg is UnaryOps.RECIP for u in lin.linearize().uops) == max_ops, msg
+      assert sum(u.op is UnaryOps.RECIP for u in lin.linearize().uops) == max_ops, msg
 
     a = Tensor.empty((4,4))
     b = Tensor.empty((4,4))
@@ -1260,7 +1260,7 @@ class TestLinearizer(unittest.TestCase):
     lin = Kernel(sched_copy[-1].ast)
     lin.hand_coded_optimizations()
     lin.linearize()
-    assert not any(u.arg == TernaryOps.WHERE for u in lin.uops), "found where where where should be folded"
+    assert not any(u.op == TernaryOps.WHERE for u in lin.uops), "found where where where should be folded"
 
   def test_phi_simplification(self):
     def helper(t, max_ops=0):
@@ -1272,7 +1272,7 @@ class TestLinearizer(unittest.TestCase):
       assert len(set([u.op for u in uops if u.op in {Ops.RANGE, Ops.SPECIAL}])) == 1, "has either specials or ranges, not both"
       assert len([u for u in uops if u.op is Ops.ASSIGN]) == 0, "ASSIGN should have been simplified"
       # TODO: once uops track min/max this will be fixed
-      #assert len([u for u in uops if u.arg is BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"
+      #assert len([u for u in uops if u.op is BinaryOps.MAX]) <= max_ops, "no unnecessary MAX ops"
 
     helper(Tensor.arange(5.5, (3.5*300), 3.5), max_ops=2)
     helper(Tensor.arange(-1, -100, -5), max_ops=2)

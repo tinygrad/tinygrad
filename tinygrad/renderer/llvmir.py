@@ -1,7 +1,7 @@
 from typing import Dict, Callable, List, Optional
 from llvmlite import ir
 from tinygrad.dtype import DType, PtrDType, dtypes
-from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps, Ops, UOp
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 
 MFLAGS = ('nsz', 'arcp', 'contract', 'afn') # All from fast math, but nnan and ninf and reassoc
@@ -52,7 +52,7 @@ class LLVMRenderer(Renderer):
   has_local = False
   has_shared = False
   global_max = None
-  code_for_op: Dict[Op, Callable] = {
+  code_for_op: Dict[Ops, Callable] = {
     UnaryOps.RECIP: lambda builder, x, dtype: builder.fdiv(const(1, dtype), x, flags=MFLAGS),
     UnaryOps.SQRT: lambda builder, x, dtype: builder.call(builder.module.declare_intrinsic('llvm.sqrt', [x.type]), [x], fastmath=MFLAGS),
     BinaryOps.ADD: lambda builder, x, y, dtype: builder.or_(x, y) if dtype == dtypes.bool else builder.add(x, y) if dtypes.is_int(dtype) else builder.fadd(x, y, flags=MFLAGS),  # noqa: E501
@@ -141,8 +141,8 @@ class LLVMRenderer(Renderer):
           backward = src[0]
           while backward.op is Ops.ASSIGN: backward = backward.src[0]
           lvars[backward] = lvars[u]
-        elif uop is Ops.ALU:
-          lvars[u] = self.code_for_op[args](bb[-1], *[lvars[x] for x in src], src[0].dtype if args in {BinaryOps.CMPLT, BinaryOps.CMPNE} else dtype)
+        elif uop in GroupOp.ALU:
+          lvars[u] = self.code_for_op[uop](bb[-1], *[lvars[x] for x in src], src[0].dtype if uop in {BinaryOps.CMPLT, BinaryOps.CMPNE} else dtype)
         elif uop in {Ops.CAST, Ops.BITCAST}: lvars[u] = cast(bb, lvars[src[0]], src[0].dtype, dtype, bitcast=uop is Ops.BITCAST)
         elif uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR}: lvars[u] = func.args[buf_index[args]]
         elif uop is Ops.CONST: lvars[u] = const(args, dtype)

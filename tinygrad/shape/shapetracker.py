@@ -76,8 +76,8 @@ class ShapeTracker:
     idx, valid = (graph_rewrite(u, symbolic_flat) for u in self.to_indexed_uops())
     for c in split_uop(idx, BinaryOps.ADD):
       if c.op is Ops.RANGE: ret[c.arg] = 1
-      if c.op is Ops.ALU and c.arg is BinaryOps.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg] = c.src[1].arg
-      if c.op is Ops.ALU and c.arg is BinaryOps.MUL and c.src[1].op is Ops.RANGE and c.src[0].op is Ops.CONST: ret[c.src[1].arg] = c.src[0].arg
+      if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg] = c.src[1].arg
+      if c.op is Ops.MUL and c.src[1].op is Ops.RANGE and c.src[0].op is Ops.CONST: ret[c.src[1].arg] = c.src[0].arg
     used_ranges = [x.arg for x in idx.sparents if x.op is Ops.RANGE]
     ret = [x if i in used_ranges else 0 for i,x in enumerate(ret)]
     if not ignore_valid:
