@@ -456,17 +456,7 @@ load_store_indexing = PatternMatcher([
                                   UPat.var("val"))), delete_redundant_gates),
 ])
 
-def idx_load_store(x:UOp):
-  idx = x.src[0].index(x.src[1], x.src[3] if len(x.src) > 3 else None)
-  v = x.dtype.count if x.op is Ops.LOAD else x.src[2].dtype.count
-  if v > 1 and not isinstance(x.src[0].dtype, ImageDType): idx = idx.cast(idx.dtype.base.vec(v).ptr(idx.dtype.local))
-  post_mask = x.src[4:] if len(x.src) > 3 else (x.src[2:] if x.op is Ops.LOAD else x.src[3:])
-  if x.op is Ops.LOAD: return UOp(x.op, x.dtype, (idx,)+post_mask, x.arg)
-  return UOp(x.op, x.dtype, (idx,x.src[2])+post_mask, x.arg)
-
 migrate_indexing = PatternMatcher([
-  # use indexing for LOAD/STORE
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)),), allow_any_len=True, name="x"), idx_load_store),
   # create gate MUST BE BEFORE expander
   (UPat(Ops.STORE, name="root"), create_gate),
 ])

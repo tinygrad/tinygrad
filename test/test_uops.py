@@ -32,9 +32,9 @@ def _test_single_value(vals, op, dts):
   output_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dts[-1]
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   buf_loads = [uop(uops, Ops.DEFINE_GLOBAL, dtype.ptr(), (), i+1) for i,dtype in enumerate(dts)]
-  loads = (uop(uops, Ops.LOAD, dtype, [buf_loads[i], uop(uops, Ops.CONST, dtypes.int32, (), 0)]) for i,dtype in enumerate(dts))
+  loads = (uop(uops, Ops.LOAD, dtype, [buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0))]) for i, dtype in enumerate(dts))
   alu = uop(uops, Ops.ALU, output_dtype, loads, op)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store, uop(uops, Ops.CONST, dtypes.int32, (), 0), alu))
+  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=_to_np_dtype(dtype)).data) for a,dtype in zip(vals, dts)]
   prg = _uops_to_prg([out])
@@ -49,7 +49,7 @@ def _test_single_value_const(vals, op, dts):
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   loads = (uop(uops, Ops.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, Ops.ALU, output_dtype, loads, op)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store, uop(uops, Ops.CONST, dtypes.int32, (), 0), alu))
+  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
@@ -61,7 +61,7 @@ def _test_uops_result(output_dtype, uops, res):
   # uops = []
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   # res = output_fn(uops)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store, uop(uops, Ops.CONST, dtypes.int32, (), 0), res))
+  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
@@ -309,20 +309,20 @@ class TestLocalAccess(unittest.TestCase):
   def test_local_basic(self):
     uops = []
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(local=True), (), ('smem', 16))
-    st = uop(uops, Ops.STORE, dtypes.void, (smem, uop(uops, Ops.CONST, dtypes.int32, (), 0), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
+    st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
-    sres = uop(uops, Ops.LOAD, dtypes.float32, (smem, uop(uops, Ops.CONST, dtypes.int32, (), 0), barr))
+    sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_indirect(self):
     uops = []
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.int32.ptr(local=True), (), ('smem', 16))
-    st1 = uop(uops, Ops.STORE, dtypes.void, (smem, uop(uops, Ops.CONST, dtypes.int32, (), 1), uop(uops, Ops.CONST, dtypes.int32, (), 2)))
-    st2 = uop(uops, Ops.STORE, dtypes.void, (smem, uop(uops, Ops.CONST, dtypes.int32, (), 2), uop(uops, Ops.CONST, dtypes.int32, (), 42)))
+    st1 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 1)), uop(uops, Ops.CONST, dtypes.int32, (), 2)))
+    st2 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 2)), uop(uops, Ops.CONST, dtypes.int32, (), 42)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st1,st2))
-    ofs = uop(uops, Ops.LOAD, dtypes.int32, (smem, uop(uops, Ops.CONST, dtypes.int32, (), 1), barr))
-    sres = uop(uops, Ops.LOAD, dtypes.int32, (smem, ofs))
+    ofs = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 1)), barr))
+    sres = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(ofs),))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
 @unittest.skipUnless(getenv("PTX"), "This only tests assembly backends")
@@ -331,7 +331,7 @@ class TestAssembly(unittest.TestCase):
     g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
     c1 = UOp(Ops.CONST, dtypes.int, (), 2)
     c2 = UOp(Ops.CONST, dtypes.int, (), 3)
-    l1 = UOp(Ops.LOAD, dtypes.int, (g1, c1))
+    l1 = UOp(Ops.LOAD, dtypes.int, (g1.index(c1),))
     a1 = UOp(Ops.ALU, dtypes.int, (l1, c1), BinaryOps.MUL)
     a2 = UOp(Ops.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
@@ -343,7 +343,7 @@ class TestAssembly(unittest.TestCase):
     g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
     c1 = UOp(Ops.CONST, dtypes.int, (), 2)
     c2 = UOp(Ops.CONST, dtypes.int, (), 3)
-    l1 = UOp(Ops.LOAD, dtypes.int, (g1, c1))
+    l1 = UOp(Ops.LOAD, dtypes.int, (g1.index(c1),))
     a1 = UOp(Ops.ALU, dtypes.int, (l1, c1), BinaryOps.IDIV)
     a2 = UOp(Ops.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
