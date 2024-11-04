@@ -26,8 +26,7 @@ class DiskAllocator(Allocator):
     return DiskBuffer(self.device, size)
   def _free(self, opaque, options):
     self.device.count -= 1
-    if self.device.count == 0:
-      self.device._close()
+    if self.device.count == 0: self.device._close()
   def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def copyout(self, dest:memoryview, src:DiskBuffer):
