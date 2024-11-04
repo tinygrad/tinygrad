@@ -1,7 +1,7 @@
 import sys
 from collections import defaultdict, deque
 from typing import Tuple, List, Dict, DefaultDict
-from tinygrad.ops import UNSAFE_PAD_OPS, MetaOps, ReduceOps, UOp, UnaryOps, resolve
+from tinygrad.ops import UNSAFE_PAD_OPS, MetaOps, ReduceOps, UOp, UnaryOps, resolve, GroupOp
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, prod, dedup, all_int, merge_dicts
 from tinygrad.dtype import ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -32,7 +32,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     elif any(v.mask is not None for v in buf.st.views): simple_pads[buf.base] = None
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
   if ctx.buf_uops[buf.buffer] in ctx.realizes: realizes[buf] = None
-  if buf.op in ReduceOps and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[buf] = None
+  if buf.op in GroupOp.Reduce and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[buf] = None
   allbufs[buf] = None
   if buf.op is MetaOps.ASSIGN:
     assign_targets[(target:=buf.srcs[0])] = buf
@@ -63,7 +63,7 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
     return group.setdefault(tr)
   for tr_next in children[tr]:
     # max one reduceop per kernel
-    if tr_next.op in ReduceOps: return group.setdefault(r)
+    if tr_next.op in GroupOp.Reduce: return group.setdefault(r)
     # can only fuse contiguous
     if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.setdefault(r)
     _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
@@ -75,7 +75,7 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
     if (p:=rc_parents.pop()) in cache: continue
     cache.add(p)
     # max one reduceop per kernel
-    if p.op in ReduceOps: return {}
+    if p.op in GroupOp.Reduce: return {}
     rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[LazyBuffer, None] = {}
@@ -101,7 +101,7 @@ def get_realizes(outs:List[LazyBuffer], ctx) -> Tuple[List[List[UOp]], Dict[Buff
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
   reduce_of_const: List[LazyBuffer] = []
   for r in allbufs:
-    if r.op not in ReduceOps or r in realizes: continue
+    if r.op not in GroupOp.Reduce or r in realizes: continue
 
     group: Dict[LazyBuffer, None] = {}
     _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, cache={})
@@ -130,7 +130,7 @@ def get_realizes(outs:List[LazyBuffer], ctx) -> Tuple[List[List[UOp]], Dict[Buff
           if len(st_childs) > 1: break
           if st.size != st_childs[0].st.size: break
           st = st + st_childs[0].st
-          if not st.contiguous or tr_next.op in ReduceOps: break
+          if not st.contiguous or tr_next.op in GroupOp.Reduce: break
           tr = tr_next
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
         if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:

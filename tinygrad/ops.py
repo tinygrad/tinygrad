@@ -16,26 +16,6 @@ class FastEnum(IntEnum):
   @staticmethod
   def _generate_next_value_(_, __, ___, last_values): return 1 + max([0, *last_values, *[max(c) for c in FastEnum.__subclasses__()]])
 
-# the Enum class doesn't work with mypy, this is static. sorry it's ugly
-# NOTE: MOD, CMPLT don't have to be implemented on vectors, just scalars
-# NOTE: many GPUs don't have DIV, but UnaryOps.RECIP doesn't work for integer division
-class UnaryOps(FastEnum):
-  """A -> A (elementwise)"""
-  EXP2 = auto(); LOG2 = auto(); CAST = auto(); BITCAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
-class BinaryOps(FastEnum):
-  """A + A -> A (elementwise)"""
-  ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto() # noqa: E702
-class TernaryOps(FastEnum):
-  """A + A + A -> A (elementwise)"""
-  WHERE = auto(); MULACC = auto() # noqa: E702
-class ReduceOps(FastEnum):
-  """A -> B (reduce)"""
-  SUM = auto(); PROD = auto(); REDUCE_MAX = auto() # noqa: E702
-class MetaOps(FastEnum):
-  EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); ASSIGN = auto(); BUFFER_VIEW = auto() # noqa: E702
-Op = Union[UnaryOps, BinaryOps, ReduceOps, MetaOps, TernaryOps]
-
 class SimpleMathTrait:
   # required to implement
   def alu(self:T, arg:Union[UnaryOps, BinaryOps, TernaryOps], *src) -> T: raise NotImplementedError
@@ -115,14 +95,6 @@ class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
   def log2(self): return self.alu(UnaryOps.LOG2)
   def exp2(self): return self.alu(UnaryOps.EXP2)
 
-# do not preserve f(0) = 0
-UNSAFE_PAD_OPS = {UnaryOps.RECIP, UnaryOps.LOG2, UnaryOps.EXP2, BinaryOps.IDIV}
-
-REDUCE_ALU: Dict[ReduceOps, BinaryOps] = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.REDUCE_MAX:BinaryOps.MAX}
-
-# https://en.wikipedia.org/wiki/Identity_element
-def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
-
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
@@ -130,7 +102,7 @@ class Ops(FastEnum):
   CONTIGUOUS = auto()
   PRELOAD = auto()
 
-  # metaops
+  # MetaOps
   COPY = auto()
   EMPTY = auto()
   BUFFER_VIEW = auto()
@@ -146,14 +118,20 @@ class Ops(FastEnum):
   VALID = auto()
   SPECIAL = auto()
   NOOP = auto()
+
+  # reduce
   REDUCE = auto()
   REDUCE_AXIS = auto()
+
+  # ReduceOps
+  SUM = auto(); PROD = auto(); REDUCE_MAX = auto() # noqa: E702
 
   # helper ops
   GEP = auto()
   VECTORIZE = auto()
-  CAST = auto()
-  BITCAST = auto()
+
+  # UnaryOps
+  CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 
   # loads before math
   LOAD = auto()
@@ -161,6 +139,13 @@ class Ops(FastEnum):
   # math ops
   ALU = auto()
   WMMA = auto()
+
+  # BinaryOps
+  ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
+  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto() # noqa: E702
+
+  # TernaryOps
+  WHERE = auto(); MULACC = auto() # noqa: E702
 
   # assignment ops
   STORE = auto()
@@ -182,6 +167,21 @@ class Ops(FastEnum):
   # consts last!
   VCONST = auto()
   CONST = auto()
+
+class GroupOp:
+  Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB}
+  Reduce = {Ops.SUM, Ops.PROD, Ops.REDUCE_MAX}
+
+# TODO: remove this
+Op = UnaryOps = BinaryOps = ReduceOps = MetaOps = TernaryOps = Ops
+
+# do not preserve f(0) = 0
+UNSAFE_PAD_OPS = {UnaryOps.RECIP, UnaryOps.LOG2, UnaryOps.EXP2, BinaryOps.IDIV}
+
+REDUCE_ALU: Dict[ReduceOps, BinaryOps] = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.REDUCE_MAX:BinaryOps.MAX}
+
+# https://en.wikipedia.org/wiki/Identity_element
+def identity_element(op:BinaryOps, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
 
 BUFOPS = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID}
 COMMUTATIVE = {BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPNE, BinaryOps.XOR, BinaryOps.AND, BinaryOps.OR}
@@ -340,7 +340,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
                                              UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=idx)
   def reduce(self, op:BinaryOps, *rng:UOp): return UOp(Ops.REDUCE, self.dtype, (self,) + rng, op)
-  def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op] if op in ReduceOps else op, axis))
+  def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op] if op in GroupOp.Reduce else op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
 
   # *** uop Variable stuff ***

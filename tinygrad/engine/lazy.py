@@ -3,7 +3,7 @@ from typing import Union, Optional, Any, Tuple, List, get_args
 from tinygrad.dtype import dtypes, DType, ConstType, to_dtype, ImageDType
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, SPLIT_REDUCEOP, LAZYCACHE
 from tinygrad.ops import MetaOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op, exec_alu, python_alu, REDUCE_ALU
-from tinygrad.ops import identity_element, MathTrait, resolve, UOp, sint
+from tinygrad.ops import identity_element, MathTrait, resolve, UOp, sint, GroupOp
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
@@ -159,7 +159,7 @@ class LazyBuffer(MathTrait):
     # const folding
     if op in python_alu and all(s.is_unrealized_unmasked_const() for s in srcs):
       return self.cast(out_dtype).const_like(exec_alu(op, out_dtype, [s.base.arg for s in srcs]))
-    if op in BinaryOps:
+    if op in GroupOp.Binary:
       x, y = self, in_srcs[0]
       if op is BinaryOps.ADD:
         if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
