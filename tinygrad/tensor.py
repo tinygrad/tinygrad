@@ -8,8 +8,8 @@ from collections import defaultdict
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN
-from tinygrad.multi import MultiLazyBuffer, reshard, find_axis_bounds
-from tinygrad.ops import MetaOps, smax, smin, resolve, UOp, UOps, BinaryOps, sint, Variable, SimpleMathTrait
+from tinygrad.multi import MultiLazyBuffer, reshard as _reshard
+from tinygrad.ops import MetaOps, smax, smin, resolve, UOp, Ops, BinaryOps, sint, Variable, SimpleMathTrait
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule
@@ -136,7 +136,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, get_args(ConstType)): data = _metaop(MetaOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, UOp):
-      assert data.op is UOps.BIND and data.src[0].op is UOps.DEFINE_VAR and data.src[1].op is UOps.CONST, f"can't create tensor from UOp {data}"
+      assert data.op is Ops.BIND and data.src[0].op is Ops.DEFINE_VAR and data.src[1].op is Ops.CONST, f"can't create tensor from UOp {data}"
       data = _metaop(MetaOps.CONST, tuple(), dtype or data.dtype, device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
     elif isinstance(data, (list, tuple)):
@@ -262,7 +262,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
     # NOTE: this realizes on the object from as_buffer being a Python object
-    cpu = self.cast(self.dtype.scalar()).contiguous().to("CLANG").realize()
+    cpu = self.cast(self.dtype.base).contiguous().to("CLANG").realize()
     buf = cast(Buffer, cast(LazyBuffer, cpu.lazydata).base.realized)
     if self.device != "CLANG": buf.options = BufferOptions(nolru=True)
     return buf.as_buffer(allow_zero_copy=True if self.device != "CLANG" else False)
@@ -363,7 +363,15 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
     devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
-    axis, bounds = find_axis_bounds(self.shape, len(devices), axis, splits)
+    if axis is not None:
+      if axis < 0: axis += len(self.shape)
+      if splits is None:
+        if not isinstance(total:=self.shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {self.shape=}, {axis=}")
+        sz = round_up(total, len(devices)) // len(devices)
+        splits = tuple([max(0, min(sz, total - sz*i)) for i in range(len(devices))])
+      assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
+      boundaries = tuple(itertools.accumulate(splits))
+      bounds = tuple(zip((0,) + boundaries, boundaries))
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis, bounds), device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None, splits:Optional[Tuple[int, ...]]=None):
@@ -373,16 +381,26 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     self.lazydata = self.shard(devices, axis, splits).lazydata
     return self
 
+  def reshard(self, axis: Optional[int]=None):
+    assert isinstance(self.lazydata, MultiLazyBuffer), "can't reshard a regular buffer"
+    if axis is None:
+      lazydata = MultiLazyBuffer([self.lazydata.copy_to_device(lb.device) for lb in self.lazydata.lbs], None)
+    else:
+      if axis < 0: axis += len(self.shape)
+      gap = self.shape[axis] // len(self.device)
+      bounds = tuple([(c * gap, (c + 1) * gap) for c in range(gap)])
+      lazydata = _reshard(self.lazydata, axis, bounds)
+    return Tensor(lazydata, device=self.device, requires_grad=self.requires_grad)
+
   def reshard_(self, axis: Optional[int]=None):
-    if not isinstance(self.lazydata, MultiLazyBuffer): return self
-    self.lazydata = reshard(self.lazydata, axis)
+    self.lazydata = self.reshard(axis).lazydata
     return self
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
-    if y.op is UOps.BIND: return Tensor(y, **kwargs, requires_grad=False)   # this is the only UOp allowed in Tensor
-    if y.op is UOps.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
-    if y.op is UOps.ALU:
+    if y.op is Ops.BIND: return Tensor(y, **kwargs, requires_grad=False)   # this is the only UOp allowed in Tensor
+    if y.op is Ops.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
+    if y.op is Ops.ALU:
       if y.arg is BinaryOps.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
       if y.arg is BinaryOps.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
       if y.arg is BinaryOps.MAX: return Tensor.from_uop(y.src[0]).maximum(Tensor.from_uop(y.src[1]))
@@ -1435,10 +1453,11 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     The rolling operation is circular, meaning that elements that go beyond the edge are wrapped around to the beginning of the dimension.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.rand(3, 4, 1).roll(shifts=1, dims=0))
+    t = Tensor.arange(4)
+    print(t.roll(shifts=1, dims=0).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.rand(3, 4, 1).roll(shifts=-1, dims=0))
+    print(t.roll(shifts=-1, dims=0).numpy())
     ```
     """
     dims, rolled = tuple(self._resolve_dim(d) for d in make_tuple(dims, 1)), self
@@ -2440,6 +2459,25 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
+
+  def isinf(self:Tensor, detect_positive:bool=True, detect_negative:bool=True):
+    """
+    Checks the tensor element-wise to return True where the element is infinity, otherwise returns False
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isinf().numpy())
+    ```
+    """
+    return (self == float("inf")) * detect_positive + (self == float("-inf")) * detect_negative
+  def isnan(self:Tensor):
+    """
+    Checks the tensor element-wise to return True where the element is NaN, otherwise returns False
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isnan().numpy())
+    ```
+    """
+    return self != self
 
   def lerp(self, end: Tensor, weight: Union[Tensor, float]) -> Tensor:
     """
