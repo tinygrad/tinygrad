@@ -10,7 +10,7 @@ from tinygrad.device import Buffer
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
 
-def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None], simple_pads:Dict[LazyBuffer, None], \
+def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None],
   children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Dict[LazyBuffer, LazyBuffer], double_reduces:Dict[LazyBuffer, None], ctx):
   """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
   if buf in allbufs or buf.base.op is MetaOps.CONST: return None
@@ -24,15 +24,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[La
     assert target.is_realized(), f"assign must be already realized to schedule {target}"
   for x in buf.srcs:
     if x.base.realized is None: children[x.base][buf] = None
-    _recurse_lb(x.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
-
-def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict[LazyBuffer, bool]) -> bool:
-  if (n:=cache.get(buf)) is not None: return n
-  if buf in realizes: return True
-  # NOTE: this broke to_image_idx and coder with JIT
-  if buf.op in GroupOp.UnsafePad: return False
-  cache[buf] = ret = all(_is_padding_okay(x.base, realizes, cache) for x in buf.srcs)
-  return ret
+    _recurse_lb(x.base, realizes, allbufs, children, assign_targets, double_reduces, ctx)
 
 def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
                      realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Dict[LazyBuffer, None],
@@ -70,16 +62,10 @@ def get_realizes(outs:List[LazyBuffer], ctx) -> Tuple[List[List[UOp]], Dict[Buff
   """search the graph for all the LazyBuffers that need to realize"""
   realizes: Dict[LazyBuffer, None] = {}
   allbufs: Dict[LazyBuffer, None] = {}
-  simple_pads: Dict[LazyBuffer, None] = {}
   children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
   assign_targets: Dict[LazyBuffer, LazyBuffer] = {}
   double_reduces: Dict[LazyBuffer, None] = {}
-  for out in outs: _recurse_lb(out, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
-
-  # check if we have to realize pads
-  for p in simple_pads:
-    if not _is_padding_okay(p, realizes, {}):
-      realizes[p] = None
+  for out in outs: _recurse_lb(out, realizes, allbufs, children, assign_targets, double_reduces, ctx)
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
