@@ -24,6 +24,7 @@ class MTLPipelineOption:
 
 libobjc = ctypes.CDLL("/usr/lib/libobjc.dylib")
 libmetal = ctypes.CDLL("/System/Library/Frameworks/Metal.framework/Metal")
+# Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
 ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
 libdispatch = ctypes.CDLL("/usr/lib/libSystem.dylib") # libdispatch is part of libSystem on mac
 libobjc.objc_getClass.restype = objc_id
