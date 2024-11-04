@@ -80,6 +80,7 @@ class LazyBuffer(MathTrait):
 
   def assign(self, x:LazyBuffer) -> LazyBuffer:
     assert x.size == self.size, f"assign target must have same size {self.size=} != {x.size=}"
+    assert x is x.base and x.is_realized(), f"assign target must be base and realized {x}"
     return LazyBuffer.metaop(MetaOps.ASSIGN, self.shape, self.dtype, self.device, arg=() if self.st.contiguous else (self.st,),
                              src=(self.base, x), enable_cache=True)
 
