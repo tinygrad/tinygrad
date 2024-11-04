@@ -383,11 +383,13 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
   def reshard(self, axis: Optional[int]=None):
     assert isinstance(self.lazydata, MultiLazyBuffer), "can't reshard a regular buffer"
-    if axis is None: lazydata = MultiLazyBuffer([self.lazydata.copy_to_device(lb.device) for lb in self.lazydata.lbs], None)
-    if axis < 0: axis += len(self.shape)
-    gap = self.shape[axis] // len(self.device)
-    bounds = tuple([(c * gap, (c + 1) * gap) for c in range(gap)])
-    lazydata = _reshard(self.lazydata, axis, bounds)
+    if axis is None:
+      lazydata = MultiLazyBuffer([self.lazydata.copy_to_device(lb.device) for lb in self.lazydata.lbs], None)
+    else:
+      if axis < 0: axis += len(self.shape)
+      gap = self.shape[axis] // len(self.device)
+      bounds = tuple([(c * gap, (c + 1) * gap) for c in range(gap)])
+      lazydata = _reshard(self.lazydata, axis, bounds)
     return Tensor(lazydata, device=self.device, requires_grad=self.requires_grad)
 
   def reshard_(self, axis: Optional[int]=None):
