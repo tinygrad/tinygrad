@@ -1,5 +1,5 @@
 from typing import Optional, List
-import ctypes, subprocess, pathlib, tempfile
+import ctypes, subprocess, pathlib, tempfile, sys
 from tinygrad.device import Compiled, Compiler, MallocAllocator
 from tinygrad.helpers import cpu_time_execution, DEBUG, cpu_objdump
 from tinygrad.renderer.cstyle import ClangRenderer
@@ -13,8 +13,12 @@ class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output(['clang', *self.args, '-O2', "-c", '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
+      if sys.platform == "darwin":
+        subprocess.check_output(['clang', *self.args, '-O2', "-c", '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
                                '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
+      else:
+        subprocess.check_output(['clang', '-shared', *self.args, '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
+                               '-', '-o', str(output_file.name)], input=src.encode('utf-8'))      
       return pathlib.Path(output_file.name).read_bytes()
 
 class ClangProgram:
@@ -24,7 +28,10 @@ class ClangProgram:
     # write to disk so we can load it
     with tempfile.NamedTemporaryFile(delete=True) as cached_file_path:
       pathlib.Path(cached_file_path.name).write_bytes(lib)
-      self.fxn, self.memory = allocate_executable_memory(lib, name)
+      if sys.platform == "darwin":
+        self.fxn, self.memory = allocate_executable_memory(lib, name)
+      else:
+        self.fxn = ctypes.CDLL(str(cached_file_path.name))[name]
 
   def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
 
