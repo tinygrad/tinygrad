@@ -56,11 +56,25 @@ def error_check(error: objc_instance, error_constructor: type[Exception] = Runti
   if error.value is None: return None
   raise error_constructor(bytes(msg(msg(error, "localizedDescription", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode())
 
-class MetalXCodeCompiler(Compiler):
-  def __init__(self): super().__init__("compile_metal_xcode")
+def metal_src_to_library(device:MetalDevice, src:str):
+  # metal source. rely on OS caching
+  options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
+  msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
+  compileError = objc_instance()
+  library = msg(device.device, "newLibraryWithSource:options:error:", to_ns_str(src), options, ctypes.byref(compileError), restype=objc_instance)
+  error_check(compileError, CompileError)
+  return library
+
+class MetalCompiler(Compiler):
+  def __init__(self, device:MetalDevice):
+    self.device = device
+    super().__init__("compile_metal")
   def compile(self, src:str) -> bytes:
-    air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
-    return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+    library = metal_src_to_library(self.device, src)
+    library_contents = msg(library, "libraryDataContents", restype=objc_instance)
+    lib = ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
+    assert lib[:4] == b"MTLB", "Invalid Metal library. Could be due to using conda. Try system python or METAL_XCODE=1 DISABLE_COMPILER_CACHE=1."
+    return lib
   def disassemble(self, lib:bytes):
     with tempfile.NamedTemporaryFile(delete=True) as shader:
       shader.write(lib)
@@ -69,23 +83,24 @@ class MetalXCodeCompiler(Compiler):
       if ret:
         print("Error running disassembler: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
+class MetalXCodeCompiler(Compiler):
+  def __init__(self): super().__init__("compile_metal_xcode")
+  def compile(self, src:str) -> bytes:
+    air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
+    return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+  disassemble = MetalCompiler.disassemble
+
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
     if lib[:4] == b"MTLB":
-      # binary metal library from xcode
+      # binary metal library
       data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
       error_library_creation = objc_instance()
       self.library = msg(self.device.device, "newLibraryWithData:error:", data, ctypes.byref(error_library_creation), restype=objc_instance)
       error_check(error_library_creation)
     else:
-      # metal source. rely on OS caching
-      options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
-      msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
-      compileError = objc_instance()
-      self.library = msg(self.device.device, "newLibraryWithSource:options:error:", to_ns_str(lib.decode()),
-                    options, ctypes.byref(compileError), restype=objc_instance)
-      error_check(compileError, CompileError)
+      self.library = metal_src_to_library(self.device, lib.decode())
     self.fxn = msg(self.library, "newFunctionWithName:", to_ns_str(name), restype=objc_instance)
     descriptor = msg(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"), "new", restype=objc_instance)
     msg(descriptor, "setComputeFunction:", self.fxn)
