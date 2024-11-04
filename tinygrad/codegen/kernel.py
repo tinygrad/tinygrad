@@ -276,7 +276,7 @@ class Kernel:
     if has_cast and not (reduceop.src[0].op is Ops.CAST and reduceop.src[0].dtype == tc.dtype_out): return None
 
     mul_op = reduceop.src[0].src[0] if has_cast else reduceop.src[0]
-    if mul_op.arg is not BinaryOps.MUL: return None
+    if mul_op.op is not BinaryOps.MUL: return None
 
     def buf_index(src:UOp) -> Optional[int]:
       # TODO: apply tc even if the sources are not from LOAD
