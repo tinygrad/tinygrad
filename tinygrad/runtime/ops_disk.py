@@ -21,7 +21,7 @@ class DiskAllocator(Allocator):
   def _alloc(self, size:int, options):
     if self.device.size is not None and size > self.device.size:
       raise ValueError(f"can't reopen Disk tensor with larger size, opened with {self.device.size}, tried to open with {size}")
-    if self.device.size is None or (self.device.fd is not None and os.fstat(self.device.fd).st_nlink): self.device._open(size)
+    if self.device.size is None or (self.device.fd is not None and not os.fstat(self.device.fd).st_nlink): self.device._open(size)
     self.device.count += 1
     return DiskBuffer(self.device, size)
   def _free(self, opaque, options):
