@@ -1,7 +1,7 @@
 import sys, atexit, functools, itertools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Callable, Set, Tuple, List, Dict, Optional, DefaultDict
+from typing import Callable, Set, Tuple, List, Dict, Optional, DefaultDict, cast
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, graph_rewrite, track_rewrites, sint
 from tinygrad.helpers import DEBUG, Metadata, all_same, colored, diskcache_put, prod, dedup, getenv, unwrap
 from tinygrad.dtype import ImageDType, dtypes
@@ -72,9 +72,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   elif buf.op is Ops.CONTIGUOUS: ret = UOp(Ops.CONTIGUOUS, dtype, src)
   elif buf.op is Ops.ASSIGN: ret = UOp(Ops.ASSIGN, dtype, (ubuf, src[1]), buf.arg)
   elif buf.op in GroupOp.Meta: ret = UOp(buf.op, buf.dtype, (ubuf, *src), buf.arg)
-  elif buf.op is Ops.CAST: ret = UOp(Ops.CAST, dtype, src)
-  elif buf.op is Ops.BITCAST: ret = UOp(Ops.BITCAST, dtype, src)
-  else: ret = UOp(Ops.ALU, dtype, src, buf.op)
+  else: ret = UOp(cast(Ops, buf.op), dtype, src)
   if buf.forced_realize: ret = UOp(Ops.CONTIGUOUS, dtype, (ret,))
   cache[buf] = ret = UOp(Ops.LOAD, dtype, (ubuf, buf.st.to_uop(), UOp.store(ubuf, ShapeTracker.from_shape(buf.shape).to_uop(), ret)))
   if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
@@ -142,7 +140,7 @@ merge_views = PatternMatcher([(UPat(Ops.VIEW, src=(UPat(Ops.VIEW, name="s0"),), 
 # push VIEW to loads
 view_left = merge_views+PatternMatcher([
   # view before ALU
-  (UPat(Ops.VIEW, src=(UPat((Ops.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Buffer), name="e"),), name="v"),
+  (UPat(Ops.VIEW, src=(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Buffer), name="e"),), name="v"),
    lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
 ])
 
@@ -156,7 +154,7 @@ view_right = merge_views+PatternMatcher([
   # push a VIEW down to STORE, through a reduce (ONLY reshapes)
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
   # push VIEW(s) down to STORE, through an elementwise op (ONLY reshapes)
-  (UPat((Ops.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
