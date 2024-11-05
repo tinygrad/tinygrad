@@ -257,7 +257,7 @@ do_realize = PatternMatcher([
   # always realize meta ops
   (UPatLoadStore(UPat((Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta))), realize),
   # don't realize image to image casts
-  (UPatLoadStore(UPat(Ops.CAST, src=(UPat(Ops.LOAD, name="x"),), dtype=dtypes.float)).view(name="v"), lambda ctx,x,view,**kwargs: r.view(view.st)
+  (UPatLoadStore(UPat(Ops.CAST, src=(UPat(Ops.LOAD, name="x"),), dtype=dtypes.float)).view(name="view"), lambda ctx,x,view,**kwargs: r.view(view.st)
    if (r:=ctx.get(b:=x.src[0])) is not None and r.op is Ops.STORE and isinstance(b.dtype, ImageDType) else None),
   # realize before expand or unsafe pad ops
   (UPatLoadStore(UPat.var("base")).view(name="view"), realize_view),
