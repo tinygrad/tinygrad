@@ -18,7 +18,7 @@ class ClangCompiler(Compiler):
                                '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
       else:
         subprocess.check_output(['clang', '-shared', *self.args, '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
-                               '-', '-o', str(output_file.name)], input=src.encode('utf-8'))      
+                               '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
       return pathlib.Path(output_file.name).read_bytes()
 
 class ClangProgram:
