@@ -1,51 +1,9 @@
-import sys
 from collections import defaultdict, deque
-from typing import Set, Tuple, List, Dict, DefaultDict
-from tinygrad.ops import GroupOp, MetaOps, ReduceOps, UOp, UnaryOps, resolve
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, prod, dedup, all_int, merge_dicts
-from tinygrad.dtype import ImageDType
+from typing import Tuple, List, Dict, DefaultDict
+from tinygrad.ops import GroupOp, MetaOps, ReduceOps, UOp, UnaryOps
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.engine.lazy import LazyBuffer
-from tinygrad.device import Buffer
-
-# creation can recurse a lot
-sys.setrecursionlimit(10000)
-
-def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None], simple_pads:Dict[LazyBuffer, None], \
-  children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], assign_targets:Set[Buffer], double_reduces:Dict[LazyBuffer, None], ctx):
-  """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
-  if buf in allbufs or buf.base.op is MetaOps.CONST: return None
-  if buf.base.realized is not None: return realizes.setdefault(buf.base)
-  # check if we need to realize views
-  if buf is not buf.base:
-    # fuse some pads
-    if len(buf.st.views) == 1 and buf.st.views[-1].mask is not None and all_int(buf.base.st.shape) and \
-        resolve(prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask])):
-      simple_pads[buf.base] = None
-    # realize all expands
-    elif resolve(prod(buf.base.st.shape) < prod(buf.st.shape)):
-      # this was causing "test_lil_model" to fail
-      if buf.base.op is UnaryOps.CAST and isinstance(buf.base.srcs[0].dtype, ImageDType) and isinstance(buf.base.arg, ImageDType):
-        simple_pads[buf.base] = None # don't realize image to image casts. this is part of a larger problem
-      else: realizes[buf.base] = None
-    # check all other pads for safe fusion
-    elif any(v.mask is not None for v in buf.st.views): simple_pads[buf.base] = None
-    return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
-  if ctx.buf_uops[buf.buffer] in ctx.realizes: realizes[buf] = None
-  if buf.op in GroupOp.Reduce and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[buf] = None
-  allbufs[buf] = None
-  if buf.op is MetaOps.ASSIGN: assign_targets.add(buf.buffer)
-  for x in buf.srcs:
-    if x.base.realized is None: children[x.base][buf] = None
-    _recurse_lb(x, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
-
-def _is_padding_okay(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], cache:Dict[LazyBuffer, bool]) -> bool:
-  if (n:=cache.get(buf)) is not None: return n
-  if buf in realizes: return True
-  # NOTE: this broke to_image_idx and coder with JIT
-  if buf.op in GroupOp.UnsafePad: return False
-  cache[buf] = ret = all(_is_padding_okay(x.base, realizes, cache) for x in buf.srcs)
-  return ret
 
 def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
                      realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Dict[LazyBuffer, None],
@@ -79,27 +37,18 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def get_realizes(outs:List[LazyBuffer], ctx) -> Tuple[List[List[UOp]], Dict[Buffer, LazyBuffer], Set[Buffer]]:
+def get_realizes(outs:List[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbufs:Dict[LazyBuffer, None],
+                 double_reduces:Dict[LazyBuffer, None], ctx) -> List[List[UOp]]:
   """search the graph for all the LazyBuffers that need to realize"""
+  # get all the realizes from big graph
   realizes: Dict[LazyBuffer, None] = {}
-  allbufs: Dict[LazyBuffer, None] = {}
-  simple_pads: Dict[LazyBuffer, None] = {}
-  children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
-  assign_targets: Set[Buffer] = set()
-  double_reduces: Dict[LazyBuffer, None] = {}
-  for out in outs: _recurse_lb(out, realizes, allbufs, simple_pads, children, assign_targets, double_reduces, ctx)
-
-  # check if we have to realize pads
-  for p in simple_pads:
-    if not _is_padding_okay(p, realizes, {}):
-      realizes[p] = None
-
+  for r in allbufs:
+    if ctx.buf_uops[r.buffer] in ctx.realizes: realizes[r] = None
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
   reduce_of_const: List[LazyBuffer] = []
   for r in allbufs:
-    if r.op not in GroupOp.Reduce or r in realizes: continue
-
+    if r in realizes or r.op not in GroupOp.Reduce: continue
     group: Dict[LazyBuffer, None] = {}
     _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, cache={})
     # max one reduceop per kernel
@@ -113,7 +62,7 @@ def get_realizes(outs:List[LazyBuffer], ctx) -> Tuple[List[List[UOp]], Dict[Buff
       parents = deque((r, *group))
       while parents and not forced_realize:
         if (p:=parents.pop().base).is_realized() or p in realizes:
-          if p.is_realized() and p.buffer in assign_targets and not any(x.buffer is p.buffer for x in group): forced_realize, can_chase = True, False
+          if p.is_realized() and p.buffer in ctx.assigns and not any(x.buffer is p.buffer for x in group): forced_realize, can_chase = True, False
           continue
         parents.extend(p.srcs)
     if forced_realize or not group:
@@ -153,13 +102,9 @@ def get_realizes(outs:List[LazyBuffer], ctx) -> Tuple[List[List[UOp]], Dict[Buff
     for tr in group:
       del realizes[tr]
       if (ubuf:=ctx.buf_uops[tr.buffer]) in ctx.realizes: del ctx.realizes[ubuf]
+
   output_groups: DefaultDict[LazyBuffer, List[UOp]] = defaultdict(list)
-  lazybufs_to_realize: Dict[Buffer, LazyBuffer] = {}
   for buf in realizes:
-    if buf.realized is None:
-      if (dup:=lazybufs_to_realize.get(buf.buffer)) is not None:
-        raise RuntimeError(f"can't double realize in one schedule, Buffer is realizing both {dup} and {buf}")
-      lazybufs_to_realize[buf.buffer] = buf
-      output_groups[reduce_for_op.get(buf, buf)].append(ubuf:=ctx.buf_uops[buf.buffer])
-      ctx.realizes[ubuf] = ubuf
-  return list(output_groups.values()), lazybufs_to_realize, assign_targets
+    output_groups[reduce_for_op.get(buf, buf)].append(ubuf:=ctx.buf_uops[buf.buffer])
+    ctx.realizes[ubuf] = ubuf
+  return list(output_groups.values())
