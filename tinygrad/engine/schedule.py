@@ -2,7 +2,7 @@ import sys, atexit, functools, itertools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Callable, Set, Tuple, List, Dict, Optional, DefaultDict, cast
-from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, graph_rewrite, resolve, track_rewrites, sint
+from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, sint
 from tinygrad.helpers import DEBUG, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, getenv, unwrap
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -241,7 +241,6 @@ def realize(ctx:Dict[UOp, UOp], b:UOp, load:UOp, store:UOp) -> UOp:
   ctx[b] = store
   return UOp(Ops.LOAD, load.dtype, (b, load.st_arg.to_uop()))
 
-def can_pad(u:UOp) -> bool: return not any(x.op in GroupOp.UnsafePad for x in u.sparents)
 def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, **kwargs) -> Optional[UOp]:
   base_shape = unwrap(base.st).shape
   st = unwrap(view.st)
