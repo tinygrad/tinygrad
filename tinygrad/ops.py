@@ -175,6 +175,7 @@ class GroupOp:
   ALU = set.union(Unary, Binary, Ternary)
 
   Reduce = {Ops.SUM, Ops.PROD, Ops.REDUCE_MAX}
+  Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
 
   # meta ops
   Meta = {Ops.COPY, Ops.EMPTY, Ops.BUFFER_VIEW}
@@ -932,8 +933,6 @@ def fold_unrolled_divs(divs:UOp):
     if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
   return ans if ans is not None and sorted(seen_const)==list(range(denominator)) else None
 
-def is_irreducible(u:UOp): return u.op in (Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE)
-
 def canonicalize_simplex(X:UOp) -> Optional[UOp]:
   # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
   # returns x0 + x1 + ... in such case, or None if not
@@ -943,13 +942,13 @@ def canonicalize_simplex(X:UOp) -> Optional[UOp]:
     if u.op is BinaryOps.MUL and u.src[1].op is Ops.CONST and u.src[1].arg > 0:
       changed = True
       u = u.src[0]
-    if not (is_irreducible(u) and u.vmin >= 0): return None
+    if not (u.op in GroupOp.Irreducible and u.vmin >= 0): return None
     ret.append(u)
   return functools.reduce(operator.add, ret) if changed else None
 
 def is_increasing(f:UOp) -> bool:
   # is f a monotonically increasing function regards its input
-  if is_irreducible(f): return True
+  if f.op in GroupOp.Irreducible: return True
   if f.op is BinaryOps.ADD: return is_increasing(f.src[0]) and is_increasing(f.src[1])
   if f.op in (BinaryOps.MUL, BinaryOps.IDIV) and f.src[1].op is Ops.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
   return False  # False if not sure
@@ -982,7 +981,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
 
     # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
     candidates = []
-    if expr.op is Ops.ADD and v[0] == 1 and all(is_irreducible(u) for u in split_uop(expr, BinaryOps.ADD)):
+    if expr.op is Ops.ADD and v[0] == 1 and all(u.op in GroupOp.Irreducible for u in split_uop(expr, BinaryOps.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
       candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, BinaryOps.ADD)])
     # try checking the whole clause
@@ -1037,8 +1036,7 @@ symbolic_simple = PatternMatcher([
   # NOTE: this can be wrong for loaded NaN
   (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # ** constant folding **
-  (UPat(GroupOp.ALU, name="root", src=UPat((Ops.VCONST, Ops.CONST))),
-   lambda root: root.const_like(exec_alu(root.op, root.dtype, [x.arg for x in root.src], truncate_output=False))),
+  (UPat(GroupOp.ALU, name="a", src=UPat((Ops.VCONST, Ops.CONST))), lambda a: a.const_like(exec_alu(a.op, a.dtype, [x.arg for x in a.src], False))),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
