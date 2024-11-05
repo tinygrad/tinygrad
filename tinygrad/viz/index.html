@@ -21,8 +21,10 @@
     margin-block-start: initial;
     margin-block-end: initial;
   }
+  button {
+    outline: none;
+  }
   html, body {
-    background-color: #08090e;
     color: #f0f0f5;
     margin: 0;
     padding: 0;
@@ -79,25 +81,25 @@
   }
   .container {
     background-color: #0f1018;
-    border-radius: 8px;
-    padding: 8px;
   }
   .container > * + *, .rewrite-container > * + * {
     margin-top: 12px;
   }
   .graph {
+    background-color: #08090e;
     position: absolute;
     inset: 0;
     z-index: 1;
   }
-  .kernel-list {
+  .kernel-list-parent {
     position: relative;
     width: 15%;
     padding: 50px 20px 20px 20px;
-    background-color: #0f1018;
-    border-right: 1px solid white;
-    border-radius: 8px;
+    border-right: 1px solid #4a4b56;
     z-index: 2;
+  }
+  .kernel-list {
+    width: 100%;
     height: 100%;
     overflow-y: auto;
   }
@@ -109,8 +111,7 @@
     width: 20%;
     padding: 20px;
     background-color: #0f1018;
-    border-left: 1px solid white;
-    border-radius: 8px;
+    border-left: 1px solid #4a4b56;
     z-index: 2;
     margin-left: auto;
     height: 100%;
@@ -136,13 +137,13 @@
     position: fixed;
     top: 10px;
     left: 20px;
-    background: #1a1b26;
-    border: 1px solid #4a4b57;
+    background-color: #1a1b26;
+    border: 1px solid #4a4b56;
     color: #f0f0f5;
     width: 32px;
     height: 32px;
     padding: 6px;
-    border-radius: 4px;
+    border-radius: 8px;
     cursor: pointer;
     z-index: 4;
   }
@@ -175,8 +176,8 @@
     <button class="collapse-btn">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 19l-7-7 7-7"/></svg>
     </button>
-    <div class="container kernel-list"></div>
-    <div class="container graph">
+    <div class="container kernel-list-parent"><div class="container kernel-list"></div></div>
+    <div class="graph">
       <svg id="graph-svg">
         <g id="render"></g>
       </svg>
@@ -243,13 +244,15 @@
 
   // **** extra helpers
   const toPath = ([fp, lineno]) => `${fp.replaceAll("\\", "/").split("/").pop()}:${lineno}`;
+  const vsCodeOpener = (parts) => Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
+      href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" });
 
   // **** main loop
   var ret = {};
   var cache = {};
   var kernels = null;
   var currentUOp = 0;
-  var currentKernel = 0;
+  var currentKernel = -1;
   var currentRewrite = 0;
   var expandKernel = true;
   async function main() {
@@ -257,19 +260,26 @@
     // ***** LHS kernels list
     if (kernels == null) {
       kernels = await (await fetch("/kernels")).json();
-      currentKernel = 0;
+      currentKernel = -1;
     }
+    const kernelListParent = document.querySelector(".container.kernel-list-parent");
     const kernelList = document.querySelector(".container.kernel-list");
     kernelList.innerHTML = "";
     kernels.forEach((k, i) => {
       const kernelUl = Object.assign(document.createElement("ul"), { key: `kernel-${i}`, className: i === currentKernel ? "active" : "",
         style: "overflow-x: auto; cursor: initial;" });
+      if (i === currentKernel) {
+        requestAnimationFrame(() => kernelUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
+      }
       const p = Object.assign(document.createElement("p"), { id: `kernel-${k[0].kernel_name}`, innerText: k[0].kernel_name ?? "UNPARENTED",
         style: "cursor: pointer;"});
       kernelUl.appendChild(p)
       k.forEach((u, j) => {
         const rwUl = Object.assign(document.createElement("ul"), { innerText: `${toPath(u.loc)} - ${u.upats.length}`, key: `uop-rewrite-${j}`,
           className: (j === currentUOp && i == currentKernel) ? "active" : "" })
+        if (j === currentUOp) {
+          requestAnimationFrame(() => rwUl.scrollIntoView({ behavior: "auto", block: "nearest" }));
+        }
         rwUl.style.display = i === currentKernel && expandKernel ? "block" : "none";
         rwUl.onclick = (e) => {
           e.stopPropagation();
@@ -295,19 +305,21 @@
       kernelList.appendChild(kernelUl);
     });
     // ***** UOp graph
-    const cacheKey = `${currentKernel}-${currentUOp}`;
-    if (cacheKey in cache) {
-      ret = cache[cacheKey];
+    if (currentKernel != -1) {
+      const cacheKey = `${currentKernel}-${currentUOp}`;
+      if (cacheKey in cache) {
+        ret = cache[cacheKey];
+      }
+      else {
+        ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`)).json();
+        cache[cacheKey] = ret;
+      }
+      renderGraph(ret.graphs[currentRewrite], currentRewrite == 0 ? [] : ret.changed_nodes[currentRewrite-1]);
     }
-    else {
-      ret = await (await fetch(`/kernels?kernel=${currentKernel}&idx=${currentUOp}`)).json();
-      cache[cacheKey] = ret;
-    }
-    renderGraph(ret.graphs[currentRewrite], currentRewrite == 0 ? [] : ret.changed_nodes[currentRewrite-1]);
     // ***** RHS metadata
     const metadata = document.querySelector(".container.metadata");
     metadata.innerHTML = "";
-    metadata.appendChild(Object.assign(document.createElement("pre"), { textContent: toPath(ret.loc) }));
+    metadata.appendChild(vsCodeOpener(ret.loc.join(":").split("/")));
     const pre = Object.assign(document.createElement("pre"), { innerHTML: `<code>${DOMPurify.sanitize(ret.code_line)}</code>`,
       className: "wrap code-block language-python" });
     metadata.appendChild(pre);
@@ -337,8 +349,7 @@
             const [loc, pattern] = ret.upats[i-1];
             const parts = loc.join(":").split("/");
             const div = Object.assign(document.createElement("div"), { className: "rewrite-container" });
-            const link = Object.assign(document.createElement("a"), { textContent: parts[parts.length-1]+"\n\n",
-              href: "vscode://file"+parts.join("/"), style: "font-family: monospace; margin: 4px 0;" })
+            const link = vsCodeOpener(parts);
             div.appendChild(link);
             const pre = Object.assign(document.createElement("pre"), { className: "code-block wrap" });
             pre.appendChild(Object.assign(document.createElement("code"), { textContent: DOMPurify.sanitize(pattern), className: "language-python" }));
@@ -363,11 +374,10 @@
     // ***** collapse/expand
     let isCollapsed = false;
     const collapseBtn = document.querySelector(".collapse-btn");
-    const graph = document.querySelector(".graph");
     collapseBtn.addEventListener("click", () => {
       isCollapsed = !isCollapsed;
       mainContainer.classList.toggle("collapsed", isCollapsed);
-      kernelList.style.display = isCollapsed ? "none" : "block";
+      kernelListParent.style.display = isCollapsed ? "none" : "block";
       metadata.style.display = isCollapsed ? "none" : "block";
       collapseBtn.style.transform = isCollapsed ? "rotate(180deg)" : "rotate(0deg)";
     });
@@ -399,7 +409,7 @@
         }, { once: true });
       });
     }
-    createResizer(kernelList, { minWidth: 15, maxWidth: 50 }, "kernel"); // left resizer
+    createResizer(kernelListParent, { minWidth: 15, maxWidth: 50 }, "kernel"); // left resizer
     createResizer(metadata, { minWidth: 20, maxWidth: 50 }, "metadata"); // right resizer
   }
 
@@ -424,9 +434,15 @@
     }
     if (event.key == "Enter") {
       event.preventDefault()
+      if (currentKernel === -1) {
+        currentKernel = 0;
+        expandKernel = true;
+      }
+      else {
+        expandKernel = !expandKernel;
+      }
       currentUOp = 0;
       currentRewrite = 0;
-      expandKernel = !expandKernel;
       main();
     }
     if (event.key == "ArrowUp") {
