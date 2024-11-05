@@ -32,8 +32,8 @@ def load_worlds(filter_reduce=True, filter_noimage=True, filter_novariable=True)
   if DEBUG >= 1: print(f"loaded {len(ast_strs)=} before filters")
   if filter_reduce: ast_strs = [x for x in ast_strs if "REDUCE_AXIS" in x]
   if filter_noimage: ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
-  if filter_novariable: ast_strs = [x for x in ast_strs if "Variable" not in x]
-  if DEBUG >= 1: print(f"loaded {len(ast_strs)=} after filters")
+  if filter_novariable: ast_strs = [x for x in ast_strs if "DEFINE_VAR" not in x]
+  if DEBUG >= 1: print(f"loaded {len(ast_strs)=} after filters {filter_reduce=}, {filter_noimage=}, {filter_novariable=}")
   random.seed(1337)
   random.shuffle(ast_strs)
   return ast_strs
