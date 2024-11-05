@@ -10,7 +10,6 @@ else:
   from extra.clang_parsers import ELFParser
 
 def allocate_executable_memory(data, name):
-  print(name)
   if sys.platform == "darwin":
     macho = MyMachO(data)
     offset, symbol_table = macho.extract_offset_and_symbols()
@@ -35,6 +34,10 @@ def allocate_executable_memory(data, name):
 
   base = ctypes.addressof(ctypes.c_char.from_buffer(mem))
   func_type = ctypes.CFUNCTYPE(ctypes.c_int)
-  fn = func_type(base)
+  if sys.platform == "darwin":
+    fn = func_type(base + symbol_addr)
+  else:
+    fn = func_type(base)
+
 
   return fn, mem
