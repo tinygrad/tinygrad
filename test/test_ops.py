@@ -1832,8 +1832,7 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), rtol=1e-5)
 
-  # TODO fix edge case
-  @unittest.expectedFailure
+  # regression test for
   def test_avgpool2d_failure(self):
     helper_test_op([(1,1,8,8)],
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(1,2), padding=(0,1), stride=(5,1)),
