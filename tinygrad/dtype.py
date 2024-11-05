@@ -1,50 +1,64 @@
 from __future__ import annotations
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable
 import math, struct, ctypes, functools
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
 
-@dataclass(frozen=True)
-class DType:
+# all DTypes should only be created once
+class DTypeMetaClass(type):
+  dcache: Dict[Tuple, DType] = {}
+  def __call__(cls, *args):
+    if (ret:=DTypeMetaClass.dcache.get(args, None)) is not None: return ret
+    DTypeMetaClass.dcache[args] = ret = super().__call__(*args)
+    return ret
+
+@dataclass(eq=False)
+class DType(metaclass=DTypeMetaClass):
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
   fmt: Optional[str]
   count: int
-  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
+  _scalar: Optional[DType]
+  @staticmethod
+  def define(priority, itemsize, name, fmt): return DType(priority, itemsize, name, fmt, 1, None)
+  def __reduce__(self): return DType, (self.priority, self.itemsize, self.name, self.fmt, self.count, self._scalar)
+  def __repr__(self): return f"dtypes.{self.scalar().name}"+(f".vec({self.count})" if self.count > 1 else "")
   def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
   @property
-  def base(self): return self
+  def base(self) -> DType: return self
   @property
   def vcount(self): return self.count
+  def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
   def vec(self, sz:int) -> DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
-    if sz == 1 or self.name == 'void': return self  # void doesn't vectorize, and sz=1 is scalar
-    return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
-  def ptr(self, local=False) -> Union[PtrDType, ImageDType]:
-    return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, local)
-  def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
+    if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
+    return DType(self.priority, self.itemsize*sz, f"{self.name}{sz}", None, sz, self)
+  def ptr(self, local=False):
+    return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, None, self, local, 1)
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class PtrDType(DType):
   _base: DType
-  local: bool = False
-  v: int = 1
+  local: bool
+  v: int
+  def __reduce__(self): return PtrDType, (self.priority, self.itemsize, self.name, self.fmt, self.count, self._scalar, self._base, self.local, self.v)
   @property
-  def base(self): return self._base
-  def scalar(self) -> PtrDType: return replace(self, v=1)
-  def vec(self, sz:int) -> PtrDType: return replace(self, v=sz)
+  def base(self) -> DType: return self._base
+  def vec(self, sz:int) -> PtrDType: return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz)
   def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
   @property
   def vcount(self): return self.v
   def __repr__(self): return f"{self.base.__repr__()}.ptr({'local=true' if self.local else ''})" + (f'.vec({self.v})' if self.v != 1 else '')
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class ImageDType(PtrDType):
   shape: Tuple[int, ...] = ()   # shape of the Image
-  def ptr(self, local=False) -> Union[PtrDType, ImageDType]:
+  def __reduce__(self):
+    return ImageDType, (self.priority, self.itemsize, self.name, self.fmt, self.count, self._scalar, self._base, self.local, self.v, self.shape)
+  def ptr(self, local=False):
     assert not local, "images can't be local"
     return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
@@ -91,21 +105,21 @@ class dtypes:
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
-  void: Final[DType] = DType(-1, 0, "void", None, 1)
-  bool: Final[DType] = DType(0, 1, "bool", '?', 1)
-  int8: Final[DType] = DType(1, 1, "char", 'b', 1)
-  uint8: Final[DType] = DType(2, 1, "unsigned char", 'B', 1)
-  int16: Final[DType] = DType(3, 2, "short", 'h', 1)
-  uint16: Final[DType] = DType(4, 2, "unsigned short", 'H', 1)
-  int32: Final[DType] = DType(5, 4, "int", 'i', 1)
-  uint32: Final[DType] = DType(6, 4, "unsigned int", 'I', 1)
-  int64: Final[DType] = DType(7, 8, "long", 'q', 1)
-  uint64: Final[DType] = DType(8, 8, "unsigned long", 'Q', 1)
-  float16: Final[DType] = DType(9, 2, "half", 'e', 1)
+  void: Final[DType] = DType.define(-1, 0, "void", None)
+  bool: Final[DType] = DType.define(0, 1, "bool", '?')
+  int8: Final[DType] = DType.define(1, 1, "char", 'b')
+  uint8: Final[DType] = DType.define(2, 1, "unsigned char", 'B')
+  int16: Final[DType] = DType.define(3, 2, "short", 'h')
+  uint16: Final[DType] = DType.define(4, 2, "unsigned short", 'H')
+  int32: Final[DType] = DType.define(5, 4, "int", 'i')
+  uint32: Final[DType] = DType.define(6, 4, "unsigned int", 'I')
+  int64: Final[DType] = DType.define(7, 8, "long", 'q')
+  uint64: Final[DType] = DType.define(8, 8, "unsigned long", 'Q')
+  float16: Final[DType] = DType.define(9, 2, "half", 'e')
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
-  bfloat16: Final[DType] = DType(10, 2, "__bf16", None, 1)
-  float32: Final[DType] = DType(11, 4, "float", 'f', 1)
-  float64: Final[DType] = DType(12, 8, "double", 'd', 1)
+  bfloat16: Final[DType] = DType.define(10, 2, "__bf16", None)
+  float32: Final[DType] = DType.define(11, 4, "float", 'f')
+  float64: Final[DType] = DType.define(12, 8, "double", 'd')
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
@@ -114,9 +128,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, shape=shp, _base=dtypes.float32)
+  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, None, dtypes.float32, False, 1, shp)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, shape=shp, _base=dtypes.float32)
+  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, None, dtypes.float32, False, 1, shp)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
@@ -151,8 +165,6 @@ def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not (k.startswith(('__', 'default', 'void'))
                                                                 or v.__class__ is staticmethod or isinstance(v, tuple))}
-INVERSE_DTYPES_DICT = {v.name:k for k,v in DTYPES_DICT.items()}
-INVERSE_DTYPES_DICT['void'] = 'void'
 
 def sum_acc_dtype(dt:DType):
   # default acc dtype for sum
