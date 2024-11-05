@@ -4,7 +4,7 @@ import sys
 
 if sys.platform == "darwin":
   from extra.clang_parsers import MyMachO
-  from mmap import MAP_JIT 
+  from mmap import MAP_JIT
   libc = ctypes.CDLL("libc.dylib")
 else:
   from extra.clang_parsers import ELFParser
