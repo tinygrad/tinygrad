@@ -1,25 +1,9 @@
-import sys
 from collections import defaultdict, deque
 from typing import Tuple, List, Dict, DefaultDict
 from tinygrad.ops import GroupOp, MetaOps, ReduceOps, UOp, UnaryOps
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.engine.lazy import LazyBuffer
-
-# creation can recurse a lot
-sys.setrecursionlimit(10000)
-
-def _recurse_lb(buf:LazyBuffer, realizes:Dict[LazyBuffer, None], allbufs:Dict[LazyBuffer, None],
-  children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], double_reduces:Dict[LazyBuffer, None], ctx):
-  """recursively search the entire graph for all LazyBuffers, insert realizes after expands"""
-  if buf in allbufs or buf.base.op is MetaOps.CONST: return None
-  if buf.base.realized is not None: return realizes.setdefault(buf.base)
-  if ctx.buf_uops[buf.buffer] in ctx.realizes: realizes[buf] = None
-  if buf.op in GroupOp.Reduce and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[buf] = None
-  allbufs[buf] = None
-  for x in buf.srcs:
-    if x.base.realized is None: children[x.base][buf] = None
-    _recurse_lb(x.base, realizes, allbufs, children, double_reduces, ctx)
 
 def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
                      realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Dict[LazyBuffer, None],
@@ -53,20 +37,18 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def get_realizes(outs:List[LazyBuffer], ctx) -> List[List[UOp]]:
+def get_realizes(outs:List[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbufs:Dict[LazyBuffer, None],
+                 double_reduces:Dict[LazyBuffer, None], ctx) -> List[List[UOp]]:
   """search the graph for all the LazyBuffers that need to realize"""
+  # get all the realizes from big graph
   realizes: Dict[LazyBuffer, None] = {}
-  allbufs: Dict[LazyBuffer, None] = {}
-  children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
-  double_reduces: Dict[LazyBuffer, None] = {}
-  for out in outs: _recurse_lb(out, realizes, allbufs, children, double_reduces, ctx)
-
+  for r in allbufs:
+    if ctx.buf_uops[r.buffer] in ctx.realizes: realizes[r] = None
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
   reduce_of_const: List[LazyBuffer] = []
   for r in allbufs:
-    if r.op not in GroupOp.Reduce or r in realizes: continue
-
+    if r in realizes or r.op not in GroupOp.Reduce: continue
     group: Dict[LazyBuffer, None] = {}
     _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, cache={})
     # max one reduceop per kernel
@@ -123,7 +105,6 @@ def get_realizes(outs:List[LazyBuffer], ctx) -> List[List[UOp]]:
 
   output_groups: DefaultDict[LazyBuffer, List[UOp]] = defaultdict(list)
   for buf in realizes:
-    if buf.realized is None:
-      output_groups[reduce_for_op.get(buf, buf)].append(ubuf:=ctx.buf_uops[buf.buffer])
-      ctx.realizes[ubuf] = ubuf
+    output_groups[reduce_for_op.get(buf, buf)].append(ubuf:=ctx.buf_uops[buf.buffer])
+    ctx.realizes[ubuf] = ubuf
   return list(output_groups.values())
