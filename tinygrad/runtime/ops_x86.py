@@ -7,12 +7,12 @@ from tinygrad.renderer.x86asm import X86Renderer
 class X86Compiler(Compiler):
   def __init__(self, cachekey="compile_x86", args:Optional[List[str]]=None):
     self.args = ['-march=native'] if args is None else args
-    super().__init__(cachekey)
+    super().__init__(None)
 
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output(['clang', '-shared', *self.args, '-x', 'assembler', '-masm=intel', '-fPIC', '-ffreestanding', '-nostdlib',
+      subprocess.check_output(['clang', '-shared', *self.args, '-x', 'assembler', '-masm=intel', '-fPIC', '-nostdlib',
                                '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
       return pathlib.Path(output_file.name).read_bytes()
 

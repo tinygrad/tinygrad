@@ -7,7 +7,7 @@ from tinygrad.renderer.cstyle import ClangRenderer
 class ClangCompiler(Compiler):
   def __init__(self, cachekey="compile_clang", args:Optional[List[str]]=None):
     self.args = ['-march=native'] if args is None else args
-    super().__init__(cachekey)
+    super().__init__(None)
 
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
