@@ -22,8 +22,6 @@ class DType(metaclass=DTypeMetaClass):
   name: str
   fmt: Optional[str]
   count: int
-  @staticmethod
-  def define(priority, itemsize, name, fmt): return DType(priority, itemsize, name, fmt, 1)
   def __reduce__(self): return type(self), astuple(self)
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
   def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
@@ -103,21 +101,21 @@ class dtypes:
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
-  void: Final[DType] = DType.define(-1, 0, "void", None)
-  bool: Final[DType] = DType.define(0, 1, "bool", '?')
-  int8: Final[DType] = DType.define(1, 1, "char", 'b')
-  uint8: Final[DType] = DType.define(2, 1, "unsigned char", 'B')
-  int16: Final[DType] = DType.define(3, 2, "short", 'h')
-  uint16: Final[DType] = DType.define(4, 2, "unsigned short", 'H')
-  int32: Final[DType] = DType.define(5, 4, "int", 'i')
-  uint32: Final[DType] = DType.define(6, 4, "unsigned int", 'I')
-  int64: Final[DType] = DType.define(7, 8, "long", 'q')
-  uint64: Final[DType] = DType.define(8, 8, "unsigned long", 'Q')
-  float16: Final[DType] = DType.define(9, 2, "half", 'e')
+  void: Final[DType] = DType(-1, 0, "void", None, 1)
+  bool: Final[DType] = DType(0, 1, "bool", '?', 1)
+  int8: Final[DType] = DType(1, 1, "char", 'b', 1)
+  uint8: Final[DType] = DType(2, 1, "unsigned char", 'B', 1)
+  int16: Final[DType] = DType(3, 2, "short", 'h', 1)
+  uint16: Final[DType] = DType(4, 2, "unsigned short", 'H', 1)
+  int32: Final[DType] = DType(5, 4, "int", 'i', 1)
+  uint32: Final[DType] = DType(6, 4, "unsigned int", 'I', 1)
+  int64: Final[DType] = DType(7, 8, "long", 'q', 1)
+  uint64: Final[DType] = DType(8, 8, "unsigned long", 'Q', 1)
+  float16: Final[DType] = DType(9, 2, "half", 'e', 1)
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
-  bfloat16: Final[DType] = DType.define(10, 2, "__bf16", None)
-  float32: Final[DType] = DType.define(11, 4, "float", 'f')
-  float64: Final[DType] = DType.define(12, 8, "double", 'd')
+  bfloat16: Final[DType] = DType(10, 2, "__bf16", None, 1)
+  float32: Final[DType] = DType(11, 4, "float", 'f', 1)
+  float64: Final[DType] = DType(12, 8, "double", 'd', 1)
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
