@@ -1,12 +1,12 @@
 from __future__ import annotations
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable
 import math, struct, ctypes, functools
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True)
 class DType:
   priority: int  # this determines when things get upcasted
   itemsize: int
@@ -14,7 +14,12 @@ class DType:
   fmt: Optional[str]
   count: int
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
-  def vec(self, sz:int):
+  def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
+  @property
+  def base(self): return self
+  @property
+  def vcount(self): return self.count
+  def vec(self, sz:int) -> DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self.name == 'void': return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
@@ -22,30 +27,32 @@ class DType:
     return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, local)
   def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
 
-@dataclass(frozen=True, repr=False)
-class ImageDType(DType):
-  shape: Tuple[int, ...]   # arbitrary arg for the dtype, used in image for the shape
-  base: DType
-  local: bool = False  # images are never local
-  def scalar(self) -> DType: return self.base
-  def vec(self, sz:int): return self.base.vec(sz)
-  def ptr(self, local=False) -> Union[PtrDType, ImageDType]: return self
-  def __repr__(self): return f"dtypes.{self.name}({self.shape})"
-
-@dataclass(frozen=True, repr=False)
+@dataclass(frozen=True)
 class PtrDType(DType):
-  base: DType
-  local: bool
-  def __hash__(self): return super().__hash__()
-  # local isn't used in the compare
-  def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.count==dt.count
-  def __ne__(self, dt): return not (self == dt)
-  def __repr__(self): return f"{super().__repr__()}.ptr(local=True)" if self.local else f"{super().__repr__()}.ptr()"
+  _base: DType
+  local: bool = False
+  v: int = 1
+  @property
+  def base(self): return self._base
+  def scalar(self) -> PtrDType: return replace(self, v=1)
+  def vec(self, sz:int) -> PtrDType: return replace(self, v=sz)
+  def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
+  @property
+  def vcount(self): return self.v
+  def __repr__(self): return f"{self.base.__repr__()}.ptr({'local=true' if self.local else ''})" + (f'.vec({self.v})' if self.v != 1 else '')
+
+@dataclass(frozen=True)
+class ImageDType(PtrDType):
+  shape: Tuple[int, ...] = ()   # shape of the Image
+  def ptr(self, local=False) -> Union[PtrDType, ImageDType]:
+    assert not local, "images can't be local"
+    return self
+  def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
 
 class dtypes:
   @staticmethod
   @functools.lru_cache(None)
-  def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats
+  def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats or isinstance(x, ImageDType)
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   @functools.lru_cache(None)
   def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints
@@ -78,7 +85,8 @@ class dtypes:
     if dtypes.is_int(dtype): return (2**(dtype.itemsize*8-(0 if dtypes.is_unsigned(dtype) else 1)))-1
     return float("inf") if dtypes.is_float(dtype) else True
   @staticmethod
-  def finfo(dtype:DType) -> Tuple[int, int]:  # (exponent, mantissa)
+  def finfo(dtype:DType) -> Tuple[int, int]:
+    """(exponent, mantissa)"""
     if not dtypes.is_float(dtype): raise ValueError(f"{dtype} is not a floating point type")
     return {dtypes.float16: (5, 10), dtypes.bfloat16: (8, 7), dtypes.float32: (8, 23), dtypes.float64: (11, 52)}[dtype]
   @staticmethod
@@ -106,9 +114,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, shape=shp, base=dtypes.float32)
+  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, shape=shp, _base=dtypes.float32)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, shape=shp, base=dtypes.float32)
+  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, shape=shp, _base=dtypes.float32)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
