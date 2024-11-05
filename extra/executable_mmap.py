@@ -1,12 +1,14 @@
 from mmap import mmap, PROT_EXEC, PROT_WRITE, MAP_PRIVATE
-from extra.clang_parsers import MyMachO
 import ctypes
 import sys
+from hexdump import hexdump
 
 if sys.platform == "darwin":
+    from extra.clang_parsers import MyMachO
     from mmap import MAP_JIT 
     libc = ctypes.CDLL("libc.dylib")
-
+else:
+    from extra.clang_parsers import ELFParser
 
 def allocate_executable_memory(data, name):
     if sys.platform == "darwin":
@@ -22,6 +24,10 @@ def allocate_executable_memory(data, name):
         macho = MyMachO(data)
         offset, symbol_table = macho.extract_offset_and_symbols()
         symbol_addr = symbol_table["_"+name] + offset
+    else: 
+        elfparser = ELFParser(data)
+        offset = elfparser.section_headers[".text"][0]
+        symbol_addr = elfparser.symbol_table[name]["value"] + offset
     
     base = ctypes.addressof(ctypes.c_char.from_buffer(mem))
     func_type = ctypes.CFUNCTYPE(ctypes.c_int)

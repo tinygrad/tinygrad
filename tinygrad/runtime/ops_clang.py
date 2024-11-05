@@ -13,7 +13,7 @@ class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      if sys.platform == "darwin":
+      if sys.platform == "darwin" or sys.platform == "linux":
         subprocess.check_output(['clang', *self.args, '-O2', "-c", '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
                                '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
       else:
@@ -28,7 +28,7 @@ class ClangProgram:
     # write to disk so we can load it
     with tempfile.NamedTemporaryFile(delete=True) as cached_file_path:
       pathlib.Path(cached_file_path.name).write_bytes(lib)
-      if sys.platform == "darwin":
+      if sys.platform == "darwin" or sys.platform == "linux":
         self.fxn, self.memory = allocate_executable_memory(lib, name)
       else:
         self.fxn = ctypes.CDLL(str(cached_file_path.name))[name]
