@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable
 import math, struct, ctypes, functools
-from dataclasses import dataclass
+from dataclasses import dataclass, astuple
 from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
@@ -12,9 +12,10 @@ class DTypeMetaClass(type):
   def __call__(cls, *args):
     if (ret:=DTypeMetaClass.dcache.get(args, None)) is not None: return ret
     DTypeMetaClass.dcache[args] = ret = super().__call__(*args)
+    #print(type(ret), args)
     return ret
 
-@dataclass(eq=False)
+@dataclass(frozen=True, eq=False)
 class DType(metaclass=DTypeMetaClass):
   priority: int  # this determines when things get upcasted
   itemsize: int
@@ -24,8 +25,8 @@ class DType(metaclass=DTypeMetaClass):
   _scalar: Optional[DType]
   @staticmethod
   def define(priority, itemsize, name, fmt): return DType(priority, itemsize, name, fmt, 1, None)
-  def __reduce__(self): return DType, (self.priority, self.itemsize, self.name, self.fmt, self.count, self._scalar)
-  def __repr__(self): return f"dtypes.{self.scalar().name}"+(f".vec({self.count})" if self.count > 1 else "")
+  def __reduce__(self): return type(self), astuple(self)
+  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
   def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
   @property
   def base(self) -> DType: return self
@@ -35,16 +36,15 @@ class DType(metaclass=DTypeMetaClass):
   def vec(self, sz:int) -> DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
-    return DType(self.priority, self.itemsize*sz, f"{self.name}{sz}", None, sz, self)
+    return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz, self)
   def ptr(self, local=False):
     return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, None, self, local, 1)
 
-@dataclass(eq=False)
+@dataclass(frozen=True, eq=False)
 class PtrDType(DType):
   _base: DType
   local: bool
   v: int
-  def __reduce__(self): return PtrDType, (self.priority, self.itemsize, self.name, self.fmt, self.count, self._scalar, self._base, self.local, self.v)
   @property
   def base(self) -> DType: return self._base
   def vec(self, sz:int) -> PtrDType: return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz)
@@ -53,11 +53,9 @@ class PtrDType(DType):
   def vcount(self): return self.v
   def __repr__(self): return f"{self.base.__repr__()}.ptr({'local=true' if self.local else ''})" + (f'.vec({self.v})' if self.v != 1 else '')
 
-@dataclass(eq=False)
+@dataclass(frozen=True, eq=False)
 class ImageDType(PtrDType):
   shape: Tuple[int, ...] = ()   # shape of the Image
-  def __reduce__(self):
-    return ImageDType, (self.priority, self.itemsize, self.name, self.fmt, self.count, self._scalar, self._base, self.local, self.v, self.shape)
   def ptr(self, local=False):
     assert not local, "images can't be local"
     return self
@@ -165,6 +163,8 @@ def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not (k.startswith(('__', 'default', 'void'))
                                                                 or v.__class__ is staticmethod or isinstance(v, tuple))}
+INVERSE_DTYPES_DICT = {v.name:k for k,v in DTYPES_DICT.items()}
+INVERSE_DTYPES_DICT['void'] = 'void'
 
 def sum_acc_dtype(dt:DType):
   # default acc dtype for sum
