@@ -2,7 +2,7 @@ from typing import List
 import unittest, time
 from tinygrad import dtypes, Device
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import BinaryOps, TernaryOps, UnaryOps, Ops, UOp, KernelInfo
+from tinygrad.ops import BinaryOps, Ops, UOp, KernelInfo
 from tinygrad.ops import UPat, PatternMatcher
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
@@ -24,7 +24,7 @@ class TestGraphRewriteEfficiency(unittest.TestCase):
     c1 = UOp.const(dtypes.int, 1)
     c2 = UOp.const(dtypes.int, 2)
     st = time.perf_counter()
-    uops = [UOp(Ops.ALU, dtypes.int, (c1, c2), BinaryOps.ADD) for _ in range(10000)]
+    uops = [UOp(Ops.ADD, dtypes.int, (c1, c2)) for _ in range(10000)]
     et = time.perf_counter() - st
     print(f"created {len(uops)} uops in {et*1000:.2f} ms")
 
@@ -37,7 +37,7 @@ class TestGraphRewriteEfficiency(unittest.TestCase):
                                                                   offset=0, mask=None, contiguous=False),)), src=()),
         UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (5, 6, 10)), src=(
           UOp(Ops.CAST, dtypes.float, arg=None, src=(
-            UOp(Ops.ALU, dtypes.half, arg=BinaryOps.MUL, src=(
+            UOp(Ops.MUL, dtypes.half, src=(
               UOp(Ops.LOAD, dtypes.half, arg=None, src=(
                 UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=1, src=()),
                 UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(
@@ -194,7 +194,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_add_constant_fold(self):
     c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
     c2 = UOp(Ops.CONST, dtypes.float, arg=2.0)
-    out = UOp(Ops.ALU, dtypes.float, (c1, c2), BinaryOps.ADD)
+    out = UOp(Ops.ADD, dtypes.float, (c1, c2))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 1)
     out = uops[-1]
@@ -204,9 +204,9 @@ class TestUOpGraph(unittest.TestCase):
   def test_where_same_fold(self):
     v = UOp.variable('tmp', 0, 1)
     c0 = UOp(Ops.CONST, dtypes.int, arg=0)
-    vc = UOp(Ops.ALU, dtypes.bool, (v, c0), BinaryOps.CMPNE)
+    vc = UOp(Ops.CMPNE, dtypes.bool, (v, c0))
     c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
-    out = UOp(Ops.ALU, dtypes.float, (vc, c1, c1), TernaryOps.WHERE)
+    out = UOp(Ops.WHERE, dtypes.float, (vc, c1, c1))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 1)
     out = uops[-1]
@@ -217,7 +217,7 @@ class TestUOpGraph(unittest.TestCase):
     bf = UOp(Ops.CONST, dtypes.bool, arg=False)
     c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
     c2 = UOp(Ops.CONST, dtypes.float, arg=2.0)
-    out = UOp(Ops.ALU, dtypes.float, (bf, c1, c2), TernaryOps.WHERE)
+    out = UOp(Ops.WHERE, dtypes.float, (bf, c1, c2))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 1)
     out = uops[-1]
@@ -240,7 +240,7 @@ class TestUOpGraph(unittest.TestCase):
     ld = UOp(Ops.LOAD, dtypes.float.vec(2), (d0, idx))
     vec = UOp(Ops.VECTORIZE, dtypes.float.vec(2), (ld,))
     x = UOp(Ops.GEP, dtypes.float, (vec, ), arg=0)
-    alu = UOp(Ops.ALU, dtypes.float, (x, ), UnaryOps.SQRT)
+    alu = UOp(Ops.SQRT, dtypes.float, (x, ))
     out = UOp(Ops.STORE, dtypes.void, (d0, idx, alu))
     uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is Ops.VECTORIZE]), 0)
@@ -375,8 +375,8 @@ class TestUOpGraph(unittest.TestCase):
     v = UOp.variable("tmp", 0, 1)
     c2 = UOp(Ops.CONST, dtypes.int, arg=2)
     c4 = UOp(Ops.CONST, dtypes.int, arg=4)
-    vc = UOp(Ops.ALU, dtypes.int, (v, c2), BinaryOps.ADD)
-    out = UOp(Ops.ALU, dtypes.int, (vc, c4), BinaryOps.ADD)
+    vc = UOp(Ops.ADD, dtypes.int, (v, c2))
+    out = UOp(Ops.ADD, dtypes.int, (vc, c4))
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 3)
     out = uops[-1]
@@ -436,7 +436,7 @@ class TestUOpGraph(unittest.TestCase):
     cf = UOp.const(dtypes.float, 0.0)
     r1 = UOp(Ops.RANGE, dtypes.int, (c0, c2), (1, 0, False))
     r2 = UOp(Ops.RANGE, dtypes.int, (c0, c2), (1, 1, False))
-    alu = UOp(Ops.ALU, dtypes.int, (r2, r1), BinaryOps.MUL)
+    alu = UOp(Ops.MUL, dtypes.int, (r2, r1))
     store = UOp(Ops.STORE, dtypes.void, (glbl.index(alu), cf))
     uops = to_uops_list([store])
     ranges = [x for x in uops if x.op is Ops.RANGE]

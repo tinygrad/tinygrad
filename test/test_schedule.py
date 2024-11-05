@@ -1690,7 +1690,7 @@ class TestIndexing(unittest.TestCase):
         UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0, src=()),
         UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()), # noqa: E501
         UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
-          UOp(Ops.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+          UOp(Ops.ADD, dtypes.int, src=(
             UOp(Ops.VIEW, dtypes.int, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=( # noqa E501
               UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
                 UOp(Ops.LOAD, dtypes.int, arg=None, src=(
@@ -1776,11 +1776,11 @@ class TestIndexing(unittest.TestCase):
         UOp(Ops.CONTIGUOUS, dtypes.float, arg=None, src=(
            x1,
           UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(1, 32, 32, 16), strides=(0, 32, 1, 1024), offset=0, mask=None, contiguous=False),)), src=(
-            UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-              UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+            UOp(Ops.ADD, dtypes.float, src=(
+              UOp(Ops.ADD, dtypes.float, src=(
                 UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(1, 16, 32, 32), strides=(0, 1, 512, 16), offset=0, mask=None, contiguous=False),)), src=(
                   UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (7, 8)), src=(
-                    UOp(Ops.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+                    UOp(Ops.MUL, dtypes.float, src=(
                       UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(1, 32, 32, 1, 1, 4, 4, 4, 4, 1, 1), strides=(0, 512, 16, 0, 0, 0, 0, 4, 1, 0, 0), offset=0, mask=None, contiguous=False),)), src=(
                         x11:=UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                           UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(2, ('METAL', 16384, dtypes.float)), src=()),

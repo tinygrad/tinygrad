@@ -2,7 +2,7 @@
 import unittest
 
 from tinygrad import Device
-from tinygrad.ops import UOp, Ops, BinaryOps, UnaryOps
+from tinygrad.ops import UOp, Ops, BinaryOps
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -17,12 +17,12 @@ class TestOpenpilotValidhack(unittest.TestCase):
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
         UOp(Ops.DEFINE_GLOBAL, dtypes.imagef((64, 1024, 4)), arg=0, src=()),
         UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 64, 128, 1, 1, 8, 4, 1, 1, 1, 1), strides=(0, 4096, 32, 0, 0, 4, 1, 0, 0, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
-        UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-          UOp(Ops.ALU, dtypes.float, arg=BinaryOps.MAX, src=(
-            x5:=UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+        UOp(Ops.ADD, dtypes.float, src=(
+          UOp(Ops.MAX, dtypes.float, src=(
+            x5:=UOp(Ops.ADD, dtypes.float, src=(
               UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (7, 8, 9, 10)), src=(
                 UOp(Ops.CAST, dtypes.float, arg=None, src=(
-                  UOp(Ops.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+                  UOp(Ops.MUL, dtypes.float, src=(
                     UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                       UOp(Ops.DEFINE_GLOBAL, dtypes.imagef((128, 768, 4)), arg=1, src=()),
                       UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1, 1, 1, 1, 3, 1, 4, 4, 130, 4, 258), strides=(0, 0, 0, 0, 0, 4, 0, 1, 0, 3072, 0, 12), offset=-3084, mask=((0, 1), (0, 1), (0, 1), (0, 1), (0, 1), (0, 3), (0, 1), (0, 4), (0, 4), (1, 129), (0, 4), (1, 257)), contiguous=False), View(shape=(1, 64, 128, 1, 1, 8, 4, 3, 4, 3, 3), strides=(0, 2064, 2, 0, 0, 0, 0, 2146560, 536640, 135192, 259), offset=0, mask=None, contiguous=False))), src=()),)),
@@ -35,14 +35,14 @@ class TestOpenpilotValidhack(unittest.TestCase):
                 UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 64, 128, 1, 1, 8, 4, 1, 1, 1, 1), strides=(0, 0, 0, 0, 0, 4, 1, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
             x19:=UOp(Ops.CONST, dtypes.float, arg=0.0, src=(
               x20:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 64, 128, 1, 1, 8, 4, 1, 1, 1, 1), strides=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
-          UOp(Ops.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
-            UOp(Ops.ALU, dtypes.float, arg=BinaryOps.MAX, src=(
-              UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+          UOp(Ops.MUL, dtypes.float, src=(
+            UOp(Ops.MAX, dtypes.float, src=(
+              UOp(Ops.ADD, dtypes.float, src=(
                 UOp(Ops.CONST, dtypes.float, arg=1.0, src=(
                   x20,)),
-                UOp(Ops.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
-                  UOp(Ops.ALU, dtypes.float, arg=UnaryOps.EXP2, src=(
-                    UOp(Ops.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+                UOp(Ops.MUL, dtypes.float, src=(
+                  UOp(Ops.EXP2, dtypes.float, src=(
+                    UOp(Ops.MUL, dtypes.float, src=(
                       x5,
                       UOp(Ops.CONST, dtypes.float, arg=1.4426950408889634, src=(
                         x20,)),)),)),
@@ -67,19 +67,19 @@ class TestOpenpilotValidhack(unittest.TestCase):
         UOp(Ops.DEFINE_GLOBAL, dtypes.imagef((10, 128, 4)), arg=0, src=()),
         UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 512, 1), offset=0, mask=None, contiguous=True),)), src=()),
         UOp(Ops.CAST, dtypes.float, arg=None, src=(
-          UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-            UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+          UOp(Ops.ADD, dtypes.float, src=(
+            UOp(Ops.ADD, dtypes.float, src=(
               UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                 UOp(Ops.DEFINE_GLOBAL, dtypes.imagef((1, 128, 4)), arg=1, src=()),
                 UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 0, 1), offset=0, mask=((0, 1), (0, 1), (0, 512)), contiguous=False),)), src=()),)),
               UOp(Ops.CAST, dtypes.float, arg=None, src=(
-                UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-                  UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-                    UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-                      UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-                        UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-                          UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-                            UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+                UOp(Ops.ADD, dtypes.float, src=(
+                  UOp(Ops.ADD, dtypes.float, src=(
+                    UOp(Ops.ADD, dtypes.float, src=(
+                      UOp(Ops.ADD, dtypes.float, src=(
+                        UOp(Ops.ADD, dtypes.float, src=(
+                          UOp(Ops.ADD, dtypes.float, src=(
+                            UOp(Ops.ADD, dtypes.float, src=(
                               UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                                 x18:=UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=2, src=()),
                                 UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 10, 512), strides=(0, 0, 1), offset=48128, mask=((0, 1), (1, 2), (0, 512)), contiguous=False),)), src=()),)),
