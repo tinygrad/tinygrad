@@ -1,7 +1,6 @@
 from mmap import mmap, PROT_EXEC, PROT_WRITE, MAP_PRIVATE
 import ctypes
 import sys
-from hexdump import hexdump
 
 if sys.platform == "darwin":
     from extra.clang_parsers import MyMachO
@@ -18,17 +17,18 @@ def allocate_executable_memory(data, name):
         libc.pthread_jit_write_protect_np(1)
     else:
         mem = mmap(-1, len(data), flags=MAP_PRIVATE, prot=PROT_WRITE | PROT_EXEC)
+        data = data.replace(b"\x00\x00\x00\x94", b"\x1f\x20\x03\xd5")
         mem.write(data)
 
     if sys.platform == "darwin":
         macho = MyMachO(data)
         offset, symbol_table = macho.extract_offset_and_symbols()
         symbol_addr = symbol_table["_"+name] + offset
-    else: 
+    else:
         elfparser = ELFParser(data)
         offset = elfparser.section_headers[".text"][0]
         symbol_addr = elfparser.symbol_table[name]["value"] + offset
-    
+ 
     base = ctypes.addressof(ctypes.c_char.from_buffer(mem))
     func_type = ctypes.CFUNCTYPE(ctypes.c_int)
     fn = func_type(base + symbol_addr)
