@@ -230,8 +230,6 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 class UOpMetaClass(type):
   ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
-    # TODO: remove this
-    if op is Ops.ALU: op, arg = arg, None
     if (ret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
     UOpMetaClass.ucache[key] = ret = super().__call__(op, dtype, src, arg)
     return ret
