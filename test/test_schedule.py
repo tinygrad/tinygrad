@@ -932,7 +932,7 @@ class TestSchedule(unittest.TestCase):
     with Tensor.train():
       img = Tensor.empty(2,3,6,6)
       c1 = nn.Conv2d(3,16,3,bias=False)
-      c2 = nn.Conv2d(16,32,3,bias=False)
+      c2 = nn.Conv2d(16,32,2,bias=False)
       _realize_weights([c1, c2])
       opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
       opt.zero_grad()
@@ -953,23 +953,23 @@ class TestSchedule(unittest.TestCase):
     with Tensor.train():
       img = Tensor.empty(2,3,6,6)
       c1 = nn.Conv2d(3,16,3,bias=False)
-      c2 = nn.Conv2d(16,32,3,bias=False)
+      c2 = nn.Conv2d(16,32,2,bias=False)
       _realize_weights([c1, c2])
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]))
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 6)
+      check_schedule(opt.schedule_step(), 8)
 
   def test_fold_2convs_sgd_nesterov_momentum_wd(self):
     with Tensor.train():
       img = Tensor.empty(2,3,6,6)
       c1 = nn.Conv2d(3,16,3,bias=False)
-      c2 = nn.Conv2d(16,32,3,bias=False)
+      c2 = nn.Conv2d(16,32,2,bias=False)
       _realize_weights([c1, c2])
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]), nesterov=True, momentum=0.9, weight_decay=0.1)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 8)
+      check_schedule(opt.schedule_step(), 10)
 
   def test_sgd_4convs_fuse(self):
     with Tensor.train():
