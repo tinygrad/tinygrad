@@ -46,10 +46,10 @@ class ScheduleContext:
   assigns: Set[Buffer] = field(default_factory=set)                # this holds all the UOps.BUFFERs we ASSIGN to in this schedule
   lazybufs: Dict[Buffer, LazyBuffer] = field(default_factory=dict) # this is a lookup for the LazyBuffers we need to mark as realized
 
-def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> UOp:
+def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children, allbufs, double_reduces, cache:Dict[LazyBuffer, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   if buf is not buf.base:
-    cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
+    cache[buf] = ret = to_uop(buf.base, ctx, children, allbufs, double_reduces, cache).view(buf.st)
     return ret
   # make things that can't be images not images
   if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
@@ -69,7 +69,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   # if the buffer is already realized we just load it
   if buf.is_realized(): return UOp(Ops.PRELOAD, dtype, (ubuf, buf.st.to_uop()))
   # everything else needs sources
-  src = tuple(to_uop(x, ctx, cache) for x in buf.srcs)
+  src = tuple(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in buf.srcs)
   if buf.op in GroupOp.Reduce: ret = src[0].r(buf.op, buf.arg)
   elif buf.op is Ops.CONTIGUOUS: ret = UOp(Ops.CONTIGUOUS, dtype, src)
   elif buf.op is Ops.ASSIGN:
@@ -81,6 +81,11 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   cache[buf] = ret = UOp(Ops.LOAD, dtype, (ubuf, buf.st.to_uop(), UOp.store(ubuf, ShapeTracker.from_shape(buf.shape).to_uop(), ret)))
   if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
   ctx.lazybufs[b] = buf
+  # things for fuse.py
+  allbufs[buf] = None
+  if buf.op in GroupOp.Reduce and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[buf] = None
+  for x in buf.srcs:
+    if x.base.realized is None: children[x.base][buf] = None
   return ret
 
 # **** AST graph rewrite
@@ -269,10 +274,14 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   # create the big graph
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
-  big_graph = UOp.sink(*(to_uop(x, ctx, cache) for x in outs))
+  # **** TODO: delete these next 3 after big graph
+  children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
+  allbufs: Dict[LazyBuffer, None] = {}
+  double_reduces: Dict[LazyBuffer, None] = {}
+  big_graph = UOp.sink(*(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in outs))
   # get realizes
   graph_rewrite(big_graph, do_realize, ctx.realizes)
-  store_groups = get_realizes(outs, ctx)
+  store_groups = get_realizes(outs, children, allbufs, double_reduces, ctx)
   # split realizes into small graphs
   graph_rewrite(big_graph, break_sched, ctx.realizes)
   assigned = {ubuf for b in ctx.assigns if (ubuf:=ctx.buf_uops.get(b)) is not None}
