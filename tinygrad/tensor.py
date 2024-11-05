@@ -1954,7 +1954,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
       xup = xup.shrink(tuple(noop_ + [(0, o*(i+s)) for o,i,s in zip(o_,i_,s_)])).reshape(noop_ + flatten((o,i+s) for o,i,s in zip(o_,i_,s_)))
       # handle dilation
       xup = xup.shrink(
-        tuple(noop_ + flatten((None, (0,k*d)) for k,d in zip(k_, d_)))).reshape(noop_ + flatten((o,k,d) for o,k,d in zip(o_,k_,d_)))
+        tuple(noop_ + flatten(((0,o), (0,k*d)) for o,k,d in zip(o_,k_,d_)))).reshape(noop_ + flatten((o,k,d) for o,k,d in zip(o_,k_,d_)))
       xup = xup.shrink(tuple(noop_ + flatten(((0,o), (0,k), (0,1)) for o,k in zip(o_,k_)))).reshape(noop_ + flatten((o,k) for o,k in zip(o_,k_)))
       # permute to move reduce to the end
       return xup.permute(*range(len(noop_)), *[len(noop_)+i*2 for i in range(len(i_))], *[len(noop_)+i*2+1 for i in range(len(i_))])
