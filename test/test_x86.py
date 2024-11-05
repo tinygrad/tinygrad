@@ -138,3 +138,4 @@ if __name__ == '__main__':
   unittest.main()
 
 # TODO: weird bug in rand where last number is often 0.99999. Also in randint last number is often 9
+# TODO: log, softmax, tan break after change to new ops
