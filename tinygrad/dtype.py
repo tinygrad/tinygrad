@@ -1,18 +1,27 @@
 from __future__ import annotations
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable
 import math, struct, ctypes, functools
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
 
-@dataclass(frozen=True)
-class DType:
+# all DTypes should only be created once
+class DTypeMetaClass(type):
+  dcache: Dict[Tuple, DType] = {}
+  def __call__(cls, *args, **kwargs):
+    if (ret:=DTypeMetaClass.dcache.get(args, None)) is not None: return ret
+    DTypeMetaClass.dcache[args] = ret = super().__call__(*args)
+    return ret
+
+@dataclass(frozen=True, eq=False)
+class DType(metaclass=DTypeMetaClass):
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
   fmt: Optional[str]
   count: int
+  def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
   def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
   @property
@@ -21,30 +30,29 @@ class DType:
   def vcount(self): return self.count
   def vec(self, sz:int) -> DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
-    if sz == 1 or self.name == 'void': return self  # void doesn't vectorize, and sz=1 is scalar
+    if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
-  def ptr(self, local=False) -> Union[PtrDType, ImageDType]:
-    return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, local)
+  def ptr(self, local=False) -> PtrDType: return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, local, 1)
   def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class PtrDType(DType):
   _base: DType
-  local: bool = False
-  v: int = 1
+  local: bool
+  v: int
   @property
   def base(self): return self._base
-  def scalar(self) -> PtrDType: return replace(self, v=1)
-  def vec(self, sz:int) -> PtrDType: return replace(self, v=sz)
+  def scalar(self) -> PtrDType: return self.vec(1)
+  def vec(self, sz:int) -> PtrDType: return type(self)(*tuple(getattr(self, f.name) if f.name != 'v' else sz for f in fields(self)))
   def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
   @property
   def vcount(self): return self.v
   def __repr__(self): return f"{self.base.__repr__()}.ptr({'local=true' if self.local else ''})" + (f'.vec({self.v})' if self.v != 1 else '')
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class ImageDType(PtrDType):
   shape: Tuple[int, ...] = ()   # shape of the Image
-  def ptr(self, local=False) -> Union[PtrDType, ImageDType]:
+  def ptr(self, local=False) -> PtrDType:
     assert not local, "images can't be local"
     return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
@@ -114,9 +122,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, shape=shp, _base=dtypes.float32)
+  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, dtypes.float32, False, 1, shp)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, shape=shp, _base=dtypes.float32)
+  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, dtypes.float32, False, 1, shp)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
