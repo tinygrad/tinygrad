@@ -31,6 +31,7 @@ class DType(metaclass=DTypeMetaClass):
   def base(self): return self
   @property
   def vcount(self): return self.count
+  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def vec(self, sz:int) -> DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
@@ -45,7 +46,8 @@ class PtrDType(DType):
   v: int
   @property
   def base(self): return self._base
-  def vec(self, sz:int) -> PtrDType:
+  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
+  def vec(self, sz:int) -> DType:
     assert self.v == 1, f"can't vectorize ptr {self} with size {sz}"
     if sz == 1: return self  # sz=1 is a scalar
     return type(self)(*tuple(sz if f.name == 'v' else (self if f.name == '_scalar' else getattr(self, f.name)) for f in fields(self)))
