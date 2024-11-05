@@ -4,7 +4,7 @@ import sys
 
 if sys.platform == "darwin":
   from extra.clang_parsers import MyMachO
-  from mmap import MAP_JIT 
+  from mmap import MAP_JIT
   libc = ctypes.CDLL("libc.dylib")
 else:
   from extra.clang_parsers import ELFParser
@@ -28,7 +28,7 @@ def allocate_executable_memory(data, name):
     elfparser = ELFParser(data)
     offset = elfparser.section_headers[".text"][0]
     symbol_addr = elfparser.symbol_table[name]["value"] + offset
- 
+
   base = ctypes.addressof(ctypes.c_char.from_buffer(mem))
   func_type = ctypes.CFUNCTYPE(ctypes.c_int)
   fn = func_type(base + symbol_addr)
