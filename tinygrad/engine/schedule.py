@@ -284,18 +284,16 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   store_groups = get_realizes(outs, children, allbufs, double_reduces, ctx)
   # split realizes into small graphs
   graph_rewrite(big_graph, break_sched, ctx.realizes)
-  assigned = {ubuf for b in ctx.assigns if (ubuf:=ctx.buf_uops.get(b)) is not None}
-  small_graphs: List[Tuple[UOp, ScheduleItemContext]] = []
-  metadata: List[Set[Metadata]] = []
-  for stores in store_groups:
-    sink = UOp.sink(*(ctx.realizes[u] for u in stores))
-    metadata.append({mx for x in sink.sparents if x.op in GroupOp.Buffer and len(x.src) > 2 and (mx:=ctx.ubuf_metadata.get(x.src[0]))})
-    small_graphs.append(full_ast_rewrite(sink, ctx.var_vals, assigned))
-
-  # do BFS
+  sinks = [UOp.sink(*(ctx.realizes[u] for u in stores)) for stores in store_groups]
+  # preschedule all realizes
   bufs = list(ctx.buf_uops)
-  prescheduled = [ScheduleItem(u, tuple(b for u in c.bufs if (b:=bufs[u.arg[0]]).size != 0), tuple(m), tuple(c.assign_preloads))
-                  for (u,c),m in zip(small_graphs, metadata)]
+  prescheduled: List[ScheduleItem] = []
+  assigned = {ubuf for b in ctx.assigns if (ubuf:=ctx.buf_uops.get(b)) is not None}
+  for sink in sinks:
+    metadata = tuple({mx for x in sink.sparents if x.op in GroupOp.Buffer and len(x.src) > 2 and (mx:=ctx.ubuf_metadata.get(x.src[0]))})
+    ast, ast_ctx = full_ast_rewrite(sink, ctx.var_vals, assigned)
+    prescheduled.append(ScheduleItem(ast, tuple(b for u in ast_ctx.bufs if (b:=bufs[u.arg[0]]).size != 0), metadata, tuple(ast_ctx.assign_preloads)))
+  # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
   in_degree: DefaultDict[ScheduleItem, int] = defaultdict(int)
