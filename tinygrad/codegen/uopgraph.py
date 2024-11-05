@@ -352,8 +352,8 @@ def do_expand(root:UOp):
         new_srcs.append(src.src[0].gep(tuple(lst)))
     else:
       # non-EXPAND input
-      if (root.op is Ops.IF) or (root.op is Ops.REDUCE and i != 0):
-        # for the first arg of IF and the RANGE args of REDUCE, just pass them through ignoring EXPANDS
+      if root.op is Ops.IF:
+        # for the first arg of IF, just pass them through ignoring EXPANDS
         new_srcs.append(src)
       elif src.dtype.count > 1:
         # put any input dtype > 1 grouped together
@@ -404,7 +404,7 @@ expander = PatternMatcher([
    lambda outer, inner: UOp(Ops.EXPAND, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
   # do expansion
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.GEP, Ops.WMMA, Ops.LOAD, Ops.STORE, Ops.INDEX, Ops.ASSIGN,
-         Ops.VECTORIZE, Ops.REDUCE, Ops.IF), name="root", custom_early_reject=set([Ops.EXPAND])), do_expand),
+         Ops.VECTORIZE, Ops.IF), name="root", custom_early_reject=set([Ops.EXPAND])), do_expand),
   (UPat(Ops.CONTRACT, name="con"), do_contract),
   # vectorize DEFINE_ACC
   (UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_ACC, name="acc"), name="v"), lambda acc,v: acc.replace(dtype=v.dtype)),
