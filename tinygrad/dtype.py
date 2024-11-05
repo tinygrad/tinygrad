@@ -22,9 +22,8 @@ class DType(metaclass=DTypeMetaClass):
   name: str
   fmt: Optional[str]
   count: int
-  _scalar: Optional[DType]
   @staticmethod
-  def define(priority, itemsize, name, fmt): return DType(priority, itemsize, name, fmt, 1, None)
+  def define(priority, itemsize, name, fmt): return DType(priority, itemsize, name, fmt, 1)
   def __reduce__(self): return type(self), astuple(self)
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
   def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
@@ -32,13 +31,13 @@ class DType(metaclass=DTypeMetaClass):
   def base(self) -> DType: return self
   @property
   def vcount(self): return self.count
-  def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
+  def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
   def vec(self, sz:int) -> DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
-    return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz, self)
+    return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
   def ptr(self, local=False):
-    return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, None, self, local, 1)
+    return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, local, 1)
 
 @dataclass(frozen=True, eq=False)
 class PtrDType(DType):
@@ -47,7 +46,8 @@ class PtrDType(DType):
   v: int
   @property
   def base(self) -> DType: return self._base
-  def vec(self, sz:int) -> PtrDType: return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz)
+  def scalar(self) -> PtrDType: return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self._base, self.local, 1)
+  def vec(self, sz:int) -> PtrDType: return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self._base, self.local, sz)
   def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
   @property
   def vcount(self): return self.v
@@ -126,9 +126,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, None, dtypes.float32, False, 1, shp)
+  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, dtypes.float32, False, 1, shp)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, None, dtypes.float32, False, 1, shp)
+  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, dtypes.float32, False, 1, shp)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
