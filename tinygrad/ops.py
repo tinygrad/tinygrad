@@ -120,7 +120,6 @@ class Ops(FastEnum):
   NOOP = auto()
 
   # reduce
-  REDUCE = auto()
   REDUCE_AXIS = auto()
 
   # ReduceOps
@@ -175,6 +174,7 @@ class GroupOp:
   ALU = set.union(Unary, Binary, Ternary)
 
   Reduce = {Ops.SUM, Ops.PROD, Ops.REDUCE_MAX}
+  Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
 
   # meta ops
   Meta = {Ops.COPY, Ops.EMPTY, Ops.BUFFER_VIEW}
@@ -326,8 +326,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if self.op is Ops.VCONST: return UOp.const(self.dtype.scalar(), self.arg[i])
       if self.op is Ops.CONST: return UOp.const(self.dtype.scalar(), self.arg)
       i = (i,)
-    if self.dtype == dtypes.void or (i == tuple(range(len(i))) and self.dtype.vcount == len(i)): return self
-    assert len(i) >= 1 and all(x < self.dtype.vcount for x in i), f"bad GEP on {self.dtype}, {i}"
+    if (self.dtype.vcount == len(i) and i == tuple(range(len(i)))) or self.dtype == dtypes.void: return self
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
@@ -345,7 +344,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
                                              UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=idx)
-  def reduce(self, op:Ops, *rng:UOp): return UOp(Ops.REDUCE, self.dtype, (self,) + rng, op)
   def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op] if op in GroupOp.Reduce else op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
 
@@ -401,34 +399,31 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def vmax(self) -> ConstType: return self._min_max[1]
   @functools.cached_property
   def _min_max(self) -> Tuple[ConstType, ConstType]:
+    if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):
+      (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
+      if self.op is BinaryOps.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
+      if self.op is BinaryOps.MUL: return min(vals:=(s0_vmin*s1_vmin, s0_vmin*s1_vmax, s0_vmax*s1_vmin, s0_vmax*s1_vmax)), max(vals)
+      if self.op is BinaryOps.MOD and s1_vmin > 0: return 0, s1_vmax-1
+      if self.op is BinaryOps.IDIV and s1_vmin == s1_vmax:  # min/max are equal in a CONST
+        if s1_vmin > 0: return s0_vmin//s1_vmin, s0_vmax//s1_vmin
+        if s1_vmin < 0 and s0_vmin >= 0: return -(s0_vmax//-s1_vmin), -(s0_vmin//-s1_vmin)
+      if self.op is BinaryOps.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
+      if self.op is BinaryOps.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
+      if self.op is BinaryOps.CMPNE: return ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin), not (s0_vmin == s0_vmax == s1_vmin == s1_vmax))
+      if self.dtype == dtypes.bool:
+        if self.op is BinaryOps.OR: return s0_vmin or s1_vmin, s0_vmax or s1_vmax
+        if self.op is BinaryOps.AND: return s0_vmin and s1_vmin, s0_vmax and s1_vmax
+    # float has NAN issue and we use explicit NAN in transcendental
+    if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
     if self.op is Ops.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op is Ops.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
-    if self.op is Ops.BIND: return self.src[0].vmin, self.src[0].vmax  # ignore the bound value
+    if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
     if self.op in {Ops.EXPAND, Ops.VECTORIZE}: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
-    if self.op in GroupOp.ALU and not dtypes.is_float(self.dtype):
-      s0,s1,s2 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(3)]
-      if self.op is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
-      if self.op is BinaryOps.MUL: return min(vals:=(s0.vmin*s1.vmin, s0.vmin*s1.vmax, s0.vmax*s1.vmin, s0.vmax*s1.vmax)), max(vals)
-      if self.op is BinaryOps.MOD and s1.vmin > 0: return 0, s1.vmax-1
-      if self.op is BinaryOps.IDIV and s1.op is Ops.CONST:
-        if s1.arg > 0: return s0.vmin//s1.arg, s0.vmax//s1.arg
-        if s1.arg < 0 and s0.vmin >= 0: return -(s0.vmax//-s1.arg), -(s0.vmin//-s1.arg)
-      if self.op is BinaryOps.MAX: return max(s0.vmin, s1.vmin), max(s0.vmax, s1.vmax)
-      if self.op is BinaryOps.CMPLT: return (s0.vmax<s1.vmin, s0.vmin<s1.vmax)
-      if self.op is BinaryOps.CMPNE:
-        always_ne = (s0.vmax < s1.vmin) or (s1.vmax < s0.vmin)
-        sometimes_ne = not (s0.vmin == s0.vmax == s1.vmin == s1.vmax)
-        return (always_ne, sometimes_ne)
-      # float has NAN issue and we use explicit NAN in transcendental
-      if self.op is TernaryOps.WHERE and dtypes.is_int(s1.dtype): return min(s1.vmin, s2.vmin), max(s1.vmax, s2.vmax)
-      if self.dtype == dtypes.bool:
-        if self.op is BinaryOps.OR: return s0.vmin or s1.vmin, s0.vmax or s1.vmax
-        if self.op is BinaryOps.AND: return s0.vmin and s1.vmin, s0.vmax and s1.vmax
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
   @functools.cached_property
@@ -719,7 +714,7 @@ if TRACK_MATCH_STATS:
       os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), ".", "viz", "serve.py"), temp("rewrites.pkl")])
     if getenv("PRINT_MATCH_STATS", 1):
       ret = [0,0,0.0,0.0]
-      for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]):
+      for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
         loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
         if v[1] != 0: print(f"{v[0]:6d} / {v[1]:7d} -- {v[3]*1000.:9.2f} / {(v[2]+v[3])*1000.:9.2f} ms -- {loc_str:15s}", k.printable())
         ret = [x+y for x,y in zip(ret, v)]
@@ -791,8 +786,7 @@ spec = PatternMatcher([
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat(name="x"), UPat(name="y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
   (UPat((Ops.CMPLT, Ops.CMPNE), dtype=dtypes.bool, src=(UPat(name="x"), UPat(name="y"))), lambda x,y: x.dtype == y.dtype),
   # and SHL/SHR, the shift distance can be an int
-  (UPat((Ops.SHL, Ops.SHR), src=(UPat(name="x"), UPat(name="y")), name="alu"),
-   lambda alu,x,y: alu.dtype == x.dtype and (x.dtype == y.dtype or y.dtype == dtypes.uint)),
+  (UPat((Ops.SHL, Ops.SHR), src=(UPat(name="x"), UPat(name="y")), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),
   (UPat(Ops.IDIV, name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(GroupOp.ALU, name="x"), lambda x: all(x.dtype == y.dtype for y in x.src)),
 
@@ -933,8 +927,6 @@ def fold_unrolled_divs(divs:UOp):
     if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
   return ans if ans is not None and sorted(seen_const)==list(range(denominator)) else None
 
-def is_irreducible(u:UOp): return u.op in (Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE)
-
 def canonicalize_simplex(X:UOp) -> Optional[UOp]:
   # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
   # returns x0 + x1 + ... in such case, or None if not
@@ -944,13 +936,13 @@ def canonicalize_simplex(X:UOp) -> Optional[UOp]:
     if u.op is BinaryOps.MUL and u.src[1].op is Ops.CONST and u.src[1].arg > 0:
       changed = True
       u = u.src[0]
-    if not (is_irreducible(u) and u.vmin >= 0): return None
+    if not (u.op in GroupOp.Irreducible and u.vmin >= 0): return None
     ret.append(u)
   return functools.reduce(operator.add, ret) if changed else None
 
 def is_increasing(f:UOp) -> bool:
   # is f a monotonically increasing function regards its input
-  if is_irreducible(f): return True
+  if f.op in GroupOp.Irreducible: return True
   if f.op is BinaryOps.ADD: return is_increasing(f.src[0]) and is_increasing(f.src[1])
   if f.op in (BinaryOps.MUL, BinaryOps.IDIV) and f.src[1].op is Ops.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
   return False  # False if not sure
@@ -983,11 +975,12 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
 
     # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
     candidates = []
-    if expr.op is Ops.ADD and all(is_irreducible(u) and v[0] == 1 for u in split_uop(expr, BinaryOps.ADD)):
+    if expr.op is Ops.ADD and v[0] == 1 and all(u.op in GroupOp.Irreducible for u in split_uop(expr, BinaryOps.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
       candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, BinaryOps.ADD)])
     # try checking the whole clause
-    candidates.append([(expr, UOp.variable("fake", expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1], expr.dtype))])
+    if expr in uop.sparents:
+      candidates.append([(expr, UOp.variable("fake", expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1], expr.dtype))])
 
     for candidate in candidates:
       # if every branch in candidate gives the same simplified uop, we can rewrite the uop
@@ -1037,8 +1030,7 @@ symbolic_simple = PatternMatcher([
   # NOTE: this can be wrong for loaded NaN
   (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # ** constant folding **
-  (UPat(GroupOp.ALU, name="root", src=UPat((Ops.VCONST, Ops.CONST))),
-   lambda root: root.const_like(exec_alu(root.op, root.dtype, [x.arg for x in root.src], truncate_output=False))),
+  (UPat(GroupOp.ALU, name="a", src=UPat((Ops.VCONST, Ops.CONST))), lambda a: a.const_like(exec_alu(a.op, a.dtype, [x.arg for x in a.src], False))),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
