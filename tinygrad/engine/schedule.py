@@ -243,17 +243,13 @@ def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, **kwargs) -> Optional[U
   # otherwise safety check pads
   return None if (all(v.mask is None for v in st.views) or can_pad(base)) else realize(ctx, **kwargs).view(st)
 
-def realize_cast(ctx:Dict[UOp, UOp], x:UOp, cast:UOp, view:UOp, **kwargs) -> Optional[UOp]:
-  if (real:=ctx.get(b:=x.src[0])) is not None and real.op is Ops.STORE and isinstance(b.dtype, ImageDType) and b.dtype.base == cast.dtype:
-    return real.src[2]
-  return None
-
 def UPatLoadStore(to_store=UPat()): return UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), to_store, name="store"), name="load")
 do_realize = PatternMatcher([
   # always realize meta ops
   (UPatLoadStore(UPat((Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta))), realize),
   # don't realize image to image casts
-  (UPatLoadStore(UPat(Ops.CAST, src=(UPat.var("x"),), name="cast")).view(name="view"), realize_cast),
+  (UPatLoadStore(UPat(Ops.CAST, src=(UPat(Ops.LOAD, name="x"),), dtype=dtypes.float)).view(),
+   lambda ctx,x,**kwargs: real if (real:=ctx.get(b:=x.src[0])) is not None and real.op is Ops.STORE and isinstance(b.dtype, ImageDType) else None),
   # realize before expand or unsafe pad ops
   (UPatLoadStore(UPat.var("base")).view(name="view"), realize_view),
   (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.var("u"), UPat.any(UPatLoadStore(), UPatLoadStore().view(name="v"))), name="root"),
