@@ -7,7 +7,7 @@ from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.device import Device
-from tinygrad.helpers import CI, Context
+from tinygrad.helpers import CI, Context, JIT
 from tinygrad.dtype import dtypes
 from extra.models.unet import ResBlock
 
@@ -352,7 +352,7 @@ class TestJit(unittest.TestCase):
 
   @unittest.skipIf(CI and Device.DEFAULT=="METAL", "no ICB in CI, creation of graph fails")
   def test_jit_batch_split(self):
-    if Device[Device.DEFAULT].graph is None: raise unittest.SkipTest("only test graphs")
+    if Device[Device.DEFAULT].graph is None or JIT >= 2: raise unittest.SkipTest("only test graphs")
 
     # Create long jit with 83 kernels.
     def f(a, b, c, d, e):

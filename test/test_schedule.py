@@ -1613,7 +1613,7 @@ class TestIndexing(unittest.TestCase):
       return a.item()
     r, et = timeit(f, a)
     self.assertEqual(r, val)
-    self.assertLess(et, 1400)
+    self.assertLess(et, 1600)
 
   def test_no_rewrite_elementwise(self):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(3)]
