@@ -14,6 +14,9 @@ class GFX_IP:
     self.adev = adev
     self.eop_gpu_addr = self.adev.vmm.alloc_vram(0x1000, "eop")
     
+    self.clear_state_size = 0x10000
+    self.clear_state_gpu_addr = self.adev.vmm.alloc_vram(self.clear_state_size, "clear_state")
+    
     self.setup()
     pass
 
@@ -87,39 +90,23 @@ class GFX_IP:
   def init_kiq_regs(self, ring): # kiq_init_registers
     print("sw", ring.me, ring.pipe, ring.queue)
     self.adev.soc21_grbm_select(ring.me, ring.pipe, ring.queue, 0)
-    # v = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL_BASE_IDX)
-    # print("compute enabled", hex(v)) # 0x3c000000
 
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_EOP_BASE_ADDR, amdgpu_gc_11_0_0.regCP_HQD_EOP_BASE_ADDR_BASE_IDX, self.eop_gpu_addr& 0xffffffff)
+    v = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL_BASE_IDX)
+    print("compute enabled 2", hex(v)) # 0x3c000000
+
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_EOP_BASE_ADDR, amdgpu_gc_11_0_0.regCP_HQD_EOP_BASE_ADDR_BASE_IDX, self.eop_gpu_addr & 0xffffffff)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_EOP_BASE_ADDR_HI, amdgpu_gc_11_0_0.regCP_HQD_EOP_BASE_ADDR_HI_BASE_IDX, (self.eop_gpu_addr >> 32) & 0xffffffff)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_EOP_CONTROL, amdgpu_gc_11_0_0.regCP_HQD_EOP_CONTROL_BASE_IDX, 12)
 
+    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE_BASE_IDX, 1)
+
     act = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE_BASE_IDX)
-    if act:
+    if act and False:
       self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_DEQUEUE_REQUEST, amdgpu_gc_11_0_0.regCP_HQD_DEQUEUE_REQUEST_BASE_IDX, 1)
       while act:
+        # print(act)
         act = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE_BASE_IDX)
       print("q deactivated")
-
-    # print("is act?", )
-    # print("is rptr", self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_RPTR, amdgpu_gc_11_0_0.regCP_HQD_PQ_RPTR_BASE_IDX))
-
-  #   if (RREG32_SOC15(GC, 0, regCP_HQD_ACTIVE) & 1) {
-	# 	WREG32_SOC15(GC, 0, regCP_HQD_DEQUEUE_REQUEST, 1);
-	# 	for (j = 0; j < adev->usec_timeout; j++) {
-	# 		if (!(RREG32_SOC15(GC, 0, regCP_HQD_ACTIVE) & 1))
-	# 			break;
-	# 		udelay(1);
-	# 	}
-	# 	WREG32_SOC15(GC, 0, regCP_HQD_DEQUEUE_REQUEST,
-	# 	       mqd->cp_hqd_dequeue_request);
-	# 	WREG32_SOC15(GC, 0, regCP_HQD_PQ_RPTR,
-	# 	       mqd->cp_hqd_pq_rptr);
-	# 	WREG32_SOC15(GC, 0, regCP_HQD_PQ_WPTR_LO,
-	# 	       mqd->cp_hqd_pq_wptr_lo);
-	# 	WREG32_SOC15(GC, 0, regCP_HQD_PQ_WPTR_HI,
-	# 	       mqd->cp_hqd_pq_wptr_hi);
-	# }
 
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_VMID, amdgpu_gc_11_0_0.regCP_HQD_VMID_BASE_IDX, ring.mqd.cp_hqd_vmid)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_DOORBELL_CONTROL, amdgpu_gc_11_0_0.regCP_HQD_PQ_DOORBELL_CONTROL_BASE_IDX, 0x0)
@@ -161,6 +148,11 @@ class GFX_IP:
     self.adev.doorbell64[index] = val
     self.adev.doorbell[index] = val
 
+  def init_csb(self):
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_HI, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_HI_BASE_IDX, self.clear_state_gpu_addr >> 32)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_LO, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_LO_BASE_IDX, self.clear_state_gpu_addr  & 0xfffffffc)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_LENGTH, amdgpu_gc_11_0_0.regRLC_CSIB_LENGTH_BASE_IDX, self.clear_state_size)
+
   def test_ring(self):
     # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0, 0)
     # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, 0, 0)
@@ -189,7 +181,7 @@ class GFX_IP:
     # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_CNTL, 0, 0x1fffe03)
 
     # mec0 is me1
-    kiq = AMDRing(self.adev, me=1, pipe=0, queue=0, vmid=0, doorbell_index=22)
+    kiq = AMDRing(self.adev, me=1, pipe=0, queue=0, vmid=0, doorbell_index=0)
     kiq.init_compute_mqd()
     self.init_kiq_regs(kiq)
 
@@ -210,7 +202,6 @@ class GFX_IP:
 
     while True:
       # print(kiq.rptr[0], kiq.wptr[0])
-
       # print("now", hex(self.adev.rreg(0xc040)))
       # print("PFS", self.adev.vmm.collect_pfs())
       if self.adev.rreg(0xc040) == 0xdeadc0de:
@@ -236,11 +227,17 @@ class GFX_IP:
       if val == 0: return
     raise Exception('gfx_v11_0_cp_gfx_enable timeout')
 
+  def gfxhub_vmm_setup(self):
+    self.adev.vmm.init_gfxhub()
+    self.adev.vmm.flush_hdp()
+    self.adev.vmm.flush_tlb(0, 0, 0)
+
   def setup(self):
     self.wait_for_rlc_autoload()
     assert self.gb_addr_config() == 0x545 # gfx11 is the same
 
     self.config_gfx_rs64()
+    self.gfxhub_vmm_setup()
     self.init_golden_registers()
     self.constants_init()
 
@@ -248,33 +245,9 @@ class GFX_IP:
     self.cp_compute_enable()
     self.cp_gfx_enable()
 
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0, 0)
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, 0, 0)
+    self.init_csb()
 
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, (1 << 30) - 1)
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, 0)
+    from extra.amdpci.mes import MES_IP
+    self.mes = MES_IP(self.adev)
 
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0, self.adev.vmm.pdb0_base & 0xffffffff)
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32, 0, (self.adev.vmm.pdb0_base >> 32) & 0xffffffff)
-
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_PAGE_TABLE_START_ADDR_LO32, 0, 0)
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_PAGE_TABLE_START_ADDR_HI32, 0, 0)
-
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_PAGE_TABLE_END_ADDR_LO32, 0, (1 << 30) - 1)
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_PAGE_TABLE_END_ADDR_LO32, 0, 0)
-
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_PAGE_TABLE_BASE_ADDR_LO32, 0, self.adev.vmm.pdb0_base & 0xffffffff)
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_PAGE_TABLE_BASE_ADDR_HI32, 0, (self.adev.vmm.pdb0_base >> 32) & 0xffffffff)
-
-    # v = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_CNTL, 0)
-    # print(hex(v), "CC")
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_CNTL, 0, 0x1fffe05)
-
-    # v = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_CNTL, 0)
-    # print(hex(v), "CC")
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_CNTL, 0, 0x1fffe05)
-    
-    # from extra.amdpci.mes import MES_IP
-    # self.mes = MES_IP(self.adev)
-
-    self.test_ring()
+    # self.test_ring()

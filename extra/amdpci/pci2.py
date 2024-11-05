@@ -18,11 +18,11 @@ while True:
   
   if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c:
     dev_fmt = "{:04x}:{:02x}:{:02x}.{:d}".format(pcidev.contents.domain_16, pcidev.contents.bus, pcidev.contents.dev, pcidev.contents.func)
-    if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
+    # if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:86:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:c6:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:44:00.0": continue # skip it, use for kernel hacking.
-    # if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
+    if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:c3:00.0": continue # skip it, use for kernel hacking.
     # print(dev_fmt)
     # exit(0)
@@ -163,7 +163,5 @@ class AMDDev:
 
       if cp_status == 0 and ((bootload_status & RLC_RLCS_BOOTLOAD_STATUS__BOOTLOAD_COMPLETE_MASK) >> RLC_RLCS_BOOTLOAD_STATUS__BOOTLOAD_COMPLETE__SHIFT) == 1:
         break
-
-
 
 adev = AMDDev(pcidev)
