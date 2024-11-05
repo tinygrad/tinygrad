@@ -9,7 +9,7 @@ ConstType = Union[float, int, bool]
 # all DTypes should only be created once
 class DTypeMetaClass(type):
   dcache: Dict[Tuple, DType] = {}
-  def __call__(cls, *args):
+  def __call__(cls, *args, **kwargs):
     if (ret:=DTypeMetaClass.dcache.get(args, None)) is not None: return ret
     DTypeMetaClass.dcache[args] = ret = super().__call__(*args)
     return ret
@@ -32,8 +32,7 @@ class DType(metaclass=DTypeMetaClass):
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
-  def ptr(self, local=False) -> Union[PtrDType, ImageDType]:
-    return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, local, 1)
+  def ptr(self, local=False) -> PtrDType: return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, local, 1)
   def scalar(self) -> DType: return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
 
 @dataclass(frozen=True, eq=False)
@@ -43,8 +42,8 @@ class PtrDType(DType):
   v: int
   @property
   def base(self): return self._base
-  def scalar(self): return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self._base, self.local, 1)
-  def vec(self, sz:int): return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self._base, self.local, sz)
+  def scalar(self) -> PtrDType: return self.vec(1)
+  def vec(self, sz:int) -> PtrDType: return type(self)(*tuple(getattr(self, f.name) if f.name != 'v' else sz for f in fields(self)))
   def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
   @property
   def vcount(self): return self.v
@@ -53,7 +52,7 @@ class PtrDType(DType):
 @dataclass(frozen=True, eq=False)
 class ImageDType(PtrDType):
   shape: Tuple[int, ...] = ()   # shape of the Image
-  def ptr(self, local=False) -> Union[PtrDType, ImageDType]:
+  def ptr(self, local=False) -> PtrDType:
     assert not local, "images can't be local"
     return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
