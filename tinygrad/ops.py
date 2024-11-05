@@ -399,34 +399,31 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def vmax(self) -> ConstType: return self._min_max[1]
   @functools.cached_property
   def _min_max(self) -> Tuple[ConstType, ConstType]:
+    if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):
+      (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
+      if self.op is BinaryOps.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
+      if self.op is BinaryOps.MUL: return min(vals:=(s0_vmin*s1_vmin, s0_vmin*s1_vmax, s0_vmax*s1_vmin, s0_vmax*s1_vmax)), max(vals)
+      if self.op is BinaryOps.MOD and s1_vmin > 0: return 0, s1_vmax-1
+      if self.op is BinaryOps.IDIV and s1_vmin == s1_vmax:  # min/max are equal in a CONST
+        if s1_vmin > 0: return s0_vmin//s1_vmin, s0_vmax//s1_vmin
+        if s1_vmin < 0 and s0_vmin >= 0: return -(s0_vmax//-s1_vmin), -(s0_vmin//-s1_vmin)
+      if self.op is BinaryOps.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
+      if self.op is BinaryOps.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
+      if self.op is BinaryOps.CMPNE: return ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin), not (s0_vmin == s0_vmax == s1_vmin == s1_vmax))
+      if self.dtype == dtypes.bool:
+        if self.op is BinaryOps.OR: return s0_vmin or s1_vmin, s0_vmax or s1_vmax
+        if self.op is BinaryOps.AND: return s0_vmin and s1_vmin, s0_vmax and s1_vmax
+    # float has NAN issue and we use explicit NAN in transcendental
+    if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
     if self.op is Ops.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op is Ops.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
-    if self.op is Ops.BIND: return self.src[0].vmin, self.src[0].vmax  # ignore the bound value
+    if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
     if self.op in {Ops.EXPAND, Ops.VECTORIZE}: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
-    if self.op in GroupOp.ALU and not dtypes.is_float(self.dtype):
-      s0,s1,s2 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(3)]
-      if self.op is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
-      if self.op is BinaryOps.MUL: return min(vals:=(s0.vmin*s1.vmin, s0.vmin*s1.vmax, s0.vmax*s1.vmin, s0.vmax*s1.vmax)), max(vals)
-      if self.op is BinaryOps.MOD and s1.vmin > 0: return 0, s1.vmax-1
-      if self.op is BinaryOps.IDIV and s1.op is Ops.CONST:
-        if s1.arg > 0: return s0.vmin//s1.arg, s0.vmax//s1.arg
-        if s1.arg < 0 and s0.vmin >= 0: return -(s0.vmax//-s1.arg), -(s0.vmin//-s1.arg)
-      if self.op is BinaryOps.MAX: return max(s0.vmin, s1.vmin), max(s0.vmax, s1.vmax)
-      if self.op is BinaryOps.CMPLT: return (s0.vmax<s1.vmin, s0.vmin<s1.vmax)
-      if self.op is BinaryOps.CMPNE:
-        always_ne = (s0.vmax < s1.vmin) or (s1.vmax < s0.vmin)
-        sometimes_ne = not (s0.vmin == s0.vmax == s1.vmin == s1.vmax)
-        return (always_ne, sometimes_ne)
-      # float has NAN issue and we use explicit NAN in transcendental
-      if self.op is TernaryOps.WHERE and dtypes.is_int(s1.dtype): return min(s1.vmin, s2.vmin), max(s1.vmax, s2.vmax)
-      if self.dtype == dtypes.bool:
-        if self.op is BinaryOps.OR: return s0.vmin or s1.vmin, s0.vmax or s1.vmax
-        if self.op is BinaryOps.AND: return s0.vmin and s1.vmin, s0.vmax and s1.vmax
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
   @functools.cached_property
