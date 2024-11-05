@@ -1634,7 +1634,7 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([(1,1,6,7), (6,1,3,3)],
                                lambda x,w:torch.nn.functional.conv2d(x,w,dilation=3),
                                lambda x,w: Tensor.conv2d(x,w,dilation=3), expected=(RuntimeError, AssertionError))
-    # regression test for ____
+    # regression test for https://github.com/tinygrad/tinygrad/pull/7549/
     self.helper_test_exception([(2,16,2,2), (32,16,3,3)], lambda x,w:torch.nn.functional.conv2d(x,w), lambda x,w: Tensor.conv2d(x,w),
                                expected=(RuntimeError, AssertionError))
 
