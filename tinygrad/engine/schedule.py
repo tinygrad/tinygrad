@@ -261,8 +261,9 @@ do_realize = PatternMatcher([
    if (r:=ctx.get(b:=x.src[0])) is not None and r.op is Ops.STORE and isinstance(b.dtype, ImageDType) else None),
   # realize before expand or unsafe pad ops
   (UPatLoadStore(UPat.var("base")).view(name="view"), realize_view),
-  (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.var("u"), UPat.any(UPatLoadStore(), UPatLoadStore().view(name="v"))), name="root"),
-   lambda ctx,root,u,v=None,**kwargs: root.replace(src=(u, realize(ctx,**kwargs) if v is None else realize(ctx,**kwargs).view(v.st))),)
+  # realize before COPY or BUFFER_VIEW
+  (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.var("u"), UPat.any(UPatLoadStore(), UPatLoadStore().view(name="view"))), name="root"),
+   lambda ctx,root,u,view=None,**kwargs: root.replace(src=(u, realize(ctx,**kwargs) if view is None else realize(ctx,**kwargs).view(view.st))),),
 ])
 break_sched = PatternMatcher([(UPatLoadStore(), lambda ctx,b,store,load: realize(ctx, b, load, store) if b in ctx else None),])
 
@@ -283,18 +284,16 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   store_groups = get_realizes(outs, children, allbufs, double_reduces, ctx)
   # split realizes into small graphs
   graph_rewrite(big_graph, break_sched, ctx.realizes)
-  assigned = {ubuf for b in ctx.assigns if (ubuf:=ctx.buf_uops.get(b)) is not None}
-  small_graphs: List[Tuple[UOp, ScheduleItemContext]] = []
-  metadata: List[Set[Metadata]] = []
-  for stores in store_groups:
-    sink = UOp.sink(*(ctx.realizes[u] for u in stores))
-    metadata.append({mx for x in sink.sparents if x.op in GroupOp.Buffer and len(x.src) > 2 and (mx:=ctx.ubuf_metadata.get(x.src[0]))})
-    small_graphs.append(full_ast_rewrite(sink, ctx.var_vals, assigned))
-
-  # do BFS
+  sinks = [UOp.sink(*(ctx.realizes[u] for u in stores)) for stores in store_groups]
+  # preschedule all realizes
   bufs = list(ctx.buf_uops)
-  prescheduled = [ScheduleItem(u, tuple(b for u in c.bufs if (b:=bufs[u.arg[0]]).size != 0),
-                               tuple(m), tuple(c.assign_preloads)) for (u,c),m in zip(small_graphs, metadata)]
+  prescheduled: List[ScheduleItem] = []
+  assigned = {ubuf for b in ctx.assigns if (ubuf:=ctx.buf_uops.get(b)) is not None}
+  for sink in sinks:
+    metadata = tuple({mx for x in sink.sparents if x.op in GroupOp.Buffer and len(x.src) > 2 and (mx:=ctx.ubuf_metadata.get(x.src[0]))})
+    ast, ast_ctx = full_ast_rewrite(sink, ctx.var_vals, assigned)
+    prescheduled.append(ScheduleItem(ast, tuple(b for u in ast_ctx.bufs if (b:=bufs[u.arg[0]]).size != 0), metadata, tuple(ast_ctx.assign_preloads)))
+  # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
   in_degree: DefaultDict[ScheduleItem, int] = defaultdict(int)
@@ -321,7 +320,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
   # confirm everything was scheduled correctly
-  if len(schedule) != (groups:=len(store_groups)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
+  if len(schedule) != (groups:=len(prescheduled)): raise RuntimeError(f"cycle detected in graph, grouped {groups} but only scheduled {len(schedule)}")
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, ctx.var_vals
 
