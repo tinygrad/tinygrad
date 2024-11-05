@@ -44,6 +44,7 @@ class ScheduleContext:
   var_vals: Dict[Variable, int] = field(default_factory=dict)      # this maps a BIND's DEFINE_VAR to its value
   realizes: Dict[UOp, UOp] = field(default_factory=dict)           # this maps a UOps.BUFFER changing in this schedule to its uop
   assigns: Set[Buffer] = field(default_factory=set)                # this holds all the UOps.BUFFERs we ASSIGN to in this schedule
+  lazybufs: Dict[Buffer, LazyBuffer] = field(default_factory=dict) # this is a lookup for the LazyBuffers we need to mark as realized
 
 def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
@@ -79,6 +80,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   if buf.forced_realize: ret = UOp(Ops.CONTIGUOUS, dtype, (ret,))
   cache[buf] = ret = UOp(Ops.LOAD, dtype, (ubuf, buf.st.to_uop(), UOp.store(ubuf, ShapeTracker.from_shape(buf.shape).to_uop(), ret)))
   if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
+  ctx.lazybufs[b] = buf
   return ret
 
 # **** AST graph rewrite
@@ -270,7 +272,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   big_graph = UOp.sink(*(to_uop(x, ctx, cache) for x in outs))
   # get realizes
   graph_rewrite(big_graph, do_realize, ctx.realizes)
-  store_groups, lazybufs_to_realize = get_realizes(outs, ctx)
+  store_groups = get_realizes(outs, ctx)
   # split realizes into small graphs
   graph_rewrite(big_graph, break_sched, ctx.realizes)
   assigned = {ubuf for b in ctx.assigns if (ubuf:=ctx.buf_uops.get(b)) is not None}
@@ -303,7 +305,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   schedule: List[ScheduleItem] = []
   while queue:
     schedule.append(si:=queue.popleft())
-    for b in si.outputs: del lazybufs_to_realize[b].srcs  # can only schedule once
+    for b in si.outputs: del ctx.lazybufs[b].srcs  # can only schedule once
     if (m:=BUF_LIMIT.get(device:=si.outputs[0].device)) and len(si.bufs) >= m:
       if DEBUG >= 3: print(si)
       raise RuntimeError(f"Kernel for {si.metadata} exceeded the {m} buffer count limit for {device} with {len(si.bufs)} buffers.")

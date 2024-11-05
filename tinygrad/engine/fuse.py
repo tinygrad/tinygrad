@@ -5,7 +5,6 @@ from tinygrad.ops import GroupOp, MetaOps, ReduceOps, UOp, UnaryOps
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.engine.lazy import LazyBuffer
-from tinygrad.device import Buffer
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
@@ -54,7 +53,7 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def get_realizes(outs:List[LazyBuffer], ctx) -> Tuple[List[List[UOp]], Dict[Buffer, LazyBuffer]]:
+def get_realizes(outs:List[LazyBuffer], ctx) -> List[List[UOp]]:
   """search the graph for all the LazyBuffers that need to realize"""
   realizes: Dict[LazyBuffer, None] = {}
   allbufs: Dict[LazyBuffer, None] = {}
@@ -121,13 +120,10 @@ def get_realizes(outs:List[LazyBuffer], ctx) -> Tuple[List[List[UOp]], Dict[Buff
     for tr in group:
       del realizes[tr]
       if (ubuf:=ctx.buf_uops[tr.buffer]) in ctx.realizes: del ctx.realizes[ubuf]
+
   output_groups: DefaultDict[LazyBuffer, List[UOp]] = defaultdict(list)
-  lazybufs_to_realize: Dict[Buffer, LazyBuffer] = {}
   for buf in realizes:
     if buf.realized is None:
-      if (dup:=lazybufs_to_realize.get(buf.buffer)) is not None:
-        raise RuntimeError(f"can't double realize in one schedule, Buffer is realizing both {dup} and {buf}")
-      lazybufs_to_realize[buf.buffer] = buf
       output_groups[reduce_for_op.get(buf, buf)].append(ubuf:=ctx.buf_uops[buf.buffer])
       ctx.realizes[ubuf] = ubuf
-  return list(output_groups.values()), lazybufs_to_realize
+  return list(output_groups.values())
