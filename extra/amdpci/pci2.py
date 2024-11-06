@@ -1,5 +1,5 @@
 import os, ctypes
-from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_ip_offset, amdgpu_mp_13_0_0_offset
+from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_ip_offset, amdgpu_mp_13_0_0, amdgpu_nbio_4_3_0
 from tinygrad.helpers import to_mv, mv_address
 
 def check(x): assert x == 0
@@ -14,16 +14,16 @@ while True:
   pcidev = libpciaccess.pci_device_next(pci_iter)
   if not pcidev: break
   dev_fmt = "{:04x}:{:02x}:{:02x}.{:d}".format(pcidev.contents.domain_16, pcidev.contents.bus, pcidev.contents.dev, pcidev.contents.func)
-  print(dev_fmt)
+  print(dev_fmt, hex(pcidev.contents.vendor_id), hex(pcidev.contents.device_id))
   
   if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c:
     dev_fmt = "{:04x}:{:02x}:{:02x}.{:d}".format(pcidev.contents.domain_16, pcidev.contents.bus, pcidev.contents.dev, pcidev.contents.func)
-    # if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
+    if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:86:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:c6:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:44:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
-    if dev_fmt == "0000:c3:00.0": continue # skip it, use for kernel hacking.
+    # if dev_fmt == "0000:c3:00.0": continue # skip it, use for kernel hacking.
     # print(dev_fmt)
     # exit(0)
     break
@@ -35,6 +35,8 @@ libpciaccess.pci_device_probe(ctypes.byref(pcidev))
 
 class AMDDev:
   def __init__(self, pcidev):
+    self.usec_timeout = 10000000
+    
     self.pcidev = pcidev
     libpciaccess.pci_device_enable(ctypes.byref(pcidev))
 
@@ -57,53 +59,67 @@ class AMDDev:
     self.pci_mmio = to_mv(pcimem, pci_region_size).cast('I')
 
     from extra.amdpci.vmm import VMM
-    self.vmm = VMM(self)
+    self.vmm = VMM(self) # gmc ip like
 
-    regMMVM_CONTEXT0_CNTL = 0x0740
-    regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32 = 0x07ab
-    regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32 = 0x07ac
-    regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32 = 0x07cb
-    regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32 = 0x07cc
-    regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32 = 0x07eb
-    regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32 = 0x07ec
-    # print("ccc", hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0)))
-    # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0)))
-    # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, 0)))
-
-    # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0)))
-    # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32, 0)))
-
-    # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0)))
-    # print(hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32, 0)))
-
-    # just reset
-    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0, 0)
-    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, 0, 0)
-
-    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, (1 << 30) - 1)
-    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32, 0, 0)
-
-    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0, self.vmm.pdb0_base & 0xffffffff)
-    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32, 0, (self.vmm.pdb0_base >> 32) & 0xffffffff)
-
-    v = self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0)
-    # print(v, "CC")
-    self.wreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0, 0x1fffe05)
-    # hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0))
-    # print("ccc", hex(self.rreg_ip("MMHUB", 0, regMMVM_CONTEXT0_CNTL, 0)))
+    from extra.amdpci.smu import SMU_IP
+    self.smu = SMU_IP(self) # soc21
 
     from extra.amdpci.psp import PSP_IP
     self.psp = PSP_IP(self)
 
+    # Issue a gpu reset...
+    if self.psp.is_sos_alive():
+      print("sOS is alive, issue mode1 reset")
+      self.smu.mode1_reset()
+
+    from extra.amdpci.soc21 import SOC21_IP
+    self.soc21 = SOC21_IP(self) # soc21
+    self.soc21.init()
+
+    self.vmm.init()
+
+    from extra.amdpci.ih import IH_IP
+    self.ih = IH_IP(self)
+    self.ih.init()
+
+    from extra.amdpci.psp import PSP_IP
+    self.psp = PSP_IP(self)
+    self.psp.init()
+
+    exit(1)
+
     from extra.amdpci.gfx import GFX_IP
     self.gfx = GFX_IP(self)
 
-  def rreg(self, reg): return self.pci_mmio[reg]
-  def wreg(self, reg, val): self.pci_mmio[reg] = val
+  def pcie_index_offset(self): return self.reg_off("NBIO", 0, amdgpu_nbio_4_3_0.regBIF_BX_PF0_RSMU_INDEX, amdgpu_nbio_4_3_0.regBIF_BX_PF0_RSMU_INDEX_BASE_IDX)
+  def pcie_data_offset(self): return self.reg_off("NBIO", 0, amdgpu_nbio_4_3_0.regBIF_BX_PF0_RSMU_DATA, amdgpu_nbio_4_3_0.regBIF_BX_PF0_RSMU_DATA_BASE_IDX)
 
-  def reg_off(self, ip, inst, seg):
+  def indirect_rreg(self, reg):
+    self.wreg(self.pcie_index_offset(), reg)
+    self.rreg(self.pcie_index_offset())
+    return self.rreg(self.pcie_data_offset())
+
+  def indirect_wreg(self, reg, val):
+    self.wreg(self.pcie_index_offset(), reg)
+    self.rreg(self.pcie_index_offset())
+    self.wreg(self.pcie_data_offset(), val)
+    self.rreg(self.pcie_data_offset())
+
+  def rreg(self, reg):
+    if reg > len(self.pci_mmio): return self.indirect_rreg(reg)
+    return self.pci_mmio[reg]
+
+  def wreg(self, reg, val):
+    if reg > len(self.pci_mmio): self.indirect_wreg(reg, val)
+    else: self.pci_mmio[reg] = val
+
+  def ip_base(self, ip, inst, seg):
     off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
     return off
+
+  def reg_off(self, ip, inst, reg, seg):
+    off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
+    return off + reg
 
   def rreg_ip(self, ip, inst, reg, seg, offset=0):
     off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
@@ -113,10 +129,10 @@ class AMDDev:
     off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
     self.wreg(off + reg + offset, val)
 
-  def setup(self):
-    from extra.amdpci.rlc import replay_rlc
+  # def setup(self):
+  #   from extra.amdpci.rlc import replay_rlc
 
-    self.hw_init()
+  #   self.hw_init()
 
   def hw_init(self): # gfx_v11_0_hw_init
     replay_rlc(self) # TODO: Split into functions, but this is the same regs setup...

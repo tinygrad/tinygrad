@@ -1,5 +1,5 @@
 import os, ctypes
-from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_ip_offset, amdgpu_mp_13_0_0_offset
+from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_ip_offset, amdgpu_mp_13_0_0
 from tinygrad.helpers import to_mv, mv_address
 
 def check(x): assert x == 0

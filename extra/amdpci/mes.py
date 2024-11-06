@@ -175,11 +175,8 @@ class MES_IP:
     self.adev.soc21_grbm_select(0, 0, 0, 0)
 
   def wdoorbell64(self, index, val):
-    # print("calling", index, val)
-    # for i in range(len(self.adev.doorbell)):
-    #   self.adev.doorbell[index] = val
-    self.adev.doorbell64[index] = val
-    # self.adev.doorbell64[index//2] = val
+    print("ringing", index, val)
+    self.adev.doorbell64[index//2] = val # this should be correct
 
   def submit_pkt_and_poll_completion(self, pkt):
     ndw = ctypes.sizeof(pkt) // 4
@@ -221,9 +218,9 @@ class MES_IP:
     mes_set_hw_res_pkt.query_status_fence_gpu_mc_ptr = self.query_status_fence_gpu_mc_ptr
 
     for i in range(5):
-      mes_set_hw_res_pkt.gc_base[i] = self.adev.reg_off("GC", 0, i)
-      mes_set_hw_res_pkt.mmhub_base[i] = self.adev.reg_off("MMHUB", 0, i)
-      mes_set_hw_res_pkt.osssys_base[i] = self.adev.reg_off("OSSSYS", 0, i)
+      mes_set_hw_res_pkt.gc_base[i] = self.adev.ip_base("GC", 0, i)
+      mes_set_hw_res_pkt.mmhub_base[i] = self.adev.ip_base("MMHUB", 0, i)
+      mes_set_hw_res_pkt.osssys_base[i] = self.adev.ip_base("OSSSYS", 0, i)
 
     mes_set_hw_res_pkt.disable_reset = 1
     mes_set_hw_res_pkt.disable_mes_log = 1
@@ -233,12 +230,10 @@ class MES_IP:
     mes_set_hw_res_pkt.oversubscription_timer = 50
 
     self.submit_pkt_and_poll_completion(mes_set_hw_res_pkt)
-
   
   def mes_init(self):
     mes_v11_0_queue_init
 
-  
   def setup(self):
     self.init_mes_regs(self.mes_queue)
 

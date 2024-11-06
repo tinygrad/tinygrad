@@ -15,8 +15,8 @@ class AMDRing:
     self.eop_gpu_addr = self.adev.vmm.alloc_vram(0x1000, "eop")
     self.mqd_gpu_addr = self.adev.vmm.alloc_vram(len(self.mqd_mv), "mqd")
 
-    self.rptr_gpu_addr = self.adev.vmm.alloc_vram(0x1000, "w/rptr")
-    self.wptr_gpu_addr = self.rptr_gpu_addr + 8
+    self.rptr_gpu_addr = self.adev.vmm.alloc_vram(0x1000, "rptr")
+    self.wptr_gpu_addr = self.adev.vmm.alloc_vram(0x1000, "wptr")
 
     self.rptr = self.adev.vmm.vram_to_cpu_mv(self.rptr_gpu_addr, 8).cast('Q')
     self.wptr = self.adev.vmm.vram_to_cpu_mv(self.wptr_gpu_addr, 8).cast('Q')
@@ -80,5 +80,5 @@ class AMDRing:
 
   def write(self, value):
     self.adev.vmm.vram_to_cpu_mv(self.ring_gpu_addr, 0x1000).cast('I')[self.next_ptr] = value
-    self.next_ptr += 4
+    self.next_ptr += 1
     self.wptr[0] = self.next_ptr
