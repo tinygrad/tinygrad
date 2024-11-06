@@ -13,7 +13,7 @@ from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, Ops, graph_rewrite, track_rewrites
-from tinygrad.helpers import CI, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, view_right, st_fixup, view_left
 from tinygrad.engine.realize import CompiledRunner, run_schedule
@@ -28,11 +28,15 @@ def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_pr
   else: outs = [t]
   if to_prerealize:
     for pre in to_prerealize: pre.schedule()
-  with Context(TRACK_MATCH_STATS=2):
-    sched = create_schedule(outs)
+  sched = create_schedule(outs)
   if filter_sink: sched = [s for s in sched if s.ast.op is Ops.SINK]
-  if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
-  if len(sched) != allowed: raise KernelCountException(f"{len(sched)=} != {allowed}")
+  if len(sched) != allowed:
+    print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
+    if DEBUG >= 3:
+      for i,s in enumerate(sched):
+        print("kernel", i+1)
+        print(s.ast)
+    raise KernelCountException(f"{len(sched)=} != {allowed}")
   # test the (sink) ops linearize
   for s in sched:
     if s.ast.op is not Ops.SINK: continue
