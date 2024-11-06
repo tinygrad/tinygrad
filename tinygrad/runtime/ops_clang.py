@@ -5,14 +5,15 @@ from tinygrad.helpers import cpu_time_execution, DEBUG, cpu_objdump
 from tinygrad.renderer.cstyle import ClangRenderer
 
 class ClangCompiler(Compiler):
-  def __init__(self, cachekey="compile_clang", args:Optional[List[str]]=None):
+  def __init__(self, cachekey="compile_clang", args:Optional[List[str]]=None, lang:Optional[List[str]]=None):
     self.args = ['-march=native'] if args is None else args
+    self.lang_args = ['c', '-ffreestanding'] if lang is None else lang
     super().__init__(None)
 
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output(['clang', '-shared', *self.args, '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
+      subprocess.check_output(['clang', '-shared', *self.args, '-Wall', '-Werror', '-x', *self.lang_args, '-fPIC', '-nostdlib',
                                '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
       return pathlib.Path(output_file.name).read_bytes()
 
