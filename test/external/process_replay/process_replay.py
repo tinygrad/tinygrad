@@ -78,7 +78,7 @@ def diff(offset:int, name:str, fxn:Callable) -> Union[Tuple[int, int], bool]:
 
 # *** generic runner for executing fxn across all rows of a table in parallel
 
-def _pmap(name:str, fxn:Callable, maxtasksperchild:int=16) -> None:
+def _pmap(name:str, run_page:Callable, maxtasksperchild:int=16, **kwargs) -> None:
   conn = db_connection()
   cur = conn.cursor()
   try: row_count = cur.execute(f"select count(*) from '{name}_{TABLE_NAME}'").fetchone()[0]
@@ -89,7 +89,7 @@ def _pmap(name:str, fxn:Callable, maxtasksperchild:int=16) -> None:
   cur.close()
   with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count(), maxtasksperchild=maxtasksperchild) as pool:
     inputs = list(range(0, row_count, PAGE_SIZE))
-    ret: List[Union[bool, Tuple[int, int]]] = list(tqdm(pool.imap_unordered(functools.partial(diff, name=name, fxn=fxn), inputs), total=len(inputs)))
+    ret: List[Union[bool, Tuple[int, int]]] = list(tqdm(pool.imap_unordered(functools.partial(run_page, name=name, **kwargs), inputs), total=len(inputs)))
     pool.close()
     pool.join()
     pool.terminate()
@@ -109,7 +109,7 @@ if __name__ == "__main__":
 
   for name,fxn in [("schedule", recreate_sched), ("kernel", recreate_kernel)]:
     logging.info(f"***** {name} diff")
-    try: _pmap(name, fxn)
+    try: _pmap(name, diff, fxn=fxn)
     except Exception as e:
       if ASSERT_DIFF: raise e
       logging.error(f"{name} diff err {e}")
