@@ -99,7 +99,7 @@ class TestLinearizerDumb(unittest.TestCase):
     self.assertLessEqual(len(conditions), 9)
 
   # this was a bug in embedding, someday we should fold this anyway
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "half not supported on this device")
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), f"no half on {Device.DEFAULT}")
   def test_llama_embedding(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
