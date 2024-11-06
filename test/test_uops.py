@@ -351,6 +351,21 @@ class TestAssembly(unittest.TestCase):
     self.assertEqual(uops[-1].op, BinaryOps.SHR)
     self.assertEqual(uops[-2].op, BinaryOps.IDIV)
 
+@unittest.skipUnless(Device.DEFAULT == "CLANG", "Only required for clang")
+class TestD2HCastRewrite(unittest.TestCase):
+  # X86 doesn't have one instruction double to half cast so llvm legalizes it as a call into compiler-rt routine __truncdfhf2
+  # that later gets statically linked with output object file
+  def test_d2h_cast_through_float(self):
+    src = UOp(Ops.DEFINE_GLOBAL, dtypes.double.ptr(), (), 1)
+    idx = UOp(Ops.CONST, dtypes.int, (), 0)
+    load = UOp(Ops.LOAD, dtypes.double, (src.index(idx),))
+    cast = UOp(Ops.CAST, dtypes.half, (load,))
+    uops = to_uops_list([cast], opts=Device[Device.DEFAULT].renderer)
+    Device[Device.DEFAULT].renderer.render("test", uops)
+    self.assertEqual((uops[-3].op, uops[-3].dtype), (Ops.LOAD, dtypes.float64))
+    self.assertEqual((uops[-2].op, uops[-2].dtype), (Ops.CAST, dtypes.float32))
+    self.assertEqual((uops[-1].op, uops[-1].dtype), (Ops.CAST, dtypes.float16))
+
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
   def test_compare_alu_same_src_different_arg(self):
