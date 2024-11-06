@@ -259,20 +259,39 @@ generate_amdgpu_2() {
   #   -o $BASE/amdgpu_2.py
 
   # clang2py -k cdefstum \
-  #   extra/amdpci/navi14_ip_offset.h \
+  #   extra/amdpci/headers/navi10_ip_offset.h \
   #   -o $BASE/amdgpu_ip_offset.py
 
   # clang2py -k cdefstum \
   #   extra/amdpci/mp_13_0_0_offset.h \
-  #   -o $BASE/amdgpu_mp_13_0_0_offset.py
+  #   -o $BASE/amdgpu_mp_13_0_0.py
 
   # clang2py -k cdefstum \
   #   extra/amdpci/psp_gfx_if.h \
   #   -o $BASE/amdgpu_psp_gfx_if.py
 
+  # clang2py -k cdefstum \
+  #   extra/amdpci/gc_11_0_0_offset.h \
+  #   -o $BASE/amdgpu_gc_11_0_0.py
+
+  # clang2py -k cdefstum \
+  #   extra/amdpci/headers/mmhub_3_0_0_offset.h \
+  #   extra/amdpci/headers/mmhub_3_0_0_sh_mask.h \
+  #   -o $BASE/amdgpu_mmhub_3_0_0.py
+
+  # clang2py -k cdefstum \
+  #   extra/amdpci/headers/nbio_4_3_0_offset.h \
+  #   extra/amdpci/headers/nbio_4_3_0_sh_mask.h \
+  #   -o $BASE/amdgpu_nbio_4_3_0.py
+
   clang2py -k cdefstum \
-    extra/amdpci/gc_11_0_0_offset.h \
-    -o $BASE/amdgpu_gc_11_0_0.py
+    extra/amdpci/headers/osssys_6_0_0_offset.h \
+    extra/amdpci/headers/osssys_6_0_0_sh_mask.h \
+    -o $BASE/amdgpu_osssys_6_0_0.py
+
+  # clang2py -k cdefstum \
+  #   extra/amdpci/headers/smu_v13_0_0_ppsmc.h \
+  #   -o $BASE/amdgpu_smu_v13_0_0.py
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
