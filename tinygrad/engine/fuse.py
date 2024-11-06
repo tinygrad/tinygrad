@@ -38,12 +38,12 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, LazyBuff
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
 def get_realizes(outs:List[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbufs:Dict[LazyBuffer, None],
-                 double_reduces:Dict[LazyBuffer, None], ctx) -> List[List[UOp]]:
+                 double_reduces:Dict[LazyBuffer, None], ubuf_realizes:Dict[UOp, UOp], ctx) -> List[List[UOp]]:
   """search the graph for all the LazyBuffers that need to realize"""
   # get all the realizes from big graph
   realizes: Dict[LazyBuffer, None] = {}
   for r in allbufs:
-    if ctx.buf_uops[r.buffer] in ctx.realizes: realizes[r] = None
+    if ctx.buf_uops[r.buffer] in ubuf_realizes: realizes[r] = None
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
   reduce_of_const: List[LazyBuffer] = []
@@ -92,7 +92,7 @@ def get_realizes(outs:List[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[La
       top_reduce = reduceop.base.srcs[0].base
       if len(children[top_reduce]) == 1:
         del realizes[top_reduce]
-        if (ubuf:=ctx.buf_uops[top_reduce.buffer]) in ctx.realizes: del ctx.realizes[ubuf]
+        if (ubuf:=ctx.buf_uops[top_reduce.buffer]) in ubuf_realizes: del ubuf_realizes[ubuf]
 
   for r in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is r}
@@ -101,10 +101,10 @@ def get_realizes(outs:List[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[La
     if len(kernel_children) == 0: continue
     for tr in group:
       del realizes[tr]
-      if (ubuf:=ctx.buf_uops[tr.buffer]) in ctx.realizes: del ctx.realizes[ubuf]
+      if (ubuf:=ctx.buf_uops[tr.buffer]) in ubuf_realizes: del ubuf_realizes[ubuf]
 
   output_groups: DefaultDict[LazyBuffer, List[UOp]] = defaultdict(list)
   for buf in realizes:
     output_groups[reduce_for_op.get(buf, buf)].append(ubuf:=ctx.buf_uops[buf.buffer])
-    ctx.realizes[ubuf] = ubuf
+    ubuf_realizes[ubuf] = ubuf
   return list(output_groups.values())
