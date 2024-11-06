@@ -1,13 +1,14 @@
 from __future__ import annotations
 from typing import Tuple, List, Any
-import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib, decimal
+import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib, decimal, sys
+assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, HCQArgsState, HCQSignal, HCQProgram
 from tinygrad.device import BufferOptions
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, mv_address
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
-from tinygrad.runtime.support.compiler_hip import AMDCompiler, disasm
+from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 if getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
@@ -268,9 +269,6 @@ class AMDProgram(HCQProgram):
   def __init__(self, device:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.device, self.name, self.lib = device, name, lib
-
-    if DEBUG >= 6: print(disasm(lib))
-
     image, sections, _ = elf_loader(self.lib)
     self.lib_gpu = self.device.allocator.alloc(round_up(image.nbytes, 0x1000), BufferOptions(cpu_access=True, nolru=True))
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
