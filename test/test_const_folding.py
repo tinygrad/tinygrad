@@ -1,6 +1,6 @@
 import unittest, math
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.ops import UOps
+from tinygrad.ops import Ops
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import CI
 import numpy as np
@@ -9,7 +9,7 @@ from test.helpers import is_dtype_supported
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
   schedule = create_schedule(t.lazydata.lbs)
-  asts = [s for s in schedule if s.ast.op is UOps.SINK]
+  asts = [s for s in schedule if s.ast.op is Ops.SINK]
   assert len(asts) == desired_count
 
 class TestUnaryOpsConstFolding(unittest.TestCase):
@@ -130,13 +130,16 @@ class TestMovedConstFolding(unittest.TestCase):
 
   def test_cast_padded(self):
     # NOTE: this is folded due to CAST_BEFORE_VIEW
-    _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
-    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
-    _check_ast_count(0, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
-    np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
+    if is_dtype_supported(dtypes.int16):
+      _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
+      np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
+    if is_dtype_supported(dtypes.uint16):
+      _check_ast_count(0, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
+      np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
     # not folded
-    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
-    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
+    if is_dtype_supported(dtypes.int64):
+      _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
+      np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
 
 class TestReduceOpsConstFolding(unittest.TestCase):
   def test_const_sum(self):

@@ -8,9 +8,11 @@ from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
-from tinygrad.ops import UnaryOps, UOps
+from tinygrad.ops import GroupOp
 from tinygrad.tensor import _to_np_dtype
 from test.helpers import is_dtype_supported
+import pytest
+pytestmark = pytest.mark.filterwarnings("ignore")
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -46,6 +48,7 @@ class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
   float32 = strat.floats(width=32, allow_subnormal=False)
   float16 = strat.floats(width=16, allow_subnormal=False)
+  bfloat16 = strat.floats(width=16, allow_subnormal=False)
   uint8 = strat.integers(0, 255)
   uint16 = strat.integers(0, 65535)
   uint32 = strat.integers(0, 2**32-1)
@@ -60,7 +63,8 @@ def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)), np.array([b]).astype(_to_np_dtype(dtype)))
-  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
+  if dtype is dtypes.bfloat16: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
+  elif dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
 def universal_test_unary(a, dtype, op):
@@ -71,11 +75,11 @@ def universal_test_unary(a, dtype, op):
   run_schedule(sched)
   tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)))
-  if dtype in dtypes_float:
+  if dtype in (*dtypes_float, dtypes.bfloat16):
     np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
-    op = [x for x in ast.parents if x.op is UOps.ALU and x.arg in UnaryOps][0]
+    op = [x for x in ast.parents if x.op in GroupOp.Unary][0]
     assert op.dtype == dtype
 
 def universal_test_cast(a, in_dtype, dtype):
@@ -104,12 +108,21 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.float16, ht.float16, strat.sampled_from(binary_operations))
   def test_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16, Device.DEFAULT), f"no bfloat16 on {Device.DEFAULT}")
+  @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
+  def test_bfloat16(self, a, b, op): universal_test(a, b, dtypes.bfloat16, op)
+
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
   @given(ht.float16, strat.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
+
+  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16, Device.DEFAULT), f"no bfloat16 on {Device.DEFAULT}")
+  @given(ht.bfloat16, strat.sampled_from(unary_operations))
+  @unittest.skipIf(Device.DEFAULT == "AMD", "broken on AMD")
+  def test_bfloat16_unary(self, a, op): universal_test_unary(a, dtypes.bfloat16, op)
 
   @given(ht.uint8, ht.uint8, strat.sampled_from(integer_binary_operations))
   def test_uint8(self, a, b, op): universal_test(a, b, dtypes.uint8, op)
@@ -159,44 +172,6 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skip("broken. TODO: fix it")
   @given(ht.int32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
   def test_int32_cast(self, a, dtype): universal_test_cast(a, dtypes.int32, dtype)
-
-class TestFromFuzzer(unittest.TestCase):
-  @given(strat.sampled_from(dtypes_float))
-  def test_sin(self, dtype):
-    if not is_dtype_supported(dtype): return
-    if dtype == dtypes.float64:
-      # crashes in CI CUDA
-      if getenv("MOCKGPU") and Device.DEFAULT == "NV": return
-    def _test_value(n: float, unit: float=1.0):
-      next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
-      ulp = next_float - 1.0
-      ulp = unit * ulp
-      np.testing.assert_allclose(Tensor([n], dtype=dtype).sin().numpy(), np.sin(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
-    _test_value(-35.0)
-    _test_value(-25.0)
-    _test_value(25.0)
-    _test_value(30.0) # 30.0 == switch_over
-    _test_value(35.0)
-    _test_value(0.0)
-    _test_value(np.pi / 2)
-     # worst case of ulp 1.5
-    _test_value(np.pi * 2, unit=1.5)
-  @given(strat.sampled_from(dtypes_float))
-  def test_log2(self, dtype):
-    if not is_dtype_supported(dtype): return
-    if dtype == dtypes.float64:
-      # crashes in CI CUDA
-      if getenv("MOCKGPU") and Device.DEFAULT == "NV": return
-    def _test_value(n: float, unit: float=1.0):
-      next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
-      ulp = next_float - 1.0
-      ulp = unit * ulp
-      np.testing.assert_allclose(Tensor([n], dtype=dtype).log2().numpy(), np.log2(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
-    fmin = np.finfo(_to_np_dtype(dtype)).tiny
-    for scale in [1.0, 1e10, 1e20, 1e30]:
-      _test_value(fmin * scale)
-      _test_value(-fmin * scale)
-    _test_value(0)
 
 if __name__ == '__main__':
   unittest.main()

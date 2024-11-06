@@ -208,7 +208,7 @@ class TestSymbolicExpand(unittest.TestCase):
       vi = Variable("i", 1, 5).bind(i)
       a = Tensor.rand(3, i).reshape(3, vi)
       a = a + 1
-      assert a.shape == (3, vi)
+      self.assertTupleEqual(a.shape, (3, vi))
 
 class TestSymbolicShrink(unittest.TestCase):
   def test_shrink_symbols(self):
