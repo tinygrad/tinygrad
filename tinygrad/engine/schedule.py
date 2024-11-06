@@ -42,7 +42,6 @@ class ScheduleContext:
   buf_uops: Dict[Buffer, UOp] = field(default_factory=dict)        # this maps Buffers to BUFFER uops
   ubuf_metadata: Dict[UOp, Metadata] = field(default_factory=dict) # this maps BUFFER uops to Metadata
   var_vals: Dict[Variable, int] = field(default_factory=dict)      # this maps a BIND's DEFINE_VAR to its value
-  realizes: Dict[UOp, UOp] = field(default_factory=dict)           # this maps a UOps.BUFFER changing in this schedule to its uop
   assigns: Set[Buffer] = field(default_factory=set)                # this holds all the UOps.BUFFERs we ASSIGN to in this schedule
   lazybufs: Dict[Buffer, LazyBuffer] = field(default_factory=dict) # this is a lookup for the LazyBuffers we need to mark as realized
 
@@ -280,11 +279,12 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   double_reduces: Dict[LazyBuffer, None] = {}
   big_graph = UOp.sink(*(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in outs))
   # get realizes
-  graph_rewrite(big_graph, do_realize, ctx.realizes)
-  store_groups = get_realizes(outs, children, allbufs, double_reduces, ctx)
+  realizes: Dict[UOp, UOp] = {}
+  graph_rewrite(big_graph, do_realize, realizes)
+  store_groups = get_realizes(outs, children, allbufs, double_reduces, realizes, ctx)
   # split realizes into small graphs
-  graph_rewrite(big_graph, break_sched, ctx.realizes)
-  sinks = [UOp.sink(*(ctx.realizes[u] for u in stores)) for stores in store_groups]
+  graph_rewrite(big_graph, break_sched, realizes)
+  sinks = [UOp.sink(*(realizes[u] for u in stores)) for stores in store_groups]
   # preschedule all realizes
   bufs = list(ctx.buf_uops)
   prescheduled: List[ScheduleItem] = []
