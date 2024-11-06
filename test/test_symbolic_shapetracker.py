@@ -28,7 +28,6 @@ class TestSymbolic(unittest.TestCase):
     st = ShapeTracker(views=(View(shape=(3, (Variable('i', 1, 10)+Variable('j', 1, 10))), strides=(Variable('i', 1, 10), 1), offset=0, mask=((0, 3), (0, Variable('i', 1, 10))), contiguous=False),))   # noqa: E501
     self.assertEqual(st.real_strides(), (Variable('i', 1, 10), None))
 
-  @unittest.expectedFailure # passes in 0.9.2
   def test_merge_view_recursion_err(self):
     vm2 = View(shape=(Variable('j', 1, 10),), strides=(0,), offset=0, mask=None, contiguous=False)
     vm1 = View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True)
