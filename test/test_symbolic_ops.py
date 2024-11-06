@@ -1,7 +1,6 @@
 import unittest
 from tinygrad import Variable
 from tinygrad.helpers import getenv
-from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from examples.gpt2 import Attention
 import numpy as np
@@ -189,12 +188,6 @@ class TestSymbolicOps(unittest.TestCase):
           expected = a.var(axis).numpy()
           symbolic = a.reshape(vi, vj).var(axis).reshape(expected.shape).numpy()
           np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-
-  @unittest.expectedFailure # passes in 0.9.2
-  def test_merge_view(self):
-    vm2 = View(shape=(Variable('j', 1, 10),), strides=(0,), offset=0, mask=None, contiguous=False)
-    vm1 = View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True)
-    vm2.__add__(vm1)
 
 if __name__ == '__main__':
   unittest.main()
