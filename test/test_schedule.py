@@ -30,18 +30,19 @@ def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_pr
     for pre in to_prerealize: pre.schedule()
   sched = create_schedule(outs)
   if filter_sink: sched = [s for s in sched if s.ast.op is Ops.SINK]
-  if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
-  if len(sched) != allowed or DEBUG >= 3:
-    for i, s in enumerate(sched):
-      print("kernel", i+1)
-      print(s.ast)
-  if len(sched) != allowed: raise KernelCountException(f"{len(sched)=} != {allowed}")
+  if len(sched) != allowed:
+    print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
+    if DEBUG >= 3:
+      for i,s in enumerate(sched):
+        print("kernel", i+1)
+        print(s.ast)
+    raise KernelCountException(f"{len(sched)=} != {allowed}")
   # test the (sink) ops linearize
   for s in sched:
     if s.ast.op is not Ops.SINK: continue
     l = Kernel(s.ast)
     l.hand_coded_optimizations()
-    l.linearize()
+    l.to_program()
   return sched
 
 def _realize_weights(m):
