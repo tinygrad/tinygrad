@@ -12,7 +12,7 @@ from tinygrad.engine.schedule import create_schedule, to_si
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
 

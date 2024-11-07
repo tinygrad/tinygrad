@@ -9,7 +9,7 @@ from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner
 from tinygrad.multi import all_reduce, MultiLazyBuffer
 import numpy as np
 from hypothesis import given, strategies as strat, settings
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")

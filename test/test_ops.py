@@ -5,7 +5,7 @@ import torch
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 if CI:
   import warnings
