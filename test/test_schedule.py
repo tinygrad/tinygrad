@@ -739,14 +739,17 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3))
     np.testing.assert_equal(out.numpy(), x.numpy().argmax(axis=-1))
 
-  # multireduce spec
   def test_scaled_dot_product_attention_multireduce_fusion(self):
     Tensor.manual_seed(0)
     q = Tensor.randn(32,8,16,64).realize()
     k = Tensor.randn(32,8,16,64).realize()
     v = Tensor.randn(32,8,16,64).realize()
     out = Tensor.scaled_dot_product_attention(q,k,v)
-    check_schedule(out, 5) # correctness checked in test_ops
+    run_schedule(check_schedule(out, 5))
+    if getenv("CHECK", 1):
+      import torch
+      compare = torch.nn.functional.scaled_dot_product_attention(torch.tensor(q.numpy()),torch.tensor(k.numpy()),torch.tensor(v.numpy()))
+      np.testing.assert_allclose(out.numpy(), compare.numpy())
 
   # multireduce spec
   def test_ugly_reduceop_pairing(self):
