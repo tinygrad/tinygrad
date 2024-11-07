@@ -32,12 +32,12 @@ class MES_IP:
     ]
     
     for pipe in range(2):
-      self.adev.soc21_grbm_select(3, pipe, 0, 0)
+      self.adev.gfx.soc21_grbm_select(3, pipe, 0, 0)
       
       ucode_addr = ucodes[pipe] >> 2
       self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_PRGRM_CNTR_START, amdgpu_gc_11_0_0.regCP_MES_PRGRM_CNTR_START_BASE_IDX, ucode_addr & 0xffffffff)
       self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_PRGRM_CNTR_START_HI, amdgpu_gc_11_0_0.regCP_MES_PRGRM_CNTR_START_HI_BASE_IDX, ucode_addr >> 32)
-    self.adev.soc21_grbm_select(0, 0, 0, 0)
+    self.adev.gfx.soc21_grbm_select(0, 0, 0, 0)
 
     # unhalt mes, and activate it
     val = (1 << amdgpu_gc_11_0_0.CP_MES_CNTL__MES_PIPE0_ACTIVE__SHIFT) | (1 << amdgpu_gc_11_0_0.CP_MES_CNTL__MES_PIPE1_ACTIVE__SHIFT)
@@ -80,11 +80,14 @@ class MES_IP:
 
     print("PFS", self.adev.vmm.collect_pfs())
 
+    print("reg before", hex(self.adev.rreg(0xc040)))
     self.wdoorbell64(self.mes_kiq.doorbell_index, self.mes_kiq.next_ptr)
 
     while True:
       if self.adev.rreg(0xc040) == 0xdeadc0de:
         break
+
+    print("WOO, reg changed", hex(self.adev.rreg(0xc040)))
     
     # self.mes_hw_init()
 
@@ -104,7 +107,7 @@ class MES_IP:
     ring.mqd.compute_static_thread_mgmt_se3 = 0xffffffff
     ring.mqd.compute_misc_reserved = 0x00000007
 
-    eop_base_addr = ring.eop_gpu_addr >> 8
+    eop_base_addr = ring.eop_gpu_vaddr >> 8
     ring.mqd.cp_hqd_eop_base_addr_lo = eop_base_addr & 0xffffffff
     ring.mqd.cp_hqd_eop_base_addr_hi = (eop_base_addr >> 32) & 0xffffffff
     ring.mqd.cp_hqd_eop_control = 0x8
@@ -114,20 +117,20 @@ class MES_IP:
     ring.mqd.cp_hqd_pq_wptr_lo = 0
     ring.mqd.cp_hqd_pq_wptr_hi = 0
 
-    ring.mqd.cp_mqd_base_addr_lo = ring.mqd_gpu_addr & 0xfffffffc
-    ring.mqd.cp_mqd_base_addr_hi = (ring.mqd_gpu_addr >> 32) & 0xffffffff
+    ring.mqd.cp_mqd_base_addr_lo = ring.mqd_gpu_vaddr & 0xfffffffc
+    ring.mqd.cp_mqd_base_addr_hi = (ring.mqd_gpu_vaddr >> 32) & 0xffffffff
 
     ring.mqd.cp_mqd_control = 0x100
 
-    hqd_gpu_addr = ring.ring_gpu_addr >> 8
+    hqd_gpu_addr = ring.ring_gpu_vaddr >> 8
     ring.mqd.cp_hqd_pq_base_lo = hqd_gpu_addr & 0xffffffff
     ring.mqd.cp_hqd_pq_base_hi = (hqd_gpu_addr >> 32) & 0xffffffff
 
-    ring.mqd.cp_hqd_pq_rptr_report_addr_lo = ring.rptr_gpu_addr & 0xfffffffc
-    ring.mqd.cp_hqd_pq_rptr_report_addr_hi = (ring.rptr_gpu_addr >> 32) & 0xffffffff
+    ring.mqd.cp_hqd_pq_rptr_report_addr_lo = ring.rptr_gpu_vaddr & 0xfffffffc
+    ring.mqd.cp_hqd_pq_rptr_report_addr_hi = (ring.rptr_gpu_vaddr >> 32) & 0xffffffff
 
-    ring.mqd.cp_hqd_pq_wptr_poll_addr_lo = ring.wptr_gpu_addr & 0xfffffffc
-    ring.mqd.cp_hqd_pq_wptr_poll_addr_hi = (ring.wptr_gpu_addr >> 32) & 0xffffffff
+    ring.mqd.cp_hqd_pq_wptr_poll_addr_lo = ring.wptr_gpu_vaddr & 0xfffffffc
+    ring.mqd.cp_hqd_pq_wptr_poll_addr_hi = (ring.wptr_gpu_vaddr >> 32) & 0xffffffff
 
     assert ring.ring_size in {0x100000, 0x2000}
     ring.mqd.cp_hqd_pq_control = 0xd8308011 if ring.ring_size == 0x100000 else 0xd830800a
@@ -141,10 +144,10 @@ class MES_IP:
     ring.mqd.cp_hqd_iq_timer = 0x0
     ring.mqd.cp_hqd_quantum = 0x0
 
-    self.adev.vmm.vram_to_cpu_mv(ring.mqd_gpu_addr, len(ring.mqd_mv))[:] = ring.mqd_mv
+    self.adev.vmm.paddr_to_cpu_mv(ring.mqd_gpu_paddr, len(ring.mqd_mv))[:] = ring.mqd_mv
 
   def init_mes_regs(self, ring): # init_mes_regs
-    self.adev.soc21_grbm_select(3, ring.pipe, 0, 0)
+    self.adev.gfx.soc21_grbm_select(3, ring.pipe, 0, 0)
 
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_VMID, amdgpu_gc_11_0_0.regCP_HQD_VMID_BASE_IDX, ring.mqd.cp_hqd_vmid)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_DOORBELL_CONTROL, amdgpu_gc_11_0_0.regCP_HQD_PQ_DOORBELL_CONTROL_BASE_IDX, 0x0)
@@ -172,7 +175,7 @@ class MES_IP:
 
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE_BASE_IDX, ring.mqd.cp_hqd_active)
 
-    self.adev.soc21_grbm_select(0, 0, 0, 0)
+    self.adev.gfx.soc21_grbm_select(0, 0, 0, 0)
 
   def wdoorbell64(self, index, val):
     print("ringing", index, val)
@@ -196,13 +199,15 @@ class MES_IP:
 
     # print(self.fence_view[0])
     # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE_BASE_IDX, 1)
-    self.adev.soc21_grbm_select(3, 0, 0, 0)
+    self.adev.gfx.soc21_grbm_select(3, 0, 0, 0)
     print("act?", self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE_BASE_IDX))
-    self.adev.soc21_grbm_select(0, 0, 0, 0)
+    self.adev.gfx.soc21_grbm_select(0, 0, 0, 0)
     while self.fence_view[0] == 0:
       # print(self.mes_queue.rptr[0], self.mes_queue.wptr[0])
       # print("PFS", self.adev.vmm.collect_pfs())
       pass
+
+    print("fence", self.fence_view[0])
   
   def set_hw_resources(self):
     mes_set_hw_res_pkt = mes_v11_api_def.union_MESAPI_SET_HW_RESOURCES()
@@ -237,7 +242,7 @@ class MES_IP:
   def setup(self):
     self.init_mes_regs(self.mes_queue)
 
-    self.adev.soc21_grbm_select(3, 0, 0, 0)
+    self.adev.gfx.soc21_grbm_select(3, 0, 0, 0)
     self.sched_version = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_GP3_LO, amdgpu_gc_11_0_0.regCP_MES_GP3_LO_BASE_IDX)
     print("MES API v", (self.sched_version & 0x00fff000) >> 12)
 
@@ -274,7 +279,7 @@ class MES_IP:
     #   mes_ip = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_INSTR_PNTR, amdgpu_gc_11_0_0.regCP_MES_INSTR_PNTR_BASE_IDX)
     #   print("regCP_MES_INSTR_PNTR", hex(mes_ip))
 
-    # self.adev.soc21_grbm_select(0, 0, 0, 0)
+    # self.adev.gfx.soc21_grbm_select(0, 0, 0, 0)
 
     # print(self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_CNTL, amdgpu_gc_11_0_0.regCP_MES_CNTL_BASE_IDX))
 

@@ -93,8 +93,10 @@ class VMM:
   def flush_tlb(self, vmid, vmhub, flush_type):
     assert vmid == 0 and vmhub == 0 and flush_type == 0
 
-    self.adev.wreg(0x291c, 0xf80001)
-    while self.adev.rreg(0x292e) != 1: pass
+    self.flush_hdp()
+
+    # self.adev.wreg(0x291c, 0xf80001)
+    # while self.adev.rreg(0x292e) != 1: pass
 
   def mmhub_flush_tlb(self, vmid, vmhub, flush_type):
     assert vmid == 0 and vmhub == 0 and flush_type == 0
@@ -139,6 +141,8 @@ class VMM:
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_LO32, 0, self.dummy_page_mc_addr >> 12)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32, 0, (self.dummy_page_mc_addr >> 44))
 
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_PROTECTION_FAULT_CNTL2, 0, 0x000E0000)
+
   def gfxhub_v3_0_init_tlb_regs(self):
     # TODO: write up
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCMC_VM_MX_L1_TLB_CNTL, amdgpu_gc_11_0_0.regGCMC_VM_MX_L1_TLB_CNTL_BASE_IDX, 0x1859)
@@ -167,8 +171,14 @@ class VMM:
     self.gfxhub_v3_0_init_cache_regs()
 
     self.gfxhub_v3_0_enable_system_domain()
-    # // gfxhub_v3_0_disable_identity_aperture(adev);
-	  # // gfxhub_v3_0_setup_vmid_config(adev);
+    
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_CONTEXT1_IDENTITY_APERTURE_LOW_ADDR_LO32, 0, 0xFFFFFFFF)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_CONTEXT1_IDENTITY_APERTURE_LOW_ADDR_HI32, 0, 0x0000000F)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_CONTEXT1_IDENTITY_APERTURE_HIGH_ADDR_LO32, 0, 0)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_CONTEXT1_IDENTITY_APERTURE_HIGH_ADDR_HI32, 0, 0)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_CONTEXT_IDENTITY_PHYSICAL_OFFSET_LO32, 0, 0)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_CONTEXT_IDENTITY_PHYSICAL_OFFSET_HI32, 0, 0)
+
     self.gfxhub_v3_0_program_invalidation()
 
   def mmhub_v3_0_init_gart_aperture_regs(self):

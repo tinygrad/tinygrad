@@ -34,6 +34,13 @@ class Firmware:
   def mes_data_psp_desc(self, hdr):
     return self.load_fw(hdr, self.header.mes_ucode_data_offset_bytes, self.header.mes_ucode_data_size_bytes)
 
+  def imu_psp_desc(self, vv):
+    if vv == amdgpu_psp_gfx_if.GFX_FW_TYPE_IMU_I:
+      return self.load_fw(vv, self.header.header.ucode_array_offset_bytes, self.header.imu_iram_ucode_size_bytes)
+    if vv == amdgpu_psp_gfx_if.GFX_FW_TYPE_IMU_D:
+      return self.load_fw(vv, self.header.header.ucode_array_offset_bytes + self.header.imu_iram_ucode_size_bytes, self.header.imu_dram_ucode_size_bytes)
+    assert False
+
   def rlc_v2_psp_desc(self, vv):
     assert vv == amdgpu_psp_gfx_if.GFX_FW_TYPE_RLC_G
     hdr = amdgpu_2.struct_rlc_firmware_header_v2_0.from_buffer(self.blob[:ctypes.sizeof(amdgpu_2.struct_rlc_firmware_header_v2_0)])

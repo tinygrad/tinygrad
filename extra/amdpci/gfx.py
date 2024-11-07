@@ -12,13 +12,20 @@ class GFX_IP:
 
   def __init__(self, adev):
     self.adev = adev
-    self.eop_gpu_addr = self.adev.vmm.alloc_vram(0x1000, "eop")
-    
-    self.clear_state_size = 0x10000
-    self.clear_state_gpu_addr = self.adev.vmm.alloc_vram(self.clear_state_size, "clear_state")
+    self.eop_gpu_vaddr = self.adev.vmm.alloc_vram(0x1000, "eop")
 
-  def init(self):
-    self.setup()
+    self.clear_state_size = 0x10000
+    self.clear_state_gpu_vaddr = self.adev.vmm.alloc_vram(self.clear_state_size, "clear_state")
+
+  def soc21_grbm_select(self, me, pipe, queue, vmid):
+    regGRBM_GFX_CNTL = 0xa900 # (adev->reg_offset[GC_HWIP][0][1] + 0x0900)
+    GRBM_GFX_CNTL__PIPEID__SHIFT=0x0
+    GRBM_GFX_CNTL__MEID__SHIFT=0x2
+    GRBM_GFX_CNTL__VMID__SHIFT=0x4
+    GRBM_GFX_CNTL__QUEUEID__SHIFT=0x8
+
+    grbm_gfx_cntl = (me << GRBM_GFX_CNTL__MEID__SHIFT) | (pipe << GRBM_GFX_CNTL__PIPEID__SHIFT) | (vmid << GRBM_GFX_CNTL__VMID__SHIFT) | (queue << GRBM_GFX_CNTL__QUEUEID__SHIFT)
+    self.adev.wreg(regGRBM_GFX_CNTL, grbm_gfx_cntl)
 
   def wait_for_rlc_autoload(self):
     # return # skip when load with amdgpu driver
@@ -51,7 +58,7 @@ class GFX_IP:
 
     # TODO: Read configs here
     for i in range(16):
-      self.adev.soc21_grbm_select(0, 0, 0, i)
+      self.soc21_grbm_select(0, 0, 0, i)
       self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regSH_MEM_CONFIG, amdgpu_gc_11_0_0.regSH_MEM_CONFIG_BASE_IDX, self.DEFAULT_SH_MEM_CONFIG)
 
       tmp = (self.adev.vmm.private_aperture_start >> 48) | ((self.adev.vmm.shared_aperture_start >> 48) << 16)
@@ -59,7 +66,7 @@ class GFX_IP:
 
       # We do not enable trap for each kfd vmid...
 
-    self.adev.soc21_grbm_select(0, 0, 0, 0)
+    self.soc21_grbm_select(0, 0, 0, 0)
 
     for i in range(1, 16):
       # Initialize all compute VMIDs to have no GDS, GWS, or OA acccess. These should be enabled by FW for target VMIDs (?)
@@ -89,7 +96,7 @@ class GFX_IP:
 
   def init_kiq_regs(self, ring): # kiq_init_registers
     print("sw", ring.me, ring.pipe, ring.queue)
-    self.adev.soc21_grbm_select(ring.me, ring.pipe, ring.queue, 0)
+    self.soc21_grbm_select(ring.me, ring.pipe, ring.queue, 0)
 
     v = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL_BASE_IDX)
     print("compute enabled 2", hex(v)) # 0x3c000000
@@ -140,7 +147,7 @@ class GFX_IP:
     # print("act?", self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_DOORBELL_RANGE_LOWER, amdgpu_gc_11_0_0.regCP_MEC_DOORBELL_RANGE_LOWER_BASE_IDX))
     # print("act?", self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_DOORBELL_RANGE_UPPER, amdgpu_gc_11_0_0.regCP_MEC_DOORBELL_RANGE_UPPER_BASE_IDX))
 
-    self.adev.soc21_grbm_select(0, 0, 0, 0)
+    self.soc21_grbm_select(0, 0, 0, 0)
 
   def wdoorbell64(self, index, val):
     # for i in range(0, 0x10000):
@@ -149,8 +156,8 @@ class GFX_IP:
     self.adev.doorbell[index] = val
 
   def init_csb(self):
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_HI, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_HI_BASE_IDX, self.clear_state_gpu_addr >> 32)
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_LO, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_LO_BASE_IDX, self.clear_state_gpu_addr  & 0xfffffffc)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_HI, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_HI_BASE_IDX, self.clear_state_gpu_vaddr >> 32)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_LO, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_LO_BASE_IDX, self.clear_state_gpu_vaddr  & 0xfffffffc)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_LENGTH, amdgpu_gc_11_0_0.regRLC_CSIB_LENGTH_BASE_IDX, self.clear_state_size)
 
   def test_ring(self):
@@ -212,10 +219,10 @@ class GFX_IP:
     regCP_MEC_RS64_PRGRM_CNTR_START_HI = 0xc938 # adev->reg_offset[GC_HWIP][0][1] + 0x2938
 
     for pipe in range(4):
-      self.adev.soc21_grbm_select(1, pipe, 0, 0)
+      self.soc21_grbm_select(1, pipe, 0, 0)
       self.adev.wreg(regCP_MEC_RS64_PRGRM_CNTR_START, 0x3000)
       self.adev.wreg(regCP_MEC_RS64_PRGRM_CNTR_START_HI, 0x70000)
-    self.adev.soc21_grbm_select(0, 0, 0, 0)
+    self.soc21_grbm_select(0, 0, 0, 0)
 
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL_BASE_IDX, 0x400f0000)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL_BASE_IDX, 0x40000000)
@@ -230,9 +237,12 @@ class GFX_IP:
   def gfxhub_vmm_setup(self):
     self.adev.vmm.init_gfxhub()
     self.adev.vmm.flush_hdp()
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_PROTECTION_FAULT_CNTL, 0, 0x3FFFFFFC)
     self.adev.vmm.flush_tlb(0, 0, 0)
 
-  def setup(self):
+  def init(self):
+    print("GFX: init")
+
     self.wait_for_rlc_autoload()
     assert self.gb_addr_config() == 0x545 # gfx11 is the same
 

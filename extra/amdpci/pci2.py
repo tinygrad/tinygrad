@@ -19,8 +19,8 @@ while True:
   if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c:
     dev_fmt = "{:04x}:{:02x}:{:02x}.{:d}".format(pcidev.contents.domain_16, pcidev.contents.bus, pcidev.contents.dev, pcidev.contents.func)
     if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
-    # if dev_fmt == "0000:86:00.0": continue # skip it, use for kernel hacking.
-    if dev_fmt == "0000:c6:00.0": continue # skip it, use for kernel hacking.
+    if dev_fmt == "0000:86:00.0": continue # skip it, use for kernel hacking.
+    # if dev_fmt == "0000:c6:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:44:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:c3:00.0": continue # skip it, use for kernel hacking.
@@ -121,9 +121,11 @@ class AMDDev:
     print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
     print(hex(self.raw_vram.cast('Q')[0x400]))
 
-    # from extra.amdpci.gfx import GFX_IP
-    # self.gfx = GFX_IP(self)
-    # self.gfx.wait_for_rlc_autoload()
+    self.smu.init()
+
+    from extra.amdpci.gfx import GFX_IP
+    self.gfx = GFX_IP(self)
+    self.gfx.init()
 
     exit(0)
 

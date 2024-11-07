@@ -12,21 +12,26 @@ class AMDRing:
     self.mqd_mv = memoryview(bytearray(ctypes.sizeof(amdgpu_2.struct_v11_compute_mqd)))
     self.mqd = amdgpu_2.struct_v11_compute_mqd.from_address(mv_address(self.mqd_mv))
 
-    self.eop_gpu_addr = self.adev.vmm.alloc_vram(0x1000, "eop")
-    self.mqd_gpu_addr = self.adev.vmm.alloc_vram(len(self.mqd_mv), "mqd")
+    self.eop_gpu_vaddr = self.adev.vmm.alloc_vram(0x1000, "eop")
+    self.mqd_gpu_vaddr = self.adev.vmm.alloc_vram(len(self.mqd_mv), "mqd")
+    self.mqd_gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.mqd_gpu_vaddr)
 
-    self.rptr_gpu_addr = self.adev.vmm.alloc_vram(0x1000, "rptr")
-    self.wptr_gpu_addr = self.adev.vmm.alloc_vram(0x1000, "wptr")
+    self.rptr_gpu_vaddr = self.adev.vmm.alloc_vram(0x1000, "rptr")
+    self.wptr_gpu_vaddr = self.adev.vmm.alloc_vram(0x1000, "wptr")
 
-    self.rptr = self.adev.vmm.vram_to_cpu_mv(self.rptr_gpu_addr, 8).cast('Q')
-    self.wptr = self.adev.vmm.vram_to_cpu_mv(self.wptr_gpu_addr, 8).cast('Q')
+    self.rptr_gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.rptr_gpu_vaddr)
+    self.wptr_gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.wptr_gpu_vaddr)
+
+    self.rptr = self.adev.vmm.paddr_to_cpu_mv(self.rptr_gpu_paddr, 8).cast('Q')
+    self.wptr = self.adev.vmm.paddr_to_cpu_mv(self.wptr_gpu_paddr, 8).cast('Q')
 
     self.rptr[0] = 0x0
     self.wptr[0] = 0x0
 
     self.ring_size = size
-    self.ring_gpu_addr = self.adev.vmm.alloc_vram(self.ring_size, "ring")
-    self.ring_view = self.adev.vmm.vram_to_cpu_mv(self.ring_gpu_addr, self.ring_size)
+    self.ring_gpu_vaddr = self.adev.vmm.alloc_vram(self.ring_size, "ring")
+    self.ring_gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.ring_gpu_vaddr)
+    self.ring_view = self.adev.vmm.paddr_to_cpu_mv(self.ring_gpu_paddr, self.ring_size)
 
     self.doorbell_index = doorbell_index
 
@@ -79,6 +84,6 @@ class AMDRing:
     self.adev.vmm.vram_to_cpu_mv(self.mqd_gpu_addr, len(self.mqd_mv))[:] = self.mqd_mv
 
   def write(self, value):
-    self.adev.vmm.vram_to_cpu_mv(self.ring_gpu_addr, 0x1000).cast('I')[self.next_ptr] = value
+    self.adev.vmm.paddr_to_cpu_mv(self.ring_gpu_paddr, 0x1000).cast('I')[self.next_ptr] = value
     self.next_ptr += 1
     self.wptr[0] = self.next_ptr

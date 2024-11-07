@@ -36,6 +36,7 @@ class PSP_IP:
     self.mes_kiq_fw = Firmware(self.adev, self.MES1_PATH, amdgpu_2.struct_mes_firmware_header_v1_0)
 
     self.rlc_fw = Firmware(self.adev, self.RLC_PATH, amdgpu_2.struct_rlc_firmware_header_v2_0)
+    self.imu_fw = Firmware(self.adev, self.IMU_PATH, amdgpu_2.struct_imu_firmware_header_v1_0)
 
     self.fw_list = [
       self.pfp_fw.cpv2_code_psp_desc(amdgpu_psp_gfx_if.GFX_FW_TYPE_RS64_PFP),
@@ -58,7 +59,10 @@ class PSP_IP:
 
       self.mes_kiq_fw.mes_code_psp_desc(amdgpu_psp_gfx_if.GFX_FW_TYPE_CP_MES_KIQ),
       self.mes_kiq_fw.mes_data_psp_desc(amdgpu_psp_gfx_if.GFX_FW_TYPE_MES_KIQ_STACK),
-    
+
+      self.imu_fw.imu_psp_desc(amdgpu_psp_gfx_if.GFX_FW_TYPE_IMU_I),
+      self.imu_fw.imu_psp_desc(amdgpu_psp_gfx_if.GFX_FW_TYPE_IMU_D),
+
       self.rlc_fw.rlc_v2_1_psp_desc(amdgpu_psp_gfx_if.GFX_FW_TYPE_RLC_RESTORE_LIST_GPM_MEM),
       self.rlc_fw.rlc_v2_1_psp_desc(amdgpu_psp_gfx_if.GFX_FW_TYPE_RLC_RESTORE_LIST_SRM_MEM),
 

@@ -64,20 +64,26 @@ class SMU_IP:
     self.tool_table_paddr = self.adev.vmm.vaddr_to_paddr(self.tool_table_vaddr)
     self.tool_table_mc_addr = self.adev.vmm.paddr_to_mc(self.tool_table_paddr)
 
-    self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetToolDramAddrHigh, self.tool_table_mc_addr >> 32, poll=True)
-    self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetToolDramAddrLow, self.tool_table_mc_addr & 0xFFFFFFFF, poll=True)
+    self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetToolsDramAddrHigh, self.tool_table_mc_addr >> 32, poll=True)
+    self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetToolsDramAddrLow, self.tool_table_mc_addr & 0xFFFFFFFF, poll=True)
 
   def smu_setup_pptable(self):
     pass
 
+  def smu_run_btc(self):
+    self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_RunDcBtc, 0, poll=True)
+
+  def smu_system_features_control(self, enable):
+    cmd = amdgpu_smu_v13_0_0.PPSMC_MSG_EnableAllSmuFeatures if enable else amdgpu_smu_v13_0_0.PPSMC_MSG_DisableAllSmuFeatures
+    self.smu_cmn_send_smc_msg_with_param(cmd, 0, poll=True)
+
   def smu_smc_hw_setup(self):
     self.smu_set_driver_table_location()
     self.smu_set_tool_table_location()
-    # self.
+
+    self.smu_run_btc()
+    self.smu_system_features_control(True)
 
   def init(self):
-    self.driver_table = 
-
-    self.smu_start_smc_engine()
-    
-    pass
+    print("SMU init")
+    self.smu_smc_hw_setup()
