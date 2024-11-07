@@ -1833,6 +1833,14 @@ class TestOps(unittest.TestCase):
         lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), dilation=dilation),
         lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), dilation=dilation))
 
+  def test_maxpool2d_ceil_mode(self):
+    shape = (1,1,6,6)
+    for ksz in [(3,3), 2, 3, (3,2)]:
+      with self.subTest(kernel_size=ksz):
+        helper_test_op([shape],
+          lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True),
+          lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True))
+
   def test_avgpool2d(self):
     shape = (32,2,111,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
@@ -1841,13 +1849,14 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), rtol=1e-5)
 
+  # regression test for TODO
   def test_avgpool2d_failure1(self):
     helper_test_op([(1,1,8,8)],
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(1,2), padding=(0,1), stride=(5,1)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(1,2), padding=(0,1), stride=(5,1)), rtol=1e-5)
 
   # Mismatched elements: 1 / 35 (2.86%) -0.32827917 (torch) != -0.49710596 (tiny) on non-cpu devices
-  @unittest.skipIf(Device.DEFAULT not in ["LLVM", "CLANG"], "uhhh")
+  @unittest.skipIf(Device.DEFAULT not in {"LLVM", "CLANG"}, "uhhh")
   def test_avgpool2d_failure2(self):
     helper_test_op([(1,1,32,32)],
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(2,6), padding=(1,3), stride=(8,5), ceil_mode=False, count_include_pad=False),
@@ -1868,6 +1877,23 @@ class TestOps(unittest.TestCase):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1, count_include_pad=False),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=1, count_include_pad=False), rtol=1e-5)
+
+  def test_avgpool2d_ceil_mode(self):
+    shape = (1,1,6,6)
+    for ksz in [(3,3), 2, 3, (3,2)]:
+      with self.subTest(kernel_size=ksz):
+        helper_test_op([shape],
+          lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, count_include_pad=False),
+          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, count_include_pad=False), rtol=1e-5)
+
+  def test_avgpool2d_ceil_mode_include_pad(self):
+    shape = (1,1,6,6)
+    for ksz in [(3,3), 2, 3, (3,2)]:
+      with self.subTest(kernel_size=ksz):
+        helper_test_op([shape],
+          lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, count_include_pad=True),
+          lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, count_include_pad=True), rtol=1e-5)
+
 
   def test_global_avgpool2d(self):
     helper_test_op([(32,2,111,28)],
