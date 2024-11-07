@@ -992,10 +992,15 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
 
   return uop
 
+def order(v: UOp, valids:List[UOp]):
+  try: return sum(parse_valid(v)[0] in other.parents for other in valids)
+  except ValueError: return 0
+
 def simplify_valid(valid:UOp) -> Optional[UOp]:
   ret:List[UOp] = []
   something_changed = False
-  for stmt in split_uop(valid, BinaryOps.AND):
+  valids = list(split_uop(valid, Ops.AND))
+  for stmt in sorted(valids, key=lambda v: order(v, valids), reverse=True):
     ret.append(newstmt if ret and (newstmt:=uop_given_valid(functools.reduce(operator.and_, ret), stmt)) is not None else stmt)
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
