@@ -1977,18 +1977,16 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     # we also remove padding in the case that a shifting window starts in the end padded region, thereby decreasing `o_` in `_pool`
     pads = list(self._padding2d(p_, len(k_)))
     for j, (o,i,s,p,k,d) in enumerate(zip(o_, i_, s_, p_, k_, d_)): pads[-1-j*2] = pads[-1-j*2] + ((o-1)*s+d*(k-1)+1)-(i+2*p) - max(0, s*(o-1)+1-i-p)
-    '''
     # HERES A CLEARER PICTURE OF WHATS GOING ON, lol
-    for j, (o,i,s,p,k,d) in enumerate(zip(o_, i_, s_, p_, k_, d_)):
-      end_pad_index = -1 - j * 2
-      padded_input_shape = i + 2 * p
-      sliding_window_before_last = s * (o - 1)
-      full_kernel_size = d * (k - 1) + 1
-      # pad so that sliding windows inside the input shape is _pool-ed with full kernel shape
-      pads[end_pad_index] += sliding_window_before_last + full_kernel_size - padded_input_shape
-      # remove extra end pads that result in sliding windows starting in the padded region outside input shape
-      pads[end_pad_index] -= max(0, sliding_window_before_last + 1 - i - p)
-    '''
+    # for j, (o,i,s,p,k,d) in enumerate(zip(o_, i_, s_, p_, k_, d_)):
+    #   end_pad_index = -1 - j * 2
+    #   padded_input_shape = i + 2 * p
+    #   sliding_window_before_last = s * (o - 1)
+    #   full_kernel_size = d * (k - 1) + 1
+    #   # pad so that sliding windows inside the input shape is _pool-ed with full kernel shape
+    #   pads[end_pad_index] += sliding_window_before_last + full_kernel_size - padded_input_shape
+    #   # remove extra end pads that result in sliding windows starting in the padded region outside input shape
+    #   pads[end_pad_index] -= max(0, sliding_window_before_last + 1 - i - p)
     return pads
 
   # NOTE: these work for more than 2D

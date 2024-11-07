@@ -931,7 +931,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_adam_2convs_fuse(self):
     with Tensor.train():
-      img = Tensor.empty(2,3,6,6)
+      img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,16,3,bias=False)
       c2 = nn.Conv2d(16,32,2,bias=False)
       _realize_weights([c1, c2])
@@ -952,7 +952,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_sgd_2convs_fuse(self):
     with Tensor.train():
-      img = Tensor.empty(2,3,6,6)
+      img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,16,3,bias=False)
       c2 = nn.Conv2d(16,32,2,bias=False)
       _realize_weights([c1, c2])
@@ -963,7 +963,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_fold_2convs_sgd_nesterov_momentum_wd(self):
     with Tensor.train():
-      img = Tensor.empty(2,3,6,6)
+      img = Tensor.empty(2,3,4,4)
       c1 = nn.Conv2d(3,16,3,bias=False)
       c2 = nn.Conv2d(16,32,2,bias=False)
       _realize_weights([c1, c2])
