@@ -1948,6 +1948,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_, d_, i_)), "kernel size cannot be greater than actual input size"
     o_ = [ceildiv(i - d * (k-1), s) for i,d,k,s in zip(i_, d_, k_, s_)]
     if any(resolve(k > s) for k,s in zip(k_, s_)) or any(d != 1 for d in d_):
+      # repeats such that we don't need padding
       xup = self.repeat([1]*len(noop_) + [o + ceildiv((o*s), i) for o,i,s in zip(o_,i_,s_)])
       # handle stride
       xup = xup.shrink(tuple(noop_ + [(0, o*(i+s)) for o,i,s in zip(o_,i_,s_)])).reshape(noop_ + flatten((o,i+s) for o,i,s in zip(o_,i_,s_)))
