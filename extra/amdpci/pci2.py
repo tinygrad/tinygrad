@@ -62,6 +62,9 @@ class AMDDev:
     from extra.amdpci.vmm import VMM
     self.vmm = VMM(self) # gmc ip like
 
+    self.raw_vram.cast('Q')[0x400] = 0xdeadbeef
+    print(hex(self.raw_vram.cast('Q')[0x400]))
+
     self.init_discovery()
 
     from extra.amdpci.smu import SMU_IP
@@ -71,9 +74,9 @@ class AMDDev:
     self.psp = PSP_IP(self)
 
     # Issue a gpu reset...
-    if self.psp.is_sos_alive():
-      print("sOS is alive, issue mode1 reset")
-      self.smu.mode1_reset()
+    # if self.psp.is_sos_alive():
+    #   print("sOS is alive, issue mode1 reset")
+    #   self.smu.mode1_reset()
 
     from extra.amdpci.soc21 import SOC21_IP
     self.soc21 = SOC21_IP(self) # soc21
@@ -81,9 +84,13 @@ class AMDDev:
 
     self.vmm.init()
 
+    print(hex(self.raw_vram.cast('Q')[0x400]))
+
+    exit(0)
+
     from extra.amdpci.ih import IH_IP
     self.ih = IH_IP(self)
-    self.ih.init()
+    # self.ih.init()
 
     from extra.amdpci.psp import PSP_IP
     self.psp = PSP_IP(self)
@@ -107,12 +114,12 @@ class AMDDev:
     self.rreg(self.pcie_data_offset())
 
   def rreg(self, reg):
-    print("read from", hex(reg))
+    # print("read from", hex(reg))
     if reg > len(self.pci_mmio): return self.indirect_rreg(reg)
     return self.pci_mmio[reg]
 
   def wreg(self, reg, val):
-    print("write to", hex(reg), hex(val))
+    # print("write to", hex(reg), hex(val))
     if reg > len(self.pci_mmio): self.indirect_wreg(reg, val)
     else: self.pci_mmio[reg] = val
 
@@ -149,12 +156,13 @@ class AMDDev:
     print("Detected VRAM size", vram_size)
 
     pos = vram_size - DISCOVERY_TMR_OFFSET
-    self.discovery_blob = self.vmm.vram_to_cpu_mv(pos, DISCOVERY_TMR_SIZE)
+    self.discovery_blob = self.vmm.paddr_to_cpu_mv(pos, DISCOVERY_TMR_SIZE, allow_high=True)
 
     bhdr = amdgpu_discovery.struct_binary_header.from_buffer(self.discovery_blob)
     
     ip_offset = bhdr.table_list[amdgpu_discovery.IP_DISCOVERY].offset
     ihdr = amdgpu_discovery.struct_ip_discovery_header.from_address(ctypes.addressof(bhdr) + ip_offset)
+    print(hex(ihdr.signature))
     assert ihdr.signature == amdgpu_discovery.DISCOVERY_TABLE_SIGNATURE
 
     hw_id_map = {}

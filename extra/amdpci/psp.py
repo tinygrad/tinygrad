@@ -247,9 +247,9 @@ class PSP_IP:
       (amdgpu_2.PSP_FW_TYPE_PSP_RAS_DRV, 0xE0000),
     ]
     for fw, compid in components_load_order: self.bootloader_load_component(fw, compid)
-    exit(0)
-
+  
     self.ring_create()
+    exit(0)
 
     # TMR
     # TODO: 0x1300000 should be parsed from TOC...
