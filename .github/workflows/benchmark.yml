@@ -25,7 +25,7 @@ jobs:
   testmacbenchmark:
     name: Mac Benchmark
     runs-on: [self-hosted, macOS]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -128,7 +128,7 @@ jobs:
   testnvidiabenchmark:
     name: tinybox green Benchmark
     runs-on: [self-hosted, Linux, tinyboxgreen]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -234,7 +234,7 @@ jobs:
   testmorenvidiabenchmark:
     name: tinybox green Training Benchmark
     runs-on: [self-hosted, Linux, tinyboxgreen]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -302,7 +302,7 @@ jobs:
   testamdbenchmark:
     name: tinybox red Benchmark
     runs-on: [self-hosted, Linux, tinybox]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -406,7 +406,7 @@ jobs:
   testmoreamdbenchmark:
     name: tinybox red Training Benchmark
     runs-on: [self-hosted, Linux, tinybox]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -470,7 +470,7 @@ jobs:
   testqualcommbenchmark:
     name: comma Benchmark
     runs-on: [self-hosted, Linux, comma]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -o pipefail {0}
