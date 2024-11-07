@@ -12,6 +12,7 @@ class IHRing():
 
     self.gpu_vaddr = self.adev.vmm.alloc_vram(262144)
     self.gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.gpu_vaddr)
+    self.gpu_mc_addr = self.adev.vmm.paddr_to_mc(self.gpu_paddr)
 
     self.rptr_gpu_vaddr = self.adev.vmm.alloc_vram(0x1000)
     self.wptr_gpu_vaddr = self.adev.vmm.alloc_vram(0x1000)
@@ -50,14 +51,14 @@ class IH_IP:
   def init(self):
     print("IH init")
     self.create_rings()
-    # self.ih_v6_0_irq_init()
+    self.ih_v6_0_irq_init()
 
   def create_rings(self):
     self.ih = IHRing(self.adev, AMDGPU_NAVI10_DOORBELL_IH)
     self.ih1 = IHRing(self.adev, AMDGPU_NAVI10_DOORBELL_IH + 1, is_1=True)
 
   def ih_v6_0_enable_ring(self, ring, is_1):
-    self.adev.wreg(ring.ih_rb_base, ring.gpu_vaddr >> 8)
+    self.adev.wreg(ring.ih_rb_base, (ring.gpu_vaddr >> 8) & 0xffffffff)
     self.adev.wreg(ring.ih_rb_base_hi, (ring.gpu_vaddr >> 40) & 0xff)
 
     cntr = 0xC0310120 if not is_1 else 0xC0100320

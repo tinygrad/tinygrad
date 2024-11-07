@@ -22,8 +22,8 @@ while True:
     if dev_fmt == "0000:86:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:c6:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:44:00.0": continue # skip it, use for kernel hacking.
-    # if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
-    if dev_fmt == "0000:c3:00.0": continue # skip it, use for kernel hacking.
+    if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
+    # if dev_fmt == "0000:c3:00.0": continue # skip it, use for kernel hacking.
     # print(dev_fmt)
     # exit(0)
     break
@@ -78,8 +78,9 @@ class AMDDev:
 
     # Issue a gpu reset...
     if self.psp.is_sos_alive():
-      print("sOS is alive, issue mode1 reset")
+      print("sOS is alive, issue mode1 reset, 1s to sleep")
       self.smu.mode1_reset()
+      time.sleep(1)
 
     from extra.amdpci.soc21 import SOC21_IP
     self.soc21 = SOC21_IP(self) # soc21
@@ -88,7 +89,7 @@ class AMDDev:
     # print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
     # print(hex(self.raw_vram.cast('Q')[0x400]))
 
-    # self.vmm.init()
+    self.vmm.init()
 
     print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BASE, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BASE_BASE_IDX)))
     print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BOT, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BOT_BASE_IDX)))

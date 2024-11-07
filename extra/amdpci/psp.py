@@ -108,11 +108,22 @@ class PSP_IP:
     self.msg1_cpu_addr = self.adev.vmm.paddr_to_cpu_addr(self.msg1_paddr)
     self.msg1_view = to_mv(self.msg1_cpu_addr, PSP_1_MEG)
 
-    # self.fence_buf = self.adev.vmm.alloc_vram(0x1000, "psp_fence_buf")
-    # self.cmd_buf = self.adev.vmm.alloc_vram(0x1000, "psp_cmd_buf")
-    # self.ring_mem = self.adev.vmm.alloc_vram(0x10000, "psp_ring_mem") # a bit bigger, no wrap around for this ring
+    self.fence_vaddr = self.adev.vmm.alloc_vram(0x1000, "psp_fence_buf")
+    self.fence_paddr = self.adev.vmm.vaddr_to_paddr(self.fence_vaddr)
+    self.fence_mc_addr = self.adev.vmm.paddr_to_mc(self.fence_paddr)
+    self.fence_view = to_mv(self.adev.vmm.paddr_to_cpu_addr(self.fence_paddr), 4).cast('I')
 
-    # ctypes.memset(self.adev.vmm.vram_to_cpu_addr(self.fence_buf, 0x1000), 0, 0x1000)
+    self.cmd_vaddr = self.adev.vmm.alloc_vram(0x1000, "psp_cmd_buf")
+    self.cmd_paddr = self.adev.vmm.vaddr_to_paddr(self.cmd_vaddr)
+    self.cmd_mc_addr = self.adev.vmm.paddr_to_mc(self.cmd_paddr)
+    self.cmd_cpu_addr = self.adev.vmm.paddr_to_cpu_addr(self.cmd_paddr)
+
+    self.ring_vaddr = self.adev.vmm.alloc_vram(0x10000, "psp_ring_mem") # a bit bigger, no wrap around for this ring
+    self.ring_paddr = self.adev.vmm.vaddr_to_paddr(self.ring_vaddr)
+    self.ring_mc_addr = self.adev.vmm.paddr_to_mc(self.ring_paddr)
+    self.ring_cpu_addr = self.adev.vmm.paddr_to_cpu_addr(self.ring_paddr)
+
+    ctypes.memset(self.adev.vmm.paddr_to_cpu_addr(self.fence_paddr), 0, 0x1000)
 
     self.hw_start()
 
@@ -125,21 +136,20 @@ class PSP_IP:
     
   def ring_create(self):
     # Remove all rings, will setup our new rings...
-    self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64_BASE_IDX, amdgpu_psp_gfx_if.GFX_CTRL_CMD_ID_DESTROY_RINGS)
-    time.sleep(100 / 1000) # 20 ms orignally
+    # self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64_BASE_IDX, amdgpu_psp_gfx_if.GFX_CTRL_CMD_ID_DESTROY_RINGS)
+    # time.sleep(100 / 1000) # 20 ms orignally
 
     reg = 0
     while reg & 0x8000FFFF != 0x80000000:
       reg = self.adev.rreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64_BASE_IDX)
-      print(reg)
 
     # Wait till the ring is ready
     reg = 0
     while reg & 0x80000000 != 0x80000000:
       reg = self.adev.rreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64_BASE_IDX)
 
-    self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_69, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_69_BASE_IDX, self.ring_mem & 0xffffffff)
-    self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_70, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_70_BASE_IDX, self.ring_mem >> 32)
+    self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_69, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_69_BASE_IDX, self.ring_mc_addr & 0xffffffff)
+    self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_70, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_70_BASE_IDX, self.ring_mc_addr >> 32)
     self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_71, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_71_BASE_IDX, 0x1000)
 
     ring_type = 2 << 16 # PSP_RING_TYPE__KM = 2. Kernel mode ring
@@ -157,23 +167,26 @@ class PSP_IP:
     print("sOS ring created")
 
   def prep_load_ip_fw_cmd_buf(self, psp_desc):
-    fw_type, phys_addr, phys_size = psp_desc
-    print('PSP: issue load ip fw:', fw_type, hex(phys_addr), hex(phys_size))
+    fw_type, fwm = psp_desc
+    print('PSP: issue load ip fw:', fw_type, hex(len(fwm)))
+
+    ctypes.memset(self.msg1_cpu_addr, 0, len(self.msg1_view))
+    self.msg1_view[:len(fwm)] = fwm
 
     assert ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp) == 1024
-    ctypes.memset(self.adev.vmm.vram_to_cpu_addr(self.cmd_buf, 0x1000), 0, 0x1000)
-    cmd = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.adev.vmm.vram_to_cpu_addr(self.cmd_buf))
+    ctypes.memset(self.cmd_cpu_addr, 0, 0x1000)
+    cmd = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.cmd_cpu_addr)
     cmd.cmd_id = amdgpu_psp_gfx_if.GFX_CMD_ID_LOAD_IP_FW
-    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = phys_addr & 0xffffffff
-    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi = phys_addr >> 32
-    cmd.cmd.cmd_load_ip_fw.fw_size = phys_size
+    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = self.msg1_mc_addr & 0xffffffff
+    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi = self.msg1_mc_addr >> 32
+    cmd.cmd.cmd_load_ip_fw.fw_size = len(self.msg1_view)
     cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
 
   def prep_tmr_cmd_buf(self):
     assert ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp) == 1024
-    ctypes.memset(self.adev.vmm.vram_to_cpu_addr(self.cmd_buf, 0x1000), 0, 0x1000)
+    ctypes.memset(self.cmd_cpu_addr, 0, 0x1000)
 
-    cmd = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.adev.vmm.vram_to_cpu_addr(self.cmd_buf))
+    cmd = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.cmd_cpu_addr)
     cmd.cmd_id = amdgpu_psp_gfx_if.GFX_CMD_ID_SETUP_TMR
     cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = self.tmr_gpu_addr & 0xffffffff
     cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi = self.tmr_gpu_addr >> 32
@@ -184,8 +197,8 @@ class PSP_IP:
 
   def prep_boot_config_get(self):
     assert ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp) == 1024
-    ctypes.memset(self.adev.vmm.vram_to_cpu_addr(self.cmd_buf, 0x1000), 0, 0x1000)
-    cmd = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.adev.vmm.vram_to_cpu_addr(self.cmd_buf))
+    ctypes.memset(self.cmd_cpu_addr, 0, 0x1000)
+    cmd = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.cmd_cpu_addr)
     cmd.cmd_id = amdgpu_psp_gfx_if.GFX_CMD_ID_BOOT_CFG
     cmd.cmd.boot_cfg.sub_cmd = amdgpu_psp_gfx_if.BOOTCFG_CMD_GET
 
@@ -197,25 +210,23 @@ class PSP_IP:
 
   def cmd_submit_buf(self):
     prev_wptr = self.ring_get_wptr()
-    ring_entry_addr = self.adev.vmm.vram_to_cpu_addr(self.ring_mem + prev_wptr * 4)
+    ring_entry_addr = self.ring_cpu_addr + prev_wptr * 4
 
     ctypes.memset(ring_entry_addr, 0, ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_rb_frame))
     write_loc = amdgpu_psp_gfx_if.struct_psp_gfx_rb_frame.from_address(ring_entry_addr)
-    write_loc.cmd_buf_addr_hi = self.cmd_buf >> 32
-    write_loc.cmd_buf_addr_lo = self.cmd_buf & 0xffffffff
-    write_loc.fence_addr_hi = self.fence_buf >> 32
-    write_loc.fence_addr_lo = self.fence_buf & 0xffffffff
+    write_loc.cmd_buf_addr_hi = self.cmd_mc_addr >> 32
+    write_loc.cmd_buf_addr_lo = self.cmd_mc_addr & 0xffffffff
+    write_loc.fence_addr_hi = self.fence_mc_addr >> 32
+    write_loc.fence_addr_lo = self.fence_mc_addr & 0xffffffff
     write_loc.fence_value = prev_wptr
 
     print(prev_wptr, hex(self.fence_buf))
     self.ring_set_wptr(prev_wptr + ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_rb_frame) // 4)
     
-    fence_view = to_mv(self.adev.vmm.vram_to_cpu_addr(self.fence_buf), 4).cast('I')
-
-    smth = fence_view[0]
+    smth = self.fence_view[0]
     while smth != prev_wptr:
       self.adev.wreg_ip("HDP", 0, 0x00d1, 0x0, 1)
-      smth = fence_view[0]
+      smth = self.fence_view[0]
 
     resp = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.adev.vmm.vram_to_cpu_addr(self.cmd_buf))
     if resp.resp.status != 0:
@@ -249,10 +260,9 @@ class PSP_IP:
       (amdgpu_2.PSP_FW_TYPE_PSP_RAS_DRV, 0xE0000),
     ]
     for fw, compid in components_load_order: self.bootloader_load_component(fw, compid)
-
-    exit(0)
+    self.bootloader_load_sos()
+  
     self.ring_create()
-    
 
     # TMR
     # TODO: 0x1300000 should be parsed from TOC...
@@ -279,38 +289,38 @@ class PSP_IP:
     if fw not in self.sos_fw_infos: return 0
     if self.is_sos_alive(): return 0
 
-    print(fw, compid)
-
     self.wait_for_bootloader()
-
-    print("entering bootloader")
 
     ctypes.memset(self.msg1_cpu_addr, 0, len(self.msg1_view))
     fwm = self.sos_fw_infos[fw]
     self.msg1_view[:len(fwm)] = fwm
 
-    checksum = 0
-    for i in range(len(fwm)):
-      checksum += fwm[i]
-      checksum %= int(1e9 + 7)
-    print("\t", checksum)
-
-    # print(hex(len(fwm)))
-    # print(hex(fwm.cast('I')[0]))
-    # print(hex(fwm.cast('I')[0x100]))
-    # print(hex(fwm.cast('I')[0x400]))
-
     self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_36, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_36_BASE_IDX, self.msg1_mc_addr >> 20)
     self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_35, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_35_BASE_IDX, compid)
 
+    print(f"PSP: loading fw: {fw} {compid}")
+
     return self.wait_for_bootloader()
   
-  def bootloader_load_kdb(self): self.bootloader_load_component(amdgpu_2.PSP_FW_TYPE_PSP_KDB, 0x80000)
-
   def bootloader_load_sos(self):
     if (self.is_sos_alive()):
       self.init_sos_version()
       print(f"sOS alive, version {self.sos_fw_version}")
       return 0
 
-    assert False, "TODO: Init from bootloader"
+    self.wait_for_bootloader()
+
+    ctypes.memset(self.msg1_cpu_addr, 0, len(self.msg1_view))
+    fwm = self.sos_fw_infos[amdgpu_2.PSP_FW_TYPE_PSP_SOS]
+    self.msg1_view[:len(fwm)] = fwm
+
+    self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_36, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_36_BASE_IDX, self.msg1_mc_addr >> 20)
+    self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_35, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_35_BASE_IDX, 0x20000)
+
+    # ret = psp_wait_for(psp, SOC15_REG_OFFSET(MP0, 0, regMP0_SMN_C2PMSG_81),
+		# 	   RREG32_SOC15(MP0, 0, regMP0_SMN_C2PMSG_81),
+		# 	   0, true);
+
+    while not self.is_sos_alive(): time.sleep(0.01)
+    self.init_sos_version()
+    print(f"sOS alive, version {self.sos_fw_version}")
