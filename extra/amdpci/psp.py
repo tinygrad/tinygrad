@@ -102,15 +102,17 @@ class PSP_IP:
 
   def load_fw(self):
     PSP_1_MEG = 0x100000
-    self.msg1_buf = self.adev.vmm.alloc_vram(PSP_1_MEG, "psp_msg1_buf", align=(1<<20))
-    self.msg1_cpu_addr = self.adev.vmm.vram_to_cpu_addr(self.msg1_buf)
+    self.msg1_vaddr = self.adev.vmm.alloc_vram(PSP_1_MEG, "psp_msg1_buf", align=(1<<20))
+    self.msg1_paddr = self.adev.vmm.vaddr_to_paddr(self.msg1_vaddr)
+    self.msg1_mc_addr = self.adev.vmm.paddr_to_mc(self.msg1_paddr)
+    self.msg1_cpu_addr = self.adev.vmm.paddr_to_cpu_addr(self.msg1_paddr)
     self.msg1_view = to_mv(self.msg1_cpu_addr, PSP_1_MEG)
 
-    self.fence_buf = self.adev.vmm.alloc_vram(0x1000, "psp_fence_buf")
-    self.cmd_buf = self.adev.vmm.alloc_vram(0x1000, "psp_cmd_buf")
-    self.ring_mem = self.adev.vmm.alloc_vram(0x10000, "psp_ring_mem") # a bit bigger, no wrap around for this ring
+    # self.fence_buf = self.adev.vmm.alloc_vram(0x1000, "psp_fence_buf")
+    # self.cmd_buf = self.adev.vmm.alloc_vram(0x1000, "psp_cmd_buf")
+    # self.ring_mem = self.adev.vmm.alloc_vram(0x10000, "psp_ring_mem") # a bit bigger, no wrap around for this ring
 
-    ctypes.memset(self.adev.vmm.vram_to_cpu_addr(self.fence_buf, 0x1000), 0, 0x1000)
+    # ctypes.memset(self.adev.vmm.vram_to_cpu_addr(self.fence_buf, 0x1000), 0, 0x1000)
 
     self.hw_start()
 
@@ -247,9 +249,10 @@ class PSP_IP:
       (amdgpu_2.PSP_FW_TYPE_PSP_RAS_DRV, 0xE0000),
     ]
     for fw, compid in components_load_order: self.bootloader_load_component(fw, compid)
-  
-    self.ring_create()
+
     exit(0)
+    self.ring_create()
+    
 
     # TMR
     # TODO: 0x1300000 should be parsed from TOC...
@@ -297,7 +300,7 @@ class PSP_IP:
     # print(hex(fwm.cast('I')[0x100]))
     # print(hex(fwm.cast('I')[0x400]))
 
-    self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_36, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_36_BASE_IDX, self.msg1_buf >> 20)
+    self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_36, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_36_BASE_IDX, self.msg1_mc_addr >> 20)
     self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_35, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_35_BASE_IDX, compid)
 
     return self.wait_for_bootloader()

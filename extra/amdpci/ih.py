@@ -10,16 +10,19 @@ class IHRing():
     self.adev = adev
     self.doorbell_index = doorbell_index << 1
 
-    self.gpu_addr = self.adev.vmm.alloc_vram(262144)
-    self.cpu_addr = self.adev.vmm.vram_to_cpu_addr(self.gpu_addr)
-    self.cpu_view = self.adev.vmm.vram_to_cpu_mv(self.gpu_addr, 262144)
+    self.gpu_vaddr = self.adev.vmm.alloc_vram(262144)
+    self.gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.gpu_vaddr)
 
-    self.rptr_gpu_addr = self.adev.vmm.alloc_vram(0x1000)
-    self.wptr_gpu_addr = self.adev.vmm.alloc_vram(0x1000)
-    self.rptr_cpu_addr = self.adev.vmm.vram_to_cpu_addr(self.rptr_gpu_addr)
-    self.wptr_cpu_addr = self.adev.vmm.vram_to_cpu_addr(self.wptr_gpu_addr)
-    self.rptr_cpu_view = self.adev.vmm.vram_to_cpu_mv(self.rptr_gpu_addr, 8)
-    self.wptr_cpu_view = self.adev.vmm.vram_to_cpu_mv(self.wptr_gpu_addr, 8)
+    self.rptr_gpu_vaddr = self.adev.vmm.alloc_vram(0x1000)
+    self.wptr_gpu_vaddr = self.adev.vmm.alloc_vram(0x1000)
+
+    self.rptr_gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.rptr_gpu_vaddr)
+    self.wptr_gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.wptr_gpu_vaddr)
+
+    self.rptr_cpu_addr = self.adev.vmm.paddr_to_cpu_addr(self.rptr_gpu_paddr)
+    self.wptr_cpu_addr = self.adev.vmm.paddr_to_cpu_addr(self.wptr_gpu_paddr)
+    self.rptr_cpu_view = self.adev.vmm.paddr_to_cpu_mv(self.rptr_gpu_paddr, 8)
+    self.wptr_cpu_view = self.adev.vmm.paddr_to_cpu_mv(self.wptr_gpu_paddr, 8)
 
     if not is_1:
       self.ih_rb_base = self.adev.reg_off("OSSSYS", 0, amdgpu_osssys_6_0_0.regIH_RB_BASE, amdgpu_osssys_6_0_0.regIH_RB_BASE_BASE_IDX)
@@ -47,22 +50,22 @@ class IH_IP:
   def init(self):
     print("IH init")
     self.create_rings()
-    self.ih_v6_0_irq_init()
+    # self.ih_v6_0_irq_init()
 
   def create_rings(self):
     self.ih = IHRing(self.adev, AMDGPU_NAVI10_DOORBELL_IH)
     self.ih1 = IHRing(self.adev, AMDGPU_NAVI10_DOORBELL_IH + 1, is_1=True)
 
   def ih_v6_0_enable_ring(self, ring, is_1):
-    self.adev.wreg(ring.ih_rb_base, ring.gpu_addr >> 8)
-    self.adev.wreg(ring.ih_rb_base_hi, (ring.gpu_addr >> 40) & 0xff)
+    self.adev.wreg(ring.ih_rb_base, ring.gpu_vaddr >> 8)
+    self.adev.wreg(ring.ih_rb_base_hi, (ring.gpu_vaddr >> 40) & 0xff)
 
     cntr = 0xC0310120 if not is_1 else 0xC0100320
     self.adev.wreg(ring.ih_rb_cntl, cntr)
 
     if not is_1:
-      self.adev.wreg(ring.ih_rb_wptr_addr_lo, ring.wptr_gpu_addr & 0xffffffff)
-      self.adev.wreg(ring.ih_rb_wptr_addr_hi, ring.wptr_gpu_addr >> 32)
+      self.adev.wreg(ring.ih_rb_wptr_addr_lo, ring.wptr_gpu_vaddr & 0xffffffff)
+      self.adev.wreg(ring.ih_rb_wptr_addr_hi, ring.wptr_gpu_vaddr >> 32)
 
     self.adev.wreg(ring.ih_rb_wptr, 0)
     self.adev.wreg(ring.ih_rb_rptr, 0)

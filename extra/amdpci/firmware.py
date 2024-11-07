@@ -17,10 +17,11 @@ class Firmware:
 
   def load_fw(self, typ, offset, size):
     if typ not in self.gpu_addr_fw_desc:
-      gpu_paddr = self.adev.vmm.alloc_vram(size, f"fw_{typ}")
-      gpu_paddr_mv = self.adev.vmm.vram_to_cpu_mv(gpu_paddr, size)
+      gpu_vaddr = self.adev.vmm.alloc_vram(size, f"fw_{typ}")
+      gpu_paddr = self.adev.vmm.vaddr_to_paddr(gpu_vaddr)
+      gpu_paddr_mv = self.adev.vmm.paddr_to_cpu_mv(gpu_paddr, size)
       gpu_paddr_mv[:] = self.blob[offset:offset+size]
-      self.gpu_addr_fw_desc[typ] = (typ, gpu_paddr, size)
+      self.gpu_addr_fw_desc[typ] = (typ, gpu_vaddr, gpu_paddr, size)
 
     return self.gpu_addr_fw_desc[typ]
 
