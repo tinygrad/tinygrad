@@ -284,14 +284,18 @@ generate_amdgpu_2() {
   #   extra/amdpci/headers/nbio_4_3_0_sh_mask.h \
   #   -o $BASE/amdgpu_nbio_4_3_0.py
 
-  clang2py -k cdefstum \
-    extra/amdpci/headers/osssys_6_0_0_offset.h \
-    extra/amdpci/headers/osssys_6_0_0_sh_mask.h \
-    -o $BASE/amdgpu_osssys_6_0_0.py
+  # clang2py -k cdefstum \
+  #   extra/amdpci/headers/osssys_6_0_0_offset.h \
+  #   extra/amdpci/headers/osssys_6_0_0_sh_mask.h \
+  #   -o $BASE/amdgpu_osssys_6_0_0.py
 
   # clang2py -k cdefstum \
   #   extra/amdpci/headers/smu_v13_0_0_ppsmc.h \
   #   -o $BASE/amdgpu_smu_v13_0_0.py
+
+  clang2py -k cdefstum \
+    extra/amdpci/headers/discovery.h \
+    -o $BASE/amdgpu_discovery.py
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl

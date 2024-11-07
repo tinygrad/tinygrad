@@ -236,6 +236,7 @@ class PSP_IP:
     self.cmd_submit_buf()
 
   def hw_start(self):
+
     components_load_order = [
       (amdgpu_2.PSP_FW_TYPE_PSP_KDB, 0x80000),
       (amdgpu_2.PSP_FW_TYPE_PSP_KDB, 0x10000000),
@@ -264,9 +265,10 @@ class PSP_IP:
       self.cmd_submit_buf()
 
   def wait_for_bootloader(self):
-    for i in range(100):
+    for i in range(1000):
       reg = self.adev.rreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_35, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_35_BASE_IDX)
-      if reg & 0xffffffff == 0x80000000: return 0
+      # print(reg)
+      if (reg & 0xffffffff) == 0x80000000: return 0
       time.sleep(0.01)
     raise RuntimeError("PSP: bootloader timeout")
 
@@ -283,13 +285,20 @@ class PSP_IP:
     ctypes.memset(self.msg1_cpu_addr, 0, len(self.msg1_view))
     fwm = self.sos_fw_infos[fw]
     self.msg1_view[:len(fwm)] = fwm
-    print(hex(len(fwm)))
-    print(hex(fwm.cast('I')[0]))
-    print(hex(fwm.cast('I')[0x100]))
-    print(hex(fwm.cast('I')[0x400]))
 
-    # self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_36, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_36_BASE_IDX, self.msg1_buf >> 20)
-    # self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_35, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_35_BASE_IDX, compid)
+    checksum = 0
+    for i in range(len(fwm)):
+      checksum += fwm[i]
+      checksum %= int(1e9 + 7)
+    print("\t", checksum)
+
+    # print(hex(len(fwm)))
+    # print(hex(fwm.cast('I')[0]))
+    # print(hex(fwm.cast('I')[0x100]))
+    # print(hex(fwm.cast('I')[0x400]))
+
+    self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_36, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_36_BASE_IDX, self.msg1_buf >> 20)
+    self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_35, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_35_BASE_IDX, compid)
 
     return self.wait_for_bootloader()
   

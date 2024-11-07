@@ -1,5 +1,5 @@
-import os, ctypes
-from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_ip_offset, amdgpu_mp_13_0_0, amdgpu_nbio_4_3_0
+import os, ctypes, collections, time
+from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_mp_13_0_0, amdgpu_nbio_4_3_0, amdgpu_discovery
 from tinygrad.helpers import to_mv, mv_address
 
 def check(x): assert x == 0
@@ -22,8 +22,8 @@ while True:
     if dev_fmt == "0000:86:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:c6:00.0": continue # skip it, use for kernel hacking.
     if dev_fmt == "0000:44:00.0": continue # skip it, use for kernel hacking.
-    if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
-    # if dev_fmt == "0000:c3:00.0": continue # skip it, use for kernel hacking.
+    # if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
+    if dev_fmt == "0000:c3:00.0": continue # skip it, use for kernel hacking.
     # print(dev_fmt)
     # exit(0)
     break
@@ -36,7 +36,8 @@ libpciaccess.pci_device_probe(ctypes.byref(pcidev))
 class AMDDev:
   def __init__(self, pcidev):
     self.usec_timeout = 10000000
-    
+    self.regs_offset = collections.defaultdict(dict)
+
     self.pcidev = pcidev
     libpciaccess.pci_device_enable(ctypes.byref(pcidev))
 
@@ -60,6 +61,8 @@ class AMDDev:
 
     from extra.amdpci.vmm import VMM
     self.vmm = VMM(self) # gmc ip like
+
+    self.init_discovery()
 
     from extra.amdpci.smu import SMU_IP
     self.smu = SMU_IP(self) # soc21
@@ -86,8 +89,6 @@ class AMDDev:
     self.psp = PSP_IP(self)
     self.psp.init()
 
-    exit(1)
-
     from extra.amdpci.gfx import GFX_IP
     self.gfx = GFX_IP(self)
 
@@ -106,78 +107,81 @@ class AMDDev:
     self.rreg(self.pcie_data_offset())
 
   def rreg(self, reg):
+    print("read from", hex(reg))
     if reg > len(self.pci_mmio): return self.indirect_rreg(reg)
     return self.pci_mmio[reg]
 
   def wreg(self, reg, val):
+    print("write to", hex(reg), hex(val))
     if reg > len(self.pci_mmio): self.indirect_wreg(reg, val)
     else: self.pci_mmio[reg] = val
 
   def ip_base(self, ip, inst, seg):
-    off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
-    return off
+    ipid = amdgpu_discovery.__dict__.get(f"{ip}_HWIP")
+    return self.regs_offset[ipid][inst][seg]
 
   def reg_off(self, ip, inst, reg, seg):
-    off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
+    off = self.ip_base(ip, inst, seg)
     return off + reg
 
   def rreg_ip(self, ip, inst, reg, seg, offset=0):
-    off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
+    off = self.ip_base(ip, inst, seg)
     return self.rreg(off + reg + offset)
 
   def wreg_ip(self, ip, inst, reg, seg, val, offset=0):
-    off = amdgpu_ip_offset.__dict__.get(f"{ip}_BASE__INST{inst}_SEG{seg}")
+    off = self.ip_base(ip, inst, seg)
     self.wreg(off + reg + offset, val)
 
-  # def setup(self):
-  #   from extra.amdpci.rlc import replay_rlc
+  def init_discovery(self):
+    mmIP_DISCOVERY_VERSION = 0x16A00
+    mmRCC_CONFIG_MEMSIZE = 0xde3
+    mmMP0_SMN_C2PMSG_33 = 0x16061
+    DISCOVERY_TMR_OFFSET = (64 << 10)
+    DISCOVERY_TMR_SIZE = (10 << 10)
 
-  #   self.hw_init()
+    # Wait for IFWI init to complete.
+    for i in range(1000):
+      msg = self.rreg(mmMP0_SMN_C2PMSG_33)
+      if msg & 0x80000000: break
+      time.sleep(0.001)
 
-  def hw_init(self): # gfx_v11_0_hw_init
-    replay_rlc(self) # TODO: Split into functions, but this is the same regs setup...
+    vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
+    print("Detected VRAM size", vram_size)
 
-    self.gfx_v11_0_wait_for_rlc_autoload_complete()
-    self.get_gb_addr_config() # raises if something wrong
-    self.gfx_v11_0_gfxhub_enable()
+    pos = vram_size - DISCOVERY_TMR_OFFSET
+    self.discovery_blob = self.vmm.vram_to_cpu_mv(pos, DISCOVERY_TMR_SIZE)
 
-  def soc21_grbm_select(self, me, pipe, queue, vmid):
-    regGRBM_GFX_CNTL = 0xa900 # (adev->reg_offset[GC_HWIP][0][1] + 0x0900)
-    GRBM_GFX_CNTL__PIPEID__SHIFT=0x0
-    GRBM_GFX_CNTL__MEID__SHIFT=0x2
-    GRBM_GFX_CNTL__VMID__SHIFT=0x4
-    GRBM_GFX_CNTL__QUEUEID__SHIFT=0x8
+    bhdr = amdgpu_discovery.struct_binary_header.from_buffer(self.discovery_blob)
+    
+    ip_offset = bhdr.table_list[amdgpu_discovery.IP_DISCOVERY].offset
+    ihdr = amdgpu_discovery.struct_ip_discovery_header.from_address(ctypes.addressof(bhdr) + ip_offset)
+    assert ihdr.signature == amdgpu_discovery.DISCOVERY_TABLE_SIGNATURE
 
-    grbm_gfx_cntl = (me << GRBM_GFX_CNTL__MEID__SHIFT) | (pipe << GRBM_GFX_CNTL__PIPEID__SHIFT) | (vmid << GRBM_GFX_CNTL__VMID__SHIFT) | (queue << GRBM_GFX_CNTL__QUEUEID__SHIFT)
-    self.wreg(regGRBM_GFX_CNTL, grbm_gfx_cntl)
+    hw_id_map = {}
+    for x,y in amdgpu_discovery.hw_id_map:
+      hw_id_map[amdgpu_discovery.__dict__[x]] = int(y)
+    # print(hw_id_map)
 
-  def hdp_v6_0_flush_hdp(self): self.wreg(0x1fc00, 0x0)
-  def gmc_v11_0_flush_gpu_tlb(self):
-    self.wreg(0x291c, 0xf80001)
-    while self.rreg(0x292e) != 1: pass
+    num_dies = ihdr.num_dies
+    for num_die in range(num_dies):
+      die_offset = ihdr.die_info[num_die].die_offset
+      dhdr = amdgpu_discovery.struct_die_header.from_address(ctypes.addressof(bhdr) + die_offset)
+      num_ips = dhdr.num_ips
+      ip_offset = die_offset + ctypes.sizeof(dhdr)
 
-  def gfx_v11_0_gfxhub_enable(self):
-    from extra.amdpci.gfxhub import gfxhub_v3_0_gart_enable
-    if DEBUG >= 2: print("start gfx_v11_0_gfxhub_enable")
-    # gfxhub_v3_0_gart_enable(self)
-    # self.hdp_v6_0_flush_hdp()
+      for num_ip in range(num_ips):
+        ip = amdgpu_discovery.struct_ip_v4.from_address(ctypes.addressof(bhdr) + ip_offset)
+        num_base_address = ip.num_base_address
 
-    self.gmc_v11_0_flush_gpu_tlb()
-    self.hdp_v6_0_flush_hdp()
-    print("start gfx_v11_0_gfxhub_enable")
-  
-  def get_gb_addr_config(self):
-    gb_addr_config = self.rreg(regGB_ADDR_CONFIG)
-    if gb_addr_config == 0: raise RuntimeError("error in get_gb_addr_config: gb_addr_config is 0")
+        assert not ihdr.base_addr_64_bit
+        base_addresses = []
+        ba = (ctypes.c_uint32 * num_base_address).from_address(ctypes.addressof(bhdr) + ip_offset + 8)
 
-  def gfx_v11_0_wait_for_rlc_autoload_complete(self):
-    while True:
-      cp_status = self.rreg(regCP_STAT)
-      # TODO: some exceptions here for other gpus
-      if True:
-        bootload_status = self.rreg(regRLC_RLCS_BOOTLOAD_STATUS)
+        for hw_ip in range(1, amdgpu_discovery.MAX_HWIP):
+          if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id:
+            self.regs_offset[hw_ip][ip.instance_number] = [x for x in ba]
+            # print("set ip instance", hw_ip, ip.instance_number, [hex(x) for x in ba])
 
-      if cp_status == 0 and ((bootload_status & RLC_RLCS_BOOTLOAD_STATUS__BOOTLOAD_COMPLETE_MASK) >> RLC_RLCS_BOOTLOAD_STATUS__BOOTLOAD_COMPLETE__SHIFT) == 1:
-        break
+        ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * num_base_address
 
 adev = AMDDev(pcidev)

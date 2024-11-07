@@ -73,6 +73,19 @@ class VMM:
     self.adev.wreg(0x291c, 0xf80001)
     while self.adev.rreg(0x292e) != 1: pass
 
+  def mmhub_flush_tlb(self, vmid, vmhub, flush_type):
+    assert vmid == 0 and vmhub == 0 and flush_type == 0
+
+    self.flush_hdp()
+
+    self.adev.wreg(0x1a774, 0xf80001)
+    while self.adev.rreg(0x1a786) != 1: pass
+
+    self.adev.wreg(0x1a762, 0x0)
+    while self.adev.rreg(0x1a786) != 1: pass
+
+    self.adev.wreg(0x1a71b, 0x12104010)
+
   def gfxhub_v3_0_init_gart_aperture_regs(self):
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0, 0)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, 0, 0)
@@ -80,7 +93,7 @@ class VMM:
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, (1 << 30) - 1)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, 0)
 
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0, self.adev.vmm.pdb0_base & 0xffffffff)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0, (self.adev.vmm.pdb0_base & 0xffffffff) | 1)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32, 0, (self.adev.vmm.pdb0_base >> 32) & 0xffffffff)
 
   def gfxhub_v3_0_init_system_aperture_regs(self):
@@ -139,7 +152,7 @@ class VMM:
     self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, (1 << 30) - 1)
     self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, 0)
 
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0, self.adev.vmm.pdb0_base & 0xffffffff)
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0, (self.adev.vmm.pdb0_base & 0xffffffff) | 1)
     self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32, 0, (self.adev.vmm.pdb0_base >> 32) & 0xffffffff)
 
   def mmhub_v3_0_init_system_aperture_regs(self):
@@ -189,3 +202,5 @@ class VMM:
 
     self.mmhub_v3_0_enable_system_domain()
     self.mmhub_v3_0_program_invalidation()
+
+    self.mmhub_flush_tlb(0, 0, 0)

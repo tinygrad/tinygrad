@@ -15,7 +15,7 @@ class IHRing():
     self.cpu_view = self.adev.vmm.vram_to_cpu_mv(self.gpu_addr, 262144)
 
     self.rptr_gpu_addr = self.adev.vmm.alloc_vram(0x1000)
-    self.wptr_gpu_addr = self.rptr_gpu_addr + 8
+    self.wptr_gpu_addr = self.adev.vmm.alloc_vram(0x1000)
     self.rptr_cpu_addr = self.adev.vmm.vram_to_cpu_addr(self.rptr_gpu_addr)
     self.wptr_cpu_addr = self.adev.vmm.vram_to_cpu_addr(self.wptr_gpu_addr)
     self.rptr_cpu_view = self.adev.vmm.vram_to_cpu_mv(self.rptr_gpu_addr, 8)
