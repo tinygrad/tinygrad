@@ -1969,13 +1969,16 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
   def _ceil_mode_padding2d(self,k_:Tuple[sint, ...], d_:Union[Tuple[int, ...], int], s_:Union[Tuple[int, ...], int],
                            p_:Union[Tuple[int, ...], int]) -> Sequence[int]:
-    (d_,k_,s_,p_) = (make_tuple(x, len(i_ := self.shape[-len(k_):])) for x in (d_,k_,s_,p_))
-    o_ = [ceildiv(i+2*p-d*(k-1)-1,s)+1 for i,d,k,s,p in zip(i_,d_,k_,s_,p_)]
+    (d_,s_,p_) = (make_tuple(x, len(i_ := self.shape[-len(k_):])) for x in (d_,s_,p_))
+    # https://arxiv.org/pdf/1603.07285 section 5.1
+    # effective kernel size described in guide as `k + (k − 1)(d − 1)` but can be simplified to `d*(k-1)+1`
+    o_ = [ceildiv(i+2*p-(d*(k-1)+1),s)+1 for i,d,k,s,p in zip(i_,d_,k_,s_,p_)]
+    # we have to do additional padding before `_pool` so that `o_` in `_pool` is calculated correctly
+    # we also remove padding in the case that a shifting window starts in the end padded region, thereby decreasing `o_` in `_pool`
     pads = list(self._padding2d(p_, len(k_)))
-    # we have to pre-pad before _pool so that o_ in _pool is calculated correctly
     for j, (o,i,s,p,k,d) in enumerate(zip(o_, i_, s_, p_, k_, d_)): pads[-1-j*2] = pads[-1-j*2] + ((o-1)*s+d*(k-1)+1)-(i+2*p) - max(0, s*(o-1)+1-i-p)
-    # HERES A CLEARER PICTURE OF WHATS GOING ON
     '''
+    # HERES A CLEARER PICTURE OF WHATS GOING ON, lol
     for j, (o,i,s,p,k,d) in enumerate(zip(o_, i_, s_, p_, k_, d_)):
       end_pad_index = -1 - j * 2
       padded_input_shape = i + 2 * p
@@ -2007,12 +2010,11 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     padding_, axis = self._padding2d(padding, len(k_ := make_tuple(kernel_size, 2))), tuple(range(-len(k_), 0))
     def pool(x:Tensor) -> Tensor: return x.pad2d(padding_)._pool(k_, stride if stride is not None else k_, dilation)
-    # the inferred padding from ceil_mode is not counted towards denominator
     if not all(p==0 for p in make_tuple(padding, 2)) and ceil_mode and count_include_pad:
-      padding_ = self._ceil_mode_padding2d(k_, dilation, stride if stride is not None else k_, padding)
-      inferred_pads = [after - before for after, before in zip(padding_, self._padding2d(padding, len(k_)))]
-      return pool(self).sum(axis=axis) / self.pad2d(self._padding2d(padding, len(k_))).ones_like().pad2d(inferred_pads)\
-                                             ._pool(k_, stride if stride is not None else k_, dilation).sum(axis=axis)
+      # the additional padding from ceil_mode is not counted towards denominator
+      padding_, pR = self._ceil_mode_padding2d(k_, dilation, stride if stride is not None else k_, padding), self._padding2d(padding, len(k_))
+      denominator = self.pad2d(pR).ones_like().pad2d(tuple(p_ceil - p_real for p_ceil, p_real in zip(padding_, pR)))
+      return pool(self).sum(axis=axis) / denominator._pool(k_, stride if stride is not None else k_, dilation).sum(axis=axis)
     if ceil_mode: padding_ = self._ceil_mode_padding2d(k_, dilation, stride if stride is not None else k_, padding)
     return pool(self).mean(axis=axis) if count_include_pad else pool(self).sum(axis=axis) / pool(self.ones_like()).sum(axis=axis)
 
