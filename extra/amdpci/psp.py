@@ -186,14 +186,25 @@ class PSP_IP:
     assert ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp) == 1024
     ctypes.memset(self.cmd_cpu_addr, 0, 0x1000)
 
+    print(hex(self.tmr_mc_addr), hex(self.tmr_size), hex(self.tmr_paddr))
+    
     cmd = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.cmd_cpu_addr)
     cmd.cmd_id = amdgpu_psp_gfx_if.GFX_CMD_ID_SETUP_TMR
-    cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = self.tmr_gpu_addr & 0xffffffff
-    cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi = self.tmr_gpu_addr >> 32
-    cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = self.tmr_gpu_addr & 0xffffffff # the same for our mappings
-    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi = self.tmr_gpu_addr >> 32
+    cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = self.tmr_mc_addr & 0xffffffff
+    cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi = self.tmr_mc_addr >> 32
+    cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = self.tmr_paddr & 0xffffffff
+    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi = self.tmr_paddr >> 32
     cmd.cmd.cmd_setup_tmr.bitfield.virt_phy_addr = 1
     cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_size
+
+  def prep_load_toc_cmd_buf(self, toc_size):
+    assert ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp) == 1024
+    ctypes.memset(self.cmd_cpu_addr, 0, 0x1000)
+    cmd = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.cmd_cpu_addr)
+    cmd.cmd_id = amdgpu_psp_gfx_if.GFX_CMD_ID_LOAD_TOC
+    cmd.cmd.cmd_load_toc.toc_phy_addr_lo = self.msg1_mc_addr & 0xffffffff
+    cmd.cmd.cmd_load_toc.toc_phy_addr_hi = self.msg1_mc_addr >> 32
+    cmd.cmd.cmd_load_toc.toc_size = toc_size
 
   def prep_boot_config_get(self):
     assert ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp) == 1024
@@ -220,7 +231,6 @@ class PSP_IP:
     write_loc.fence_addr_lo = self.fence_mc_addr & 0xffffffff
     write_loc.fence_value = prev_wptr
 
-    print(prev_wptr, hex(self.fence_buf))
     self.ring_set_wptr(prev_wptr + ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_rb_frame) // 4)
     
     smth = self.fence_view[0]
@@ -228,23 +238,49 @@ class PSP_IP:
       self.adev.wreg_ip("HDP", 0, 0x00d1, 0x0, 1)
       smth = self.fence_view[0]
 
-    resp = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.adev.vmm.vram_to_cpu_addr(self.cmd_buf))
+    resp = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.cmd_cpu_addr)
+    time.sleep(0.1)
     if resp.resp.status != 0:
+      print(hex(resp.resp.fw_addr_lo))
+      print(hex(resp.resp.fw_addr_hi))
       print(colored(f"PSP command failed {resp.cmd_id} {resp.resp.status}", "red"))
+    else: print(colored(f"PSP command success {resp.cmd_id}", "green"))
+    return resp
 
   def load_smu_fw(self):
+    self.prep_tmr_cmd_buf()
+    self.cmd_submit_buf()
+
     self.prep_load_ip_fw_cmd_buf(self.smu_psp_desc)
     self.cmd_submit_buf()
 
+  def load_toc(self):
+    ctypes.memset(self.msg1_cpu_addr, 0, len(self.msg1_view))
+    fwm = self.sos_fw_infos[amdgpu_2.PSP_FW_TYPE_PSP_TOC]
+    self.msg1_view[:len(fwm)] = fwm
+
+    self.prep_load_toc_cmd_buf(len(fwm))
+    resp = self.cmd_submit_buf()
+
+    self.tmr_size = resp.resp.tmr_size
+    print("PSP: TOC loaded")
+    print("TMR size: ", hex(self.tmr_size))
+
+  def tmr_init(self):
+    self.load_toc()
+    self.tmr_vaddr = self.adev.vmm.alloc_vram(self.tmr_size, "psp_tmr", align=0x100000) # psp tmr
+    self.tmr_paddr = self.adev.vmm.vaddr_to_paddr(self.tmr_vaddr)
+    self.tmr_mc_addr = self.adev.vmm.paddr_to_mc(self.tmr_paddr)
+  
   def load_tmr(self):
     self.prep_tmr_cmd_buf()
     self.cmd_submit_buf()
 
   def rlc_autoload_start(self):
     assert ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp) == 1024
-    ctypes.memset(self.adev.vmm.vram_to_cpu_addr(self.cmd_buf, 0x1000), 0, 0x1000)
+    ctypes.memset(self.cmd_cpu_addr, 0, 0x1000)
 
-    cmd = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.adev.vmm.vram_to_cpu_addr(self.cmd_buf))
+    cmd = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.cmd_cpu_addr)
     cmd.cmd_id = amdgpu_psp_gfx_if.GFX_CMD_ID_AUTOLOAD_RLC
     self.cmd_submit_buf()
 
@@ -264,10 +300,7 @@ class PSP_IP:
   
     self.ring_create()
 
-    # TMR
-    # TODO: 0x1300000 should be parsed from TOC...
-    self.tmr_size = 0x1300000
-    self.tmr_gpu_addr = self.adev.vmm.alloc_vram(self.tmr_size, "psp_tmr", align=0x100000) # psp tmr
+    self.tmr_init()
 
     # For ASICs with DF Cstate management centralized to PMFW, TMR setup should be performed after PMFW loaded and before other non-psp firmware loaded.
     self.load_smu_fw()
