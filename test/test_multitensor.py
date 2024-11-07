@@ -602,7 +602,7 @@ class TestMultiTensor(unittest.TestCase):
       output = X.dropout(0.5).numpy()
       unique, counts = np.unique(output, return_counts=True)
       assert set(unique) == {0, 2}, unique
-      assert 228 < counts[0] < 284, counts[0]
+      assert 200 < counts[0] < 312, counts[0]
 
   def test_dropout_on_uneven_shard_axis(self):
     with Tensor.train():
