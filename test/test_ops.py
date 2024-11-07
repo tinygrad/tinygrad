@@ -1855,8 +1855,6 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(1,2), padding=(0,1), stride=(5,1)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(1,2), padding=(0,1), stride=(5,1)), rtol=1e-5)
 
-  # Mismatched elements: 1 / 35 (2.86%) -0.32827917 (torch) != -0.49710596 (tiny) on non-cpu devices
-  @unittest.skipIf(Device.DEFAULT not in {"LLVM", "CLANG"}, "uhhh")
   def test_avgpool2d_failure2(self):
     helper_test_op([(1,1,32,32)],
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(2,6), padding=(1,3), stride=(8,5), ceil_mode=False, count_include_pad=False),
