@@ -21,14 +21,13 @@ class X86Renderer(Renderer):
   global_max = None
 
   extra_matcher = x86_pm
-  #string_rewrite = base_rewrite
   code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [Ops.NEG, Ops.EXP2, Ops.SIN, Ops.LOG2]})}
 
   def render(self, name:str, ops:List[UOp]) -> str:
     # 64 bit general registers, rsp/rbp not included
     gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx"] + ['r'+str(i) for i in range(10,16)]
     float_regs = ["xmm" + str(i) for i in range(0,16)]
-    size_to_suffix = {1: "byte", 2: "word", 4: "dword", 8: "qword"}
+    size_prefix = {1: "byte", 2: "word", 4: "dword", 8: "qword"}
     asm_ops = {Ops.STORE: "mov", Ops.LOAD: "mov", Ops.DEFINE_ACC: "mov", Ops.ASSIGN: "mov", Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "idiv",
                Ops.SHL: "shl", Ops.SHR: "shr", Ops.CMPNE: "cmp", Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor",
                Ops.RECIP: "rcp", Ops.SQRT: "sqrt", Ops.WHERE: "cmovz"}
@@ -40,12 +39,15 @@ class X86Renderer(Renderer):
 
     child_count = Counter(v for ru in ops for v in ru.src)
     uop_i = {u:i for i,u in enumerate(ops)}
+    # these ops require all operands to be regs
+    srcs_all_regs = (Ops.WHERE, Ops.IDIV)
 
-    def line(op:str, outr:str=None, inr:str=None) -> str:
+    def line(op:str, outr:str=None, inr:str=None, imm:str=None) -> str:
       nonlocal ins
       if outr is None: ins += f"{op}\n"
-      elif inr is None: ins += f"{op} {outr}\n" 
-      else: ins += f"{op} {outr}, {inr}\n"
+      elif inr is None: ins += f"{op} {outr}\n"
+      elif imm is None: ins += f"{op} {outr}, {inr}\n"
+      else: ins += f"{op} {outr}, {inr}, {imm}\n"
 
     # 64 bit int reg to lower bit reg
     def regsz(reg:str, sz:int) -> str:
@@ -63,14 +65,6 @@ class X86Renderer(Renderer):
         return f"[rbp - {mem[u]}]"
       sz = sz if sz else u.dtype.itemsize if not isinstance(u.dtype, PtrDType) else 8
       return regsz(regs[u], sz)
-
-    def addr(u:UOp) -> str:
-      if u.op is Ops.STORE and u.src[1].op is Ops.CONST:
-        return f"{size_to_suffix[u.src[1].dtype.itemsize]} ptr [{loc(u.src[0].src[0])} + {loc(u.src[0].src[1], 8)}*{u.src[0].dtype.itemsize}]"
-      return f"[{loc(u.src[0].src[0])} + {loc(u.src[0].src[1], 8)}*{u.src[0].dtype.itemsize}]"
-      #if u.op is Ops.STORE and u.src[2].op is Ops.CONST:
-      #  return f"{size_to_suffix[u.src[2].dtype.itemsize]} ptr [{loc(u.src[0])} + {loc(u.src[1], 8)}*{u.src[0].dtype.itemsize}]"
-      #return f"[{loc(u.src[0])} + {loc(u.src[1], 8)}*{u.src[0].dtype.itemsize}]"
     
     def op2(op:str, dt:DType) -> str:
       if dtypes.is_float(dt) and not isinstance(dt, PtrDType):
@@ -78,7 +72,6 @@ class X86Renderer(Renderer):
         s2 = 'd' if dt.itemsize == 8 else 's'
         if op == "cmp": return "ucomi" + s1 + s2
         if op == "mov": return op + ('u' if s1 == 'p' else '') + s1 + s2 # packed mov is unaligned
-        if u.src[0].op is Ops.GEP: return 'h' + op + 'p' + s2 # inner vector op
         return (op if op[0] != 'i' else op[1:]) + s1 + s2
       if dtypes.is_unsigned(u.dtype) and op == 'idiv': return op[1:]
       return op
@@ -120,40 +113,43 @@ class X86Renderer(Renderer):
           if s not in live_range: live_range[s] = []
           live_range[s].append(i)
 
-    # move define globals to stack, this frees them for spilling
-    for i,u in enumerate(ops):
-      if u.op is Ops.DEFINE_GLOBAL:
-        reg = assign_reg(i, u.dtype)
-        mem[u] = stack_size
-        stack_size += 8
-        free_reg(reg)
-        line("mov", loc(u), reg)
-    
-    # consts also mov to stack if they can't be immediate values
     for i,u in enumerate(ops):
       if u.op is Ops.CONST:
+        # consts to stack if they can't be immediate values
         if u.dtype.itemsize == 8 or dtypes.is_float(u.dtype):
           mem[u] = stack_size
           stack_size += 8
           line("mov", "r15", to_hex(u.arg))
           line("mov", loc(u), "r15")
+      if u.op is Ops.DEFINE_GLOBAL:
+        #define globals to stack, this frees them for spilling
+        reg = assign_reg(i, u.dtype)
+        mem[u] = stack_size
+        stack_size += 8
+        free_reg(reg)
+        line("mov", loc(u), reg)
+      if u.op in (Ops.CONST, Ops.DEFINE_GLOBAL): continue
 
-    for i,u in enumerate(ops):
-      if u.op in (Ops.CONST, Ops.DEFINE_GLOBAL, Ops.INDEX): continue
       # for now only non const srcs must be in registers, unless op requires all registers
-      # why is op index a thing, there's no reg/op associated with it
-      for s in (u.src if u.op not in (Ops.STORE, Ops.LOAD) else u.src[0].src):
-        if (s.op is not Ops.CONST or (u.op in (Ops.WHERE, Ops.IDIV))) and s not in regs:
-          if s.op is Ops.RANGE and s not in mem: continue
+      for s in u.src:
+        if (s.op is not Ops.CONST or u.op in srcs_all_regs) and s not in regs:
+          if uop_i[s] > i: continue # this happens in define_acc
           if s.op is not Ops.CONST: assert s in mem
           reg = assign_reg(i, s.dtype)
           line(op2("mov", s.dtype), reg, loc(s))
           regs[s] = reg
 
-      regs[u] = regs[u.src[0]] if u.op in (Ops.ASSIGN, Ops.GEP) else assign_reg(i, u.dtype)
+      regs[u] = regs[u.src[0]] if u.op in (Ops.ASSIGN,) else assign_reg(i, u.dtype)
       
-      if u.op is Ops.LOAD: line(opc(u), loc(u), addr(u))
-      elif u.op is Ops.STORE: line(opc(u), addr(u), loc(u.src[1]))
+      if u.op is Ops.INDEX:
+        line("lea", loc(u), f"[{loc(u.src[0])} + {loc(u.src[1], 8)}*{u.src[0].dtype.itemsize}]")
+        if u.src[1].op is Ops.CONST:
+          mem[u] = stack_size
+          stack_size += 8
+          line("mov", f"[rbp - {mem[u]}]", loc(u))
+          free_reg(regs.pop(u))
+      elif u.op is Ops.LOAD: line(opc(u), loc(u), f"[{loc(u.src[0])}]")
+      elif u.op is Ops.STORE: line(opc(u), f"[{loc(u.src[0])}]", loc(u.src[1]))
       elif u.op is Ops.DEFINE_ACC: line(opc(u), loc(u), loc(u.src[0]))
       elif u.op is Ops.ASSIGN:
         if regs[u] != regs[u.src[1]]: line(opc(u), loc(u), loc(u.src[1]))
@@ -164,6 +160,15 @@ class X86Renderer(Renderer):
         line("inc", loc(u.src[0]))
         line("cmp", loc(u.src[0]), loc(u.src[0].src[1]))
         line(f"jl .l{uop_i[u.src[0]]}")
+      elif u.op is Ops.GEP:
+        assert len(u.arg) == 1
+        assert dtypes.is_float(u.dtype)
+        idx_imm = {0: "0x00", 1: "0x55", 2:"0xAA", 3:"0xFF"}
+        line("shufps", loc(u), loc(u.src[0]), idx_imm[u.arg[0]])
+      elif u.op is Ops.VECTORIZE:
+        assert dtypes.is_float(u.dtype.scalar())
+        line(op2("mov", u.dtype.scalar()), loc(u), loc(u.src[0]))
+        line("unpcklps", loc(u), loc(u.src[1]))
       elif u.op is Ops.BITCAST:
         # bitcast just movs to register of the type
         assert dtypes.is_int(u.dtype) != dtypes.is_int(u.src[0].dtype), "what do?"
@@ -188,7 +193,8 @@ class X86Renderer(Renderer):
             line(op2("ucomi", u.src[0].dtype), loc(u.src[0]), temp_reg)
             line("setne", loc(u))
             float_cmp(u)
-        else:
+        elif not isinstance(u.dtype, PtrDType):
+          # cast between pointers don't do anything
           cfrom = "si" if not dtypes.is_float(u.src[0].dtype) else "tsd" if u.src[0].dtype.itemsize == 8 else "tss"
           cto = "si" if not dtypes.is_float(u.dtype) else "sd" if u.dtype.itemsize == 8 else "ss"
           # zero extend boolean
@@ -244,7 +250,7 @@ class X86Renderer(Renderer):
 
         elif u.op in GroupOp.Unary:
           # NOTE: using recip loses precision so we just div
-          if u.arg is Ops.RECIP:
+          if u.op is Ops.RECIP:
             assert u.dtype == dtypes.float32
             # load 1 into gen reg, mov to float reg and div
             temp_reg = assign_reg(i, dtypes.int32)
@@ -267,5 +273,5 @@ class X86Renderer(Renderer):
 # NOTE: for now we mov all operands to regs
 # TODO: handle func args in stack
 # TODO: avoid unnacessary registers using child_count
-# TODO: apparently LOAD can have 4 srcs it behaves like a cmov, do we want this? Shouldn't it just be a WHERE? This causes cumsum with NOOPT to seg fault
 # TODO: logsumexp and softmax with NOOPT are incorrect, something about range
+# TODO: everything before a range should just mov to the stack
