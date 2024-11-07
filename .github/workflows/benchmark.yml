@@ -25,7 +25,7 @@ jobs:
   testmacbenchmark:
     name: Mac Benchmark
     runs-on: [self-hosted, macOS]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -41,6 +41,8 @@ jobs:
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+    - name: clear disk cache
+      run: python3 -c "from tinygrad.helpers import diskcache_clear; diskcache_clear()"
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -128,7 +130,7 @@ jobs:
   testnvidiabenchmark:
     name: tinybox green Benchmark
     runs-on: [self-hosted, Linux, tinyboxgreen]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -147,6 +149,8 @@ jobs:
         ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: clear disk cache
+      run: python3 -c "from tinygrad.helpers import diskcache_clear; diskcache_clear()"
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -234,7 +238,7 @@ jobs:
   testmorenvidiabenchmark:
     name: tinybox green Training Benchmark
     runs-on: [self-hosted, Linux, tinyboxgreen]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -252,6 +256,8 @@ jobs:
         ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: clear disk cache
+      run: python3 -c "from tinygrad.helpers import diskcache_clear; diskcache_clear()"
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -302,7 +308,7 @@ jobs:
   testamdbenchmark:
     name: tinybox red Benchmark
     runs-on: [self-hosted, Linux, tinybox]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -321,6 +327,8 @@ jobs:
         ln -s /raid/weights/LLaMA-3 weights/LLaMA-3
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: clear disk cache
+      run: python3 -c "from tinygrad.helpers import diskcache_clear; diskcache_clear()"
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -406,7 +414,7 @@ jobs:
   testmoreamdbenchmark:
     name: tinybox red Training Benchmark
     runs-on: [self-hosted, Linux, tinybox]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -424,6 +432,8 @@ jobs:
         ln -s /raid/weights/LLaMA-2 weights/LLaMA-2
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
+    - name: clear disk cache
+      run: python3 -c "from tinygrad.helpers import diskcache_clear; diskcache_clear()"
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
@@ -470,7 +480,7 @@ jobs:
   testqualcommbenchmark:
     name: comma Benchmark
     runs-on: [self-hosted, Linux, comma]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -478,6 +488,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: clear disk cache
+      run: python3 -c "from tinygrad.helpers import diskcache_clear; diskcache_clear()"
     - name: setup staging db
       if: github.ref == 'refs/heads/update_benchmark_staging'
       run: |
