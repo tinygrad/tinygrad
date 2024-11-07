@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.engine.realize import lower_schedule
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 class TestCompileFailures(unittest.TestCase):
   def compile(self, out:Tensor):

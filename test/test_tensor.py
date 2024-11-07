@@ -7,7 +7,7 @@ from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import getenv, temp, CI, _METADATA, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")

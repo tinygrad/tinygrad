@@ -26,7 +26,7 @@ from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG, Timing
 from tinygrad.ops import UnaryOps, UOp, Ops
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 def on_linearizer_will_run(): pass
 def on_linearizer_did_run(): pass
