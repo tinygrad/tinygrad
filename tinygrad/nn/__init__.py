@@ -1,6 +1,6 @@
 from __future__ import annotations
 import math
-from typing import Optional, Union, Tuple
+from typing import Optional, Union, Tuple, List
 from tinygrad.tensor import Tensor, dtypes
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import prod, make_tuple, flatten

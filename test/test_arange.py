@@ -137,7 +137,7 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       np.testing.assert_equal(X.numpy(), 0)
 
-  @unittest.skipIf(getenv("PTX") or Device.DEFAULT == "WEBGPU", "broken on ptx for some reason, WEBGPU has no uint8")
+  @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
   def test_index_mnist(self, noopt=1, op_limit=512*784*5):
     from tinygrad.nn.datasets import mnist
     X_train, Y_train, _, _ = mnist()
