@@ -33,7 +33,7 @@ def _test_single_value(vals, op, dts):
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   buf_loads = [uop(uops, Ops.DEFINE_GLOBAL, dtype.ptr(), (), i+1) for i,dtype in enumerate(dts)]
   loads = (uop(uops, Ops.LOAD, dtype, [buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0))]) for i, dtype in enumerate(dts))
-  alu = uop(uops, Ops.ALU, output_dtype, loads, op)
+  alu = uop(uops, op, output_dtype, loads)
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=_to_np_dtype(dtype)).data) for a,dtype in zip(vals, dts)]
@@ -48,7 +48,7 @@ def _test_single_value_const(vals, op, dts):
   output_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dts[-1]
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   loads = (uop(uops, Ops.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
-  alu = uop(uops, Ops.ALU, output_dtype, loads, op)
+  alu = uop(uops, op, output_dtype, loads)
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
@@ -332,8 +332,8 @@ class TestAssembly(unittest.TestCase):
     c1 = UOp(Ops.CONST, dtypes.int, (), 2)
     c2 = UOp(Ops.CONST, dtypes.int, (), 3)
     l1 = UOp(Ops.LOAD, dtypes.int, (g1.index(c1),))
-    a1 = UOp(Ops.ALU, dtypes.int, (l1, c1), BinaryOps.MUL)
-    a2 = UOp(Ops.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
+    a1 = UOp(Ops.MUL, dtypes.int, (l1, c1))
+    a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops[-1].op, BinaryOps.SHL)
@@ -344,8 +344,8 @@ class TestAssembly(unittest.TestCase):
     c1 = UOp(Ops.CONST, dtypes.int, (), 2)
     c2 = UOp(Ops.CONST, dtypes.int, (), 3)
     l1 = UOp(Ops.LOAD, dtypes.int, (g1.index(c1),))
-    a1 = UOp(Ops.ALU, dtypes.int, (l1, c1), BinaryOps.IDIV)
-    a2 = UOp(Ops.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
+    a1 = UOp(Ops.IDIV, dtypes.int, (l1, c1))
+    a2 = UOp(Ops.IDIV, dtypes.int, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
     self.assertEqual(uops[-1].op, BinaryOps.SHR)
@@ -357,8 +357,8 @@ class TestUOpMethod(unittest.TestCase):
     a = UOp(Ops.CONST, dtypes.float, (), 2.0)
     b = UOp(Ops.CONST, dtypes.float, (), 3.0)
 
-    add = UOp(Ops.ALU, dtypes.float, (a, b), BinaryOps.ADD)
-    mul = UOp(Ops.ALU, dtypes.float, (a, b), BinaryOps.MUL)
+    add = UOp(Ops.ADD, dtypes.float, (a, b))
+    mul = UOp(Ops.MUL, dtypes.float, (a, b))
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
 
   def test_uop_variables(self):

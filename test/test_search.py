@@ -108,12 +108,12 @@ class TestBEAM(unittest.TestCase):
         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()),
         UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1, 256), strides=(0, 0, 1), offset=0, mask=None, contiguous=True),)), src=()), # noqa: E501
         UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.MAX, (1,)), src=(
-          UOp(Ops.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
-            UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-              UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-                UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-                  UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-                    UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+          UOp(Ops.MUL, dtypes.float, arg=None, src=(
+            UOp(Ops.ADD, dtypes.float, arg=None, src=(
+              UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                  UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                    UOp(Ops.ADD, dtypes.float, arg=None, src=(
                       UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()),
                         UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=0, mask=((0, 64128),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)), # noqa: E501

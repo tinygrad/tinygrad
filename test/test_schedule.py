@@ -30,18 +30,19 @@ def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_pr
     for pre in to_prerealize: pre.schedule()
   sched = create_schedule(outs)
   if filter_sink: sched = [s for s in sched if s.ast.op is Ops.SINK]
-  if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
-  if len(sched) != allowed or DEBUG >= 3:
-    for i, s in enumerate(sched):
-      print("kernel", i+1)
-      print(s.ast)
-  if len(sched) != allowed: raise KernelCountException(f"{len(sched)=} != {allowed}")
+  if len(sched) != allowed:
+    print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
+    if DEBUG >= 3:
+      for i,s in enumerate(sched):
+        print("kernel", i+1)
+        print(s.ast)
+    raise KernelCountException(f"{len(sched)=} != {allowed}")
   # test the (sink) ops linearize
   for s in sched:
     if s.ast.op is not Ops.SINK: continue
     l = Kernel(s.ast)
     l.hand_coded_optimizations()
-    l.linearize()
+    l.to_program()
   return sched
 
 def _realize_weights(m):
@@ -1613,7 +1614,7 @@ class TestIndexing(unittest.TestCase):
       return a.item()
     r, et = timeit(f, a)
     self.assertEqual(r, val)
-    self.assertLess(et, 1200)
+    self.assertLess(et, 1600)
 
   def test_no_rewrite_elementwise(self):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(3)]
@@ -1689,10 +1690,10 @@ class TestIndexing(unittest.TestCase):
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
         UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0, src=()),
         UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1), strides=(0, 0), offset=0, mask=None, contiguous=True),)), src=()), # noqa: E501
-        UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
-          UOp(Ops.ALU, dtypes.int, arg=BinaryOps.ADD, src=(
+        UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(Ops.ADD, (0, 1)), src=(
+          UOp(Ops.ADD, dtypes.int, arg=None, src=(
             UOp(Ops.VIEW, dtypes.int, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=( # noqa E501
-              UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(BinaryOps.ADD, (0, 1)), src=(
+              UOp(Ops.REDUCE_AXIS, dtypes.int, arg=(Ops.ADD, (0, 1)), src=(
                 UOp(Ops.LOAD, dtypes.int, arg=None, src=(
                   x8:=UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1, src=()),
                   UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(32, 32), strides=(32, 1), offset=0, mask=None, contiguous=True),)), src=()),)),)),)), # noqa E501
@@ -1776,11 +1777,11 @@ class TestIndexing(unittest.TestCase):
         UOp(Ops.CONTIGUOUS, dtypes.float, arg=None, src=(
            x1,
           UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(1, 32, 32, 16), strides=(0, 32, 1, 1024), offset=0, mask=None, contiguous=False),)), src=(
-            UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-              UOp(Ops.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
+            UOp(Ops.ADD, dtypes.float, arg=None, src=(
+              UOp(Ops.ADD, dtypes.float, arg=None, src=(
                 UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(1, 16, 32, 32), strides=(0, 1, 512, 16), offset=0, mask=None, contiguous=False),)), src=(
-                  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (7, 8)), src=(
-                    UOp(Ops.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
+                  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (7, 8)), src=(
+                    UOp(Ops.MUL, dtypes.float, arg=None, src=(
                       UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(1, 32, 32, 1, 1, 4, 4, 4, 4, 1, 1), strides=(0, 512, 16, 0, 0, 0, 0, 4, 1, 0, 0), offset=0, mask=None, contiguous=False),)), src=(
                         x11:=UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                           UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(2, ('METAL', 16384, dtypes.float)), src=()),

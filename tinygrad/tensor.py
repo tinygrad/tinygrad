@@ -3132,7 +3132,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
   def lt(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, False))
   def gt(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, True))
-  def ne(self, x) -> Tensor: return F.Neq.apply(*self._broadcasted(x))  # type: ignore[override]
+  def ne(self, x) -> Tensor: return F.Neq.apply(*self._broadcasted(x))
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
 
