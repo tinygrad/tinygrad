@@ -33,3 +33,32 @@ class Firmware:
 
   def mes_data_psp_desc(self, hdr):
     return self.load_fw(hdr, self.header.mes_ucode_data_offset_bytes, self.header.mes_ucode_data_size_bytes)
+
+  def rlc_v2_psp_desc(self, vv):
+    assert vv == amdgpu_psp_gfx_if.GFX_FW_TYPE_RLC_G
+    hdr = amdgpu_2.struct_rlc_firmware_header_v2_0.from_buffer(self.blob[:ctypes.sizeof(amdgpu_2.struct_rlc_firmware_header_v2_0)])
+    return self.load_fw(vv, self.common_header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes)
+
+  def rlc_v2_1_psp_desc(self, vv):
+    hdr = amdgpu_2.struct_rlc_firmware_header_v2_1.from_buffer(self.blob[:ctypes.sizeof(amdgpu_2.struct_rlc_firmware_header_v2_1)])
+    if vv == amdgpu_psp_gfx_if.GFX_FW_TYPE_RLC_RESTORE_LIST_GPM_MEM:
+      return self.load_fw(vv, hdr.save_restore_list_gpm_offset_bytes, hdr.save_restore_list_gpm_size_bytes)
+    if vv == amdgpu_psp_gfx_if.GFX_FW_TYPE_RLC_RESTORE_LIST_SRM_MEM:
+      return self.load_fw(vv, hdr.save_restore_list_srm_offset_bytes, hdr.save_restore_list_srm_size_bytes)
+    assert False
+
+  def rlc_v2_2_psp_desc(self, vv):
+    hdr = amdgpu_2.struct_rlc_firmware_header_v2_2.from_buffer(self.blob[:ctypes.sizeof(amdgpu_2.struct_rlc_firmware_header_v2_2)])
+    if vv == amdgpu_psp_gfx_if.GFX_FW_TYPE_RLC_IRAM:
+      return self.load_fw(vv, hdr.rlc_iram_ucode_offset_bytes, hdr.rlc_iram_ucode_size_bytes)
+    if vv == amdgpu_psp_gfx_if.GFX_FW_TYPE_RLC_DRAM_BOOT:
+      return self.load_fw(vv, hdr.rlc_dram_ucode_offset_bytes, hdr.rlc_dram_ucode_size_bytes)
+    assert False
+
+  def rlc_v2_3_psp_desc(self, vv):
+    hdr = amdgpu_2.struct_rlc_firmware_header_v2_3.from_buffer(self.blob[:ctypes.sizeof(amdgpu_2.struct_rlc_firmware_header_v2_3)])
+    if vv == amdgpu_psp_gfx_if.GFX_FW_TYPE_RLC_P:
+      return self.load_fw(vv, hdr.rlcp_ucode_offset_bytes, hdr.rlcp_ucode_size_bytes)
+    if vv == amdgpu_psp_gfx_if.GFX_FW_TYPE_RLC_V:
+      return self.load_fw(vv, hdr.rlcv_ucode_offset_bytes, hdr.rlcv_ucode_size_bytes)
+    assert False

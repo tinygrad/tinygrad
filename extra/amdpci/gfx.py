@@ -16,9 +16,9 @@ class GFX_IP:
     
     self.clear_state_size = 0x10000
     self.clear_state_gpu_addr = self.adev.vmm.alloc_vram(self.clear_state_size, "clear_state")
-    
+
+  def init(self):
     self.setup()
-    pass
 
   def wait_for_rlc_autoload(self):
     # return # skip when load with amdgpu driver

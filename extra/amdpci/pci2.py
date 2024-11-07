@@ -121,10 +121,11 @@ class AMDDev:
     print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
     print(hex(self.raw_vram.cast('Q')[0x400]))
 
-    exit(0)
+    # from extra.amdpci.gfx import GFX_IP
+    # self.gfx = GFX_IP(self)
+    # self.gfx.wait_for_rlc_autoload()
 
-    from extra.amdpci.gfx import GFX_IP
-    self.gfx = GFX_IP(self)
+    exit(0)
 
   def pcie_index_offset(self): return self.reg_off("NBIO", 0, amdgpu_nbio_4_3_0.regBIF_BX_PF0_RSMU_INDEX, amdgpu_nbio_4_3_0.regBIF_BX_PF0_RSMU_INDEX_BASE_IDX)
   def pcie_data_offset(self): return self.reg_off("NBIO", 0, amdgpu_nbio_4_3_0.regBIF_BX_PF0_RSMU_DATA, amdgpu_nbio_4_3_0.regBIF_BX_PF0_RSMU_DATA_BASE_IDX)
