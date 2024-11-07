@@ -2,12 +2,13 @@
 import unittest, random
 import numpy as np
 from tinygrad.codegen.kernel import Kernel, KernelOptError
+from tinygrad.device import is_dtype_supported
 from tinygrad.ops import UOp, Ops, BinaryOps
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import CI
 from test.external.fuzz_linearizer import compare_linearizer
-from test.helpers import is_dtype_supported, ast_const
+from test.helpers import ast_const
 
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View

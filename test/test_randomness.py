@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit
 from tinygrad.helpers import getenv, CI
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 from hypothesis import given, settings, strategies as strat
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
