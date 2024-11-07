@@ -599,15 +599,16 @@ class TestOps(unittest.TestCase):
       helper_test_op([()], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val))
 
   def test_prelu(self):
-    helper_test_op([(45,65), ()], lambda x,w: torch.nn.functional.prelu(x,w), lambda x,w: Tensor.prelu(x,w), forward_only=True)
-    helper_test_op([(1,3,6,6), ()], lambda x,w: torch.nn.functional.prelu(x,w), lambda x,w: Tensor.prelu(x,w), forward_only=True)
-    helper_test_op([(1,3,6,6), (3,)], lambda x,w: torch.nn.functional.prelu(x,w), lambda x,w: Tensor.prelu(x,w), forward_only=True)
+    helper_test_op([(45,65), ()], lambda x,w: torch.nn.functional.prelu(x,w), lambda x,w: Tensor.prelu(x,w,channel_dim=1), forward_only=True)
+    helper_test_op([(1,3,6,6), ()], lambda x,w: torch.nn.functional.prelu(x,w), lambda x,w: Tensor.prelu(x,w,channel_dim=1), forward_only=True)
+    helper_test_op([(1,3,6,6), (3,)], lambda x,w: torch.nn.functional.prelu(x,w), lambda x,w: Tensor.prelu(x,w,channel_dim=1), forward_only=True)
+    helper_test_op([(3,3,6,6), (3,)], lambda x,w: torch.nn.functional.prelu(x,w), lambda x,w: Tensor.prelu(x,w,channel_dim=1), forward_only=True)
     self.helper_test_exception([(45,65), (3)],
                                lambda x,w: torch.nn.functional.prelu(x,w),
-                               lambda x,w: Tensor.prelu(x,w), expected=(RuntimeError, ValueError))
+                               lambda x,w: Tensor.prelu(x,w,channel_dim=1), expected=(RuntimeError, ValueError))
     self.helper_test_exception([(1,3,6,6), (3,3)],
                                lambda x,w: torch.nn.functional.prelu(x,w),
-                               lambda x,w: Tensor.prelu(x,w), expected=(RuntimeError, ValueError))
+                               lambda x,w: Tensor.prelu(x,w,channel_dim=1), expected=(RuntimeError, ValueError))
     self.helper_test_exception([(1,3,6,6), (6)],
                                lambda x,w: torch.nn.functional.prelu(x,w),
                                lambda x,w: Tensor.prelu(x,w,channel_dim=1), expected=(RuntimeError, ValueError))

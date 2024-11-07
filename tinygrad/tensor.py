@@ -2514,7 +2514,7 @@ class Tensor:
     """
     return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
 
-  def prelu(self, weight: Tensor, channel_dim:Optional[int]=1):
+  def prelu(self, weight: Tensor, channel_dim:Optional[int]=None):
     """
     Applies the Parametric Rectified Linear Unit (PReLU) function element-wise.
     NOTE: if `weight` is a non-scalar 1-D Tensor, prelu follows unconventional broadcasting rules determined by `channel_dim`
@@ -2529,6 +2529,7 @@ class Tensor:
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).prelu().numpy())
     ```
     """
+    if self.shape == weight.shape: return (self > 0).where(self, self * weight)
     if weight.ndim > 1: raise ValueError("weight must be a scalar or a 1-D Tensor")
     if self.ndim <= 2 and weight.ndim != 0: raise ValueError("weight must be scalar if there are no channels")
     if channel_dim is not None and weight.shape and self.size(channel_dim) != weight.size(0): raise ValueError("weight size must equal channel size")
