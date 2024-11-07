@@ -135,7 +135,6 @@ class TestRealStrides(unittest.TestCase):
     ))
     self.assertEqual(st.real_strides(), (90, 45, None, None))
 
-  @unittest.expectedFailure  # FIXME
   def test_3(self):
     # test/test_ops.py::TestOps::test_simple_cumsum
     st = ShapeTracker((
@@ -145,7 +144,6 @@ class TestRealStrides(unittest.TestCase):
     ))
     self.assertEqual(st.real_strides(), (256, None, None))
 
-  @unittest.expectedFailure  # FIXME
   def test_4(self):
     # test/test_nn.py::TestNN::test_conv_transpose1d
     st = ShapeTracker((
