@@ -1894,7 +1894,6 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, count_include_pad=True),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, count_include_pad=True), rtol=1e-5)
 
-
   def test_global_avgpool2d(self):
     helper_test_op([(32,2,111,28)],
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
