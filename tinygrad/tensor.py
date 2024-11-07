@@ -1967,7 +1967,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
   def _padding2d(self, padding:Union[int, Sequence[int]], dims:int) -> Sequence[int]:
     return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
 
-  def _ceil_mode_padding2d(self,k_:Tuple[sint, ...], d_:Union[Tuple[int, ...], int], s_:Union[Tuple[int, ...], int],
+  def _ceil_mode_padding2d(self,k_:Tuple[sint, ...], s_:Union[Tuple[int, ...], int], d_:Union[Tuple[int, ...], int],
                            p_:Union[Tuple[int, ...], int]) -> Sequence[int]:
     (d_,s_,p_) = (make_tuple(x, len(i_ := self.shape[-len(k_):])) for x in (d_,s_,p_))
     # https://arxiv.org/pdf/1603.07285 section 5.1
@@ -2006,15 +2006,15 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.avg_pool2d(padding=1).numpy())
     ```
     """
-    padding_, axis = self._padding2d(padding, len(k_ := make_tuple(kernel_size, 2))), tuple(range(-len(k_), 0))
-    def pool(x:Tensor) -> Tensor: return x.pad2d(padding_)._pool(k_, stride if stride is not None else k_, dilation)
-    if not all(p==0 for p in make_tuple(padding, 2)) and ceil_mode and count_include_pad:
-      # the additional padding from ceil_mode is not counted towards denominator
-      padding_, pR = self._ceil_mode_padding2d(k_, dilation, stride if stride is not None else k_, padding), self._padding2d(padding, len(k_))
-      denominator = self.pad2d(pR).ones_like().pad2d(tuple(p_ceil - p_real for p_ceil, p_real in zip(padding_, pR)))
-      return pool(self).sum(axis=axis) / denominator._pool(k_, stride if stride is not None else k_, dilation).sum(axis=axis)
-    if ceil_mode: padding_ = self._ceil_mode_padding2d(k_, dilation, stride if stride is not None else k_, padding)
-    return pool(self).mean(axis=axis) if count_include_pad else pool(self).sum(axis=axis) / pool(self.ones_like()).sum(axis=axis)
+    def pool(x:Tensor, padding_:Sequence[int]) -> Tensor: return x.pad2d(padding_)._pool(k_, stride if stride is not None else k_, dilation)
+    axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
+    real_pads = self._padding2d(padding,len(k_))
+    if not ceil_mode and count_include_pad: return pool(self, real_pads).mean(axis=axis)
+    if not ceil_mode and not count_include_pad: return pool(self, real_pads).sum(axis=axis) / pool(self.ones_like(), real_pads).sum(axis=axis)
+    ceil_pads = self._ceil_mode_padding2d(k_, stride if stride is not None else k_, dilation, padding)
+    if count_include_pad: return pool(self, ceil_pads).mean(axis=axis)
+    # ceil_mode and not count_include_pad
+    return pool(self, ceil_pads).sum(axis=axis) / pool(self.pad2d(real_pads).ones_like(), tuple(cp - rp for cp,rp in zip(ceil_pads, real_pads)))
 
   def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False):
     """
@@ -2032,9 +2032,9 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.max_pool2d(padding=1).numpy())
     ```
     """
-    padding_ = self._padding2d(padding, len(k_ := make_tuple(kernel_size, 2)))
-    if ceil_mode: padding_ = self._ceil_mode_padding2d(k_, dilation, stride if stride is not None else k_, padding)
-    return self.pad2d(padding_, value=float('-inf'))._pool(k_, stride if stride is not None else k_, dilation).max(axis=tuple(range(-len(k_), 0)))
+    k_ = make_tuple(kernel_size, 2)
+    p_ = self._ceil_mode_padding2d(k_, stride if stride is not None else k_, dilation, padding) if ceil_mode else self._padding2d(padding, len(k_))
+    return self.pad2d(p_, value=float('-inf'))._pool(k_, stride if stride is not None else k_, dilation).max(axis=tuple(range(-len(k_), 0)))
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding:int|Tuple[int, ...]=0,
              acc_dtype:Optional[DTypeLike]=None) -> Tensor:
