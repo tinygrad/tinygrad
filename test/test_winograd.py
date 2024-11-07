@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, GlobalCounters
-from tinygrad.ops import UOps
+from tinygrad.ops import Ops
 from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG, getenv
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import create_schedule
@@ -23,7 +23,7 @@ class TestWinograd(unittest.TestCase):
       sched = create_schedule([out.lazydata])
 
     for i,s in enumerate(sched):
-      if s.ast.op is not UOps.SINK: continue
+      if s.ast.op is not Ops.SINK: continue
       ops = s.ast.parents
       with Timing(f"linearize {i} with {len(ops):4d} ops: "):
         l = Kernel(s.ast)

@@ -28,7 +28,7 @@ class Cast(Function):
 
 class Reciprocal(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.recip()
+    self.ret = x.reciprocal()
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return -grad_output * self.ret * self.ret
@@ -42,7 +42,7 @@ class Sin(Function):
 
 class Relu(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.max(0)
+    self.ret = x.maximum(0)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.gt(0).cast(grad_output.dtype) * grad_output
@@ -73,7 +73,7 @@ class Sqrt(Function):
 # TODO: have the backend automatically find this
 class Sigmoid(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = (1 + (x * (-1/math.log(2))).exp2()).recip()
+    self.ret = (1 + (x * (-1/math.log(2))).exp2()).reciprocal()
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
@@ -156,7 +156,7 @@ class Prod(Function):
 
 class Max(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
-    self.x, self.ret, self.axis = x, x.r(ReduceOps.MAX, axis), axis
+    self.x, self.ret, self.axis = x, x.r(ReduceOps.REDUCE_MAX, axis), axis
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
