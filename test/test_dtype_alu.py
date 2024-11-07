@@ -112,6 +112,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
   def test_bfloat16(self, a, b, op): universal_test(a, b, dtypes.bfloat16, op)
 
+  @unittest.skipIf(Device.DEFAULT== "WEBGPU", "Precision issue on WebGPU")
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
@@ -148,12 +149,14 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, ht.int32, strat.sampled_from(integer_binary_operations))
   def test_int32(self, a, b, op): universal_test(a, b, dtypes.int32, op)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.int64, Device.DEFAULT), f"no int64 on {Device.DEFAULT}")
   @given(ht.int64, ht.int64, strat.sampled_from(integer_binary_operations))
   def test_int64(self, a, b, op): universal_test(a, b, dtypes.int64, op)
 
   @given(ht.bool, ht.bool, strat.sampled_from(((operator.add, operator.add), (operator.mul, operator.mul))))
   def test_bool(self, a, b, op): universal_test(a, b, dtypes.bool, op)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Precision issue in WebGPU")
   @given(ht.int32, ht.int32, ht.float32, strat.sampled_from(integer_binary_operations), strat.sampled_from(binary_operations))
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 

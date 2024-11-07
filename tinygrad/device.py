@@ -50,7 +50,7 @@ class BufferOptions:
   cpu_access: bool = False
   host: bool = False
   nolru: bool = False
-  wgpu_bool: bool = False
+  scale_size: int = 1
   external_ptr: Optional[int] = None
 
 class Buffer:
@@ -58,7 +58,10 @@ class Buffer:
                initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
-    if dtype == dtypes.bool and device == "WEBGPU": options = BufferOptions(wgpu_bool=True)
+    # on webgpu buffers have to be 4-byte aligned
+    if device == "WEBGPU":
+      scale_sizes = defaultdict(lambda: 1, {dtypes.bool: 4, dtypes.char: 4, dtypes.uchar: 4, dtypes.short: 2, dtypes.ushort: 2})
+      options = BufferOptions(scale_size = scale_sizes[dtype])
     self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
     if base is None:
       assert offset == 0, "base buffers can't have offset"
@@ -209,7 +212,9 @@ def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
   if dtype == dtypes.bfloat16:
     # NOTE: this requires bf16 buffer support
     return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
-  if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
+  if device == "WEBGL": return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
+  if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
+                                          dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32]
   # for CI GPU and OSX, cl_khr_fp16 isn't supported
   # for CI LLVM, it segfaults because it can't link to the casting function
   # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs

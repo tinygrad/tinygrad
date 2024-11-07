@@ -49,14 +49,19 @@ class WebGPUProgram:
 class WebGpuAllocator(Allocator):
   def __init__(self, device): self.device = device
   def _alloc(self, size: int, options):
-    if options.wgpu_bool: size = 4 * size # storing bools as i32
-    return self.device.create_buffer(size=size, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)
-  # copies are hacky for booleans.
+    scaled_size = size*options.scale_size
+    return self.device.create_buffer(size=scaled_size, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)
   def copyin(self, dest, src: memoryview):
-    if dest.size == len(src) * 4: self.device.queue.write_buffer(dest, 0, bytearray([byte for b in src for byte in [b, 0, 0, 0]]))
+    scale = dest.size // len(src)
+    if scale == 4: self.device.queue.write_buffer(dest, 0, bytearray([byte for b in src for byte in [b, 0, 0, 0]]))
+    elif scale == 2: self.device.queue.write_buffer(dest, 0, bytearray([byte for i in range(0, len(src), 2) for byte in [src[i], src[i+1], 0, 0]]))
     else: self.device.queue.write_buffer(dest, 0, src)
   def copyout(self, dest: memoryview, src):
-    dest[:] = self.device.queue.read_buffer(src, 0)[::4] if src.size == 4 * len(dest) else self.device.queue.read_buffer(src, 0)
+    step = (4 // (src.size // len(dest)))
+    raw_data = self.device.queue.read_buffer(src, 0)
+    extracted_data = bytearray()
+    for i in range(0, len(raw_data), 4): extracted_data.extend(raw_data[i:i+step])
+    dest[:] = extracted_data[:len(dest)]
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):

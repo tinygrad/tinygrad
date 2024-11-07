@@ -23,23 +23,30 @@ wgsl_matcher = PatternMatcher([
    lambda bidx,val,gate: UOp.store(bidx, val.cast(dtypes.int), gate)),
   (UPat.store(UPat.var("bidx"), UPat.var("var", dtype=dtypes.bool)), lambda bidx,var: UOp.store(bidx, var.cast(dtypes.int))),
   (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
+  # prevent ulong mul: 'a * select(0, 1 << 32, cond) -> select(0, a << 32, cond)'
   (UPat(Ops.MUL, name="m", src=(UPat(name="a"), UPat(TernaryOps.WHERE, src=(UPat.var("g"), \
     UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2")))), dtype=dtypes.ulong), \
     lambda m,a,g,c1,c2: UOp(TernaryOps.WHERE, dtype=m.dtype, src=(g, a << 32, UOp.const(dtype=m.dtype, b=0))) \
-    if c1.arg == 4294967296 and c2.arg == 0 else None),
+    if c1.arg == (1 << 32) and c2.arg == 0 else None),
+  # fix nan propagation: 'a * select(1, nan, cond) -> select(a, nan, cond)'
   (UPat(Ops.MUL, name="m", src=(UPat(name="a"), UPat(TernaryOps.WHERE, src=(UPat.var("g"), \
     UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2"))))), \
     lambda m,a,g,c1,c2: UOp(TernaryOps.WHERE, dtype=m.dtype, src=(g, UOp.const(dtype=dtypes.float, b=float('nan')), a)) \
     if math.isnan(c1.arg) and c2.arg == 1.0 else None),
   ])
 
-type_map = {dtypes.float: "f32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.ulong: "vec2<u32>"}
+type_map = { dtypes.float: "f32", dtypes.uchar: "u32", dtypes.ushort: "u32", dtypes.short: "i32",
+            dtypes.char: "i32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.ulong: "vec2<u32>" }
 
-def render_load_store(r, bidx):
+# convert from pointer style indexing to array style
+def render_load_store(r, bidx, sext = False, sext_am = 8):
   sbidx = strip_parens(r[bidx])
   buf, idx = sbidx.split("+")[0], '+'.join(sbidx.split("+")[1:])
-  return f"{buf}[{idx}]"
+  # sign-extend when loading char/short
+  return f"bitcast<i32>(select(0u, 0xffffffffu << {sext_am}, (({buf}[{idx}] >> {sext_am-1}) > 0)) | bitcast<u32>({buf}[{idx}]))" \
+    if sext else f"{buf}[{idx}]"
 
+# emulate ulong shift
 def render_ushift(r, v, am, left):
   v, am = r[v], f"{r[am]}.x" if am.dtype == dtypes.ulong else f"{r[am]}"
   return f"select(vec2<u32>({v}.x << {am}, ({v}.y << {am}) | ({v}.x >> (32u-{am}))), vec2<u32>(0u, {v}.x << ({am}-32u)), {am} >= 32u)" \
@@ -60,21 +67,29 @@ class WGSLRenderer(CStyleLanguage):
 
   string_rewrite = PatternMatcher([
     (UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda ctx,x: "true" if x.arg else "false"),
-    (UPat(Ops.CONST, dtype=dtypes.uint32, name="x"), lambda ctx,x: f"bitcast<u32>({x.arg}i)" if x.arg < 0 else f"{x.arg&0xFFFFFFFF}u"),
+    (UPat(Ops.CONST, dtype=(dtypes.char, dtypes.short), name="x"), lambda ctx,x: f"i32({x.arg})"),
+    (UPat(Ops.CONST, dtype=(dtypes.uchar, dtypes.ushort, dtypes.uint32), name="x"), lambda ctx,x: f"bitcast<u32>({x.arg}i)" \
+     if x.arg < 0 else f"{x.arg&0xFFFFFFFF}u"),
     (UPat(Ops.CONST, dtype=dtypes.ulong, name="x"), lambda ctx,x: f"vec2<u32>({x.arg}, 0u)" if x.arg <= 0xFFFFFFFF \
      else  f"vec2<u32>({x.arg&0xFFFFFFFF}, {x.arg>>32})"),
     (UPat(Ops.CONST, arg=math.inf, name="x"), lambda ctx, x: f"{type_map[x.dtype]}({ctx.infinity})"),
     (UPat(Ops.CONST, arg=-math.inf, name="x"), lambda ctx, x: f"{type_map[x.dtype]}(-{ctx.infinity})"),
     (UPat(Ops.CONST, dtype=dtypes.floats, name="x"), lambda ctx,x: f"({type_map[x.dtype]}({ctx.nan}))" if math.isnan(x.arg) else None),
     (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"var<workgroup> {ctx[x]}: array<{type_map[x.dtype.base]}, {x.arg[1]}>;"),
-    (UPat(Ops.CAST, name="x"), lambda ctx,x: f"vec2<u32>(({ctx[x.src[0]]})&4294967295, 0u)" if x.dtype == dtypes.uint64 \
+    (UPat(Ops.CAST, name="x"), lambda ctx,x: f"vec2<u32>(({ctx[x.src[0]]}), 0u)" if x.dtype == dtypes.uint64 \
       else f"{type_map[x.dtype]}({ctx[x.src[0]]}.x)" if x.src[0].dtype == dtypes.uint64 else f"{type_map[x.dtype]}({ctx[x.src[0]]})"),
+    (UPat(Ops.BITCAST, dtype=(dtypes.char, dtypes.uchar), name="x"), lambda ctx,x: f"bitcast<{type_map[x.dtype]}>({ctx[x.src[0]]}&0xFF)"),
+    (UPat(Ops.BITCAST, dtype=(dtypes.short, dtypes.ushort), name="x"), lambda ctx,x: f"bitcast<{type_map[x.dtype]}>({ctx[x.src[0]]}&0xFFFF)"),
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"bitcast<{type_map[x.dtype]}>({ctx[x.src[0]]})"),
-    (UPat(Ops.LOAD, src=(UPat.var("bidx"), UPat.var('var'), UPat.var("gate"))),
-      lambda ctx,bidx,var,gate: f"select({ctx[var]}, {render_load_store(ctx, bidx)}, {ctx[gate]})"),
-    (UPat(Ops.LOAD, src=(UPat.var('bidx'),), allow_any_len=True), lambda ctx,bidx: f"{render_load_store(ctx, bidx)}"),
+    # sign extended loads for char, short
+    (UPat(Ops.LOAD, name="l", src=(UPat.var("bidx"), UPat.var('var'), UPat.var("gate"))),
+      lambda ctx,l,bidx,var,gate: f"select({ctx[var]}, {render_load_store(ctx, bidx, l.dtype in [dtypes.char, dtypes.short], \
+        8*l.dtype.itemsize)}, {ctx[gate]})"),
+    (UPat(Ops.LOAD, name="l", src=(UPat.var('bidx'),), allow_any_len=True), lambda ctx,l, bidx:
+     f"{render_load_store(ctx, bidx, l.dtype in [dtypes.char, dtypes.short], 8*l.dtype.itemsize)}"),
     (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var")), allow_any_len=True),
      lambda ctx,bidx,var: f"{render_load_store(ctx,bidx)} = {ctx[var]};"),
+    # fix nan check: 'a != a -> is_nan()'
     (UPat(Ops.CMPNE, src=(UPat.var("a"), UPat.var("b"))), lambda ctx,a,b: f"is_nan({ctx[a]})" if a == b else None),
     (UPat(Ops.SHL, name="x", dtype=dtypes.ulong), lambda ctx,x: render_ushift(ctx, x.src[0], x.src[1], left=True)),
     (UPat(Ops.SHR, name="x", dtype=dtypes.ulong), lambda ctx,x: render_ushift(ctx, x.src[0], x.src[1], left=False)),

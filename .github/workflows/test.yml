@@ -384,7 +384,8 @@ jobs:
     - name: Run selected webgpu tests
       run: |
           WEBGPU=1 WGPU_BACKEND_TYPE=Metal python3 -m pytest test/test_assign.py test/test_arange.py test/test_const_folding.py test/test_dtype.py \
-          test/test_conv.py test/test_conv_shapetracker.py test/test_nn.py test/test_ops.py test/test_optim.py test/test_randomness.py --durations=20
+          test/test_dtype_alu.py test/test_conv.py test/test_conv_shapetracker.py test/test_nn.py test/test_ops.py test/test_optim.py \
+          test/test_randomness.py test/test_uops_stats.py test/test_uops.py  --durations=20
 
   testmetal:
     name: Metal Tests
