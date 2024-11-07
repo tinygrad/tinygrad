@@ -8,7 +8,7 @@ import numpy as np
 
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
                   "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-                  "Elu", "Celu", "PRelu", "Xor", "Round"}
+                  "Elu", "Celu", "PRelu", "Xor", "Round", "Erf"}
 
 # **************** Free Ops ****************
 
