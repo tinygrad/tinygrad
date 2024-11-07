@@ -1295,7 +1295,7 @@ class TestLinearizerFailures(unittest.TestCase):
                   UOp(Ops.CONST, dtypes.bool, arg=True, src=()),
                   UOp(Ops.CONST, dtypes.bool, arg=False, src=()),)),)),)),)),)),)),))
     opts = [Opt(op=OptOps.GROUPTOP, axis=1, amt=16)]
-    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["AMD", "GPU", "METAL", "NV", "CUDA"])
+    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=[])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"METAL"}, "hangs metal gpu CI")
   def test_failure_54(self):

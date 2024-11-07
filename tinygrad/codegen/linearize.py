@@ -54,9 +54,9 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   # prevent priority inversion
   @functools.lru_cache(None)
   def fix_priority(u:UOp, lowest_priority):
-    if u.op in {Ops.CAST, Ops.BITCAST, *GroupOp.ALU, Ops.VECTORIZE, Ops.GEP, Ops.SPECIAL, Ops.DEFINE_LOCAL, Ops.LOAD}:
+    if u.op in {Ops.CAST, Ops.BITCAST, *GroupOp.ALU, Ops.VECTORIZE, Ops.GEP, Ops.SPECIAL, Ops.DEFINE_LOCAL, Ops.LOAD, Ops.INDEX}:
       priorities[u] = min(priorities[u], lowest_priority)
-      if u.op is Ops.LOAD: priorities[u] += 100 # load penalty (here)
+      if u.op is Ops.LOAD: priorities[u] -= 100 # load boost (here)
     for x in u.src: fix_priority(x, priorities[u])
   fix_priority(sink, 0)
 
