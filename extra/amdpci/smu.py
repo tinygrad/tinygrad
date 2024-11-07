@@ -48,5 +48,36 @@ class SMU_IP:
   def mode1_reset(self):
     self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_Mode1Reset, 0, poll=True)
 
+  def smu_start_smc_engine(self):
+    pass
+
+  def smu_set_driver_table_location(self):
+    self.driver_table_vaddr = self.adev.vmm.alloc_vram(0x4000)
+    self.driver_table_paddr = self.adev.vmm.vaddr_to_paddr(self.driver_table_vaddr)
+    self.driver_table_mc_addr = self.adev.vmm.paddr_to_mc(self.driver_table_paddr)
+
+    self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetDriverDramAddrHigh, self.driver_table_mc_addr >> 32, poll=True)
+    self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetDriverDramAddrLow, self.driver_table_mc_addr & 0xFFFFFFFF, poll=True)
+
+  def smu_set_tool_table_location(self):
+    self.tool_table_vaddr = self.adev.vmm.alloc_vram(0x19000)
+    self.tool_table_paddr = self.adev.vmm.vaddr_to_paddr(self.tool_table_vaddr)
+    self.tool_table_mc_addr = self.adev.vmm.paddr_to_mc(self.tool_table_paddr)
+
+    self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetToolDramAddrHigh, self.tool_table_mc_addr >> 32, poll=True)
+    self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetToolDramAddrLow, self.tool_table_mc_addr & 0xFFFFFFFF, poll=True)
+
+  def smu_setup_pptable(self):
+    pass
+
+  def smu_smc_hw_setup(self):
+    self.smu_set_driver_table_location()
+    self.smu_set_tool_table_location()
+    # self.
+
   def init(self):
+    self.driver_table = 
+
+    self.smu_start_smc_engine()
+    
     pass
