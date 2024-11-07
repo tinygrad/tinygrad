@@ -343,7 +343,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
-                                             UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=idx)
+                                             UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=(idx, False))
   def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op] if op in GroupOp.Reduce else op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
 

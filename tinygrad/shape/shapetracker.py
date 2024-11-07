@@ -76,20 +76,20 @@ class ShapeTracker:
     idx, valid = (graph_rewrite(u, symbolic_flat) for u in self.to_indexed_uops())
     if (newidx:=uop_given_valid(valid, idx)) is not None: idx = newidx
     for c in split_uop(idx, BinaryOps.ADD):
-      if c.op is Ops.RANGE: ret[c.arg] = 1
-      if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg] = c.src[1].arg
-      if c.op is Ops.MUL and c.src[1].op is Ops.RANGE and c.src[0].op is Ops.CONST: ret[c.src[1].arg] = c.src[0].arg
-    used_ranges = [x.arg for x in idx.sparents if x.op is Ops.RANGE]
+      if c.op is Ops.RANGE: ret[c.arg[0]] = 1
+      if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg[0]] = c.src[1].arg
+      if c.op is Ops.MUL and c.src[1].op is Ops.RANGE and c.src[0].op is Ops.CONST: ret[c.src[1].arg[0]] = c.src[0].arg
+    used_ranges = [x.arg[0] for x in idx.sparents if x.op is Ops.RANGE]
     ret = [x if i in used_ranges else 0 for i,x in enumerate(ret)]
     if not ignore_valid:
-      for masked_axis in [x.arg for x in valid.sparents if x.op is Ops.RANGE]: ret[masked_axis] = None
+      for masked_axis in [x.arg[0] for x in valid.sparents if x.op is Ops.RANGE]: ret[masked_axis] = None
     return tuple(ret)
 
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
   def axis_is_masked(self, axis:int) -> bool:
     _, valid = self.to_indexed_uops()
-    return axis in [x.arg for x in graph_rewrite(valid, symbolic_flat).sparents if x.op is Ops.RANGE]
+    return axis in [x.arg[0] for x in graph_rewrite(valid, symbolic_flat).sparents if x.op is Ops.RANGE]
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
