@@ -181,6 +181,12 @@ class VMM:
 
     self.gfxhub_v3_0_program_invalidation()
 
+    self.flush_hdp()
+
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_PROTECTION_FAULT_CNTL, 0, 0x3FFFFFFC)
+
+    self.flush_tlb(0, 0, 0)
+
   def mmhub_v3_0_init_gart_aperture_regs(self):
     self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0, (self.vm_base >> 12) & 0xffffffff)
     self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, 0, self.vm_base >> 44)

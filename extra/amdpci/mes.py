@@ -1,5 +1,6 @@
 import os, ctypes, time
 from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_gc_11_0_0, mes_v11_api_def
+from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
 from tinygrad.helpers import to_mv, mv_address
 
 from extra.amdpci.amdring import AMDRing
@@ -10,16 +11,20 @@ class MES_IP:
 
   def __init__(self, adev):
     self.adev = adev
-    
-    self.sch_ctx_gpu_addr = self.adev.vmm.alloc_vram(0x1000, "sch_ctx")
-    self.query_status_fence_gpu_mc_ptr = self.adev.vmm.alloc_vram(0x1000, "query_status_fence")
-    self.write_fence_addr = self.adev.vmm.alloc_vram(0x1000, "w_fence")
-    
-    self.kiq_hw_init()
-    
-    # self.mes_queue = AMDRing(self.adev, me=3, pipe=0, queue=0, vmid=0, doorbell_index=(self.AMDGPU_NAVI10_DOORBELL_MES_RING0 << 1))
-    # self.mes_queue.init_mes_mqd()
-    # self.setup()
+
+    self.sch_ctx_gpu_vaddr = self.adev.vmm.alloc_vram(0x1000, "sch_ctx")
+    self.sch_ctx_gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.sch_ctx_gpu_vaddr)
+    self.sch_ctx_gpu_mc_addr = self.adev.vmm.paddr_to_mc(self.sch_ctx_gpu_paddr)
+
+    self.query_status_fence_vaddr = self.adev.vmm.alloc_vram(0x1000, "query_status_fence")
+    self.query_status_fence_paddr = self.adev.vmm.vaddr_to_paddr(self.query_status_fence_vaddr)
+    self.query_status_fence_mc_addr = self.adev.vmm.paddr_to_mc(self.query_status_fence_paddr)
+
+    self.write_fence_vaddr = self.adev.vmm.alloc_vram(0x1000, "w_fence")
+    self.write_fence_paddr = self.adev.vmm.vaddr_to_paddr(self.write_fence_vaddr)
+    self.write_fence_mc_addr = self.adev.vmm.paddr_to_mc(self.write_fence_paddr)
+    self.write_fence_cpu_view = self.adev.vmm.paddr_to_cpu_mv(self.write_fence_paddr, 0x1000).cast('I')
+    self.next_write_fence = 1
 
   def mes_enable(self):
     print("MES enable / mes_v11_0_enable()")
@@ -30,10 +35,10 @@ class MES_IP:
       self.adev.psp.mes_fw.header.mes_uc_start_addr_lo | (self.adev.psp.mes_fw.header.mes_uc_start_addr_hi << 32),
       self.adev.psp.mes_kiq_fw.header.mes_uc_start_addr_lo | (self.adev.psp.mes_kiq_fw.header.mes_uc_start_addr_hi << 32),
     ]
-    
+
     for pipe in range(2):
       self.adev.gfx.soc21_grbm_select(3, pipe, 0, 0)
-      
+
       ucode_addr = ucodes[pipe] >> 2
       self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_PRGRM_CNTR_START, amdgpu_gc_11_0_0.regCP_MES_PRGRM_CNTR_START_BASE_IDX, ucode_addr & 0xffffffff)
       self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_PRGRM_CNTR_START_HI, amdgpu_gc_11_0_0.regCP_MES_PRGRM_CNTR_START_HI_BASE_IDX, ucode_addr >> 32)
@@ -42,7 +47,7 @@ class MES_IP:
     # unhalt mes, and activate it
     val = (1 << amdgpu_gc_11_0_0.CP_MES_CNTL__MES_PIPE0_ACTIVE__SHIFT) | (1 << amdgpu_gc_11_0_0.CP_MES_CNTL__MES_PIPE1_ACTIVE__SHIFT)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_CNTL, amdgpu_gc_11_0_0.regCP_MES_CNTL_BASE_IDX, val)
-  
+
   def kiq_setting(self, ring):
     tmp = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CP_SCHEDULERS, amdgpu_gc_11_0_0.regRLC_CP_SCHEDULERS_BASE_IDX)
     tmp &= 0xffffff00
@@ -51,52 +56,69 @@ class MES_IP:
     tmp |= 0x80
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CP_SCHEDULERS, amdgpu_gc_11_0_0.regRLC_CP_SCHEDULERS_BASE_IDX, tmp)
 
-  def mes_v11_0_queue_init(self, ring, is_kiq):
+  def kiq_map_queue(self, ring_to_enable, is_compute=False):
+    if is_compute:
+      me = 1
+      eng_sel = 0
+    else:
+      # MES queue
+      me = 2
+      eng_sel = 5
+
+    self.adev.wreg(sc_reg:=0xc040, 0xcafedead) # sratch reg
+
+    self.mes_kiq.write(amd_gpu.PACKET3(amd_gpu.PACKET3_MAP_QUEUES, 5))
+    self.mes_kiq.write(
+      amd_gpu.PACKET3_MAP_QUEUES_QUEUE_SEL(0) |
+      amd_gpu.PACKET3_MAP_QUEUES_VMID(0) |
+      amd_gpu.PACKET3_MAP_QUEUES_QUEUE(ring_to_enable.queue) |
+      amd_gpu.PACKET3_MAP_QUEUES_PIPE(ring_to_enable.pipe) |
+      amd_gpu.PACKET3_MAP_QUEUES_ME((me)) |
+      amd_gpu.PACKET3_MAP_QUEUES_QUEUE_TYPE(0) | # queue_type: normal compute queue 
+      amd_gpu.PACKET3_MAP_QUEUES_ALLOC_FORMAT(0) | # alloc format: all_on_one_pipe
+      amd_gpu.PACKET3_MAP_QUEUES_ENGINE_SEL(eng_sel) |
+      amd_gpu.PACKET3_MAP_QUEUES_NUM_QUEUES(1)
+    )
+    self.mes_kiq.write(amd_gpu.PACKET3_MAP_QUEUES_DOORBELL_OFFSET(ring_to_enable.doorbell_index))
+    self.mes_kiq.write(ring_to_enable.mqd_gpu_vaddr & 0xffffffff)
+    self.mes_kiq.write(ring_to_enable.mqd_gpu_vaddr >> 32)
+    self.mes_kiq.write(ring_to_enable.wptr_gpu_vaddr & 0xffffffff)
+    self.mes_kiq.write(ring_to_enable.wptr_gpu_vaddr >> 32)
+
+    # Just to test if command is executed
+    self.mes_kiq.write(amd_gpu.PACKET3(amd_gpu.PACKET3_WRITE_DATA, 3))
+    self.mes_kiq.write(1 << 16)
+    self.mes_kiq.write(sc_reg) 
+    self.mes_kiq.write(0x0)
+    self.mes_kiq.write(0xdeadc0de)
+
+    self.wdoorbell64(self.mes_kiq.doorbell_index, self.mes_kiq.next_ptr)
+    while self.adev.rreg(sc_reg) != 0xdeadc0de: pass
+
+  def kiq_enable_queue(self, ring_to_enable): self.kiq_map_queue(ring_to_enable)
+
+  def queue_init(self, ring, is_kiq):
     self.mes_v11_0_mqd_init(ring)
 
     if is_kiq:
       self.init_mes_regs(ring)
     else:
-      self.mes_v11_0_kiq_enable_queue(ring)
+      self.kiq_enable_queue(ring)
 
   def kiq_hw_init(self):
     self.mes_kiq = AMDRing(self.adev, size=0x100000, me=3, pipe=1, queue=0, vmid=0, doorbell_index=(self.AMDGPU_NAVI10_DOORBELL_MES_RING1 << 1))
 
     self.mes_enable()
     self.kiq_setting(self.mes_kiq)
-    self.mes_v11_0_queue_init(self.mes_kiq, is_kiq=True)
+    self.queue_init(self.mes_kiq, is_kiq=True)
 
-    # test kiq queue
-    from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
-    PACKET3_SET_UCONFIG_REG_START = 0x0000c000
-    self.adev.wreg(0x1fc00, 0x0) # hdp flush
-    self.adev.wreg(0xc040, 0xcafedead)
-
-    self.mes_kiq.write(amd_gpu.PACKET3(amd_gpu.PACKET3_WRITE_DATA, 3))
-    self.mes_kiq.write(1 << 16)
-    self.mes_kiq.write(0xc040) 
-    self.mes_kiq.write(0x0)
-    self.mes_kiq.write(0xdeadc0de)
-
-    print("PFS", self.adev.vmm.collect_pfs())
-
-    print("reg before", hex(self.adev.rreg(0xc040)))
-    self.wdoorbell64(self.mes_kiq.doorbell_index, self.mes_kiq.next_ptr)
-
-    while True:
-      if self.adev.rreg(0xc040) == 0xdeadc0de:
-        break
-
-    print("WOO, reg changed", hex(self.adev.rreg(0xc040)))
-    
-    # self.mes_hw_init()
+    self.mes_hw_init()
 
   def mes_hw_init(self):
     self.mes_ring = AMDRing(self.adev, size=0x2000, me=3, pipe=0, queue=0, vmid=0, doorbell_index=(self.AMDGPU_NAVI10_DOORBELL_MES_RING0 << 1))
-    self.mes_v11_0_queue_init(self.mes_ring, is_kiq=False)
-
-  def mes_v11_0_kiq_enable_queue():
-    pass
+    self.queue_init(self.mes_ring, is_kiq=False)
+    self.set_hw_resources()
+    self.query_sched_status()
 
   def mes_v11_0_mqd_init(self, ring):
     ring.mqd.header = 0xC0310800
@@ -182,32 +204,24 @@ class MES_IP:
     self.adev.doorbell64[index//2] = val # this should be correct
 
   def submit_pkt_and_poll_completion(self, pkt):
-    ndw = ctypes.sizeof(pkt) // 4
+    pkt.api_status.api_completion_fence_addr = self.write_fence_mc_addr
+    pkt.api_status.api_completion_fence_value = self.next_write_fence
 
-    pkt.api_status.api_completion_fence_addr = self.write_fence_addr
-    pkt.api_status.api_completion_fence_value = 0xdead
+    for i in range(ctypes.sizeof(pkt) // 4): self.mes_ring.write(pkt.max_dwords_in_api[i])
+    self.wdoorbell64(self.mes_ring.doorbell_index, self.mes_ring.next_ptr)
 
-    self.fence_view = self.adev.vmm.vram_to_cpu_mv(self.write_fence_addr, 0x1000).cast('I')
-    self.fence_view[0] = 0
-    print(self.fence_view[0])
-    
-    for i in range(ndw):
-      # print(hex(pkt.max_dwords_in_api[i]))
-      self.mes_queue.write(pkt.max_dwords_in_api[i])
+    while self.write_fence_cpu_view[0] != self.next_write_fence: pass
+    self.next_write_fence += 1
 
-    self.wdoorbell64(self.mes_queue.doorbell_index, self.mes_queue.next_ptr)
+    return 0
 
-    # print(self.fence_view[0])
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE_BASE_IDX, 1)
-    self.adev.gfx.soc21_grbm_select(3, 0, 0, 0)
-    print("act?", self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE_BASE_IDX))
-    self.adev.gfx.soc21_grbm_select(0, 0, 0, 0)
-    while self.fence_view[0] == 0:
-      # print(self.mes_queue.rptr[0], self.mes_queue.wptr[0])
-      # print("PFS", self.adev.vmm.collect_pfs())
-      pass
+  def query_sched_status(self):
+    mes_sch_status_pkt = mes_v11_api_def.union_MESAPI__QUERY_MES_STATUS()
+    mes_sch_status_pkt.header.type = mes_v11_api_def.MES_API_TYPE_SCHEDULER
+    mes_sch_status_pkt.header.opcode = mes_v11_api_def.MES_SCH_API_QUERY_SCHEDULER_STATUS
+    mes_sch_status_pkt.header.dwsize = mes_v11_api_def.API_FRAME_SIZE_IN_DWORDS
 
-    print("fence", self.fence_view[0])
+    return self.submit_pkt_and_poll_completion(mes_sch_status_pkt)
   
   def set_hw_resources(self):
     mes_set_hw_res_pkt = mes_v11_api_def.union_MESAPI_SET_HW_RESOURCES()
@@ -219,8 +233,8 @@ class MES_IP:
     mes_set_hw_res_pkt.vmid_mask_gfxhub = 0xffffff00
     mes_set_hw_res_pkt.gds_size = 0x1000
     mes_set_hw_res_pkt.paging_vmid = 0
-    mes_set_hw_res_pkt.g_sch_ctx_gpu_mc_ptr = self.sch_ctx_gpu_addr
-    mes_set_hw_res_pkt.query_status_fence_gpu_mc_ptr = self.query_status_fence_gpu_mc_ptr
+    mes_set_hw_res_pkt.g_sch_ctx_gpu_mc_ptr = self.sch_ctx_gpu_mc_addr
+    mes_set_hw_res_pkt.query_status_fence_gpu_mc_ptr = self.query_status_fence_mc_addr
 
     for i in range(5):
       mes_set_hw_res_pkt.gc_base[i] = self.adev.ip_base("GC", 0, i)
@@ -234,53 +248,4 @@ class MES_IP:
     mes_set_hw_res_pkt.enable_level_process_quantum_check = 1
     mes_set_hw_res_pkt.oversubscription_timer = 50
 
-    self.submit_pkt_and_poll_completion(mes_set_hw_res_pkt)
-  
-  def mes_init(self):
-    mes_v11_0_queue_init
-
-  def setup(self):
-    self.init_mes_regs(self.mes_queue)
-
-    self.adev.gfx.soc21_grbm_select(3, 0, 0, 0)
-    self.sched_version = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_GP3_LO, amdgpu_gc_11_0_0.regCP_MES_GP3_LO_BASE_IDX)
-    print("MES API v", (self.sched_version & 0x00fff000) >> 12)
-
-    # # reset mes
-    # mes_cntr = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_CNTL, amdgpu_gc_11_0_0.regCP_MES_CNTL_BASE_IDX)
-    # if (mes_cntr & 0x40000000): print("MES HALTED")
-
-    # mes_cntr_reset = mes_cntr | (0x00010000) # pipe0 reset
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_CNTL, amdgpu_gc_11_0_0.regCP_MES_CNTL_BASE_IDX, mes_cntr_reset)
-
-    # start_mes = (0x04000000) # pipe0 active
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_CNTL, amdgpu_gc_11_0_0.regCP_MES_CNTL_BASE_IDX, start_mes)
-
-    # mes_cntr = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_CNTL, amdgpu_gc_11_0_0.regCP_MES_CNTL_BASE_IDX)
-    # if (mes_cntr & 0x40000000): print("MES HALTED")
-    # print("MES STATUS", hex(mes_cntr))    
-
-    # mes_ip = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_PRGRM_CNTR_START, amdgpu_gc_11_0_0.regCP_MES_PRGRM_CNTR_START_BASE_IDX)
-    # print("mes_ip", hex(mes_ip))
-
-    # mes_ip = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_MCAUSE_LO, amdgpu_gc_11_0_0.regCP_MES_MCAUSE_LO_BASE_IDX)
-    # print("regCP_MES_MCAUSE", hex(mes_ip))
-
-    # mes_ip = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_MBADADDR_LO, amdgpu_gc_11_0_0.regCP_MES_MBADADDR_LO_BASE_IDX)
-    # print("regCP_MES_MBADADDR_LO", hex(mes_ip))
-
-    # mes_ip = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_MIP_LO, amdgpu_gc_11_0_0.regCP_MES_MIP_LO_BASE_IDX)
-    # print("regCP_MES_MIP_LO", hex(mes_ip))
-
-    # mes_ip = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_MTIME_LO, amdgpu_gc_11_0_0.regCP_MES_MTIME_LO_BASE_IDX)
-    # print("regCP_MES_MTIME_LO", hex(mes_ip))
-
-    # while True:
-    #   mes_ip = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_INSTR_PNTR, amdgpu_gc_11_0_0.regCP_MES_INSTR_PNTR_BASE_IDX)
-    #   print("regCP_MES_INSTR_PNTR", hex(mes_ip))
-
-    # self.adev.gfx.soc21_grbm_select(0, 0, 0, 0)
-
-    # print(self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_CNTL, amdgpu_gc_11_0_0.regCP_MES_CNTL_BASE_IDX))
-
-    # self.set_hw_resources()
+    return self.submit_pkt_and_poll_completion(mes_set_hw_res_pkt)

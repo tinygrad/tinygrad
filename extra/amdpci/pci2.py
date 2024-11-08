@@ -125,6 +125,10 @@ class AMDDev:
 
     from extra.amdpci.gfx import GFX_IP
     self.gfx = GFX_IP(self)
+
+    from extra.amdpci.mes import MES_IP
+    self.mes = MES_IP(self)
+
     self.gfx.init()
 
     exit(0)
@@ -155,7 +159,9 @@ class AMDDev:
 
   def ip_base(self, ip, inst, seg):
     ipid = amdgpu_discovery.__dict__.get(f"{ip}_HWIP")
-    return self.regs_offset[ipid][inst][seg]
+    try: x = self.regs_offset[ipid][inst][seg]
+    except (KeyError, IndexError): x = 0
+    return x
 
   def reg_off(self, ip, inst, reg, seg):
     off = self.ip_base(ip, inst, seg)
