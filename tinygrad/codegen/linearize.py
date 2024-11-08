@@ -1,8 +1,92 @@
 from typing import List, Set, Dict, Tuple
 import functools, heapq
+from collections import defaultdict
 from tinygrad.ops import type_verify, END_FOR_UOP, UOp, Ops, GroupOp
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, dedup, flatten
+
+from tinygrad.ops import PatternMatcher, UPat, graph_rewrite
+class BasicBlock:
+  def __init__(self, rngs, lst):
+    self.rngs = tuple(rngs)
+    self.lst = tuple(lst)
+  def __hash__(self): return hash((self.rngs, self.lst))
+  def __eq__(self, x): return self.rngs == x.rngs and self.lst == x.lst
+  def __repr__(self):
+    return f"{[y.arg[0] for y in self.rngs]}\n{'\n'.join([str(x.op) for x in self.lst])}"
+  #def __add__(self, x):
+  #  assert self.rngs == x.rngs
+  #  return BasicBlock(self.rngs, self.lst+x.lst)
+  def add(self, x):
+    if len(x) == 0: return self
+    return BasicBlock(self.rngs, tuple(x)+self.lst)
+
+@functools.lru_cache(None)
+def get_ranges_in_parents(x:UOp) -> Tuple[UOp]:
+  ret = []
+  for u in x.src:
+    if u.op is Ops.RANGE: ret.append([u])
+    # don't flow through assign and store
+    if u.op is Ops.STORE: continue
+    if u.op is Ops.ASSIGN:
+      assert u.src[0].op is Ops.DEFINE_ACC
+      ret.append([x for x in get_ranges_in_parents(u.src[1]) if x not in u.src[0].src[1:]])
+    else:
+      ret.append(get_ranges_in_parents(u))
+  return tuple(dedup(sorted(flatten(ret), key=lambda x: x.arg)))
+
+def append_to_block(x:UOp):
+  new_srcs = []
+  to_append = []
+  old_blocks = {u.arg.rngs:u for u in x.src if u.op is Ops.BASICBLOCK}
+  new_blocks = defaultdict(list)
+  for u in x.src:
+    if u.op is Ops.BASICBLOCK:
+      continue
+    elif u.op in {Ops.RANGE, Ops.CONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.SPECIAL}: #, Ops.DEFINE_ACC}:
+      new_srcs.append(u)
+    else:
+      if (rngs:=get_ranges_in_parents(u)) == x.arg.rngs:
+        # fine to put it in this block
+        new_srcs += list(u.src)
+        to_append.append(u)
+      elif rngs in old_blocks:
+        new_blocks[rngs].extend(old_blocks[rngs].arg.lst)
+        del old_blocks[rngs]
+      else:
+        # need to create a new block
+        new_blocks[rngs].append(u)
+  new_srcs = list(old_blocks.values()) + new_srcs
+  if len(to_append) == 0 and len(new_blocks) == 0: return None
+  for rng,lst in new_blocks.items():
+    new_srcs.append(UOp(Ops.BASICBLOCK, dtypes.void, tuple(dedup(sum([x.src for x in lst], ()))), BasicBlock(rng, lst)))
+  return UOp(Ops.BASICBLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
+
+  """
+  new_srcs = []
+  to_append = []
+  new_assigns = defaultdict(list)
+  for u in x.src:
+    if u.op not in {Ops.BASICBLOCK, Ops.ASSIGN, Ops.RANGE, Ops.IF}:
+      new_srcs += list(u.src)
+      to_append.append(u)
+    elif u.op is Ops.ASSIGN:
+      # ASSIGN creates a new block
+      assert u.src[0].op is Ops.DEFINE_ACC
+      new_assigns[u.src[0].src[1:]].append(u)
+    else:
+      new_srcs.append(u)
+  new_new_srcs = []
+  for v in new_assigns.values():
+    new_new_srcs.append(UOp(Ops.BASICBLOCK, dtypes.void, tuple(dedup(sum([x.src for x in v], ()))), BasicBlock(v)))
+  if len(to_append) == 0 and len(new_new_srcs) == 0: return None
+  return UOp(Ops.BASICBLOCK, dtypes.void, tuple(dedup(new_new_srcs+new_srcs)), x.arg.add(to_append))
+  """
+
+make_basic_blocks = PatternMatcher([
+  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BASICBLOCK, dtypes.void, x.src, BasicBlock(get_ranges_in_parents(x), [x]))),
+  (UPat(Ops.BASICBLOCK, name="x"), append_to_block),
+])
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
   if u in children: return srcs[u]
@@ -17,6 +101,9 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
+
+  sink_bb = graph_rewrite(sink, make_basic_blocks)
+
   # filter nodes that don't link to a sink
   # BFS toposort
   children: Dict[UOp, List[UOp]] = {}
@@ -71,6 +158,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   _uops: List[UOp] = []
   while queue:
     p,_,x = heapq.heappop(queue)
+    print(x.op, [y.arg[0] for y in get_ranges_in_parents(x)])
     if DEBUG >= 7: print(f"{p:5d}", x.op, x.dtype, x.arg)
     if x in scope_children: scope_end[x] = x
     if x.op is Ops.DEFINE_ACC:
