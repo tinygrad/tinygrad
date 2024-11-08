@@ -101,39 +101,38 @@ class Ops(FastEnum):
   SINK = auto()
   CONTIGUOUS = auto()
   PRELOAD = auto()
+  NOOP = auto()
 
   # MetaOps
   COPY = auto()
   EMPTY = auto()
   BUFFER_VIEW = auto()
 
+  # unrendered
   EXPAND = auto()
   CONTRACT = auto()
   VIEW = auto()
-  DEFINE_GLOBAL = auto()
   BUFFER = auto()
-  DEFINE_VAR = auto()
-  DEFINE_LOCAL = auto()
-  DEFINE_ACC = auto()
   VALID = auto()
-  SPECIAL = auto()
-  NOOP = auto()
 
-  # reduce
+  # reduce + ReduceOps (not rendered)
   REDUCE_AXIS = auto()
-
-  # ReduceOps
   SUM = auto(); PROD = auto(); REDUCE_MAX = auto() # noqa: E702
 
-  # helper ops
-  GEP = auto()
-  VECTORIZE = auto()
+  # defines
+  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
 
-  # UnaryOps
-  CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
+  # gidx/lidx
+  SPECIAL = auto()
 
   # loads before math
   LOAD = auto()
+
+  # helper ops
+  GEP = auto(); VECTORIZE = auto() # noqa: E702
+
+  # UnaryOps
+  CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 
   # math ops
   ALU = auto()
@@ -475,8 +474,8 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
 
 def print_uops(uops:List[UOp]):
   for i,u in enumerate(uops):
-    formatted_parents = [uops.index(x) if x.op is not Ops.CONST else f"{x.arg}" for x in u.src]
-    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):25s} " f"{str(formatted_parents):32s} {u.arg}")
+    formatted_parents = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
+    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):30s} " f"{str(formatted_parents):32s} {u.arg}")
 
 def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   flops: sint = 0

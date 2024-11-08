@@ -1,8 +1,10 @@
-from typing import List, Set, Dict, Tuple
+from typing import List, Set, Dict, Tuple, DefaultDict
 import functools, heapq
-from tinygrad.ops import type_verify, END_FOR_UOP, UOp, Ops, GroupOp
+from collections import defaultdict
+from dataclasses import dataclass
+from tinygrad.ops import type_verify, END_FOR_UOP, UOp, Ops, GroupOp, print_uops
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, dedup
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
   if u in children: return srcs[u]
@@ -15,8 +17,96 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
   in_degree[u] = len(u.src)
   return srcs[u]
 
+@dataclass(eq=True, unsafe_hash=True)
+class Block:
+  loop_inside: Tuple[UOp, ...]
+  loop_after: Tuple[UOp, ...]
+  @property
+  def key(self): return len(self.loop_after), [x.arg for x in self.loop_after], len(self.loop_inside), [x.arg for x in self.loop_inside]
+  def __lt__(self, o): return self.key < o.key
+  def __repr__(self): return f"{[x.arg for x in self.loop_inside]}-{[x.arg for x in self.loop_after]}"
+
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
+
+  # break uops into basic blocks
+  blocks: DefaultDict[Block, List[UOp]] = defaultdict(list)
+  placed: Dict[UOp, Block] = {}
+  @functools.lru_cache(None)
+  def place_with_scope(u:UOp, rng:Tuple[UOp]=()):
+    if u.op is Ops.ASSIGN:
+      assert u.src[0].op is Ops.DEFINE_ACC
+      rng = rng+u.src[0].src[1:]
+    parent_rng = tuple(sorted([x for x in u.sparents if x.op is Ops.RANGE], key=lambda x: x.tuplize))
+    # (<loop inside>, <loop after>)
+    block = Block(tuple(x for x in rng if x in parent_rng), parent_rng)
+    blocks[block].append(u)
+    placed[u] = block
+    for x in u.src: place_with_scope(x, rng)
+  place_with_scope(sink)
+
+  """
+  open_loops = set()
+  seen_loops = set()
+
+  # block placement
+  placed_blocks = []
+  while len(placed_blocks) < len(blocks):
+    placable_blocks = []
+    for block in blocks.keys():
+      if block in placed_blocks: continue
+      if not all(x in open_loops for x in block.loop_inside) or not all(x in seen_loops for x in block.loop_after): continue
+      placable_blocks.append(block)
+    if len(placable_blocks) > 0:
+      placed_blocks.append(placable_blocks[0])
+      continue
+
+    # we have to open a loop
+    placable_blocks_with_open = []
+    for block in blocks.keys():
+      if block in placed_blocks: continue
+      if not all(x in seen_loops for x in block.loop_after): continue
+      placable_blocks_with_open.append(block)
+    placable_blocks_with_open = sorted(placable_blocks_with_open)
+    if len(placable_blocks_with_open) > 0:
+      for x in placable_blocks_with_open[0].loop_inside: open_loops.add(x)
+      placed_blocks.append(placable_blocks_with_open[0])
+      continue
+    raise RuntimeError("no placable blocks")
+  """
+
+  #for block in placed_blocks:
+  for block in sorted(blocks.keys()):
+    v = blocks[block]
+    print(block, len(v))
+    v = sorted(dedup(v), key=lambda x: x.tuplize)
+    print_uops(v)
+
+
+  """
+  # get block deps
+  deps = {b:set() for b in blocks}
+  for block,ops in blocks.items():
+    for u in ops:
+      for s in u.src:
+        if placed[s] != block: deps[block].add(placed[s])
+
+  for block,v in sorted(blocks.items()):
+    print(block, len(v))
+    #print(deps[block])
+    v = sorted(dedup(v), key=lambda x: x.tuplize)
+    print_uops(v)
+  """
+
+
+  """
+  ops_to_range = {u:tuple(sorted([x for x in u.sparents if x.op is Ops.RANGE], key=lambda x: x.tuplize)) for u in sink.sparents}
+  ranges_to_ops = defaultdict(list)
+  for k,v in ops_to_range.items(): ranges_to_ops[v].append(k)
+  for k,v in ranges_to_ops.items():
+    print([x.arg for x in k], len(v))
+  """
+
   # filter nodes that don't link to a sink
   # BFS toposort
   children: Dict[UOp, List[UOp]] = {}
