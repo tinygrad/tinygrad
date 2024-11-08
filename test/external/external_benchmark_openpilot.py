@@ -36,7 +36,7 @@ if __name__ == "__main__":
   for _ in range(20):
     GlobalCounters.reset()
     st = time.perf_counter_ns()
-    # Need to cast non-image inputs from numpy, this is only realistic way to run it
+    # Need to cast non-image inputs from numpy, this is only realistic way to run model
     inputs = {**{k:v for k,v in new_inputs_junk.items() if 'img' in k},
               **{k:Tensor(v) for k,v in new_inputs_junk_numpy.items() if 'img' not in k}}
     ret = next(iter(run_onnx_jit(**inputs).values())).cast(dtypes.float32).numpy()
