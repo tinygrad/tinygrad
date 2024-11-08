@@ -97,21 +97,27 @@ class TestX86(unittest.TestCase):
   def test_cumsum(self):
     assert Tensor([1,2,3]).cumsum().tolist() == [1, 3, 6]
 
-  # illegal instruction
+  # seg fault
   #def test_sin(self):
   #  a = Tensor([1,2,3], device="X86").sin().tolist()
   #  b = Tensor([1,2,3], device="CLANG").sin().tolist()
   #  assert a == b
-  
+  # seg fault
   #def test_cos(self):
   #  a = Tensor([1,2,3], device="X86").cos().tolist()
   #  b = Tensor([1,2,3], device="CLANG").cos().tolist()
   #  assert a == b
-
+  # wrong
   #def test_tan(self):
   #  a = Tensor([1,2,3]).tan().tolist()
   #  b = Tensor([1,2,3], device="CLANG").tan().tolist()
   #  assert a == b
+  # last number is 0.99999???
+  #def test_rand(self):
+  #  a = Tensor.rand(3).tolist()
+
+  #def test_randint(self):
+  #  a = Tensor.randint(3).tolist()
   
   def test_log(self):
     a = Tensor([1,2,3]).log().tolist()
@@ -128,13 +134,20 @@ class TestX86(unittest.TestCase):
     b = Tensor([1,2,3], device="CLANG").softmax().tolist()
     assert np.allclose(a, b, rtol=1e-7)
   
-  #def test_sparse_categorical_crossentropy(self):
-    # weirdly way off
-    #a = Tensor([[-1, 2, -3], [1, -2, 3]], device="X86").sparse_categorical_crossentropy(Tensor([1, 2], device="X86")).tolist()
-    #b = Tensor([[-1, 2, -3], [1, -2, 3]], device="CLANG").sparse_categorical_crossentropy(Tensor([1, 2], device="CLANG")).tolist()
-    #assert a == b
+  def test_sparse_categorical_crossentropy(self):
+    a = Tensor([[-1, 2, -3], [1, -2, 3]], device="X86").sparse_categorical_crossentropy(Tensor([1, 2], device="X86")).tolist()
+    b = Tensor([[-1, 2, -3], [1, -2, 3]], device="CLANG").sparse_categorical_crossentropy(Tensor([1, 2], device="CLANG")).tolist()
+    assert np.allclose(a, b, rtol=1e-7)
+
+  def test_logcumsumexp(self):
+    # vectorize 2
+    a = Tensor([1,2,3]).logcumsumexp().tolist()
+    b = Tensor([1,2,3], device="CLANG").logcumsumexp().tolist()
+    assert np.allclose(a, b, rtol=1e-7)
+    # vectorize 4
+    a = Tensor([1,2,3,4]).logcumsumexp().tolist()
+    b = Tensor([1,2,3,4], device="CLANG").logcumsumexp().tolist()
+    assert np.allclose(a, b, rtol=1e-7)
 
 if __name__ == '__main__':
   unittest.main()
-
-# TODO: weird bug in rand where last number is often 0.99999. Also in randint last number is often 9

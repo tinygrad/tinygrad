@@ -69,9 +69,11 @@ class X86Renderer(Renderer):
     def op2(op:str, dt:DType) -> str:
       if dtypes.is_float(dt) and not isinstance(dt, PtrDType):
         s1 = 'p' if dt.count > 1 else 's'
-        s2 = 'd' if dt.itemsize == 8 else 's'
+        s2 = 'd' if dt.scalar().itemsize == 8 else 's'
         if op == "cmp": return "ucomi" + s1 + s2
-        if op == "mov": return op + ('u' if s1 == 'p' else '') + s1 + s2 # packed mov is unaligned
+        if op == "mov":
+          s0 = 'l' if dt.count == 2 and dt.scalar() is dtypes.float32 else 'u' if dt.count > 1 else ''
+          return op + s0 + s1 + s2 # packed mov is unaligned
         return (op if op[0] != 'i' else op[1:]) + s1 + s2
       if dtypes.is_unsigned(u.dtype) and op == 'idiv': return op[1:]
       return op
@@ -116,7 +118,8 @@ class X86Renderer(Renderer):
     for i,u in enumerate(ops):
       if u.op is Ops.CONST:
         # consts to stack if they can't be immediate values
-        if u.dtype.itemsize == 8 or dtypes.is_float(u.dtype):
+        # pattern match 64bit int consts to 32bit?
+        if dtypes.is_float(u.dtype) or abs(u.arg) > (2**31-1):
           mem[u] = stack_size
           stack_size += 8
           line("mov", "r15", to_hex(u.arg))
@@ -149,7 +152,9 @@ class X86Renderer(Renderer):
           line("mov", f"[rbp - {mem[u]}]", loc(u))
           free_reg(regs.pop(u))
       elif u.op is Ops.LOAD: line(opc(u), loc(u), f"[{loc(u.src[0])}]")
-      elif u.op is Ops.STORE: line(opc(u), f"[{loc(u.src[0])}]", loc(u.src[1]))
+      elif u.op is Ops.STORE:
+        prefix = f"{size_prefix[u.src[1].dtype.itemsize]} ptr " if u.src[1].op is Ops.CONST else ""
+        line(opc(u), f"{prefix}[{loc(u.src[0])}]", loc(u.src[1]))
       elif u.op is Ops.DEFINE_ACC: line(opc(u), loc(u), loc(u.src[0]))
       elif u.op is Ops.ASSIGN:
         if regs[u] != regs[u.src[1]]: line(opc(u), loc(u), loc(u.src[1]))
@@ -161,14 +166,13 @@ class X86Renderer(Renderer):
         line("cmp", loc(u.src[0]), loc(u.src[0].src[1]))
         line(f"jl .l{uop_i[u.src[0]]}")
       elif u.op is Ops.GEP:
-        assert len(u.arg) == 1
-        assert dtypes.is_float(u.dtype)
-        idx_imm = {0: "0x00", 1: "0x55", 2:"0xAA", 3:"0xFF"}
-        line("shufps", loc(u), loc(u.src[0]), idx_imm[u.arg[0]])
+        assert u.dtype == dtypes.float32 and u.dtype.count == 1 and len(u.arg) == 1
+        idx_imm = {0: "0x00", 1: "0x40", 2:"0x80", 3:"0xC0"}
+        line("insertps", loc(u), loc(u.src[0]), idx_imm[u.arg[0]])
       elif u.op is Ops.VECTORIZE:
-        assert dtypes.is_float(u.dtype.scalar())
-        line(op2("mov", u.dtype.scalar()), loc(u), loc(u.src[0]))
-        line("unpcklps", loc(u), loc(u.src[1]))
+        assert u.dtype.scalar() == dtypes.float32
+        idx_imm = {0: "0x00", 1: "0x10", 2:"0x20", 3:"0x30"}
+        for si,s in enumerate(u.src): line("insertps", loc(u), loc(s), idx_imm[si])
       elif u.op is Ops.BITCAST:
         # bitcast just movs to register of the type
         assert dtypes.is_int(u.dtype) != dtypes.is_int(u.src[0].dtype), "what do?"
@@ -194,12 +198,15 @@ class X86Renderer(Renderer):
             line("setne", loc(u))
             float_cmp(u)
         elif not isinstance(u.dtype, PtrDType):
-          # cast between pointers don't do anything
           cfrom = "si" if not dtypes.is_float(u.src[0].dtype) else "tsd" if u.src[0].dtype.itemsize == 8 else "tss"
           cto = "si" if not dtypes.is_float(u.dtype) else "sd" if u.dtype.itemsize == 8 else "ss"
           # zero extend boolean
           if u.src[0].dtype == dtypes.bool and u.src[0] in regs: line("and", loc(u.src[0], 8), "1")
           line(f"cvt{cfrom}2{cto}", loc(u), loc(u.src[0], None if u.src[0].dtype != dtypes.bool else 4))
+        else:
+          # cast between pointers don't do anything, we just mov
+          assert isinstance(u.src[0].dtype.scalar(), PtrDType)
+          line("mov", loc(u), loc(u.src[0]))
 
       # alu ops
       elif u.op in GroupOp.ALU:
