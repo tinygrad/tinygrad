@@ -2,37 +2,6 @@ import os, ctypes, collections, time
 from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_mp_13_0_0, amdgpu_nbio_4_3_0, amdgpu_discovery, amdgpu_mmhub_3_0_0
 from tinygrad.helpers import to_mv, mv_address
 
-def check(x): assert x == 0
-
-check(libpciaccess.pci_system_init())
-
-pci_iter = libpciaccess.pci_id_match_iterator_create(None)
-print(pci_iter)
-
-pcidev = None
-while True:
-  pcidev = libpciaccess.pci_device_next(pci_iter)
-  if not pcidev: break
-  dev_fmt = "{:04x}:{:02x}:{:02x}.{:d}".format(pcidev.contents.domain_16, pcidev.contents.bus, pcidev.contents.dev, pcidev.contents.func)
-  print(dev_fmt, hex(pcidev.contents.vendor_id), hex(pcidev.contents.device_id))
-  
-  if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c:
-    dev_fmt = "{:04x}:{:02x}:{:02x}.{:d}".format(pcidev.contents.domain_16, pcidev.contents.bus, pcidev.contents.dev, pcidev.contents.func)
-    if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
-    if dev_fmt == "0000:86:00.0": continue # skip it, use for kernel hacking.
-    # if dev_fmt == "0000:c6:00.0": continue # skip it, use for kernel hacking.
-    if dev_fmt == "0000:44:00.0": continue # skip it, use for kernel hacking.
-    if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
-    if dev_fmt == "0000:c3:00.0": continue # skip it, use for kernel hacking.
-    # print(dev_fmt)
-    # exit(0)
-    break
-
-assert pcidev is not None
-pcidev = pcidev.contents
-
-libpciaccess.pci_device_probe(ctypes.byref(pcidev))
-
 class AMDDev:
   def __init__(self, pcidev):
     self.usec_timeout = 10000000
@@ -62,11 +31,11 @@ class AMDDev:
     from extra.amdpci.vmm import VMM
     self.vmm = VMM(self) # gmc ip like
 
-    self.raw_vram.cast('Q')[0x400] = 0xdeadbeef
-    print(hex(self.raw_vram.cast('Q')[0x400]))
+    # self.raw_vram.cast('Q')[0x400] = 0xdeadbeef
+    # print(hex(self.raw_vram.cast('Q')[0x400]))
 
-    self.raw_vram.cast('Q')[(21 << 30) // 8] = 0x11cafe11
-    print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
+    # self.raw_vram.cast('Q')[(21 << 30) // 8] = 0x11cafe11
+    # print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
 
     self.init_discovery()
 
@@ -91,35 +60,34 @@ class AMDDev:
 
     self.vmm.init()
 
-    print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BASE, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BASE_BASE_IDX)))
-    print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BOT, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BOT_BASE_IDX)))
-    print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_TOP, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_TOP_BASE_IDX)))
-    print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_LOW_ADDR, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_LOW_ADDR_BASE_IDX)))
-    print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_HIGH_ADDR, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_HIGH_ADDR_BASE_IDX)))
+    # print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BASE, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BASE_BASE_IDX)))
+    # print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BOT, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BOT_BASE_IDX)))
+    # print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_TOP, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_TOP_BASE_IDX)))
+    # print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_LOW_ADDR, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_LOW_ADDR_BASE_IDX)))
+    # print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_HIGH_ADDR, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_HIGH_ADDR_BASE_IDX)))
 
     # self.adev.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_LSB, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_LSB_BASE_IDX)
     # self.adev.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_MSB, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_MSB_BASE_IDX)
 
-    print(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_LO32, 0))
-    print(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32, 0))
+    # print(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_LO32, 0))
+    # print(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32, 0))
 
-
-    print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
-    print(hex(self.raw_vram.cast('Q')[0x400]))
+    # print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
+    # print(hex(self.raw_vram.cast('Q')[0x400]))
 
     from extra.amdpci.ih import IH_IP
     self.ih = IH_IP(self)
     self.ih.init()
 
-    print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
-    print(hex(self.raw_vram.cast('Q')[0x400]))
+    # print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
+    # print(hex(self.raw_vram.cast('Q')[0x400]))
 
     from extra.amdpci.psp import PSP_IP
     self.psp = PSP_IP(self)
     self.psp.init()
 
-    print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
-    print(hex(self.raw_vram.cast('Q')[0x400]))
+    # print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
+    # print(hex(self.raw_vram.cast('Q')[0x400]))
 
     self.smu.init()
 
@@ -196,7 +164,7 @@ class AMDDev:
     
     ip_offset = bhdr.table_list[amdgpu_discovery.IP_DISCOVERY].offset
     ihdr = amdgpu_discovery.struct_ip_discovery_header.from_address(ctypes.addressof(bhdr) + ip_offset)
-    print(hex(ihdr.signature))
+    # print(hex(ihdr.signature))
     assert ihdr.signature == amdgpu_discovery.DISCOVERY_TABLE_SIGNATURE
 
     hw_id_map = {}
@@ -226,4 +194,37 @@ class AMDDev:
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * num_base_address
 
-# adev = AMDDev(pcidev)
+
+if __name__ == "__main__":
+  def check(x): assert x == 0
+
+  check(libpciaccess.pci_system_init())
+
+  pci_iter = libpciaccess.pci_id_match_iterator_create(None)
+  print(pci_iter)
+
+  pcidev = None
+  while True:
+    pcidev = libpciaccess.pci_device_next(pci_iter)
+    if not pcidev: break
+    dev_fmt = "{:04x}:{:02x}:{:02x}.{:d}".format(pcidev.contents.domain_16, pcidev.contents.bus, pcidev.contents.dev, pcidev.contents.func)
+    print(dev_fmt, hex(pcidev.contents.vendor_id), hex(pcidev.contents.device_id))
+    
+    if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c:
+      dev_fmt = "{:04x}:{:02x}:{:02x}.{:d}".format(pcidev.contents.domain_16, pcidev.contents.bus, pcidev.contents.dev, pcidev.contents.func)
+      if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
+      if dev_fmt == "0000:86:00.0": continue # skip it, use for kernel hacking.
+      # if dev_fmt == "0000:c6:00.0": continue # skip it, use for kernel hacking.
+      if dev_fmt == "0000:44:00.0": continue # skip it, use for kernel hacking.
+      if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
+      if dev_fmt == "0000:c3:00.0": continue # skip it, use for kernel hacking.
+      # print(dev_fmt)
+      # exit(0)
+      break
+
+  assert pcidev is not None
+  pcidev = pcidev.contents
+
+  libpciaccess.pci_device_probe(ctypes.byref(pcidev))
+
+  adev = AMDDev(pcidev)

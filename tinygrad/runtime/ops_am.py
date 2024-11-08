@@ -213,8 +213,8 @@ class AMAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer: return self.device._gpu_alloc(size)
 
   def _free(self, opaque, options:BufferOptions):
-    print("free....")
-    time.sleep(1)
+    self.device.synchronize()
+    # TODO
 
   def copyin(self, dest:HCQBuffer, src:memoryview):
     ctypes.memmove(dest.cpu_addr, mv_address(src), src.nbytes)
@@ -261,12 +261,7 @@ class AMDevice(HCQCompiled):
 
       if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c:
           dev_fmt = "{:04x}:{:02x}:{:02x}.{:d}".format(pcidev.contents.domain_16, pcidev.contents.bus, pcidev.contents.dev, pcidev.contents.func)
-          if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
-          # if dev_fmt == "0000:86:00.0": continue # skip it, use for kernel hacking.
-          if dev_fmt == "0000:c6:00.0": continue # skip it, use for kernel hacking.
-          if dev_fmt == "0000:44:00.0": continue # skip it, use for kernel hacking.
-          if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
-          if dev_fmt == "0000:c3:00.0": continue # skip it, use for kernel hacking.
+          print(f"Select device {dev_fmt}")
           break
 
     assert pcidev is not None

@@ -85,8 +85,8 @@ class PSP_IP:
     assert sos_hdr.header.header_version_minor == 0
     fw_bin = sos_hdr.psp_fw_bin
 
-    print(sos_hdr.psp_fw_bin_count)
-    
+    # print(sos_hdr.psp_fw_bin_count)
+
     self.sos_fw_infos = {}
     for fw_i in range(sos_hdr.psp_fw_bin_count):
       fw_bin_desc = amdgpu_2.struct_psp_fw_bin_desc.from_address(ctypes.addressof(fw_bin) + fw_i * ctypes.sizeof(amdgpu_2.struct_psp_fw_bin_desc))
@@ -171,7 +171,7 @@ class PSP_IP:
 
     ring_type = 2 << 16 # PSP_RING_TYPE__KM = 2. Kernel mode ring
     self.adev.wreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64_BASE_IDX, ring_type)
-    print(self.adev.rreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64_BASE_IDX))
+    # print(self.adev.rreg_ip("MP0", 0, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64, amdgpu_mp_13_0_0.regMP0_SMN_C2PMSG_64_BASE_IDX))
 
     # there might be handshake issue with hardware which needs delay
     time.sleep(100 / 1000) # 20 ms orignally
@@ -203,8 +203,6 @@ class PSP_IP:
     assert ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp) == 1024
     ctypes.memset(self.cmd_cpu_addr, 0, 0x1000)
 
-    print(hex(self.tmr_mc_addr), hex(self.tmr_size), hex(self.tmr_paddr))
-    
     cmd = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.cmd_cpu_addr)
     cmd.cmd_id = amdgpu_psp_gfx_if.GFX_CMD_ID_SETUP_TMR
     cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = self.tmr_mc_addr & 0xffffffff
@@ -254,14 +252,14 @@ class PSP_IP:
     while smth != prev_wptr:
       self.adev.wreg_ip("HDP", 0, 0x00d1, 0x0, 1)
       smth = self.fence_view[0]
+    time.sleep(0.05)
 
     resp = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.cmd_cpu_addr)
-    time.sleep(0.1)
-    if resp.resp.status != 0:
-      print(hex(resp.resp.fw_addr_lo))
-      print(hex(resp.resp.fw_addr_hi))
-      print(colored(f"PSP command failed {resp.cmd_id} {resp.resp.status}", "red"))
-    else: print(colored(f"PSP command success {resp.cmd_id}", "green"))
+    if resp.resp.status != 0: print(colored(f"PSP command failed {resp.cmd_id} {resp.resp.status}", "red"))
+    else: 
+      print(colored(f"PSP command success {resp.cmd_id}", "green"))
+      # print(hex(resp.resp.fw_addr_lo))
+      # print(hex(resp.resp.fw_addr_hi))
     return resp
 
   def load_smu_fw(self):

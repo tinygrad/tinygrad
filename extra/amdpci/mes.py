@@ -219,7 +219,6 @@ class MES_IP:
     self.adev.gfx.soc21_grbm_select(0, 0, 0, 0)
 
   def wdoorbell64(self, index, val):
-    print("ringing", index, val)
     self.adev.doorbell64[index//2] = val # this should be correct
 
   def submit_pkt_and_poll_completion(self, pkt):
@@ -227,16 +226,11 @@ class MES_IP:
     pkt.api_status.api_completion_fence_addr = self.write_fence_mc_addr
     pkt.api_status.api_completion_fence_value = 1
 
-    for i in range(ctypes.sizeof(pkt) // 4):
-      print(i, hex(pkt.max_dwords_in_api[i]))
-      self.mes_ring.write(pkt.max_dwords_in_api[i])
+    for i in range(ctypes.sizeof(pkt) // 4): self.mes_ring.write(pkt.max_dwords_in_api[i])
 
-    # print("pf", self.adev.vmm.collect_pfs())
     self.adev.vmm.flush_hdp()
     self.wdoorbell64(self.mes_ring.doorbell_index, self.mes_ring.next_ptr)
 
-    # print("x", self.write_fence_cpu_view[0], self.next_write_fence)
-    # print("qs", self.query_status_fence_cpu_view[0])
     while self.write_fence_cpu_view[0] != 1:
       self.adev.vmm.collect_pfs()
 
