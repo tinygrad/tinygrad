@@ -64,6 +64,38 @@ class VMM:
 
   def collect_pfs(self):
     gfx = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_PROTECTION_FAULT_STATUS, 0)
+
+    if gfx != 0:
+      addr = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_PROTECTION_FAULT_ADDR_LO32, 0)
+      addr |= (self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_PROTECTION_FAULT_ADDR_HI32, 0) << 32)
+
+      client_mappings = ["CB/DB",
+        "Reserved",
+        "GE1",
+        "GE2",
+        "CPF",
+        "CPC",
+        "CPG",
+        "RLC",
+        "TCP",
+        "SQC (inst)",
+        "SQC (data)",
+        "SQG",
+        "Reserved",
+        "SDMA0",
+        "SDMA1",
+        "GCR",
+        "SDMA2",
+        "SDMA3"
+      ]
+      cid = (gfx & amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__CID_MASK) >> amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__CID__SHIFT
+      more_faults = (gfx & amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__MORE_FAULTS_MASK) >> amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__MORE_FAULTS__SHIFT
+      rw = (gfx & amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__RW_MASK) >> amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__RW__SHIFT
+      vmid = (gfx & amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__VMID_MASK) >> amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__VMID__SHIFT
+      mapping_error = (gfx & amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__MAPPING_ERROR_MASK) >> amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__MAPPING_ERROR__SHIFT
+      permission_faults = (gfx & amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__PERMISSION_FAULTS_MASK) >> amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__PERMISSION_FAULTS__SHIFT
+      raise RuntimeError(f"GFX FAULT: {client_mappings[cid]} {addr=:X}: {more_faults=}, {rw=}, {vmid=}, {mapping_error=} {permission_faults=}")
+
     mmhub = self.adev.rreg_ip("MMHUB", 0, 0x070c, 0) ## MMVM_L2_PROTECTION_FAULT_STATUS
     return gfx, mmhub
 

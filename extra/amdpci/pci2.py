@@ -131,8 +131,6 @@ class AMDDev:
 
     self.gfx.init()
 
-    exit(0)
-
   def pcie_index_offset(self): return self.reg_off("NBIO", 0, amdgpu_nbio_4_3_0.regBIF_BX_PF0_RSMU_INDEX, amdgpu_nbio_4_3_0.regBIF_BX_PF0_RSMU_INDEX_BASE_IDX)
   def pcie_data_offset(self): return self.reg_off("NBIO", 0, amdgpu_nbio_4_3_0.regBIF_BX_PF0_RSMU_DATA, amdgpu_nbio_4_3_0.regBIF_BX_PF0_RSMU_DATA_BASE_IDX)
 
@@ -228,4 +226,4 @@ class AMDDev:
 
         ip_offset += 8 + (8 if ihdr.base_addr_64_bit else 4) * num_base_address
 
-adev = AMDDev(pcidev)
+# adev = AMDDev(pcidev)

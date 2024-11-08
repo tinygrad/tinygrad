@@ -19,6 +19,7 @@ class MES_IP:
     self.query_status_fence_vaddr = self.adev.vmm.alloc_vram(0x1000, "query_status_fence")
     self.query_status_fence_paddr = self.adev.vmm.vaddr_to_paddr(self.query_status_fence_vaddr)
     self.query_status_fence_mc_addr = self.adev.vmm.paddr_to_mc(self.query_status_fence_paddr)
+    self.query_status_fence_cpu_view = self.adev.vmm.paddr_to_cpu_mv(self.query_status_fence_paddr, 0x1000).cast('I')
 
     self.write_fence_vaddr = self.adev.vmm.alloc_vram(0x1000, "w_fence")
     self.write_fence_paddr = self.adev.vmm.vaddr_to_paddr(self.write_fence_vaddr)
@@ -222,15 +223,22 @@ class MES_IP:
     self.adev.doorbell64[index//2] = val # this should be correct
 
   def submit_pkt_and_poll_completion(self, pkt):
+    self.write_fence_cpu_view[0] = 0
     pkt.api_status.api_completion_fence_addr = self.write_fence_mc_addr
-    pkt.api_status.api_completion_fence_value = self.next_write_fence
+    pkt.api_status.api_completion_fence_value = 1
 
-    for i in range(ctypes.sizeof(pkt) // 4): self.mes_ring.write(pkt.max_dwords_in_api[i])
+    for i in range(ctypes.sizeof(pkt) // 4):
+      print(i, hex(pkt.max_dwords_in_api[i]))
+      self.mes_ring.write(pkt.max_dwords_in_api[i])
+
+    # print("pf", self.adev.vmm.collect_pfs())
+    self.adev.vmm.flush_hdp()
     self.wdoorbell64(self.mes_ring.doorbell_index, self.mes_ring.next_ptr)
 
-    print("x", self.write_fence_cpu_view[0], self.next_write_fence)
-    while self.write_fence_cpu_view[0] != self.next_write_fence: pass
-    self.next_write_fence += 1
+    # print("x", self.write_fence_cpu_view[0], self.next_write_fence)
+    # print("qs", self.query_status_fence_cpu_view[0])
+    while self.write_fence_cpu_view[0] != 1:
+      self.adev.vmm.collect_pfs()
 
     return 0
 
@@ -248,8 +256,8 @@ class MES_IP:
     mes_set_hw_res_pkt.header.opcode = mes_v11_api_def.MES_SCH_API_SET_HW_RSRC
     mes_set_hw_res_pkt.header.dwsize = mes_v11_api_def.API_FRAME_SIZE_IN_DWORDS
 
-    mes_set_hw_res_pkt.vmid_mask_mmhub = 0xffffffff
-    mes_set_hw_res_pkt.vmid_mask_gfxhub = 0xffffffff
+    mes_set_hw_res_pkt.vmid_mask_mmhub = 0xffffff00
+    mes_set_hw_res_pkt.vmid_mask_gfxhub = 0xffffff00
     mes_set_hw_res_pkt.gds_size = 0x1000
     mes_set_hw_res_pkt.paging_vmid = 0
     mes_set_hw_res_pkt.g_sch_ctx_gpu_mc_ptr = self.sch_ctx_gpu_mc_addr

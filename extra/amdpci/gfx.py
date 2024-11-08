@@ -154,7 +154,9 @@ class GFX_IP:
 
     self.adev.vmm.flush_hdp()
     self.adev.mes.kiq_set_resources(0xffffffffffffffff) # full mask
-    self.adev.mes.map_legacy_queue(self.kcq_ring, mes_v11_api_def.MES_QUEUE_TYPE_COMPUTE)
+
+    # Directly map kcq with kiq, no MES map_legacy_queue.
+    self.adev.mes.kiq_map_queue(self.kcq_ring, is_compute=True)
 
     # test kcq
     self.adev.wreg(0xc040, 0xcafedead)
@@ -163,13 +165,18 @@ class GFX_IP:
     self.kcq_ring.write(0x40) # uconfreg
     self.kcq_ring.write(0xdeadc0de)
 
+    # self.kcq_ring.write(amd_gpu.PACKET3(amd_gpu.PACKET3_SET_UCONFIG_REG, 1))
+    # self.kcq_ring.write(0x40) # uconfreg
+    # self.kcq_ring.write(0xdeadc0de)
+
     self.wdoorbell64(self.kcq_ring.doorbell_index, self.kcq_ring.next_ptr)
 
     while True:
+      self.adev.vmm.collect_pfs()
       if self.adev.rreg(0xc040) == 0xdeadc0de:
         break
 
-    print("kcq test done")
+    print("GFX: kcq test done")
 
   def cp_resume(self):
     self.cp_set_doorbell_range()
@@ -203,7 +210,7 @@ class GFX_IP:
     ring.mqd.compute_static_thread_mgmt_se3 = 0xffffffff
     ring.mqd.compute_misc_reserved = 0x00000007
 
-    eop_base_addr = ring.eop_gpu_vaddr >> 8
+    eop_base_addr = ring.eop_gpu_mc_addr >> 8
     ring.mqd.cp_hqd_eop_base_addr_lo = eop_base_addr & 0xffffffff
     ring.mqd.cp_hqd_eop_base_addr_hi = (eop_base_addr >> 32) & 0xffffffff
     ring.mqd.cp_hqd_eop_control = 0x8
@@ -227,11 +234,11 @@ class GFX_IP:
     assert ring.ring_size in {0x2000}
     ring.mqd.cp_hqd_pq_control = 0xd030890a
 
-    ring.mqd.cp_hqd_pq_rptr_report_addr_lo = ring.rptr_gpu_vaddr & 0xfffffffc
-    ring.mqd.cp_hqd_pq_rptr_report_addr_hi = (ring.rptr_gpu_vaddr >> 32) & 0xffff
+    ring.mqd.cp_hqd_pq_rptr_report_addr_lo = ring.rptr_gpu_mc_addr & 0xfffffffc
+    ring.mqd.cp_hqd_pq_rptr_report_addr_hi = (ring.rptr_gpu_mc_addr >> 32) & 0xffff
 
-    ring.mqd.cp_hqd_pq_wptr_poll_addr_lo = ring.wptr_gpu_vaddr & 0xfffffffc
-    ring.mqd.cp_hqd_pq_wptr_poll_addr_hi = (ring.wptr_gpu_vaddr >> 32) & 0xffff
+    ring.mqd.cp_hqd_pq_wptr_poll_addr_lo = ring.wptr_gpu_mc_addr & 0xfffffffc
+    ring.mqd.cp_hqd_pq_wptr_poll_addr_hi = (ring.wptr_gpu_mc_addr >> 32) & 0xffff
 
     ring.mqd.cp_hqd_pq_doorbell_control = (1 << 0x1e) | (ring.doorbell_index << 2)
     ring.mqd.cp_hqd_vmid = 0
