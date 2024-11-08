@@ -149,7 +149,7 @@ class GFX_IP:
     self.soc21_grbm_select(0, 0, 0, 0)
 
   def kcq_resume(self):
-    self.kcq_ring = AMDRing(self.adev, size=0x2000, me=1, pipe=0, queue=0, vmid=0, doorbell_index=(self.AMDGPU_NAVI10_DOORBELL_MEC_RING0 << 1))
+    self.kcq_ring = AMDRing(self.adev, size=0x100000, me=1, pipe=0, queue=0, vmid=0, doorbell_index=(self.AMDGPU_NAVI10_DOORBELL_MEC_RING0 << 1))
     self.kcq_init_queue(self.kcq_ring)
 
     self.adev.vmm.flush_hdp()
@@ -231,8 +231,8 @@ class GFX_IP:
     hqd_gpu_addr = ring.ring_gpu_mc_addr >> 8
     ring.mqd.cp_hqd_pq_base_lo = hqd_gpu_addr & 0xffffffff
     ring.mqd.cp_hqd_pq_base_hi = (hqd_gpu_addr >> 32) & 0xffffffff
-    assert ring.ring_size in {0x2000}
-    ring.mqd.cp_hqd_pq_control = 0xd030890a
+    assert ring.ring_size in {0x100000}
+    ring.mqd.cp_hqd_pq_control = 0xd0308911
 
     ring.mqd.cp_hqd_pq_rptr_report_addr_lo = ring.rptr_gpu_mc_addr & 0xfffffffc
     ring.mqd.cp_hqd_pq_rptr_report_addr_hi = (ring.rptr_gpu_mc_addr >> 32) & 0xffff

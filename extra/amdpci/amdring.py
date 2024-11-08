@@ -92,6 +92,6 @@ class AMDRing:
     self.adev.vmm.vram_to_cpu_mv(self.mqd_gpu_addr, len(self.mqd_mv))[:] = self.mqd_mv
 
   def write(self, value):
-    self.adev.vmm.paddr_to_cpu_mv(self.ring_gpu_paddr, 0x1000).cast('I')[self.next_ptr] = value
+    self.adev.vmm.paddr_to_cpu_mv(self.ring_gpu_paddr, self.ring_size).cast('I')[self.next_ptr % (self.ring_size // 4)] = value
     self.next_ptr += 1
     self.wptr[0] = self.next_ptr

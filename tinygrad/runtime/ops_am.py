@@ -30,12 +30,13 @@ def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMSignal(HCQSignal):
   def __init__(self, value=0, alloc_event=False):
-    x, off = AMDevice.signals_pool.pop()
+    self._o = AMDevice.signals_pool.pop()
+    x, off = self._o
     self._gpu_addr = x.va_addr + off
     self._mc_addr = x.mc_addr + off
     self._signal = to_mv(x.cpu_addr + off, 16).cast("Q")
     super().__init__(value)
-  def __del__(self): AMDDevice.signals_pool.append(self._signal)
+  def __del__(self): AMDevice.signals_pool.append(self._o)
   def _get_value(self) -> int: return self._signal[0]
   def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(100)
   def _set_value(self, new_value:int): self._signal[0] = new_value
@@ -84,10 +85,6 @@ class AMComputeQueue(HWComputeQueue):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC1), prg.rsrc1, prg.rsrc2]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC3), 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_TMPRING_SIZE), prg.device.tmpring_size]
-    # if prg.device.has_scratch_base_registers:
-    #   self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2),
-    #              gfxreg(amd_gpu.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO), *data64_le(prg.device.scratch.va_addr >> 8)]
-    # if prg.device.target < 110000: self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.mmCP_COHER_START_DELAY), 0x20]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), gfxreg(amd_gpu.regCOMPUTE_RESTART_X), 0, 0, 0, 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE0)] + [0xFFFFFFFF] * 2
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE2)] + [0xFFFFFFFF] * 2
@@ -210,7 +207,7 @@ class AMDevice(HCQCompiled):
     self.pcidev = self._find_pci_dev()
     self.adev = AMDDev(self.pcidev)
     self.arch = "gfx1100"
-    self.tmpring_size = 0
+    self.tmpring_size = 0x200200
 
     signals_alloc = self._gpu_alloc(0x1000)
     AMDevice.signals_pool = [(signals_alloc, off) for off in range(0, signals_alloc.size, 16)]
