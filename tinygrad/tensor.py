@@ -1951,13 +1951,13 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
       # repeats such that we don't need padding
       xup = self.repeat([1]*len(noop_) + [o + ceildiv((o*s), i) for o,i,s in zip(o_,i_,s_)])
       # handle stride
-      xup = xup.shrink(tuple(noop_ + [(0, o*(i+s)) for o,i,s in zip(o_,i_,s_)])).reshape(noop_ + flatten((o,i+s) for o,i,s in zip(o_,i_,s_)))
+      xup = xup.shrink(tuple(noop_ + [(0, (i+s)*o) for o,i,s in zip(o_,i_,s_)])).reshape(noop_ + flatten((i+s, o) for o,i,s in zip(o_,i_,s_)))
       # handle dilation
       xup = xup.shrink(
-        tuple(noop_ + flatten(((0,o), (0,k*d)) for o,k,d in zip(o_,k_,d_)))).reshape(noop_ + flatten((o,k,d) for o,k,d in zip(o_,k_,d_)))
-      xup = xup.shrink(tuple(noop_ + flatten(((0,o), (0,k), (0,1)) for o,k in zip(o_,k_)))).reshape(noop_ + flatten((o,k) for o,k in zip(o_,k_)))
+        tuple(noop_ + flatten(((0,k*d), (0,o)) for o,k,d in zip(o_,k_,d_)))).reshape(noop_ + flatten((k,d,o) for o,k,d in zip(o_,k_,d_)))
+      xup = xup.shrink(tuple(noop_ + flatten(((0,k), (0,1), (0,o)) for o,k in zip(o_,k_)))).reshape(noop_ + flatten((o,k) for o,k in zip(o_,k_)))
       # permute to move reduce to the end
-      return xup.permute(*range(len(noop_)), *[len(noop_)+i*2 for i in range(len(i_))], *[len(noop_)+i*2+1 for i in range(len(i_))])
+      return xup.permute(*range(len(noop_)), *[len(noop_)+i*2+1 for i in range(len(i_))], *[len(noop_)+i*2 for i in range(len(i_))])
     # TODO: once the shapetracker can optimize well, remove this alternative implementation
     xup = self.pad(tuple(noop_ + [(0, max(0,o*s-i)) for i,o,s in zip(i_, o_, s_)])).shrink(tuple(noop_ + [(0,o*s) for o,s in zip(o_, s_)]))
     xup = xup.reshape(noop_ + flatten(((o,s) for o,s in zip(o_, s_))))
