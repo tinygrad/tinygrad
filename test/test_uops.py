@@ -6,13 +6,13 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context
 from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import Ops, UOp, Pat, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu, spec # noqa F401
+from tinygrad.ops import Ops, UOp, UPat, UnaryOps, BinaryOps, TernaryOps, ReduceOps, KernelInfo, exec_alu, spec # noqa F401
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule, to_si
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 def to_uops_list(u:List[UOp], opts=None, skip_check=False) -> List[UOp]: return linearize_uop(full_graph_rewrite(UOp.sink(*u), opts), skip_check)
 
@@ -32,9 +32,9 @@ def _test_single_value(vals, op, dts):
   output_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dts[-1]
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   buf_loads = [uop(uops, Ops.DEFINE_GLOBAL, dtype.ptr(), (), i+1) for i,dtype in enumerate(dts)]
-  loads = (uop(uops, Ops.LOAD, dtype, [buf_loads[i], uop(uops, Ops.CONST, dtypes.int32, (), 0)]) for i,dtype in enumerate(dts))
-  alu = uop(uops, Ops.ALU, output_dtype, loads, op)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store, uop(uops, Ops.CONST, dtypes.int32, (), 0), alu))
+  loads = (uop(uops, Ops.LOAD, dtype, [buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0))]) for i, dtype in enumerate(dts))
+  alu = uop(uops, op, output_dtype, loads)
+  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=_to_np_dtype(dtype)).data) for a,dtype in zip(vals, dts)]
   prg = _uops_to_prg([out])
@@ -48,8 +48,8 @@ def _test_single_value_const(vals, op, dts):
   output_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dts[-1]
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   loads = (uop(uops, Ops.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
-  alu = uop(uops, Ops.ALU, output_dtype, loads, op)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store, uop(uops, Ops.CONST, dtypes.int32, (), 0), alu))
+  alu = uop(uops, op, output_dtype, loads)
+  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
@@ -61,7 +61,7 @@ def _test_uops_result(output_dtype, uops, res):
   # uops = []
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   # res = output_fn(uops)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store, uop(uops, Ops.CONST, dtypes.int32, (), 0), res))
+  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
@@ -309,20 +309,20 @@ class TestLocalAccess(unittest.TestCase):
   def test_local_basic(self):
     uops = []
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(local=True), (), ('smem', 16))
-    st = uop(uops, Ops.STORE, dtypes.void, (smem, uop(uops, Ops.CONST, dtypes.int32, (), 0), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
+    st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
-    sres = uop(uops, Ops.LOAD, dtypes.float32, (smem, uop(uops, Ops.CONST, dtypes.int32, (), 0), barr))
+    sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_indirect(self):
     uops = []
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.int32.ptr(local=True), (), ('smem', 16))
-    st1 = uop(uops, Ops.STORE, dtypes.void, (smem, uop(uops, Ops.CONST, dtypes.int32, (), 1), uop(uops, Ops.CONST, dtypes.int32, (), 2)))
-    st2 = uop(uops, Ops.STORE, dtypes.void, (smem, uop(uops, Ops.CONST, dtypes.int32, (), 2), uop(uops, Ops.CONST, dtypes.int32, (), 42)))
+    st1 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 1)), uop(uops, Ops.CONST, dtypes.int32, (), 2)))
+    st2 = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 2)), uop(uops, Ops.CONST, dtypes.int32, (), 42)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st1,st2))
-    ofs = uop(uops, Ops.LOAD, dtypes.int32, (smem, uop(uops, Ops.CONST, dtypes.int32, (), 1), barr))
-    sres = uop(uops, Ops.LOAD, dtypes.int32, (smem, ofs))
+    ofs = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 1)), barr))
+    sres = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(ofs),))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
 @unittest.skipUnless(getenv("PTX"), "This only tests assembly backends")
@@ -331,25 +331,25 @@ class TestAssembly(unittest.TestCase):
     g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
     c1 = UOp(Ops.CONST, dtypes.int, (), 2)
     c2 = UOp(Ops.CONST, dtypes.int, (), 3)
-    l1 = UOp(Ops.LOAD, dtypes.int, (g1, c1))
-    a1 = UOp(Ops.ALU, dtypes.int, (l1, c1), BinaryOps.MUL)
-    a2 = UOp(Ops.ALU, dtypes.int, (l1, c2), BinaryOps.MUL)
+    l1 = UOp(Ops.LOAD, dtypes.int, (g1.index(c1),))
+    a1 = UOp(Ops.MUL, dtypes.int, (l1, c1))
+    a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops[-1].arg, BinaryOps.SHL)
-    self.assertEqual(uops[-2].arg, BinaryOps.MUL)
+    self.assertEqual(uops[-1].op, BinaryOps.SHL)
+    self.assertEqual(uops[-2].op, BinaryOps.MUL)
 
   def test_bitshift_right(self):
     g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
     c1 = UOp(Ops.CONST, dtypes.int, (), 2)
     c2 = UOp(Ops.CONST, dtypes.int, (), 3)
-    l1 = UOp(Ops.LOAD, dtypes.int, (g1, c1))
-    a1 = UOp(Ops.ALU, dtypes.int, (l1, c1), BinaryOps.IDIV)
-    a2 = UOp(Ops.ALU, dtypes.int, (l1, c2), BinaryOps.IDIV)
+    l1 = UOp(Ops.LOAD, dtypes.int, (g1.index(c1),))
+    a1 = UOp(Ops.IDIV, dtypes.int, (l1, c1))
+    a2 = UOp(Ops.IDIV, dtypes.int, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops[-1].arg, BinaryOps.SHR)
-    self.assertEqual(uops[-2].arg, BinaryOps.IDIV)
+    self.assertEqual(uops[-1].op, BinaryOps.SHR)
+    self.assertEqual(uops[-2].op, BinaryOps.IDIV)
 
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
@@ -357,8 +357,8 @@ class TestUOpMethod(unittest.TestCase):
     a = UOp(Ops.CONST, dtypes.float, (), 2.0)
     b = UOp(Ops.CONST, dtypes.float, (), 3.0)
 
-    add = UOp(Ops.ALU, dtypes.float, (a, b), BinaryOps.ADD)
-    mul = UOp(Ops.ALU, dtypes.float, (a, b), BinaryOps.MUL)
+    add = UOp(Ops.ADD, dtypes.float, (a, b))
+    mul = UOp(Ops.MUL, dtypes.float, (a, b))
     assert (add < mul) or (mul < add), "add and mul with same src should have an order"
 
   def test_uop_variables(self):
@@ -441,13 +441,13 @@ class TestIndexingOrdering(unittest.TestCase):
     stores = [st for st in uops if st.op is Ops.STORE]
     assert stores[0].src[1] < stores[1].src[1], f"stored at idx {stores[1].src[1].arg} AFTER {stores[0].src[1].arg}"
 
-class TestPatHelpers(unittest.TestCase):
+class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
     self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "uopgraph.py")
     self.assertEqual(to_si.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "schedule.py")
     self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "ops.py")
-    with self.assertRaises(AssertionError): # TODO: location Pat files created in test/*?
-      test_upat = Pat(Ops.CONST, dtypes.bool)
+    with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?
+      test_upat = UPat(Ops.CONST, dtypes.bool)
       self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])
 
 if __name__ == '__main__':

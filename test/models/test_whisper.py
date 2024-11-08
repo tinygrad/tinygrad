@@ -3,7 +3,7 @@ import pathlib
 from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
 from tinygrad.helpers import CI, fetch
 from tinygrad import Device, dtypes
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 # Audio generated with the command on MacOS:
 # say "Could you please let me out of the box?" --file-format=WAVE  --data-format=LEUI8@16000 -o test

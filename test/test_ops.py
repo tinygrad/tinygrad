@@ -5,6 +5,7 @@ import torch
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
+from tinygrad.device import is_dtype_supported
 
 if CI:
   import warnings
@@ -1628,6 +1629,15 @@ class TestOps(unittest.TestCase):
   def test_conv2d_bs_1_cin_1(self): self._test_conv2d(bs=1, cin=1)
   def test_conv2d_bs_4_cin_1(self): self._test_conv2d(bs=4, cin=1)
 
+  def test_conv2d_errors(self):
+    # kernel size cannot be larger than input size
+    self.helper_test_exception([(1,1,6,7), (6,1,3,3)],
+                               lambda x,w:torch.nn.functional.conv2d(x,w,dilation=3),
+                               lambda x,w: Tensor.conv2d(x,w,dilation=3), expected=(RuntimeError, AssertionError))
+    # regression test for https://github.com/tinygrad/tinygrad/pull/7549/
+    self.helper_test_exception([(2,16,2,2), (32,16,3,3)], lambda x,w:torch.nn.functional.conv2d(x,w), lambda x,w: Tensor.conv2d(x,w),
+                               expected=(RuntimeError, AssertionError))
+
   def test_large_input_conv2d(self):
     bs = 4
     cin = 16
@@ -2180,6 +2190,7 @@ class TestOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
+@unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
 class TestOpsUint8(unittest.TestCase):
   @unittest.skip('this is broken for negative numbers')
   def test_cast(self):

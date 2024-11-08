@@ -1,7 +1,7 @@
-from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable
+from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable, Tuple
 import struct
 from collections import defaultdict
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op, Ops, UOp, PatternMatcher, Pat
+from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -14,7 +14,7 @@ def render_val(x, dtype):
     return "0f%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
   return str(int(x)) + ("U" if dtypes.is_unsigned(dtype) else "")
 
-asm_for_op: Dict[Op, Callable] = {
+asm_for_op: Dict[Ops, Callable] = {
   UnaryOps.RECIP: lambda d,a,dt,name: f"rcp{'.approx' if dtypes.is_float(dt) else ''}.{name} {d}, {a};",
   UnaryOps.EXP2: lambda d,a,dt,name: f"ex2.approx.{name} {d}, {a};", UnaryOps.LOG2: lambda d,a,dt,name: f"lg2.approx.{name} {d}, {a};",
   UnaryOps.SIN: lambda d,a,dt,name: f"sin.approx.{name} {d}, {a};", UnaryOps.SQRT: lambda d,a,dt,name: f"sqrt.approx.{name} {d}, {a};",
@@ -32,26 +32,26 @@ asm_for_op: Dict[Op, Callable] = {
     f"@{a} mov.{name} {d}, {b};\n@!{a} mov.{name} {d}, {c};" if name == "pred" else f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
 }
 
-supports_half: List[Op] = [UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
+supports_half: List[Ops] = [UnaryOps.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
+doesnt_support_half: Tuple[Ops, ...] = tuple(op for op in asm_for_op.keys() if op not in supports_half)
 ptx_matcher = PatternMatcher([
   # bool CMPNE is XOR, bool CMPLT is XOR+AND (universal makes this slow, this is for renderer only)
-  (Pat.var('x', dtype=dtypes.bool).ne(Pat.var('y')), lambda x,y: x^y),
-  (Pat.var('x', dtype=dtypes.bool).lt(Pat.var('y')), lambda x,y: (x^True)&y),
+  (UPat.var('x', dtype=dtypes.bool).ne(UPat.var('y')), lambda x,y: x^y),
+  (UPat.var('x', dtype=dtypes.bool).lt(UPat.var('y')), lambda x,y: (x^True)&y),
   # upcast to float32 all the ops that don't support half
-  *[(Pat(Ops.ALU, arg=op, dtype=dtypes.half, name="x"),
-    lambda x: (UOp(x.op, dtypes.float32, tuple(vv.cast(dtypes.float32) for vv in x.src), x.arg).cast(dtypes.half)))
-    for op in asm_for_op.keys() if op not in supports_half],
+  (UPat(doesnt_support_half, dtype=dtypes.half, name="x"),
+    lambda x: (UOp(x.op, dtypes.float32, tuple(vv.cast(dtypes.float32) for vv in x.src), x.arg).cast(dtypes.half))),
   # load/store bool -> uint8
-  (Pat(Ops.LOAD, dtypes.bool, src=(Pat(dtype=dtypes.int64),), name="x", allow_any_len=True),
+  (UPat(Ops.LOAD, dtypes.bool, src=(UPat(dtype=dtypes.int64),), name="x", allow_any_len=True),
    lambda x: UOp(x.op, dtypes.uint8, x.src[0:1] + ((x.src[1].cast(dtypes.uint8),) if len(x.src) >= 2 else ()) + x.src[2:]).cast(dtypes.bool)),
-  (Pat(Ops.STORE, src=(Pat(dtype=dtypes.int64), Pat(dtype=dtypes.bool)), name="x", allow_any_len=True),
+  (UPat(Ops.STORE, src=(UPat(dtype=dtypes.int64), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
    lambda x: UOp(x.op, dtypes.void, x.src[0:1] + (x.src[1].cast(dtypes.uint8),) + x.src[2:])),
   # load/store use pointer arithmetic, and the cast does nothing
-  (Pat(Ops.INDEX, src=(Pat.var("buf"), Pat.var("idx"))), lambda buf,idx: buf.cast(dtypes.int64) + idx.cast(dtypes.int64)*buf.dtype.itemsize),
-  (Pat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) else None),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx: buf.cast(dtypes.int64) + idx.cast(dtypes.int64)*buf.dtype.itemsize),
+  (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) else None),
   # ptx shr and shl instructions require y to be uint
-  (Pat.var("x") << Pat.var("y"), lambda x,y: UOp(Ops.ALU, x.dtype, (x,y.cast(dtypes.uint)), BinaryOps.SHL) if y.dtype != dtypes.uint else None),
-  (Pat.var("x") >> Pat.var("y"), lambda x,y: UOp(Ops.ALU, x.dtype, (x,y.cast(dtypes.uint)), BinaryOps.SHR) if y.dtype != dtypes.uint else None),
+  (UPat.var("x") << UPat.var("y"), lambda x,y: UOp(Ops.SHL, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
+  (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
 ])
 
 class PTXRenderer(Renderer):
@@ -166,9 +166,9 @@ class PTXRenderer(Renderer):
           kk(gate + f"st{mem_type}.{self.mem_types[src[1].dtype]} [{r[src[0]]}+0], {r[src[1]]};")
       else:
         if uop is Ops.RANGE: kk(*self.render_loop(loop:=ssa('ridx', u), r[src[0]], "LOOP_"+loop[1:]))
-        elif uop is Ops.ALU:
-          src_dtype = src[0].dtype if args in {BinaryOps.CMPLT, BinaryOps.CMPNE} else dtype
-          kk(self.code_for_op[args](ssa("alu", u), *[r[x] for x in src], src_dtype, self.types[src_dtype]))
+        elif uop in GroupOp.ALU:
+          src_dtype = src[0].dtype if uop in {BinaryOps.CMPLT, BinaryOps.CMPNE} else dtype
+          kk(self.code_for_op[uop](ssa("alu", u), *[r[x] for x in src], src_dtype, self.types[src_dtype]))
         elif uop is Ops.DEFINE_ACC:
           if dtype.count > 1:
             r[u] = [ssa('acc', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
@@ -190,7 +190,7 @@ class PTXRenderer(Renderer):
         elif uop is Ops.LOAD:
           assert src[0].dtype == dtypes.int64, "load isn't int64"
           mem_type = '.shared' if src[0].op is Ops.DEFINE_LOCAL or any(x.op is Ops.DEFINE_LOCAL for x in src[0].parents) else '.global'
-          has_gate = len(src) > 2 and src[2].op is Ops.ALU
+          has_gate = len(src) > 2 and src[2].op in GroupOp.ALU
           if dtype.count > 1:
             r[u] = [ssa('val', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
             if has_gate:

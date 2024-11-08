@@ -44,7 +44,7 @@ class CUDAProgram:
       cuda_disassemble(lib, device.arch)
       raise RuntimeError(f"module load failed with status code {status}: {cuda.cudaError_enum__enumvalues[status]}")
     check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
-    self.prg = prg #type: ignore
+    self.prg = prg
     if self.smem > 0: check(cuda.cuFuncSetAttribute(self.prg, cuda.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, self.smem))
 
   def __del__(self):
@@ -53,7 +53,7 @@ class CUDAProgram:
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     check(cuda.cuCtxSetCurrent(self.device.context))
     if not hasattr(self, "vargs"):
-      self.c_args, self.vargs = encode_args(args, vals) #type: ignore
+      self.c_args, self.vargs = encode_args(args, vals)
     else:
       for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
       for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])

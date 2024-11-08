@@ -384,10 +384,9 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
   def from_uop(y:UOp, **kwargs) -> Tensor:
     if y.op is Ops.BIND: return Tensor(y, **kwargs, requires_grad=False)   # this is the only UOp allowed in Tensor
     if y.op is Ops.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
-    if y.op is Ops.ALU:
-      if y.arg is BinaryOps.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
-      if y.arg is BinaryOps.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
-      if y.arg is BinaryOps.MAX: return Tensor.from_uop(y.src[0]).maximum(Tensor.from_uop(y.src[1]))
+    if y.op is BinaryOps.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
+    if y.op is BinaryOps.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
+    if y.op is BinaryOps.MAX: return Tensor.from_uop(y.src[0]).maximum(Tensor.from_uop(y.src[1]))
     raise RuntimeError(f"unhandled UOp {y}")
 
   # ***** creation entrypoint *****
@@ -1946,6 +1945,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     s_, d_ = make_tuple(stride, len(k_)), make_tuple(dilation, len(k_))
     assert len(k_) == len(s_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
     noop_, i_ = [None] * len(self.shape[:-len(k_)]), self.shape[-len(k_):]
+    assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_, d_, i_)), "kernel size cannot be greater than actual input size"
     o_ = [ceildiv(i - d * (k-1), s) for i,d,k,s in zip(i_, d_, k_, s_)]
     if any(resolve(k > s) for k,s in zip(k_, s_)) or any(d != 1 for d in d_):
       # repeats such that we don't need padding
@@ -3101,7 +3101,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
   def lt(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, False))
   def gt(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, True))
-  def ne(self, x) -> Tensor: return F.Neq.apply(*self._broadcasted(x))  # type: ignore[override]
+  def ne(self, x) -> Tensor: return F.Neq.apply(*self._broadcasted(x))
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
 

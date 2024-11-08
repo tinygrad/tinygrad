@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 import torch
-from tinygrad import Tensor, Device, TinyJit
+from tinygrad import Tensor, Device, TinyJit, dtypes
 from tinygrad.ops import Ops
 from tinygrad.helpers import CI, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
@@ -10,6 +10,7 @@ from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNo
 from tinygrad.nn.state import load_state_dict
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
+from tinygrad.device import is_dtype_supported
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestNN(unittest.TestCase):
@@ -474,6 +475,7 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=2e-3, rtol=1e-3)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), f"no long on {Device.DEFAULT}")
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
 
