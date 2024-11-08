@@ -1,10 +1,9 @@
 from typing import List, Set, Dict, Tuple, DefaultDict
 import functools, heapq
 from collections import defaultdict
-from dataclasses import dataclass
-from tinygrad.ops import type_verify, END_FOR_UOP, UOp, Ops, GroupOp, print_uops
+from tinygrad.ops import type_verify, END_FOR_UOP, UOp, Ops, GroupOp
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import DEBUG, dedup
+from tinygrad.helpers import DEBUG, dedup, flatten
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
   if u in children: return srcs[u]
@@ -17,98 +16,55 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
   in_degree[u] = len(u.src)
   return srcs[u]
 
-@dataclass(eq=True, unsafe_hash=True)
-class Block:
-  loop_inside: Tuple[UOp, ...]
-  loop_after: Tuple[UOp, ...]
-  @property
-  def key(self): return len(self.loop_after), [x.arg for x in self.loop_after], len(self.loop_inside), [x.arg for x in self.loop_inside]
-  def __lt__(self, o): return self.key < o.key
-  def __repr__(self): return f"{[x.arg[0] for x in self.loop_inside]}-{[x.arg[0] for x in self.loop_after]}"
+BlockType = Tuple[Tuple[int, ...], Tuple[int, ...]]
+def order_blocks(blocks:List[BlockType]) -> List[BlockType]:
+  open_loops: List[int] = []
+  seen_loops: List[int] = []
+  placed_blocks: List[BlockType] = []
+  blocks = sorted(blocks, key=lambda x: (len(x[1]), x[1], len(x[0]), x[0]))
+  while len(blocks):
+    # can we place any blocks without opening or closing loops
+    for b in blocks:
+      if all(x in open_loops for x in b[0]) and all(x in seen_loops for x in b[1]):
+        blocks.remove(b)
+        placed_blocks.append(b)
+    # see if we can close any loops (no longer required)
+    loops_still_required = flatten([b[0] for b in blocks if b not in placed_blocks])
+    closable_loops = [x for x in open_loops if x not in loops_still_required]
+    if len(closable_loops):
+      open_loops = [x for x in open_loops if x not in closable_loops]
+      seen_loops += closable_loops
+      continue
+    if not len(blocks): break
+    # if we are here, we have to open a loop
+    placable_blocks = [b for b in blocks if all(x in seen_loops for x in b[1])]
+    assert len(placable_blocks) != 0, "no placable blocks!"
+    open_loops = dedup(open_loops + list(placable_blocks[0][0]))
+    blocks.remove(placable_blocks[0])
+    placed_blocks.append(placable_blocks[0])
+  return placed_blocks
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
   # break uops into basic blocks
-  blocks: DefaultDict[Block, List[UOp]] = defaultdict(list)
+  blocks: DefaultDict[BlockType, List[UOp]] = defaultdict(list)
   @functools.lru_cache(None)
-  def place_with_scope(u:UOp, rng:Tuple[UOp]=()):
+  def place_with_scope(u:UOp, rng:Tuple[int, ...]=()):
     if u.op is Ops.ASSIGN:
       assert u.src[0].op is Ops.DEFINE_ACC
-      rng = rng+u.src[0].src[1:]
-    parent_rng = tuple(sorted([x for x in u.sparents if x.op is Ops.RANGE], key=lambda x: x.tuplize))
+      rng = rng+tuple(x.arg[0] for x in u.src[0].src[1:])
+    parent_rng = tuple(sorted([x.arg[0] for x in u.sparents if x.op is Ops.RANGE]))
     loop_inside = tuple(x for x in rng if x in parent_rng)
-    blocks[Block(loop_inside, tuple(x for x in parent_rng if x not in loop_inside))].append(u)
+    blocks[(loop_inside, tuple(x for x in parent_rng if x not in loop_inside))].append(u)
     for x in u.src: place_with_scope(x, rng)
   place_with_scope(sink)
 
-  """
-  open_loops = set()
-  seen_loops = set()
-
-  # block placement
-  placed_blocks = []
-  while len(placed_blocks) < len(blocks):
-    placable_blocks = []
-    placable_blocks_with_open = []
-    for block in blocks.keys():
-      # skip if block is already placed
-      if block in placed_blocks: continue
-      # skip if we haven't seen the required loops
-      if not all(x in seen_loops for x in block.loop_after): continue
-      # if open loops is a
-      #if not all(x in open_loops for x in block.loop_inside) or not all(x in seen_loops for x in block.loop_after): continue
-      placable_blocks.append(block)
-    if len(placable_blocks) > 0:
-      placed_blocks.append(placable_blocks[0])
-      continue
-
-    # we have to open a loop
-    for block in blocks.keys():
-      if block in placed_blocks: continue
-      if not all(x in seen_loops for x in block.loop_after): continue
-      placable_blocks_with_open.append(block)
-    placable_blocks_with_open = sorted(placable_blocks_with_open)
-    if len(placable_blocks_with_open) > 0:
-      for x in placable_blocks_with_open[0].loop_inside: open_loops.add(x)
-      placed_blocks.append(placable_blocks_with_open[0])
-      continue
-    raise RuntimeError("no placable blocks")
-  """
-
-  #for block in placed_blocks:
-  block_priority = defaultdict(lambda: -1)
-
-  for block_num, block in enumerate(sorted(blocks.keys())):
-    v = blocks[block]
-    v = sorted(dedup(v), key=lambda x: x.tuplize)
-    for u in v:
+  block_priority: DefaultDict[UOp, int] = defaultdict(lambda: -1)
+  for block_num, block in enumerate(order_blocks(list(blocks.keys()))):
+    if DEBUG >= 5: print(block)
+    for u in blocks[block]:
       if block_priority[u] == -1: block_priority[u] = block_num
-    #print(block, len(v))
-    #print_uops(v)
-
-  """
-  # get block deps
-  deps = {b:set() for b in blocks}
-  for block,ops in blocks.items():
-    for u in ops:
-      for s in u.src:
-        if placed[s] != block: deps[block].add(placed[s])
-
-  for block,v in sorted(blocks.items()):
-    print(block, len(v))
-    #print(deps[block])
-    v = sorted(dedup(v), key=lambda x: x.tuplize)
-    print_uops(v)
-  """
-
-  """
-  ops_to_range = {u:tuple(sorted([x for x in u.sparents if x.op is Ops.RANGE], key=lambda x: x.tuplize)) for u in sink.sparents}
-  ranges_to_ops = defaultdict(list)
-  for k,v in ops_to_range.items(): ranges_to_ops[v].append(k)
-  for k,v in ranges_to_ops.items():
-    print([x.arg for x in k], len(v))
-  """
 
   # filter nodes that don't link to a sink
   # BFS toposort
@@ -154,7 +110,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   fix_priority(sink, 0)
 
   # NOTE: the compare should never make it all the way to u
-  queue:List[Tuple[int, Tuple, UOp]] = []
+  queue:List[Tuple[int, int, Tuple, UOp]] = []
   def push(u:UOp): heapq.heappush(queue, (block_priority[u], priorities[u], u.tuplize, u))
 
   for u in children:
