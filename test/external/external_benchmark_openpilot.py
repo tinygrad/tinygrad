@@ -23,7 +23,7 @@ if __name__ == "__main__":
   new_inputs = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in input_shapes.items()}
   new_inputs_junk = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in input_shapes.items()}
   new_inputs_junk_numpy = {k:v.numpy() for k,v in new_inputs_junk.items()}
-  
+
   # benchmark
   for _ in range(5):
     GlobalCounters.reset()
