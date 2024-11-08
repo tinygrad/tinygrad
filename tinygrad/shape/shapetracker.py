@@ -51,6 +51,9 @@ class ShapeTracker:
         idxs.append((idx//acc)%d)
         acc *= d
       idx, valid = view.to_indexed_uops(idxs[::-1], valid)
+    idx, valid = (graph_rewrite(u, symbolic_flat) for u in (idx, valid))
+    if (newvalid:=simplify_valid(valid)) is not None: valid = newvalid
+    if (newidx:=uop_given_valid(valid, idx)) is not None: idx = graph_rewrite(newidx, symbolic_flat)
     return idx, valid
 
   def real_size(self) -> int:
@@ -73,10 +76,7 @@ class ShapeTracker:
   def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
     ret: List[Optional[sint]] = [None] * len(self.shape)
-    idx, valid = (graph_rewrite(u, symbolic_flat) for u in self.to_indexed_uops())
-    # TODO: always apply these in to_indexed_uops?
-    if (newvalid:=simplify_valid(valid)) is not None: valid = newvalid
-    if (newidx:=uop_given_valid(valid, idx)) is not None: idx = graph_rewrite(newidx, symbolic_flat)
+    idx, valid = self.to_indexed_uops()
     for c in split_uop(idx, BinaryOps.ADD):
       if c.op is Ops.RANGE: ret[c.arg[0]] = 1
       if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg[0]] = c.src[1].arg
