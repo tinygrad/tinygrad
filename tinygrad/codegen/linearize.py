@@ -21,15 +21,23 @@ def order_blocks(blocks:List[BlockType]) -> List[BlockType]:
   # order the loops
   loop_deps: DefaultDict[int, List[int]] = defaultdict(list)
   for b in blocks:
-    for o in b[0]: loop_deps[o] = sorted(dedup(loop_deps[o] + list(b[1])))
+    for o in b[0]: loop_deps[o] = sorted(dedup(loop_deps[o] + [x for x in b[0] if x != o] + list(b[1])))
+  #print(loop_deps)
   loop_order: List[int] = []
   while len(loop_order) < len(loop_deps):
     to_place = []
+    others = []
     for k,v in sorted(loop_deps.items()):
       # already placed
       if k in loop_order: continue
       if all(x in loop_order for x in v): to_place.append(k)
-    loop_order += to_place
+      else: others.append(k)
+    if len(to_place) == 0:
+      # sad panda :(
+      loop_order.append(others[0])
+    else:
+      loop_order += to_place
+  #print(loop_order)
   open_loops: List[int] = []
   seen_loops: List[int] = []
   placed_blocks: List[BlockType] = []
@@ -73,9 +81,11 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   place_with_scope(sink)
 
   #for block,ops in blocks.items():
-  #  print(block, len(ops))
-  #  from tinygrad.ops import print_uops
-  #  print_uops(sorted(ops, key=lambda x: x.tuplize))
+  #for block in order_blocks(list(blocks.keys())):
+    #ops = blocks[block]
+    #print(block, len(ops))
+    #from tinygrad.ops import print_uops
+    #print_uops(dedup(sorted(ops, key=lambda x: x.tuplize)))
 
   block_priority: DefaultDict[UOp, int] = defaultdict(lambda: -1)
   for block_num, block in enumerate(order_blocks(list(blocks.keys()))):

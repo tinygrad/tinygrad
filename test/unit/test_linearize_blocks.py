@@ -77,5 +77,18 @@ class TestLinearizeBlocks(unittest.TestCase):
       ((1002,), (4, 5, 1003)),
       ((), (4, 5, 1002, 1003))])
 
+  def test_clang_matmul(self):
+    self._order_blocks([
+      ((), ()),
+      ((0,), ()),
+      ((1,), ()),
+      ((0, 1), ()),
+      ((2,), ()),
+      ((0, 2), ()),
+      ((1, 2), ()),
+      ((0, 1, 2), ()),
+      ((0, 1), (2,)),
+      ((), (0, 1, 2))])
+
 if __name__ == '__main__':
   unittest.main()
