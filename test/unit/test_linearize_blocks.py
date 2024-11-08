@@ -1,6 +1,8 @@
 import unittest, random
 from tinygrad.codegen.linearize import order_blocks
 
+# the tuples are (<inside loop>, <after loop>)
+
 class TestLinearizeBlocks(unittest.TestCase):
   def _order_blocks(self, blocks):
     rng_blocks = blocks[:]
@@ -59,6 +61,21 @@ class TestLinearizeBlocks(unittest.TestCase):
       ((2, 1001), ()),
       ((2,), (1001,)),
       ((), (2, 1001))])
+
+  def test_complex_nesting(self):
+    self._order_blocks([
+      ((), ()),
+      ((5,), ()),
+      ((), (5,)),
+      ((1003,), ()),
+      ((1003,), (5,)),
+      ((), (5, 1003)),
+      ((4,), ()),
+      ((4,), (5, 1003)),
+      ((), (4, 5, 1003)),
+      ((1002,), ()),
+      ((1002,), (4, 5, 1003)),
+      ((), (4, 5, 1002, 1003))])
 
 if __name__ == '__main__':
   unittest.main()

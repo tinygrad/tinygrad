@@ -18,6 +18,18 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
 
 BlockType = Tuple[Tuple[int, ...], Tuple[int, ...]]
 def order_blocks(blocks:List[BlockType]) -> List[BlockType]:
+  # order the loops
+  loop_deps: DefaultDict[int, List[int]] = defaultdict(list)
+  for b in blocks:
+    for o in b[0]: loop_deps[o] = sorted(dedup(loop_deps[o] + list(b[1])))
+  loop_order: List[int] = []
+  while len(loop_order) < len(loop_deps):
+    to_place = []
+    for k,v in sorted(loop_deps.items()):
+      # already placed
+      if k in loop_order: continue
+      if all(x in loop_order for x in v): to_place.append(k)
+    loop_order += to_place
   open_loops: List[int] = []
   seen_loops: List[int] = []
   placed_blocks: List[BlockType] = []
@@ -25,23 +37,20 @@ def order_blocks(blocks:List[BlockType]) -> List[BlockType]:
   while len(blocks):
     # can we place any blocks without opening or closing loops
     for b in blocks:
+      if b in placed_blocks: continue
       if all(x in open_loops for x in b[0]) and all(x in seen_loops for x in b[1]):
-        blocks.remove(b)
         placed_blocks.append(b)
-    # see if we can close any loops (no longer required)
+    if len(placed_blocks) == len(blocks): break
+    # see if we can close any no longer required loops
     loops_still_required = flatten([b[0] for b in blocks if b not in placed_blocks])
     closable_loops = [x for x in open_loops if x not in loops_still_required]
     if len(closable_loops):
+      # there are closable loops
       open_loops = [x for x in open_loops if x not in closable_loops]
       seen_loops += closable_loops
-      continue
-    if not len(blocks): break
-    # if we are here, we have to open a loop
-    placable_blocks = [b for b in blocks if all(x in seen_loops for x in b[1])]
-    assert len(placable_blocks) != 0, "no placable blocks!"
-    open_loops = dedup(open_loops + list(placable_blocks[0][0]))
-    blocks.remove(placable_blocks[0])
-    placed_blocks.append(placable_blocks[0])
+    else:
+      # we have to open a loop because no blocks are currently placable
+      open_loops.append(loop_order.pop(0))
   #for x in blocks: print(x)
   return placed_blocks
 
