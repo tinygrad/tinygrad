@@ -136,7 +136,6 @@ class Ops(FastEnum):
   LOAD = auto()
 
   # math ops
-  ALU = auto()
   WMMA = auto()
 
   # BinaryOps
@@ -343,7 +342,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
-                                             UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=idx)
+                                             UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=(idx, False))
   def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op] if op in GroupOp.Reduce else op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
 
@@ -992,10 +991,16 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
 
   return uop
 
+def _valid_priority(v: UOp, valids:List[UOp]):
+  # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
+  try: return sum(-1 if parse_valid(v)[0] in other.parents else 0 for other in valids)
+  except ValueError: return 0
+
 def simplify_valid(valid:UOp) -> Optional[UOp]:
   ret:List[UOp] = []
   something_changed = False
-  for stmt in split_uop(valid, BinaryOps.AND):
+  valids = list(split_uop(valid, Ops.AND))
+  for stmt in sorted(valids, key=lambda v: _valid_priority(v, valids)):
     ret.append(newstmt if ret and (newstmt:=uop_given_valid(functools.reduce(operator.and_, ret), stmt)) is not None else stmt)
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
