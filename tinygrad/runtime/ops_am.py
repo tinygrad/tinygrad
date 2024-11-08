@@ -204,6 +204,8 @@ class AMDevice(HCQCompiled):
   signals_pool = []
 
   def __init__(self, device:str=""):
+    if os.path.isdir('/sys/module/amdgpu/'): raise RuntimeError("amdgpu module is loaded, unload it first")
+
     self.pcidev = self._find_pci_dev()
     self.adev = AMDDev(self.pcidev)
     self.arch = "gfx1100"
