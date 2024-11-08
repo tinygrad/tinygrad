@@ -24,6 +24,7 @@ class MES_IP:
     self.write_fence_paddr = self.adev.vmm.vaddr_to_paddr(self.write_fence_vaddr)
     self.write_fence_mc_addr = self.adev.vmm.paddr_to_mc(self.write_fence_paddr)
     self.write_fence_cpu_view = self.adev.vmm.paddr_to_cpu_mv(self.write_fence_paddr, 0x1000).cast('I')
+    self.write_fence_cpu_view[0] = 0x0
     self.next_write_fence = 1
 
   def mes_enable(self):
@@ -227,6 +228,7 @@ class MES_IP:
     for i in range(ctypes.sizeof(pkt) // 4): self.mes_ring.write(pkt.max_dwords_in_api[i])
     self.wdoorbell64(self.mes_ring.doorbell_index, self.mes_ring.next_ptr)
 
+    print("x", self.write_fence_cpu_view[0], self.next_write_fence)
     while self.write_fence_cpu_view[0] != self.next_write_fence: pass
     self.next_write_fence += 1
 
@@ -246,12 +248,17 @@ class MES_IP:
     mes_set_hw_res_pkt.header.opcode = mes_v11_api_def.MES_SCH_API_SET_HW_RSRC
     mes_set_hw_res_pkt.header.dwsize = mes_v11_api_def.API_FRAME_SIZE_IN_DWORDS
 
-    mes_set_hw_res_pkt.vmid_mask_mmhub = 0xffffff00
-    mes_set_hw_res_pkt.vmid_mask_gfxhub = 0xffffff00
+    mes_set_hw_res_pkt.vmid_mask_mmhub = 0xffffffff
+    mes_set_hw_res_pkt.vmid_mask_gfxhub = 0xffffffff
     mes_set_hw_res_pkt.gds_size = 0x1000
     mes_set_hw_res_pkt.paging_vmid = 0
     mes_set_hw_res_pkt.g_sch_ctx_gpu_mc_ptr = self.sch_ctx_gpu_mc_addr
     mes_set_hw_res_pkt.query_status_fence_gpu_mc_ptr = self.query_status_fence_mc_addr
+
+    for i,v in enumerate([0xc, 0xc, 0xc, 0xc, 0x0, 0x0, 0x0, 0x0]): mes_set_hw_res_pkt.compute_hqd_mask[i] = v
+    for i,v in enumerate([0xfffffffe, 0x0]): mes_set_hw_res_pkt.gfx_hqd_mask[i] = v
+    for i,v in enumerate([0xfc, 0xfc]): mes_set_hw_res_pkt.sdma_hqd_mask[i] = v
+    for i,v in enumerate([2048, 2050, 2052, 2054, 2056]): mes_set_hw_res_pkt.aggregated_doorbells[i] = v
 
     for i in range(5):
       mes_set_hw_res_pkt.gc_base[i] = self.adev.ip_base("GC", 0, i)
@@ -277,8 +284,8 @@ class MES_IP:
     mes_add_queue_pkt.pipe_id = ring.pipe
     mes_add_queue_pkt.queue_id = ring.queue
     mes_add_queue_pkt.doorbell_offset = ring.doorbell_index
-    mes_add_queue_pkt.mqd_addr = ring.mqd_gpu_vaddr
-    mes_add_queue_pkt.wptr_addr = ring.wptr_gpu_vaddr
+    mes_add_queue_pkt.mqd_addr = ring.mqd_gpu_mc_addr
+    mes_add_queue_pkt.wptr_addr = ring.wptr_gpu_mc_addr
     mes_add_queue_pkt.queue_type = qtype # mes_v11_api_def.MES_QUEUE_TYPE_COMPUTE
     mes_add_queue_pkt.map_legacy_kq = 1
 

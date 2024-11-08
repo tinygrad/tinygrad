@@ -18,6 +18,8 @@ class GFX_IP:
 
     self.clear_state_size = 0x10000
     self.clear_state_gpu_vaddr = self.adev.vmm.alloc_vram(self.clear_state_size, "clear_state")
+    self.clear_state_gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.clear_state_gpu_vaddr)
+    self.clear_state_gpu_mc_addr = self.adev.vmm.paddr_to_mc(self.clear_state_gpu_paddr)
 
   def soc21_grbm_select(self, me, pipe, queue, vmid):
     regGRBM_GFX_CNTL = 0xa900 # (adev->reg_offset[GC_HWIP][0][1] + 0x0900)
@@ -90,32 +92,55 @@ class GFX_IP:
 
   def cp_compute_enable(self):
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL_BASE_IDX, 0x3c000000)
+    time.sleep(0.5)
+
+  def nbio_v4_3_gc_doorbell_init(self):
+    self.adev.wreg(0x507a40, 0x30000007)
+    self.adev.wreg(0x507a43, 0x3000000d)
 
   def wdoorbell64(self, index, val): self.adev.doorbell64[index//2] = val
 
   def init_csb(self):
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_HI, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_HI_BASE_IDX, self.clear_state_gpu_vaddr >> 32)
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_LO, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_LO_BASE_IDX, self.clear_state_gpu_vaddr  & 0xfffffffc)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_HI, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_HI_BASE_IDX, self.clear_state_gpu_mc_addr >> 32)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_LO, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_LO_BASE_IDX, self.clear_state_gpu_mc_addr  & 0xfffffffc)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_LENGTH, amdgpu_gc_11_0_0.regRLC_CSIB_LENGTH_BASE_IDX, self.clear_state_size)
 
   def config_gfx_rs64(self):
-    regCP_MEC_RS64_PRGRM_CNTR_START = 0xc900 # adev->reg_offset[GC_HWIP][0][1] + 0x2900
-    regCP_MEC_RS64_PRGRM_CNTR_START_HI = 0xc938 # adev->reg_offset[GC_HWIP][0][1] + 0x2938
+    print(hex(self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_STAT, amdgpu_gc_11_0_0.regCP_STAT_BASE_IDX)))
+
+    for pipe in range(2):
+      self.soc21_grbm_select(0, pipe, 0, 0)
+      self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_PFP_PRGRM_CNTR_START, amdgpu_gc_11_0_0.regCP_PFP_PRGRM_CNTR_START_BASE_IDX, 0xc00)
+      self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_PFP_PRGRM_CNTR_START_HI, amdgpu_gc_11_0_0.regCP_PFP_PRGRM_CNTR_START_HI_BASE_IDX, 0x1c000)
+    self.soc21_grbm_select(0, 0, 0, 0)
+
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_ME_CNTL, amdgpu_gc_11_0_0.regCP_ME_CNTL_BASE_IDX, 0x153c0000)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_ME_CNTL, amdgpu_gc_11_0_0.regCP_ME_CNTL_BASE_IDX, 0x15300000)
+
+    for pipe in range(2):
+      self.soc21_grbm_select(0, pipe, 0, 0)
+      self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_ME_PRGRM_CNTR_START, amdgpu_gc_11_0_0.regCP_ME_PRGRM_CNTR_START_BASE_IDX, 0xc00)
+      self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_ME_PRGRM_CNTR_START_HI, amdgpu_gc_11_0_0.regCP_ME_PRGRM_CNTR_START_HI_BASE_IDX, 0x1c000)
+    self.soc21_grbm_select(0, 0, 0, 0)
+
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_ME_CNTL, amdgpu_gc_11_0_0.regCP_ME_CNTL_BASE_IDX, 0x15300000)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_ME_CNTL, amdgpu_gc_11_0_0.regCP_ME_CNTL_BASE_IDX, 0x15000000)
 
     for pipe in range(4):
       self.soc21_grbm_select(1, pipe, 0, 0)
-      self.adev.wreg(regCP_MEC_RS64_PRGRM_CNTR_START, 0x3000)
-      self.adev.wreg(regCP_MEC_RS64_PRGRM_CNTR_START_HI, 0x70000)
+      self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_PRGRM_CNTR_START, amdgpu_gc_11_0_0.regCP_MEC_RS64_PRGRM_CNTR_START_BASE_IDX, 0xc00)
+      self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_PRGRM_CNTR_START_HI, amdgpu_gc_11_0_0.regCP_MEC_RS64_PRGRM_CNTR_START_HI_BASE_IDX, 0x1c000)
     self.soc21_grbm_select(0, 0, 0, 0)
 
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL_BASE_IDX, 0x400f0000)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL_BASE_IDX, 0x40000000)
 
   def cp_gfx_enable(self):
-    self.adev.wreg(0xa803, 0x1000000)
-    for i in range(1000000):
-      val = self.adev.rreg(0x21a0)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_ME_CNTL, amdgpu_gc_11_0_0.regCP_ME_CNTL_BASE_IDX, 0x1000000)
+    for i in range(100):
+      val = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_STAT, amdgpu_gc_11_0_0.regCP_STAT_BASE_IDX)
       if val == 0: return
+      time.sleep(0.00001)
     raise Exception('gfx_v11_0_cp_gfx_enable timeout')
 
   def kcq_init_queue(self, ring):
@@ -127,6 +152,7 @@ class GFX_IP:
     self.kcq_ring = AMDRing(self.adev, size=0x2000, me=1, pipe=0, queue=0, vmid=0, doorbell_index=(self.AMDGPU_NAVI10_DOORBELL_MEC_RING0 << 1))
     self.kcq_init_queue(self.kcq_ring)
 
+    self.adev.vmm.flush_hdp()
     self.adev.mes.kiq_set_resources(0xffffffffffffffff) # full mask
     self.adev.mes.map_legacy_queue(self.kcq_ring, mes_v11_api_def.MES_QUEUE_TYPE_COMPUTE)
 
@@ -147,6 +173,7 @@ class GFX_IP:
 
   def cp_resume(self):
     self.cp_set_doorbell_range()
+    self.cp_gfx_enable()
     self.cp_compute_enable()
 
     self.adev.mes.kiq_hw_init()
@@ -162,8 +189,9 @@ class GFX_IP:
     self.adev.vmm.init_gfxhub()
     self.init_golden_registers()
     self.constants_init()
+    self.nbio_v4_3_gc_doorbell_init()
 
-    self.init_csb()
+    # self.init_csb()
     self.cp_resume()
 
   def compute_init_mqd(self, ring):
@@ -188,12 +216,12 @@ class GFX_IP:
     ring.mqd.cp_hqd_pq_wptr_lo = 0
     ring.mqd.cp_hqd_pq_wptr_hi = 0
 
-    ring.mqd.cp_mqd_base_addr_lo = ring.mqd_gpu_vaddr & 0xfffffffc
-    ring.mqd.cp_mqd_base_addr_hi = (ring.mqd_gpu_vaddr >> 32) & 0xffffffff
+    ring.mqd.cp_mqd_base_addr_lo = ring.mqd_gpu_mc_addr & 0xfffffffc
+    ring.mqd.cp_mqd_base_addr_hi = (ring.mqd_gpu_mc_addr >> 32) & 0xffffffff
 
     ring.mqd.cp_mqd_control = 0x100
 
-    hqd_gpu_addr = ring.ring_gpu_vaddr >> 8
+    hqd_gpu_addr = ring.ring_gpu_mc_addr >> 8
     ring.mqd.cp_hqd_pq_base_lo = hqd_gpu_addr & 0xffffffff
     ring.mqd.cp_hqd_pq_base_hi = (hqd_gpu_addr >> 32) & 0xffffffff
     assert ring.ring_size in {0x2000}
@@ -212,8 +240,9 @@ class GFX_IP:
 
     ring.mqd.cp_hqd_persistent_state = 0xbe05501
     ring.mqd.cp_hqd_ib_control = 0x300000 # 3 << CP_HQD_IB_CONTROL__MIN_IB_AVAIL_SIZE__SHIFT
-    ring.mqd.cp_hqd_pipe_priority = 0x2
-    ring.mqd.cp_hqd_queue_priority = 0xf
-    ring.mqd.cp_hqd_active = 1 # why?
+    ring.mqd.cp_hqd_pipe_priority = 0x0
+    ring.mqd.cp_hqd_queue_priority = 0x0
+    ring.mqd.cp_hqd_active = 0
 
     self.adev.vmm.paddr_to_cpu_mv(ring.mqd_gpu_paddr, len(ring.mqd_mv))[:] = ring.mqd_mv
+    self.adev.vmm.flush_hdp()

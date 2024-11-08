@@ -34,6 +34,7 @@ class AMDRing:
     self.ring_size = size
     self.ring_gpu_vaddr = self.adev.vmm.alloc_vram(self.ring_size, "ring")
     self.ring_gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.ring_gpu_vaddr)
+    self.ring_gpu_mc_addr = self.adev.vmm.paddr_to_mc(self.ring_gpu_paddr)
     self.ring_view = self.adev.vmm.paddr_to_cpu_mv(self.ring_gpu_paddr, self.ring_size)
 
     self.doorbell_index = doorbell_index
