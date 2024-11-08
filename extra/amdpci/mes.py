@@ -56,6 +56,17 @@ class MES_IP:
     tmp |= 0x80
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CP_SCHEDULERS, amdgpu_gc_11_0_0.regRLC_CP_SCHEDULERS_BASE_IDX, tmp)
 
+  def kiq_ring_test_helper(self):
+    self.adev.wreg(sc_reg:=0xc040, 0xcafedead) # sratch reg
+    self.mes_kiq.write(amd_gpu.PACKET3(amd_gpu.PACKET3_WRITE_DATA, 3))
+    self.mes_kiq.write(1 << 16)
+    self.mes_kiq.write(sc_reg) 
+    self.mes_kiq.write(0x0)
+    self.mes_kiq.write(0xdeadc0de)
+
+    self.wdoorbell64(self.mes_kiq.doorbell_index, self.mes_kiq.next_ptr)
+    while self.adev.rreg(sc_reg) != 0xdeadc0de: pass
+  
   def kiq_map_queue(self, ring_to_enable, is_compute=False):
     if is_compute:
       me = 1
@@ -64,8 +75,6 @@ class MES_IP:
       # MES queue
       me = 2
       eng_sel = 5
-
-    self.adev.wreg(sc_reg:=0xc040, 0xcafedead) # sratch reg
 
     self.mes_kiq.write(amd_gpu.PACKET3(amd_gpu.PACKET3_MAP_QUEUES, 5))
     self.mes_kiq.write(
@@ -86,14 +95,22 @@ class MES_IP:
     self.mes_kiq.write(ring_to_enable.wptr_gpu_vaddr >> 32)
 
     # Just to test if command is executed
-    self.mes_kiq.write(amd_gpu.PACKET3(amd_gpu.PACKET3_WRITE_DATA, 3))
-    self.mes_kiq.write(1 << 16)
-    self.mes_kiq.write(sc_reg) 
-    self.mes_kiq.write(0x0)
-    self.mes_kiq.write(0xdeadc0de)
+    return self.kiq_ring_test_helper()
 
-    self.wdoorbell64(self.mes_kiq.doorbell_index, self.mes_kiq.next_ptr)
-    while self.adev.rreg(sc_reg) != 0xdeadc0de: pass
+  def kiq_set_resources(self, queue_mask):
+    self.mes_kiq.write(amd_gpu.PACKET3(amd_gpu.PACKET3_SET_RESOURCES, 6))
+    self.mes_kiq.write(amd_gpu.PACKET3_SET_RESOURCES_VMID_MASK(0) |
+          amd_gpu.PACKET3_SET_RESOURCES_UNMAP_LATENTY(0xa) | # 1s
+          amd_gpu.PACKET3_SET_RESOURCES_QUEUE_TYPE(0))
+    self.mes_kiq.write(queue_mask & 0xffffffff)
+    self.mes_kiq.write(queue_mask >> 32)
+    self.mes_kiq.write(0)
+    self.mes_kiq.write(0)
+    self.mes_kiq.write(0)
+    self.mes_kiq.write(0)
+
+    # Just to test if command is executed
+    return self.kiq_ring_test_helper()
 
   def kiq_enable_queue(self, ring_to_enable): self.kiq_map_queue(ring_to_enable)
 
@@ -249,3 +266,20 @@ class MES_IP:
     mes_set_hw_res_pkt.oversubscription_timer = 50
 
     return self.submit_pkt_and_poll_completion(mes_set_hw_res_pkt)
+
+  def map_legacy_queue(self, ring, qtype):
+    mes_add_queue_pkt = mes_v11_api_def.union_MESAPI__ADD_QUEUE()
+
+    mes_add_queue_pkt.header.type = mes_v11_api_def.MES_API_TYPE_SCHEDULER
+    mes_add_queue_pkt.header.opcode = mes_v11_api_def.MES_SCH_API_ADD_QUEUE
+    mes_add_queue_pkt.header.dwsize = mes_v11_api_def.API_FRAME_SIZE_IN_DWORDS
+
+    mes_add_queue_pkt.pipe_id = ring.pipe
+    mes_add_queue_pkt.queue_id = ring.queue
+    mes_add_queue_pkt.doorbell_offset = ring.doorbell_index
+    mes_add_queue_pkt.mqd_addr = ring.mqd_gpu_vaddr
+    mes_add_queue_pkt.wptr_addr = ring.wptr_gpu_vaddr
+    mes_add_queue_pkt.queue_type = qtype # mes_v11_api_def.MES_QUEUE_TYPE_COMPUTE
+    mes_add_queue_pkt.map_legacy_kq = 1
+
+    return self.submit_pkt_and_poll_completion(mes_add_queue_pkt)

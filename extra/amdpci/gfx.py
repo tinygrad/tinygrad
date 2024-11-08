@@ -1,5 +1,6 @@
 import os, ctypes, time
-from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_gc_11_0_0
+from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_gc_11_0_0, mes_v11_api_def
+from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
 from tinygrad.helpers import to_mv, mv_address
 
 from extra.amdpci.amdring import AMDRing
@@ -78,142 +79,24 @@ class GFX_IP:
       self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGDS_OA_VMID0, amdgpu_gc_11_0_0.regGDS_OA_VMID0_BASE_IDX, 0, offset=i)
 
   def cp_set_doorbell_range(self):
-    g_base = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_RB_DOORBELL_RANGE_LOWER, amdgpu_gc_11_0_0.regCP_RB_DOORBELL_RANGE_LOWER_BASE_IDX)
-    cp_base = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_DOORBELL_RANGE_LOWER, amdgpu_gc_11_0_0.regCP_MEC_DOORBELL_RANGE_LOWER_BASE_IDX)
+    # g_base = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_RB_DOORBELL_RANGE_LOWER, amdgpu_gc_11_0_0.regCP_RB_DOORBELL_RANGE_LOWER_BASE_IDX)
+    # cp_base = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_DOORBELL_RANGE_LOWER, amdgpu_gc_11_0_0.regCP_MEC_DOORBELL_RANGE_LOWER_BASE_IDX)
+    # print("doorbell range", hex(g_base), hex(cp_base))
 
-    print("doorbell range", hex(g_base), hex(cp_base))
-
-    # amdgpu_wreg(0x305a, 0x458) # ring0
-    # amdgpu_wreg(0x305b, 0x7f8) 
-    # amdgpu_wreg(0x305c, 0x0) # kiq
-    # amdgpu_wreg(0x305d, 0x450)
+    self.adev.wreg(0x305a, 0x458) # ring0
+    self.adev.wreg(0x305b, 0x7f8) 
+    self.adev.wreg(0x305c, 0x0) # kiq
+    self.adev.wreg(0x305d, 0x450)
 
   def cp_compute_enable(self):
-    v = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL_BASE_IDX)
-    print("compute enabled", hex(v)) # 0x3c000000
-
-    # Enable it
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL_BASE_IDX, 0x3c000000)
 
-  def init_kiq_regs(self, ring): # kiq_init_registers
-    print("sw", ring.me, ring.pipe, ring.queue)
-    self.soc21_grbm_select(ring.me, ring.pipe, ring.queue, 0)
-
-    v = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL, amdgpu_gc_11_0_0.regCP_MEC_RS64_CNTL_BASE_IDX)
-    print("compute enabled 2", hex(v)) # 0x3c000000
-
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_EOP_BASE_ADDR, amdgpu_gc_11_0_0.regCP_HQD_EOP_BASE_ADDR_BASE_IDX, self.eop_gpu_addr & 0xffffffff)
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_EOP_BASE_ADDR_HI, amdgpu_gc_11_0_0.regCP_HQD_EOP_BASE_ADDR_HI_BASE_IDX, (self.eop_gpu_addr >> 32) & 0xffffffff)
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_EOP_CONTROL, amdgpu_gc_11_0_0.regCP_HQD_EOP_CONTROL_BASE_IDX, 12)
-
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE_BASE_IDX, 1)
-
-    act = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE_BASE_IDX)
-    if act and False:
-      self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_DEQUEUE_REQUEST, amdgpu_gc_11_0_0.regCP_HQD_DEQUEUE_REQUEST_BASE_IDX, 1)
-      while act:
-        # print(act)
-        act = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE_BASE_IDX)
-      print("q deactivated")
-
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_VMID, amdgpu_gc_11_0_0.regCP_HQD_VMID_BASE_IDX, ring.mqd.cp_hqd_vmid)
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_DOORBELL_CONTROL, amdgpu_gc_11_0_0.regCP_HQD_PQ_DOORBELL_CONTROL_BASE_IDX, 0x0)
-
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MQD_BASE_ADDR, amdgpu_gc_11_0_0.regCP_MQD_BASE_ADDR_BASE_IDX, ring.mqd.cp_mqd_base_addr_lo)
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MQD_BASE_ADDR_HI, amdgpu_gc_11_0_0.regCP_MQD_BASE_ADDR_HI_BASE_IDX, ring.mqd.cp_mqd_base_addr_hi)
-
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MQD_CONTROL, amdgpu_gc_11_0_0.regCP_MQD_CONTROL_BASE_IDX, ring.mqd.cp_mqd_control)
-
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_BASE, amdgpu_gc_11_0_0.regCP_HQD_PQ_BASE_BASE_IDX, ring.mqd.cp_hqd_pq_base_lo)
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_BASE_HI, amdgpu_gc_11_0_0.regCP_HQD_PQ_BASE_HI_BASE_IDX, ring.mqd.cp_hqd_pq_base_hi)
-    
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_RPTR_REPORT_ADDR, amdgpu_gc_11_0_0.regCP_HQD_PQ_RPTR_REPORT_ADDR_BASE_IDX, ring.mqd.cp_hqd_pq_rptr_report_addr_lo)
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_RPTR_REPORT_ADDR_HI, amdgpu_gc_11_0_0.regCP_HQD_PQ_RPTR_REPORT_ADDR_HI_BASE_IDX, ring.mqd.cp_hqd_pq_rptr_report_addr_hi)
-
-    # assert ring.mqd.cp_hqd_pq_control == 0xd8308011
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_CONTROL, amdgpu_gc_11_0_0.regCP_HQD_PQ_CONTROL_BASE_IDX, ring.mqd.cp_hqd_pq_control)
-
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_PQ_WPTR_POLL_CNTL, amdgpu_gc_11_0_0.regCP_PQ_WPTR_POLL_CNTL_BASE_IDX, 0x80000000)
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_WPTR_POLL_ADDR, amdgpu_gc_11_0_0.regCP_HQD_PQ_WPTR_POLL_ADDR_BASE_IDX, ring.mqd.cp_hqd_pq_wptr_poll_addr_lo)
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_WPTR_POLL_ADDR_HI, amdgpu_gc_11_0_0.regCP_HQD_PQ_WPTR_POLL_ADDR_HI_BASE_IDX, ring.mqd.cp_hqd_pq_wptr_poll_addr_hi)
-
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_DOORBELL_CONTROL, amdgpu_gc_11_0_0.regCP_HQD_PQ_DOORBELL_CONTROL_BASE_IDX, ring.mqd.cp_hqd_pq_doorbell_control)
-
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PERSISTENT_STATE, amdgpu_gc_11_0_0.regCP_HQD_PERSISTENT_STATE_BASE_IDX, ring.mqd.cp_hqd_persistent_state)
-
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE, amdgpu_gc_11_0_0.regCP_HQD_ACTIVE_BASE_IDX, ring.mqd.cp_hqd_active)
-
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_PQ_STATUS, amdgpu_gc_11_0_0.regCP_PQ_STATUS_BASE_IDX, 0x2)
-
-    # print("act?", self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_DOORBELL_RANGE_LOWER, amdgpu_gc_11_0_0.regCP_MEC_DOORBELL_RANGE_LOWER_BASE_IDX))
-    # print("act?", self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_DOORBELL_RANGE_UPPER, amdgpu_gc_11_0_0.regCP_MEC_DOORBELL_RANGE_UPPER_BASE_IDX))
-
-    self.soc21_grbm_select(0, 0, 0, 0)
-
-  def wdoorbell64(self, index, val):
-    # for i in range(0, 0x10000):
-    #   self.adev.doorbell[i] = val
-    self.adev.doorbell64[index] = val
-    self.adev.doorbell[index] = val
+  def wdoorbell64(self, index, val): self.adev.doorbell64[index//2] = val
 
   def init_csb(self):
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_HI, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_HI_BASE_IDX, self.clear_state_gpu_vaddr >> 32)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_LO, amdgpu_gc_11_0_0.regRLC_CSIB_ADDR_LO_BASE_IDX, self.clear_state_gpu_vaddr  & 0xfffffffc)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regRLC_CSIB_LENGTH, amdgpu_gc_11_0_0.regRLC_CSIB_LENGTH_BASE_IDX, self.clear_state_size)
-
-  def test_ring(self):
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0, 0)
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, 0, 0)
-
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, (512 << 20) - 1)
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, 0)
-
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0, self.adev.vmm.pdb0_base & 0xffffffff)
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32, 0, (self.adev.vmm.pdb0_base >> 32) & 0xffffffff)
-
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_PAGE_TABLE_START_ADDR_LO32, 0, 0)
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_PAGE_TABLE_START_ADDR_HI32, 0, 0)
-
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_PAGE_TABLE_END_ADDR_LO32, 0, (512 << 20) - 1)
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_PAGE_TABLE_END_ADDR_LO32, 0, 0)
-
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_PAGE_TABLE_BASE_ADDR_LO32, 0, self.adev.vmm.pdb0_base & 0xffffffff)
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_PAGE_TABLE_BASE_ADDR_HI32, 0, (self.adev.vmm.pdb0_base >> 32) & 0xffffffff)
-
-    # v = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_CNTL, 0)
-    # print(hex(v), "CC")
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT13_CNTL, 0, 0x1fffe03)
-
-    # v = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_CNTL, 0)
-    # print(hex(v), "CC")
-    # self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_CNTL, 0, 0x1fffe03)
-
-    # mec0 is me1
-    kiq = AMDRing(self.adev, me=1, pipe=0, queue=0, vmid=0, doorbell_index=0)
-    kiq.init_compute_mqd()
-    self.init_kiq_regs(kiq)
-
-    from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
-    PACKET3_SET_UCONFIG_REG_START = 0x0000c000
-    self.adev.wreg(0x1fc00, 0x0) # hdp flush
-    self.adev.wreg(0xc040, 0xcafedead)
-
-    kiq.write(amd_gpu.PACKET3(amd_gpu.PACKET3_SET_UCONFIG_REG, 1))
-    kiq.write(0x40) # uconfreg
-    kiq.write(0xdeadc0de)
-
-    print("PFS", self.adev.vmm.collect_pfs())
-    # print("is mec alive?", self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MEC_RS64_EXCEPTION_STATUS, amdgpu_gc_11_0_0.regCP_MEC_RS64_EXCEPTION_STATUS_BASE_IDX))
-
-    # print(hex(kiq.next_ptr))
-    self.wdoorbell64(kiq.doorbell_index, kiq.next_ptr)
-
-    while True:
-      # print(kiq.rptr[0], kiq.wptr[0])
-      # print("now", hex(self.adev.rreg(0xc040)))
-      # print("PFS", self.adev.vmm.collect_pfs())
-      if self.adev.rreg(0xc040) == 0xdeadc0de:
-        break
 
   def config_gfx_rs64(self):
     regCP_MEC_RS64_PRGRM_CNTR_START = 0xc900 # adev->reg_offset[GC_HWIP][0][1] + 0x2900
@@ -243,7 +126,24 @@ class GFX_IP:
   def kcq_resume(self):
     self.kcq_ring = AMDRing(self.adev, size=0x2000, me=1, pipe=0, queue=0, vmid=0, doorbell_index=(self.AMDGPU_NAVI10_DOORBELL_MEC_RING0 << 1))
     self.kcq_init_queue(self.kcq_ring)
-    # self.amdgpu_gfx_enable_kcq()
+
+    self.adev.mes.kiq_set_resources(0xffffffffffffffff) # full mask
+    self.adev.mes.map_legacy_queue(self.kcq_ring, mes_v11_api_def.MES_QUEUE_TYPE_COMPUTE)
+
+    # test kcq
+    self.adev.wreg(0xc040, 0xcafedead)
+
+    self.kcq_ring.write(amd_gpu.PACKET3(amd_gpu.PACKET3_SET_UCONFIG_REG, 1))
+    self.kcq_ring.write(0x40) # uconfreg
+    self.kcq_ring.write(0xdeadc0de)
+
+    self.wdoorbell64(self.kcq_ring.doorbell_index, self.kcq_ring.next_ptr)
+
+    while True:
+      if self.adev.rreg(0xc040) == 0xdeadc0de:
+        break
+
+    print("kcq test done")
 
   def cp_resume(self):
     self.cp_set_doorbell_range()
@@ -291,7 +191,7 @@ class GFX_IP:
     ring.mqd.cp_mqd_base_addr_lo = ring.mqd_gpu_vaddr & 0xfffffffc
     ring.mqd.cp_mqd_base_addr_hi = (ring.mqd_gpu_vaddr >> 32) & 0xffffffff
 
-    ring.mqd.cp_mqd_control = 0x100 ## ??
+    ring.mqd.cp_mqd_control = 0x100
 
     hqd_gpu_addr = ring.ring_gpu_vaddr >> 8
     ring.mqd.cp_hqd_pq_base_lo = hqd_gpu_addr & 0xffffffff
@@ -307,11 +207,13 @@ class GFX_IP:
 
     ring.mqd.cp_hqd_pq_doorbell_control = (1 << 0x1e) | (ring.doorbell_index << 2)
     ring.mqd.cp_hqd_vmid = 0
-    ring.mqd.cp_hqd_active = 1
+
+    ring.mqd.cp_hqd_pq_rptr = 0 # ??
 
     ring.mqd.cp_hqd_persistent_state = 0xbe05501
     ring.mqd.cp_hqd_ib_control = 0x300000 # 3 << CP_HQD_IB_CONTROL__MIN_IB_AVAIL_SIZE__SHIFT
-    ring.mqd.cp_hqd_iq_timer = 0x0
-    ring.mqd.cp_hqd_quantum = 0x0
+    ring.mqd.cp_hqd_pipe_priority = 0x2
+    ring.mqd.cp_hqd_queue_priority = 0xf
+    ring.mqd.cp_hqd_active = 1 # why?
 
     self.adev.vmm.paddr_to_cpu_mv(ring.mqd_gpu_paddr, len(ring.mqd_mv))[:] = ring.mqd_mv

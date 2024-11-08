@@ -15,12 +15,15 @@ class AMDRing:
     self.eop_gpu_vaddr = self.adev.vmm.alloc_vram(0x1000, "eop")
     self.mqd_gpu_vaddr = self.adev.vmm.alloc_vram(len(self.mqd_mv), "mqd")
     self.mqd_gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.mqd_gpu_vaddr)
+    self.mqd_gpu_mc_addr = self.adev.vmm.paddr_to_mc(self.mqd_gpu_paddr)
 
     self.rptr_gpu_vaddr = self.adev.vmm.alloc_vram(0x1000, "rptr")
     self.wptr_gpu_vaddr = self.adev.vmm.alloc_vram(0x1000, "wptr")
-
+    
     self.rptr_gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.rptr_gpu_vaddr)
     self.wptr_gpu_paddr = self.adev.vmm.vaddr_to_paddr(self.wptr_gpu_vaddr)
+
+    self.wptr_gpu_mc_addr = self.adev.vmm.paddr_to_mc(self.wptr_gpu_paddr)
 
     self.rptr = self.adev.vmm.paddr_to_cpu_mv(self.rptr_gpu_paddr, 8).cast('Q')
     self.wptr = self.adev.vmm.paddr_to_cpu_mv(self.wptr_gpu_paddr, 8).cast('Q')

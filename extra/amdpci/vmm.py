@@ -84,7 +84,7 @@ class VMM:
 
     # Each PDE0 (used as PTE) covers (2^vmid0_page_table_block_size)*2M
     for i in range(0, 512):
-      addr = (vram_base + i * pde0_page_size) % (32 << 30)
+      addr = (vram_base + i * pde0_page_size) #% (32 << 30)
       self.amdgpu_gmc_set_pte_pde(self.pdb0_cpu_addr, i, addr, flags)
     
     self.vm_config = 0x1fffe05 # 2 level, 1 gb huge pages
@@ -96,20 +96,22 @@ class VMM:
     self.flush_hdp()
 
     # self.adev.wreg(0x291c, 0xf80001)
-    # while self.adev.rreg(0x292e) != 1: pass
+    # while self.adev.rreg(0x292e) != 1:
+    #   print(self.collect_pfs())
+    #   print("flush_tlb", hex(self.adev.rreg(0x292e)))
 
   def mmhub_flush_tlb(self, vmid, vmhub, flush_type):
     assert vmid == 0 and vmhub == 0 and flush_type == 0
 
     self.flush_hdp()
 
-    self.adev.wreg(0x1a774, 0xf80001)
-    while self.adev.rreg(0x1a786) != 1: pass
+    # self.adev.wreg(0x1a774, 0xf80001)
+    # while self.adev.rreg(0x1a786) != 1: pass
 
-    self.adev.wreg(0x1a762, 0x0)
-    while self.adev.rreg(0x1a786) != 1: pass
+    # self.adev.wreg(0x1a762, 0x0)
+    # while self.adev.rreg(0x1a786) != 1: pass
 
-    self.adev.wreg(0x1a71b, 0x12104010)
+    # self.adev.wreg(0x1a71b, 0x12104010)
 
   def gfxhub_v3_0_init_gart_aperture_regs(self):
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0, (self.vm_base >> 12) & 0xffffffff)
@@ -121,6 +123,16 @@ class VMM:
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0, (self.pdb0_paddr & 0xffffffff) | 1)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32, 0, (self.pdb0_paddr >> 32) & 0xffffffff)
 
+  def mmhub_v3_0_init_gart_aperture_regs(self):
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0, (self.vm_base >> 12) & 0xffffffff)
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, 0, self.vm_base >> 44)
+
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, (self.vm_end >> 12) & 0xffffffff)
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32, 0, self.vm_end >> 44)
+
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0, (self.pdb0_paddr & 0xffffffff) | 1)
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32, 0, (self.pdb0_paddr >> 32) & 0xffffffff)
+
   def gfxhub_v3_0_init_system_aperture_regs(self):
     # disabled
     agp_start = 0xffffffffffff
@@ -130,8 +142,8 @@ class VMM:
     fb_end = 0x85feffffff
 
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCMC_VM_AGP_BASE, amdgpu_gc_11_0_0.regGCMC_VM_AGP_BASE_BASE_IDX, 0)
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCMC_VM_AGP_BOT, amdgpu_gc_11_0_0.regGCMC_VM_AGP_BOT_BASE_IDX, 0x0)
-    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCMC_VM_AGP_TOP, amdgpu_gc_11_0_0.regGCMC_VM_AGP_TOP_BASE_IDX, 0x0)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCMC_VM_AGP_BOT, amdgpu_gc_11_0_0.regGCMC_VM_AGP_BOT_BASE_IDX, agp_start >> 24)
+    self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCMC_VM_AGP_TOP, amdgpu_gc_11_0_0.regGCMC_VM_AGP_TOP_BASE_IDX, agp_end >> 24)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR, amdgpu_gc_11_0_0.regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR_BASE_IDX, fb_start >> 18)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR, amdgpu_gc_11_0_0.regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR_BASE_IDX, fb_end >> 18)
 
@@ -143,10 +155,32 @@ class VMM:
 
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_PROTECTION_FAULT_CNTL2, 0, 0x000E0000)
 
+  def mmhub_v3_0_init_system_aperture_regs(self):
+    # disabled
+    agp_start = 0xffffffffffff
+    agp_end = 0
+
+    fb_start = 0x8000000000
+    fb_end = 0x85feffffff
+
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BASE, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BASE_BASE_IDX, 0)
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BOT, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BOT_BASE_IDX, agp_start >> 24)
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_TOP, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_TOP_BASE_IDX, agp_end >> 24)
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_LOW_ADDR, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_LOW_ADDR_BASE_IDX, fb_start >> 18)
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_HIGH_ADDR, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_HIGH_ADDR_BASE_IDX, fb_end >> 18)
+
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_LSB, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_LSB_BASE_IDX, self.memscratch_paddr >> 12)
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_MSB, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_MSB_BASE_IDX, (self.memscratch_paddr >> 44))
+
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_LO32, 0, self.dummy_page_mc_addr >> 12)
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32, 0, (self.dummy_page_mc_addr >> 44))
+
+    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_L2_PROTECTION_FAULT_CNTL2, 0, 0x000E0000)
+
   def gfxhub_v3_0_init_tlb_regs(self):
     # TODO: write up
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCMC_VM_MX_L1_TLB_CNTL, amdgpu_gc_11_0_0.regGCMC_VM_MX_L1_TLB_CNTL_BASE_IDX, 0x1859)
-
+  
   def gfxhub_v3_0_init_cache_regs(self):
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_CNTL, amdgpu_gc_11_0_0.regGCVM_L2_CNTL_BASE_IDX, 0x80e01)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_CNTL2, amdgpu_gc_11_0_0.regGCVM_L2_CNTL2_BASE_IDX, 0x3)
@@ -186,38 +220,6 @@ class VMM:
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regGCVM_L2_PROTECTION_FAULT_CNTL, 0, 0x3FFFFFFC)
 
     self.flush_tlb(0, 0, 0)
-
-  def mmhub_v3_0_init_gart_aperture_regs(self):
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32, 0, (self.vm_base >> 12) & 0xffffffff)
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32, 0, self.vm_base >> 44)
-
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32, 0, (self.vm_end >> 12) & 0xffffffff)
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32, 0, self.vm_end >> 44)
-
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, 0, (self.pdb0_paddr & 0xffffffff) | 1)
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32, 0, (self.pdb0_paddr >> 32) & 0xffffffff)
-
-  def mmhub_v3_0_init_system_aperture_regs(self):
-    # disabled
-    agp_start = 0xffffffffffff
-    agp_end = 0
-
-    fb_start = 0x8000000000
-    fb_end = 0x85feffffff
-
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BASE, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BASE_BASE_IDX, 0)
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BOT, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BOT_BASE_IDX, agp_start >> 24)
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_TOP, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_TOP_BASE_IDX, agp_end >> 24)
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_LOW_ADDR, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_LOW_ADDR_BASE_IDX, fb_start >> 18)
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_HIGH_ADDR, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_HIGH_ADDR_BASE_IDX, fb_end >> 18)
-
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_LSB, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_LSB_BASE_IDX, self.memscratch_paddr >> 12)
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_MSB, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_MSB_BASE_IDX, (self.memscratch_paddr >> 44))
-
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_LO32, 0, self.dummy_page_mc_addr >> 12)
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32, 0, (self.dummy_page_mc_addr >> 44))
-
-    self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_L2_PROTECTION_FAULT_CNTL2, 0, 0x000E0000)
 
   def mmhub_v3_0_init_tlb_regs(self):
     self.adev.wreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_MX_L1_TLB_CNTL, amdgpu_mmhub_3_0_0.regMMMC_VM_MX_L1_TLB_CNTL_BASE_IDX, 0x00001859)
