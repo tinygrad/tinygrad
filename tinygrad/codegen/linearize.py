@@ -42,6 +42,7 @@ def order_blocks(blocks:List[BlockType]) -> List[BlockType]:
     open_loops = dedup(open_loops + list(placable_blocks[0][0]))
     blocks.remove(placable_blocks[0])
     placed_blocks.append(placable_blocks[0])
+  #for x in blocks: print(x)
   return placed_blocks
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
@@ -53,12 +54,19 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   def place_with_scope(u:UOp, rng:Tuple[int, ...]=()):
     if u.op is Ops.ASSIGN:
       assert u.src[0].op is Ops.DEFINE_ACC
-      rng = rng+tuple(x.arg[0] for x in u.src[0].src[1:])
+      rng = tuple(sorted(dedup(rng+tuple(x.arg[0] for x in u.src[0].src[1:]))))
+    if u.op is Ops.STORE:
+      rng = tuple(sorted(dedup(rng+tuple(x.arg[0] for x in u.src[0].sparents if x.op is Ops.RANGE))))
     parent_rng = tuple(sorted([x.arg[0] for x in u.sparents if x.op is Ops.RANGE]))
     loop_inside = tuple(x for x in rng if x in parent_rng)
     blocks[(loop_inside, tuple(x for x in parent_rng if x not in loop_inside))].append(u)
     for x in u.src: place_with_scope(x, rng)
   place_with_scope(sink)
+
+  #for block,ops in blocks.items():
+  #  print(block, len(ops))
+  #  from tinygrad.ops import print_uops
+  #  print_uops(sorted(ops, key=lambda x: x.tuplize))
 
   block_priority: DefaultDict[UOp, int] = defaultdict(lambda: -1)
   for block_num, block in enumerate(order_blocks(list(blocks.keys()))):

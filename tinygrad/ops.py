@@ -101,38 +101,39 @@ class Ops(FastEnum):
   SINK = auto()
   CONTIGUOUS = auto()
   PRELOAD = auto()
-  NOOP = auto()
 
   # MetaOps
   COPY = auto()
   EMPTY = auto()
   BUFFER_VIEW = auto()
 
-  # unrendered
   EXPAND = auto()
   CONTRACT = auto()
   VIEW = auto()
+  DEFINE_GLOBAL = auto()
   BUFFER = auto()
+  DEFINE_VAR = auto()
+  DEFINE_LOCAL = auto()
+  DEFINE_ACC = auto()
   VALID = auto()
+  SPECIAL = auto()
+  NOOP = auto()
 
-  # reduce + ReduceOps (not rendered)
+  # reduce
   REDUCE_AXIS = auto()
+
+  # ReduceOps
   SUM = auto(); PROD = auto(); REDUCE_MAX = auto() # noqa: E702
 
-  # defines
-  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
-
-  # gidx/lidx
-  SPECIAL = auto()
-
-  # loads before math
-  LOAD = auto()
-
   # helper ops
-  GEP = auto(); VECTORIZE = auto() # noqa: E702
+  GEP = auto()
+  VECTORIZE = auto()
 
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
+
+  # loads before math
+  LOAD = auto()
 
   # math ops
   ALU = auto()
