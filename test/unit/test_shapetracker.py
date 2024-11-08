@@ -153,7 +153,6 @@ class TestRealStrides(unittest.TestCase):
     ))
     self.assertEqual(st.real_strides(), (896, 0, None, 56, None))
 
-  @unittest.expectedFailure  # FIXME
   def test_5(self):
     # test/test_ops.py::TestOps::test_conv2d
     st = ShapeTracker((
