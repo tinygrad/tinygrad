@@ -85,6 +85,8 @@ class AMComputeQueue(HWComputeQueue):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC1), prg.rsrc1, prg.rsrc2]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC3), 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_TMPRING_SIZE), prg.device.tmpring_size]
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2),
+               gfxreg(amd_gpu.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO), *data64_le(prg.device.scratch.va_addr >> 8)]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), gfxreg(amd_gpu.regCOMPUTE_RESTART_X), 0, 0, 0, 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE0)] + [0xFFFFFFFF] * 2
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE2)] + [0xFFFFFFFF] * 2
@@ -99,21 +101,48 @@ class AMComputeQueue(HWComputeQueue):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_DISPATCH_DIRECT, 3), *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_EVENT_WRITE, 0), amd_gpu.EVENT_TYPE(7) | amd_gpu.EVENT_INDEX(4)]
 
+  def _update_exec(self, cmd_idx, global_size, local_size):
+    if local_size is not None: self._patch(cmd_idx, offset=self.cmd_idx_to_local_offset[cmd_idx], data=local_size)
+    if global_size is not None: self._patch(cmd_idx, offset=self.cmd_idx_to_global_offset[cmd_idx], data=global_size)
+
+    if (dp:=self.cmd_idx_to_dispatch_packet.get(cmd_idx)) is not None:
+      if local_size is not None: dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
+      if global_size is not None:
+        dp.grid_size_x,dp.grid_size_y,dp.grid_size_z = [g*l for g,l in zip(global_size,[dp.workgroup_size_x,dp.workgroup_size_y,dp.workgroup_size_z])]
+
   def _wait(self, signal, value=0):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
       amd_gpu.WAIT_REG_MEM_MEM_SPACE(1) | amd_gpu.WAIT_REG_MEM_OPERATION(0) | amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.WAIT_REG_MEM_ENGINE(0), *data64_le(signal._gpu_addr), value, 0xffffffff, 4]
 
   def _timestamp(self, signal): 
-    assert False, "Not implemented"
-    # self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=signal._timestamp_addr)
+    self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=signal._gpu_addr + 8)
 
   def _signal(self, signal, value=0):
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
     self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal._gpu_addr, value=value, cache_flush=True)
 
+  def _update_wait(self, cmd_idx, signal=None, value=None):
+    if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(signal._gpu_addr))
+    if value is not None: self._patch(cmd_idx, offset=4, data=[value])
+
+  def _update_signal(self, cmd_idx, signal=None, value=None):
+    if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(signal._gpu_addr))
+    if value is not None: self._patch(cmd_idx, offset=5, data=data64_le(value))
+
+  def bind(self, device):
+    self.binded_device = device
+    self.hw_page = device.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True, uncached=True))
+    hw_view = to_mv(self.hw_page.cpu_addr, self.hw_page.size).cast("I")
+    for i, value in enumerate(self.q): hw_view[i] = value
+
+    self.indirect_cmd = [amd_gpu.PACKET3(amd_gpu.PACKET3_INDIRECT_BUFFER, 2), *data64_le(self.hw_page.va_addr),
+                         len(self.q) | amd_gpu.INDIRECT_BUFFER_VALID]
+    self.q = hw_view # type: ignore
+  
   def _submit(self, device):
-    for value in self.q: device.adev.gfx.kcq_ring.write(value)
+    cmds = self.indirect_cmd if device == self.binded_device else self.q
+    for value in cmds: device.adev.gfx.kcq_ring.write(value)
     device.adev.gfx.wdoorbell64(device.adev.gfx.kcq_ring.doorbell_index, device.adev.gfx.kcq_ring.next_ptr)
 
 class AMArgsState(HCQArgsState):
@@ -148,9 +177,7 @@ class AMProgram(HCQProgram):
     self.kernargs_segment_size = image[entry_point+8:entry_point+12].cast("I")[0]
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
-    # print(lds_size)
-    # if lds_size > (self.device.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
-    # if self.private_segment_size > self.device.max_private_segment_size: raise RuntimeError("Too many resources requsted: private_segment_size")
+    if self.private_segment_size > self.device.max_private_segment_size: raise RuntimeError("Too many resources requsted: private_segment_size")
 
     code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.cpu_addr + entry_point) # NOTE: this is wrong, it's not this object
     assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
@@ -190,14 +217,11 @@ class AMAllocator(LRUAllocator):
     time.sleep(1)
 
   def copyin(self, dest:HCQBuffer, src:memoryview):
-    print("CP in")
     ctypes.memmove(dest.cpu_addr, mv_address(src), src.nbytes)
     self.device.adev.vmm.flush_hdp()
 
   def copyout(self, dest:memoryview, src:HCQBuffer):
-    print("CP out")
     self.device.synchronize()
-    self.device.adev.vmm.flush_hdp()
     ctypes.memmove(from_mv(dest), src.cpu_addr, dest.nbytes)
 
 class AMDevice(HCQCompiled):
@@ -210,6 +234,8 @@ class AMDevice(HCQCompiled):
     self.adev = AMDDev(self.pcidev)
     self.arch = "gfx1100"
     self.tmpring_size = 0x200200
+    self.max_private_segment_size = 4096
+    self.scratch = self._gpu_alloc(0x18000000)
 
     signals_alloc = self._gpu_alloc(0x1000)
     AMDevice.signals_pool = [(signals_alloc, off) for off in range(0, signals_alloc.size, 16)]
@@ -235,8 +261,8 @@ class AMDevice(HCQCompiled):
 
       if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c:
           dev_fmt = "{:04x}:{:02x}:{:02x}.{:d}".format(pcidev.contents.domain_16, pcidev.contents.bus, pcidev.contents.dev, pcidev.contents.func)
-          # if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
-          if dev_fmt == "0000:86:00.0": continue # skip it, use for kernel hacking.
+          if dev_fmt == "0000:03:00.0": continue # skip it, use for kernel hacking.
+          # if dev_fmt == "0000:86:00.0": continue # skip it, use for kernel hacking.
           if dev_fmt == "0000:c6:00.0": continue # skip it, use for kernel hacking.
           if dev_fmt == "0000:44:00.0": continue # skip it, use for kernel hacking.
           if dev_fmt == "0000:83:00.0": continue # skip it, use for kernel hacking.
