@@ -97,7 +97,8 @@ class MetalProgram:
       error_check(error_library_creation)
     else:
       # metal source. rely on OS caching
-      self.library = metal_src_to_library(self.device, lib.decode())
+      try: self.library = metal_src_to_library(self.device, lib.decode())
+      except CompileError as e: raise RuntimeError from e
     self.fxn = msg(self.library, "newFunctionWithName:", to_ns_str(name), restype=objc_instance)
     descriptor = msg(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"), "new", restype=objc_instance)
     msg(descriptor, "setComputeFunction:", self.fxn)
