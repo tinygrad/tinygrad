@@ -446,8 +446,8 @@ def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:Optio
 
 def int64_indexing(buf:UOp, idx:UOp):
   def rec(u:UOp):
-    return UOp(u.op, dtypes.int64, (rec(s).cast(dtypes.int64) for s in u.src), u.arg) if max(u._min_max, key=abs) > dtypes.max(u.dtype) else u
-  return buf.index(rec(idx)) if max(idx._min_max, key=abs) > dtypes.max(idx.dtype) else None
+    return UOp(u.op, dtypes.int64, tuple(rec(s).cast(dtypes.int64) for s in u.src), u.arg) if max(u._min_max, key=abs) > dtypes.max(u.dtype) else u
+  return buf.index(rec(idx)) if idx.dtype != dtypes.int64 and max(idx._min_max, key=abs) > dtypes.max(idx.dtype) else None
 
 load_store_indexing = PatternMatcher([
   # late fixup of unfoldable image loads

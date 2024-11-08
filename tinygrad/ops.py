@@ -423,7 +423,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
-    if self.op is Ops.CAST: return self.src[0].vmin, self.src[0].vmax
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
   @functools.cached_property
