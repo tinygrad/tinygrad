@@ -131,7 +131,7 @@ class MES_IP:
     self.kiq_setting(self.mes_kiq)
     self.queue_init(self.mes_kiq, is_kiq=True)
 
-    self.mes_hw_init()
+    # self.mes_hw_init()
 
   def mes_hw_init(self):
     self.mes_ring = AMDRing(self.adev, size=0x2000, me=3, pipe=0, queue=0, vmid=0, doorbell_index=(self.AMDGPU_NAVI10_DOORBELL_MES_RING0 << 1))
