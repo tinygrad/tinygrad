@@ -73,9 +73,6 @@ class dtypes:
   def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints
   @staticmethod
   @functools.lru_cache(None)
-  def is_signed(x: DType) -> bool: return x.scalar() in dtypes.sints
-  @staticmethod
-  @functools.lru_cache(None)
   def is_unsigned(x: DType) -> bool: return x.scalar() in dtypes.uints
   @staticmethod
   def from_py(x) -> DType:
@@ -141,8 +138,10 @@ class dtypes:
 
   floats = (float16, bfloat16, float32, float64)
   uints = (uint8, uint16, uint32, uint64)
+  uints_bool = uints + (bool,)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
+  ints_bool = ints + (bool,)
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
   dtypes.default_float = getattr(dtypes, env_default_float.lower())

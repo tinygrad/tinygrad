@@ -1,7 +1,8 @@
 from typing import List, Dict
+import struct
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
-from tinygrad.dtype import dtypes, DType, PtrDType
+from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 
 # this will unify ptx and llvm
 type_map = {
@@ -13,19 +14,19 @@ def ldt(dt:DType):
   return type_map[dt]
 
 def lcast(input_type:DType, output_type:DType):
-  if dtypes.is_unsigned(input_type) and dtypes.is_unsigned(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
-  if dtypes.is_unsigned(input_type) and dtypes.is_float(output_type): return 'uitofp'
-  if dtypes.is_signed(input_type) and dtypes.is_float(output_type): return 'sitofp'
-  if dtypes.is_unsigned(input_type) and dtypes.is_signed(output_type): return 'sext'
-  if dtypes.is_float(input_type) and dtypes.is_unsigned(output_type): return 'fptoui'
-  if dtypes.is_float(input_type) and dtypes.is_signed(output_type): return 'fptosi'
+  if input_type in dtypes.ints_bool and output_type in dtypes.uints_bool: return 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
+  if input_type in dtypes.uints_bool and output_type in dtypes.floats: return 'uitofp'
+  if input_type in dtypes.ints_bool and output_type in dtypes.sints: return 'sext'
+  if input_type in dtypes.sints and output_type in dtypes.floats: return 'sitofp'
+  if input_type in dtypes.floats and output_type in dtypes.uints_bool: return 'fptoui'
+  if input_type in dtypes.floats and output_type in dtypes.sints: return 'fptosi'
   raise RuntimeError(f"cast from {input_type} to {output_type} not supported")
 
 unsigned_lop = {
   Ops.ADD: "add", Ops.MUL: "mul", Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor", Ops.IDIV: "udiv",
 }
 signed_lop = {**unsigned_lop, Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv"}
-float_lop = {Ops.ADD: "fadd", Ops.MUL: "fmul", Ops.CMPLT: "fcmp ult", Ops.CMPNE: "fcmp une",}
+float_lop = {Ops.ADD: "fadd", Ops.MUL: "fmul", Ops.CMPLT: "fcmp ult", Ops.CMPNE: "fcmp une", Ops.FDIV: "fdiv"}
 
 # total lop
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
@@ -42,6 +43,7 @@ llvm_rewrite = PatternMatcher([
    f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x.src[0]]}, %loop_entry_{x.arg[0]}], [{ctx[x]}phi, %loop_latch_{x.arg[0]}]"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
+  (UPat(Ops.SQRT, name="x"), lambda ctx,x: f"  {ctx[x]} = @llvm.sqrt.{x.src[0].dtype} {ctx[x.src[0]]}"),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
@@ -56,6 +58,10 @@ extra_pm = PatternMatcher([
   (UPat(Ops.DEFINE_ACC, name="x"), lambda x:
     UOp(Ops.DEFINE_ACC, x.dtype.ptr(), x.src, x.arg).load(dtype=x.dtype) if not isinstance(x.dtype, PtrDType) else None),
   (UPat(Ops.ASSIGN, src=(UPat(Ops.LOAD), ), allow_any_len=True, name="x"), lambda x: UOp(Ops.ASSIGN, x.dtype, (x.src[0].src[0],)+x.src[1:])),
+  # rewrite RECIP with FDIV
+  (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
+  # rewrite MAX to CMPLT + WHERE (max function is annoying on many cstyle backends)
+  (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
 ])
 
 class LLVM2Renderer(Renderer):
@@ -80,7 +86,7 @@ class LLVM2Renderer(Renderer):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
         bufs[r[u]] = u.dtype
       elif u.op is Ops.CONST:
-        r[u] = f"{u.arg}" if u.dtype is not dtypes.bool else f"{int(u.arg)}"
+        r[u] = f"{truncate[u.dtype](u.arg)}" if u.dtype in dtypes.floats else f"{int(u.arg)}"
       else:
         if u.op is Ops.ASSIGN: r[u] = r[u.src[1]]
         else: r[u] = f"%v{self.var_counter}"
