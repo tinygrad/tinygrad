@@ -1,17 +1,21 @@
+# this will unify ptx and llvm
 from typing import List, Dict
-import struct
+import math, struct
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 
-# this will unify ptx and llvm
-type_map = {
-  dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
-  dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64",
-  dtypes.float16: "half", dtypes.float32: "float", dtypes.float64: "double", dtypes.bool: "i1", dtypes.void: "void"}
 def ldt(dt:DType):
   if isinstance(dt, PtrDType): return ldt(dt.base) + "*"
-  return type_map[dt]
+  return {dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
+          dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64",
+          dtypes.float16: "half", dtypes.float32: "float", dtypes.float64: "double", dtypes.bool: "i1", dtypes.void: "void"}[dt]
+
+def lconst(x, dtype:DType):
+  if dtype in dtypes.floats:
+    if math.isinf(x) or math.isnan(x): return "0x%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
+    return truncate[dtype](x)
+  return int(x)
 
 def lcast(input_type:DType, output_type:DType):
   if input_type in dtypes.ints_bool and output_type in dtypes.uints_bool: return 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
@@ -23,9 +27,10 @@ def lcast(input_type:DType, output_type:DType):
   raise RuntimeError(f"cast from {input_type} to {output_type} not supported")
 
 unsigned_lop = {
-  Ops.ADD: "add", Ops.MUL: "mul", Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor", Ops.IDIV: "udiv",
+  Ops.ADD: "add", Ops.MUL: "mul", Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor",
+  Ops.IDIV: "udiv", Ops.MOD: "urem",
 }
-signed_lop = {**unsigned_lop, Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv"}
+signed_lop = {**unsigned_lop, Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv", Ops.MOD: "srem"}
 float_lop = {Ops.ADD: "fadd", Ops.MUL: "fmul", Ops.CMPLT: "fcmp ult", Ops.CMPNE: "fcmp une", Ops.FDIV: "fdiv"}
 
 # total lop
@@ -86,7 +91,7 @@ class LLVM2Renderer(Renderer):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
         bufs[r[u]] = u.dtype
       elif u.op is Ops.CONST:
-        r[u] = f"{truncate[u.dtype](u.arg)}" if u.dtype in dtypes.floats else f"{int(u.arg)}"
+        r[u] = lconst(u.arg, u.dtype)
       else:
         if u.op is Ops.ASSIGN: r[u] = r[u.src[1]]
         else: r[u] = f"%v{self.var_counter}"
