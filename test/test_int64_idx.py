@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, dtypes, Context, Device
+from tinygrad import Tensor, dtypes, Device
 
 class TestInt64Indexing(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT in ("METAL", "NV"), "memory error in METAL, NV takes too long")
