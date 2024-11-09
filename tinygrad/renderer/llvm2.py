@@ -18,6 +18,7 @@ def lconst(x, dtype:DType):
   return int(x)
 
 def lcast(input_type:DType, output_type:DType):
+  if input_type is dtypes.bool and output_type in dtypes.sints: return 'zext'
   if input_type in dtypes.ints_bool and output_type in dtypes.uints_bool: return 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
   if input_type in dtypes.ints_bool and output_type in dtypes.sints: return 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
   if input_type in dtypes.uints_bool and output_type in dtypes.floats: return 'uitofp'
@@ -30,8 +31,10 @@ unsigned_lop = {
   Ops.ADD: "add", Ops.MUL: "mul", Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor",
   Ops.IDIV: "udiv", Ops.MOD: "urem",
 }
+flags = " nsz arcp contract afn"
+
 signed_lop = {**unsigned_lop, Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv", Ops.MOD: "srem"}
-float_lop = {Ops.ADD: "fadd", Ops.MUL: "fmul", Ops.CMPLT: "fcmp ult", Ops.CMPNE: "fcmp une", Ops.FDIV: "fdiv"}
+float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} ult", Ops.CMPNE: f"fcmp{flags} une", Ops.FDIV: "fdiv"+flags}
 
 # total lop
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
@@ -49,7 +52,8 @@ llvm_rewrite = PatternMatcher([
    f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x.src[0]]}, %loop_entry_{x.arg[0]}], [{ctx[x]}phi, %loop_latch_{x.arg[0]}]"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
-  (UPat(Ops.SQRT, name="x"), lambda ctx,x: f"  {ctx[x]} = @llvm.sqrt.{ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
+  (UPat(Ops.SQRT, name="x"), lambda ctx,x:
+   f"  {ctx[x]} = call{flags} {ldt(x.dtype)} @llvm.sqrt.{ldt(x.src[0].dtype)}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
@@ -87,7 +91,11 @@ class LLVM2Renderer(Renderer):
     kernel = []
     self.var_counter = 0
 
+    end_lines = []
+
     for u in uops:
+      if u.op in {Ops.SQRT}:
+        end_lines.append(f'declare {ldt(u.dtype)} @llvm.sqrt.{ldt(u.dtype)}({ldt(u.dtype)} %".1")')
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
         bufs[r[u]] = u.dtype
@@ -104,5 +112,5 @@ class LLVM2Renderer(Renderer):
         kernel.append(l)
 
     args = ', '.join([f"{ldt(dtype)} {name}" for name, dtype in bufs.items()])
-    code = f"define void @{name}({args}) {{\n" + '\n'.join(kernel) + "\n  ret void\n}"
+    code = f"define void @{name}({args}) {{\n" + '\n'.join(kernel) + "\n  ret void\n}\n"+'\n'.join(end_lines)
     return code
