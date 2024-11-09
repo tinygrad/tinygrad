@@ -1285,6 +1285,36 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (-1,2,-3,4)), lambda x: x.pad2d(padding=(-1,2,-3,4)))
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4), value=5), lambda x: x.pad2d(padding=(1,2,3,4),value=5))
     helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (-1,2,-3,4), value=5), lambda x: x.pad2d(padding=(-1,2,-3,4),value=5))
+    # raise error when padding length is improper
+    self.helper_test_exception([(3,3,3)], lambda x: torch.nn.functional.pad(x, (0,0,0,0,1,0,3,0)), lambda x: x.pad2d((0,0,0,0,1,0,3,0)),
+                               expected=(RuntimeError, ValueError))
+    self.helper_test_exception([(3,3,3)], lambda x: torch.nn.functional.pad(x, (2,0,2)), lambda x: x.pad2d((2,0,2)),
+                               expected=(RuntimeError, ValueError))
+    # raise error for negative output size
+    self.helper_test_exception([(3,3,3)], lambda x: torch.nn.functional.pad(x, (0, -7)), lambda x: x.pad2d((0, -7)),
+                               expected=(RuntimeError, AssertionError))
+    # raise error for mode string typo
+    self.helper_test_exception([(3,3,3)], lambda x: torch.nn.functional.pad(x, (3,0), mode="typo"), lambda x: x.pad2d((3,0), mode="typo"),
+                               expected=(NotImplementedError, NotImplementedError))
+
+  def test_pad2d_reflect_replicate_modes(self):
+    for mode in ("reflect", "replicate"):
+      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (0,2,3,2), mode=mode), lambda x: x.pad2d((0,2,3,2), mode=mode))
+      helper_test_op([(5,5,5)], lambda x: torch.nn.functional.pad(x, (0,2), mode=mode), lambda x: x.pad2d((0,2), mode=mode))
+      helper_test_op([(1,1,5,5,5)], lambda x: torch.nn.functional.pad(x, (1,2,3,4,1,2), mode=mode), lambda x: x.pad2d((1,2,3,4,1,2), mode=mode))
+      helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (-1,2,2,-1), mode=mode), lambda x: x.pad2d((-1,2,2,-1), mode=mode))
+      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,-3,0,-3), mode=mode), lambda x: x.pad2d((3,-3,0,-3), mode=mode))
+      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,-5,1,-5), mode=mode), lambda x: x.pad2d((3,-5,1,-5), mode=mode))
+      helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (0,0,0,-5), mode=mode), lambda x: x.pad2d((0,0,0,-5), mode=mode))
+
+    # no max pad sizes for replicate
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,11,0,30), mode="replicate"), lambda x: x.pad2d((3,11,0,30), mode="replicate"))
+    # max pad size for reflect is exactly once: pad < input size
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (4,4,0,4), mode="reflect"), lambda x:x.pad2d((4,4,0,4),mode="reflect"))
+    # raise error for relfection padding when: pad >= input size
+    self.helper_test_exception([(1,1,5,5)],
+                                lambda x: torch.nn.functional.pad(x, (3,5,0,0),mode="reflect"), lambda x: x.pad2d((3,5,0,0),mode="reflect"),
+                                expected=(RuntimeError, ValueError))
 
   def test_pad(self):
     helper_test_op([(3,3)], lambda x: torch.nn.functional.pad(x, (1,2,3,4)),lambda x: x.pad(((3,4),(1,2))))

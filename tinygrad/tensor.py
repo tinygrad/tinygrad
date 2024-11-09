@@ -1359,8 +1359,9 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
   def pad2d(self, padding:Sequence[int], mode:str="constant", value:float=0.0) -> Tensor:
     """
-    Returns a tensor that pads the last two axes specified by `padding` (padding_left, padding_right, padding_top, padding_bottom).
-    If `value` is specified, the tensor is padded with `value` instead of `0.0`.
+    Returns a tensor that pads from the last axis specified by `padding` (padding_left, padding_right, padding_top, padding_bottom, ...).
+    The padding modes is selected with `mode` which supports 'constant', 'reflect' and 'replicate'
+    If 'constant' is selected as `mode` and `value` is specified, the tensor is padded with `value` instead of `0.0`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(9).reshape(1, 1, 3, 3)
@@ -1370,8 +1371,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.pad2d((1, 1, 2, 0), value=-float("inf")).numpy())
     ```
     """
-    if mode not in {"constant", "reflect", "replicate"}: raise ValueError(f"{mode=} is not supported")
-    if len(padding) % 2 != 0: raise ValueError("padding length length must be divisible by 2")
+    if mode not in {"constant", "reflect", "replicate"}: raise NotImplementedError(f"{mode=} is not supported")
+    if len(padding) % 2 != 0 or len(padding) // 2 > self.ndim: raise ValueError("padding length is improper")
     # padding (left, right, top, bottom, ...) -> padding_X (..., (top, bottom), (left, right))
     X, pX = self, ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2]))
     pads, shrinks = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX), tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, X.shape))
