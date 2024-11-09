@@ -14,7 +14,7 @@ class TestInt64Indexing(unittest.TestCase):
                   UOp(Ops.CONST, dtypes.int, arg=715827884, src=()),)),
                 UOp(Ops.CONST, dtypes.int, arg=3, src=()),)),
               UOp(Ops.CONST, dtypes.int, arg=2, src=()),)),))
-    
+
     int64_idx = graph_rewrite(idx, load_store_indexing)
 
     target = UOp(Ops.INDEX, dtypes.char.ptr(), arg=None, src=(
