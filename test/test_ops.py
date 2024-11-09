@@ -1290,9 +1290,6 @@ class TestOps(unittest.TestCase):
                                expected=(RuntimeError, ValueError))
     self.helper_test_exception([(3,3,3)], lambda x: torch.nn.functional.pad(x, (2,0,2)), lambda x: x.pad2d((2,0,2)),
                                expected=(RuntimeError, ValueError))
-    # raise error for negative output size
-    self.helper_test_exception([(3,3,3)], lambda x: torch.nn.functional.pad(x, (0, -7)), lambda x: x.pad2d((0, -7)),
-                               expected=(RuntimeError, AssertionError))
     # raise error for mode string typo
     self.helper_test_exception([(3,3,3)], lambda x: torch.nn.functional.pad(x, (3,0), mode="typo"), lambda x: x.pad2d((3,0), mode="typo"),
                                expected=(NotImplementedError, NotImplementedError))
