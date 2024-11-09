@@ -746,7 +746,7 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
   if uop.op in {Ops.REDUCE_AXIS, Ops.WMMA}: st = ShapeTracker.from_shape(sts[uop.src[0]].reduce(uop.axis_arg))
   # movementops are pushed to VIEW
   elif uop.op is Ops.VIEW:
-    assert len(uop.src) == 0, f"can't have swizzle in ast {uop}"
+    assert len(uop.src) == 0, f"can't swizzle in kernel yet {uop}"
     st = uop.arg
   # everything else inherits shape
   else:
