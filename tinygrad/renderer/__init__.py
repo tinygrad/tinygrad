@@ -74,6 +74,7 @@ class Renderer:
   device: str = ""
   suffix: str = ""
   # TODO: make this generic with a list of supported types
+  supports_vectorized: bool = False
   supports_float4: bool = True
   has_local: bool = True
   has_shared: bool = True

@@ -2,8 +2,9 @@ from __future__ import annotations
 import ctypes, functools
 from typing import Tuple
 from tinygrad.device import Compiled, Compiler, MallocAllocator
-from tinygrad.helpers import DEBUG, cpu_time_execution, cpu_objdump
+from tinygrad.helpers import DEBUG, cpu_time_execution, cpu_objdump, getenv
 from tinygrad.renderer.llvmir import LLVMRenderer
+from tinygrad.renderer.llvm2 import LLVM2Renderer
 import llvmlite.binding as llvm
 
 class LLVMCompiler(Compiler):
@@ -23,6 +24,7 @@ class LLVMProgram:
     self.name, self.lib = name, lib
     device.engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
     self.fxn = device.engine.get_function_address(name)
+    assert self.fxn != 0, "LLVM failed to get function address"
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     if not hasattr(self, 'cfunc'):
@@ -43,4 +45,5 @@ class LLVMDevice(Compiled):
     backing_mod = llvm.parse_assembly(str())
     backing_mod.triple = llvm.get_process_triple()
     self.engine: llvm.executionengine.ExecutionEngine = llvm.create_mcjit_compiler(backing_mod, self.target_machine)
-    super().__init__(device, MallocAllocator, LLVMRenderer(), LLVMCompiler(self), functools.partial(LLVMProgram, self))
+    super().__init__(device, MallocAllocator, LLVM2Renderer() if getenv("LLVM2") else LLVMRenderer(),
+                     LLVMCompiler(self), functools.partial(LLVMProgram, self))

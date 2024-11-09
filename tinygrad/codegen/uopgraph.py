@@ -484,6 +484,8 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
   supported_ops = tuple(opts.code_for_op.keys()) if opts is not None else ()
   extra_matcher = opts.extra_matcher if opts is not None and opts.extra_matcher is not None else PatternMatcher([])
+  devec = (devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize) \
+    if opts is None or not opts.supports_vectorized else PatternMatcher([])
 
   # initial symbolic + migrate indexing (remove this)
   sink = graph_rewrite(sink, sym+migrate_indexing)
@@ -492,7 +494,7 @@ def full_graph_rewrite(sink:UOp, opts:Optional[Renderer]=None) -> UOp:
   sink = graph_rewrite(sink, sym+expander)
 
   # devectorize + load_store_indexing
-  sink = graph_rewrite(sink, sym+(devectorize+float4_folding if opts is not None and opts.supports_float4 else devectorize)+load_store_indexing)
+  sink = graph_rewrite(sink, sym+devec+load_store_indexing)
 
   # final rules for the renderer (without sym)
   sink = graph_rewrite(sink, symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)+pm_render+extra_matcher)
