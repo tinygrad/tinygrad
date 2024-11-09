@@ -613,6 +613,26 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
+  def linspace(start:Union[int, float], stop:Union[int, float], steps:int, **kwargs) -> Tensor:
+    """
+    Returns a 1-D tensor of `steps` evenly spaced values from `start` to `stop`, inclusive.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.linspace(0, 10, 5).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.linspace(-1, 1, 5).numpy())
+    ```
+    """
+    if steps < 0: raise ValueError("number of steps must be non-negative")
+    dtype = kwargs.pop("dtype", dtypes.default_float)
+    if steps == 1: return Tensor([start], dtype=dtype, **kwargs)
+    return (start + Tensor.arange(steps, **kwargs) * ((stop - start) / (steps - 1))).cast(dtype)
+
+  @staticmethod
   def eye(n:int, m:Optional[int]=None, **kwargs) -> Tensor:
     """
     Returns a 2-D tensor with `n` rows and `m` columns, with ones on the diagonal and zeros elsewhere.
