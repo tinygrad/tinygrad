@@ -73,6 +73,9 @@ class dtypes:
   def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints
   @staticmethod
   @functools.lru_cache(None)
+  def is_signed(x: DType) -> bool: return x.scalar() in dtypes.sints
+  @staticmethod
+  @functools.lru_cache(None)
   def is_unsigned(x: DType) -> bool: return x.scalar() in dtypes.uints
   @staticmethod
   def from_py(x) -> DType:
