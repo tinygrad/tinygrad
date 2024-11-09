@@ -2,7 +2,7 @@ from typing import Optional, List, Tuple, Dict, Callable, Any
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.ops import Op, UOps, UOp, flops_mem, sym_infer, sint, Variable
+from tinygrad.ops import Ops, UOp, flops_mem, sym_infer, sint, Variable
 from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
@@ -42,10 +42,10 @@ class Program:
     if not self._ran_post_init and self.uops is not None:
       # single pass through the uops
       for u in self.uops:
-        if u.op is UOps.DEFINE_VAR: self.vars.append(u)
-        if u.op is UOps.DEFINE_GLOBAL: self.globals.append(u.arg)
-        if u.op is UOps.STORE: self.outs.extend([x.arg for x in u.src[0].sparents if x.op is UOps.DEFINE_GLOBAL])
-        if u.op is UOps.SPECIAL:
+        if u.op is Ops.DEFINE_VAR: self.vars.append(u)
+        if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
+        if u.op is Ops.STORE: self.outs.extend([x.arg for x in u.src[0].sparents if x.op is Ops.DEFINE_GLOBAL])
+        if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0][0] == 'i': self.local_size = None
           special_size = self.local_size if u.arg[0][0] == 'l' else self.global_size
@@ -83,7 +83,7 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
-  code_for_op: Dict[Op, Callable] = {}
+  code_for_op: Dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
   def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")

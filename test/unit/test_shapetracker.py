@@ -5,14 +5,14 @@ from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad import Variable
-from tinygrad.ops import UOp, UOps, graph_rewrite
+from tinygrad.ops import UOp, Ops, graph_rewrite
 from tinygrad.codegen.uopgraph import sym
 from itertools import product
 
 def shapetracker_getitem(st:ShapeTracker, val:int):
   idx, valid = st.reshape((st.size,)).to_indexed_uops([UOp.const(dtypes.int, val)])
   idx, valid = graph_rewrite(idx, sym), graph_rewrite(valid, sym)
-  assert idx.op is UOps.CONST and valid.op is UOps.CONST
+  assert idx.op is Ops.CONST and valid.op is Ops.CONST
   return idx.arg, valid.arg
 
 class CheckingShapeTracker:
@@ -125,7 +125,6 @@ class TestRealStrides(unittest.TestCase):
     ))
     self.assertEqual(st.real_strides(), (None, 4, 1))
 
-  @unittest.expectedFailure  # FIXME
   def test_2(self):
     # test/test_ops.py::TestOps::test_simple_padding_conv1d
     st = ShapeTracker((
@@ -135,7 +134,6 @@ class TestRealStrides(unittest.TestCase):
     ))
     self.assertEqual(st.real_strides(), (90, 45, None, None))
 
-  @unittest.expectedFailure  # FIXME
   def test_3(self):
     # test/test_ops.py::TestOps::test_simple_cumsum
     st = ShapeTracker((
@@ -145,7 +143,6 @@ class TestRealStrides(unittest.TestCase):
     ))
     self.assertEqual(st.real_strides(), (256, None, None))
 
-  @unittest.expectedFailure  # FIXME
   def test_4(self):
     # test/test_nn.py::TestNN::test_conv_transpose1d
     st = ShapeTracker((
@@ -155,7 +152,6 @@ class TestRealStrides(unittest.TestCase):
     ))
     self.assertEqual(st.real_strides(), (896, 0, None, 56, None))
 
-  @unittest.expectedFailure  # FIXME
   def test_5(self):
     # test/test_ops.py::TestOps::test_conv2d
     st = ShapeTracker((
@@ -863,6 +859,18 @@ class TestConsecutive(unittest.TestCase):
     assert not self.ones[0, :].lazydata.st.consecutive
     # consecutive if sliced into size 1
     assert self.ones[0, 0].lazydata.st.consecutive
+
+class TestRender(unittest.TestCase):
+  def test_render(self):
+    st = ShapeTracker.from_shape((2, 3))
+    idx, valid = st.to_indexed_uops()
+    self.assertEqual(idx.render(), "((ridx0*3)+ridx1)")
+    self.assertEqual(valid.render(), "True")
+
+    st = st.pad(((0, 1), (0, 0)))
+    idx, valid = st.to_indexed_uops()
+    self.assertEqual(idx.render(), "((ridx0*3)+ridx1)")
+    self.assertEqual(valid.render(), "(ridx0<2)")
 
 if __name__ == '__main__':
   unittest.main()
