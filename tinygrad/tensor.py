@@ -1360,7 +1360,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
   def pad2d(self, padding:Sequence[int], mode:str="constant", value:float=0.0) -> Tensor:
     """
     Returns a tensor that pads from the last axis specified by `padding` (padding_left, padding_right, padding_top, padding_bottom, ...).
-    The padding modes is selected with `mode` which supports 'constant', 'reflect' and 'replicate'
+    The padding modes is selected with `mode` which supports 'constant' and 'reflect'
     If 'constant' is selected as `mode` and `value` is specified, the tensor is padded with `value` instead of `0.0`.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1371,21 +1371,16 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.pad2d((1, 1, 2, 0), value=-float("inf")).numpy())
     ```
     """
-    if mode not in {"constant", "reflect", "replicate"}: raise NotImplementedError(f"{mode=} is not supported")
-    if len(padding) % 2 != 0 or len(padding) // 2 > self.ndim: raise ValueError("padding length is improper")
+    if mode not in {"constant", "reflect"}: raise NotImplementedError(f"{mode=} is not supported")
     # padding (left, right, top, bottom, ...) -> padding_X (..., (top, bottom), (left, right))
     X, pX = self, ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2]))
     pads, shrinks = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX), tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, X.shape))
     if mode == "constant": return X.shrink(shrinks).pad(pads, value)
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     for d,(pB,pA) in enumerate(pads):
-      if mode == "reflect":
-        if pB >= (s:=X.shape[d]) or pA>=s: raise ValueError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
-        xB = X[[slice(pB,0,-1) if i == d else slice(None) for i in range(X.ndim)]] if pB else None
-        xA = X[[slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1) if i==d else slice(None) for i in range(X.ndim)]] if pA else None
-      if mode == "replicate":
-        xB = X[[slice(None,1) if i==d else slice(None) for i in range(X.ndim)]].expand([pB if i==d else None for i in range(X.ndim)]) if pB else None
-        xA = X[[slice(-1,None) if i==d else slice(None) for i in range(X.ndim)]].expand([pA if i==d else None for i in range(X.ndim)]) if pA else None
+      if pB >= (s:=X.shape[d]) or pA>=s: raise ValueError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
+      xB = X[[slice(pB,0,-1) if i == d else slice(None) for i in range(X.ndim)]] if pB else None
+      xA = X[[slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1) if i==d else slice(None) for i in range(X.ndim)]] if pA else None
       X = Tensor.cat(*(X_ for X_ in (xB, X, xA) if X_ is not None), dim=d)
     return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
 
