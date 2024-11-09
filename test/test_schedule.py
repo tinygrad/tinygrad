@@ -1361,11 +1361,29 @@ class TestSchedule(unittest.TestCase):
       run_schedule(check_schedule(out, 4))
       np.testing.assert_allclose(out.numpy(), x.numpy()@y.numpy(), atol=1e-4, rtol=1e-4)
 
+  def _test_fusion(self, shapes, f, cnt):
+    with Context(DEBUG=0, TRACK_MATCH_STATS=0): args = [Tensor.randn(s).realize() for s in shapes]
+    run_schedule(check_schedule(compare:=f(*args), cnt))
+    if getenv("COMPARE", 1):
+      import torch
+      good = f(*[torch.tensor(x.numpy()) for x in args])
+      np.testing.assert_allclose(compare.numpy(), good.numpy(), atol=1e-4, rtol=1e-4)
+
+  def test_late_fusion_simple(self):
+    self._test_fusion([(4, 4), (4, 1)], lambda a,b:a.sum(1, keepdim=True)+b, 1)
+
+  def test_late_fusion_post_reshape(self):
+    self._test_fusion([(4, 4), (1, 4)], lambda a,b:a.sum(1).reshape(b.shape)+b, 1)
+
+  def test_late_fusion_post_permute(self):
+    self._test_fusion([(4, 6, 4), (4, 4, 1)], lambda a,b:a.sum(1, keepdim=True).permute((2, 0, 1))+b, 2)
+
   def test_late_fusion_double_transpose(self):
-    with Context(DEBUG=0): a = Tensor.randn(32, 16, 1).realize()
-    compare = (a.expand(32, 16, 16).sum((2,), keepdim=True).T+2).T.contiguous()
-    run_schedule(check_schedule(compare, 1))
-    np.testing.assert_allclose(compare.numpy(), (np.broadcast_to(a.numpy(), (32, 16, 16)).sum(axis=2, keepdims=True).T+2).T, atol=1e-4, rtol=1e-4)
+    self._test_fusion([(32, 16, 1)],
+                      lambda a:(a.expand(32, 16, 16).sum((2,), keepdim=True).permute((1, 0, 2))+2).permute((1, 0, 2)).contiguous(), 1)
+
+  def test_late_fusion_post_expand(self):
+    self._test_fusion([(32, 32)], lambda a:a-a.sum(1), 2)
 
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
