@@ -38,7 +38,7 @@ if __name__ == "__main__":
   to_mv(res, 0x10)[1] = 0xaa
 
   from tinygrad.runtime.ops_clang import ClangCompiler
-  cc = ClangCompiler(args=["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib"])
+  cc = ClangCompiler(args=["-shared", "--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib"])
 
   obj = cc.compile("""
     typedef unsigned long long remote_handle64;
