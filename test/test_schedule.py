@@ -1642,9 +1642,8 @@ class TestIndexing(unittest.TestCase):
     r = r + ast_const(dtypes.int, 2, ())
     sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink = graph_rewrite(sink, view_right)
-    # NOTE: this AST is always correct in the entire lifecycle of graph_rewrite!
-    # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
-    verify_ast(sink)
+    # this AST first needs to swizzle, but it doesn't have implicit movementops
+    with self.assertRaisesRegex(AssertionError, "swizzle"): verify_ast(sink)
     verify_ast(rsink)
 
   def test_no_reshape_reduceop(self):
@@ -1664,9 +1663,8 @@ class TestIndexing(unittest.TestCase):
     for _ in range(24): r = r + ast_const(dtypes.int, 2, ())
     sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink, et = timeit(graph_rewrite, sink, view_right)
-    # NOTE: this AST is always correct in the entire lifecycle of graph_rewrite!
-    # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
-    verify_ast(sink)
+    # this AST first needs to swizzle, but it doesn't have implicit movementops
+    with self.assertRaisesRegex(AssertionError, "swizzle"): verify_ast(sink)
     verify_ast(rsink)
     self.assertLessEqual(et, 1e3)
 
