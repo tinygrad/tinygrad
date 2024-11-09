@@ -81,5 +81,12 @@ class TestVerifyAST(unittest.TestCase):
     const_st = [st for u,st in uop_sts.items() if u.op is Ops.VALID][0]
     self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
 
+  def test_assert_swizzle(self):
+    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
+    a = UOp(Ops.LOAD, dtypes.float, (buf, ShapeTracker.from_shape((32, 1)).to_uop()))
+    r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (ReduceOps.SUM, (0,)))
+    st = UOp.store(buf, ShapeTracker.from_shape((32, 1)).to_uop(), r.view(r.st.expand((32, 1)))+a)
+    with self.assertRaisesRegex(InvalidASTException, "swizzle"): helper_test_verify_ast(st)
+
 if __name__ == '__main__':
   unittest.main()
