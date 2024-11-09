@@ -19,8 +19,8 @@ def lconst(x, dtype:DType):
 
 def lcast(input_type:DType, output_type:DType):
   if input_type in dtypes.ints_bool and output_type in dtypes.uints_bool: return 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
+  if input_type in dtypes.ints_bool and output_type in dtypes.sints: return 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
   if input_type in dtypes.uints_bool and output_type in dtypes.floats: return 'uitofp'
-  if input_type in dtypes.ints_bool and output_type in dtypes.sints: return 'sext'
   if input_type in dtypes.sints and output_type in dtypes.floats: return 'sitofp'
   if input_type in dtypes.floats and output_type in dtypes.uints_bool: return 'fptoui'
   if input_type in dtypes.floats and output_type in dtypes.sints: return 'fptosi'
@@ -41,14 +41,15 @@ llvm_rewrite = PatternMatcher([
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, i32 {ctx[x.src[1]]}"),
   (UPat(Ops.LOAD, name="x"), lambda ctx,x: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
   (UPat((Ops.STORE, Ops.ASSIGN), name="x"), lambda ctx,x: f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
-  (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx, x: f"  {ctx[x]} = alloca {ldt(x.dtype.base)}"),
+  (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx, x:
+   f"  {ctx[x]} = alloca {ldt(x.dtype.base)}\n  store {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.dtype)} {ctx[x]}"),
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
    f"  br label %loop_entry_{x.arg[0]}\nloop_entry_{x.arg[0]}:\n"
    f"  br label %loop_body_{x.arg[0]}\nloop_body_{x.arg[0]}:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x.src[0]]}, %loop_entry_{x.arg[0]}], [{ctx[x]}phi, %loop_latch_{x.arg[0]}]"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
-  (UPat(Ops.SQRT, name="x"), lambda ctx,x: f"  {ctx[x]} = @llvm.sqrt.{x.src[0].dtype} {ctx[x.src[0]]}"),
+  (UPat(Ops.SQRT, name="x"), lambda ctx,x: f"  {ctx[x]} = @llvm.sqrt.{ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
@@ -92,6 +93,8 @@ class LLVM2Renderer(Renderer):
         bufs[r[u]] = u.dtype
       elif u.op is Ops.CONST:
         r[u] = lconst(u.arg, u.dtype)
+      elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype):
+        r[u] = r[u.src[0]]
       else:
         if u.op is Ops.ASSIGN: r[u] = r[u.src[1]]
         else: r[u] = f"%v{self.var_counter}"
