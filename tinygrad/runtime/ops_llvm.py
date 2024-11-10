@@ -9,7 +9,7 @@ import llvmlite.binding as llvm
 class LLVMCompiler(Compiler):
   def __init__(self, device:LLVMDevice):
     self.device = device
-    super().__init__("compile_llvm")
+    super().__init__("compile_llvm_opt")
   def compile(self, src:str) -> bytes:
     mod = llvm.parse_assembly(src)
     mod.verify()
@@ -40,6 +40,15 @@ class LLVMDevice(Compiled):
     # this opt actually can change things. ex: opt=3 means no FMA, opt=2 means FMA
     self.target_machine: llvm.targets.TargetMachine = llvm.Target.from_triple(llvm.get_process_triple()).create_target_machine(opt=2)
     self.target_machine.add_analysis_passes(self.optimizer)
+
+    # llvm optimization
+    with llvm.create_pass_manager_builder() as builder:
+      builder.opt_level = 3
+      builder.size_level = 0
+      builder.loop_vectorize = True
+      builder.slp_vectorize = True
+      builder.populate(self.optimizer)
+
     self.target_machine.set_asm_verbosity(True)
     backing_mod = llvm.parse_assembly(str())
     backing_mod.triple = llvm.get_process_triple()
