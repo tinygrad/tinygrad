@@ -44,6 +44,9 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     elif u.op is Ops.CONST:
       # place consts first here, they don't do anything and it can cause issues with DEFINE_ACC
       priority -= 100000000000
+    elif u.op is Ops.DEFINE_ACC:
+      # place DEFINE_ACC last
+      priority += 100000000000
     else:
       # prefer uops that are loop children
       priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is Ops.RANGE and u in ss])
@@ -74,7 +77,9 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     if DEBUG >= 7: print(f"{p:5d}", x.op, x.dtype, x.arg)
     if x in scope_children: scope_end[x] = x
     if x.op is Ops.DEFINE_ACC:
-      idx = min([_uops.index(l) for l in x.src if l.op is Ops.RANGE])
+      range_children = [y.src[2:] for y in children[x] if y.op is Ops.ASSIGN]
+      assert len(range_children) == 1, "DEFINE_ACC is missing an ASSIGN child"
+      idx = min([_uops.index(l) for l in range_children[0]])
       _uops.insert(idx, x)
     else: _uops.append(x)
     for u, ss in scope_children.items():

@@ -108,9 +108,9 @@ def lower_reduce_axis(ctx: IndexContext, x: UOp):
     ret = functools.reduce(lambda x,y: x.alu(alu_op, y), [ret.gep(i) for i in range(ret.dtype.count)])
   if not len(reduce_range): return ret
   # create ACC and assign
-  acc = UOp(Ops.DEFINE_ACC, x.dtype, (x.const_like(identity_element(alu_op, x.dtype.scalar())),) + tuple(reduce_range), (ctx.acc_num,))
+  acc = UOp(Ops.DEFINE_ACC, x.dtype, (x.const_like(identity_element(alu_op, x.dtype.scalar())),), (ctx.acc_num,))
   ctx.acc_num += 1
-  return acc.assign(acc.alu(alu_op, ret))
+  return acc.assign(acc.alu(alu_op, ret), *reduce_range)
 
 def lower_load_store(ctx: IndexContext, x: UOp):
   idx, valid = x.st_arg.to_indexed_uops(ctx.ridxs if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL else ctx.idxs)
