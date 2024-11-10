@@ -499,7 +499,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
       mults = mult_stack.pop(-1)
     elif u.op is Ops.SPECIAL:
       mults *= u.arg[1] # NOTE: we don't push to the mult_stack here, you can't end these
-    elif u.op is Ops.LOAD:
+    elif u.op is Ops.LOAD and u.src[0].op is not Ops.DEFINE_ACC:
       mem += u.dtype.itemsize * mults
     elif u.op is Ops.STORE:
       mem += u.src[1].dtype.itemsize * mults

@@ -50,7 +50,7 @@ llvm_rewrite = PatternMatcher([
    f"  {ctx[x]}_yes = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}\n"
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
-  (UPat(Ops.LOAD, name="x"), lambda ctx,x: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
+  (UPat(Ops.LOAD, src=(UPat.var('idx'),), name="x"), lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}"),
   (UPat((Ops.STORE, Ops.ASSIGN), name="x"), lambda ctx,x: f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
 
   # unary/binary/ternary ops
@@ -130,6 +130,6 @@ class LLVMRenderer(Renderer):
         if l is None: raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
 
-    args = ', '.join([f"{ldt(dtype)} {name}" for name, dtype in bufs.items()])
+    args = ', '.join([f"{ldt(dtype)}{' noalias' if isinstance(dtype, PtrDType) else ''} {name}" for name, dtype in bufs.items()])
     code = f"define void @{name}({args}) {{\n" + '\n'.join(kernel) + "\n  ret void\n}\n"+'\n'.join(end_lines.keys())
     return code

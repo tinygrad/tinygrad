@@ -23,6 +23,7 @@ class LLVMProgram:
     self.name, self.lib = name, lib
     device.engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
     self.fxn = device.engine.get_function_address(name)
+    assert self.fxn != 0, "LLVM failed to get function address"
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     if not hasattr(self, 'cfunc'):
