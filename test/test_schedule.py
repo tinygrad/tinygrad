@@ -16,7 +16,7 @@ from tinygrad.shape.view import View
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, Ops, graph_rewrite, track_rewrites
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, view_right, st_fixup, view_left
+from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, view_right, view_left
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
 from test.helpers import ast_const, timeit
@@ -1626,13 +1626,14 @@ class TestIndexing(unittest.TestCase):
       ref = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
     np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 
-  def test_recursive_st_fixup(self):
+  def test_recursive_swizzle(self):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
     ast = a.schedule()[0].ast
-    new_uop, et = timeit(st_fixup, ast.src[0].src[2], lambda st:st.reshape((4, 1)), {})
+    swizzle = ast.src[0].src[2].reshape((4, 1))
+    new_uop = swizzle_rewrite(swizzle)
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
-    self.assertLess(et, 1e3)
+    self.assertEqual(swizzle_cnt(new_uop), 0)
 
   def test_strongly_connected_DAG(self):
     val = 1.0
