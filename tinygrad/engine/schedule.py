@@ -95,6 +95,7 @@ def st_fixup(u:UOp, apply_to_st:Callable[[ShapeTracker], ShapeTracker], cache:Di
   if (n:=cache.get(u)) is not None: return n
   if u.op is Ops.VIEW: return u.replace(arg=apply_to_st(u.arg))
   if len(u.src) == 0 or (u.st is not None and u.st == apply_to_st(u.st)): return u
+  assert u.op is not Ops.REDUCE_AXIS, "can't push a fixup through a reduce"
   cache[u] = ret = u.replace(src=tuple(st_fixup(x, apply_to_st, cache) for x in u.src))
   return ret
 
