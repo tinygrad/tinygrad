@@ -1008,14 +1008,14 @@ class TestLinearizer(unittest.TestCase):
       k = Kernel(create_schedule([a.lazydata])[-1].ast)
       k.linearize()
       local = [uop for uop in k.uops if uop.op is Ops.DEFINE_ACC]
-      assert local[0].dtype == acc_dtype
+      assert local[0].dtype.base == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
       k = Kernel(create_schedule([c.lazydata])[-1].ast)
       k.linearize()
       local = [uop for uop in k.uops if uop.op is Ops.DEFINE_ACC]
-      assert local[0].dtype == expected_dtype
+      assert local[0].dtype.base == expected_dtype
 
     tests = (
       (dtypes.float16, None, dtypes.float),
@@ -1219,7 +1219,7 @@ class TestLinearizer(unittest.TestCase):
       assert len(sched) == 1
 
       lin = Kernel(sched[0].ast)
-      assert sum(u.op is UnaryOps.RECIP for u in lin.linearize().uops) == max_ops, msg
+      assert sum(u.op in {UnaryOps.RECIP, BinaryOps.FDIV} for u in lin.linearize().uops) == max_ops, msg
 
     a = Tensor.empty((4,4))
     b = Tensor.empty((4,4))
