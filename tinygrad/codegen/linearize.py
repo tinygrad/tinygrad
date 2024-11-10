@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Dict, Tuple, DefaultDict, Any
+from typing import List, Dict, Tuple, DefaultDict
 import functools, heapq
 from collections import defaultdict
 from tinygrad.ops import type_verify, UOp, Ops
@@ -43,31 +43,32 @@ def get_ranges_in_parents(x:UOp) -> Tuple[UOp, ...]:
 def append_to_block(ctx, x:UOp):
   new_srcs = []
   to_append = []
-  new_blocks: DefaultDict[Tuple[UOp, ...], Any] = defaultdict(list)
+  new_blocks: DefaultDict[Tuple[UOp, ...], List[UOp]] = defaultdict(list)
   updated = False
+  block_uop_set = set(x.arg.lst)
   for u in x.src:
     if u.op is Ops.BLOCK:
       if len(new_block_list:=new_blocks[u.arg.rngs]): updated = True
       new_block_list.append(u)
-    elif u.op in {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR} or len([y for y in ctx[u] if y not in set(x.arg.lst)]):
+    elif u.op in {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR} or len([y for y in ctx[u] if y not in block_uop_set]):
       # it stays in srcs if it has children not in the basic or is RANGE/CONST
       new_srcs.append(u)
     else:
+      updated = True
       if (rngs:=get_ranges_in_parents(u)) == x.arg.rngs:
         # fine to put it in this block
         new_srcs += list(u.src)
         to_append.append(u)
       else:
         # need to create a new block
-        updated = True
         new_blocks[rngs].append(u)
-  if len(to_append) == 0 and not updated: return None
+  if not updated: return None
   for rng,lst in new_blocks.items():
-    new_lst = []
-    for y in lst:
-      if y.op is Ops.BLOCK: new_lst += y.arg.lst
-      else: new_lst.append(y)
-    new_srcs.append(UOp(Ops.BLOCK, dtypes.void, tuple(dedup(sum([y.src for y in lst], tuple()))), BasicBlock(rng, new_lst)))
+    if len(lst) == 1 and lst[0].op is Ops.BLOCK:
+      new_srcs.append(lst[0])
+    else:
+      new_lst = flatten([y.arg.lst if y.op is Ops.BLOCK else [y] for y in lst])
+      new_srcs.append(UOp(Ops.BLOCK, dtypes.void, tuple(dedup(sum([y.src for y in lst], tuple()))), BasicBlock(rng, new_lst)))
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
 
 make_basic_blocks = PatternMatcher([
