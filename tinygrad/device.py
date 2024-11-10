@@ -2,9 +2,9 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Optional, Dict, Tuple, Any, Iterator
-import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib
-from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
-from tinygrad.dtype import DType, ImageDType, PtrDType
+import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys
+from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
+from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
 
 # **************** Device ****************
@@ -200,3 +200,22 @@ class Compiled:
     This method ensures that all previously queued operations on the device have been completed before proceeding.
     """
     # override this in your device implementation
+
+# TODO: move this to each Device
+def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
+  if device is None: device = Device.DEFAULT
+  if dtype == dtypes.bfloat16:
+    # NOTE: this requires bf16 buffer support
+    return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
+  if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
+  # for CI GPU and OSX, cl_khr_fp16 isn't supported
+  # for CI LLVM, it segfaults because it can't link to the casting function
+  # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
+  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
+  if dtype == dtypes.half:
+    if device == "GPU": return not CI and not OSX
+    if device in ["CUDA", "NV"]: return not CI
+    if device == "LLVM": return OSX
+    if device == "PYTHON": return sys.version_info >= (3, 12)
+  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
+  return True

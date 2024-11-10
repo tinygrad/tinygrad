@@ -194,7 +194,9 @@ class View:
         merged_size, merged_term = 1, UOp.const(dtypes.int, 0)
     if resolve(merged_term != 0): return None
     if (vm2_shape := tuple(s for s,_ in reversed(extents))) != vm2.shape:
-      return (reshaped_vm2 := vm2.reshape(vm2_shape)) and reshaped_vm2 + vm1
+      reshaped_vm2 = vm2.reshape(vm2_shape)
+      if reshaped_vm2 is None: return None
+      if reshaped_vm2.shape != vm2.shape: return reshaped_vm2 + vm1
 
     if vm2.mask:
       # Try to project vm2's mask on to vm1.
