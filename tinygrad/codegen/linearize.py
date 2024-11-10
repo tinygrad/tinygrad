@@ -13,7 +13,8 @@ class BasicBlock:
     self.lst = tuple(lst)
   def __hash__(self): return hash((self.rngs, self.lst))
   def __eq__(self, x): return self.rngs == x.rngs and self.lst == x.lst
-  def __repr__(self): return f"{[y.arg[0] for y in self.rngs]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
+  def __repr__(self):
+    return f"{[y.arg[0] if y.op is Ops.RANGE else "IF" for y in self.rngs]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
   @functools.cached_property
   def lst_tuplize(self): return tuple(y.tuplize for y in self.lst)
   @functools.cached_property
@@ -29,7 +30,7 @@ class BasicBlock:
 def get_ranges_in_parents(x:UOp) -> Tuple[UOp, ...]:
   ret: List[Tuple[UOp, ...]] = []
   for u in x.src:
-    if u.op is Ops.RANGE: ret.append((u,))
+    if u.op in {Ops.RANGE, Ops.IF}: ret.append((u,))
     # don't flow through assign and store
     if u.op is Ops.STORE: continue
     if u.op is Ops.ASSIGN:
@@ -37,7 +38,7 @@ def get_ranges_in_parents(x:UOp) -> Tuple[UOp, ...]:
       ret.append(tuple(x for x in get_ranges_in_parents(u.src[1]) if x not in u.src[0].src[1:]))
     else:
       ret.append(get_ranges_in_parents(u))
-  return tuple(dedup(sorted(flatten(ret), key=lambda x: x.arg)))
+  return tuple(dedup(sorted(flatten(ret), key=lambda x: x.tuplize)))
 
 def append_to_block(ctx, x:UOp):
   new_srcs = []
@@ -121,6 +122,8 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     _,_,x = heapq.heappop(queue)
     if x.op is Ops.BLOCK:
       _uops.extend(x.arg.lst)
+      for y in x.arg.lst:
+        if y.op is Ops.IF: open_loops.append(y)
       # end any ranges
       for c in children[x]:
         assert c.op is Ops.BLOCK
@@ -130,7 +133,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
           if r not in c.arg.rngs: to_end.append(r)
         for r in open_loops[::-1]:
           if r in to_end:
-            _uops.append(UOp(Ops.ENDRANGE, src=(r,)))
+            _uops.append(UOp(Ops.ENDRANGE if r.op is Ops.RANGE else Ops.ENDIF, src=(r,)))
             open_loops.remove(r)
     elif x.op is Ops.DEFINE_ACC:
       idx = min([_uops.index(l) for l in x.src if l.op is Ops.RANGE])
@@ -141,9 +144,6 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     for u in children[x]:
       in_degree[u] -= 1
       if in_degree[u] == 0: push(u)
-
-  # close ifs
-  for ifs in [u for u in _uops[::-1] if u.op is Ops.IF]: _uops = _uops[:-1] + [UOp(Ops.ENDIF, src=(ifs,)), _uops[-1]]
 
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
   if not skip_check: type_verify(_uops)
