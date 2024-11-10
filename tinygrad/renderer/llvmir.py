@@ -95,7 +95,7 @@ class LLVMRenderer(Renderer):
 
   def render(self, name: str, uops: List[UOp]) -> str:
     r: Dict[UOp, str] = {}
-    bufs: Dict[str, DType] = {}
+    args: List[str] = []
     kernel: List[str] = []
     end_lines: Dict[str, None] = {}
     vc = -1
@@ -115,7 +115,7 @@ class LLVMRenderer(Renderer):
 
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
-        bufs[r[u]] = u.dtype
+        args.append(f"{ldt(u.dtype)}{' noalias' if isinstance(u.dtype, PtrDType) else ''} {r[u]}")
       elif u.op is Ops.ASSIGN: pass  # assign is already handled by the first pass
       elif u.op is Ops.DEFINE_ACC: r[u] = r[u.src[0]]  # a define acc can be used and never be assigned to
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
@@ -138,5 +138,5 @@ class LLVMRenderer(Renderer):
               kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)}" f"[{r[x]}, %loop_entry_{u.arg[0]}], [{r[acc_to_assign[x]]}, %loop_latch_{u.arg[0]}]")
               r[x] = f"%acc{vc}"
 
-    args = ', '.join([f"{ldt(dtype)}{' noalias' if isinstance(dtype, PtrDType) else ''} {name}" for name, dtype in bufs.items()])
-    return f"define void @{name}({args}) {{\n" + '\n'.join(kernel) + "\n  ret void\n}\n"+'\n'.join(end_lines.keys())
+    # output the function
+    return f"define void @{name}({','.join(args)}) {{\n" + '\n'.join(kernel) + "\n  ret void\n}\n"+'\n'.join(end_lines.keys())
