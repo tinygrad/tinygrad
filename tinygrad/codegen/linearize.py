@@ -14,6 +14,7 @@ class BasicBlock:
   def __eq__(self, x): return self.rngs == x.rngs and self.lst == x.lst
   def __repr__(self):
     return f"{[y.arg[0] for y in self.rngs]}\n{'\n'.join([str(x.op) for x in self.lst])}"
+    #return f"{[y.arg[0] for y in self.rngs]} {len(self.lst)}"
   #def __add__(self, x):
   #  assert self.rngs == x.rngs
   #  return BasicBlock(self.rngs, self.lst+x.lst)
@@ -35,15 +36,15 @@ def get_ranges_in_parents(x:UOp) -> Tuple[UOp]:
       ret.append(get_ranges_in_parents(u))
   return tuple(dedup(sorted(flatten(ret), key=lambda x: x.arg)))
 
-def append_to_block(x:UOp):
+def append_to_block(ctx, x:UOp):
   new_srcs = []
   to_append = []
   old_blocks = {u.arg.rngs:u for u in x.src if u.op is Ops.BASICBLOCK}
   new_blocks = defaultdict(list)
   for u in x.src:
-    if u.op is Ops.BASICBLOCK:
-      continue
-    elif u.op in {Ops.RANGE, Ops.CONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.SPECIAL}: #, Ops.DEFINE_ACC}:
+    if u.op is Ops.BASICBLOCK: continue
+    if len([y for y in ctx[u] if y not in x.arg.lst]): continue
+    elif u.op in {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC}: #, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.SPECIAL}: #, Ops.DEFINE_ACC}:
       new_srcs.append(u)
     else:
       if (rngs:=get_ranges_in_parents(u)) == x.arg.rngs:
@@ -62,29 +63,8 @@ def append_to_block(x:UOp):
     new_srcs.append(UOp(Ops.BASICBLOCK, dtypes.void, tuple(dedup(sum([x.src for x in lst], ()))), BasicBlock(rng, lst)))
   return UOp(Ops.BASICBLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
 
-  """
-  new_srcs = []
-  to_append = []
-  new_assigns = defaultdict(list)
-  for u in x.src:
-    if u.op not in {Ops.BASICBLOCK, Ops.ASSIGN, Ops.RANGE, Ops.IF}:
-      new_srcs += list(u.src)
-      to_append.append(u)
-    elif u.op is Ops.ASSIGN:
-      # ASSIGN creates a new block
-      assert u.src[0].op is Ops.DEFINE_ACC
-      new_assigns[u.src[0].src[1:]].append(u)
-    else:
-      new_srcs.append(u)
-  new_new_srcs = []
-  for v in new_assigns.values():
-    new_new_srcs.append(UOp(Ops.BASICBLOCK, dtypes.void, tuple(dedup(sum([x.src for x in v], ()))), BasicBlock(v)))
-  if len(to_append) == 0 and len(new_new_srcs) == 0: return None
-  return UOp(Ops.BASICBLOCK, dtypes.void, tuple(dedup(new_new_srcs+new_srcs)), x.arg.add(to_append))
-  """
-
 make_basic_blocks = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BASICBLOCK, dtypes.void, x.src, BasicBlock(get_ranges_in_parents(x), [x]))),
+  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BASICBLOCK, dtypes.void, x.src, BasicBlock([], [x]))),
   (UPat(Ops.BASICBLOCK, name="x"), append_to_block),
 ])
 
@@ -102,14 +82,14 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
-  sink_bb = graph_rewrite(sink, make_basic_blocks)
-
   # filter nodes that don't link to a sink
   # BFS toposort
   children: Dict[UOp, List[UOp]] = {}
   range_srcs: Dict[UOp, Dict[UOp, None]] = {}
   in_degree: Dict[UOp, int] = {}
   get_children_dfs(sink, children, range_srcs, in_degree)
+
+  sink_bb = graph_rewrite(sink, make_basic_blocks, ctx=children)
 
   @functools.lru_cache(None)
   def get_recursive_children(x:UOp, end:Ops, include_self=False) -> Set[UOp]:
@@ -158,7 +138,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   _uops: List[UOp] = []
   while queue:
     p,_,x = heapq.heappop(queue)
-    print(x.op, [y.arg[0] for y in get_ranges_in_parents(x)])
+    #print(x.op, [y.arg[0] for y in get_ranges_in_parents(x)])
     if DEBUG >= 7: print(f"{p:5d}", x.op, x.dtype, x.arg)
     if x in scope_children: scope_end[x] = x
     if x.op is Ops.DEFINE_ACC:
