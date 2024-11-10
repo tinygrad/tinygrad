@@ -46,7 +46,7 @@ def append_to_block(ctx, x:UOp):
       if len(new_blocks[u.arg.rngs]): updated = True
       new_blocks[u.arg.rngs].extend(u.arg.lst)
       new_block_srcs[u.arg.rngs].extend(u.src)
-    elif len([y for y in ctx[u] if y not in x.arg.lst]) or u.op in {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC}:
+    elif len([y for y in ctx[u] if y not in x.arg.lst]) or u.op in {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR}:
       # it stays in srcs if it has children not in the basic or is RANGE/CONST
       new_srcs.append(u)
     else:
@@ -102,16 +102,34 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
   # NOTE: the compare should never make it all the way to u
   queue:List[Tuple[int, Tuple, UOp]] = []
-  def push(u:UOp): heapq.heappush(queue, (0, u.tuplize, u))
+  def push(u:UOp):
+    p = 0
+    if u.op is Ops.CONST: p = -10  # TODO: put CONST earlier
+    heapq.heappush(queue, (p, u.tuplize, u))
 
   for u in children:
     if in_degree[u] == 0: push(u)
 
   _uops: List[UOp] = []
+  open_loops: List[UOp] = []
   while queue:
     p,_,x = heapq.heappop(queue)
-    if x.op is Ops.BLOCK: _uops.extend(x.arg.lst)
-    else: _uops.append(x)
+    if x.op is Ops.BLOCK:
+      for r in x.arg.rngs: assert r in open_loops, "loop wasn't opened?"
+      new_open_loops = []
+      for r in open_loops:
+        if r not in x.arg.rngs:
+          _uops.append(UOp(Ops.ENDRANGE, src=(r,)))
+        else:
+          new_open_loops.append(r)
+      open_loops = new_open_loops
+      _uops.extend(x.arg.lst)
+    elif x.op is Ops.DEFINE_ACC:
+      idx = min([_uops.index(l) for l in x.src if l.op is Ops.RANGE])
+      _uops.insert(idx, x)
+    else:
+      if x.op is Ops.RANGE: open_loops.append(x)
+      _uops.append(x)
     for u in children[x]:
       in_degree[u] -= 1
       if in_degree[u] == 0: push(u)
