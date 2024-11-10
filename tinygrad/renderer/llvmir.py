@@ -96,18 +96,18 @@ class LLVMRenderer(Renderer):
   def render(self, name: str, uops: List[UOp]) -> str:
     r: Dict[UOp, str] = {}
     bufs: Dict[str, DType] = {}
-    self.r = r
     kernel: List[str] = []
     var_counter = 0
     end_lines: Dict[str, None] = {}
 
     # prealloc all assigns
-    define_acc_to_assign = {}
+    define_acc_to_assign: Dict[UOp, UOp] = {}
     for u in uops:
       if u.op is Ops.ASSIGN:
         r[u] = r[u.src[1]] = f"%assign{var_counter}"
-        define_acc_to_assign[u.src[0]] = u.src[1]
         var_counter += 1
+        assert u.src[0] not in define_acc_to_assign, "can't assign to DEFINE_ACC twice"
+        define_acc_to_assign[u.src[0]] = u.src[1]
 
     for u in uops:
       # hack for defining sqrt function
@@ -116,7 +116,8 @@ class LLVMRenderer(Renderer):
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
         bufs[r[u]] = u.dtype
-      elif u.op in {Ops.ASSIGN, Ops.DEFINE_ACC}: pass
+      elif u.op is Ops.ASSIGN: pass
+      elif u.op is Ops.DEFINE_ACC: r[u] = r[u.src[0]]  # NOTE: a define acc can never be assigned to
       elif u.op is Ops.CONST:
         r[u] = lconst(u.arg, u.dtype)
       elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype):
@@ -133,7 +134,7 @@ class LLVMRenderer(Renderer):
         if u.op is Ops.RANGE:
           for x in define_acc_to_assign:
             if u in x.src:
-              old_define_acc = r[x] if x in r else r[x.src[0]]
+              old_define_acc = r[x]
               r[x] = f"%acc{var_counter}"
               var_counter += 1
               kernel.append(f"  {r[x]} = phi {ldt(x.dtype)}"
