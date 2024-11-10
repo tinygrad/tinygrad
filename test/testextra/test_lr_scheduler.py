@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn.optim import Adam, SGD
 from tinygrad.helpers import DEBUG
-from extra.lr_scheduler import MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR, OneCycleLR
+from extra.lr_scheduler import MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR, OneCycleLR, LambdaLR
 from extra.training import train, evaluate
 from extra.datasets import fetch_mnist
 
@@ -85,6 +85,8 @@ class TestLrScheduler(unittest.TestCase):
   def _test_onecyclelr(self, epochs, opts, atol, rtol):
     opts['total_steps'] = epochs
     self._test_lr_scheduler(OneCycleLR, torch.optim.lr_scheduler.OneCycleLR, epochs, opts, atol, rtol)
+  def _test_lambdalr(self, epochs, opts, atol, rtol):
+    self._test_lr_scheduler(LambdaLR, torch.optim.lr_scheduler.LambdaLR, epochs, opts, atol, rtol)
 
   def test_multisteplr(self): self._test_multisteplr(10, {'milestones': [1, 2, 7]}, 1e-6, 1e-6)
   def test_multisteplr_gamma(self): self._test_multisteplr(10, {'milestones': [1, 2, 7], 'gamma': 0.1337}, 1e-6, 1e-6)
@@ -98,6 +100,8 @@ class TestLrScheduler(unittest.TestCase):
 
   def test_cosineannealinglr(self): self._test_cosineannealinglr(100, {}, 1e-6, 1e-6)
   def test_cosineannealinglr_eta_min(self): self._test_cosineannealinglr(100, {'eta_min': 0.001}, 1e-6, 1e-6)
+
+  def test_lambda_lr(self): self._test_lambdalr(100, {'lr_lambda': lambda e: 0.9 ** e}, 1e-6, 1e-6)
 
   def test_multistep_2step(self):
     # was making this fail with LRU=1, some issue with epoch_counter
