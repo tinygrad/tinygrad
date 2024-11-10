@@ -14,7 +14,7 @@ class BasicBlock:
   def __hash__(self): return hash((self.rngs, self.lst))
   def __eq__(self, x): return self.rngs == x.rngs and self.lst == x.lst
   def __repr__(self):
-    return f"{[y.arg[0] if y.op is Ops.RANGE else "IF" for y in self.rngs]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
+    return f"{[y.arg[0] if y.op is Ops.RANGE else 'IF' for y in self.rngs]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
   @functools.cached_property
   def lst_tuplize(self): return tuple(y.tuplize for y in self.lst)
   @functools.cached_property
