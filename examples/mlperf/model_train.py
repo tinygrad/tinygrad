@@ -362,9 +362,15 @@ def train_retinanet():
           layer:Tensor = get_child(backbone, loaded_key)
           layer.requires_grad = False
 
+  def _data_get(it):
+    x, y_boxes, y_labels, cookie = next(it)
+    return x, y_boxes, y_labels, cookie
+
   # ** hyperparameters **
   LR = 1e-4
   SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
+  BS = getenv("BS", 128)
+  NUM_EPOCHS = getenv("EPOCHS", 26)
 
   # ** model initializers **
   resnet.BatchNorm = FrozenBatchNorm2d
@@ -389,9 +395,29 @@ def train_retinanet():
   train_dataloader = batch_load_retinanet(train_dataset, False, anchors, Path(BASE_DIR), batch_size=256)
 
   # ** training loop **
-  with tqdm(total=len(train_dataset.imgs.keys())) as pbar:
-    for x, _, _, _ in train_dataloader:
-      pbar.update(x.shape[0])
+  for e in range(1, NUM_EPOCHS + 1):
+    train_dataloader = batch_load_retinanet(train_dataset, False, anchors, Path(BASE_DIR), batch_size=BS, seed=SEED)
+    it = iter(tqdm(train_dataloader, total=len(train_dataset.imgs.keys()) // BS, desc=f"epoch {e}"))
+    i, proc = 0, _data_get(it)
+
+    prev_cookies = []
+    st = time.perf_counter()
+
+    while proc is not None:
+      if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
+      try:
+        next_proc = _data_get(it)
+      except StopIteration:
+        next_proc = None
+    
+      dt = time.perf_counter()
+
+      tqdm.write(f"{i:5} {(dt - st) * 1000.0:6.2f} ms fetch data")
+
+      st = dt
+      prev_cookies.append(proc)
+      proc, next_proc = next_proc, None  # return old cookie
+      i += 1
 
 def train_unet3d():
   """
