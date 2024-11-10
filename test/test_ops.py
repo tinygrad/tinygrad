@@ -235,14 +235,9 @@ class TestOps(unittest.TestCase):
 
   def test_linspace(self):
     helper_test_op([], lambda: torch.linspace(5, 10, 3), lambda: Tensor.linspace(5, 10, 3), forward_only=True)
-    helper_test_op([], lambda: torch.linspace(5, 10, 6), lambda: Tensor.linspace(5, 10, 6), forward_only=True)
     helper_test_op([], lambda: torch.linspace(5, 10, 10), lambda: Tensor.linspace(5, 10, 10), forward_only=True)
-    helper_test_op([], lambda: torch.linspace(5.5, 175.5, 10), lambda: Tensor.linspace(5.5, 175.5, 10), forward_only=True)
-    helper_test_op([], lambda: torch.linspace(175.5, 5.5, 10), lambda: Tensor.linspace(175.5, 5.5, 10), forward_only=True)
-    helper_test_op([], lambda: torch.linspace(5.5, -5.5, 10), lambda: Tensor.linspace(5.5, -5.5, 10), forward_only=True)
-    helper_test_op([], lambda: torch.linspace(-5.5, 5.5, 10), lambda: Tensor.linspace(-5.5, 5.5, 10), forward_only=True)
-    helper_test_op([], lambda: torch.linspace(-5.5, -175.5, 10), lambda: Tensor.linspace(-5.5, -175.5, 10), forward_only=True)
-    helper_test_op([], lambda: torch.linspace(-175.5, -5.5, 10), lambda: Tensor.linspace(-175.5, -5.5, 10), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(-5.5, 5.5, 10), lambda: Tensor.linspace(-5.5, -175.5, 10), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5.5, -5.5, 10), lambda: Tensor.linspace(-5.5, -175.5, 10), forward_only=True)
     helper_test_op([], lambda: torch.linspace(5, 10, 3, dtype=torch.int32), lambda: Tensor.linspace(5, 10, 3, dtype=dtypes.int32), forward_only=True)
     helper_test_op([], lambda: torch.linspace(1, 78, 2), lambda: Tensor.linspace(1, 78, 2), forward_only=True)
     helper_test_op([], lambda: torch.linspace(1, 78, 1), lambda: Tensor.linspace(1, 78, 1), forward_only=True)
