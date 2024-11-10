@@ -37,9 +37,6 @@ float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{fla
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
 
 llvm_rewrite = PatternMatcher([
-  # local variables
-  (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx, x: f"  store {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.dtype)} {ctx[x]}"),
-
   # memory load/store
   (UPat(Ops.INDEX, name="x"), lambda ctx,x:
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, i32 {ctx[x.src[1]]}"),
@@ -50,7 +47,7 @@ llvm_rewrite = PatternMatcher([
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
    f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'),), name="x"), lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}"),
-  (UPat((Ops.STORE, Ops.ASSIGN), name="x"), lambda ctx,x: f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
+  (UPat(Ops.STORE, name="x"), lambda ctx,x: f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
 
   # unary/binary/ternary ops
   (UPat(Ops.SQRT, name="x"), lambda ctx,x:
@@ -84,10 +81,6 @@ class LLVMRenderer(Renderer):
   global_max = None
 
   extra_matcher = PatternMatcher([
-    # DEFINE_ACC is an alloca ptr in LLVM, do a fixup for that
-    (UPat(Ops.DEFINE_ACC, name="x"), lambda x:
-      UOp(Ops.DEFINE_ACC, x.dtype.ptr(), x.src, x.arg).load(dtype=x.dtype) if not isinstance(x.dtype, PtrDType) else None),
-    (UPat(Ops.ASSIGN, src=(UPat(Ops.LOAD), ), allow_any_len=True, name="x"), lambda x: UOp(Ops.ASSIGN, x.dtype, (x.src[0].src[0],)+x.src[1:])),
     # rewrite RECIP with FDIV
     (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
     # rewrite cast to bool to CMPNE 0
@@ -105,9 +98,16 @@ class LLVMRenderer(Renderer):
     bufs: Dict[str, DType] = {}
     self.r = r
     kernel: List[str] = []
-    self.var_counter = 0
-
+    var_counter = 0
     end_lines: Dict[str, None] = {}
+
+    # prealloc all assigns
+    define_acc_to_assign = {}
+    for u in uops:
+      if u.op is Ops.ASSIGN:
+        r[u] = r[u.src[1]] = f"%assign{var_counter}"
+        define_acc_to_assign[u.src[0]] = u.src[1]
+        var_counter += 1
 
     for u in uops:
       # hack for defining sqrt function
@@ -116,20 +116,28 @@ class LLVMRenderer(Renderer):
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
         bufs[r[u]] = u.dtype
+      elif u.op in {Ops.ASSIGN, Ops.DEFINE_ACC}: pass
       elif u.op is Ops.CONST:
         r[u] = lconst(u.arg, u.dtype)
       elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype):
         # cast from signed to unsigned of the same size is a noop
         r[u] = r[u.src[0]]
       else:
-        if u.op is Ops.ASSIGN: r[u] = r[u.src[1]]
-        else: r[u] = f"%v{self.var_counter}"
-        # ugh, alloca is annoying. put all the define_acc early
-        if u.op is Ops.DEFINE_ACC: kernel = [f"  {r[u]} = alloca {ldt(u.dtype.base)}"] + kernel
-        self.var_counter += 1
+        if u not in r:
+          # if it's an assign target, it's already preallocated
+          r[u] = f"%v{var_counter}"
+          var_counter += 1
         l = llvm_rewrite.rewrite(u, ctx=r)
         if l is None: raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
+        if u.op is Ops.RANGE:
+          for x in define_acc_to_assign:
+            if u in x.src:
+              old_define_acc = r[x] if x in r else r[x.src[0]]
+              r[x] = f"%acc{var_counter}"
+              var_counter += 1
+              kernel.append(f"  {r[x]} = phi {ldt(x.dtype)}"
+                            f"[{old_define_acc}, %loop_entry_{u.arg[0]}], [{r[define_acc_to_assign[x]]}, %loop_latch_{u.arg[0]}]")
 
     args = ', '.join([f"{ldt(dtype)}{' noalias' if isinstance(dtype, PtrDType) else ''} {name}" for name, dtype in bufs.items()])
     code = f"define void @{name}({args}) {{\n" + '\n'.join(kernel) + "\n  ret void\n}\n"+'\n'.join(end_lines.keys())
