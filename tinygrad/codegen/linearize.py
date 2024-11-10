@@ -39,12 +39,11 @@ def get_ranges_in_parents(x:UOp) -> Tuple[UOp]:
 def append_to_block(ctx, x:UOp):
   new_srcs = []
   to_append = []
-  old_blocks = {u.arg.rngs:u for u in x.src if u.op is Ops.BASICBLOCK}
+  old_blocks = {u.arg.rngs:u for u in x.src if u.op is Ops.BLOCK}
   new_blocks = defaultdict(list)
   for u in x.src:
-    if u.op is Ops.BASICBLOCK: continue
-    if len([y for y in ctx[u] if y not in x.arg.lst]): continue
-    elif u.op in {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC}: #, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.SPECIAL}: #, Ops.DEFINE_ACC}:
+    if u.op is Ops.BLOCK: continue
+    if len([y for y in ctx[u] if y not in x.arg.lst]) or u.op in {Ops.RANGE, Ops.CONST}:
       new_srcs.append(u)
     else:
       if (rngs:=get_ranges_in_parents(u)) == x.arg.rngs:
@@ -60,12 +59,12 @@ def append_to_block(ctx, x:UOp):
   new_srcs = list(old_blocks.values()) + new_srcs
   if len(to_append) == 0 and len(new_blocks) == 0: return None
   for rng,lst in new_blocks.items():
-    new_srcs.append(UOp(Ops.BASICBLOCK, dtypes.void, tuple(dedup(sum([x.src for x in lst], ()))), BasicBlock(rng, lst)))
-  return UOp(Ops.BASICBLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
+    new_srcs.append(UOp(Ops.BLOCK, dtypes.void, tuple(dedup(sum([x.src for x in lst], ()))), BasicBlock(rng, lst)))
+  return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
 
 make_basic_blocks = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BASICBLOCK, dtypes.void, x.src, BasicBlock([], [x]))),
-  (UPat(Ops.BASICBLOCK, name="x"), append_to_block),
+  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, dtypes.void, x.src, BasicBlock([], [x]))),
+  (UPat(Ops.BLOCK, name="x"), append_to_block),
 ])
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):

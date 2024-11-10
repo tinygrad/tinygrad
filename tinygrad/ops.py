@@ -167,7 +167,7 @@ class Ops(FastEnum):
   CONST = auto()
 
   # basic block at the end
-  BASICBLOCK = auto()
+  BLOCK = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
