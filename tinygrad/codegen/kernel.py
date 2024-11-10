@@ -745,7 +745,9 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
   # only reduceuop is allowed to change shape, limited to turning n to 1
   if uop.op in {Ops.REDUCE_AXIS, Ops.WMMA}: st = ShapeTracker.from_shape(sts[uop.src[0]].reduce(uop.axis_arg))
   # movementops are pushed to VIEW
-  elif uop.op is Ops.VIEW: st = uop.arg
+  elif uop.op is Ops.VIEW:
+    assert len(uop.src) == 0, f"can't swizzle in kernel yet {uop}"
+    st = uop.arg
   # everything else inherits shape
   else:
     st = (src_sts:=[sts[x] for x in uop.src if x.has_st])[0]
