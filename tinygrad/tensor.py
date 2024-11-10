@@ -518,8 +518,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     bits = bits.bitcast(uint_dtype)
     # only randomize the mantissa bits and set the exponent to 1
     one = Tensor.ones_like(bits, device=bits.device, dtype=dtype).bitcast(uint_dtype)
-    # HACK
-    bits = bits.contiguous().rshift((dtype.itemsize * 8) - nmant).bitwise_or(one)
+    bits = bits.rshift((dtype.itemsize * 8) - nmant).bitwise_or(one)
     # bitcast back to the original dtype and reshape
     out = bits.bitcast(dtype)[:num_].sub(1).reshape(shape)
 
@@ -611,8 +610,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
-    # HACK
-    return (Tensor.full((output_len,), step, dtype=dtype, **kwargs).pad2d((output_len,0))._pool(((output_len,))).sum(0) + (start - step)).cast(dtype)
+    return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
   def eye(n:int, m:Optional[int]=None, **kwargs) -> Tensor:
@@ -1950,31 +1948,16 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_, d_, i_)), "kernel size cannot be greater than actual input size"
     o_ = [ceildiv(i - d * (k-1), s) for i,d,k,s in zip(i_, d_, k_, s_)]
     if any(resolve(k > s) for k,s in zip(k_, s_)) or any(d != 1 for d in d_):
-      # # repeats such that we don't need padding
-      # xup = self.repeat([1]*len(noop_) + [ceildiv(k*(i+d), i) for k,i,d in zip(k_, i_, d_)])
-      # # handle dilation
-      # xup = xup.shrink(tuple(noop_ + [(0,k*(i+d)) for k,i,d in zip(k_, i_, d_)])).reshape(noop_ + flatten((k,i+d) for k,i,d in zip(k_, i_, d_)))
-      # # handle stride
-      # xup = xup.shrink(
-      #   tuple(noop_ + flatten(((0,k), (0,o*s)) for k,o,s in zip(k_, o_, s_)))).reshape(noop_ + flatten((k,o,s) for k,o,s in zip(k_, o_, s_)))
-      # xup = xup.shrink(tuple(noop_ + flatten(((0,k), (0,o), (0,1)) for k,o in zip(k_, o_)))).reshape(noop_ + flatten((k,o) for k,o in zip(k_, o_)))
-      # # permute to move reduce to the end
-      # xup = xup.permute(*range(len(noop_)), *[len(noop_)+i*2+1 for i in range(len(i_))], *[len(noop_)+i*2 for i in range(len(i_))])
-      # return xup
-
       # repeats such that we don't need padding
       xup = self.repeat([1]*len(noop_) + [o + ceildiv((o*s), i) for o,i,s in zip(o_,i_,s_)])
       # handle stride
       xup = xup.shrink(tuple(noop_ + [(0, o*(i+s)) for o,i,s in zip(o_,i_,s_)])).reshape(noop_ + flatten((o,i+s) for o,i,s in zip(o_,i_,s_)))
-      # xup = xup.permute(*range(len(noop_)), *[len(noop_)+i*2 for i in range(len(i_))], *[len(noop_)+i*2+1 for i in range(len(i_))])
       # handle dilation
       xup = xup.shrink(
         tuple(noop_ + flatten(((0,o), (0,k*d)) for o,k,d in zip(o_,k_,d_)))).reshape(noop_ + flatten((o,k,d) for o,k,d in zip(o_,k_,d_)))
       xup = xup.shrink(tuple(noop_ + flatten(((0,o), (0,k), (0,1)) for o,k in zip(o_,k_)))).reshape(noop_ + flatten((o,k) for o,k in zip(o_,k_)))
       # permute to move reduce to the end
-      xup = xup.permute(*range(len(noop_)), *[len(noop_)+i*2 for i in range(len(i_))], *[len(noop_)+i*2+1 for i in range(len(i_))])
-      return xup
-
+      return xup.permute(*range(len(noop_)), *[len(noop_)+i*2 for i in range(len(i_))], *[len(noop_)+i*2+1 for i in range(len(i_))])
     # TODO: once the shapetracker can optimize well, remove this alternative implementation
     xup = self.pad(tuple(noop_ + [(0, max(0,o*s-i)) for i,o,s in zip(i_, o_, s_)])).shrink(tuple(noop_ + [(0,o*s) for o,s in zip(o_, s_)]))
     xup = xup.reshape(noop_ + flatten(((o,s) for o,s in zip(o_, s_))))
