@@ -47,4 +47,4 @@ class LLVMDevice(Compiled):
     backing_mod = llvm.parse_assembly(str())
     backing_mod.triple = llvm.get_process_triple()
     self.engine: llvm.executionengine.ExecutionEngine = llvm.create_mcjit_compiler(backing_mod, self.target_machine)
-    super().__init__(device, MallocAllocator, LLVMRenderer(), LLVMCompiler(self, getenv("LLVMOPT")), functools.partial(LLVMProgram, self))
+    super().__init__(device, MallocAllocator, LLVMRenderer(), LLVMCompiler(self, getenv("LLVM_OPT")), functools.partial(LLVMProgram, self))
