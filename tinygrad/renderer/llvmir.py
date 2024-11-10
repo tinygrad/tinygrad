@@ -97,17 +97,17 @@ class LLVMRenderer(Renderer):
     r: Dict[UOp, str] = {}
     bufs: Dict[str, DType] = {}
     kernel: List[str] = []
-    var_counter = 0
     end_lines: Dict[str, None] = {}
+    vc = -1
 
     # prealloc all assigns
-    define_acc_to_assign: Dict[UOp, UOp] = {}
+    acc_to_assign: Dict[UOp, UOp] = {}
     for u in uops:
       if u.op is Ops.ASSIGN:
-        r[u] = r[u.src[1]] = f"%assign{var_counter}"
-        var_counter += 1
-        assert u.src[0] not in define_acc_to_assign, "can't assign to DEFINE_ACC twice"
-        define_acc_to_assign[u.src[0]] = u.src[1]
+        vc += 1
+        r[u] = r[u.src[1]] = f"%assign{vc}"
+        assert u.src[0] not in acc_to_assign, "can't assign to DEFINE_ACC twice"
+        acc_to_assign[u.src[0]] = u.src[1]
 
     for u in uops:
       # hack for defining sqrt function
@@ -116,30 +116,26 @@ class LLVMRenderer(Renderer):
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
         bufs[r[u]] = u.dtype
-      elif u.op is Ops.ASSIGN: pass
-      elif u.op is Ops.DEFINE_ACC: r[u] = r[u.src[0]]  # NOTE: a define acc can never be assigned to
-      elif u.op is Ops.CONST:
-        r[u] = lconst(u.arg, u.dtype)
-      elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype):
-        # cast from signed to unsigned of the same size is a noop
-        r[u] = r[u.src[0]]
+      elif u.op is Ops.ASSIGN: pass  # assign is already handled by the first pass
+      elif u.op is Ops.DEFINE_ACC: r[u] = r[u.src[0]]  # a define acc can be used and never be assigned to
+      elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
+      elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype): r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop
       else:
         if u not in r:
           # if it's an assign target, it's already preallocated
-          r[u] = f"%v{var_counter}"
-          var_counter += 1
+          vc += 1
+          r[u] = f"%v{vc}"
         l = llvm_rewrite.rewrite(u, ctx=r)
         if l is None: raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
+
+        # generate the phi nodes for the assigns
         if u.op is Ops.RANGE:
-          for x in define_acc_to_assign:
-            if u in x.src:
-              old_define_acc = r[x]
-              r[x] = f"%acc{var_counter}"
-              var_counter += 1
-              kernel.append(f"  {r[x]} = phi {ldt(x.dtype)}"
-                            f"[{old_define_acc}, %loop_entry_{u.arg[0]}], [{r[define_acc_to_assign[x]]}, %loop_latch_{u.arg[0]}]")
+          for x in acc_to_assign:
+            if u in x.src:  # if this range is relevent for this acc
+              vc += 1
+              kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)}" f"[{r[x]}, %loop_entry_{u.arg[0]}], [{r[acc_to_assign[x]]}, %loop_latch_{u.arg[0]}]")
+              r[x] = f"%acc{vc}"
 
     args = ', '.join([f"{ldt(dtype)}{' noalias' if isinstance(dtype, PtrDType) else ''} {name}" for name, dtype in bufs.items()])
-    code = f"define void @{name}({args}) {{\n" + '\n'.join(kernel) + "\n  ret void\n}\n"+'\n'.join(end_lines.keys())
-    return code
+    return f"define void @{name}({args}) {{\n" + '\n'.join(kernel) + "\n  ret void\n}\n"+'\n'.join(end_lines.keys())
