@@ -1,5 +1,5 @@
 # this will unify ptx and llvm
-from typing import List, Dict
+from typing import List, Dict, cast
 import math, struct
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
@@ -18,14 +18,16 @@ def lconst(x, dtype:DType):
   return int(x)
 
 def lcast(input_type:DType, output_type:DType):
-  if input_type is dtypes.bool and output_type in dtypes.sints: return 'zext'
-  if input_type in dtypes.ints_bool and output_type in dtypes.uints_bool: return 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
-  if input_type in dtypes.ints_bool and output_type in dtypes.sints: return 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
-  if input_type in dtypes.uints_bool and output_type in dtypes.floats: return 'uitofp'
-  if input_type in dtypes.sints and output_type in dtypes.floats: return 'sitofp'
-  if input_type in dtypes.floats and output_type in dtypes.uints_bool: return 'fptoui'
-  if input_type in dtypes.floats and output_type in dtypes.sints: return 'fptosi'
-  raise RuntimeError(f"cast from {input_type} to {output_type} not supported")
+  if dtypes.is_float(input_type):
+    if dtypes.is_float(output_type): return 'fpext' if output_type.itemsize > input_type.itemsize else 'fptrunc'
+    if dtypes.is_int(output_type): return 'fptoui' if dtypes.is_unsigned(output_type) else 'fptosi'
+  if dtypes.is_unsigned(input_type) or input_type == dtypes.bool:
+    if dtypes.is_float(output_type): return 'uitofp'
+    if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'zext'
+  if dtypes.is_int(input_type):
+    if dtypes.is_float(output_type): return 'sitofp'
+    if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
+  raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
 unsigned_lop = {
   Ops.ADD: "add", Ops.MUL: "mul", Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor",
@@ -78,6 +80,8 @@ extra_pm = PatternMatcher([
   (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
   # rewrite MAX to CMPLT + WHERE (max function is annoying on many cstyle backends)
   (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
+  # rewrite cast to bool to CMPNE 0
+  (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
 ])
 
 class LLVM2Renderer(Renderer):
@@ -97,11 +101,11 @@ class LLVM2Renderer(Renderer):
     kernel = []
     self.var_counter = 0
 
-    end_lines = []
+    end_lines: Dict[str, None] = {}
 
     for u in uops:
       if u.op in {Ops.SQRT}:
-        end_lines.append(f'declare {ldt(u.dtype)} @llvm.sqrt.{ldt(u.dtype)}({ldt(u.dtype)} %".1")')
+        end_lines[f'declare {ldt(u.dtype)} @llvm.sqrt.{ldt(u.dtype)}({ldt(u.dtype)} %".1")'] = None
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else f"%{u.arg[0]}"
         bufs[r[u]] = u.dtype
@@ -115,8 +119,8 @@ class LLVM2Renderer(Renderer):
         self.var_counter += 1
         l = llvm_rewrite.rewrite(u, ctx=self)
         if l is None: raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
-        kernel.append(l)
+        kernel.append(cast(str, l))
 
     args = ', '.join([f"{ldt(dtype)} {name}" for name, dtype in bufs.items()])
-    code = f"define void @{name}({args}) {{\n" + '\n'.join(kernel) + "\n  ret void\n}\n"+'\n'.join(end_lines)
+    code = f"define void @{name}({args}) {{\n" + '\n'.join(kernel) + "\n  ret void\n}\n"+'\n'.join(end_lines.keys())
     return code
