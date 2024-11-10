@@ -3,7 +3,7 @@ import math, struct
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, all_same
 
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
@@ -53,8 +53,11 @@ llvm_rewrite = PatternMatcher([
 
   # GEP / VECTORIZE / CAST pointer (not needed without float4)
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"  {ctx[x]} = extractelement {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, i32 {x.arg[0]}"),
+  (UPat(Ops.VECTORIZE, src=UPat.var('y'), name="x"), lambda ctx,x,y:
+   f"  {ctx[x]}_z = insertelement <1 x {ldt(y.dtype)}> poison, {ldt(y.dtype)} {ctx[y]}, i32 0\n"
+   f"  {ctx[x]} = shufflevector <1 x {ldt(y.dtype)}> {ctx[x]}_z, <1 x {ldt(y.dtype)}> poison, <{x.dtype.count} x i32> zeroinitializer"),
   (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join([(f"  {ctx[x]}_{i}" if i+1 != len(x.src) else f"  {ctx[x]}")+
-                                                            f" = insertelement {ldt(x.dtype)} "+(f"{ctx[x]}_{i-1}" if i != 0 else "undef")+
+                                                            f" = insertelement {ldt(x.dtype)} "+(f"{ctx[x]}_{i-1}" if i != 0 else "poison")+
                                                             f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
   (UPat(Ops.CAST, name="x"), lambda ctx,x:
    f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}" if isinstance(x.dtype, PtrDType) else None),
@@ -84,6 +87,22 @@ llvm_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
 ])
 
+def revectorize(v:UOp):
+  if not all_same([x.op for x in v.src]): return None
+  new_srcs = [UOp(Ops.VECTORIZE, v.src[0].src[i].dtype.vec(v.dtype.count), tuple(x.src[i] for x in v.src)) for i in range(len(v.src[0].src))]
+  return UOp(v.src[0].op, v.dtype, tuple(new_srcs), v.src[0].arg)
+
+revectorize_pm = PatternMatcher([
+  (UPat(Ops.VECTORIZE, src=UPat((*GroupOp.ALU, Ops.ASSIGN)), name="v"), revectorize),
+  # vectorize DEFINE_ACC (similar to expander)
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.DEFINE_ACC), name="v"),
+    lambda v: UOp(Ops.DEFINE_ACC, v.dtype, (UOp.const(v.dtype, v.src[0].src[0].arg),)+v.src[0].src[1:], v.src[0].arg)),
+  # vectorize increasing GEPs = nothing
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.GEP), name="v"),
+    lambda v: v.src[0].src[0] if all_same([x.src for x in v.src]) and \
+    [x.arg[0] if len(x.arg) == 1 else None for x in v.src] == list(range(v.dtype.count)) else None),
+])
+
 class LLVMRenderer(Renderer):
   device = "LLVM"
   supports_float4 = getenv("LLVM_FLOAT4", False)
@@ -91,7 +110,7 @@ class LLVMRenderer(Renderer):
   has_shared = False
   global_max = None
 
-  extra_matcher = PatternMatcher([
+  extra_matcher = revectorize_pm+PatternMatcher([
     # rewrite RECIP with FDIV
     (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
     # rewrite cast to bool to CMPNE 0
@@ -130,6 +149,7 @@ class LLVMRenderer(Renderer):
       elif u.op is Ops.ASSIGN: pass  # assign is already handled by the first pass
       elif u.op is Ops.DEFINE_ACC: r[u] = r[u.src[0]]  # a define acc can be used and never be assigned to
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
+      elif u.op is Ops.VCONST: r[u] = "<"+', '.join(f"{ldt(u.dtype.scalar())} {lconst(a, u.dtype.scalar())}" for a in u.arg) + ">"
       elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype): r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop
       else:
         # if it's an assign target, it's already preallocated
