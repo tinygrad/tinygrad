@@ -88,7 +88,7 @@ class LLVMRenderer(Renderer):
     # *** also in cstyle ***
     # gate any stores that aren't gated with ifs
     (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
-    lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
+      lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
     # rewrite MAX to CMPLT + WHERE
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
   ])
@@ -110,7 +110,7 @@ class LLVMRenderer(Renderer):
         acc_to_assign[u.src[0]] = u.src[1]
 
     for u in uops:
-      # hack for defining sqrt function
+      # hack for defining sqrt function (TODO: can we get a transcendental for this?)
       if u.op is Ops.SQRT: end_lines[f'declare {ldt(u.dtype)} @llvm.sqrt.{ldt(u.dtype)}({ldt(u.dtype)} %".1")'] = None
 
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
@@ -121,12 +121,13 @@ class LLVMRenderer(Renderer):
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
       elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype): r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop
       else:
+        # if it's an assign target, it's already preallocated
         if u not in r:
-          # if it's an assign target, it's already preallocated
           vc += 1
           r[u] = f"%v{vc}"
-        l = llvm_rewrite.rewrite(u, ctx=r)
-        if l is None: raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
+
+        # do the rendering of the llvm ir code
+        if (l:=llvm_rewrite.rewrite(u, ctx=r)) is None: raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
 
         # generate the phi nodes for the assigns
