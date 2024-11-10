@@ -80,17 +80,51 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
   in_degree[u] = len(u.src)
   return srcs[u]
 
+def block_uop(sink:UOp) -> UOp:
+  children: Dict[UOp, List[UOp]] = {}
+  range_srcs: Dict[UOp, Dict[UOp, None]] = {}
+  in_degree: Dict[UOp, int] = {}
+  get_children_dfs(sink, children, range_srcs, in_degree)
+  sink_bb = graph_rewrite(sink, make_basic_blocks, ctx=children)
+  return sink_bb
+
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
+
+  sink_bb = block_uop(sink)
 
   # filter nodes that don't link to a sink
   # BFS toposort
   children: Dict[UOp, List[UOp]] = {}
   range_srcs: Dict[UOp, Dict[UOp, None]] = {}
   in_degree: Dict[UOp, int] = {}
-  get_children_dfs(sink, children, range_srcs, in_degree)
+  get_children_dfs(sink_bb, children, range_srcs, in_degree)
 
-  sink_bb = graph_rewrite(sink, make_basic_blocks, ctx=children)
+  # NOTE: the compare should never make it all the way to u
+  queue:List[Tuple[int, Tuple, UOp]] = []
+  def push(u:UOp): heapq.heappush(queue, (0, u.tuplize, u))
+
+  for u in children:
+    if in_degree[u] == 0: push(u)
+
+  _uops: List[UOp] = []
+  while queue:
+    p,_,x = heapq.heappop(queue)
+    if x.op is Ops.BLOCK: _uops.extend(x.arg.lst)
+    else: _uops.append(x)
+    for u in children[x]:
+      in_degree[u] -= 1
+      if in_degree[u] == 0: push(u)
+
+  # sanity checks (NOTE: these can cause things to be skipped in BEAM)
+  if not skip_check: type_verify(_uops)
+
+  #from tinygrad.ops import print_uops
+  #print_uops(_uops)
+
+  # strip the SINK
+  assert _uops[-1].op is Ops.SINK
+  return _uops[:-1]
 
   @functools.lru_cache(None)
   def get_recursive_children(x:UOp, end:Ops, include_self=False) -> Set[UOp]:

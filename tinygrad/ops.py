@@ -102,6 +102,9 @@ class Ops(FastEnum):
   CONTIGUOUS = auto()
   PRELOAD = auto()
 
+  # basic block ASAP
+  BLOCK = auto()
+
   # MetaOps
   COPY = auto()
   EMPTY = auto()
@@ -165,9 +168,6 @@ class Ops(FastEnum):
   # consts last!
   VCONST = auto()
   CONST = auto()
-
-  # basic block at the end
-  BLOCK = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
