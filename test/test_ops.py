@@ -235,13 +235,12 @@ class TestOps(unittest.TestCase):
 
   def test_linspace(self):
     helper_test_op([], lambda: torch.linspace(5, 10, 3), lambda: Tensor.linspace(5, 10, 3), forward_only=True)
-    helper_test_op([], lambda: torch.linspace(5, 10, 10), lambda: Tensor.linspace(5, 10, 10), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5, 10, 1), lambda: Tensor.linspace(5, 10, 1), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5, 10, 0), lambda: Tensor.linspace(5, 10, 0), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5, 10, 30), lambda: Tensor.linspace(5, 10, 30), forward_only=True)
     helper_test_op([], lambda: torch.linspace(-5.5, 5.5, 10), lambda: Tensor.linspace(-5.5, 5.5, 10), forward_only=True)
     helper_test_op([], lambda: torch.linspace(5.5, -5.5, 10), lambda: Tensor.linspace(5.5, -5.5, 10), forward_only=True)
     helper_test_op([], lambda: torch.linspace(5, 10, 3, dtype=torch.int32), lambda: Tensor.linspace(5, 10, 3, dtype=dtypes.int32), forward_only=True)
-    helper_test_op([], lambda: torch.linspace(1, 78, 2), lambda: Tensor.linspace(1, 78, 2), forward_only=True)
-    helper_test_op([], lambda: torch.linspace(1, 78, 1), lambda: Tensor.linspace(1, 78, 1), forward_only=True)
-    helper_test_op([], lambda: torch.linspace(1, 78, 0), lambda: Tensor.linspace(1, 78, 0), forward_only=True)
     self.helper_test_exception([], lambda: torch.linspace(1, 2, -1), lambda: Tensor.linspace(1, 2, -1), expected=(RuntimeError, ValueError))
 
   def test_sum_fake(self):
