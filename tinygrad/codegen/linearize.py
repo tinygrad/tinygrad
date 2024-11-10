@@ -13,8 +13,7 @@ class BasicBlock:
   def __hash__(self): return hash((self.rngs, self.lst))
   def __eq__(self, x): return self.rngs == x.rngs and self.lst == x.lst
   def __repr__(self):
-    return f"{[y.arg[0] for y in self.rngs]}\n{'\n'.join([str(x.op) for x in self.lst])}"
-    #return f"{[y.arg[0] for y in self.rngs]} {len(self.lst)}"
+    return f"{[y.arg[0] for y in self.rngs]} {len(self.lst)}\n{'\n'.join([str(x.op) for x in self.lst])}"
   #def __add__(self, x):
   #  assert self.rngs == x.rngs
   #  return BasicBlock(self.rngs, self.lst+x.lst)
@@ -39,27 +38,30 @@ def get_ranges_in_parents(x:UOp) -> Tuple[UOp]:
 def append_to_block(ctx, x:UOp):
   new_srcs = []
   to_append = []
-  old_blocks = {u.arg.rngs:u for u in x.src if u.op is Ops.BLOCK}
   new_blocks = defaultdict(list)
+  new_block_srcs = defaultdict(list)
+  updated = False
   for u in x.src:
-    if u.op is Ops.BLOCK: continue
-    if len([y for y in ctx[u] if y not in x.arg.lst]) or u.op in {Ops.RANGE, Ops.CONST}:
+    if u.op is Ops.BLOCK:
+      if len(new_blocks[u.arg.rngs]): updated = True
+      new_blocks[u.arg.rngs].extend(u.arg.lst)
+      new_block_srcs[u.arg.rngs].extend(u.src)
+    elif len([y for y in ctx[u] if y not in x.arg.lst]) or u.op in {Ops.RANGE, Ops.CONST}:
+      # it stays in srcs if it has children not in the basic or is RANGE/CONST
       new_srcs.append(u)
     else:
       if (rngs:=get_ranges_in_parents(u)) == x.arg.rngs:
         # fine to put it in this block
         new_srcs += list(u.src)
         to_append.append(u)
-      elif rngs in old_blocks:
-        new_blocks[rngs].extend(old_blocks[rngs].arg.lst)
-        del old_blocks[rngs]
       else:
         # need to create a new block
+        updated = True
         new_blocks[rngs].append(u)
-  new_srcs = list(old_blocks.values()) + new_srcs
-  if len(to_append) == 0 and len(new_blocks) == 0: return None
+        new_block_srcs[rngs].extend(u.src)
+  if len(to_append) == 0 and not updated: return None
   for rng,lst in new_blocks.items():
-    new_srcs.append(UOp(Ops.BLOCK, dtypes.void, tuple(dedup(sum([x.src for x in lst], ()))), BasicBlock(rng, lst)))
+    new_srcs.append(UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_block_srcs[rng])), BasicBlock(rng, lst)))
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
 
 make_basic_blocks = PatternMatcher([
