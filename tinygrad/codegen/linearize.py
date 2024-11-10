@@ -137,6 +137,9 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
       in_degree[u] -= 1
       if in_degree[u] == 0: push(u)
 
+  # close ifs
+  for ifs in [u for u in _uops[::-1] if u.op is Ops.IF]: _uops = _uops[:-1] + [UOp(Ops.ENDIF, src=(ifs,)), _uops[-1]]
+
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
   if not skip_check: type_verify(_uops)
 
