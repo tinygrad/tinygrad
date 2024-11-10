@@ -43,14 +43,12 @@ def append_to_block(ctx, x:UOp):
   new_srcs = []
   to_append = []
   new_blocks: DefaultDict[Tuple[UOp, ...], Any] = defaultdict(list)
-  new_block_srcs: DefaultDict[Tuple[UOp, ...], Any] = defaultdict(list)
   updated = False
   for u in x.src:
     if u.op is Ops.BLOCK:
-      if len(new_blocks[u.arg.rngs]): updated = True
-      new_blocks[u.arg.rngs].extend(u.arg.lst)
-      new_block_srcs[u.arg.rngs].extend(u.src)
-    elif u.op in {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR} or len([y for y in ctx[u] if y not in x.arg.lst]):
+      if len(new_block_list:=new_blocks[u.arg.rngs]): updated = True
+      new_block_list.append(u)
+    elif u.op in {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR} or len([y for y in ctx[u] if y not in set(x.arg.lst)]):
       # it stays in srcs if it has children not in the basic or is RANGE/CONST
       new_srcs.append(u)
     else:
@@ -62,10 +60,13 @@ def append_to_block(ctx, x:UOp):
         # need to create a new block
         updated = True
         new_blocks[rngs].append(u)
-        new_block_srcs[rngs].extend(u.src)
   if len(to_append) == 0 and not updated: return None
   for rng,lst in new_blocks.items():
-    new_srcs.append(UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_block_srcs[rng])), BasicBlock(rng, lst)))
+    new_lst = []
+    for y in lst:
+      if y.op is Ops.BLOCK: new_lst += y.arg.lst
+      else: new_lst.append(y)
+    new_srcs.append(UOp(Ops.BLOCK, dtypes.void, tuple(dedup(sum([y.src for y in lst], tuple()))), BasicBlock(rng, new_lst)))
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
 
 make_basic_blocks = PatternMatcher([
