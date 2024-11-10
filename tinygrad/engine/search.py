@@ -24,12 +24,12 @@ actions += [Opt(op=OptOps.SWAP, axis=axis, amt=amt) for axis in range(5) for amt
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
 
 def _get_test_global_size(global_size, max_global_size, var_vals):
-  test_global_size, factor = [sym_infer(sz, var_vals) for sz in global_size], 1
+  test_global_size, factor = [sym_infer(sz, var_vals) for sz in global_size], 1.0
   while prod(test_global_size) > max_global_size:
     for j in range(len(global_size)-1,-1,-1):
       if test_global_size[j] > 16:
+        factor *= (test_global_size[j] / (test_global_size[j]//2))
         test_global_size[j] //= 2
-        factor *= 2
         break
   return test_global_size, factor
 
