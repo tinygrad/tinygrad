@@ -14,9 +14,9 @@ class BasicBlock:
   def __eq__(self, x): return self.rngs == x.rngs and self.lst == x.lst
   def __repr__(self):
     return f"{[y.arg[0] for y in self.rngs]} {len(self.lst)}\n{'\n'.join([str(x.op) for x in self.lst])}"
-  #def __add__(self, x):
-  #  assert self.rngs == x.rngs
-  #  return BasicBlock(self.rngs, self.lst+x.lst)
+  def __lt__(self, x):
+    if self.rngs == x.rngs: return tuple(y.tuplize for y in self.lst) < tuple(y.tuplize for y in x.lst)
+    return tuple(y.tuplize for y in self.rngs) < tuple(y.tuplize for y in x.rngs)
   def add(self, x):
     if len(x) == 0: return self
     return BasicBlock(self.rngs, tuple(x)+self.lst)
@@ -115,15 +115,18 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   while queue:
     p,_,x = heapq.heappop(queue)
     if x.op is Ops.BLOCK:
-      for r in x.arg.rngs: assert r in open_loops, "loop wasn't opened?"
-      new_open_loops = []
-      for r in open_loops:
-        if r not in x.arg.rngs:
-          _uops.append(UOp(Ops.ENDRANGE, src=(r,)))
-        else:
-          new_open_loops.append(r)
-      open_loops = new_open_loops
       _uops.extend(x.arg.lst)
+      # end any ranges
+      for c in children[x]:
+        assert c.op is Ops.BLOCK
+        to_end = []
+        for r in x.arg.rngs:
+          assert r in open_loops, f"loop {r.arg} wasn't opened? {[x.arg for x in open_loops]} were"
+          if r not in c.arg.rngs: to_end.append(r)
+        for r in open_loops[::-1]:
+          if r in to_end:
+            _uops.append(UOp(Ops.ENDRANGE, src=(r,)))
+            open_loops.remove(r)
     elif x.op is Ops.DEFINE_ACC:
       idx = min([_uops.index(l) for l in x.src if l.op is Ops.RANGE])
       _uops.insert(idx, x)
@@ -136,9 +139,6 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
   if not skip_check: type_verify(_uops)
-
-  #from tinygrad.ops import print_uops
-  #print_uops(_uops)
 
   # strip the SINK
   assert _uops[-1].op is Ops.SINK
