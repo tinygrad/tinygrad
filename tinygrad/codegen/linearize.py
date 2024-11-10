@@ -46,7 +46,7 @@ def append_to_block(ctx, x:UOp):
       if len(new_blocks[u.arg.rngs]): updated = True
       new_blocks[u.arg.rngs].extend(u.arg.lst)
       new_block_srcs[u.arg.rngs].extend(u.src)
-    elif len([y for y in ctx[u] if y not in x.arg.lst]) or u.op in {Ops.RANGE, Ops.CONST}:
+    elif len([y for y in ctx[u] if y not in x.arg.lst]) or u.op in {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC}:
       # it stays in srcs if it has children not in the basic or is RANGE/CONST
       new_srcs.append(u)
     else:
