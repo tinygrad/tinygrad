@@ -1374,15 +1374,15 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     if mode not in {"constant", "reflect"}: raise NotImplementedError(f"{mode=} is not supported")
     # padding (left, right, top, bottom, ...) -> padding_X (..., (top, bottom), (left, right))
     X, pX = self, ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2]))
-    pads, shrinks = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX), tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, X.shape))
-    if mode == "constant": return X.shrink(shrinks).pad(pads, value)
+    pads, shrinks = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX), lambda xsh: tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, xsh))
+    if mode == "constant": return X.shrink(shrinks(X.shape)).pad(pads, value)
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     for d,(pB,pA) in enumerate(pads):
       if pB >= (s:=X.shape[d]) or pA>=s: raise ValueError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
       slcB, slcA, = slice(pB,0,-1), slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1)
       xB, xA = (X[[slc if i == d else slice(None) for i in range(X.ndim)]] if p > 0 else None for slc, p in ((slcB, pB), (slcA, pA)))
       X = Tensor.cat(*(X_ for X_ in (xB, X, xA) if X_ is not None), dim=d)
-    return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
+    return X.shrink(shrinks(X.shape))
 
   @property
   def T(self) -> Tensor:
