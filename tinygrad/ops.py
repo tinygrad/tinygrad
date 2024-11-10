@@ -136,7 +136,6 @@ class Ops(FastEnum):
   LOAD = auto()
 
   # math ops
-  ALU = auto()
   WMMA = auto()
 
   # BinaryOps
@@ -194,6 +193,8 @@ REDUCE_ALU: Dict[Ops, Ops] = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:Binary
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
 
+def can_pad(u:UOp) -> bool: return not any(x.op in GroupOp.UnsafePad for x in u.sparents)
+
 END_FOR_UOP = {Ops.IF:(Ops.STORE, Ops.ENDIF), Ops.RANGE:(Ops.ASSIGN, Ops.ENDRANGE)}
 
 # With True as the default, this matches the old symbolic behavior
@@ -228,8 +229,6 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 class UOpMetaClass(type):
   ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
-    # TODO: remove this
-    if op is Ops.ALU: op, arg = arg, None
     if (ret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
     UOpMetaClass.ucache[key] = ret = super().__call__(op, dtype, src, arg)
     return ret
@@ -326,8 +325,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if self.op is Ops.VCONST: return UOp.const(self.dtype.scalar(), self.arg[i])
       if self.op is Ops.CONST: return UOp.const(self.dtype.scalar(), self.arg)
       i = (i,)
-    if self.dtype == dtypes.void or (i == tuple(range(len(i))) and self.dtype.vcount == len(i)): return self
-    assert len(i) >= 1 and all(x < self.dtype.vcount for x in i), f"bad GEP on {self.dtype}, {i}"
+    if (self.dtype.vcount == len(i) and i == tuple(range(len(i)))) or self.dtype == dtypes.void: return self
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
@@ -340,11 +338,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const(dtype:DType, b:ConstLike):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
-    return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b) # type: ignore
+    return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
   @staticmethod
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
-                                             UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=idx)
+                                             UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=(idx, False))
   def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op] if op in GroupOp.Reduce else op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
 
@@ -400,34 +398,31 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def vmax(self) -> ConstType: return self._min_max[1]
   @functools.cached_property
   def _min_max(self) -> Tuple[ConstType, ConstType]:
+    if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):
+      (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
+      if self.op is BinaryOps.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
+      if self.op is BinaryOps.MUL: return min(vals:=(s0_vmin*s1_vmin, s0_vmin*s1_vmax, s0_vmax*s1_vmin, s0_vmax*s1_vmax)), max(vals)
+      if self.op is BinaryOps.MOD and s1_vmin > 0: return 0, s1_vmax-1
+      if self.op is BinaryOps.IDIV and s1_vmin == s1_vmax:  # min/max are equal in a CONST
+        if s1_vmin > 0: return s0_vmin//s1_vmin, s0_vmax//s1_vmin
+        if s1_vmin < 0 and s0_vmin >= 0: return -(s0_vmax//-s1_vmin), -(s0_vmin//-s1_vmin)
+      if self.op is BinaryOps.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
+      if self.op is BinaryOps.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
+      if self.op is BinaryOps.CMPNE: return ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin), not (s0_vmin == s0_vmax == s1_vmin == s1_vmax))
+      if self.dtype == dtypes.bool:
+        if self.op is BinaryOps.OR: return s0_vmin or s1_vmin, s0_vmax or s1_vmax
+        if self.op is BinaryOps.AND: return s0_vmin and s1_vmin, s0_vmax and s1_vmax
+    # float has NAN issue and we use explicit NAN in transcendental
+    if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
     if self.op is Ops.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op is Ops.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
-    if self.op is Ops.BIND: return self.src[0].vmin, self.src[0].vmax  # ignore the bound value
+    if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
     if self.op in {Ops.EXPAND, Ops.VECTORIZE}: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else dtypes.max(self.dtype)
     if self.op is Ops.CONST: return self.arg, self.arg
     if self.op is Ops.VCONST: return (min(self.arg), max(self.arg))
-    if self.op in GroupOp.ALU and not dtypes.is_float(self.dtype):
-      s0,s1,s2 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(3)]
-      if self.op is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
-      if self.op is BinaryOps.MUL: return min(vals:=(s0.vmin*s1.vmin, s0.vmin*s1.vmax, s0.vmax*s1.vmin, s0.vmax*s1.vmax)), max(vals)
-      if self.op is BinaryOps.MOD and s1.vmin > 0: return 0, s1.vmax-1
-      if self.op is BinaryOps.IDIV and s1.op is Ops.CONST:
-        if s1.arg > 0: return s0.vmin//s1.arg, s0.vmax//s1.arg
-        if s1.arg < 0 and s0.vmin >= 0: return -(s0.vmax//-s1.arg), -(s0.vmin//-s1.arg)
-      if self.op is BinaryOps.MAX: return max(s0.vmin, s1.vmin), max(s0.vmax, s1.vmax)
-      if self.op is BinaryOps.CMPLT: return (s0.vmax<s1.vmin, s0.vmin<s1.vmax)
-      if self.op is BinaryOps.CMPNE:
-        always_ne = (s0.vmax < s1.vmin) or (s1.vmax < s0.vmin)
-        sometimes_ne = not (s0.vmin == s0.vmax == s1.vmin == s1.vmax)
-        return (always_ne, sometimes_ne)
-      # float has NAN issue and we use explicit NAN in transcendental
-      if self.op is TernaryOps.WHERE and dtypes.is_int(s1.dtype): return min(s1.vmin, s2.vmin), max(s1.vmax, s2.vmax)
-      if self.dtype == dtypes.bool:
-        if self.op is BinaryOps.OR: return s0.vmin or s1.vmin, s0.vmax or s1.vmax
-        if self.op is BinaryOps.AND: return s0.vmin and s1.vmin, s0.vmax and s1.vmax
     return dtypes.min(self.dtype), dtypes.max(self.dtype)
 
   @functools.cached_property
@@ -479,8 +474,8 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
 
 def print_uops(uops:List[UOp]):
   for i,u in enumerate(uops):
-    formatted_parents = [uops.index(x) if x.op is not Ops.CONST else f"{x.arg}" for x in u.src]
-    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):25s} " f"{str(formatted_parents):32s} {u.arg}")
+    formatted_parents = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
+    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):30s} " f"{str(formatted_parents):32s} {u.arg}")
 
 def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   flops: sint = 0
@@ -996,10 +991,16 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
 
   return uop
 
+def _valid_priority(v: UOp, valids:List[UOp]):
+  # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
+  try: return sum(-1 if parse_valid(v)[0] in other.parents else 0 for other in valids)
+  except ValueError: return 0
+
 def simplify_valid(valid:UOp) -> Optional[UOp]:
   ret:List[UOp] = []
   something_changed = False
-  for stmt in split_uop(valid, BinaryOps.AND):
+  valids = list(split_uop(valid, Ops.AND))
+  for stmt in sorted(valids, key=lambda v: _valid_priority(v, valids)):
     ret.append(newstmt if ret and (newstmt:=uop_given_valid(functools.reduce(operator.and_, ret), stmt)) is not None else stmt)
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
