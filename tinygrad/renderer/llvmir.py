@@ -38,8 +38,7 @@ lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop 
 
 llvm_rewrite = PatternMatcher([
   # local variables
-  (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx, x:
-   f"  {ctx[x]} = alloca {ldt(x.dtype.base)}\n  store {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.dtype)} {ctx[x]}"),
+  (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx, x: f"  store {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.dtype)} {ctx[x]}"),
 
   # memory load/store
   (UPat(Ops.INDEX, name="x"), lambda ctx,x:
@@ -105,7 +104,7 @@ class LLVMRenderer(Renderer):
     r: Dict[UOp, str] = {}
     bufs: Dict[str, DType] = {}
     self.r = r
-    kernel = []
+    kernel: List[str] = []
     self.var_counter = 0
 
     end_lines: Dict[str, None] = {}
@@ -125,6 +124,8 @@ class LLVMRenderer(Renderer):
       else:
         if u.op is Ops.ASSIGN: r[u] = r[u.src[1]]
         else: r[u] = f"%v{self.var_counter}"
+        # ugh, alloca is annoying. put all the define_acc early
+        if u.op is Ops.DEFINE_ACC: kernel = [f"  {r[u]} = alloca {ldt(u.dtype.base)}"] + kernel
         self.var_counter += 1
         l = llvm_rewrite.rewrite(u, ctx=r)
         if l is None: raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
