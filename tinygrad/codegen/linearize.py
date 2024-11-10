@@ -76,9 +76,8 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     p,_,x = heapq.heappop(queue)
     if DEBUG >= 7: print(f"{p:5d}", x.op, x.dtype, x.arg)
     if x in scope_children: scope_end[x] = x
-    if x.op is Ops.DEFINE_ACC:
-      range_children = [y.src[2:] for y in children[x] if y.op is Ops.ASSIGN]
-      assert len(range_children) == 1, "DEFINE_ACC is missing an ASSIGN child"
+    if x.op is Ops.DEFINE_ACC and len(range_children:=[y.src[2:] for y in children[x] if y.op is Ops.REDUCE]) >= 1:
+      assert len(range_children) == 1, "DEFINE_ACC is missing a single REDUCE child"
       idx = min([_uops.index(l) for l in range_children[0]])
       _uops.insert(idx, x)
     else: _uops.append(x)

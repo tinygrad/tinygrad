@@ -162,9 +162,9 @@ def threefry2x32(x: UOp, key: UOp):
 
 # ***** main rewriter *****
 
-def loop_collapse(compval, multconst, rng:UOp, acc:UOp, idx2=None,idx3=None,extra=None,vec=None,ne=None,
+def loop_collapse(red:UOp, compval, multconst, rng:UOp, acc:UOp, idx2=None,idx3=None,extra=None,vec=None,ne=None,
                   add=UOp.const(dtypes.int, 0), mul:UOp=UOp.const(dtypes.int, 1)):
-  if getenv("DISABLE_LOOP_COLLAPSE") or rng not in acc.src: return None  # must be the right REDUCE
+  if getenv("DISABLE_LOOP_COLLAPSE") or rng not in red.src[2:]: return None  # must be the right REDUCE
   loop_start, loop_end = rng.src
   if loop_start.arg != 0:
     # TODO: support and test this with other mul and loop_starts
@@ -186,10 +186,15 @@ def loop_collapse(compval, multconst, rng:UOp, acc:UOp, idx2=None,idx3=None,extr
     return None
   new_reduce_op = comprange.cast(multconst.dtype) * multconst
   # TODO: what does it mean to have the same numbered DEFINE_ACC with different ranges?
-  new_acc = acc.replace(src=acc.src[0:1]+tuple(x for x in acc.src[1:] if x is not rng))
-  ret = new_acc.assign(new_acc+new_reduce_op)
-  if extra is not None: ret = ret + acc.assign(acc+extra)
+  new_ranges = [x for x in red.src[2:] if x is not rng]
+  ret = new_reduce_op if len(new_ranges) == 0 else acc.reduce(acc+new_reduce_op, *new_ranges)
+  if extra is not None: ret = ret + acc.reduce(acc+extra)
   return ret
+
+  #new_acc = acc.replace(src=acc.src[0:1]+tuple(x for x in acc.src[1:] if x is not rng))
+  #ret = new_acc.assign(new_acc+new_reduce_op)
+  #if extra is not None: ret = ret + acc.assign(acc+extra)
+  #return ret
 
 def index_collapse(idx:UOp,rng:UOp,buf:UOp,ld:UOp,acc:UOp,add=UOp.const(dtypes.int, 0),mul=UOp.const(dtypes.int, 1)):
   if rng not in acc.src: return None
@@ -277,7 +282,7 @@ sym = symbolic_flat+PatternMatcher([
   # threefry
   (UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32),
   # arange loop folding
-  (acc_pat.assign(UPat.any(arange_m, arange_m+UPat.var("extra"))+acc_pat), loop_collapse),
+  (acc_pat.reduce(UPat.any(arange_m, arange_m+UPat.var("extra"))+acc_pat, name="red"), loop_collapse),
   # indexing, with cast or where
   (acc_pat.assign(UPat.var("idx").eq(UPat(Ops.RANGE, name="rng")).cast()*index_load+acc_pat), index_collapse),
   (acc_pat.assign(UPat.var("idx").eq(UPat(Ops.RANGE, name="rng")).where(index_load, UPat.const(None, 0.0))+acc_pat), index_collapse),
@@ -285,6 +290,7 @@ sym = symbolic_flat+PatternMatcher([
   (acc_pat.assign(UPat(Ops.ADD, src=[acc_pat, UPat.var("ret")], name="alu")), reduce_collapse),
   (acc_pat.assign(UPat(Ops.MAX, src=[acc_pat, UPat.var("ret")], name="alu")), reduce_collapse),
   # ** self folding **
+  (UPat(Ops.REDUCE, src=(UPat(), UPat.var("x"))), lambda x: x),  # a REDUCE without ranges is just the op
   #(UPat(Ops.DEFINE_ACC, src=(UPat.var("x"),)), lambda x: x),            # a DEFINE_ACC without ranges is a CONST
   #(UPat(Ops.ASSIGN, src=(UPat.cvar(), UPat.var("x")), allow_any_len=True), lambda x: x),     # an ASSIGN to a const is a NOOP
   # x!=0 -> (bool)x

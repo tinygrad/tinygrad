@@ -9,7 +9,7 @@ from tinygrad.renderer import Renderer, TensorCore
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: ctx[x.src[0]]),
-  (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{ctx[x.src[0]]} = {ctx[x.src[1]]};"),
+  (UPat(Ops.REDUCE, name="x"), lambda ctx,x: f"{ctx[x.src[0]]} = {ctx[x.src[1]]};"),
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"if ({ctx[x.src[0]]}) {{"),
   (UPat((Ops.ENDIF, Ops.ENDRANGE)), lambda ctx: "}"),
   (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
@@ -153,8 +153,8 @@ class CStyleLanguage(Renderer):
                                                         and child_count[u] == 1 and not getenv("EXPAND_SSA")):
         r[u] = l
       else:
-        if u.op in {Ops.RANGE, Ops.ASSIGN, Ops.DEFINE_LOCAL} or u.dtype == dtypes.void:
-          if u.op is Ops.ASSIGN: r[u] = r[u.src[0]]
+        if u.op in {Ops.RANGE, Ops.REDUCE, Ops.DEFINE_LOCAL} or u.dtype == dtypes.void:
+          if u.op is Ops.REDUCE: r[u] = r[u.src[0]]
         else:
           l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
         kernel.append("  "*depth + l)
