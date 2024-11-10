@@ -1,6 +1,7 @@
 # type: ignore
 import ctypes, ctypes.util, struct, fcntl, re
 from hexdump import hexdump
+from copy import deepcopy
 import pathlib, sys
 from tinygrad.helpers import to_mv, getenv
 from tinygrad.runtime.autogen import adreno
@@ -91,27 +92,36 @@ def parse_cmd_buf(dat):
         num_unit = vals[0]>>22
         if IOCTL > 0: print(f"{num_unit=} {state_block=} {state_src=} {state_type=} {dst_off=}")
 
-        if state_block == SB6_CS_SHADER and IOCTL > 2:
+        if "LOAD_FRAGS" not in CAPTURED_STATE: CAPTURED_STATE['LOAD_FRAGS'] = []
+        CAPTURED_STATE['LOAD_FRAGS'].append((state_block, state_type, num_unit, dst_off))
+
+        if state_block == SB6_CS_SHADER:
           from extra.disassemblers.adreno import disasm_raw
-          if state_type == ST6_SHADER: disasm_raw(get_mem(((vals[2] << 32) | vals[1]), num_unit * 128))
-          if state_type == ST6_CONSTANTS: hexdump(get_mem(((vals[2] << 32) | vals[1]), min(0x180, num_unit*4)))
+          if state_type == ST6_SHADER and IOCTL > 2:
+            disasm_raw(get_mem(((vals[2] << 32) | vals[1]), num_unit * 128))
+          if state_type == ST6_CONSTANTS:
+            x = get_mem(((vals[2] << 32) | vals[1]), num_unit*4)
+            CAPTURED_STATE['constants'] = x[:]
+            if IOCTL > 2:
+              print('constants')
+              hexdump(x)
           if state_type == ST6_IBO:
             ibos_bytes = get_mem((vals[2] << 32) | vals[1], num_unit * 16 * 4)
             CAPTURED_STATE['ibos'] = ibos_bytes[:]
-            if IOCTL > 0:
+            if IOCTL > 1:
               print('texture ibos')
               hexdump(ibos_bytes)
-        elif state_block == SB6_CS_TEX and IOCTL > 2:
+        elif state_block == SB6_CS_TEX:
           if state_type == ST6_SHADER:
             samplers_bytes = get_mem((vals[2] << 32) | vals[1], num_unit * 4 * 4)
-            CAPTURED_STATE['samplers'] = ibos_bytes[:]
-            if IOCTL > 0:
+            CAPTURED_STATE['samplers'] = samplers_bytes[:]
+            if IOCTL > 1:
               print('texture samplers')
               hexdump(samplers_bytes)
           if state_type == ST6_CONSTANTS:
-            descriptors_bytes = get_mem((vals[2] << 32) | vals[1], num_unit * 16 * 4)
-            CAPTURED_STATE['descriptors'] = ibos_bytes[:]
-            if IOCTL > 0:
+            descriptors_bytes = get_mem((vals[2] << 32) | vals[1], 1600)
+            CAPTURED_STATE['descriptors'] = descriptors_bytes[:]
+            if IOCTL > 1:
               print('texture descriptors')
               hexdump(descriptors_bytes)
 
@@ -200,10 +210,19 @@ install_hook(libc.ioctl, ioctl)
 def before_launch():
   global CAPTURED_STATE
   CAPTURED_STATE.clear()
-def collect_last_launch_state(): return CAPTURED_STATE
+def collect_last_launch_state():
+  global CAPTURED_STATE
+  return deepcopy(CAPTURED_STATE)
 def compare_launch_state(state, good_state):
   cmp = [
-    (adreno.REG_A6XX_SP_CS_CONFIG, 0xffffffff),
+    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_NTEX__MASK),
+    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_NSAMP__MASK),
+    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_NIBO__MASK),
+    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_ENABLED),
+    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_BINDLESS_TEX),
+    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_BINDLESS_SAMP),
+    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_BINDLESS_IBO),
+    (adreno.REG_A6XX_SP_CS_CONFIG, adreno.A6XX_SP_CS_CONFIG_BINDLESS_UBO),
 
     (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_HALFREGFOOTPRINT__MASK),
     (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_FULLREGFOOTPRINT__MASK),
@@ -213,20 +232,55 @@ def compare_launch_state(state, good_state):
     (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_EARLYPREAMBLE),
     (adreno.REG_A6XX_SP_CS_CTRL_REG0, adreno.A6XX_SP_CS_CTRL_REG0_MERGEDREGS),
 
+    (adreno.REG_A6XX_SP_CS_PVT_MEM_PARAM, adreno.A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM__MASK),
+    (adreno.REG_A6XX_SP_CS_PVT_MEM_PARAM, adreno.A6XX_SP_CS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__MASK),
+
     (adreno.REG_A6XX_SP_CS_UNKNOWN_A9B1, adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK5),
     (adreno.REG_A6XX_SP_CS_UNKNOWN_A9B1, adreno.A6XX_SP_CS_UNKNOWN_A9B1_UNK6),
 
     (adreno.REG_A6XX_SP_CS_BRANCH_COND, 0xffffffff),
+
+    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_0, adreno.A6XX_HLSQ_CS_NDRANGE_0_KERNELDIM__MASK),
+    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_0, adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEX__MASK),
+    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_0, adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEY__MASK),
+    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_0, adreno.A6XX_HLSQ_CS_NDRANGE_0_LOCALSIZEZ__MASK),
+
+    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_1, 0xffffffff),
+    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_2, 0xffffffff),
+    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_3, 0xffffffff),
+    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_4, 0xffffffff),
+    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_5, 0xffffffff),
+    (adreno.REG_A6XX_HLSQ_CS_NDRANGE_6, 0xffffffff),
+
+    (adreno.REG_A6XX_HLSQ_CS_CNTL_0, 0xffffffff),
+    (adreno.REG_A6XX_HLSQ_CS_CNTL_1, 0xffffffff),
+    (adreno.REG_A6XX_HLSQ_CS_KERNEL_GROUP_X, 0xffffffff),
+    (adreno.REG_A6XX_HLSQ_CS_KERNEL_GROUP_Y, 0xffffffff),
+    (adreno.REG_A6XX_HLSQ_CS_KERNEL_GROUP_Z, 0xffffffff),
+
+    (adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, adreno.A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET_OFFSET__MASK),
   ]
 
   for x,m in cmp:
+    print(f"Field {REGS[x]}, mask: 0x{m:X} cmp: {state.get(x, 0) & m} vs {good_state.get(x, 0) & m}")
     if state.get(x, 0) & m != good_state.get(x, 0) & m:
-      return False, f"Field {REGS[x]}, mask: {x:X} mismatch: {state.get(x, 0) & m} vs {good_state.get(x, 0) & m}"
+      return False, f"Field {REGS[x]}, mask: 0x{m:X} mismatch: {state.get(x, 0) & m} vs {good_state.get(x, 0) & m}"
 
-  for n in ['ibos', 'samplers', 'descriptors']:
+  for n in ['descriptors', 'ibos']:
     if n not in good_state: continue
     mv1, mv2 = state.get(n), good_state.get(n)
-    if len(mv1) != len(mv2): return False, f"{n}: len mismatch"
+
+    if len(mv1) != len(mv2): return False, f"{n}: len mismatch {len(mv1)} != {len(mv2)}"
+    mv1 = memoryview(bytearray(mv1)).cast('I')
+    mv2 = memoryview(bytearray(mv2)).cast('I')
+    for i in range(len(mv2)):
+      if i % 8 == 5 or i % 8 == 4: continue # addresses
+      if mv1[i]!=mv2[i]: return False, f"{n}: content mismatch {i} {mv1[i]} {mv2[i]}"
+
+  for n in ['samplers']:
+    if n not in good_state: continue
+    mv1, mv2 = state.get(n), good_state.get(n)
+    if len(mv1) != len(mv2): return False, f"{n}: len mismatch {len(mv1)} != {len(mv2)}"
     if any(mv1[i]!=mv2[i] for i in range(len(mv1))): return False, f"{n}: content mismatch"
 
   return True, "PASS"
