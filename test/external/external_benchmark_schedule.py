@@ -48,7 +48,8 @@ if __name__ == "__main__":
                 rewritten_uops.append(full_graph_rewrite(u, k.opts))
             uops = rewritten_uops
         if getenv("LINEARIZE", 1):
-          with Timing("***** model linearize in "): uops = [linearize_uop(u) for u in uops]
+          with Profiling(PROFILE >= 2):
+            with Timing("***** model linearize in "): uops = [linearize_uop(u) for u in uops]
           print(sum(len(u) for u in uops))
           if getenv("SRC", 0):
             renderer = Device[Device.DEFAULT].renderer
