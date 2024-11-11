@@ -348,7 +348,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop movement ops ***
 
-  def view(self, st:ShapeTracker): return self if self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
+  def view(self, st:ShapeTracker): return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
   def reshape(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).reshape(arg))
 
   # *** uop Variable stuff ***
