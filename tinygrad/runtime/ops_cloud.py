@@ -7,12 +7,12 @@
 from __future__ import annotations
 from typing import Tuple, Optional, Dict, Any, DefaultDict, List
 from collections import defaultdict
-import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct, ast, contextlib
-from tinygrad.dtype import dtypes
 from dataclasses import dataclass, field
+import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct, ast, contextlib
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
 from tinygrad.device import Compiled, Allocator, Compiler, Device, BufferOptions
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ***** API *****
 
@@ -88,7 +88,7 @@ class CloudHandler(BaseHTTPRequestHandler):
 
   def _do(self, method):
     session = CloudHandler.sessions[unwrap(self.headers.get("Cookie")).split("session=")[1]]
-    ret = b""
+    ret, status_code = b"", 200
     if self.path == "/batch" and method == "POST":
       content_len = self.headers.get('Content-Length')
       assert content_len is not None
@@ -121,11 +121,8 @@ class CloudHandler(BaseHTTPRequestHandler):
     elif self.path == "/renderer" and method == "GET":
       cls, args = Device[CloudHandler.dname].renderer.__reduce__()
       ret = json.dumps((cls.__module__, cls.__name__, args)).encode()
-    else:
-      self.send_response(404)
-      self.end_headers()
-      return 0
-    self.send_response(200)
+    else: status_code = 404
+    self.send_response(status_code)
     self.send_header('Content-Length', str(len(ret)))
     self.end_headers()
     return self.wfile.write(ret)
@@ -174,8 +171,7 @@ class CloudProgram:
 
 class CloudDevice(Compiled):
   def __init__(self, device:str):
-    if (host:=getenv("HOST", "")) != "":
-      self.host = host
+    if (host:=getenv("HOST", "")) != "": self.host = host
     else:
       p = multiprocessing.Process(target=cloud_server, args=(6667,))
       p.daemon = True
