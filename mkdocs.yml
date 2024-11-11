@@ -29,7 +29,6 @@ nav:
       - HCQ: developer/hcq.md
     - Tools:
       - VIZ: developer/viz.md
-      #- Process Replay: developer/process_replay.md
   - tinybox: tinybox.md
 #- tinygrad: reference/
 
