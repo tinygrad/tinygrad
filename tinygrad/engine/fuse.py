@@ -6,7 +6,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.engine.lazy import LazyBuffer
 
 def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
-                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, LazyBuffer], group:Dict[LazyBuffer, None],
+                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, UOp], group:Dict[LazyBuffer, None],
                      cache:Dict[Tuple[LazyBuffer, ShapeTracker], None]) -> None:
   """recursively search the LazyBuffer for groupable children, realize the LazyBuffer if a child can't group"""
   if (tr, st) in cache: return
@@ -45,8 +45,8 @@ def get_realizes(children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbu
   for r in allbufs:
     if ctx.buf_uops[r.buffer] in ubuf_realizes: realizes[r] = None
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
-  reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
-  reduce_of_const: List[LazyBuffer] = []
+  reduce_for_op: Dict[LazyBuffer, UOp] = {}
+  reduce_of_const: List[UOp] = []
   for r in allbufs:
     if r in realizes or r.op not in GroupOp.Reduce: continue
     group: Dict[LazyBuffer, None] = {}
@@ -83,8 +83,9 @@ def get_realizes(children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbu
           tr = tr.srcs[0].base
       group = {tr: None}
       realizes[tr] = None
-    reduce_for_op.update((tr, r) for tr in group)
-    if FUSE_ARANGE and r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: reduce_of_const.append(r)
+    rbuf = ctx.buf_uops[r.buffer]
+    reduce_for_op.update((tr, rbuf) for tr in group)
+    if FUSE_ARANGE and r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: reduce_of_const.append(rbuf)
 
   # fuse double reduces with no other child
   if FUSE_CONV_BW:
@@ -94,8 +95,8 @@ def get_realizes(children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbu
         del realizes[top_reduce]
         if (ubuf:=ctx.buf_uops[top_reduce.buffer]) in ubuf_realizes: del ubuf_realizes[ubuf]
 
-  for r in reduce_of_const:
-    group = {tr:None for tr,rop in reduce_for_op.items() if rop is r}
+  for rbuf in reduce_of_const:
+    group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
     if any(tr.forced_realize for tr in group): continue
     kernel_children = {c for tr in group for c in children[tr] if c.op not in {MetaOps.COPY, MetaOps.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
@@ -103,8 +104,8 @@ def get_realizes(children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbu
       del realizes[tr]
       if (ubuf:=ctx.buf_uops[tr.buffer]) in ubuf_realizes: del ubuf_realizes[ubuf]
 
-  output_groups: DefaultDict[LazyBuffer, List[UOp]] = defaultdict(list)
+  output_groups: DefaultDict[UOp, List[UOp]] = defaultdict(list)
   for buf in realizes:
-    output_groups[reduce_for_op.get(buf, buf)].append(ubuf:=ctx.buf_uops[buf.buffer])
+    output_groups[reduce_for_op.get(buf, ubuf:=ctx.buf_uops[buf.buffer])].append(ubuf)
     ubuf_realizes[ubuf] = ubuf
   return list(output_groups.values())
