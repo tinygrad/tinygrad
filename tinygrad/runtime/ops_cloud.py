@@ -7,10 +7,10 @@
 from __future__ import annotations
 from typing import Tuple, Optional, Dict, Any, DefaultDict, List
 from collections import defaultdict
-import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct, ast
+import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct, ast, contextlib
 from tinygrad.dtype import dtypes
 from dataclasses import dataclass, field
-from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap
+from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
 from tinygrad.device import Compiled, Allocator, Compiler, Device, BufferOptions
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -203,6 +203,11 @@ class CloudDevice(Compiled):
     self.reset()
     super().__init__(device, CloudAllocator(self), renderer, Compiler(), functools.partial(CloudProgram, self))
 
+  def __del__(self):
+    # TODO: this is never being called
+    # TODO: should close the whole session
+    with contextlib.suppress(ConnectionRefusedError, http.client.CannotSendRequest, http.client.RemoteDisconnected): self.drain()
+
   def reset(self):
     self._q: List[Any] = []
     self._h: Dict[str, bytes] = {}
@@ -212,10 +217,14 @@ class CloudDevice(Compiled):
     binhash = hashlib.sha256(d).digest()
     self._h[datahash:=binascii.hexlify(binhash).decode()] = binhash+struct.pack("<Q", len(d))+d
     return datahash
-  def q(self, x): self._q.append(x)
+  def q(self, x):
+    if DEBUG >= 3: print(x)
+    self._q.append(x)
   def drain(self):
     self.h(repr(self._q).encode())
-    ret = self.send("POST", "drain", b''.join(self._h.values()))
+    data = b''.join(self._h.values())
+    with Timing(f"*** send {len(self._q):-3d} requests {len(self._h):-3d} hashes with len {len(data)/1024:.2f} kB in ", enabled=DEBUG>=1):
+      ret = self.send("POST", "drain", data)
     self.reset()
     return ret
 
