@@ -34,11 +34,11 @@ class CopyOut(CloudRequest): buffer_num: int
 class ProgramAlloc(CloudRequest): name: str; datahash: str # noqa: E702
 
 @dataclass(frozen=True)
-class ProgramFree(CloudRequest): datahash: str
+class ProgramFree(CloudRequest): name: str; datahash: str # noqa: E702
 
 @dataclass(frozen=True)
 class ProgramExec(CloudRequest):
-  datahash: str; bufs: Tuple[int, ...]; vals: Tuple[int, ...] # noqa: E702
+  name: str; datahash: str; bufs: Tuple[int, ...]; vals: Tuple[int, ...] # noqa: E702
   global_size: Optional[Tuple[int, ...]]; local_size: Optional[Tuple[int, ...]]; wait: bool # noqa: E702
 
 # for safe deserialization
@@ -73,7 +73,7 @@ class BatchRequest:
 
 @dataclass
 class CloudSession:
-  programs: Dict[str, Any] = field(default_factory=dict)
+  programs: Dict[Tuple[str, str], Any] = field(default_factory=dict)
   # TODO: the buffer should track this internally
   buffers: Dict[int, Tuple[Any, int, Optional[BufferOptions]]] = field(default_factory=dict)
 
@@ -111,12 +111,12 @@ class CloudHandler(BaseHTTPRequestHandler):
             Device[CloudHandler.dname].allocator.copyout(memoryview(ret:=bytearray(sz)), buf)
           case ProgramAlloc():
             lib = Device[CloudHandler.dname].compiler.compile_cached(req._h[c.datahash].decode())
-            session.programs[c.datahash] = Device[CloudHandler.dname].runtime(c.name, lib)
-          case ProgramFree(): del session.programs[c.datahash]
+            session.programs[(c.name, c.datahash)] = Device[CloudHandler.dname].runtime(c.name, lib)
+          case ProgramFree(): del session.programs[(c.name, c.datahash)]
           case ProgramExec():
             bufs = [session.buffers[x][0] for x in c.bufs]
             extra_args = {k:v for k,v in [("global_size", c.global_size), ("local_size", c.local_size)] if v is not None}
-            r = session.programs[c.datahash](*bufs, vals=c.vals, wait=c.wait, **extra_args)
+            r = session.programs[(c.name, c.datahash)](*bufs, vals=c.vals, wait=c.wait, **extra_args)
             if r is not None: ret = str(r).encode()
     elif self.path == "/renderer" and method == "GET":
       cls, args = Device[CloudHandler.dname].renderer.__reduce__()
@@ -162,14 +162,14 @@ class CloudAllocator(Allocator):
 
 class CloudProgram:
   def __init__(self, device:CloudDevice, name:str, lib:bytes):
-    self.device = device
+    self.device, self.name = device, name
     self.datahash = self.device.req.h(lib)
-    self.device.req.q(ProgramAlloc(name, self.datahash))
+    self.device.req.q(ProgramAlloc(self.name, self.datahash))
     super().__init__()
-  def __del__(self): self.device.req.q(ProgramFree(self.datahash))
+  def __del__(self): self.device.req.q(ProgramFree(self.name, self.datahash))
 
   def __call__(self, *bufs, global_size=None, local_size=None, vals:Tuple[int, ...]=(), wait=False):
-    self.device.req.q(ProgramExec(self.datahash, bufs, vals, global_size, local_size, wait))
+    self.device.req.q(ProgramExec(self.name, self.datahash, bufs, vals, global_size, local_size, wait))
     if wait: return float(self.device.batch_submit())
 
 class CloudDevice(Compiled):
