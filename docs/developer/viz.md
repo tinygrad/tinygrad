@@ -2,7 +2,7 @@
 
 ## Background
 
-Tinygrad can specify an entire training job <a href="https://github.com/tinygrad/tinygrad/blob/master/examples/stunning_mnist.py" target="_blank">in a single graph</a>.
+tinygrad can specify an entire training job <a href="https://github.com/tinygrad/tinygrad/blob/master/examples/stunning_mnist.py" target="_blank">in a single graph</a>.
 We use a graph rewrite engine to [break](developer.md#scheduling) this big graph into kernels and [lower](developer.md#lowering) it to <a href="https://github.com/tinygrad/tinygrad/tree/master/tinygrad/renderer" target="_blank">code</a>.
 
 VIZ is a UI for viewing these graph rewrites.
