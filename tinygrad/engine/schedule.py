@@ -92,7 +92,6 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children, allbufs, double_reduce
 # ** helpers for doing movementops on uops
 
 def apply_swizzle(u:UOp, arg:ShapeTracker) -> UOp:
-  if u.op is Ops.VIEW and u.src and u.src[0].st == arg: return u.src[0] # TODO: delete this
   with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u.view(arg), view_left)
 
 def permute_reduce(input_st:ShapeTracker, axis:Tuple[int, ...]) -> Tuple[ShapeTracker, Tuple[sint, ...]]:
@@ -125,12 +124,13 @@ def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp, src:UOp) -> UOp:
   return swizzle.src[0].r(root.arg[0], new_axis).view(ShapeTracker.from_shape(output_shape))
 
 def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
-  swizzle_arg = [(unwrap(x.st).shape, unwrap(x.src[0].st).shape) for x in root.src if x.op is Ops.VIEW and len(x.src) != 0]
-  if len(swizzle_arg) == 0: return None
-  assert all_same(swizzle_arg), f"incomptabile swizzles {swizzle_arg}"
-  shape, src_shape = swizzle_arg[0]
-  ret = root.replace(src=tuple(apply_swizzle(x, ShapeTracker.from_shape(src_shape)) for x in root.src))
-  return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(shape))
+  swizzles = [x for x in root.src if x.op is Ops.VIEW and len(x.src) != 0]
+  if len(swizzles) == 0: return None
+  swizzle_shapes = [(unwrap(x.st).shape, unwrap(x.src[0].st).shape) for x in swizzles]
+  assert all_same([(x, prod(x), prod(y)) for x,y in swizzle_shapes]), f"swizzles must have the same size {swizzle_shapes}"
+  new_shape, new_input_shape = swizzle_shapes[0]
+  ret = root.replace(src=tuple(x.src[0] if x in swizzles else apply_swizzle(x, ShapeTracker.from_shape(new_input_shape)) for x in root.src))
+  return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(new_shape))
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
