@@ -11,8 +11,85 @@ def to_hex(x: int | float) -> str:
   if isinstance(x, int): return hex(x)
   return "0x" + "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 
+def x86cast(i_dt:DType, o_dt:DType) -> str:
+  pass
+
 x86_pm = PatternMatcher([
+  # rewrite RECIP to FDIV
+  (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
+  # rewrite cast to bool to CMPNE 0
+  (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
+  # gate any stores that aren't gated with ifs
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
+    lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
+  # rewrite MAX to CMPLT + WHERE
   (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
+])
+
+# 64 bit general registers, rsp/rbp not included, r15 temp register for now
+gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx"] + ['r'+str(i) for i in range(10,15)]
+float_regs = ["xmm" + str(i) for i in range(0,16)]
+all_regs = gen_regs + float_regs
+size_prefix = {1: "byte", 2: "word", 4: "dword", 8: "qword"}
+mov_sufix = {4: "d", 8: "q"}
+asm_ops = {Ops.STORE: "mov", Ops.LOAD: "mov", Ops.DEFINE_ACC: "mov", Ops.ASSIGN: "mov", Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "idiv",
+            Ops.FDIV: "div", Ops.SHL: "shl", Ops.SHR: "shr", Ops.CMPNE: "cmp", Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor",
+            Ops.RECIP: "rcp", Ops.SQRT: "sqrt", Ops.WHERE: "cmovz"}
+
+gep_imm = {0: "0x00", 1: "0x40", 2:"0x80", 3:"0xC0"}
+vec_imm = {0: "0x00", 1: "0x10", 2:"0x20", 3:"0x30"}
+
+def cflag(x:UOp) -> str:
+  if x.op is Ops.CMPLT: return "setl" if x.src[0].dtype in dtypes.sints else "setb"
+  if x.op is Ops.CMPNE: return "setne"
+  assert False
+
+# need this to handle nans, maybe rewrite in pm cmplt/cmpne to handle nans? It would be unreadable though
+def float_cmp(reg:str) -> str: return "push r15\n" + "setp r15b\n" + f"xor {reg}, r15b\n" + "pop r15"
+
+def opc(u:UOp) -> str:
+  op = asm_ops[u.op]
+  # store and cmp op type is based on srcs
+  return optype(op, u.src[-1].dtype) if u.op is Ops.STORE or op == "cmp" else optype(op, u.dtype)
+
+def optype(op:str, dt:DType) -> str:
+  if dtypes.is_float(dt) and not isinstance(dt, PtrDType):
+    s1 = 'p' if dt.count > 1 else 's'
+    s2 = 'd' if dt.scalar().itemsize == 8 else 's'
+    if op == "cmp": return "ucomi" + s1 + s2
+    if op == "mov":
+      s0 = 'l' if dt.count == 2 and dt.scalar() is dtypes.float32 else 'u' if dt.count > 1 else ''
+      return op + s0 + s1 + s2 # packed mov is unaligned
+    return (op if op[0] != 'i' else op[1:]) + s1 + s2
+  if dtypes.is_unsigned(dt) and op == 'idiv': return op[1:]
+  return op
+
+x86_rewrite = PatternMatcher([
+  (UPat(Ops.INDEX, name="x"), lambda ctx,x: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx[x.src[1]]}*{x.src[0].dtype.itemsize}]"),
+  (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{opc(x)} {ctx[x]}, [{ctx[idx]}]"),
+  (UPat(Ops.STORE, name="x"), lambda ctx,x: f"{opc(x)} {size_prefix[x.src[0].dtype.itemsize]} ptr [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
+  (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{opc(x)} {ctx[x]}, {ctx[x.src[0]]}"),
+  # only assign if location isn't the same
+  (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{opc(x)} {ctx[x.src[0]]}, {ctx[x.src[1]]}" if ctx[x.src[0]] != ctx[x.src[1]] else None),
+
+  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"insertps {ctx[x]}, {ctx[x.src[0]]}, {vec_imm[x.arg[0]]}"),
+  (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {vec_imm[i]}" for i,s in enumerate(x.src))),
+  
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx[x.src[0]]}\n.LOOP_{x.arg[0]}:"),
+  (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x: f"inc {ctx[x.src[0]]}\ncmp {ctx[x.src[0]]}, {ctx[x.src[0].src[1]]}\njl .LOOP_{x.src[0].arg[0]}"),
+  # TODO: instead of in all_regs do is_reg or in regs (pm needs access to regs)
+  (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"mov{mov_sufix[x.dtype.itemsize] if ctx[x.src[0]] in all_regs else ""} {ctx[x]}, {ctx[x.src[0]]}"),
+  #(UPat(Ops.CAST, name="x"), lambda ctx,x: ),
+  # no cmov for floats
+  (UPat(Ops.WHERE, dtype=dtypes.floats, name="x"), lambda ctx,x: f"test {ctx[x]}, 1\njnz .l{i}\n{optype("mov", x.dtype)} {ctx[x]}, {ctx[x.src[2]]}\n.l{i}:"),
+  (UPat(Ops.WHERE, dtype=dtypes.ints, name="x"), lambda ctx,x: f"test {ctx[x]}, 1\n{opc(x)} {ctx[x]}, {ctx[x.src[2]]}"),
+
+  (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
+   lambda ctx,x: f"{opc(x)} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{cflag(x)} {ctx[x]}{"\n"+float_cmp(x) if dtypes.is_float(x.src[0].dtype) else ""}"),
+  # idiv requires rax/rdx
+  (UPat(Ops.IDIV, name="x"), lambda ctx,x: f""),
+  # rest of binary ops
+  (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"{opc(x)} {ctx[x]}, {ctx[x.src[1]]}"),
 ])
 
 class X86Renderer(Renderer):
@@ -24,18 +101,14 @@ class X86Renderer(Renderer):
   code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [Ops.NEG, Ops.EXP2, Ops.SIN, Ops.LOG2]})}
 
   def render(self, name:str, ops:List[UOp]) -> str:
-    # 64 bit general registers, rsp/rbp not included
-    gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx"] + ['r'+str(i) for i in range(10,16)]
-    float_regs = ["xmm" + str(i) for i in range(0,16)]
-    size_prefix = {1: "byte", 2: "word", 4: "dword", 8: "qword"}
-    asm_ops = {Ops.STORE: "mov", Ops.LOAD: "mov", Ops.DEFINE_ACC: "mov", Ops.ASSIGN: "mov", Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "idiv",
-               Ops.SHL: "shl", Ops.SHR: "shr", Ops.CMPNE: "cmp", Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor",
-               Ops.RECIP: "rcp", Ops.SQRT: "sqrt", Ops.WHERE: "cmovz"}
 
     regs: Dict[UOp, str] = {}
     mem: Dict[UOp, int] = {}
+    # can be a register, memory location or immediate value
+    r: Dict[UOp, str] = {}
     stack_size: int = 8
     ins = ""
+    kernel: List[str] = []
 
     child_count = Counter(v for ru in ops for v in ru.src)
     uop_i = {u:i for i,u in enumerate(ops)}
@@ -66,28 +139,11 @@ class X86Renderer(Renderer):
       sz = sz if sz else u.dtype.itemsize if not isinstance(u.dtype, PtrDType) else 8
       return regsz(regs[u], sz)
     
-    def op2(op:str, dt:DType) -> str:
-      if dtypes.is_float(dt) and not isinstance(dt, PtrDType):
-        s1 = 'p' if dt.count > 1 else 's'
-        s2 = 'd' if dt.scalar().itemsize == 8 else 's'
-        if op == "cmp": return "ucomi" + s1 + s2
-        if op == "mov":
-          s0 = 'l' if dt.count == 2 and dt.scalar() is dtypes.float32 else 'u' if dt.count > 1 else ''
-          return op + s0 + s1 + s2 # packed mov is unaligned
-        return (op if op[0] != 'i' else op[1:]) + s1 + s2
-      if dtypes.is_unsigned(u.dtype) and op == 'idiv': return op[1:]
-      return op
-
-    def opc(u:UOp) -> str:
-      op = asm_ops[u.op]
-      # store and cmp op type is based on srcs
-      return op2(op, u.src[-1].dtype) if u.op is Ops.STORE or op == "cmp" else op2(op, u.dtype)
-    
     def free_reg(reg:str): float_regs.append(reg) if reg.startswith("xmm") else gen_regs.append(reg)
 
     def assign_reg(i:int, dt:DType) -> str:
-      if dtypes.is_float(dt) and not isinstance(dt, PtrDType) and float_regs: return float_regs.pop(0)
-      if (not dtypes.is_float(dt) or isinstance(dt, PtrDType)) and gen_regs: return gen_regs.pop(0)
+      type_regs = float_regs if dtypes.is_float(dt) and not isinstance(dt, PtrDType) else gen_regs
+      if type_regs: return type_regs.pop(0)
       # no available regs, spill one
       t = 'x' if dtypes.is_float(dt) and not isinstance(dt, PtrDType) else 'r'
       candidates = [u for u in regs if u in live_range and live_range[u][-1] > i and regs[u][0] == t]
@@ -97,15 +153,8 @@ class X86Renderer(Renderer):
       if chosen not in mem:
         mem[chosen] = stack_size
         stack_size += 8
-      line(op2("mov", dt), f"[rbp - {mem[chosen]}]", loc(chosen))
+      line(optype("mov", dt), f"[rbp - {mem[chosen]}]", loc(chosen))
       return regs.pop(chosen)
-
-    # need this to handle nans
-    def float_cmp(u:UOp):
-      temp_reg = assign_reg(i, u.dtype)
-      line("setp", regsz(temp_reg, u.dtype.itemsize))
-      line("xor", loc(u), regsz(temp_reg, u.dtype.itemsize))
-      free_reg(temp_reg)
 
     # do a pass over ops to assign ranges, ranges allow us to get rid of dead regs and pick the best reg to spill
     live_range: Dict[UOp, List[int]] = {}
@@ -124,6 +173,9 @@ class X86Renderer(Renderer):
           stack_size += 8
           line("mov", "r15", to_hex(u.arg))
           line("mov", loc(u), "r15")
+          #r[u] = f"[rbp - {mem[u]}]"
+        #else:
+          #r[u] = to_hex(u.arg)
       if u.op is Ops.DEFINE_GLOBAL:
         #define globals to stack, this frees them for spilling
         reg = assign_reg(i, u.dtype)
@@ -139,70 +191,38 @@ class X86Renderer(Renderer):
           if uop_i[s] > i: continue # this happens in define_acc
           if s.op is not Ops.CONST: assert s in mem
           reg = assign_reg(i, s.dtype)
-          line(op2("mov", s.dtype), reg, loc(s))
+          line(optype("mov", s.dtype), reg, loc(s))
           regs[s] = reg
 
       regs[u] = regs[u.src[0]] if u.op in (Ops.ASSIGN,) else assign_reg(i, u.dtype)
+
+      #for s in u.src: r[s] = regs[s] if s in regs else f"[rbp - {mem[s]}]" if s in mem else to_hex(s.arg)
+      #r[u] = regs[u]
+      #l = x86_rewrite.rewrite(u, ctx=r)
+
+          
+      if u.op is Ops.GEP: assert u.dtype == dtypes.float32 and u.dtype.count == 1 and len(u.arg) == 1
+      if u.op is Ops.VECTORIZE: assert u.dtype.scalar() == dtypes.float32
+      if u.op is Ops.BITCAST: assert dtypes.is_int(u.dtype) != dtypes.is_int(u.src[0].dtype)
       
-      if u.op is Ops.INDEX:
-        line("lea", loc(u), f"[{loc(u.src[0])} + {loc(u.src[1], 8)}*{u.src[0].dtype.itemsize}]")
-        if u.src[1].op is Ops.CONST:
-          mem[u] = stack_size
-          stack_size += 8
-          line("mov", f"[rbp - {mem[u]}]", loc(u))
-          free_reg(regs.pop(u))
-      elif u.op is Ops.LOAD: line(opc(u), loc(u), f"[{loc(u.src[0])}]")
-      elif u.op is Ops.STORE:
-        prefix = f"{size_prefix[u.src[1].dtype.itemsize]} ptr " if u.src[1].op is Ops.CONST else ""
-        line(opc(u), f"{prefix}[{loc(u.src[0])}]", loc(u.src[1]))
-      elif u.op is Ops.DEFINE_ACC: line(opc(u), loc(u), loc(u.src[0]))
-      elif u.op is Ops.ASSIGN:
-        if regs[u] != regs[u.src[1]]: line(opc(u), loc(u), loc(u.src[1]))
-      elif u.op is Ops.RANGE:
-        line("mov", loc(u), loc(u.src[0]))
-        line(f".l{i}:")
-      elif u.op is Ops.ENDRANGE:
-        line("inc", loc(u.src[0]))
-        line("cmp", loc(u.src[0]), loc(u.src[0].src[1]))
-        line(f"jl .l{uop_i[u.src[0]]}")
-      elif u.op is Ops.GEP:
-        assert u.dtype == dtypes.float32 and u.dtype.count == 1 and len(u.arg) == 1
-        idx_imm = {0: "0x00", 1: "0x40", 2:"0x80", 3:"0xC0"}
-        line("insertps", loc(u), loc(u.src[0]), idx_imm[u.arg[0]])
-      elif u.op is Ops.VECTORIZE:
-        assert u.dtype.scalar() == dtypes.float32
-        idx_imm = {0: "0x00", 1: "0x10", 2:"0x20", 3:"0x30"}
-        for si,s in enumerate(u.src): line("insertps", loc(u), loc(s), idx_imm[si])
-      elif u.op is Ops.BITCAST:
-        # bitcast just movs to register of the type
-        assert dtypes.is_int(u.dtype) != dtypes.is_int(u.src[0].dtype), "what do?"
-        if u.src[0] in regs: line("movq", loc(u), loc(u.src[0])) if u.dtype.itemsize == 8 else line("movd", loc(u), loc(u.src[0]))
-        else: line(op2("mov", u.dtype), loc(u), loc(u.src[0]))
       elif u.op is Ops.CAST:
-        if dtypes.is_int(u.dtype) and dtypes.is_int(u.src[0].dtype):
+        if dtypes.is_int(u.dtype) and (dtypes.is_int(u.src[0].dtype) or u.src[0].dtype is dtypes.bool):
           # sign extend if casting to larger int
           if u.dtype.itemsize > u.src[0].dtype.itemsize:
-            line("movsxd", loc(u), loc(u.src[0])) if u.src[0].dtype.itemsize == 4 else line("movsx", loc(u), loc(u.src[0]))
+            if dtypes.is_unsigned(u.src[0].dtype):
+              line("mov", loc(u), regsz(regs[u.src[0]], u.dtype.itemsize)) if u.src[0].dtype.itemsize == 4 else line("movzx", loc(u), loc(u.src[0]))
+            else:
+              line("movsxd", loc(u), loc(u.src[0])) if u.src[0].dtype.itemsize == 4 else line("movsx", loc(u), loc(u.src[0]))
           # casting to smaller int is just a mov
           else: line("mov", loc(u), regsz(regs[u.src[0]], u.dtype.itemsize))
 
-        elif u.dtype is dtypes.bool:
-          if dtypes.is_int(u.src[0].dtype):
-            line("test", loc(u.src[0]), loc(u.src[0]))
-            line("setne", loc(u))
-          else: # casting float to boolean is this annoying yes
-            temp_reg = assign_reg(i, u.src[0].dtype)
-            free_reg(temp_reg)
-            line("xorps", temp_reg, temp_reg)
-            line(op2("ucomi", u.src[0].dtype), loc(u.src[0]), temp_reg)
-            line("setne", loc(u))
-            float_cmp(u)
         elif not isinstance(u.dtype, PtrDType):
           cfrom = "si" if not dtypes.is_float(u.src[0].dtype) else "tsd" if u.src[0].dtype.itemsize == 8 else "tss"
           cto = "si" if not dtypes.is_float(u.dtype) else "sd" if u.dtype.itemsize == 8 else "ss"
           # zero extend boolean
           if u.src[0].dtype == dtypes.bool and u.src[0] in regs: line("and", loc(u.src[0], 8), "1")
           line(f"cvt{cfrom}2{cto}", loc(u), loc(u.src[0], None if u.src[0].dtype != dtypes.bool else 4))
+
         else:
           # cast between pointers don't do anything, we just mov
           assert isinstance(u.src[0].dtype.scalar(), PtrDType)
@@ -213,17 +233,7 @@ class X86Renderer(Renderer):
         # for cmp nothing to mov as reg depends on flag
         if u.op not in (Ops.CMPLT, Ops.CMPNE):
           # if cmov copy first src, mov happens if condition is false
-          line(op2("mov", u.dtype), loc(u), loc(u.src[0] if u.op is not Ops.WHERE else u.src[1]))
-          
-        if u.op is Ops.WHERE:
-          line("test", loc(u.src[0]), "1")
-          # cmovs don't work on floats need jump
-          if dtypes.is_float(u.dtype):
-            line(f"jnz .l{i}")
-            line(op2("mov", u.dtype), loc(u), loc(u.src[2]))
-            line(f".l{i}:")
-          else:
-            line(opc(u), loc(u), loc(u.src[2]))
+          line(optype("mov", u.dtype), loc(u), loc(u.src[0] if u.op is not Ops.WHERE else u.src[1]))
           
         elif u.op in GroupOp.Binary:
           # for int div need to clear rax/rdx
@@ -239,33 +249,6 @@ class X86Renderer(Renderer):
             line("mov", loc(u), regsz("rax", u.dtype.itemsize))
             if "rax" in regs.values() and regs[u] != "rax": line("pop", "rax")
             if "rdx" in regs.values(): line("pop", "rdx")
-
-          elif u.op is Ops.CMPLT:
-            line(opc(u), loc(u.src[0]), loc(u.src[1]))
-            if dtypes.is_float(u.src[0].dtype):
-              line("setb", loc(u))
-              float_cmp(u)
-            else: line("setl", loc(u))
-          
-          elif u.op is Ops.CMPNE:
-            line(opc(u), loc(u.src[0]), loc(u.src[1]))
-            line("setne", loc(u))
-            if dtypes.is_float(u.src[0].dtype): float_cmp(u)
-              
-          else:
-            line(opc(u), loc(u), loc(u.src[1]))
-
-        elif u.op in GroupOp.Unary:
-          # NOTE: using recip loses precision so we just div
-          if u.op is Ops.RECIP:
-            assert u.dtype == dtypes.float32
-            # load 1 into gen reg, mov to float reg and div
-            temp_reg = assign_reg(i, dtypes.int32)
-            line("mov", temp_reg, to_hex(1.))
-            line("movd", loc(u), temp_reg)
-            line("divss", loc(u), loc(u.src[0]))
-            free_reg(temp_reg)
-          #line(opc(u), loc(u), loc(u))
 
       # free dead regs
       for s in u.src:

@@ -89,6 +89,9 @@ class TestX86(unittest.TestCase):
     # signed to unsigned
     a = Tensor([-1,0,1], dtype=dtypes.int32)
     assert a.cast(dtypes.uint64).tolist() == [18446744073709551615, 0, 1]
+    # uint32 to uint64
+    a = Tensor([1,2,3000000000], dtype=dtypes.uint32)
+    assert a.cast(dtypes.uint64).tolist() == [1, 2, 3000000000]
 
   def test_bitcast(self):
     a = Tensor([-1.,1.,2.123], dtype=dtypes.float32)
