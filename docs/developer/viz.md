@@ -7,7 +7,6 @@ We use a graph rewrite engine to [break](developer.md#scheduling) this big graph
 
 VIZ is a UI for viewing these graph rewrites.
 
-
 ## Quickstart
 
 All you need is run tinygrad with `VIZ=1`!
