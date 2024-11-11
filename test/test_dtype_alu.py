@@ -10,7 +10,7 @@ from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import GroupOp
 from tinygrad.tensor import _to_np_dtype
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
 

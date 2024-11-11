@@ -12,7 +12,7 @@ from test.helpers import print_diff
 # *** process replay settings
 
 # internal
-PAGE_SIZE = 100
+PAGE_SIZE = getenv("PAGE_SIZE", 100)
 REF = os.getenv("GITHUB_REF_NAME", "")
 MAX_DIFF_PCT = getenv("PROCESS_REPLAY_MAX_DIFF_PCT", 20)
 TABLE_NAME = f"process_replay_{VERSION}"

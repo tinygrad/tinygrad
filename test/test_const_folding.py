@@ -4,7 +4,7 @@ from tinygrad.ops import Ops
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import CI
 import numpy as np
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
