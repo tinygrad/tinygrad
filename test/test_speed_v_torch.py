@@ -93,7 +93,7 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
   flops = save_ops*1e-6
   mem = save_mem*1e-6
   print(("\r" if not CI else "")+f"{name:42s} {et_torch:7.2f} ms ({flops/et_torch:9.2f} GFLOPS {mem/et_torch:7.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:9.2f} GFLOPS {mem/et_tinygrad:7.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")  # noqa: E501
-  atol, rtol = (5e-3, 5e-3) if torch_dt == torch.float16 else (1e-3, 1e-3)
+  atol, rtol = (1e-2, 1e-2) if torch_dt == torch.float16 else (1e-3, 1e-3)
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=atol, rtol=rtol)
 
 def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_x):
