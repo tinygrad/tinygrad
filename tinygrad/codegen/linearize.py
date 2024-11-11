@@ -68,7 +68,7 @@ def append_to_block(ctx, x:UOp):
       new_srcs.append(lst[0])
     else:
       new_lst = flatten([y.arg.lst if y.op is Ops.BLOCK else [y] for y in lst])
-      new_srcs.append(UOp(Ops.BLOCK, dtypes.void, tuple(dedup(sum([y.src for y in lst], tuple()))), BasicBlock(rng, new_lst)))
+      new_srcs.append(UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, new_lst)))
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
 
 make_basic_blocks = PatternMatcher([
