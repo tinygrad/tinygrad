@@ -13,7 +13,7 @@ All you need is run tinygrad with `VIZ=1`!
 
 NOTE: Make sure you use tinygrad **master** `pip install git+https://github.com/tinygrad/tinygrad.git`
 
-For example, it can show all the graph rewrites for an add kernel:
+For example, it can show all the graph rewrites for this compute:
 ```py
 from tinygrad import Tensor
 
@@ -26,7 +26,7 @@ The first graph is generic. We LOAD BUFFERs `1` and `2`, ADD them and STORE the 
 
 ![viz_1](viz_1.png)
 
-After a sequence of graph rewrites, the graph is functionally equivalent but specialized to how GPUs render code.
+After a sequence of graph rewrites, the graph specializes to how GPUs render code.
 
 See how we're still adding `a` and `b`, but this time using pointers, and <a href="https://registry.khronos.org/OpenCL/sdk/3.0/docs/man/html/get_group_id.html" target="_blank">OpenCL's `SPECIAL` lidx0</a>.
 
