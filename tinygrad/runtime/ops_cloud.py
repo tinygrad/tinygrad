@@ -17,38 +17,27 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 # ***** API *****
 
 @dataclass(frozen=True)
-class BufferAlloc:
-  buffer_num: int
-  size: int
-  options: BufferOptions
+class BufferAlloc: buffer_num: int; size: int; options: BufferOptions # noqa: E702
 
 @dataclass(frozen=True)
-class BufferFree: buffer_num: int
+class BufferFree: buffer_num: int # noqa: E702
 
 @dataclass(frozen=True)
-class CopyIn:
-  buffer_num: int
-  datahash: str
+class CopyIn: buffer_num: int; datahash: str # noqa: E702
 
 @dataclass(frozen=True)
 class CopyOut: buffer_num: int
 
 @dataclass(frozen=True)
-class ProgramAlloc:
-  name: str
-  datahash: str
+class ProgramAlloc: name: str; datahash: str # noqa: E702
 
 @dataclass(frozen=True)
 class ProgramFree: datahash: str
 
 @dataclass(frozen=True)
 class ProgramExec:
-  datahash: str
-  bufs: Tuple[int, ...]
-  vals: Tuple[int, ...]
-  global_size: Optional[Tuple[int, ...]]
-  local_size: Optional[Tuple[int, ...]]
-  wait: bool
+  datahash: str; bufs: Tuple[int, ...]; vals: Tuple[int, ...] # noqa: E702
+  global_size: Optional[Tuple[int, ...]]; local_size: Optional[Tuple[int, ...]]; wait: bool # noqa: E702
 
 # for safe deserialization
 whitelist = {x.__name__:x for x in [BufferAlloc, BufferFree, CopyIn, CopyOut, ProgramAlloc, ProgramFree, ProgramExec, BufferOptions]}
