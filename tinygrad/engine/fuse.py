@@ -81,9 +81,9 @@ def get_realizes(children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbu
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
         if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
           tr = tr.srcs[0].base
-        reduce_for_op[tr] = r
+      group = {tr: None}
       realizes[tr] = None
-    else: reduce_for_op.update((tr, r) for tr in group)
+    reduce_for_op.update((tr, r) for tr in group)
     if FUSE_ARANGE and r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: reduce_of_const.append(r)
 
   # fuse double reduces with no other child
