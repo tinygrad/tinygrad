@@ -31,12 +31,6 @@ class AMDDev:
     from extra.amdpci.vmm import VMM
     self.vmm = VMM(self) # gmc ip like
 
-    # self.raw_vram.cast('Q')[0x400] = 0xdeadbeef
-    # print(hex(self.raw_vram.cast('Q')[0x400]))
-
-    # self.raw_vram.cast('Q')[(21 << 30) // 8] = 0x11cafe11
-    # print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
-
     self.init_discovery()
 
     from extra.amdpci.smu import SMU_IP
@@ -55,39 +49,15 @@ class AMDDev:
     self.soc21 = SOC21_IP(self) # soc21
     self.soc21.init()
 
-    # print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
-    # print(hex(self.raw_vram.cast('Q')[0x400]))
-
     self.vmm.init()
-
-    # print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BASE, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BASE_BASE_IDX)))
-    # print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BOT, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_BOT_BASE_IDX)))
-    # print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_TOP, amdgpu_mmhub_3_0_0.regMMMC_VM_AGP_TOP_BASE_IDX)))
-    # print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_LOW_ADDR, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_LOW_ADDR_BASE_IDX)))
-    # print(hex(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_HIGH_ADDR, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_HIGH_ADDR_BASE_IDX)))
-
-    # self.adev.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_LSB, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_LSB_BASE_IDX)
-    # self.adev.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_MSB, amdgpu_mmhub_3_0_0.regMMMC_VM_SYSTEM_APERTURE_DEFAULT_ADDR_MSB_BASE_IDX)
-
-    # print(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_LO32, 0))
-    # print(self.rreg_ip("MMHUB", 0, amdgpu_mmhub_3_0_0.regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32, 0))
-
-    # print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
-    # print(hex(self.raw_vram.cast('Q')[0x400]))
 
     from extra.amdpci.ih import IH_IP
     self.ih = IH_IP(self)
     self.ih.init()
 
-    # print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
-    # print(hex(self.raw_vram.cast('Q')[0x400]))
-
     from extra.amdpci.psp import PSP_IP
     self.psp = PSP_IP(self)
     self.psp.init()
-
-    # print(hex(self.raw_vram.cast('Q')[(21 << 30) // 8]))
-    # print(hex(self.raw_vram.cast('Q')[0x400]))
 
     self.smu.init()
 

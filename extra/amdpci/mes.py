@@ -29,7 +29,7 @@ class MES_IP:
     self.next_write_fence = 1
 
   def mes_enable(self):
-    print("MES enable / mes_v11_0_enable()")
+    # print("MES enable / mes_v11_0_enable()")
     val = (1 << amdgpu_gc_11_0_0.CP_MES_CNTL__MES_PIPE0_RESET__SHIFT) | (1 << amdgpu_gc_11_0_0.CP_MES_CNTL__MES_PIPE1_RESET__SHIFT)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_MES_CNTL, amdgpu_gc_11_0_0.regCP_MES_CNTL_BASE_IDX, val)
 
@@ -68,7 +68,7 @@ class MES_IP:
 
     self.wdoorbell64(self.mes_kiq.doorbell_index, self.mes_kiq.next_ptr)
     while self.adev.rreg(sc_reg) != 0xdeadc0de: pass
-  
+
   def kiq_map_queue(self, ring_to_enable, is_compute=False):
     if is_compute:
       me = 1
@@ -200,7 +200,7 @@ class MES_IP:
 
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_BASE, amdgpu_gc_11_0_0.regCP_HQD_PQ_BASE_BASE_IDX, ring.mqd.cp_hqd_pq_base_lo)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_BASE_HI, amdgpu_gc_11_0_0.regCP_HQD_PQ_BASE_HI_BASE_IDX, ring.mqd.cp_hqd_pq_base_hi)
-    
+
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_RPTR_REPORT_ADDR, amdgpu_gc_11_0_0.regCP_HQD_PQ_RPTR_REPORT_ADDR_BASE_IDX, ring.mqd.cp_hqd_pq_rptr_report_addr_lo)
     self.adev.wreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_HQD_PQ_RPTR_REPORT_ADDR_HI, amdgpu_gc_11_0_0.regCP_HQD_PQ_RPTR_REPORT_ADDR_HI_BASE_IDX, ring.mqd.cp_hqd_pq_rptr_report_addr_hi)
 
@@ -243,7 +243,7 @@ class MES_IP:
     mes_sch_status_pkt.header.dwsize = mes_v11_api_def.API_FRAME_SIZE_IN_DWORDS
 
     return self.submit_pkt_and_poll_completion(mes_sch_status_pkt)
-  
+
   def set_hw_resources(self):
     mes_set_hw_res_pkt = mes_v11_api_def.union_MESAPI_SET_HW_RESOURCES()
     mes_set_hw_res_pkt.header.type = mes_v11_api_def.MES_API_TYPE_SCHEDULER
