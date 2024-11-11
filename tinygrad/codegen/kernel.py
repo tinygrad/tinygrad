@@ -621,9 +621,7 @@ class Kernel:
         grouped_axis = get_axis(self.first_reduce, self.first_reduce+self.group_for_reduces)
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
-          reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
-
-          def fix_st(st: ShapeTracker, local_pattern: Tuple[Tuple[int,int], ...], upcast_pattern: Tuple[Tuple[int,int], ...]):
+          def fix_st(st, local_pattern, upcast_pattern):
             wd, warp_dims = self.global_dims,  tuple(sz for _, sz in tc.threads)
             tcd, tcd_dims = self.first_upcast, tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
 
@@ -650,6 +648,7 @@ class Kernel:
 
               srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st_uop, local_store))
 
+          reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
             upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
             wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, reduce_axes)
