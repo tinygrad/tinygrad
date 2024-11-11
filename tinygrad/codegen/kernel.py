@@ -630,9 +630,8 @@ class Kernel:
             assert tc.expanded_shape is not None
 
             new_shape = st.shape[:tcd] + tc.expanded_shape + st.shape[tcd+len(tcd_dims):]  # expand the tcd
-            permaxis = list(range(wd)) + \
-              [y + (wd if x == 0 else tcd) for x,y in local_pattern]  + list(range(wd+len(warp_dims), tcd)) + \
-              [y + (wd if x == 0 else tcd) for x,y in upcast_pattern] + list(range(tcd+len(tc.expanded_shape), len(new_shape)))
+            permaxis = list(range(wd)) + [y+(wd if x==0 else tcd) for x,y in local_pattern]  + list(range(wd+len(warp_dims),tcd)) + \
+                                         [y+(wd if x==0 else tcd) for x,y in upcast_pattern] + list(range(tcd+len(tc.expanded_shape),len(new_shape)))
             return st.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st.shape).simplify()
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
