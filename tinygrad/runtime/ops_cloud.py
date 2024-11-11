@@ -52,15 +52,10 @@ class ProgramExec:
 
 # for safe deserialization
 whitelist = {x.__name__:x for x in [BufferAlloc, BufferFree, CopyIn, CopyOut, ProgramAlloc, ProgramFree, ProgramExec, BufferOptions]}
-def custom_eval(node):
-  if isinstance(node, ast.Constant): return node.value
-  if isinstance(node, ast.Tuple): return tuple(map(custom_eval, node.elts))
-  if isinstance(node, ast.List): return list(map(custom_eval, node.elts))
-  if isinstance(node, ast.Call):
-    return custom_eval(node.func)(*[custom_eval(arg) for arg in node.args], **{kwarg.arg: custom_eval(kwarg.value) for kwarg in node.keywords})
-  if isinstance(node, ast.Name): return whitelist[node.id]
-  if isinstance(node, ast.Attribute): return {"imagef": dtypes.imagef, "imageh": dtypes.imageh}[node.attr]
-  raise RuntimeError(f"couldn't parse {node}")
+eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
+  ast.Call: lambda x: safe_eval(x.func)(*[safe_eval(arg) for arg in x.args], **{kwarg.arg: safe_eval(kwarg.value) for kwarg in x.keywords}),
+  ast.Name: lambda x: whitelist[x.id], ast.Attribute: lambda x: {"imagef": dtypes.imagef, "imageh": dtypes.imageh}[x.attr]}
+def safe_eval(node): return eval_fxns[node.__class__](node)
 
 # ***** backend *****
 
@@ -103,7 +98,7 @@ class CloudHandler(BaseHTTPRequestHandler):
         h[datahash] = dat[ptr+0x28:ptr+0x28+datalen]
         ptr += 0x28+datalen
       # the cmds are always last (currently in datahash)
-      for c in custom_eval(ast.parse(h[datahash], mode="eval").body):
+      for c in safe_eval(ast.parse(h[datahash], mode="eval").body):
         #print(c)
         match c:
           case BufferAlloc():
