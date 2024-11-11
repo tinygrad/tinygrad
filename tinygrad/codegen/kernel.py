@@ -629,13 +629,14 @@ class Kernel:
           if rsrc.op is Ops.CAST: rsrc = rsrc.src[0]
           assert rsrc.op is Ops.MUL
 
-          def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
+          def fix_st(warp_dims, tcd_dims, tcd_expand, wd_pattern, tcd_pattern, st1):
             wd, tcd = self.global_dims, self.first_upcast
             assert st1.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st1.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
             assert st1.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st1.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
             new_shape = st1.shape[:tcd] + tcd_expand + st1.shape[tcd+len(tcd_dims):]  # expand the tcd
-            permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in pattern_1] + list(range(wd+len(warp_dims), tcd)) + \
-                                         [y + (wd if x == 0 else tcd) for x,y in pattern_2] + list(range(tcd+len(tcd_expand), len(new_shape)))
+            permaxis = list(range(wd)) + \
+              [i + (tcd if permute else wd) for permute, i in wd_pattern] + list(range(wd+len(warp_dims), tcd)) + \
+              [i + (wd if permute else tcd) for permute, i in tcd_pattern] + list(range(tcd+len(tcd_expand), len(new_shape)))
             return st1.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st1.shape).simplify()
 
           warp_dims = tuple(sz for _, sz in tc.threads)
