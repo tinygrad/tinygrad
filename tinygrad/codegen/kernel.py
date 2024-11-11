@@ -609,9 +609,9 @@ class Kernel:
   def get_optimized_ast(self) -> UOp:
     @functools.lru_cache(None)
     def fixup_ast(op:UOp) -> UOp:
-      arg = op.arg
-      if op.op in GroupOp.Buffer and op.src[0].op is not Ops.DEFINE_LOCAL:
-        return op.replace(src=tuple(fixup_ast(x) for x in op.src)).view(self.sts[self.bufs.index(op)])
+      ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
+      if op.op in GroupOp.Buffer and op in self.bufs: return ret.view(self.sts[self.bufs.index(op)])
+      if op.op is Ops.SINK: return ret.replace(arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
 
@@ -621,7 +621,6 @@ class Kernel:
         grouped_axis = get_axis(self.first_reduce, self.first_reduce+self.group_for_reduces)
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
-          rsrc = op.src[0] if op.src[0].op is not Ops.CAST else op.src[0].src[0]
           reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
 
           def fix_st(st: ShapeTracker, local_pattern: Tuple[Tuple[int,int], ...], upcast_pattern: Tuple[Tuple[int,int], ...]):
@@ -638,11 +637,9 @@ class Kernel:
               [y + (wd if x == 0 else tcd) for x,y in upcast_pattern] + list(range(tcd+len(tc.expanded_shape), len(new_shape)))
             return st.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st.shape).simplify()
 
-          srcs = list(rsrc.src)
+          srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
-            st = self.sts[self.bufs_for_tensor_core[op][i]]
-            srcs[i] = srcs[i].view(st)
-            if tc_pattern and srcs[i].has_st: srcs[i] = srcs[i].view(fix_st(st, *tc_pattern))
+            if tc_pattern: srcs[i] = srcs[i].view(fix_st(srcs[i].st, *tc_pattern))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
@@ -661,37 +658,34 @@ class Kernel:
               UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=upcast_axes[0]),
               UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=upcast_axes[1]),
               UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), arg=wmma_arg)
-            ret = UOp(Ops.EXPAND, tc.dtype_out, (wmma,), arg=upcast_axes[2])
+            tc_uop = UOp(Ops.EXPAND, tc.dtype_out, (wmma,), arg=upcast_axes[2])
 
           else: # for TC=3 MUL/SUM instead of WMMA
-            ret = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, reduce_axes))
+            tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, reduce_axes))
 
           new_reduce_axes = tuple(i for i in axis if i not in reduce_axes)
-          return op.replace(src=(ret,), arg=(Ops.ADD, new_reduce_axes)) if new_reduce_axes else ret
+          return ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_reduce_axes)) if new_reduce_axes else tc_uop
 
+        ret = ret.replace(arg = (op.arg[0], axis))
         if self.group_for_reduces and grouped_axis:
-          reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (fixup_ast(op.src[0]),), arg=(op.arg[0], axis))
           local_shape = (1,) * self.global_dims + self.full_shape[self.global_dims:self.global_dims+self.local_dims] + \
             tuple([self.full_shape[i] if self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i] else 1 \
               for i in range(self.first_reduce, self.first_reduce+self.group_for_reduces)]) + \
             (1,) * (self.shape_len - self.upcasted - self.group_for_reduces - self.first_reduce) + tuple([x[0] for x in self.upcasted_axis(0)])
           st_uop = ShapeTracker.from_shape(local_shape).to_uop()
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local=True), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
-          local_load = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, reduce)))
+          local_load = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, ret)))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axis))
           if op is self.reduceops[-1]: return grouped_reduce
           st_uop = ShapeTracker.from_shape(tuple([1 if i in grouped_axis else a for i,a in enumerate(local_shape)])).to_uop()
           return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
 
-        arg = (op.arg[0], axis)
-
-      return op.replace(src=tuple(fixup_ast(x) for x in op.src), arg=arg)
+      return ret
 
     return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
       (UPat(Ops.CAST, name="c").view(name="v"), lambda c,v: c.replace(src=tuple(s.view(v.st) if s.has_st else s for s in c.src))),
       (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
-      (UPat(Ops.SINK, name="op"), lambda ctx,op: None if op.arg else op.replace(arg=KernelInfo(ctx.local_dims, ctx.upcasted, ctx.dont_use_locals))),
-    ]), self)
+    ]))
 
   # **** this is the lowerer ****
 
