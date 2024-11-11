@@ -26,13 +26,11 @@ The first graph is generic. We LOAD BUFFERs `1` and `2`, ADD them and STORE the 
 
 ![viz_1](viz_1.png)
 
-After a sequence of graph rewrites, the graph specializes to how GPUs render code.
-
-See how we're still adding `a` and `b`, but this time using pointers, and <a href="https://registry.khronos.org/OpenCL/sdk/3.0/docs/man/html/get_group_id.html" target="_blank">OpenCL's `SPECIAL` lidx0</a>.
+After a sequence of graph rewrites, the graph specializes to how GPUs render code. See how we're still adding `a` and `b`, but this time using pointers, and <a href="https://registry.khronos.org/OpenCL/sdk/3.0/docs/man/html/get_group_id.html" target="_blank">OpenCL's `SPECIAL` lidx0</a>.
 
 ![viz_2](viz_2.png)
 
-VIZ displays all graph rewrites using 3 parts:
+VIZ displays all graph rewrites using 3 sections:
 
 1. Left sidebar kernel list: Groups rewrites by the schedule or kernel they belong to.
 2. Middle UOp graph: DAG visualization of all the nodes.
