@@ -83,8 +83,8 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"bitcast<{type_map[x.dtype]}>({ctx[x.src[0]]})"),
     # sign extended loads for char, short
     (UPat(Ops.LOAD, name="l", src=(UPat.var("bidx"), UPat.var('var'), UPat.var("gate"))),
-      lambda ctx,l,bidx,var,gate: f"select({ctx[var]}, {render_load_store(ctx, bidx, l.dtype in [dtypes.char, dtypes.short], \
-        8*l.dtype.itemsize)}, {ctx[gate]})"),
+      lambda ctx,l,bidx,var,gate: f"select({ctx[var]}, "
+        f"{render_load_store(ctx, bidx, l.dtype in [dtypes.char, dtypes.short], 8 * l.dtype.itemsize)}, {ctx[gate]})"),
     (UPat(Ops.LOAD, name="l", src=(UPat.var('bidx'),), allow_any_len=True), lambda ctx,l, bidx:
      f"{render_load_store(ctx, bidx, l.dtype in [dtypes.char, dtypes.short], 8*l.dtype.itemsize)}"),
     (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var")), allow_any_len=True),
