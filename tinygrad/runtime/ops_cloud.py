@@ -7,7 +7,8 @@
 from __future__ import annotations
 from typing import Tuple, Optional, Dict, Any, DefaultDict, List
 from collections import defaultdict
-import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct
+import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct, ast
+from tinygrad.dtype import dtypes
 from dataclasses import dataclass, field
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap
 from tinygrad.device import Compiled, Allocator, Compiler, Device, BufferOptions
@@ -49,6 +50,18 @@ class ProgramExec:
   local_size: Optional[Tuple[int, ...]]
   wait: bool
 
+# for safe deserialization
+whitelist = {x.__name__:x for x in [BufferAlloc, BufferFree, CopyIn, CopyOut, ProgramAlloc, ProgramFree, ProgramExec, BufferOptions]}
+def custom_eval(node):
+  if isinstance(node, ast.Constant): return node.value
+  if isinstance(node, ast.Tuple): return tuple(map(custom_eval, node.elts))
+  if isinstance(node, ast.List): return list(map(custom_eval, node.elts))
+  if isinstance(node, ast.Call):
+    return custom_eval(node.func)(*[custom_eval(arg) for arg in node.args], **{kwarg.arg: custom_eval(kwarg.value) for kwarg in node.keywords})
+  if isinstance(node, ast.Name): return whitelist[node.id]
+  if isinstance(node, ast.Attribute): return {"imagef": dtypes.imagef, "imageh": dtypes.imageh}[node.attr]
+  raise RuntimeError(f"couldn't parse {node}")
+
 # ***** backend *****
 
 @dataclass
@@ -89,10 +102,9 @@ class CloudHandler(BaseHTTPRequestHandler):
         datahash, datalen = binascii.hexlify(dat[ptr:ptr+0x20]).decode(), struct.unpack("<Q", dat[ptr+0x20:ptr+0x28])[0]
         h[datahash] = dat[ptr+0x28:ptr+0x28+datalen]
         ptr += 0x28+datalen
-      # the cmds are always last
-      cmds = eval(h[datahash]) # TODO: security
-      for c in cmds:
-        print(c)
+      # the cmds are always last (currently in datahash)
+      for c in custom_eval(ast.parse(h[datahash], mode="eval").body):
+        #print(c)
         match c:
           case BufferAlloc():
             session.buffers[c.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(c.size, c.options), c.size, c.options)
@@ -100,9 +112,10 @@ class CloudHandler(BaseHTTPRequestHandler):
             buf,sz,buffer_options = session.buffers[c.buffer_num]
             Device[CloudHandler.dname].allocator.free(buf,sz,buffer_options)
             del session.buffers[c.buffer_num]
-          case CopyIn(): Device[CloudHandler.dname].allocator.copyin(session.buffers[c.buffer_num][0], memoryview(h[c.datahash]))
+          case CopyIn(): Device[CloudHandler.dname].allocator.copyin(session.buffers[c.buffer_num][0], memoryview(bytearray(h[c.datahash])))
           case CopyOut():
-            Device[CloudHandler.dname].allocator.copyout(memoryview(ret:=bytearray(sz)), session.buffers[c.buffer_num][0])
+            buf,sz,_ = session.buffers[c.buffer_num]
+            Device[CloudHandler.dname].allocator.copyout(memoryview(ret:=bytearray(sz)), buf)
           case ProgramAlloc():
             lib = Device[CloudHandler.dname].compiler.compile_cached(h[c.datahash].decode())
             session.programs[c.datahash] = Device[CloudHandler.dname].runtime(c.name, lib)
@@ -144,7 +157,7 @@ class CloudAllocator(Allocator):
     self.device.buffer_num += 1
     self.device.q(BufferAlloc(self.device.buffer_num, size, options))
     return self.device.buffer_num
-  # TODO: options should not be here
+  # TODO: options should not be here in any Allocator
   def _free(self, opaque:int, options): self.device.q(BufferFree(opaque))
   def copyin(self, dest:int, src:memoryview): self.device.q(CopyIn(dest, self.device.h(bytes(src))))
   def copyout(self, dest:memoryview, src:int):
