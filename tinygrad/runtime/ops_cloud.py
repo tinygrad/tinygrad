@@ -10,6 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct, ast, contextlib
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from tinygrad.renderer import Renderer
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
 from tinygrad.device import Compiled, Allocator, Compiler, Device, BufferOptions
@@ -90,10 +91,8 @@ class CloudHandler(BaseHTTPRequestHandler):
     session = CloudHandler.sessions[unwrap(self.headers.get("Cookie")).split("session=")[1]]
     ret, status_code = b"", 200
     if self.path == "/batch" and method == "POST":
-      content_len = self.headers.get('Content-Length')
-      assert content_len is not None
       # TODO: streaming deserialize?
-      req = BatchRequest().deserialize(self.rfile.read(int(content_len)))
+      req = BatchRequest().deserialize(self.rfile.read(int(unwrap(self.headers.get('Content-Length')))))
       # the cmds are always last (currently in datahash)
       for c in req._q:
         if DEBUG >= 1: print(c)
@@ -194,10 +193,10 @@ class CloudDevice(Compiled):
         time.sleep(0.1)
     if DEBUG >= 1: print(f"remote has device {clouddev}")
     # TODO: how to we have BEAM be cached on the backend? this should just send a specification of the compute. rethink what goes in Renderer
-    # TODO: is this secure?
-    assert clouddev[0].startswith("tinygrad.renderer.") and clouddev[1].endswith("Renderer"), f"bad renderer {clouddev}"
-    renderer = fromimport(clouddev[0], clouddev[1])(*clouddev[2])
-    super().__init__(device, CloudAllocator(self), renderer, Compiler(), functools.partial(CloudProgram, self))
+    if not clouddev[0].startswith("tinygrad.renderer.") or not clouddev[1].endswith("Renderer"): raise RuntimeError(f"bad renderer {clouddev}")
+    renderer_class = fromimport(clouddev[0], clouddev[1])  # TODO: is this secure?
+    if not issubclass(renderer_class, Renderer): raise RuntimeError(f"renderer isn't a Renderer {clouddev}")
+    super().__init__(device, CloudAllocator(self), renderer_class(*clouddev[2]), Compiler(), functools.partial(CloudProgram, self))
 
   def __del__(self):
     # TODO: this is never being called
