@@ -42,7 +42,7 @@ class Sin(Function):
 
 class Relu(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.max(0)
+    self.ret = x.maximum(0)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.gt(0).cast(grad_output.dtype) * grad_output
@@ -156,7 +156,7 @@ class Prod(Function):
 
 class Max(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
-    self.x, self.ret, self.axis = x, x.r(ReduceOps.MAX, axis), axis
+    self.x, self.ret, self.axis = x, x.r(ReduceOps.REDUCE_MAX, axis), axis
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:

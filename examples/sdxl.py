@@ -303,7 +303,7 @@ class VanillaCFG(Guider):
 
 class SplitVanillaCFG(Guider):
   def __call__(self, denoiser, x:Tensor, s:Tensor, c:Dict, uc:Dict) -> Tensor:
-    x_u = denoiser(x, s, uc)
+    x_u = denoiser(x, s, uc).clone().realize()
     x_c = denoiser(x, s, c)
     x_pred = x_u + self.scale*(x_c - x_u)
     return x_pred

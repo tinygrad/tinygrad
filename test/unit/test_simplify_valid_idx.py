@@ -1,29 +1,25 @@
-import unittest
+import unittest, itertools
 from typing import Tuple
 
 from tinygrad.codegen.uopgraph import full_graph_rewrite, is_increasing
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp, UOps, simplify_valid
+from tinygrad.ops import UOp, Ops, simplify_valid
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
-  return UOp(UOps.LOAD, dtypes.float, (
-    UOp(UOps.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0),
-    idx,
-    UOp.const(dtypes.float, 0.0),
-    valid
+  return UOp(Ops.LOAD, dtypes.float, (
+    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0).index(idx, valid),
+    UOp.const(dtypes.float, 0.0)
   ))
 
 def get_load_image_uop(image_shape:Tuple[int, ...], valid:UOp, idx:Tuple[UOp, UOp]):
-  return UOp(UOps.LOAD, dtypes.float.vec(4), (
-    UOp(UOps.DEFINE_GLOBAL, dtypes.imagef(image_shape), arg=0),
-    UOp(UOps.VECTORIZE, dtypes.int.vec(2), idx),
-    UOp(UOps.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0),)*4),
-    valid
+  return UOp(Ops.LOAD, dtypes.float.vec(4), (
+    UOp(Ops.DEFINE_GLOBAL, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.VECTORIZE, dtypes.int.vec(2), idx), valid),
+    UOp(Ops.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
-def Special(expr, nmax): return UOp(UOps.SPECIAL, dtypes.int, (), (expr, nmax))
+def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.int, (), (expr, nmax))
 def Variable(expr, nmin, nmax): return UOp.variable(expr, nmin, nmax)
-def Range(n, nmax): return UOp(UOps.RANGE, dtypes.int, arg=(n, True), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, nmax),))
+def Range(n, nmax): return UOp(Ops.RANGE, dtypes.int, arg=(n, True), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, nmax),))
 
 class TestHelpers(unittest.TestCase):
   def test_is_increasing(self):
@@ -43,14 +39,14 @@ class TestHelpers(unittest.TestCase):
     self.assertTrue(is_increasing(f2))
     self.assertTrue(is_increasing(f3))
 
-    rng = UOp(UOps.RANGE, dtypes.int, arg=(2, True), src=(UOp(UOps.CONST, dtypes.int, arg=0, src=()), UOp(UOps.CONST, dtypes.int, arg=5, src=()),))
+    rng = UOp(Ops.RANGE, dtypes.int, arg=(2, True), src=(UOp(Ops.CONST, dtypes.int, arg=0, src=()), UOp(Ops.CONST, dtypes.int, arg=5, src=()),))
     self.assertTrue(is_increasing(rng))
     self.assertTrue(is_increasing(rng+2))
 
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid):
     load = full_graph_rewrite(load.sink()).src[0]
-    idx, valid = load.src[1], load.src[3]
+    idx, valid = load.src[0].src[1], load.src[2]
     self.assertEqual(idx.render(simplify=False), sidx)
     self.assertEqual(valid.render(simplify=False), svalid)
 
@@ -83,16 +79,36 @@ class TestValidIdxSimplification(unittest.TestCase):
     valid = alu0.lt(57) & alu0.ge(1)
     self.assertIsNone(simplify_valid(valid))
 
+  def test_valid_order_matters1(self):
+    ridx0 = Range(0, 2)
+    v0 = ridx0.lt(1)
+    v1 = ((ridx0*5+1)%6).lt(5)
+    self.assertEqual(simplify_valid(v0&v1).render(), "(ridx0<1)")
+    self.assertEqual(simplify_valid(v1&v0).render(), "(ridx0<1)")
+
+  def test_valid_order_matters2(self):
+    gidx0 = Special("gidx0", 13)
+    gidx1 = Special("gidx1", 13)
+    ridx0 = Range(0, 4)
+    alu0 = (gidx1+(ridx0*13))
+    v0 = ((gidx0+11)%14).lt(11)
+    v1 = ((alu0+((gidx0+39)//42))%14).lt(11)
+    v2 = gidx0.lt(3)
+    v3 = alu0.lt(42)
+
+    for v in itertools.permutations([v0,v1,v2,v3]):
+      self.assertEqual(simplify_valid(v[0]&v[1]&v[2]&v[3]).render(), "False")
+
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
     load = full_graph_rewrite(load.sink()).src[0]
-    idx = load.src[1]
-    self.assertEqual(idx.op, UOps.VECTORIZE)
+    idx = load.src[0].src[1]
+    self.assertEqual(idx.op, Ops.VECTORIZE)
     self.assertEqual(len(idx.src), 2)
     idx0, idx1 = idx.src[0], idx.src[1]
     self.assertEqual(idx0.render(simplify=False), sidx0)
     self.assertEqual(idx1.render(simplify=False), sidx1)
-    if svalid is not None: self.assertEqual(load.src[3].render(simplify=False), svalid)
+    if svalid is not None: self.assertEqual(load.src[2].render(simplify=False), svalid)
 
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
@@ -152,7 +168,7 @@ class TestImageSimplification(unittest.TestCase):
     # empty -> invalid
     load = get_load_image_uop(shape, (gidx0).lt(8) & (gidx0).lt(8).ne(True), idx)
     load = full_graph_rewrite(load.sink()).src[0]
-    self.assertEqual(load.op, UOps.VECTORIZE)
+    self.assertEqual(load.op, Ops.VECTORIZE)
     self.assertEqual(load.dtype.count, 4)
 
   def test_openpilot_conv1(self):

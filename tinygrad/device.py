@@ -1,18 +1,19 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple, Any, Iterator
-import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib
-from tinygrad.helpers import getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
-from tinygrad.dtype import DType, ImageDType
+from typing import Optional, Dict, Tuple, Any, Iterator
+import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys
+from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
+from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
 
 # **************** Device ****************
 
 class _Device:
-  def __init__(self) -> None: self._devices: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]  # noqa: E501
+  def __init__(self) -> None:
+    self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def _canonicalize(self, device:str) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")   # noqa: E501
+  def _canonicalize(self, device:str) -> str: return ((d:=device.split(":", 1)[0].upper()) + device[len(d):]).replace(":0", "")
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
   def canonicalize(self, device:Optional[str]) -> str: return self._canonicalize(device) if device is not None else Device.DEFAULT
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
@@ -21,7 +22,8 @@ class _Device:
     cpn = multiprocessing.current_process().name
     assert (cpn == "MainProcess") or ix.split(":")[0] in ["DISK", "NPY"], f"can only open device {ix} from parent, not {cpn}"
     x = ix.split(":")[0].upper()
-    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{__name__.split(".")[0]}.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
+    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{__name__.split(".")[0]}.runtime.ops_{x.lower()}')) \
+           if (cname.lower() == x.lower() + "device")][0](ix)
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
     return ret
   @property
@@ -53,8 +55,8 @@ class BufferOptions:
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None,
                initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
-    assert isinstance(dtype, DType)
     if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
+    else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
     self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
     if base is None:
       assert offset == 0, "base buffers can't have offset"
@@ -75,9 +77,9 @@ class Buffer:
   def lb_refcount(self): return self.base._lb_refcount
   def ref(self, cnt): self.base._lb_refcount += cnt
   def is_allocated(self) -> bool: return hasattr(self, '_buf')
-  def ensure_allocated(self) -> Buffer: return self.allocate() if not hasattr(self, '_buf') else self
+  def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
-    assert not hasattr(self, '_buf'), "can't allocate already allocated buffer"
+    assert not self.is_allocated(), "can't allocate already allocated buffer"
     self.allocator = Device[self.device].allocator
     if external_ptr is not None:
       self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferOptions(external_ptr=external_ptr)
@@ -92,7 +94,7 @@ class Buffer:
   def __reduce__(self):
     buf = None
     if self._base is not None:
-      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, hasattr(self, '_buf'))
+      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
     if self.is_allocated():
       buf = bytearray(self.nbytes)
@@ -101,14 +103,13 @@ class Buffer:
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
-    if not hasattr(self, '_buf'): return
+    if not self.is_allocated(): return
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
       self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self):
-    return f"<buf real:{hasattr(self, '_buf')} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
-           (f" offset:{self.offset}" if hasattr(self, "base") else "") + \
-           (">" if self.options is None else f" {self.options=}>")
+    return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
+           (f" offset:{self.offset}" if hasattr(self, "base") else "") + (f" {self.options=}" if self.options is not None else "") + ">"
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer') and (self.options is None or self.options.image is None):
@@ -186,6 +187,7 @@ class Compiler:
       lib = self.compile(src)
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
+  def disassemble(self, lib:bytes): pass
 
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
@@ -198,3 +200,22 @@ class Compiled:
     This method ensures that all previously queued operations on the device have been completed before proceeding.
     """
     # override this in your device implementation
+
+# TODO: move this to each Device
+def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
+  if device is None: device = Device.DEFAULT
+  if dtype == dtypes.bfloat16:
+    # NOTE: this requires bf16 buffer support
+    return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
+  if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
+  # for CI GPU and OSX, cl_khr_fp16 isn't supported
+  # for CI LLVM, it segfaults because it can't link to the casting function
+  # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
+  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
+  if dtype == dtypes.half:
+    if device == "GPU": return not CI and not OSX
+    if device in ["CUDA", "NV"]: return not CI
+    if device == "LLVM": return OSX
+    if device == "PYTHON": return sys.version_info >= (3, 12)
+  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
+  return True

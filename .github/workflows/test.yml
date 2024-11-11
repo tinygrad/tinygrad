@@ -150,7 +150,9 @@ jobs:
         IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
         IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_simple_conv2d
     - name: Test emulated METAL tensor cores
-      run: DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_big_gemm
+      run: |
+        DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_big_gemm
+        PYTHONPATH=. DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Test emulated AMX tensor cores
       run: PYTHONPATH=. DEBUG=2 AMX=1 EMULATE_AMX=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
     - name: Test emulated AMD tensor cores
@@ -159,8 +161,11 @@ jobs:
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
+        PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Test emulated CUDA tensor cores
-      run: DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
+      run: |
+        DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
+        PYTHONPATH="." DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Test emulated INTEL OpenCL tensor cores
       run: DEBUG=2 EMULATE_INTEL=1 FORWARD_ONLY=1 PYTHON=1 HALF=1 N=64 python3 ./extra/gemm/simple_matmul.py
     - name: Full test tensor cores
@@ -309,10 +314,16 @@ jobs:
         run: CLANG=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Run CLOUD=1 Test
-        run: CLOUDDEV=CLANG CLOUD=1 python3 test/test_ops.py TestOps.test_tiny_add
+        run: |
+          CLOUDDEV=CLANG CLOUD=1 python3 test/test_tiny.py
+          CLOUDDEV=GPU CLOUD=1 python3 test/test_tiny.py
+          CLOUDDEV=GPU IMAGE=2 CLOUD=1 python3 test/test_tiny.py
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Test Optimization Helpers
+        run: PYTHONPATH="." DEBUG=1 python3 extra/optimization/test_helpers.py
       - if: ${{ matrix.task == 'onnx' }}
         name: Test Action Space
-        run: PYTHONPATH="." GPU=1 python3 extra/optimization/get_action_space.py
+        run: PYTHONPATH="." DEBUG=1 GPU=1 python3 extra/optimization/get_action_space.py
       - if: ${{ matrix.task == 'onnx' }}
         name: Test Beam Search
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py

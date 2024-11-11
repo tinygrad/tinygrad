@@ -8,9 +8,9 @@ from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
-from tinygrad.ops import UnaryOps, UOps
+from tinygrad.ops import GroupOp
 from tinygrad.tensor import _to_np_dtype
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
 
@@ -79,7 +79,7 @@ def universal_test_unary(a, dtype, op):
     np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
-    op = [x for x in ast.parents if x.op is UOps.ALU and x.arg in UnaryOps][0]
+    op = [x for x in ast.parents if x.op in GroupOp.Unary][0]
     assert op.dtype == dtype
 
 def universal_test_cast(a, in_dtype, dtype):
@@ -172,44 +172,6 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skip("broken. TODO: fix it")
   @given(ht.int32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
   def test_int32_cast(self, a, dtype): universal_test_cast(a, dtypes.int32, dtype)
-
-class TestFromFuzzer(unittest.TestCase):
-  @given(strat.sampled_from(dtypes_float))
-  def test_sin(self, dtype):
-    if not is_dtype_supported(dtype): return
-    if dtype == dtypes.float64:
-      # crashes in CI CUDA
-      if getenv("MOCKGPU") and Device.DEFAULT == "NV": return
-    def _test_value(n: float, unit: float=1.0):
-      next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
-      ulp = next_float - 1.0
-      ulp = unit * ulp
-      np.testing.assert_allclose(Tensor([n], dtype=dtype).sin().numpy(), np.sin(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
-    _test_value(-35.0)
-    _test_value(-25.0)
-    _test_value(25.0)
-    _test_value(30.0) # 30.0 == switch_over
-    _test_value(35.0)
-    _test_value(0.0)
-    _test_value(np.pi / 2)
-     # worst case of ulp 1.5
-    _test_value(np.pi * 2, unit=1.5)
-  @given(strat.sampled_from(dtypes_float))
-  def test_log2(self, dtype):
-    if not is_dtype_supported(dtype): return
-    if dtype == dtypes.float64:
-      # crashes in CI CUDA
-      if getenv("MOCKGPU") and Device.DEFAULT == "NV": return
-    def _test_value(n: float, unit: float=1.0):
-      next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
-      ulp = next_float - 1.0
-      ulp = unit * ulp
-      np.testing.assert_allclose(Tensor([n], dtype=dtype).log2().numpy(), np.log2(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
-    fmin = np.finfo(_to_np_dtype(dtype)).tiny
-    for scale in [1.0, 1e10, 1e20, 1e30]:
-      _test_value(fmin * scale)
-      _test_value(-fmin * scale)
-    _test_value(0)
 
 if __name__ == '__main__':
   unittest.main()
