@@ -4,10 +4,6 @@ from tinygrad.renderer.wgsl import WGSLRenderer
 import wgpu
 import struct
 
-class WGSLCompiler(Compiler):
-  def compile(self, src):
-    return src.encode()
-
 def create_uniform(wgpu_device, val) -> wgpu.GPUBuffer:
   buf = wgpu_device.create_buffer(size=4, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
   if isinstance(val, int): wgpu_device.queue.write_buffer(buf, 0, val.to_bytes(4, "little"))
@@ -68,5 +64,5 @@ class WebGpuDevice(Compiled):
     adapter = wgpu.gpu.request_adapter(power_preference="high-performance")
     timestamp_supported = wgpu.FeatureName.timestamp_query in adapter.features
     wgpu_device = adapter.request_device(required_features=[wgpu.FeatureName.timestamp_query] if timestamp_supported else [])
-    super().__init__(device, WebGpuAllocator(wgpu_device), WGSLRenderer(), WGSLCompiler(),
+    super().__init__(device, WebGpuAllocator(wgpu_device), WGSLRenderer(), Compiler(),
                      functools.partial(WebGPUProgram, (wgpu_device, timestamp_supported)))
