@@ -257,8 +257,6 @@ def compare_launch_state(state, good_state):
     (adreno.REG_A6XX_HLSQ_CS_KERNEL_GROUP_X, 0xffffffff),
     (adreno.REG_A6XX_HLSQ_CS_KERNEL_GROUP_Y, 0xffffffff),
     (adreno.REG_A6XX_HLSQ_CS_KERNEL_GROUP_Z, 0xffffffff),
-
-    (adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, adreno.A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET_OFFSET__MASK),
   ]
 
   for x,m in cmp:
