@@ -5,23 +5,57 @@
 # it should be a secure (example: no use of pickle) boundary. HTTP is used for RPC
 
 from __future__ import annotations
-from typing import Tuple, Optional, Dict, Any, DefaultDict
+from typing import Tuple, Optional, Dict, Any, DefaultDict, List
 from collections import defaultdict
-import multiprocessing, functools, http.client, hashlib, json, time, contextlib, os, binascii
+import multiprocessing, functools, http.client, hashlib, json, time, os, binascii, struct
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes
-from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, prod
+from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap
 from tinygrad.device import Compiled, Allocator, Compiler, Device, BufferOptions
 from http.server import HTTPServer, BaseHTTPRequestHandler
+
+# ***** API *****
+
+@dataclass(frozen=True)
+class BufferAlloc:
+  buffer_num: int
+  size: int
+  options: BufferOptions
+
+@dataclass(frozen=True)
+class BufferFree: buffer_num: int
+
+@dataclass(frozen=True)
+class CopyIn:
+  buffer_num: int
+  datahash: str
+
+@dataclass(frozen=True)
+class CopyOut: buffer_num: int
+
+@dataclass(frozen=True)
+class ProgramAlloc:
+  name: str
+  datahash: str
+
+@dataclass(frozen=True)
+class ProgramFree: datahash: str
+
+@dataclass(frozen=True)
+class ProgramExec:
+  datahash: str
+  bufs: Tuple[int, ...]
+  vals: Tuple[int, ...]
+  global_size: Optional[Tuple[int, ...]]
+  local_size: Optional[Tuple[int, ...]]
+  wait: bool
 
 # ***** backend *****
 
 @dataclass
 class CloudSession:
-  programs: Dict[Tuple[str, str], Any] = field(default_factory=dict)
+  programs: Dict[str, Any] = field(default_factory=dict)
   # TODO: the buffer should track this internally
   buffers: Dict[int, Tuple[Any, int, Optional[BufferOptions]]] = field(default_factory=dict)
-  buffer_num = 0
 
 class CloudHandler(BaseHTTPRequestHandler):
   protocol_version = 'HTTP/1.1'
@@ -46,42 +80,41 @@ class CloudHandler(BaseHTTPRequestHandler):
   def _do(self, method):
     session = CloudHandler.sessions[unwrap(self.headers.get("Cookie")).split("session=")[1]]
     ret = b""
-    if self.path == "/renderer" and method == "GET":
+    if self.path == "/drain" and method == "POST":
+      # extract the hash data
+      h:Dict[str, bytes] = {}
+      ptr = 0
+      dat = self.get_data()
+      while ptr < len(dat):
+        datahash, datalen = binascii.hexlify(dat[ptr:ptr+0x20]).decode(), struct.unpack("<Q", dat[ptr+0x20:ptr+0x28])[0]
+        h[datahash] = dat[ptr+0x28:ptr+0x28+datalen]
+        ptr += 0x28+datalen
+      # the cmds are always last
+      cmds = eval(h[datahash]) # TODO: security
+      for c in cmds:
+        print(c)
+        match c:
+          case BufferAlloc():
+            session.buffers[c.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(c.size, c.options), c.size, c.options)
+          case BufferFree():
+            buf,sz,buffer_options = session.buffers[c.buffer_num]
+            Device[CloudHandler.dname].allocator.free(buf,sz,buffer_options)
+            del session.buffers[c.buffer_num]
+          case CopyIn(): Device[CloudHandler.dname].allocator.copyin(session.buffers[c.buffer_num][0], memoryview(h[c.datahash]))
+          case CopyOut():
+            Device[CloudHandler.dname].allocator.copyout(memoryview(ret:=bytearray(sz)), session.buffers[c.buffer_num][0])
+          case ProgramAlloc():
+            lib = Device[CloudHandler.dname].compiler.compile_cached(h[c.datahash].decode())
+            session.programs[c.datahash] = Device[CloudHandler.dname].runtime(c.name, lib)
+          case ProgramFree(): del session.programs[c.datahash]
+          case ProgramExec():
+            bufs = [session.buffers[x][0] for x in c.bufs]
+            extra_args = {k:v for k,v in [("global_size", c.global_size), ("local_size", c.local_size)] if v is not None}
+            r = session.programs[c.datahash](*bufs, vals=c.vals, wait=c.wait, **extra_args)
+            if r is not None: ret = str(r).encode()
+    elif self.path == "/renderer" and method == "GET":
       cls, args = Device[CloudHandler.dname].renderer.__reduce__()
       ret = json.dumps((cls.__module__, cls.__name__, args)).encode()
-    elif self.path.startswith("/alloc") and method == "POST":
-      size = int(self.path.split("=")[-1])
-      buffer_options: Optional[BufferOptions] = None
-      if 'image' in self.path:
-        image_shape = tuple([int(x) for x in self.path.split("=")[-2].split("&")[0].split(",")])
-        buffer_options = BufferOptions(image=dtypes.imageh(image_shape) if prod(image_shape)*2 == size else dtypes.imagef(image_shape))
-      session.buffer_num += 1
-      session.buffers[session.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(size, buffer_options), size, buffer_options)
-      ret = str(session.buffer_num).encode()
-    elif self.path.startswith("/buffer"):
-      key = int(self.path.split("/")[-1])
-      buf,sz,buffer_options = session.buffers[key]
-      if method == "GET": Device[CloudHandler.dname].allocator.copyout(memoryview(ret:=bytearray(sz)), buf)
-      elif method == "PUT": Device[CloudHandler.dname].allocator.copyin(buf, memoryview(bytearray(self.get_data())))
-      elif method == "DELETE":
-        Device[CloudHandler.dname].allocator.free(buf,sz,buffer_options)
-        del session.buffers[key]
-      else: return self._fail()
-    elif self.path.startswith("/program"):
-      name, hsh = self.path.split("/")[-2:]
-      if method == "PUT":
-        src = self.get_data()
-        assert hashlib.sha256(src).hexdigest() == hsh
-        lib = Device[CloudHandler.dname].compiler.compile_cached(src.decode())
-        session.programs[(name, hsh)] = Device[CloudHandler.dname].runtime(name, lib)
-      elif method == "POST":
-        j = self.get_json()
-        bufs = [session.buffers[x][0] for x in j['bufs']]
-        del j['bufs']
-        r = session.programs[(name, hsh)](*bufs, **j)
-        if r is not None: ret = str(r).encode()
-      elif method == "DELETE": del session.programs[(name, hsh)]
-      else: return self._fail()
     else: return self._fail()
     self.send_response(200)
     self.send_header('Content-Length', str(len(ret)))
@@ -106,33 +139,31 @@ class CloudAllocator(Allocator):
   def __init__(self, device:CloudDevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size:int, options) -> int:
-    # TODO: ideally we shouldn't have to deal with images here
-    extra = ("image="+','.join([str(x) for x in options.image.shape])+"&") if options.image is not None else ""
-    return int(self.device.send("POST", f"alloc?{extra}size={size}"))
-  def _free(self, opaque, options):
-    with contextlib.suppress(ConnectionRefusedError, http.client.CannotSendRequest, http.client.RemoteDisconnected):
-      self.device.send("DELETE", f"buffer/{opaque}", data=b"")
-  def copyin(self, dest:int, src:memoryview): self.device.send("PUT", f"buffer/{dest}", data=bytes(src))
+  # TODO: ideally we shouldn't have to deal with images here
+  def _alloc(self, size:int, options:BufferOptions) -> int:
+    self.device.buffer_num += 1
+    self.device.q(BufferAlloc(self.device.buffer_num, size, options))
+    return self.device.buffer_num
+  # TODO: options should not be here
+  def _free(self, opaque:int, options): self.device.q(BufferFree(opaque))
+  def copyin(self, dest:int, src:memoryview): self.device.q(CopyIn(dest, self.device.h(bytes(src))))
   def copyout(self, dest:memoryview, src:int):
-    resp = self.device.send("GET", f"buffer/{src}")
+    self.device.q(CopyOut(src))
+    resp = self.device.drain()
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
     dest[:] = resp
 
 class CloudProgram:
   def __init__(self, device:CloudDevice, name:str, lib:bytes):
     self.device = device
-    self.prgid = f"{name}/{hashlib.sha256(lib).hexdigest()}"
-    self.device.send("PUT", "program/"+self.prgid, lib)
+    self.datahash = self.device.h(lib)
+    self.device.q(ProgramAlloc(name, self.datahash))
     super().__init__()
-  def __del__(self): self.device.send("DELETE", "program/"+self.prgid)
+  def __del__(self): self.device.q(ProgramFree(self.datahash))
 
   def __call__(self, *bufs, global_size=None, local_size=None, vals:Tuple[int, ...]=(), wait=False):
-    args = {"bufs": bufs, "vals": vals, "wait": wait}
-    if global_size is not None: args["global_size"] = global_size
-    if local_size is not None: args["local_size"] = local_size
-    ret = self.device.send("POST", "program/"+self.prgid, json.dumps(args).encode())
-    if wait: return float(ret)
+    self.device.q(ProgramExec(self.datahash, bufs, vals, global_size, local_size, wait))
+    if wait: return float(self.device.drain())
 
 class CloudDevice(Compiled):
   def __init__(self, device:str):
@@ -143,7 +174,11 @@ class CloudDevice(Compiled):
       p.daemon = True
       p.start()
       self.host = "127.0.0.1:6667"
-    self.cookie = binascii.hexlify(os.urandom(0x10)).decode()
+
+    # state for the connection
+    self.session = binascii.hexlify(os.urandom(0x10)).decode()
+    self.buffer_num = 0
+
     if DEBUG >= 1: print(f"cloud with host {self.host}")
     while 1:
       try:
@@ -157,11 +192,28 @@ class CloudDevice(Compiled):
     # TODO: how to we have BEAM be cached on the backend? this should just send a specification of the compute. rethink what goes in Renderer
     assert clouddev[0].startswith("tinygrad.renderer."), f"bad renderer {clouddev}"
     renderer = fromimport(clouddev[0], clouddev[1])(*clouddev[2])
+    self.reset()
     super().__init__(device, CloudAllocator(self), renderer, Compiler(), functools.partial(CloudProgram, self))
+
+  def reset(self):
+    self._q: List[Any] = []
+    self._h: Dict[str, bytes] = {}
+
+  def h(self, d:bytes):
+    # these will be deleted from self._h after they are uploaded
+    binhash = hashlib.sha256(d).digest()
+    self._h[datahash:=binascii.hexlify(binhash).decode()] = binhash+struct.pack("<Q", len(d))+d
+    return datahash
+  def q(self, x): self._q.append(x)
+  def drain(self):
+    self.h(repr(self._q).encode())
+    ret = self.send("POST", "drain", b''.join(self._h.values()))
+    self.reset()
+    return ret
 
   def send(self, method, path, data:Optional[bytes]=None) -> bytes:
     # TODO: retry logic
-    self.conn.request(method, "/"+path, data, headers={"Cookie": f"session={self.cookie}"})
+    self.conn.request(method, "/"+path, data, headers={"Cookie": f"session={self.session}"})
     response = self.conn.getresponse()
     assert response.status == 200, f"failed on {method} {path}"
     return response.read()
