@@ -2,7 +2,7 @@
 
 ## Background
 
-Tinygrad can express an entire training job <a href="https://github.com/tinygrad/tinygrad/blob/master/examples/stunning_mnist.py" target="_blank">in a single graph</a>.
+Tinygrad can specify an entire training job <a href="https://github.com/tinygrad/tinygrad/blob/master/examples/stunning_mnist.py" target="_blank">in a single graph</a>.
 We use a graph rewrite engine to [break](developer.md#scheduling) this big graph into kernels and [lower](developer.md#lowering) it to <a href="https://github.com/tinygrad/tinygrad/tree/master/tinygrad/renderer" target="_blank">code</a>.
 
 VIZ is a UI for viewing these graph rewrites.
@@ -12,7 +12,7 @@ VIZ is a UI for viewing these graph rewrites.
 
 All you need is run tinygrad with `VIZ=1`!
 
-NOTE: Make sure you use tinygrad master `pip install git+https://github.com/tinygrad/tinygrad.git`
+NOTE: Make sure you use tinygrad **master** `pip install git+https://github.com/tinygrad/tinygrad.git`
 
 For example, it can show all the graph rewrites for an add kernel:
 ```py
@@ -23,7 +23,7 @@ b = Tensor.empty(3)
 (a + b).realize()
 ```
 
-The first graph is generic. We load `a` and `b` BUFFERs, use BinaryOps.ADD and STORE the result.
+The first graph is generic. We LOAD BUFFERs `1` and `2`, ADD them and STORE the result to BUFFER `0`.
 
 ![viz_1](viz_1.png)
 
