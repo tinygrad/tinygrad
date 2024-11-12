@@ -1,7 +1,7 @@
 from collections import defaultdict, deque
 from typing import Set, Tuple, List, Dict, DefaultDict
 from tinygrad.device import Buffer
-from tinygrad.ops import GroupOp, MetaOps, Ops, ReduceOps, UOp, UnaryOps
+from tinygrad.ops import MetaOps, Ops, ReduceOps, UOp
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts, unwrap
 from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -75,8 +75,8 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
           if not st.contiguous or tr_next_uop.op is Ops.REDUCE_AXIS: break
           tr = tr_next
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
-        if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
-          tr = tr.srcs[0].base
+        if (tr_uop:=allbufs[tr]).op is Ops.CAST and tr_uop.dtype.itemsize > tr_uop.src[0].dtype.itemsize:
+          tr = tr_uop.src[0].base.src[0]
       group = {tr: None}
       realizes[tr] = tr
     reduce_for_op.update((tr, rbuf) for tr in group)
