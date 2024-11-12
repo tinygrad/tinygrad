@@ -102,9 +102,6 @@ class Ops(FastEnum):
   CONTIGUOUS = auto()
   PRELOAD = auto()
 
-  # basic block ASAP
-  BLOCK = auto()
-
   # MetaOps
   COPY = auto()
   EMPTY = auto()
@@ -121,6 +118,9 @@ class Ops(FastEnum):
   VALID = auto()
   SPECIAL = auto()
   NOOP = auto()
+
+  # basic block ASAP
+  BLOCK = auto()
 
   # reduce
   REDUCE_AXIS = auto()

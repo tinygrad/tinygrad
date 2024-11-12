@@ -4,7 +4,7 @@ import functools, heapq
 from collections import defaultdict
 from tinygrad.ops import type_verify, UOp, Ops
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import dedup, flatten
+from tinygrad.helpers import dedup, flatten, DEBUG
 
 from tinygrad.ops import PatternMatcher, UPat, graph_rewrite
 class BasicBlock:
@@ -14,13 +14,13 @@ class BasicBlock:
   def __hash__(self): return hash((self.rngs, self.lst))
   def __eq__(self, x): return self.rngs == x.rngs and self.lst == x.lst
   def __repr__(self):
-    return f"{[y.arg[0] if y.op is Ops.RANGE else 'IF' for y in self.rngs]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
+    return f"{[y.arg[0] if y.op is Ops.RANGE else f'IF{id(y)}' for y in self.rngs]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
   @functools.cached_property
   def lst_tuplize(self): return tuple(y.tuplize for y in self.lst)
   @functools.cached_property
   def rngs_tuplize(self): return tuple(y.tuplize for y in self.rngs)
   def __lt__(self, x:BasicBlock):
-    if self.rngs == x.rngs: return self.lst_tuplize < x.lst_tuplize
+    if self.rngs == x.rngs: return False # self.lst_tuplize < x.lst_tuplize
     return self.rngs_tuplize < x.rngs_tuplize
   def add(self, x):
     if len(x) == 0: return self
@@ -40,7 +40,9 @@ def get_ranges_in_parents(x:UOp) -> Tuple[UOp, ...]:
       ret.append(get_ranges_in_parents(u))
   return tuple(dedup(sorted(flatten(ret), key=lambda x: x.tuplize)))
 
+DONT_PLACE_IN_BLOCK = {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.SPECIAL}
 def append_to_block(ctx, x:UOp):
+  children, forks = ctx
   new_srcs = []
   to_append = []
   new_blocks: DefaultDict[Tuple[UOp, ...], List[UOp]] = defaultdict(list)
@@ -50,7 +52,7 @@ def append_to_block(ctx, x:UOp):
     if u.op is Ops.BLOCK:
       if len(new_block_list:=new_blocks[u.arg.rngs]): updated = True
       new_block_list.append(u)
-    elif u.op in {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR} or len([y for y in ctx[u] if y not in block_uop_set]):
+    elif u.op in DONT_PLACE_IN_BLOCK or (len([y for y in children[u] if y not in block_uop_set]) and u not in forks):
       # it stays in srcs if it has children not in the basic or is RANGE/CONST
       new_srcs.append(u)
     else:
@@ -92,8 +94,21 @@ def block_uop(sink:UOp) -> UOp:
   range_srcs: Dict[UOp, Dict[UOp, None]] = {}
   in_degree: Dict[UOp, int] = {}
   get_children_dfs(sink, children, range_srcs, in_degree)
-  sink_bb = graph_rewrite(sink, make_basic_blocks, ctx=children)
-  return sink_bb
+
+  forks: Dict[UOp, None] = {}
+  while 1:
+    sink = graph_rewrite(sink, make_basic_blocks, ctx=(children, forks))
+
+    # some blocks have two children, find them and mark them as okay to fork
+    forks = {}
+    for block in sink.sparents:
+      if block.op is not Ops.BLOCK: continue
+      for u in block.src:
+        if u.op is Ops.BLOCK or u.op in DONT_PLACE_IN_BLOCK: continue
+        forks[u] = None
+    if len(forks) == 0: break
+
+  return sink
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
@@ -119,8 +134,10 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
   _uops: List[UOp] = []
   open_loops: List[UOp] = []
+  if DEBUG >= 6: print("*** PLACE")
   while queue:
     _,_,x = heapq.heappop(queue)
+    if DEBUG >= 6: print(x.op, x.dtype, str(x.arg).split("\n")[0] if x.op is Ops.BLOCK else x.arg)
     if x.op is Ops.BLOCK:
       _uops.extend(x.arg.lst)
       for y in x.arg.lst:
