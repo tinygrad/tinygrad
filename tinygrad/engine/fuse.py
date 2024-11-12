@@ -11,7 +11,7 @@ def _recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, D
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
   tr_uop = allbufs[tr]
-  if tr in realizes and tr_uop is not r:
+  if tr in realizes and tr is not r:
     # can only fuse contiguous
     # max one reduceop per kernel
     if not st.contiguous or st.size != (unwrap(tr_uop.st)).size or tr in reduce_for_op: group.setdefault(r)
