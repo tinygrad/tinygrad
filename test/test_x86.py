@@ -103,8 +103,6 @@ class TestX86(unittest.TestCase):
   def test_sin(self):
     a = Tensor([1,2,3]).sin().tolist()
     b = Tensor([1,2,3], device="CLANG").sin().tolist()
-    print(a)
-    print(b)
     assert np.allclose(a, b, rtol=1e-6)
 
   def test_cos(self):
@@ -117,12 +115,11 @@ class TestX86(unittest.TestCase):
     b = Tensor([1,2,3], device="CLANG").tan().tolist()
     assert np.allclose(a, b, rtol=1e-6)
 
-  # last number is 0.99999???
-  #def test_rand(self):
-  #  a = Tensor.rand(3).tolist()
+  def test_rand(self):
+    a = Tensor.rand(3).tolist()
 
-  #def test_randint(self):
-  #  a = Tensor.randint(3).tolist()
+  def test_randint(self):
+    a = Tensor.randint(3).tolist()
   
   def test_log(self):
     a = Tensor([1,2,3]).log().tolist()
