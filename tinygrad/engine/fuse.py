@@ -2,7 +2,7 @@ from collections import defaultdict, deque
 from typing import Set, Tuple, List, Dict, DefaultDict
 from tinygrad.device import Buffer
 from tinygrad.ops import GroupOp, MetaOps, Ops, ReduceOps, UOp, UnaryOps
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts, unwrap
 from tinygrad.shape.shapetracker import ShapeTracker
 
 def _recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], realizes:Dict[UOp, UOp],
@@ -10,17 +10,19 @@ def _recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, D
   """recursively search the UOp for groupable children, realize the UOp if a child can't group"""
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
-  if tr in realizes and tr is not r:
+  tr_uop = allbufs[tr]
+  if tr in realizes and tr_uop is not r:
     # can only fuse contiguous
     # max one reduceop per kernel
-    if not st.contiguous or st.size != r.st.size or tr in reduce_for_op: group.setdefault(r)
+    if not st.contiguous or st.size != (unwrap(tr_uop.st)).size or tr in reduce_for_op: group.setdefault(r)
     return group.setdefault(tr)
   for tr_next in children[tr]:
+    if (tr_next_uop:=allbufs[tr_next]).op is Ops.CONTIGUOUS and tr_next_uop.src[0].op is not Ops.LOAD: tr_next_uop = tr_next_uop.src[0]
     # max one reduceop per kernel
-    if tr_next.op in GroupOp.Reduce: return group.setdefault(r)
+    if tr_next_uop.op is Ops.REDUCE_AXIS: return group.setdefault(r)
     # can only fuse contiguous
-    if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.setdefault(r)
-    _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, allbufs, group, cache)
+    if len(st_childs:=dedup(s for s in tr_next_uop.src if s.base.src[0] == tr)) > 1: return group.setdefault(r)
+    _recursive_group(tr_next, st+unwrap(st_childs[0].st), r, children, realizes, reduce_for_op, allbufs, group, cache)
 
 def _get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultDict[UOp, Dict[UOp, None]], realizes:Dict[UOp, UOp],
                            allbufs:Dict[UOp, UOp], group:Dict[UOp, None]) -> Dict[UOp, None]:
@@ -45,7 +47,7 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
   for rbuf,r in allbufs.items():
     if rbuf in realizes or r.op is not Ops.REDUCE_AXIS: continue
     group: Dict[UOp, None] = {}
-    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, allbufs, group, cache={})
+    _recursive_group(rbuf, r.st, r, children, realizes, reduce_for_op, allbufs, group, cache={})
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
