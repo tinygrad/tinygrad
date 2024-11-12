@@ -84,8 +84,8 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
 
   # fuse double reduces with no other child
   if FUSE_CONV_BW:
-    for reduceop in double_reduces:
-      top_reduce = reduceop.base.srcs[0].base
+    for rbuf in double_reduces:
+      top_reduce = allbufs[rbuf].base.src[0].base.src[0]
       if len(children[top_reduce]) == 1: del realizes[top_reduce]
 
   for rbuf in reduce_of_const:
