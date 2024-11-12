@@ -10,11 +10,10 @@ def _recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, D
   """recursively search the UOp for groupable children, realize the UOp if a child can't group"""
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
-  tr_uop = allbufs[tr]
   if tr in realizes and tr is not r:
     # can only fuse contiguous
     # max one reduceop per kernel
-    if not st.contiguous or st.size != (unwrap(tr_uop.st)).size or tr in reduce_for_op: group.setdefault(r)
+    if not st.contiguous or st.size != (unwrap(allbufs[r].st)).size or tr in reduce_for_op: group.setdefault(r)
     return group.setdefault(tr)
   for tr_next in children[tr]:
     # max one reduceop per kernel
