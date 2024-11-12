@@ -39,10 +39,10 @@ class TestKernelSpeed(unittest.TestCase):
 
   # TODO: smaller ones has other overhead in synchronize
   # TODO: AMD number can be better (perf level?)
-  def test_gemm_1024(self): self._test_matmul(1024, nv=9, amd=5)
-  def test_gemm_2048(self): self._test_matmul(2048, nv=50, amd=20)
-  def test_gemm_4096(self): self._test_matmul(4096, nv=95, amd=30)
-  def test_gemm_8192(self): self._test_matmul(8192, nv=130, amd=50)
+  def test_gemm_1024(self): self._test_matmul(1024, nv=8, amd=7)
+  def test_gemm_2048(self): self._test_matmul(2048, nv=50, amd=30)
+  def test_gemm_4096(self): self._test_matmul(4096, nv=95, amd=65)
+  def test_gemm_8192(self): self._test_matmul(8192, nv=130, amd=70)
 
   # TODO: add gemv, which is memory bounded
 
