@@ -681,9 +681,8 @@ class Kernel:
       return ret
 
     return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
-      (UPat(Ops.CAST, name="c").view(name="v"), lambda c,v: c.replace(src=tuple(s.view(v.st) if s.has_st else s for s in c.src))),
-      (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
-    ]))
+      (UPat({*GroupOp.ALU,Ops.CAST,Ops.BITCAST,Ops.ASSIGN}, name="e").view(name="v"), lambda e,v: e.replace(src=tuple(s.view(v.st) for s in e.src))),
+      (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src)))]))
 
   # **** this is the lowerer ****
 
