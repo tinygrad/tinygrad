@@ -30,7 +30,7 @@ from tinygrad.device import is_dtype_supported
 
 def on_linearizer_will_run(): pass
 def on_linearizer_did_run(): pass
-def compare_states(x, y): return True
+def compare_states(x, y): return (True, "")
 
 if getenv("VALIDATE_HCQ"):
   if Device.DEFAULT == "NV":
