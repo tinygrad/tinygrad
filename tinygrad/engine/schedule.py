@@ -42,7 +42,7 @@ class ScheduleContext:
   buf_uops: Dict[Buffer, UOp] = field(default_factory=dict)        # this maps Buffers to BUFFER uops
   ubuf_metadata: Dict[UOp, Metadata] = field(default_factory=dict) # this maps BUFFER uops to Metadata
   var_vals: Dict[Variable, int] = field(default_factory=dict)      # this maps a BIND's DEFINE_VAR to its value
-  assigns: Set[Buffer] = field(default_factory=set)                # this holds all the UOps.BUFFERs we ASSIGN to in this schedule
+  assigns: Set[UOp] = field(default_factory=set)                   # this holds all the UOps.BUFFERs we ASSIGN to in this schedule
   lazybufs: Dict[Buffer, LazyBuffer] = field(default_factory=dict) # this is a lookup for the LazyBuffers we need to mark as realized
 
 def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children, allbufs, double_reduces, cache:Dict[LazyBuffer, UOp]) -> UOp:
@@ -72,7 +72,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children, allbufs, double_reduce
   if buf.op in GroupOp.Reduce: ret = src[0].r(buf.op, buf.arg)
   elif buf.op is Ops.CONTIGUOUS: ret = UOp(Ops.CONTIGUOUS, dtype, src)
   elif buf.op is Ops.ASSIGN:
-    ctx.assigns.add(b)
+    ctx.assigns.add(ubuf)
     ret = UOp(Ops.ASSIGN, dtype, (ubuf, src[1]), buf.arg)
   elif buf.op in GroupOp.Meta: ret = UOp(buf.op, buf.dtype, (ubuf, *src), buf.arg)
   else: ret = UOp(cast(Ops, buf.op), dtype, src)
@@ -275,17 +275,16 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   # get realizes
   realizes: Dict[UOp, UOp] = {}
   graph_rewrite(big_graph, do_realize, realizes)
-  store_groups = get_realizes(children, allbufs, double_reduces, realizes, ctx.buf_uops)
+  store_groups = get_realizes(children, allbufs, double_reduces, realizes, ctx.assigns, ctx.buf_uops)
   # split realizes into small graphs
   graph_rewrite(big_graph, break_sched, realizes)
   sinks = [UOp.sink(*(realizes[u] for u in stores)) for stores in store_groups]
   # preschedule all realizes
   bufs = list(ctx.buf_uops)
   prescheduled: List[ScheduleItem] = []
-  assigned = {ubuf for b in ctx.assigns if (ubuf:=ctx.buf_uops.get(b)) is not None}
   for sink in sinks:
     metadata = tuple({mx for x in sink.sparents if x.op in GroupOp.Buffer and len(x.src) > 2 and (mx:=ctx.ubuf_metadata.get(x.src[0]))})
-    ast, ast_ctx = full_ast_rewrite(sink, ctx.var_vals, assigned)
+    ast, ast_ctx = full_ast_rewrite(sink, ctx.var_vals, ctx.assigns)
     prescheduled.append(ScheduleItem(ast, tuple(b for u in ast_ctx.bufs if (b:=bufs[u.arg[0]]).size != 0), metadata, tuple(ast_ctx.assign_preloads)))
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
