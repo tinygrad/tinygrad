@@ -17,22 +17,21 @@ def _recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, D
     if not st.contiguous or st.size != (unwrap(tr_uop.st)).size or tr in reduce_for_op: group.setdefault(r)
     return group.setdefault(tr)
   for tr_next in children[tr]:
-    if (tr_next_uop:=allbufs[tr_next]).op is Ops.CONTIGUOUS and tr_next_uop.src[0].op is not Ops.LOAD: tr_next_uop = tr_next_uop.src[0]
     # max one reduceop per kernel
-    if tr_next_uop.op is Ops.REDUCE_AXIS: return group.setdefault(r)
+    if (tr_next_uop:=allbufs[tr_next]).op is Ops.REDUCE_AXIS: return group.setdefault(r)
     # can only fuse contiguous
     if len(st_childs:=dedup(s for s in tr_next_uop.src if s.base.src[0] == tr)) > 1: return group.setdefault(r)
     _recursive_group(tr_next, st+unwrap(st_childs[0].st), r, children, realizes, reduce_for_op, allbufs, group, cache)
 
-def _get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultDict[UOp, Dict[UOp, None]], realizes:Dict[UOp, UOp],
+def _get_isolated_children(rbuf:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultDict[UOp, Dict[UOp, None]], realizes:Dict[UOp, UOp],
                            allbufs:Dict[UOp, UOp], group:Dict[UOp, None]) -> Dict[UOp, None]:
   rc_parents, cache = deque(group), set()
   while rc_parents:
     if (p:=rc_parents.pop()) in cache: continue
     cache.add(p)
     # max one reduceop per kernel
-    if p.op in GroupOp.Reduce: return {}
-    rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
+    if (p_uop:=allbufs[p]).op is Ops.REDUCE_AXIS: return {}
+    rc_parents.extend(next_p for x in p_uop.src if x.base.op is Ops.LOAD and (next_p:=x.base.src[0]) is not rbuf)
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[UOp, None] = {}
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, allbufs, descendants, cache={})
@@ -53,7 +52,7 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = rbuf in group
     if not forced_realize and len(group) > 1:
-      group = _get_isolated_children(r, reduce_for_op, children, realizes, allbufs, group)
+      group = _get_isolated_children(rbuf, reduce_for_op, children, realizes, allbufs, group)
     # can only fuse assign if no other assign_target is used in the kernel
     if not forced_realize and any(x.op is MetaOps.ASSIGN for x in group):
       parents = deque((r, *group))
@@ -68,8 +67,7 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
         # can chase this down to contiguous children
         st = unwrap(r.st)
         while len(children[tr]) == 1:
-          tr_next = next(iter(children[tr]))
-          if (tr_next_uop:=allbufs[tr_next]).op is Ops.CONTIGUOUS and tr_next_uop.src[0].op is not Ops.LOAD: tr_next_uop = tr_next_uop.src[0]
+          tr_next_uop = allbufs[tr_next:=next(iter(children[tr]))]
           st_childs = dedup(s for s in tr_next_uop.src if s.base.src[0] == tr)
           if len(st_childs) > 1: break
           if st.size != unwrap(st_childs[0].st).size: break
