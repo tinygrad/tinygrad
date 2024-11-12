@@ -1,7 +1,7 @@
 from collections import defaultdict, deque
 from typing import Set, Tuple, List, Dict, DefaultDict
 from tinygrad.device import Buffer
-from tinygrad.ops import GroupOp, MetaOps, Ops, ReduceOps, UOp, UnaryOps
+from tinygrad.ops import GroupOp, MetaOps, ReduceOps, UOp, UnaryOps
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.engine.lazy import LazyBuffer
@@ -38,15 +38,13 @@ def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, UOp], ch
   for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def get_realizes(children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbufs:Dict[LazyBuffer, None],
-                 double_reduces:Dict[LazyBuffer, None], ubuf_realizes:Dict[UOp, UOp], buf_uops:Dict[Buffer, UOp]) -> List[List[UOp]]:
+def get_realizes(children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbufs:Dict[LazyBuffer, None], double_reduces:Dict[LazyBuffer, None],
+                 ubuf_realizes:Dict[UOp, UOp], assigns:Set[UOp], buf_uops:Dict[Buffer, UOp]) -> List[List[UOp]]:
   """search the graph for all the LazyBuffers that need to realize"""
   # get all the realizes from big graph
   realizes: Dict[LazyBuffer, None] = {}
-  assigns: Set[UOp] = set()
   for r in allbufs:
     if (ubuf:=buf_uops[r.buffer]) in ubuf_realizes: realizes[r] = None
-    if r.op is Ops.ASSIGN: assigns.add(ubuf)
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, UOp] = {}
   reduce_of_const: List[UOp] = []
