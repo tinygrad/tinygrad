@@ -47,11 +47,11 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
   for rbuf,r in allbufs.items():
     if rbuf in realizes or r.op is not Ops.REDUCE_AXIS: continue
     group: Dict[UOp, None] = {}
-    _recursive_group(rbuf, r.st, r, children, realizes, reduce_for_op, allbufs, group, cache={})
+    _recursive_group(rbuf, r.st, rbuf, children, realizes, reduce_for_op, allbufs, group, cache={})
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
-    forced_realize = r in group
+    forced_realize = rbuf in group
     if not forced_realize and len(group) > 1:
       group = _get_isolated_children(r, reduce_for_op, children, realizes, allbufs, group)
     # can only fuse assign if no other assign_target is used in the kernel
@@ -63,17 +63,18 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
           continue
         parents.extend(p.srcs)
     if forced_realize or not group:
-      tr = r
+      tr = rbuf
       if can_chase:
         # can chase this down to contiguous children
-        st = tr.st
+        st = unwrap(r.st)
         while len(children[tr]) == 1:
           tr_next = next(iter(children[tr]))
-          st_childs = dedup(s for s in tr_next.srcs if s.base is tr)
+          if (tr_next_uop:=allbufs[tr_next]).op is Ops.CONTIGUOUS and tr_next_uop.src[0].op is not Ops.LOAD: tr_next_uop = tr_next_uop.src[0]
+          st_childs = dedup(s for s in tr_next_uop.src if s.base.src[0] == tr)
           if len(st_childs) > 1: break
-          if st.size != st_childs[0].st.size: break
-          st = st + st_childs[0].st
-          if not st.contiguous or tr_next.op in GroupOp.Reduce: break
+          if st.size != unwrap(st_childs[0].st).size: break
+          st = st + unwrap(st_childs[0].st)
+          if not st.contiguous or tr_next_uop.op in GroupOp.Reduce: break
           tr = tr_next
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
         if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
