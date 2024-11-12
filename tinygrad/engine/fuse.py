@@ -68,11 +68,11 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
         st = unwrap(r.st)
         while len(children[tr]) == 1:
           tr_next_uop = allbufs[tr_next:=next(iter(children[tr]))]
-          st_childs = dedup(s for s in tr_next_uop.src if s.base.src[0] == tr)
+          st_childs = dedup(s for s in tr_next_uop.src if s.base.op is Ops.LOAD and s.base.src[0] == tr)
           if len(st_childs) > 1: break
           if st.size != unwrap(st_childs[0].st).size: break
           st = st + unwrap(st_childs[0].st)
-          if not st.contiguous or tr_next_uop.op in GroupOp.Reduce: break
+          if not st.contiguous or tr_next_uop.op is Ops.REDUCE_AXIS: break
           tr = tr_next
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
         if tr.op is UnaryOps.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
