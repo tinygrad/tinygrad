@@ -40,7 +40,7 @@ def get_ranges_in_parents(x:UOp) -> Tuple[UOp, ...]:
       ret.append(get_ranges_in_parents(u))
   return tuple(dedup(sorted(flatten(ret), key=lambda x: x.tuplize)))
 
-DONT_PLACE_IN_BLOCK = {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.BLOCKEND, Ops.BLOCKIF}
+DONT_PLACE_IN_BLOCK = {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.BLOCKEND, Ops.BLOCKIF, Ops.BLOCKFORK}
 def append_to_block(ctx, x:UOp):
   children, forks = ctx
   new_srcs = []
@@ -48,19 +48,32 @@ def append_to_block(ctx, x:UOp):
   new_blocks: DefaultDict[Tuple[UOp, ...], List[UOp]] = defaultdict(list)
   updated = False
   block_uop_set = set(x.arg.lst)
+  pend_if = None
   for u in x.src:
     if u.op is Ops.BLOCK:
-      if len(new_block_list:=new_blocks[u.arg.rngs]): updated = True
-      new_block_list.append(u)
+      return None
+      #if len(new_block_list:=new_blocks[u.arg.rngs]): updated = True
+      #new_block_list.append(u)
+    elif u in forks:
+      updated = True
+      #new_blocks[get_ranges_in_parents(u)].append(u)
+      new_srcs.append(forks[u])
     elif u.op is Ops.IF:
+      pend_if = u
       blk = UOp(Ops.BLOCK, dtypes.void, u.src, BasicBlock(get_ranges_in_parents(u), []))
-      new_srcs.append(UOp(Ops.BLOCKIF, dtypes.void, (blk,), BasicBlock(get_ranges_in_parents(u)+(u,), [u])))
-    elif u.op in DONT_PLACE_IN_BLOCK or (len([y for y in children[u] if y not in block_uop_set]) and u not in forks):
+      new_srcs.append(blk)
+      #new_srcs.append(UOp(Ops.BLOCKIF, dtypes.void, (blk,), BasicBlock(get_ranges_in_parents(u)+(u,), [u])))
+    elif u.op in DONT_PLACE_IN_BLOCK:
       # it stays in srcs if it has children not in the basic or is RANGE/CONST
       new_srcs.append(u)
+    elif (len([y for y in children[u] if y not in block_uop_set]) and u not in forks):
+      new_srcs.append(u)
+      #blk = UOp(Ops.BLOCK, dtypes.void, u.src, BasicBlock(get_ranges_in_parents(u), []))
+      #new_srcs.append(UOp(Ops.BLOCKFORK, dtypes.void, (blk,), BasicBlock(get_ranges_in_parents(u)+(u,), [u])))
+      #pass
     else:
       updated = True
-      if (rngs:=get_ranges_in_parents(u)) == x.arg.rngs:
+      if (rngs:=get_ranges_in_parents(u)) == x.arg.rngs: # and u not in forks:
         # fine to put it in this block
         new_srcs += list(u.src)
         to_append.append(u)
@@ -78,11 +91,14 @@ def append_to_block(ctx, x:UOp):
       # TODO: is this order always right?
       for c in closed[::-1]: new_src = UOp(Ops.BLOCKEND, dtypes.void, (new_src,), arg=BasicBlock([c], []))
     new_srcs.append(new_src)
+  if pend_if is not None:
+    new_srcs = [UOp(Ops.BLOCKIF, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(get_ranges_in_parents(u)+(u,), [u]))]
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
 
 make_basic_blocks = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, dtypes.void, x.src, BasicBlock([], [x]))),
   (UPat(Ops.BLOCK, name="x"), append_to_block),
+  #(UPat(Ops.BLOCK, name="x"), simple_append_to_block),
 ])
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
@@ -102,29 +118,47 @@ def block_uop(sink:UOp) -> UOp:
   in_degree: Dict[UOp, int] = {}
   get_children_dfs(sink, children, range_srcs, in_degree)
 
-  forks: Dict[UOp, None] = {}
+  forks: Dict[UOp, UOp] = {}
   while 1:
     sink = graph_rewrite(sink, make_basic_blocks, ctx=(children, forks))
 
     # some blocks have two children, find them and mark them as okay to fork
-    forks = {}
+    forks: Dict[UOp, UOp] = {}
+    non_forks: Dict[UOp, None] = {}
     for block in sink.sparents:
-      if block.op is not Ops.BLOCK: continue
+      #if block.op is not Ops.BLOCK: continue
       for u in block.src:
         if u.op is Ops.BLOCK or u.op in DONT_PLACE_IN_BLOCK: continue
-        forks[u] = None
+        if block.op is Ops.BLOCK:
+          blk = UOp(Ops.BLOCK, dtypes.void, u.src, BasicBlock(get_ranges_in_parents(u), [u]))
+          forks[u] = UOp(Ops.BLOCKFORK, dtypes.void, (blk,))
+        else:
+          non_forks[u] = None
+    for k in non_forks:
+      if k in forks:
+        del forks[k]
     if len(forks) == 0: break
 
+        #forks[u] = None #UOp(Ops.BLOCK, dtypes.void, u.src, BasicBlock(get_ranges_in_parents(u), [u]))
+        #if u not in forks:
+          #blk = UOp(Ops.BLOCK, dtypes.void, u.src, BasicBlock(get_ranges_in_parents(u), [u]))
+          #forks[u] = UOp(Ops.BLOCKFORK, dtypes.void, (u,))
+    #replace_forks = PatternMatcher([
+    #  (UPat(Ops.BLOCK, name="x"), lambda ctx,x: x.replace(src=tuple(ctx.get(u, u) for u in x.src)) if any(u in ctx for u in x.src) else None),
+    #])
+    #sink = graph_rewrite(sink, replace_forks, forks)
+
+    #for k,v in forks.items():
+    #  sink = sink.substitute({k:v})
+
   # terrible O(n^2) algo
-  cc = defaultdict(list)
-  dd: DefaultDict[BasicBlock, List[UOp]] = defaultdict(list)
+  cc: DefaultDict[BasicBlock, List[UOp]] = defaultdict(list)
   for block in sink.sparents:
     if block.op is Ops.BLOCKEND:
       cc[block.arg].append(block)
-      dd[block.arg].extend(block.src)
   for k,v in cc.items():
     if len(v) > 1:
-      rep = UOp(Ops.BLOCKEND, dtypes.void, tuple(dedup(dd[k])), k)
+      rep = UOp(Ops.BLOCKEND, dtypes.void, tuple(dedup(flatten(x.src for x in v))), k)
       sink = sink.substitute({u:rep for u in v})
 
   # show graph for VIZ
@@ -143,6 +177,23 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   in_degree: Dict[UOp, int] = {}
   get_children_dfs(sink_bb, children, range_srcs, in_degree)
 
+  """
+  ret: List[UOp] = []
+  placed: Set[UOp] = {}
+  placable = []
+
+  def place(x):
+    placed.add(x)
+    ret.append(x)
+    for u in x.src:
+      if all(y in placed for y in children[u]):
+        placable.append(u)
+
+  place(sink_bb)
+
+  return ret
+  """
+
   # NOTE: the compare should never make it all the way to u
   queue:List[Tuple[int, Tuple, UOp]] = []
   def push(u:UOp):
@@ -160,7 +211,10 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     _,_,x = heapq.heappop(queue)
     if DEBUG >= 6: print(x.op, x.dtype, str(x.arg).split("\n")[0] if x.op in {Ops.BLOCK, Ops.BLOCKIF, Ops.BLOCKEND} else x.arg)
     if x.op is Ops.BLOCK:
+      for u in x.arg.lst: assert u not in _uops, f"replacing {u.op}"
       _uops.extend(x.arg.lst)
+    elif x.op is Ops.BLOCKFORK:
+      pass
     elif x.op is Ops.BLOCKIF:
       _uops.extend(x.arg.lst)
       open_loops.append(x.arg.lst[0])

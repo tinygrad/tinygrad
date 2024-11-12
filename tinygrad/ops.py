@@ -156,13 +156,13 @@ class Ops(FastEnum):
   # basic block at the end (but before range)
   BLOCKEND = auto()
   BLOCK = auto()
+  BLOCKFORK = auto()
+  BLOCKIF = auto()
 
   # control flow ops
   BARRIER = auto()
   IF = auto()
   RANGE = auto()
-
-  BLOCKIF = auto()
 
   # ops that are not graph nodes
   ENDRANGE = auto()
