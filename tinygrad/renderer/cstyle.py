@@ -81,13 +81,14 @@ class CStyleLanguage(Renderer):
   type_map: Dict[DType, str] = {}
   infinity: str = "INFINITY"
   nan: str = "NAN"
-  code_for_op: Dict = { TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})",
-    BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})", BinaryOps.IDIV: lambda a,b,dtype: f"({a}/{b})", UnaryOps.NEG: lambda x,dtype: f"-{x}",
-    BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.SHL: lambda a,b,dtype: f"({a}<<{b})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
-    BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SHR: lambda a,b,dtype: f"({a}>>{b})", BinaryOps.OR: lambda a,b,dtype: f"({a}|{b})",
-    BinaryOps.AND: lambda a,b,dtype: f"({a}&{b})", UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})",
-    BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})",
-    BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})", UnaryOps.RECIP: lambda x,dtype: f"(1/{x})" }
+  code_for_op: Dict = {
+    UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})", UnaryOps.RECIP: lambda x,dtype: f"(1/{x})", UnaryOps.NEG: lambda x,dtype: f"-{x}",
+    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
+    BinaryOps.AND: lambda a,b,dtype: f"({a}&{b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})", BinaryOps.OR: lambda a,b,dtype: f"({a}|{b})",
+    BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})",
+    BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})", BinaryOps.IDIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.CMPNE: lambda a,b,dtype: f"({a}!={b})",
+    BinaryOps.SHR: lambda a,b,dtype: f"({a}>>{b})", BinaryOps.SHL: lambda a,b,dtype: f"({a}<<{b})", BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})",
+    TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})" }
 
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
