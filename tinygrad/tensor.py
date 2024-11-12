@@ -464,9 +464,9 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
 
   @staticmethod
-  def _threefry_random_bits(key, counts0, counts1):
+  def _threefry_random_bits(key:Tensor, counts0:Tensor, counts1:Tensor):
     x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
-    x = F.Threefry.apply(*x._broadcasted(key))
+    x = F.Threefry.apply(x, (key[1]._broadcast_to(x.shape).cast(dtypes.uint64) << 32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
     counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
     return counts0.cat(counts1)
 
@@ -494,9 +494,9 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
     # generate per device seeds and rng counter if we haven't seen this device yet
     if device not in Tensor._device_seeds:
-      Tensor._device_seeds[device] = Tensor([((Tensor._seed & 0xffffffff) << 32) \
-        | int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big") & 0xffffffff],
-                                            device=device, dtype=dtypes.uint64, requires_grad=False)
+      Tensor._device_seeds[device] = Tensor(
+        [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed],
+        device=device, dtype=dtypes.uint32, requires_grad=False)
       Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint32, requires_grad=False)
       had_counter = False
     else: had_counter = True
@@ -611,6 +611,26 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
     return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumsum() + (start - step)).cast(dtype)
+
+  @staticmethod
+  def linspace(start:Union[int, float], stop:Union[int, float], steps:int, **kwargs) -> Tensor:
+    """
+    Returns a 1-D tensor of `steps` evenly spaced values from `start` to `stop`, inclusive.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.linspace(0, 10, 5).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.linspace(-1, 1, 5).numpy())
+    ```
+    """
+    if steps < 0: raise ValueError("number of steps must be non-negative")
+    if (dtype := to_dtype(kwargs.pop("dtype", dtypes.default_float))) == dtypes.bool: raise ValueError("linspace with bool dtype is not supported")
+    if steps == 1: return Tensor([start], dtype=dtype, **kwargs)
+    return (start + Tensor.arange(steps, **kwargs) * ((stop - start) / (steps - 1))).cast(dtype)
 
   @staticmethod
   def eye(n:int, m:Optional[int]=None, **kwargs) -> Tensor:
@@ -734,7 +754,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     if not isinstance(low, int) or not isinstance(high, int): raise TypeError(f"{low=} and {high=} must be integers")
-    dtype = kwargs.pop("dtype", dtypes.int32)
+    dtype = to_dtype(kwargs.pop("dtype", dtypes.int32))
     if not dtypes.is_int(dtype): raise TypeError(f"{dtype=} must be int")
     return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
 
