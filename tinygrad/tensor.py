@@ -628,7 +628,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     if steps < 0: raise ValueError("number of steps must be non-negative")
-    dtype = kwargs.pop("dtype", dtypes.default_float)
+    if (dtype := to_dtype(kwargs.pop("dtype", dtypes.default_float))) == dtypes.bool: raise ValueError("linspace with bool dtype is not supported")
     if steps == 1: return Tensor([start], dtype=dtype, **kwargs)
     return (start + Tensor.arange(steps, **kwargs) * ((stop - start) / (steps - 1))).cast(dtype)
 
@@ -754,7 +754,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     if not isinstance(low, int) or not isinstance(high, int): raise TypeError(f"{low=} and {high=} must be integers")
-    dtype = kwargs.pop("dtype", dtypes.int32)
+    dtype = to_dtype(kwargs.pop("dtype", dtypes.int32))
     if not dtypes.is_int(dtype): raise TypeError(f"{dtype=} must be int")
     return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
 
