@@ -5,9 +5,8 @@ from tinygrad.ops import GroupOp, MetaOps, Ops, ReduceOps, UOp, UnaryOps
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts
 from tinygrad.shape.shapetracker import ShapeTracker
 
-def _recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]],
-                     realizes:Dict[UOp, None], reduce_for_op:Dict[UOp, UOp], group:Dict[UOp, None],
-                     cache:Dict[Tuple[UOp, ShapeTracker], None]) -> None:
+def _recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], realizes:Dict[UOp, UOp],
+                     reduce_for_op:Dict[UOp, UOp], allbufs:Dict[UOp, UOp], group:Dict[UOp, None], cache:Dict[Tuple[UOp, ShapeTracker], None]) -> None:
   """recursively search the UOp for groupable children, realize the UOp if a child can't group"""
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
@@ -21,10 +20,10 @@ def _recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, D
     if tr_next.op in GroupOp.Reduce: return group.setdefault(r)
     # can only fuse contiguous
     if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.setdefault(r)
-    _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
+    _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, allbufs, group, cache)
 
-def _get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultDict[UOp, Dict[UOp, None]],\
-    realizes:Dict[UOp, None], group:Dict[UOp, None]) -> Dict[UOp, None]:
+def _get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultDict[UOp, Dict[UOp, None]], realizes:Dict[UOp, UOp],
+                           allbufs:Dict[UOp, UOp], group:Dict[UOp, None]) -> Dict[UOp, None]:
   rc_parents, cache = deque(group), set()
   while rc_parents:
     if (p:=rc_parents.pop()) in cache: continue
@@ -34,7 +33,7 @@ def _get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:Default
     rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[UOp, None] = {}
-  for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
+  for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, allbufs, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
 def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], double_reduces:Dict[UOp, None],
@@ -46,13 +45,13 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
   for rbuf,r in allbufs.items():
     if rbuf in realizes or r.op is not Ops.REDUCE_AXIS: continue
     group: Dict[UOp, None] = {}
-    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, cache={})
+    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, allbufs, group, cache={})
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = r in group
     if not forced_realize and len(group) > 1:
-      group = _get_isolated_children(r, reduce_for_op, children, realizes, group)
+      group = _get_isolated_children(r, reduce_for_op, children, realizes, allbufs, group)
     # can only fuse assign if no other assign_target is used in the kernel
     if not forced_realize and any(x.op is MetaOps.ASSIGN for x in group):
       parents = deque((r, *group))
