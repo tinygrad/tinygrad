@@ -6,6 +6,7 @@ import torch
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit
 from tinygrad.helpers import getenv, CI
 from tinygrad.device import is_dtype_supported
+from tinygrad.engine.realize import lower_schedule, CompiledRunner
 from hypothesis import given, settings, strategies as strat
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -95,6 +96,12 @@ class TestRandomness(unittest.TestCase):
     r = Tensor._threefry_random_bits(Tensor([0, 1337], dtype='uint32'), counts0, counts1).numpy()
 
     np.testing.assert_allclose(jr, r)
+
+  def test_threefry_doesnt_use_long(self):
+    for ei in lower_schedule(Tensor.rand(20).schedule()):
+      if isinstance(ei.prg, CompiledRunner):
+        for u in ei.prg.p.uops:
+          self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {ei.prg.p.name}")
 
   def test_threefry_against_reference_full(self):
     Tensor.manual_seed(1337)
