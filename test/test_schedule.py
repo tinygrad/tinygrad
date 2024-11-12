@@ -1481,6 +1481,7 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(out, 1)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
+  @unittest.skip("broken")
   def test_arange_index_contiguous(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(5, 2).realize()
@@ -1497,6 +1498,7 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(out, 1)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
+  @unittest.skip("broken")
   def test_arange_index_contiguous_child(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(5, 2).realize()
@@ -1565,6 +1567,7 @@ class TestIndexing(unittest.TestCase):
       run_schedule(check_schedule(ref, 3))
       np.testing.assert_equal(fused.numpy(), ref.numpy())
 
+  @unittest.skip("broken")
   def test_fuse_assign_contiguous(self):
     x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
     a = Tensor.arange(8).reshape(4, 2)

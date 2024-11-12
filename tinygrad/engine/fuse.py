@@ -1,7 +1,7 @@
 from collections import defaultdict, deque
 from typing import Set, Tuple, List, Dict, DefaultDict
 from tinygrad.device import Buffer
-from tinygrad.ops import MetaOps, Ops, ReduceOps, UOp
+from tinygrad.ops import MetaOps, Ops, UOp
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts, unwrap
 from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -80,7 +80,7 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
       group = {tr: None}
       realizes[tr] = tr
     reduce_for_op.update((tr, rbuf) for tr in group)
-    if FUSE_ARANGE and r.op is ReduceOps.SUM and r.srcs[0].base.op is MetaOps.CONST: reduce_of_const.append(rbuf)
+    if FUSE_ARANGE and r.arg[0] is Ops.ADD and r.src[0].base.op not in {Ops.LOAD, Ops.PRELOAD}: reduce_of_const.append(rbuf)
 
   # fuse double reduces with no other child
   if FUSE_CONV_BW:
@@ -90,8 +90,7 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
 
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
-    if any(tr.forced_realize for tr in group): continue
-    kernel_children = {c for tr in group for c in children[tr] if c.op not in {MetaOps.COPY, MetaOps.BUFFER_VIEW}}
+    kernel_children = {c for tr in group for c in children[tr] if allbufs[c].op not in {MetaOps.COPY, MetaOps.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group: del realizes[tr]
 
