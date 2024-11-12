@@ -276,10 +276,10 @@ sym = symbolic_flat+PatternMatcher([
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
   # threefry + remove longs
   (UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32),
+  (UPat.var('x', dtype=dtypes.uint32).cast(dtypes.uint64).cast(dtypes.uint32), lambda x: x),   # cast there and back is noop (TODO: genericize)
   ((UPat.var('x', dtype=dtypes.uint64)&0xFFFFFFFF).cast(dtypes.uint32), lambda x: x.cast(dtypes.uint32)),  # cast does truncation
-  (((UPat(dtype=dtypes.uint64)*(1<<32)) | UPat.var('x', dtype=dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda x: x),
-  (((UPat.var('x', dtype=dtypes.uint64)*(1<<32))|UPat(dtype=dtypes.uint32).cast(dtypes.uint64))//(1<<32), lambda x: x),
-  (UPat.var('x', dtype=dtypes.uint32).cast(dtypes.uint64).cast(dtypes.uint32), lambda x: x),
+  (((UPat.var('x', dtype=dtypes.uint64)*(1<<32)) | UPat.var('y', dtype=dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda x,y: y),
+  (((UPat.var('x', dtype=dtypes.uint64)*(1<<32)) | UPat.var('y', dtype=dtypes.uint32).cast(dtypes.uint64))//(1<<32), lambda x,y: x),
   # arange loop folding
   (acc_pat.assign(UPat.any(arange_m, arange_m+UPat.var("extra"))+acc_pat), loop_collapse),
   # indexing, with cast or where
