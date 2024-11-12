@@ -1,12 +1,12 @@
 from collections import defaultdict, deque
-from typing import Set, Tuple, List, Dict, DefaultDict
+from typing import Tuple, List, Dict, DefaultDict
 from tinygrad.ops import Ops, UOp
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts, unwrap
 from tinygrad.shape.shapetracker import ShapeTracker
 
 def _recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], realizes:Dict[UOp, UOp], allbufs:Dict[UOp, UOp],
                      reduce_for_op:Dict[UOp, UOp], group:Dict[UOp, None], cache:Dict[Tuple[UOp, ShapeTracker], None]) -> None:
-  """recursively search the UOp for groupable children, realize the UOp if a child can't group"""
+  """recursively search the uop for groupable children, realize the UOp if a child can't group"""
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
   reduceop_size = unwrap(allbufs[r].st).size
@@ -36,9 +36,9 @@ def _get_isolated_children(rbuf:UOp, reduce_for_op:Dict[UOp, UOp], children:Defa
   for tr in group: _recursive_group(tr, unwrap(allbufs[tr].st), tr, children, realizes, allbufs, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], double_reduces:Dict[UOp, None], realizes:Dict[UOp, UOp],
-                 assigns:Set[UOp]) -> List[List[UOp]]:
-  """search the graph for all the LazyBuffers that need to realize"""
+def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], double_reduces:Dict[UOp, None],
+                 realizes:Dict[UOp, UOp]) -> List[List[UOp]]:
+  """search the graph for all the uops that need to realize"""
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[UOp, UOp] = {}
   reduce_of_const: List[UOp] = []
@@ -56,8 +56,7 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
     if not forced_realize and any(allbufs[x].op is Ops.ASSIGN for x in group):
       parents = deque((rbuf, *group))
       while parents and not forced_realize:
-        p = parents.pop()
-        if (p_uop:=allbufs.get(p)) is None: continue
+        if (p_uop:=allbufs.get(p:=parents.pop())) is None: continue
         if p_uop.op is Ops.ASSIGN and p not in group: forced_realize, can_chase = True, False
         if p in realizes: continue
         parents.extend([x.base.src[0] for x in p_uop.src if x.base.op in {Ops.LOAD, Ops.PRELOAD}])
