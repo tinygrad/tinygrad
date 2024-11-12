@@ -47,55 +47,55 @@ jobs:
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
-      run: test/external/process_replay/reset.py
+      run: python3.11 test/external/process_replay/reset.py
     - name: Run Stable Diffusion
-      run: JIT=2 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+      run: JIT=2 python3.11 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run Stable Diffusion with fp16
-      run: JIT=2 python3 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd_fp16.txt
+      run: JIT=2 python3.11 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd_fp16.txt
     - name: Run SDXL
-      run: JIT=2 python3 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
+      run: JIT=2 python3.11 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
     - name: Run model inference benchmark
-      run: METAL=1 python3 test/external/external_model_benchmark.py
+      run: METAL=1 python3.11 test/external/external_model_benchmark.py
     - name: Test speed vs torch
-      run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+      run: BIG=2 MPS=1 python3.11 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Test tensor cores
-      run: METAL=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
+      run: METAL=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Run Tensor Core GEMM
       run: |
-        DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
-        DEBUG=2 HALF=1 python3 extra/gemm/simple_matmul.py | tee matmul_half.txt
+        DEBUG=2 python3.11 extra/gemm/simple_matmul.py | tee matmul.txt
+        DEBUG=2 HALF=1 python3.11 extra/gemm/simple_matmul.py | tee matmul_half.txt
     - name: Fuzz Padded Tensor Core GEMM
-      run: METAL=1 M_START=6 M_STOP=10 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=6 K_STOP=24 K_STEP=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
+      run: METAL=1 M_START=6 M_STOP=10 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=6 K_STOP=24 K_STEP=1 TC_OPT=2 DEBUG=2 python3.11 ./extra/gemm/fuzz_matmul.py
     - name: Run LLaMA
       run: |
-        JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
-        JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+        JIT=0 python3.11 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        JIT=1 python3.11 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run LLaMA with BEAM
-      run: JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
+      run: JITBEAM=2 IGNORE_BEAM_CACHE=1 python3.11 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_beam.txt
     - name: Run quantized LLaMA
       run: |
-        python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing --quantize int8 | tee llama_int8.txt
-        python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing --quantize nf4 | tee llama_nf4.txt
+        python3.11 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing --quantize int8 | tee llama_int8.txt
+        python3.11 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing --quantize nf4 | tee llama_nf4.txt
     - name: Run LLaMA 7B on 4 (virtual) GPUs
-      run: python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
+      run: python3.11 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 10 --temperature 0  --timing | tee llama_four_gpu.txt
     - name: Run GPT2
       run: |
-        JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
-        JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
+        JIT=0 python3.11 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
+        JIT=1 python3.11 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run GPT2 w HALF
-      run: HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
+      run: HALF=1 python3.11 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half.txt
     - name: Run GPT2 w HALF/BEAM
-      run: HALF=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 CAST_BEFORE_VIEW=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
+      run: HALF=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 CAST_BEFORE_VIEW=0 python3.11 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
     - name: Train MNIST
-      run: time PYTHONPATH=. TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
+      run: time PYTHONPATH=. TARGET_EVAL_ACC_PCT=96.0 python3.11 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps
-      run: JIT=2 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+      run: JIT=2 STEPS=10 python3.11 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
-      run: JIT=2 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+      run: JIT=2 STEPS=10 DEFAULT_FLOAT=HALF python3.11 examples/hlb_cifar10.py | tee train_cifar_half.txt
     #- name: Run 10 CIFAR training steps w BF16
-    #  run: STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
+    #  run: STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3.11 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     - name: Run 10 CIFAR training steps w winograd
-      run: JIT=2 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
+      run: JIT=2 WINO=1 STEPS=10 python3.11 examples/hlb_cifar10.py | tee train_cifar_wino.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)
@@ -123,7 +123,7 @@ jobs:
           train_cifar_bf16.txt
           train_cifar_wino.txt
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3.11 process_replay.py
 
   testnvidiabenchmark:
     name: tinybox green Benchmark
@@ -157,7 +157,7 @@ jobs:
     - name: Run model inference benchmark
       run: NV=1 RUN_PROCESS_REPLAY=0 NOCLANG=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
-      run: NV=1 RUN_PROCESS_REPLAY=0 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+      run: NV=1 RUN_PROCESS_REPLAY=0 HALF=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Test tensor cores
       run: |
         NV=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
@@ -170,8 +170,10 @@ jobs:
       run: NV=1 PTX=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_ptx.txt
     - name: Run Tensor Core GEMM (NV)
       run: NV=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_nv.txt
-    - name: Run Tensor Core GEMM (NV) with BEAM
-      run: BEAM=4 NV=1 HALF=1 IGNORE_BEAM_CACHE=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
+    # - name: Run Tensor Core GEMM (NV) with BEAM
+    #   run: BEAM=4 NV=1 HALF=1 IGNORE_BEAM_CACHE=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
+    - name: Test speed vs theoretical
+      run: NV=1 IGNORE_BEAM_CACHE=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py
     - name: Run Stable Diffusion
       run: NV=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run SDXL
@@ -328,6 +330,10 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
+    - name: setup perflevel
+      run: |
+        examples/mlperf/training_submission_v4.1/tinycorp/benchmarks/bert/implementations/tinybox_red/setup.sh
+        rocm-smi
     - name: Show off tinybox
       run: /opt/rocm/bin/rocm-bandwidth-test
     # TODO: unstable on AMD
@@ -343,6 +349,8 @@ jobs:
         AMD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Run Tensor Core GEMM (AMD)
       run: AMD=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt
+    - name: Test speed vs theoretical
+      run: AMD=1 IGNORE_BEAM_CACHE=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py
     # TODO: AMD compiler bug causes this to fail
     #- name: Fuzz Padded Tensor Core GEMM
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
@@ -431,6 +439,10 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
+    - name: setup perflevel
+      run: |
+        examples/mlperf/training_submission_v4.1/tinycorp/benchmarks/bert/implementations/tinybox_red/setup.sh
+        rocm-smi
     - name: Train MNIST
       run: time PYTHONPATH=. AMD=1 TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps

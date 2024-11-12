@@ -155,7 +155,7 @@ class QCOMComputeQueue(HWComputeQueue):
 
     if args_state.prg.tex_cnt > 0:
       self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
-                                                                 state_block=adreno.SB6_CS_TEX, num_unit=args_state.prg.tex_cnt),
+                                                                 state_block=adreno.SB6_CS_TEX, num_unit=min(16, args_state.prg.tex_cnt)),
                *data64_le(args_state.ptr + args_state.prg.tex_off))
       self.reg(adreno.REG_A6XX_SP_CS_TEX_CONST, *data64_le(args_state.ptr + args_state.prg.tex_off))
 
@@ -247,14 +247,15 @@ class QCOMProgram(HCQProgram):
     self.buf_info, self.consts_info = [], []
 
     # Collect sampler info.
-    self.samp_cnt = _read_lib(image_desc_off + 0xdc)
+    self.samp_cnt = samp_cnt_in_file = _read_lib(image_desc_off + 0xdc)
     assert self.samp_cnt <= 1, "Up to one sampler supported"
     if self.samp_cnt:
+      self.samp_cnt += 1
       self.samplers = [qreg.a6xx_tex_samp_0(wrap_s=(clamp_mode:=adreno.A6XX_TEX_CLAMP_TO_BORDER), wrap_t=clamp_mode, wrap_r=clamp_mode),
-                       qreg.a6xx_tex_samp_1(unnorm_coords=True, cubemapseamlessfiltoff=True), 0, 0]
+                       qreg.a6xx_tex_samp_1(unnorm_coords=True, cubemapseamlessfiltoff=True), 0, 0, 0, 0, 0, 0]
 
     # Collect kernel arguments (buffers) info.
-    bdoff = round_up(image_desc_off + 0x158 + len(self.name), 4) + 8 * self.samp_cnt
+    bdoff = round_up(image_desc_off + 0x158 + len(self.name), 4) + 8 * samp_cnt_in_file
     while bdoff + 32 <= len(self.lib):
       length, _, _, offset_words, _, _, _, typ = struct.unpack("IIIIIIII", self.lib[bdoff:bdoff+32])
       if length == 0: break
@@ -263,7 +264,7 @@ class QCOMProgram(HCQProgram):
 
     # Setting correct offsets to textures/ibos.
     self.tex_cnt, self.ibo_cnt = sum(x.type is BUFTYPE_TEX for x in self.buf_info), sum(x.type is BUFTYPE_IBO for x in self.buf_info)
-    self.samp_off, self.ibo_off, self.tex_off = 2048, 2048 + 0x10 * self.samp_cnt, 2048 + 0x10 * self.samp_cnt + 0x40 * self.ibo_cnt
+    self.ibo_off, self.tex_off, self.samp_off = 2048, 2048 + 0x40 * self.ibo_cnt, 2048 + 0x40 * self.tex_cnt + 0x40 * self.ibo_cnt
     cur_ibo_off, cur_tex_off = self.ibo_off, self.tex_off
     for x in self.buf_info:
       if x.type is BUFTYPE_IBO: x.offset, cur_ibo_off = cur_ibo_off, cur_ibo_off + 0x40
@@ -307,10 +308,10 @@ class QCOMAllocator(HCQAllocator):
       texture.pitch, texture.real_stride = pitch, real_stride
 
       tex_fmt = adreno.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else adreno.FMT6_16_16_16_16_FLOAT
-      texture.desc[0] = qreg.a6xx_tex_const_0(swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt)
+      texture.desc[0] = qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt)
       texture.desc[1] = qreg.a6xx_tex_const_1(width=imgw, height=imgh)
       texture.desc[2] = qreg.a6xx_tex_const_2(type=adreno.A6XX_TEX_2D, pitch=texture.pitch, pitchalign=pitchalign-6)
-      texture.desc[4:7] = [*data64_le(texture.va_addr), qreg.a6xx_tex_const_6(plane_pitch=0x400000)]
+      texture.desc[4:8] = [*data64_le(texture.va_addr), qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13)]
       texture.ibo = [texture.desc[0] & (~0xffff), *texture.desc[1:len(texture.desc)]]
 
       return texture

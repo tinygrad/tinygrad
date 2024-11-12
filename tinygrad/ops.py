@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp, T
+from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp, unwrap, T
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -314,7 +314,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   def sink(self, *srcs:UOp): return UOp(Ops.SINK, dtypes.void, (self,)+srcs)
   def index(self, idx:UOp, valid:Optional[UOp]=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
-  def view(self, st:ShapeTracker): return UOp(Ops.VIEW, self.dtype, (self,), st)
   def const_like(self, b:ConstLike): return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
@@ -350,6 +349,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op] if op in GroupOp.Reduce else op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
 
+  # *** uop movement ops ***
+
+  def view(self, st:ShapeTracker): return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
+  def reshape(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).reshape(arg))
+
   # *** uop Variable stuff ***
 
   @staticmethod
@@ -383,7 +387,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is Ops.CONST: return self.arg
-    if self.op is Ops.VCONST: return functools.reduce(math.gcd, self.arg)
+    if self.op is Ops.VCONST: return math.gcd(*self.arg)
     if self.op is BinaryOps.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
     if self.op is BinaryOps.MUL: return self.src[0].arg if self.src[0].op is Ops.CONST else self.src[1].arg if self.src[1].op is Ops.CONST else 1
     return 1
@@ -634,7 +638,6 @@ class PatternMatcher:
     for p,fxn in self.patterns:
       assert p.op is not None
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
-      tuple_fxn[1]['__builtins__'] = __builtins__  # NOTE: Python 3.8 requires this for "all" and "len" and friends
       real_fxn = types.FunctionType(*tuple_fxn)
       for uop in p.op: self.pdict.setdefault(uop, []).append((p, real_fxn, p.early_reject, 'ctx' in inspect.signature(real_fxn).parameters))
 
@@ -905,7 +908,7 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
 
 def lt_folding(x:UOp, c:int) -> Optional[UOp]:
   p, np = partition(split_uop(x, BinaryOps.ADD), lambda u: u.const_factor() == 1)
-  if np and (d:=functools.reduce(math.gcd, [u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
+  if np and (d:=math.gcd(*[u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
     return cast(UOp, functools.reduce(operator.add, np).divides(d)).lt(c//d)
   return None
 
@@ -1054,6 +1057,8 @@ symbolic = symbolic_simple+PatternMatcher([
   (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
   # group like
   ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
+  # ** boolean algebra **
+  (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
   (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
