@@ -483,7 +483,7 @@ class TestIndexing(unittest.TestCase):
     def get_set_tensor(indexed: Tensor, indexer):
       set_size = indexed[indexer].shape
       set_count = indexed[indexer].numel()
-      set_tensor = Tensor.randint(set_count, high=set_count).reshape(set_size).cast(dtypes.float64)
+      set_tensor = Tensor.randint(set_count, high=set_count).reshape(set_size) #.cast(dtypes.float64)
       return set_tensor
 
     # Tensor is  0  1  2  3  4

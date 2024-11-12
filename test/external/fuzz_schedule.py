@@ -2,9 +2,9 @@ import itertools
 import numpy as np
 from typing import DefaultDict, Dict, List, Set, Tuple, TypeVar, Union
 from tinygrad.device import Buffer
-from tinygrad.engine.realize import CustomOp, capturing, lower_schedule_item
+from tinygrad.engine.realize import capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, MULTIOUTPUT, colored, getenv
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.schedule import LBScheduleItem, _graph_schedule, ScheduleItem
 from tinygrad.ops import MetaOps
 from tinygrad.tensor import Tensor, _to_np_dtype
@@ -38,7 +38,7 @@ def fuzz_schedule(outs:List[LazyBuffer]):
         assign_targets[out.srcs[1]] = out
     for x in lsi.inputs:
       if x not in ground_truth and x.device != "NPY": prerealized[x] = x.buffer.as_buffer()
-    si = ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0))
+    si = ScheduleItem(lsi.ast, tuple(x.buffer for x in lsi.outputs+lsi.inputs if x.size != 0), lsi.metadata)
     _exec_si(si, seed)
     for out in lsi.outputs:
       ground_truth[out] = out.buffer.as_buffer()
@@ -50,7 +50,7 @@ def fuzz_schedule(outs:List[LazyBuffer]):
     rawbufs: Dict[LazyBuffer, Buffer] = {}
     for lsi in ts:
       for out in lsi.outputs:
-        base = rawbufs[lsi.inputs[0]].base if out.op is MetaOps.VIEW else None
+        base = rawbufs[lsi.inputs[0]].base if out.op is MetaOps.BUFFER_VIEW else None
         rawbufs[out] = Buffer(out.buffer.device, out.buffer.size, out.buffer.dtype, base=base)
         if out.op is MetaOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
       for x in lsi.inputs:
@@ -60,7 +60,7 @@ def fuzz_schedule(outs:List[LazyBuffer]):
           elif x.device == "NPY": rawbufs[x] = x.buffer
           # copy the pre realized input
           else: rawbufs[x] = Buffer(x.buffer.device, x.buffer.size, x.buffer.dtype, initial_value=bytes(prerealized[x]))
-      si = ScheduleItem(lsi.ast, tuple(rawbufs[x] for x in lsi.bufs if x.size != 0))
+      si = ScheduleItem(lsi.ast, tuple(rawbufs[x] for x in lsi.bufs if x.size != 0), lsi.metadata)
       _exec_si(si, seed)
       for out in lsi.outputs:
         outbuf = np.frombuffer(rawbufs[out].as_buffer(), _to_np_dtype(out.dtype))
@@ -72,7 +72,6 @@ def fuzz_schedule(outs:List[LazyBuffer]):
 def _exec_si(si:ScheduleItem, seed:int):
   ei = lower_schedule_item(si)
   if len(capturing): capturing[0].add(ei)
-  if isinstance(ei.prg, CustomOp): Tensor._seed = seed
   ei.run()
 
 T = TypeVar("T")

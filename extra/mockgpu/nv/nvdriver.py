@@ -129,6 +129,9 @@ class NVDriver(VirtDriver):
       self.object_by_handle[struct.hObjectNew] = NVGPFIFO(gpu, gpfifo_token)
     elif struct.hClass == nv_gpu.AMPERE_DMA_COPY_B or struct.hClass == nv_gpu.ADA_COMPUTE_A:
       assert struct.hObjectParent in self.object_by_handle and isinstance(self.object_by_handle[struct.hObjectParent], NVGPFIFO)
+      struct.hObjectNew = self._alloc_handle()
+    elif struct.hClass == nv_gpu.GT200_DEBUGGER:
+      struct.hObjectNew = self._alloc_handle()
     else: raise RuntimeError(f"Unknown {struct.hClass} to rm_alloc")
     return 0
 
@@ -154,7 +157,12 @@ class NVDriver(VirtDriver):
       else:
         for i,c in enumerate(classes): params.classList[i] = c
     elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_GR_GET_INFO:
-      info = {nv_gpu.NV2080_CTRL_GR_INFO_INDEX_SM_VERSION: nv_gpu.NV2080_CTRL_GR_INFO_SM_VERSION_3_5}
+      info = {nv_gpu.NV2080_CTRL_GR_INFO_INDEX_SM_VERSION: nv_gpu.NV2080_CTRL_GR_INFO_SM_VERSION_3_5,
+        nv_gpu.NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS: 1,
+        nv_gpu.NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPC_PER_GPC: 1,
+        nv_gpu.NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_SM_PER_TPC: 1,
+        nv_gpu.NV2080_CTRL_GR_INFO_INDEX_MAX_WARPS_PER_SM: 1,
+      }
 
       params = nv_gpu.NV2080_CTRL_GR_GET_INFO_PARAMS.from_address(params_ptr)
       reqlist = (nv_gpu.NV2080_CTRL_GR_INFO * params.grInfoListSize).from_address(params.grInfoList)

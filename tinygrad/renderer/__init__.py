@@ -2,8 +2,7 @@ from typing import Optional, List, Tuple, Dict, Callable, Any
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.ops import Op, UOps, UOp, flops_mem
-from tinygrad.shape.symbolic import sym_infer, sint, Variable
+from tinygrad.ops import Ops, UOp, flops_mem, sym_infer, sint, Variable
 from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
@@ -43,16 +42,16 @@ class Program:
     if not self._ran_post_init and self.uops is not None:
       # single pass through the uops
       for u in self.uops:
-        if u.op is UOps.DEFINE_VAR: self.vars.append(Variable(u.arg[0], u.arg[1], u.arg[2]))
-        if u.op is UOps.DEFINE_GLOBAL: self.globals.append(u.arg)
-        if u.op is UOps.STORE: self.outs.extend([x.arg for x in u.src[0].sparents if x.op is UOps.DEFINE_GLOBAL])
-        if u.op is UOps.SPECIAL:
+        if u.op is Ops.DEFINE_VAR: self.vars.append(u)
+        if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
+        if u.op is Ops.STORE: self.outs.extend([x.arg for x in u.src[0].sparents if x.op is Ops.DEFINE_GLOBAL])
+        if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0][0] == 'i': self.local_size = None
           special_size = self.local_size if u.arg[0][0] == 'l' else self.global_size
           assert special_size is not None
           special_size[int(u.arg[0][-1])] = u.arg[1]
-      self.vars = sorted(self.vars, key=lambda v: v.expr)
+      self.vars = sorted(self.vars, key=lambda v: v.arg)
       self.outs = sorted(dedup(self.outs))
       self._ran_post_init = True
 
@@ -62,9 +61,6 @@ class Program:
   def lds_estimate(self) -> sint: return self._ops_lds[1]
   @functools.cached_property
   def _ops_lds(self) -> Tuple[sint, sint]: return (0,0) if self.uops is None else flops_mem(self.uops, ignore_indexing=True)
-
-  @property
-  def outcount(self) -> int: return len(self.outs)
 
   @functools.cached_property
   def function_name(self) -> str: return to_function_name(self.name)
@@ -87,6 +83,7 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
-  code_for_op: Dict[Op, Callable] = {}
+  code_for_op: Dict[Ops, Callable] = {}
 
+  def __reduce__(self): return self.__class__, ()
   def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")

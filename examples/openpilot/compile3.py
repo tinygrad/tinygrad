@@ -5,8 +5,8 @@ if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
 if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
 if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
 
-from tinygrad import fetch, Tensor, TinyJit, Device, Context, GlobalCounters
-from tinygrad.helpers import OSX, DEBUG, getenv
+from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters
+from tinygrad.helpers import DEBUG, getenv
 from tinygrad.tensor import _from_np_dtype
 
 import onnx
@@ -17,12 +17,6 @@ OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/comm
 OUTPUT = "/tmp/openpilot.pkl"
 
 def compile():
-  # hack to fix GPU on OSX: max doesn't work on half, see test/external/external_gpu_fail_osx.py
-  if OSX:
-    from tinygrad.ops import BinaryOps
-    from tinygrad.renderer.cstyle import ClangRenderer, CStyleLanguage
-    CStyleLanguage.code_for_op[BinaryOps.MAX] = ClangRenderer.code_for_op[BinaryOps.MAX]
-
   Tensor.no_grad = True
   Tensor.training = False
 
@@ -43,7 +37,8 @@ def compile():
     print(f"run {i}")
     with Context(DEBUG=max(DEBUG.value, 2 if i == 2 else 1)):
       ret = next(iter(run_onnx_jit(**new_inputs).values())).cast('float32').numpy()
-    if i == 0: test_val = np.copy(ret)
+    # copy i == 1 so use of JITBEAM is okay
+    if i == 1: test_val = np.copy(ret)
   print(f"captured {len(run_onnx_jit.captured.jit_cache)} kernels")
   np.testing.assert_equal(test_val, ret)
   print("jit run validated")
@@ -63,9 +58,13 @@ def test(test_val=None):
   Tensor.manual_seed(100)
   new_inputs = {nm:Tensor.randn(*st.shape, dtype=dtype).mul(8).realize() for nm, (st, _, dtype, _) in
                 sorted(zip(run.captured.expected_names, run.captured.expected_st_vars_dtype_device))}
+  new_inputs_numpy = {k:v.numpy() for k,v in new_inputs.items()}
   for _ in range(20):
     st = time.perf_counter()
-    out = run(**new_inputs)
+    # Need to cast non-image inputs from numpy, this is only realistic way to run it
+    inputs = {**{k:v for k,v in new_inputs.items() if 'img' in k},
+              **{k:Tensor(v) for k,v in new_inputs_numpy.items() if 'img' not in k}}
+    out = run(**inputs)
     mt = time.perf_counter()
     val = out['outputs'].numpy()
     et = time.perf_counter()

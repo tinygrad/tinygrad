@@ -4,10 +4,11 @@ if "NOOPT" not in os.environ: os.environ["NOOPT"] = "1"
 from tinygrad import Device, nn, Tensor, dtypes, Variable
 Device.DEFAULT = "CLANG"
 from train_gpt2 import GPT, GPTConfig
-from tinygrad.helpers import dedup, to_function_name, flatten, getenv, GRAPH, GlobalCounters, ansilen, to_function_name
+from tinygrad.helpers import dedup, to_function_name, flatten, getenv, GlobalCounters, ansilen, to_function_name
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.engine.realize import get_kernel, memory_planner, run_schedule
-from tinygrad.ops import MetaOps, UOps
+from tinygrad.engine.realize import get_kernel, run_schedule
+from tinygrad.engine.memory import memory_planner
+from tinygrad.ops import MetaOps, Ops
 
 TIMING = getenv("TIMING")
 
@@ -26,7 +27,6 @@ if __name__ == "__main__":
   optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=1e-4)
   warmup_count = getenv("WARMUP", 3)
   for i in range(warmup_count):  # TODO: why does it take three and not two to stablize
-    if i == warmup_count-1: GRAPH.value = getenv("LATEGRAPH")
     GlobalCounters.reset()
     X = Tensor.empty(4, 64, dtype=dtypes.int).reshape(B, T)
     Y = Tensor.empty(4, 64, dtype=dtypes.int).reshape(B, T)
@@ -41,7 +41,7 @@ if __name__ == "__main__":
     print(f"calls {i}:", len(sched))
     #run_schedule(sched[:])
   sched = memory_planner(sched)
-  ast_dedup = dedup([si.ast for si in sched if si.ast.op is UOps.SINK])
+  ast_dedup = dedup([si.ast for si in sched if si.ast.op is Ops.SINK])
   srcs = {}
   for ast in ast_dedup:
     k = get_kernel(Device["CLANG"].renderer, ast)
@@ -82,7 +82,7 @@ if __name__ == "__main__":
   for i,si in enumerate(sched):
     bufs = [(named_buffers.get(b, f"b{numbered_bufs[b]}"), b) for b in si.bufs]
     all_bufs += bufs
-    if si.ast.op is not UOps.SINK:
+    if si.ast.op is not Ops.SINK:
       print(f"// {si.ast.op}", bufs)
     else:
       print(f"{srcs[si.ast][0]}({', '.join([x[0] for x in bufs])})")

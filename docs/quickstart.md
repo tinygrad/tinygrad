@@ -165,7 +165,7 @@ from extra.datasets import fetch_mnist
 Now we have everything we need to start training our neural network.
 We will be training for 1000 steps with a batch size of 64.
 
-We use `with Tensor.train()` set the internal flag `Tensor.training` to `True` during training.
+We use `with Tensor.train()` to set the internal flag `Tensor.training` to `True` during training.
 Upon exit, the flag is restored to its previous value by the context manager.
 
 ```python
@@ -302,7 +302,4 @@ You can find a full list and their descriptions in [env_vars.md](env_vars.md).
 
 ### Visualizing the Computation Graph
 
-It is possible to visualize the computation graph of a neural network using [graphviz](https://graphviz.org/).
-
-This is easily done by running a single pass (forward or backward!) of the neural network with the environment variable `GRAPH` set to `1`.
-The graph will be saved to `/tmp/net.svg` by default.
+It is possible to visualize the computation graph of a neural network using VIZ=1.

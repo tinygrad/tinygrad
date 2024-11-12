@@ -3,10 +3,9 @@ import math
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
-from tinygrad.ops import ReduceOps
+from tinygrad.ops import ReduceOps, resolve, sint
 from tinygrad.tensor import Function
-from tinygrad.lazy import LazyBuffer
-from tinygrad.shape.symbolic import sint
+from tinygrad.engine.lazy import LazyBuffer
 
 class Contiguous(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.contiguous()
@@ -19,15 +18,17 @@ class ContiguousBackward(Function):
 class Cast(Function):
   def forward(self, x:LazyBuffer, dtype:DType, bitcast:bool=False) -> LazyBuffer:
     self.input_dtype, self.bitcast = x.dtype, bitcast
-    return x.cast(dtype, bitcast)
+    return x.bitcast(dtype) if self.bitcast else x.cast(dtype)
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.cast(self.input_dtype, self.bitcast)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    if self.bitcast: raise RuntimeError("bitcast cannot backward")
+    return grad_output.cast(self.input_dtype)
 
 # ************* unary ops *************
 
 class Reciprocal(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.recip()
+    self.ret = x.reciprocal()
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return -grad_output * self.ret * self.ret
@@ -39,10 +40,9 @@ class Sin(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return (math.pi/2 - self.x).sin() * grad_output
 
-# NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.max(0)
+    self.ret = x.maximum(0)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.gt(0).cast(grad_output.dtype) * grad_output
@@ -73,7 +73,7 @@ class Sqrt(Function):
 # TODO: have the backend automatically find this
 class Sigmoid(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = (1 + (x * (-1/math.log(2))).exp2()).recip()
+    self.ret = (1 + (x * (-1/math.log(2))).exp2()).reciprocal()
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
@@ -156,7 +156,7 @@ class Prod(Function):
 
 class Max(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
-    self.x, self.ret, self.axis = x, x.r(ReduceOps.MAX, axis), axis
+    self.x, self.ret, self.axis = x, x.r(ReduceOps.REDUCE_MAX, axis), axis
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
@@ -170,7 +170,7 @@ class Max(Function):
 # NOTE: this is sum in reverse
 class Expand(Function):
   def forward(self, x:LazyBuffer, shape:Tuple[int, ...]) -> LazyBuffer:
-    self.expanded_axis = tuple(i for i, (si, so) in enumerate(zip(x.shape, shape)) if si != so)
+    self.expanded_axis = tuple(i for i, (si, so) in enumerate(zip(x.shape, shape)) if resolve(si != so))
     return x.expand(shape)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:

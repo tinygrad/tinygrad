@@ -40,9 +40,6 @@ METAL_XCODE         | [1]        | enable Metal using macOS Xcode SDK
 CLANG               | [1]        | enable Clang backend
 LLVM                | [1]        | enable LLVM backend
 BEAM                | [#]        | number of beams in kernel beam search
-GRAPH               | [1]        | create a graph of all operations (requires graphviz)
-GRAPHUOPS           | [1]        | create a graph of uops (requires graphviz and saves at /tmp/uops.{svg,dot})
-GRAPHPATH           | [/path/to] | where to put the generated graph
 DEFAULT_FLOAT       | [HALF, ...]| specify the default float dtype (FLOAT32, HALF, BFLOAT16, FLOAT64, ...), default to FLOAT32
 IMAGE               | [1-2]      | enable 2d specific optimizations
 FLOAT16             | [1]        | use float16 for images instead of float32
@@ -50,3 +47,4 @@ PTX                 | [1]        | enable the specialized [PTX](https://docs.nvi
 PROFILE             | [1]        | enable output of [perfetto](https://ui.perfetto.dev/) compatible profile. This feature is supported in NV and AMD backends.
 VISIBLE_DEVICES     | [list[int]]| restricts the NV/AMD devices that are available. The format is a comma-separated list of identifiers (indexing starts with 0).
 JIT                 | [0-2]      | 0=disabled, 1=[jit enabled](quickstart.md#jit) (default), 2=jit enabled, but graphs are disabled
+VIZ                 | [1]        | 0=disabled, 1=[viz enabled](../tinygrad/viz/README)

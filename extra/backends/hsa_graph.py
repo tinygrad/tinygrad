@@ -3,7 +3,7 @@ from typing import List, Any, Dict, cast, Optional, Tuple
 from tinygrad.helpers import init_c_var, round_up
 from tinygrad.device import Buffer, BufferOptions
 from tinygrad.device import Compiled, Device
-from tinygrad.shape.symbolic import Variable
+from tinygrad.ops import Variable
 from tinygrad.runtime.ops_hsa import HSADevice, PROFILE, Profiler
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner, GraphException
@@ -70,7 +70,7 @@ class HSAGraph(MultiGraphRunner):
 
     for j,ji in enumerate(self.jit_cache):
       if isinstance(ji.prg, CompiledRunner):
-        wait_signals = self.access_resources(ji.bufs[(outs:=ji.prg.p.outcount):], ji.bufs[:outs], new_dependency=j, sync_with_aql_packets=False)
+        wait_signals = self.access_resources(ji.bufs, ji.prg.p.outs, new_dependency=j, sync_with_aql_packets=False)
         for i in range(0, len(wait_signals), 5):
           self.virt_aql_queues[ji.prg.device].submit_barrier(wait_signals[i:i+5])
         self.packets[j] = hsa.hsa_kernel_dispatch_packet_t.from_address(self.virt_aql_queues[ji.prg.device].write_addr)
@@ -84,7 +84,7 @@ class HSAGraph(MultiGraphRunner):
         dest_dev, src_dev = cast(HSADevice, Device[dest.device]), cast(HSADevice, Device[src.device])
         sync_signal = self.alloc_signal(reset_on_start=True, wait_on=[dest_dev, src_dev])
 
-        wait_signals = self.access_resources(read=[src], write=[dest], new_dependency=sync_signal, sync_with_aql_packets=True)
+        wait_signals = self.access_resources([dest, src], write=[0], new_dependency=sync_signal, sync_with_aql_packets=True)
         self.transfers.append([dest._buf, dest_dev.agent, src._buf, src_dev.agent, dest.nbytes, len(wait_signals),
                               (hsa.hsa_signal_t*len(wait_signals))(*wait_signals), sync_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True])
         self.ji_to_transfer[j] = len(self.transfers) - 1
@@ -164,8 +164,8 @@ class HSAGraph(MultiGraphRunner):
       return packet.completion_signal
     return None
 
-  def access_resources(self, read, write, new_dependency, sync_with_aql_packets=False):
-    rdeps = self._access_resources(read, write, new_dependency)
+  def access_resources(self, rawbufs, write, new_dependency, sync_with_aql_packets=False):
+    rdeps = self._access_resources(rawbufs, write, new_dependency)
     wait_signals = [self.dependency_as_signal(dep, sync_with_aql_packets=sync_with_aql_packets) for dep in rdeps]
-    if sync_with_aql_packets: wait_signals += [self.kickoff_signals[cast(HSADevice, Device[rawbuf.device])] for rawbuf in read+write]
+    if sync_with_aql_packets: wait_signals += [self.kickoff_signals[cast(HSADevice, Device[rawbuf.device])] for rawbuf in rawbufs]
     return dedup_signals(wait_signals)

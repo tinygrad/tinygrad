@@ -1,7 +1,8 @@
 import unittest, ctypes, struct
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import CI, getenv
-from tinygrad.device import Buffer, BufferOptions, HCQCompiled
+from tinygrad.device import Buffer, BufferOptions
+from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_runner, CompiledRunner
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
@@ -291,7 +292,7 @@ class TestHCQ(unittest.TestCase):
     et = TestHCQ.d0._gpu2cpu_time(sig_en.timestamp, True) - TestHCQ.d0._gpu2cpu_time(sig_st.timestamp, True)
 
     print(f"exec kernel time: {et:.2f} us")
-    assert 1 <= et <= (7000 if CI else 30)
+    assert 0.1 <= et <= (7000 if CI else 100)
 
   def test_speed_copy_bandwidth(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
@@ -299,7 +300,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0._prof_setup()
 
     # THEORY: the bandwidth is low here because it's only using one SDMA queue. I suspect it's more stable like this at least.
-    SZ = 2_000_000_000
+    SZ = 200_000_000
     a = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
     b = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
 
@@ -327,7 +328,7 @@ class TestHCQ(unittest.TestCase):
 
     TestHCQ.d0._prof_setup()
 
-    SZ = 2_000_000_000
+    SZ = 200_000_000
     b = Buffer(f"{Device.DEFAULT}:1", SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
     a = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferOptions(nolru=True)).allocate()
     TestHCQ.d0._gpu_map(b._buf)

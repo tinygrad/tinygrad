@@ -1,11 +1,12 @@
 from __future__ import annotations
 import ctypes, functools
 from typing import Tuple
-from tinygrad.helpers import DEBUG, init_c_var, from_mv, init_c_struct_t
+from tinygrad.helpers import init_c_var, from_mv, init_c_struct_t, getenv
 from tinygrad.device import Compiled, LRUAllocator, BufferOptions
 from tinygrad.runtime.autogen import hip
-from tinygrad.runtime.support.compiler_hip import AMDCompiler, disasm
+from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.renderer.cstyle import HIPRenderer
+if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 def check(status):
   if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
@@ -13,9 +14,6 @@ def check(status):
 class HIPProgram:
   def __init__(self, device:HIPDevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
-
-    if DEBUG >= 6: print(disasm(lib))
-
     check(hip.hipSetDevice(self.device.device_id))
     self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
     self.prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
