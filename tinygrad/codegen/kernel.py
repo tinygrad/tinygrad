@@ -617,8 +617,8 @@ class Kernel:
 
         def reduced_axes(start, stop):
           return tuple(i for i in range(start, stop) if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx + 1].shape[i]))
-        axes = reduced_axes(self.first_reduce+self.group_for_reduces, self.shape_len)
-        grouped_axes = reduced_axes(self.first_reduce, self.first_reduce+self.group_for_reduces)
+        axes = reduced_axes(self.first_reduce + self.group_for_reduces, self.shape_len)
+        grouped_axes = reduced_axes(self.first_reduce, self.first_reduce + self.group_for_reduces)
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           def fix_st(st, wd_pattern, tcd_pattern):
