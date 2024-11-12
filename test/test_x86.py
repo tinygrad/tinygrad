@@ -100,21 +100,23 @@ class TestX86(unittest.TestCase):
   def test_cumsum(self):
     assert Tensor([1,2,3]).cumsum().tolist() == [1, 3, 6]
 
-  # seg fault
-  #def test_sin(self):
-  #  a = Tensor([1,2,3], device="X86").sin().tolist()
-  #  b = Tensor([1,2,3], device="CLANG").sin().tolist()
-  #  assert a == b
-  # seg fault
-  #def test_cos(self):
-  #  a = Tensor([1,2,3], device="X86").cos().tolist()
-  #  b = Tensor([1,2,3], device="CLANG").cos().tolist()
-  #  assert a == b
-  # wrong
-  #def test_tan(self):
-  #  a = Tensor([1,2,3]).tan().tolist()
-  #  b = Tensor([1,2,3], device="CLANG").tan().tolist()
-  #  assert a == b
+  def test_sin(self):
+    a = Tensor([1,2,3]).sin().tolist()
+    b = Tensor([1,2,3], device="CLANG").sin().tolist()
+    print(a)
+    print(b)
+    assert np.allclose(a, b, rtol=1e-6)
+
+  def test_cos(self):
+    a = Tensor([1,2,3]).cos().tolist()
+    b = Tensor([1,2,3], device="CLANG").cos().tolist()
+    assert np.allclose(a, b, rtol=1e-6)
+
+  def test_tan(self):
+    a = Tensor([1,2,3]).tan().tolist()
+    b = Tensor([1,2,3], device="CLANG").tan().tolist()
+    assert np.allclose(a, b, rtol=1e-6)
+
   # last number is 0.99999???
   #def test_rand(self):
   #  a = Tensor.rand(3).tolist()
@@ -136,7 +138,7 @@ class TestX86(unittest.TestCase):
     a = Tensor([1,2,3]).softmax().tolist()
     b = Tensor([1,2,3], device="CLANG").softmax().tolist()
     assert np.allclose(a, b, rtol=1e-7)
-  
+
   def test_sparse_categorical_crossentropy(self):
     a = Tensor([[-1, 2, -3], [1, -2, 3]], device="X86").sparse_categorical_crossentropy(Tensor([1, 2], device="X86")).tolist()
     b = Tensor([[-1, 2, -3], [1, -2, 3]], device="CLANG").sparse_categorical_crossentropy(Tensor([1, 2], device="CLANG")).tolist()
