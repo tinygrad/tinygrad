@@ -34,7 +34,7 @@ def _get_isolated_children(rbuf:UOp, reduce_for_op:Dict[UOp, UOp], children:Defa
     rc_parents.extend(next_p for x in p_uop.src if x.base.op is Ops.LOAD and (next_p:=x.base.src[0]) is not rbuf)
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[UOp, None] = {}
-  for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, allbufs, descendants, cache={})
+  for tr in group: _recursive_group(tr, unwrap(allbufs[tr].st), tr, children, realizes, reduce_for_op, allbufs, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
 def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], double_reduces:Dict[UOp, None],
@@ -46,7 +46,7 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
   for rbuf,r in allbufs.items():
     if rbuf in realizes or r.op is not Ops.REDUCE_AXIS: continue
     group: Dict[UOp, None] = {}
-    _recursive_group(rbuf, r.st, rbuf, children, realizes, reduce_for_op, allbufs, group, cache={})
+    _recursive_group(rbuf, unwrap(r.st), rbuf, children, realizes, reduce_for_op, allbufs, group, cache={})
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
