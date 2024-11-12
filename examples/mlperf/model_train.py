@@ -346,6 +346,7 @@ def train_retinanet():
   from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset
   from extra.models.retinanet import RetinaNet
   from extra.models import resnet
+  from extra.lr_scheduler import LambdaLR
   from pycocotools.coco import COCO
   from tinygrad.helpers import get_child
   
@@ -365,12 +366,30 @@ def train_retinanet():
   def _data_get(it):
     x, y_boxes, y_labels, cookie = next(it)
     return x, y_boxes, y_labels, cookie
+  
+  def _create_lr_scheduler(optim, start_iter, warmup_iters, warmup_factor):
+    # TODO: refactor this a bit more so we don't have to recreate it, unlike what MLPerf script is doing
+    def _lr_lambda(e):
+      e = e + start_iter
+      if e >= warmup_iters: return 1.0
+      alpha = float(e) / warmup_iters
+      return warmup_factor * (1 - alpha) + alpha
+    return LambdaLR(optim, _lr_lambda)
+
+  def _train_step(model, optim, lr_scheduler):
+    optim.zero_grad()
+
+    optim.step()
+    lr_scheduler.step()
 
   # ** hyperparameters **
+  # using https://github.com/mlcommons/logging/blob/96d0acee011ba97702532dcc39e6eeaa99ebef24/mlperf_logging/rcp_checker/training_4.1.0/rcps_ssd.json#L3
   LR = 1e-4
+  LR_WARMUP_EPOCHS = 1
+  LR_WARMUP_FACTOR = 1e-3
   SEED = getenv("SEED", random.SystemRandom().randint(0, 2**32 - 1))
   BS = getenv("BS", 128)
-  NUM_EPOCHS = getenv("EPOCHS", 26)
+  NUM_EPOCHS = getenv("EPOCHS", 4)
 
   # ** model initializers **
   resnet.BatchNorm = FrozenBatchNorm2d
@@ -397,13 +416,20 @@ def train_retinanet():
   # ** training loop **
   for e in range(1, NUM_EPOCHS + 1):
     train_dataloader = batch_load_retinanet(train_dataset, False, anchors, Path(BASE_DIR), batch_size=BS, seed=SEED)
-    it = iter(tqdm(train_dataloader, total=len(train_dataset.imgs.keys()) // BS, desc=f"epoch {e}"))
+    it = iter(tqdm(train_dataloader, total=(train_dataset_len:=len(train_dataset.imgs.keys())) // BS, desc=f"epoch {e}"))
     i, proc = 0, _data_get(it)
+
+    if e < LR_WARMUP_EPOCHS:
+      start_iter, warmup_iters = e * train_dataset_len, LR_WARMUP_EPOCHS * train_dataset_len
+      lr_scheduler = _create_lr_scheduler(optim, start_iter, warmup_iters, LR_WARMUP_FACTOR)
+    else: lr_scheduler = None
 
     prev_cookies = []
     st = time.perf_counter()
 
     while proc is not None:
+      # _train_step(model, optim, lr_scheduler) # TODO: enable once full model has been integrated
+
       if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:
         next_proc = _data_get(it)
