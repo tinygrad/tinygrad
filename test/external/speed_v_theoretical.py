@@ -14,8 +14,8 @@ class TestKernelSpeed(unittest.TestCase):
     with Context(BEAM=3):
       for _ in range(10):
         with Context(BEAM=0, DEBUG=0):
-          a = Tensor.rand(M, K, dtype="half").realize()
-          b = Tensor.rand(K, N, dtype="half").realize()
+          a = Tensor.randn(M, K, dtype="half").realize()
+          b = Tensor.randn(K, N, dtype="half").realize()
         Device.default.synchronize()
         st = time.perf_counter()
         c = f(a, b)
