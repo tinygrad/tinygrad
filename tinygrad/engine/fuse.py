@@ -1,7 +1,6 @@
 from collections import defaultdict, deque
 from typing import Set, Tuple, List, Dict, DefaultDict
-from tinygrad.device import Buffer
-from tinygrad.ops import MetaOps, Ops, UOp
+from tinygrad.ops import Ops, UOp
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts, unwrap
 from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -37,8 +36,8 @@ def _get_isolated_children(rbuf:UOp, reduce_for_op:Dict[UOp, UOp], children:Defa
   for tr in group: _recursive_group(tr, unwrap(allbufs[tr].st), tr, children, realizes, allbufs, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], double_reduces:Dict[UOp, None],
-                 realizes:Dict[UOp, UOp], assigns:Set[UOp], buf_uops:Dict[Buffer, UOp]) -> List[List[UOp]]:
+def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], double_reduces:Dict[UOp, None], realizes:Dict[UOp, UOp],
+                 assigns:Set[UOp]) -> List[List[UOp]]:
   """search the graph for all the LazyBuffers that need to realize"""
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[UOp, UOp] = {}
@@ -54,13 +53,14 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
     if not forced_realize and len(group) > 1:
       group = _get_isolated_children(rbuf, reduce_for_op, children, realizes, allbufs, group)
     # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and any(x.op is MetaOps.ASSIGN for x in group):
-      parents = deque((r, *group))
+    if not forced_realize and any(allbufs[x].op is Ops.ASSIGN for x in group):
+      parents = deque((rbuf, *group))
       while parents and not forced_realize:
-        if (p:=parents.pop().base).is_realized() or p in realizes:
-          if p.is_realized() and buf_uops[(b:=p.buffer)] in assigns and not any(x.buffer is b for x in group): forced_realize, can_chase = True, False
-          continue
-        parents.extend(p.srcs)
+        p = parents.pop()
+        if (p_uop:=allbufs.get(p)) is None: continue
+        if p_uop.op is Ops.ASSIGN and p not in group: forced_realize, can_chase = True, False
+        if p in realizes: continue
+        parents.extend([x.base.src[0] for x in p_uop.src if x.base.op in {Ops.LOAD, Ops.PRELOAD}])
     if forced_realize or not group:
       tr = rbuf
       if can_chase:
@@ -70,7 +70,8 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
           tr_next_uop = allbufs[tr_next:=next(iter(children[tr]))]
           st_childs = dedup(s for s in tr_next_uop.src if s.base.op is Ops.LOAD and s.base.src[0] == tr)
           if len(st_childs) > 1: break
-          if st.size != unwrap(st_childs[0].st).size: break
+          st_child: ShapeTracker = unwrap(st_childs[0].st)
+          if st.size != st_child.size: break
           st = st + unwrap(st_childs[0].st)
           if not st.contiguous or tr_next_uop.op is Ops.REDUCE_AXIS: break
           tr = tr_next
@@ -90,7 +91,7 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
 
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
-    kernel_children = {c for tr in group for c in children[tr] if allbufs[c].op not in {MetaOps.COPY, MetaOps.BUFFER_VIEW}}
+    kernel_children = {c for tr in group for c in children[tr] if allbufs[c].op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group: del realizes[tr]
 

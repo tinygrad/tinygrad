@@ -279,7 +279,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   # get realizes
   realizes: Dict[UOp, UOp] = {}
   graph_rewrite(big_graph, do_realize, realizes)
-  store_groups = get_realizes(children, allbufs, double_reduces, realizes, ctx.assigns, ctx.buf_uops)
+  store_groups = get_realizes(children, allbufs, double_reduces, realizes, ctx.assigns)
   # split realizes into small graphs
   graph_rewrite(big_graph, break_sched, realizes)
   sinks = [UOp.sink(*(realizes[u] for u in stores)) for stores in store_groups]
