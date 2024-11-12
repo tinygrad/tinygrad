@@ -363,16 +363,12 @@ if __name__ == "__main__":
     files = get_val_files() if val else get_train_files()
 
     if not preprocessed_dir.exists(): preprocess_dataset(files, preprocessed_dir, val)
-    with tqdm(total=len(files)) as pbar:
-      for x, _, _ in batch_load_unet3d(preprocessed_dir, val=val):
-        pbar.update(x.shape[0])
+    for x, _, _ in tqdm(batch_load_unet3d(preprocessed_dir, val=val), total=len(files) // 6): pass
 
   def load_resnet(val):
     from extra.datasets.imagenet import get_train_files, get_val_files
     files = get_val_files() if val else get_train_files()
-    with tqdm(total=len(files)) as pbar:
-      for x,y,c in batch_load_resnet(val=val):
-        pbar.update(x.shape[0])
+    for x, _, _ in tqdm(batch_load_resnet(val=val), total=len(files) // 64): pass
 
   load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
   if load_fn_name in globals():
