@@ -75,7 +75,6 @@ class TestRandomness(unittest.TestCase):
     assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
-  @unittest.skipIf(CI and Device.DEFAULT == "NV", "gpuocelot doesn't support certain ops needed for threefry")
   def test_threefry_against_reference(self):
     Tensor.manual_seed(1337)
 
@@ -92,7 +91,7 @@ class TestRandomness(unittest.TestCase):
 
     counts = Tensor.arange(20, dtype=dtypes.uint32)
     counts0, counts1 = counts.chunk(2)
-    r = Tensor._threefry_random_bits(1337 << 32, counts0, counts1).numpy()
+    r = Tensor._threefry_random_bits(Tensor([0, 1337], dtype='uint32'), counts0, counts1).numpy()
 
     np.testing.assert_allclose(jr, r)
 
