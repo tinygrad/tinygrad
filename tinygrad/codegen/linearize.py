@@ -40,7 +40,7 @@ def get_ranges_in_parents(x:UOp) -> Tuple[UOp, ...]:
       ret.append(get_ranges_in_parents(u))
   return tuple(dedup(sorted(flatten(ret), key=lambda x: x.tuplize)))
 
-DONT_PLACE_IN_BLOCK = {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.SPECIAL}
+DONT_PLACE_IN_BLOCK = {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.BLOCKEND, Ops.BLOCKIF}
 def append_to_block(ctx, x:UOp):
   children, forks = ctx
   new_srcs = []
@@ -52,6 +52,9 @@ def append_to_block(ctx, x:UOp):
     if u.op is Ops.BLOCK:
       if len(new_block_list:=new_blocks[u.arg.rngs]): updated = True
       new_block_list.append(u)
+    elif u.op is Ops.IF:
+      blk = UOp(Ops.BLOCK, dtypes.void, u.src, BasicBlock(get_ranges_in_parents(u), []))
+      new_srcs.append(UOp(Ops.BLOCKIF, dtypes.void, (blk,), BasicBlock(get_ranges_in_parents(u)+(u,), [u])))
     elif u.op in DONT_PLACE_IN_BLOCK or (len([y for y in children[u] if y not in block_uop_set]) and u not in forks):
       # it stays in srcs if it has children not in the basic or is RANGE/CONST
       new_srcs.append(u)
@@ -66,11 +69,15 @@ def append_to_block(ctx, x:UOp):
         new_blocks[rngs].append(u)
   if not updated: return None
   for rng,lst in new_blocks.items():
-    if len(lst) == 1 and lst[0].op is Ops.BLOCK:
-      new_srcs.append(lst[0])
+    if len(lst) == 1 and lst[0].op is Ops.BLOCK: new_src = lst[0]
     else:
       new_lst = flatten([y.arg.lst if y.op is Ops.BLOCK else [y] for y in lst])
-      new_srcs.append(UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, new_lst)))
+      new_src = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, new_lst))
+    closed = tuple([y for y in new_src.arg.rngs if y not in x.arg.rngs])
+    if len(closed):
+      # TODO: is this order always right?
+      for c in closed[::-1]: new_src = UOp(Ops.BLOCKEND, dtypes.void, (new_src,), arg=BasicBlock([c], []))
+    new_srcs.append(new_src)
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
 
 make_basic_blocks = PatternMatcher([
@@ -108,6 +115,20 @@ def block_uop(sink:UOp) -> UOp:
         forks[u] = None
     if len(forks) == 0: break
 
+  # terrible O(n^2) algo
+  cc = defaultdict(list)
+  dd: DefaultDict[BasicBlock, List[UOp]] = defaultdict(list)
+  for block in sink.sparents:
+    if block.op is Ops.BLOCKEND:
+      cc[block.arg].append(block)
+      dd[block.arg].extend(block.src)
+  for k,v in cc.items():
+    if len(v) > 1:
+      rep = UOp(Ops.BLOCKEND, dtypes.void, tuple(dedup(dd[k])), k)
+      sink = sink.substitute({u:rep for u in v})
+
+  # show graph for VIZ
+  sink = graph_rewrite(sink, PatternMatcher([]))
   return sink
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
@@ -137,22 +158,18 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   if DEBUG >= 6: print("*** PLACE")
   while queue:
     _,_,x = heapq.heappop(queue)
-    if DEBUG >= 6: print(x.op, x.dtype, str(x.arg).split("\n")[0] if x.op is Ops.BLOCK else x.arg)
+    if DEBUG >= 6: print(x.op, x.dtype, str(x.arg).split("\n")[0] if x.op in {Ops.BLOCK, Ops.BLOCKIF, Ops.BLOCKEND} else x.arg)
     if x.op is Ops.BLOCK:
       _uops.extend(x.arg.lst)
-      for y in x.arg.lst:
-        if y.op is Ops.IF: open_loops.append(y)
-      # end any ranges
-      for c in children[x]:
-        assert c.op is Ops.BLOCK
-        to_end = []
-        for r in x.arg.rngs:
-          assert r in open_loops, f"loop {r.arg} wasn't opened? {[x.arg for x in open_loops]} were"
-          if r not in c.arg.rngs: to_end.append(r)
-        for r in open_loops[::-1]:
-          if r in to_end:
-            _uops.append(UOp(Ops.ENDRANGE if r.op is Ops.RANGE else Ops.ENDIF, src=(r,)))
-            open_loops.remove(r)
+    elif x.op is Ops.BLOCKIF:
+      _uops.extend(x.arg.lst)
+      open_loops.append(x.arg.lst[0])
+    elif x.op is Ops.BLOCKEND:
+      for r in x.arg.rngs:
+        assert r in open_loops
+        if r.op is Ops.RANGE: _uops.append(UOp(Ops.ENDRANGE, dtypes.void, (r,)))
+        elif r.op is Ops.IF: _uops.append(UOp(Ops.ENDIF, dtypes.void, (r,)))
+        else: raise RuntimeError(f"unknown op {r.op}")
     elif x.op is Ops.DEFINE_ACC:
       idx = min([_uops.index(l) for l in x.src if l.op is Ops.RANGE])
       _uops.insert(idx, x)

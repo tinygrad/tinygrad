@@ -119,9 +119,6 @@ class Ops(FastEnum):
   SPECIAL = auto()
   NOOP = auto()
 
-  # basic block ASAP
-  BLOCK = auto()
-
   # reduce
   REDUCE_AXIS = auto()
 
@@ -156,10 +153,16 @@ class Ops(FastEnum):
   # late INDEX
   INDEX = auto()
 
+  # basic block at the end (but before range)
+  BLOCKEND = auto()
+  BLOCK = auto()
+
   # control flow ops
   BARRIER = auto()
   IF = auto()
   RANGE = auto()
+
+  BLOCKIF = auto()
 
   # ops that are not graph nodes
   ENDRANGE = auto()
@@ -522,7 +525,7 @@ def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
   # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
   while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "uopgraph.py", "schedule.py",
-                                                                                        "lowerer.py", "cstyle.py"}:
+                                                                                        "lowerer.py", "cstyle.py", "linearize.py"}:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
