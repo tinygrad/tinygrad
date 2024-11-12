@@ -20,7 +20,7 @@ def _recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, D
     # max one reduceop per kernel
     if (tr_next_uop:=allbufs[tr_next]).op is Ops.REDUCE_AXIS: return group.setdefault(r)
     # can only fuse contiguous
-    if len(st_childs:=dedup(s for s in tr_next_uop.src if s.base.src[0] == tr)) > 1: return group.setdefault(r)
+    if len(st_childs:=dedup(s for s in tr_next_uop.src if s.base.op is Ops.LOAD and s.base.src[0] == tr)) > 1: return group.setdefault(r)
     _recursive_group(tr_next, st+unwrap(st_childs[0].st), r, children, realizes, allbufs, reduce_for_op, group, cache)
 
 def _get_isolated_children(rbuf:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultDict[UOp, Dict[UOp, None]], realizes:Dict[UOp, UOp],
