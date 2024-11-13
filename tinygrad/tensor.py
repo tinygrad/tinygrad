@@ -1013,10 +1013,12 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
     1. Flat padding: (padding_left, padding_right, padding_top, padding_bottom, ...)
        - This structure matches PyTorch's pad.
+       - `padding` length must be even
 
     2. Group padding: (..., (padding_top, padding_bottom), (padding_left, padding_right))
        - This structure matches pad for jax, numpy, tensorflow and others.
        - For each axis, padding can be `None`, meaning no padding, or a tuple `(start, end)`.
+       - `padding` must have the same length as `self.ndim`
 
     Padding values can be negative, resulting in dimension shrinks that work similarly to Python negative slices.
     The `mode` parameter currently supports only `"constant"` padding, where the `value` specifies the padding value.
@@ -1035,12 +1037,12 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.pad((1, 2, 0, -1), mode="constant", value=-float('inf')).numpy())
     ```
     """
-    X, pX = self, padding
     if mode not in {"constant"}: raise NotImplementedError(f"{mode=} is not supported")
     if (flat:=all(isinstance(p, (int,UOp)) for p in padding)) and len(padding)%2 != 0: raise ValueError("Flat padding must have even number of pads")
-    # turn flat padding into grouped padding and treat Nones for group padding
-    pX = ((0,0),)*(self.ndim - len(pX)//2) + tuple(zip(pX[-2::-2], pX[::-2])) if flat else tuple((0,0) if p is None else p for p in pX)
-    if len(pX) != self.ndim: raise ValueError(f"padding length is improper, padding {pX} shape {X.shape}")
+    # turn flat padding into group padding
+    pX = ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2])) if flat else padding
+    if len(pX) != self.ndim: raise ValueError(f"padding length is improper, padding {padding} shape {self.shape}")
+    X, pX = self, cast(Tuple[Tuple[sint, sint]], tuple((0,0) if p is None else p for p in pX))
     pads, shrinks = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX), tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, self.shape))
     if value == 0: return F.Pad.apply(X.shrink(shrinks), arg=pads)
     return F.Pad.apply(shrunken := X.shrink(shrinks), arg=pads) + F.Pad.apply(Tensor.ones_like(shrunken), arg=pads).where(0, value)
