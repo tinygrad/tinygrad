@@ -709,16 +709,13 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     dtype = kwargs.pop("dtype", self.dtype)
-    device_arg, device = kwargs.get("device"), kwargs.pop("device", self.device)
-    contiguous = kwargs.pop("contiguous", True)
     if isinstance(self.device, tuple) and isinstance(self.lazydata, MultiLazyBuffer):
-      if device_arg is not None: raise RuntimeError("cannot specify `device` on `rand_like` of a multi device tensor")
-      if self.lazydata.axis is not None:
-        rands = [cast(LazyBuffer, Tensor.rand(*lb.shape, device=lb.device, dtype=dtype, contiguous=contiguous, **kwargs).lazydata) \
-                 for lb in self.lazydata.lbs]
-        return Tensor(MultiLazyBuffer(rands, self.lazydata.axis), device=self.device, dtype=dtype, **kwargs)
-      return Tensor.rand(*self.shape, dtype=dtype, contiguous=contiguous, **kwargs).shard(self.device)
-    return Tensor.rand(*self.shape, device=device, dtype=dtype, contiguous=contiguous, **kwargs)
+      if kwargs.get("device") is not None: raise RuntimeError("cannot specify `device` on `rand_like` of a multi device tensor")
+      if self.lazydata.axis is None: return Tensor.rand(*self.shape, dtype=dtype, **kwargs).shard(self.device)
+      contiguous = kwargs.pop("contiguous", True)
+      rands = [Tensor.rand(*lb.shape, device=lb.device, dtype=dtype, contiguous=contiguous, **kwargs).lazydata for lb in self.lazydata.lbs]
+      return Tensor(MultiLazyBuffer(cast(List[LazyBuffer], rands), self.lazydata.axis), device=self.device, dtype=dtype, **kwargs)
+    return Tensor.rand(*self.shape, device=kwargs.pop("device", self.device), dtype=dtype, **kwargs)
 
   # ***** rng hlops *****
 
