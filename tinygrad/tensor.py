@@ -3340,7 +3340,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     Compute the negative log likelihood loss between log-probabilities and target labels.
 
-    NOTE: `self` are log-probabilities and `Y` are the Y labels or class probabilities.
+    NOTE: `self` is log-probabilities and `Y` is the Y labels or class probabilities.
 
     See: https://pytorch.org/docs/stable/generated/torch.nn.functional.nll_loss.html
 
