@@ -355,10 +355,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def buf_uop(self) -> UOp:
-    match self.op:
-      case Ops.BUFFER: return self
-      case Ops.LOAD | Ops.PRELOAD | Ops.STORE | Ops.ASSIGN: return self.src[0]
-      case _: raise RuntimeError(f"buf_uop called on {self.op}")
+    assert self.op in {*GroupOp.Buffer, Ops.ASSIGN}, f"buf_uop called on {self.op}"
+    return self.src[0]
 
   # *** uop Variable stuff ***
 
