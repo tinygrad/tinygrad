@@ -4,19 +4,22 @@ import functools, heapq
 from collections import defaultdict
 from tinygrad.ops import type_verify, UOp, Ops
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import dedup, flatten, DEBUG
+from tinygrad.helpers import dedup, flatten, DEBUG, partition
 
 from tinygrad.ops import PatternMatcher, UPat, graph_rewrite
+def disp(y): return y.arg[0] if y.op is Ops.RANGE else f'IF{id(y)}'
+
 class BasicBlock:
-  def __init__(self, rngs, lst):
+  def __init__(self, rngs, lst, closed=()):
     self.rngs = tuple(rngs)
     self.lst = tuple(lst)
+    self.closed = tuple(closed)
   def __hash__(self): return hash((self.rngs, self.lst))
   def __eq__(self, x):
     if x is None: return False
-    return self.rngs == x.rngs and self.lst == x.lst
+    return self.rngs == x.rngs and self.lst == x.lst and self.closed == x.closed
   def __repr__(self):
-    return f"{[y.arg[0] if y.op is Ops.RANGE else f'IF{id(y)}' for y in self.rngs]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
+    return f"{[disp(y) for y in self.rngs]} {[disp(y) for y in self.closed] if len(self.closed) else ''} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
   @functools.cached_property
   def lst_tuplize(self): return tuple(y.tuplize for y in self.lst)
   @functools.cached_property
@@ -26,7 +29,7 @@ class BasicBlock:
     return self.rngs_tuplize < x.rngs_tuplize
   def add(self, x):
     if len(x) == 0: return self
-    return BasicBlock(self.rngs, tuple(x)+self.lst)
+    return BasicBlock(self.rngs, tuple(x)+self.lst, self.closed)
 
 @functools.lru_cache(None)
 def get_ranges_in_parents(x:UOp) -> Tuple[UOp, ...]:
@@ -76,11 +79,11 @@ def simple_append_to_block(ctx, x:UOp):
         # and it's a different range, we place it in a new block
         new_blocks[rngs].append(u)
     elif None in children_block_location:
-      # this has an unplaced child, it stays in srcs
+      # this has an unplaced child, it stays in srcs because it might not need a fork (diamond)
       new_srcs.append(u)
     else:
       updated = True
-      new_srcs.append(UOp(Ops.BLOCKFORK, dtypes.void, (u,)))
+      new_srcs.append(UOp(Ops.BLOCKFORK, dtypes.void, (u,), len(children[u])))
 
   if not updated: return None
 
@@ -91,7 +94,9 @@ def simple_append_to_block(ctx, x:UOp):
     closed = tuple([y for y in new_src.arg.rngs if y not in x.arg.rngs])
     if len(closed):
       # TODO: is this order always right?
-      for c in closed[::-1]: new_src = UOp(Ops.BLOCKEND, dtypes.void, (new_src,), arg=BasicBlock([c], []))
+      for c in closed[::-1]:
+        new_src = UOp(Ops.BLOCKEND, dtypes.void, (new_src,), arg=BasicBlock(rng, [], [c]))
+        rng = tuple(x for x in rng if x is not c)
     new_srcs.append(new_src)
 
   ret = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
@@ -111,7 +116,6 @@ def fix_fork(ctx, x):
   ret = UOp(Ops.BLOCK, dtypes.void, x.src[0].src, BasicBlock(ranges[x.src[0]], [x.src[0]]))
   placed[x.src[0]] = ret.arg
   return x.replace(src=(ret,))
-
 
 make_basic_blocks = PatternMatcher([
   (UPat(Ops.SINK, name="x"), place_sink),
@@ -141,6 +145,19 @@ def block_uop(sink:UOp) -> UOp:
 
   ranges = {u:get_ranges_in_parents(u) for u in sink.sparents}
 
+  # add ifs to parents that only feed into things already in the if (awful algo is n^2)
+  changed = True
+  while changed:
+    changed = False
+    for k,v in children.items():
+      if len(v) == 0: continue
+      if k.op in {Ops.IF, Ops.ASSIGN}: continue
+      # if all children have an if, add the if
+      to_add = [u for u in set.intersection(*[set(ranges[c]) for c in v]) if u.op is Ops.IF and u not in ranges[k]]
+      if len(to_add):
+        changed = True
+        ranges[k] = tuple(dedup(sorted(ranges[k]+tuple(to_add), key=lambda x: x.tuplize)))
+
   # terrible algo for rewriting
   placed = {}
   sink = graph_rewrite(sink, make_basic_blocks, ctx=(children, ranges, placed))
@@ -163,6 +180,28 @@ def block_uop(sink:UOp) -> UOp:
     if len(v) > 1:
       rep = UOp(Ops.BLOCKEND, dtypes.void, tuple(dedup(flatten(x.src for x in v))), k)
       sink = sink.substitute({u:rep for u in v})
+
+  # blockend gobble
+  def blockend_gobble(x:UOp):
+    blocks, non_blocks = partition(x.src, lambda y: y.op is Ops.BLOCK and x.arg.closed[0] in y.arg.rngs) # and x.arg.rngs == y.arg.rngs)
+    #for b in blocks: assert x.arg.closed[0] in b.arg.rngs
+    if len(blocks) == 0:
+      # find BLOCKFORK and merge it
+      for b in non_blocks:
+        if b.op is Ops.BLOCKFORK:
+          print(len([x for x in non_blocks if x is b]), b.arg)
+          if len([x for x in non_blocks if x is b]) == b.arg:
+            new_srcs = tuple([x for x in non_blocks if x is not b]) + b.src
+            return UOp(Ops.BLOCKEND, dtypes.void, new_srcs, x.arg)
+      # find matching BLOCKIF and merge it
+      # find matching RANGE and merge it
+      return None
+    return UOp(Ops.BLOCKEND, dtypes.void, tuple(flatten([x.src for x in blocks])+non_blocks), x.arg.add(flatten([x.arg.lst for x in blocks])))
+
+  gobble = PatternMatcher([
+    (UPat(Ops.BLOCKEND, name="x"), blockend_gobble),
+  ])
+  sink = graph_rewrite(sink, gobble)
 
   # show graph for VIZ
   sink = graph_rewrite(sink, PatternMatcher([]))
@@ -205,8 +244,12 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
       _uops.extend(x.arg.lst)
       open_loops.append(x.arg.lst[0])
     elif x.op is Ops.BLOCKEND:
-      assert len(x.arg.rngs) == 1
-      r = x.arg.rngs[0]
+      for u in x.arg.lst: assert u not in _uops, f"replacing {u.op}"
+      _uops.extend(x.arg.lst)
+
+      assert len(x.arg.closed) == 1
+      r = x.arg.closed[0]
+      """
       if r is not open_loops[-1] and r.op is Ops.RANGE:
         flip_ifs = open_loops[open_loops.index(r)+1:][::-1]
         for rr in flip_ifs:
@@ -217,9 +260,10 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
           _uops.append(rr)
       else:
         assert r is open_loops[-1]
-        if r.op is Ops.RANGE: _uops.append(UOp(Ops.ENDRANGE, dtypes.void, (r,)))
-        elif r.op is Ops.IF: _uops.append(UOp(Ops.ENDIF, dtypes.void, (r,)))
-        open_loops.remove(r)
+      """
+      if r.op is Ops.RANGE: _uops.append(UOp(Ops.ENDRANGE, dtypes.void, (r,)))
+      elif r.op is Ops.IF: _uops.append(UOp(Ops.ENDIF, dtypes.void, (r,)))
+      open_loops.remove(r)
     elif x.op is Ops.DEFINE_ACC:
       idx = min([_uops.index(l) for l in x.src if l.op is Ops.RANGE])
       _uops.insert(idx, x)
