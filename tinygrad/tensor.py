@@ -1006,7 +1006,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     if all(x is None or x == (0,s) for x,s in zip(arg, self.shape)): return self
     return F.Shrink.apply(self, arg=tuple(x if x is not None else (0,s) for x,s in zip(arg, self.shape)))
 
-  def pad(self, padding:Union[Sequence[sint], Sequence[Optional[Tuple[sint, sint]]]], mode:str="constant", value:float=0.0) -> Tensor:
+  def pad(self, padding:Union[Sequence[sint], Sequence[Optional[Tuple[sint, sint]]]], value:float=0.0, mode:str="constant") -> Tensor:
     """
     Returns a tensor with padding applied based on the input `padding`.
     `padding` supports two padding structures:
@@ -1015,10 +1015,10 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
        - This structure matches PyTorch's pad.
 
     2. Group padding: (..., (padding_top, padding_bottom), (padding_left, padding_right))
-       - This structure matches jax, numpy, tensorflow and others
+       - This structure matches pad for jax, numpy, tensorflow and others.
        - For each axis, padding can be `None`, meaning no padding, or a tuple `(start, end)`.
 
-    Padding values can be negative, resulting in dimension shrinks that work similarly to negative Python slices.
+    Padding values can be negative, resulting in dimension shrinks that work similarly to Python negative slices.
     The `mode` parameter currently supports only `"constant"` padding, where the `value` specifies the padding value.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1032,7 +1032,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.pad(((None, None, (0, -1), (1, 2)))).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.pad((1, 2, 0, -1), mode="constant" value=-float('inf')).numpy())
+    print(t.pad((1, 2, 0, -1), mode="constant", value=-float('inf')).numpy())
     ```
     """
     X, pX = self, padding
