@@ -2183,25 +2183,34 @@ class TestOps(unittest.TestCase):
                                          lambda x,y: x.cross_entropy(y, label_smoothing=ls))
 
   def test_nll_loss(self):
-    helper_test_op([(32,10), (32)], lambda x,y: torch.nn.functional.nll_loss(x, torch.clip(y,0).type(torch.long)),
-                                    lambda x,y: x.nll_loss(y.clip(0).cast(dtypes.long)), forward_only=True)
+    helper_test_op([(32,10), (32)], lambda x,y: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1),
+                                                                             torch.clip(y,0).type(torch.long)),
+                                    lambda x,y: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.long)), forward_only=True)
 
   def test_nll_loss_reductions(self):
     for r in ("mean", "sum", "none"):
-      helper_test_op([(32,10), (32)], lambda x,y: torch.nn.functional.nll_loss(x, torch.clip(y,0).type(torch.long), reduction=r),
-                                      lambda x,y: x.nll_loss(y.clip(0).cast(dtypes.long), reduction=r), forward_only=True)
+      helper_test_op([(32,10), (32)], lambda x,y: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1),
+                                                                               torch.clip(y,0).type(torch.long), reduction=r),
+                                      lambda x,y: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.long), reduction=r), forward_only=True)
     self.helper_test_exception([(32,10), (32)], lambda x,y: torch.nn.functional.nll_loss(x, torch.clip(y,0).type(torch.long), reduction="typo"),
                                                 lambda x,y: x.nll_loss(y.clip(0).cast(dtypes.long), reduction="typo"), expected=ValueError)
 
   def test_nll_loss_weight(self):
     for r in ("mean", "sum", "none"):
-      helper_test_op([(32,10), (32), (10)], lambda x,y,z: torch.nn.functional.nll_loss(x, torch.clip(y,0).type(torch.long), z, reduction=r),
-                                            lambda x,y,z: x.nll_loss(y.clip(0).cast(dtypes.long), z, reduction=r), forward_only=True)
+      helper_test_op([(32,10), (32), (10)], lambda x,y,z: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1),
+                                                                                            torch.clip(y,0).type(torch.long), weight=z, reduction=r),
+                                            lambda x,y,z: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.long),
+                                                                                         weight=z, reduction=r), forward_only=True)
 
   def test_nll_loss_ignore_index(self):
-    log_probs = [[-1.0, -2.0, -3.0], [-1.5, -0.8, -2.5], [-1.2, -3.1, -0.5]]
-    helper_test_op(None, lambda x, y: torch.nn.functional.nll_loss(x, y.type(torch.long), ignore_index=-1),
-                         lambda x, y: x.nll_loss(y.cast(dtypes.long), ignore_index=-1), vals=[log_probs, [0, -1, 2]], forward_only=True)
+    logits = [[2.0, 0.5, -1.0],
+              [1.5, 2.5, -0.5],
+              [0.0, -2.0, 1.0]]
+    targets = [0, 1, 2]
+    helper_test_op(None, lambda x,y: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1),
+                                                                  torch.clip(y,0).type(torch.long), ignore_index=1),
+                         lambda x,y: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.long), ignore_index=1),
+                         forward_only=True, vals=[logits, targets])
 
   def test_one_hot(self):
     data = [1, 2, 4]
