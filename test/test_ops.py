@@ -2185,13 +2185,13 @@ class TestOps(unittest.TestCase):
   def test_nll_loss(self):
     helper_test_op([(32,10), (32)], lambda x,y: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1),
                                                                              torch.clip(y,0).type(torch.long)),
-                                    lambda x,y: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.long)), forward_only=True)
+                                    lambda x,y: x.log_softmax().nll_loss(y.clip(0).cast(dtypes.long)), forward_only=True)
 
   def test_nll_loss_reductions(self):
     for r in ("mean", "sum", "none"):
       helper_test_op([(32,10), (32)], lambda x,y: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1),
                                                                                torch.clip(y,0).type(torch.long), reduction=r),
-                                      lambda x,y: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.long), reduction=r), forward_only=True)
+                                      lambda x,y: x.log_softmax().nll_loss(y.clip(0).cast(dtypes.long), reduction=r), forward_only=True)
     self.helper_test_exception([(32,10), (32)], lambda x,y: torch.nn.functional.nll_loss(x, torch.clip(y,0).type(torch.long), reduction="typo"),
                                                 lambda x,y: x.nll_loss(y.clip(0).cast(dtypes.long), reduction="typo"), expected=ValueError)
 
@@ -2199,7 +2199,7 @@ class TestOps(unittest.TestCase):
     for r in ("mean", "sum", "none"):
       helper_test_op([(32,10), (32), (10)], lambda x,y,z: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1),
                                                                                             torch.clip(y,0).type(torch.long), weight=z, reduction=r),
-                                            lambda x,y,z: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.long),
+                                            lambda x,y,z: x.log_softmax().nll_loss(y.clip(0).cast(dtypes.long),
                                                                                          weight=z, reduction=r), forward_only=True)
 
   def test_nll_loss_ignore_index(self):
@@ -2209,7 +2209,7 @@ class TestOps(unittest.TestCase):
     targets = [0, 1, 2]
     helper_test_op(None, lambda x,y: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1),
                                                                   torch.clip(y,0).type(torch.long), ignore_index=1),
-                         lambda x,y: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.long), ignore_index=1),
+                         lambda x,y: x.log_softmax().nll_loss(y.clip(0).cast(dtypes.long), ignore_index=1),
                          forward_only=True, vals=[logits, targets])
 
   def test_one_hot(self):
