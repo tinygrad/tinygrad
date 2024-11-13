@@ -12,7 +12,9 @@ class BasicBlock:
     self.rngs = tuple(rngs)
     self.lst = tuple(lst)
   def __hash__(self): return hash((self.rngs, self.lst))
-  def __eq__(self, x): return self.rngs == x.rngs and self.lst == x.lst
+  def __eq__(self, x):
+    if x is None: return False
+    return self.rngs == x.rngs and self.lst == x.lst
   def __repr__(self):
     return f"{[y.arg[0] if y.op is Ops.RANGE else f'IF{id(y)}' for y in self.rngs]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
   @functools.cached_property
@@ -40,7 +42,7 @@ def get_ranges_in_parents(x:UOp) -> Tuple[UOp, ...]:
       ret.append(get_ranges_in_parents(u))
   return tuple(dedup(sorted(flatten(ret), key=lambda x: x.tuplize)))
 
-DONT_PLACE_IN_BLOCK = {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.BLOCKEND, Ops.BLOCKIF, Ops.BLOCKFORK}
+DONT_PLACE_IN_BLOCK = {Ops.RANGE, Ops.CONST, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKIF, Ops.BLOCKFORK}
 def append_to_block(ctx, x:UOp):
   children, forks = ctx
   new_srcs = []
@@ -95,11 +97,94 @@ def append_to_block(ctx, x:UOp):
     new_srcs = [UOp(Ops.BLOCKIF, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(get_ranges_in_parents(u), [u]))]
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
 
+
+def simple_append_to_block(ctx, x:UOp):
+  # we are in a block
+  children, ranges, placed = ctx
+  new_blocks: DefaultDict[Tuple[UOp, ...], List[UOp]] = defaultdict(list)
+  new_srcs = []
+  to_append = []
+  updated = False
+  for u in x.src:
+    if u.op in DONT_PLACE_IN_BLOCK:
+      # it stays in the block srcs if it's an unplaced type (including a parent block)
+      new_srcs.append(u)
+      continue
+
+    if u.op is Ops.IF:
+      updated = True
+      blk = UOp(Ops.BLOCK, dtypes.void, u.src, BasicBlock(get_ranges_in_parents(u), []))
+      placed[u] = blk.arg
+      blk_if = UOp(Ops.BLOCKIF, dtypes.void, (blk,), BasicBlock(get_ranges_in_parents(u)+(u,), [u]))
+      new_srcs.append(blk_if)
+      continue
+
+    # see where it's children are placed
+    children_block_location = dedup([placed.get(c, None) for c in children[u]])
+    if len(children_block_location) == 1 and children_block_location[0] == x.arg:
+      # if all children are in this block
+      updated = True
+      if (rngs:=ranges[u]) == x.arg.rngs:
+        # and it's the same range, we place it in this block
+        new_srcs += list(u.src)
+        to_append.append(u)
+      else:
+        # and it's a different range, we place it in a new block
+        new_blocks[rngs].append(u)
+    elif None in children_block_location:
+      # this has an unplaced child, it stays in srcs
+      print(f"unplaced {u.op}")
+      new_srcs.append(u)
+    else:
+      #print(f"FAILURE on {u.op} len {len(children_block_location)} {id(children_block_location[0])}, {id(x)}")
+      #new_srcs.append(u)
+      updated = True
+      # this has two children in different blocks, create a new (empty) block to replace it
+
+      new_srcs.append(UOp(Ops.BLOCKFORK, dtypes.void, (u,)))
+      #new_srcs.append(UOp(Ops.BLOCK, dtypes.void, (u,), BasicBlock(ranges[u], [])))
+
+  if not updated: return None
+
+  # create new blocks, sometimes ending things
+  for rng,lst in new_blocks.items():
+    new_src = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, lst))
+    for l in new_src.arg.lst: placed[l] = new_src.arg
+    closed = tuple([y for y in new_src.arg.rngs if y not in x.arg.rngs])
+    if len(closed):
+      # TODO: is this order always right?
+      for c in closed[::-1]: new_src = UOp(Ops.BLOCKEND, dtypes.void, (new_src,), arg=BasicBlock([c], []))
+    new_srcs.append(new_src)
+
+  ret = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
+  for l in ret.arg.lst: placed[l] = ret.arg
+  return ret
+
+def place_sink(ctx, x:UOp):
+  children, ranges, placed = ctx
+  ret = UOp(Ops.BLOCK, dtypes.void, x.src, BasicBlock([], [x]))
+  placed[x] = ret.arg
+  return ret
+
 make_basic_blocks = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, dtypes.void, x.src, BasicBlock([], [x]))),
-  (UPat(Ops.BLOCK, name="x"), append_to_block),
-  #(UPat(Ops.BLOCK, name="x"), simple_append_to_block),
+  (UPat(Ops.SINK, name="x"), place_sink),
+  #(UPat(Ops.BLOCK, name="x"), append_to_block),
+  (UPat(Ops.BLOCK, name="x"), simple_append_to_block),
 ])
+
+def fix_fork(ctx, x):
+  assert len(x.src) == 1
+  if x.src[0].op is Ops.BLOCK: return None
+
+  children, ranges, placed = ctx
+  ret = UOp(Ops.BLOCK, dtypes.void, x.src[0].src, BasicBlock(ranges[x.src[0]], [x.src[0]]))
+  placed[x.src[0]] = ret.arg
+  return x.replace(src=(ret,))
+
+fix_forks = PatternMatcher([
+  (UPat(Ops.BLOCKFORK, name="x"), fix_fork),
+])
+
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
   if u in children: return srcs[u]
@@ -117,6 +202,44 @@ def block_uop(sink:UOp) -> UOp:
   range_srcs: Dict[UOp, Dict[UOp, None]] = {}
   in_degree: Dict[UOp, int] = {}
   get_children_dfs(sink, children, range_srcs, in_degree)
+
+  ranges = {u:get_ranges_in_parents(u) for u in sink.sparents}
+
+  # find ifs
+  # if you aren't in a parent of the IF, you are in the IF (FALSE!)
+  """
+  for u in sink.sparents:
+    if u.op is Ops.IF:
+      not_in_if = u.sparents
+      in_if = [s for s in sink.parents if s not in not_in_if]
+      for x in in_if:
+        ranges[x] = tuple(dedup(sorted(ranges[x] + (u,), key=lambda y: y.tuplize)))
+  """
+
+  placed = {}
+  sink = graph_rewrite(sink, make_basic_blocks, ctx=(children, ranges, placed))
+
+  while any(u.op is Ops.BLOCKFORK and u.src[0].op is not Ops.BLOCK for u in sink.sparents):
+    # link up the FORKs
+    sink = graph_rewrite(sink, make_basic_blocks, ctx=(children, ranges, placed))
+
+    # rewrite the FORKs as blocks
+    sink = graph_rewrite(sink, fix_forks, ctx=(children, ranges, placed))
+
+    # more rewrite
+    sink = graph_rewrite(sink, make_basic_blocks, ctx=(children, ranges, placed))
+
+
+  #ranges = []
+  #stores = []
+  #for u in sink.sparents:
+    #if u.op is Ops.RANGE: ranges.append(u)
+    #if u.op is Ops.IF: ifs.append(u)
+    #if u.op is Ops.IF: ifs.append(u)
+
+
+
+  """
 
   forks: Dict[UOp, UOp] = {}
   while 1:
@@ -138,6 +261,7 @@ def block_uop(sink:UOp) -> UOp:
       if k in forks:
         del forks[k]
     if len(forks) == 0: break
+  """
 
   # terrible O(n^2) algo
   cc: DefaultDict[BasicBlock, List[UOp]] = defaultdict(list)
