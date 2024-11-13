@@ -717,10 +717,10 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     dtype = kwargs.pop("dtype", self.dtype)
-    device = kwargs.pop("device", self.device)
+    device_arg, device = kwargs.get("device"), kwargs.pop("device", self.device)
     contiguous = kwargs.pop("contiguous", True)
-    if isinstance(self.device, tuple):
-      assert isinstance(self.lazydata, MultiLazyBuffer)
+    if isinstance(self.device, tuple) and isinstance(self.lazydata, MultiLazyBuffer):
+      if device_arg is not None: raise RuntimeError("cannot specify `device` on `rand_like` of a multi device tensor")
       if self.lazydata.axis is not None:
         rands = [cast(LazyBuffer, Tensor.rand(*lb.shape, device=lb.device, dtype=dtype, contiguous=contiguous, **kwargs).lazydata) \
                  for lb in self.lazydata.lbs]
@@ -1586,6 +1586,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.min(axis=1, keepdim=True).numpy())
     ```
     """
+    if dtypes.is_unsigned(self.dtype):
+      return dtypes.max(self.dtype) - (dtypes.max(self.dtype) - self).max(axis=axis, keepdim=keepdim)
     return -((-self).max(axis=axis, keepdim=keepdim))
 
   def any(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
