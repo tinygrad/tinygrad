@@ -1,7 +1,7 @@
 from typing import List, Tuple
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import UOp, Ops, UnaryOps, TernaryOps, PatternMatcher, UPat
-from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite
+from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, extra_pm
 from tinygrad.helpers import strip_parens
 import math
 
@@ -20,13 +20,12 @@ wgsl_matcher = PatternMatcher([
   (UPat.store(UPat.var("bidx"), UPat.var("var", dtype=dtypes.bool), UPat.var("gate")),
    lambda bidx,val,gate: UOp.store(bidx, val.cast(dtypes.int), gate)),
   (UPat.store(UPat.var("bidx"), UPat.var("var", dtype=dtypes.bool)), lambda bidx,var: UOp.store(bidx, var.cast(dtypes.int))),
-  (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
   # fix nan propagation: 'a * select(1, nan, cond) -> select(a, nan, cond)'
   (UPat(Ops.MUL, name="m", src=(UPat(name="a"), UPat(TernaryOps.WHERE, src=(UPat.var("g"), \
     UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2"))))), \
     lambda m,a,g,c1,c2: UOp(TernaryOps.WHERE, dtype=m.dtype, src=(g, UOp.const(dtype=dtypes.float, b=float('nan')), a)) \
     if math.isnan(c1.arg) and c2.arg == 1.0 else None),
-  ])
+  ]) + extra_pm
 
 type_map = { dtypes.float: "f32", dtypes.uchar: "u32", dtypes.ushort: "u32", dtypes.short: "i32",
             dtypes.char: "i32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool" }
@@ -45,7 +44,6 @@ class WGSLRenderer(CStyleLanguage):
   local_max = (256, 256, 64)
   code_for_workitem = {"g": lambda x: f"i32(gindex.{'xyz'[int(x)]})", "l": lambda x: f"i32(lindex.{'xyz'[int(x)]})"}
   extra_matcher = wgsl_matcher
-  external_local_bufs = True
   supports_float4 = False
   barrier = "workgroupBarrier();"
   code_for_op = {**CStyleLanguage.code_for_op, TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a})"}
@@ -82,10 +80,12 @@ class WGSLRenderer(CStyleLanguage):
     local_size = [num for _, num in sorted([u.arg for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == 'l'], key=lambda x: x[0])]
     if not local_size: local_size = [1]
     bind_it = iter(range(len(bufs)))
+    external_local_bus = [line.lstrip() for line in kernel if "var<workgroup>" in line]
+    kernel[:] = [line for line in kernel if "var<workgroup>" not in line]
     prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
     # trick to obfuscate compiler so that nan is detected properly
     prg += "fn is_nan(v:f32) -> bool { return min(v, 1.0) == 1.0 && max(v, -1.0) == -1.0; }\n"
     prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
-    prg += "\n".join((prefix or [])+[f"@group(0) @binding({next(bind_it)+1}) {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}: {f'array<{self.type_map[dtype.base]}>' if isinstance(dtype, PtrDType) else 'i32'};" for name,(dtype,rw) in bufs])  # noqa: E501
+    prg += "\n".join((external_local_bus or [])+[f"@group(0) @binding({next(bind_it)+1}) {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}: {f'array<{self.type_map[dtype.base]}>' if isinstance(dtype, PtrDType) else 'i32'};" for name,(dtype,rw) in bufs])  # noqa: E501
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501
     return prg

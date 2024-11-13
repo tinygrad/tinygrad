@@ -74,7 +74,6 @@ class CStyleLanguage(Renderer):
   smem_prefix: str = ""
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = "const int"
-  external_local_bufs: bool = False
   barrier: str = ""
   code_for_workitem: Dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
   extra_args: List[str] = []
@@ -121,7 +120,6 @@ class CStyleLanguage(Renderer):
     child_count = Counter(v for ru in uops for v in ru.src)
     bufs: Dict[UOp, Tuple[str, Tuple[DType, bool]]] = {}
     kernel = []
-    prekernel = []
     depth = 1
     c: DefaultDict[str, int] = defaultdict(int)
     for u in uops:
@@ -157,14 +155,13 @@ class CStyleLanguage(Renderer):
           if u.op is Ops.ASSIGN: r[u] = r[u.src[0]]
         else:
           l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
-        # this is annoying, wgsl specific
-        prekernel.append(l) if u.op == Ops.DEFINE_LOCAL and self.external_local_bufs else kernel.append("  "*depth + l)
+        kernel.append("  "*depth + l)
         if prefix: c[prefix] += 1  # if it was used, increment
       if u.op in {Ops.IF, Ops.RANGE}: depth += 1
     del self.r
 
     # NOTE: this relies on bufs dict preserving order
-    return self.render_kernel(name, kernel, list(bufs.values()), uops, prekernel or None)
+    return self.render_kernel(name, kernel, list(bufs.values()), uops)
 
 class ClangRenderer(CStyleLanguage):
   device = "CLANG"
