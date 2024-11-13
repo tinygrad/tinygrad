@@ -2,7 +2,7 @@ import functools
 from tinygrad.device import  Compiled, Allocator, Compiler
 from tinygrad.renderer.wgsl import WGSLRenderer
 import wgpu
-import struct
+import struct, array
 
 def create_uniform(wgpu_device, val) -> wgpu.GPUBuffer:
   buf = wgpu_device.create_buffer(size=4, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
@@ -49,15 +49,15 @@ class WebGpuAllocator(Allocator):
     return self.device.create_buffer(size=scaled_size, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)
   def copyin(self, dest, src: memoryview):
     scale = dest.size // len(src)
-    if scale == 4: self.device.queue.write_buffer(dest, 0, bytearray([byte for b in src for byte in [b, 0, 0, 0]]))
-    elif scale == 2: self.device.queue.write_buffer(dest, 0, bytearray([byte for i in range(0, len(src), 2) for byte in [src[i], src[i+1], 0, 0]]))
-    else: self.device.queue.write_buffer(dest, 0, src)
+    # short, ushort -> int32
+    if scale == 2: self.device.queue.write_buffer(dest, 0, memoryview(array.array('i', [(src[i] | src[i+1] << 8) for i in range(0, len(src), 2)])))
+    # normal case and bool, char, uchar -> int32
+    else: self.device.queue.write_buffer(dest, 0, memoryview(array.array('i', src)) if scale == 4 else src)
   def copyout(self, dest: memoryview, src):
-    step = (4 // (src.size // len(dest)))
+    scale = src.size // len(dest)
     raw_data = self.device.queue.read_buffer(src, 0)
-    extracted_data = bytearray()
-    for i in range(0, len(raw_data), 4): extracted_data.extend(raw_data[i:i+step])
-    dest[:] = extracted_data[:len(dest)]
+    format = 'H' if scale == 2 else 'B'
+    dest[:] = memoryview(array.array(format, raw_data.cast(format)[::scale])).cast(dest.format) if scale > 1 else raw_data
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
