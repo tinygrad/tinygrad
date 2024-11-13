@@ -2949,6 +2949,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(Tensor([True, True, False, False]).xor(Tensor([True, False, True, False])).numpy())
     ```
     """
+    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return F.Xor.apply(*self._broadcasted(x, reverse))
 
   def bitwise_and(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
@@ -2963,7 +2964,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(Tensor([True, True, False, False]).bitwise_and(Tensor([True, False, True, False])).numpy())
     ```
     """
-    assert dtypes.is_int(self.dtype)
+    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return F.BitwiseAnd.apply(*self._broadcasted(x, reverse))
 
   def bitwise_or(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
@@ -2978,7 +2979,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(Tensor([True, True, False, False]).bitwise_or(Tensor([True, False, True, False])).numpy())
     ```
     """
-    assert dtypes.is_int(self.dtype)
+    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return F.BitwiseOr.apply(*self._broadcasted(x, reverse))
 
   def lshift(self, x:int):
