@@ -610,7 +610,9 @@ class Kernel:
     @functools.lru_cache(None)
     def fixup_ast(op:UOp) -> UOp:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
-      if op.op in GroupOp.Buffer and op in self.bufs: return ret.view(self.sts[self.bufs.index(op)])
+      if op.op in GroupOp.Buffer and op in self.bufs:
+        st_uop = self.sts[self.bufs.index(op)].to_uop()
+        return ret.replace(src=(st_uop,)) if op.op is Ops.VALID else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
       if op.op is Ops.SINK: return ret.replace(arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
@@ -640,12 +642,11 @@ class Kernel:
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
-              st_uop = ShapeTracker.from_shape(local_shape).to_uop()
-              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i + 1}", st_uop.arg.real_size()))
-              local_store = UOp.store(local_buffer, st_uop, srcs[i])
-              if tc_pattern: local_store = local_store.view(fix_st(local_store.st, *tc_pattern))
-
-              srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st_uop, local_store))
+              st = store_st = ShapeTracker.from_shape(local_shape)
+              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i + 1}", st.real_size()))
+              if tc_pattern: store_st = fix_st(store_st, *tc_pattern)
+              local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
+              srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
 
           tc_reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.reduce_axes)
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/EXPAND to get the vectorization right
@@ -682,7 +683,7 @@ class Kernel:
 
     return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
       (UPat({*GroupOp.ALU,Ops.CAST,Ops.BITCAST,Ops.ASSIGN}, name="e").view(name="v"), lambda e,v: e.replace(src=tuple(s.view(v.st) for s in e.src))),
-      (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src)))]))
+      (UPat({Ops.LOAD, Ops.PRELOAD, Ops.VALID}, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src)))]))
 
   # **** this is the lowerer ****
 
