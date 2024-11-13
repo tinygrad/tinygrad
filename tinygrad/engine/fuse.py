@@ -1,99 +1,112 @@
 from collections import defaultdict, deque
-from typing import Tuple, List, Dict, DefaultDict
-from tinygrad.ops import Ops, UOp
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts, unwrap
+from typing import Set, Tuple, List, Dict, DefaultDict
+from tinygrad.device import Buffer
+from tinygrad.ops import UOp, Ops
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.engine.lazy import LazyBuffer
 
-def _recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], realizes:Dict[UOp, UOp], allbufs:Dict[UOp, UOp],
-                     reduce_for_op:Dict[UOp, UOp], group:Dict[UOp, None], cache:Dict[Tuple[UOp, ShapeTracker], None]) -> None:
-  """recursively search the uop for groupable children, realize the UOp if a child can't group"""
+def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
+                     realizes:Dict[LazyBuffer, None], reduce_for_op:Dict[LazyBuffer, UOp], group:Dict[LazyBuffer, None],
+                     cache:Dict[Tuple[LazyBuffer, ShapeTracker], None]) -> None:
+  """recursively search the LazyBuffer for groupable children, realize the LazyBuffer if a child can't group"""
   if (tr, st) in cache: return
   cache.setdefault((tr, st))
-  reduceop_size = unwrap(allbufs[r].st).size
   if tr in realizes and tr is not r:
     # can only fuse contiguous
     # max one reduceop per kernel
-    if not st.contiguous or st.size != reduceop_size or tr in reduce_for_op: group.setdefault(r)
+    if not st.contiguous or st.size != r.st.size or tr in reduce_for_op: group.setdefault(r)
     return group.setdefault(tr)
   for tr_next in children[tr]:
     # max one reduceop per kernel
-    if (tr_next_uop:=allbufs[tr_next]).op is Ops.REDUCE_AXIS: return group.setdefault(r)
+    if tr_next.op is Ops.REDUCE_AXIS: return group.setdefault(r)
     # can only fuse contiguous
-    if len(st_childs:=dedup(s for s in tr_next_uop.src if s.base.op is Ops.LOAD and s.base.src[0] == tr)) > 1: return group.setdefault(r)
-    _recursive_group(tr_next, st+unwrap(st_childs[0].st), r, children, realizes, allbufs, reduce_for_op, group, cache)
+    if len(st_childs:=dedup(s.st for s in tr_next.srcs if s.base == tr)) > 1: return group.setdefault(r)
+    _recursive_group(tr_next, st+st_childs[0], r, children, realizes, reduce_for_op, group, cache)
 
-def _get_isolated_children(rbuf:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultDict[UOp, Dict[UOp, None]], realizes:Dict[UOp, UOp],
-                           allbufs:Dict[UOp, UOp], group:Dict[UOp, None]) -> Dict[UOp, None]:
+def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, UOp], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],
+                           realizes:Dict[LazyBuffer, None], group:Dict[LazyBuffer, None]) -> Dict[LazyBuffer, None]:
   rc_parents, cache = deque(group), set()
   while rc_parents:
     if (p:=rc_parents.pop()) in cache: continue
     cache.add(p)
     # max one reduceop per kernel
-    if (p_uop:=allbufs[p]).op is Ops.REDUCE_AXIS: return {}
-    rc_parents.extend(next_p for x in p_uop.src if x.base.op is Ops.LOAD and (next_p:=x.base.src[0]) is not rbuf)
+    if p.op is Ops.REDUCE_AXIS: return {}
+    rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
   # search descendants of the reduceop that can cleanly group
-  descendants: Dict[UOp, None] = {}
-  for tr in group: _recursive_group(tr, unwrap(allbufs[tr].st), tr, children, realizes, allbufs, reduce_for_op, descendants, cache={})
+  descendants: Dict[LazyBuffer, None] = {}
+  for tr in group: _recursive_group(tr, tr.st, tr, children, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], double_reduces:Dict[UOp, None],
-                 realizes:Dict[UOp, UOp]) -> List[List[UOp]]:
-  """search the graph for all the uops that need to realize"""
+def get_realizes(children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbufs:Dict[LazyBuffer, None], double_reduces:Dict[LazyBuffer, None],
+                 ubuf_realizes:Dict[UOp, UOp], assigns:Set[UOp], buf_uops:Dict[Buffer, UOp]) -> List[List[UOp]]:
+  """search the graph for all the LazyBuffers that need to realize"""
+  # get all the realizes from big graph
+  realizes: Dict[LazyBuffer, None] = {}
+  for r in allbufs:
+    if (ubuf:=buf_uops[r.buffer]) in ubuf_realizes: realizes[r] = None
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
-  reduce_for_op: Dict[UOp, UOp] = {}
+  reduce_for_op: Dict[LazyBuffer, UOp] = {}
   reduce_of_const: List[UOp] = []
-  for rbuf,r in allbufs.items():
-    if rbuf in realizes or r.op is not Ops.REDUCE_AXIS: continue
-    group: Dict[UOp, None] = {}
-    _recursive_group(rbuf, unwrap(r.st), rbuf, children, realizes, allbufs, reduce_for_op, group, cache={})
+  for r in allbufs:
+    if r in realizes or r.op is not Ops.REDUCE_AXIS: continue
+    group: Dict[LazyBuffer, None] = {}
+    _recursive_group(r, r.st, r, children, realizes, reduce_for_op, group, cache={})
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
-    forced_realize = rbuf in group
+    forced_realize = r in group
     if not forced_realize and len(group) > 1:
-      group = _get_isolated_children(rbuf, reduce_for_op, children, realizes, allbufs, group)
+      group = _get_isolated_children(r, reduce_for_op, children, realizes, group)
     # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and any(allbufs[x].op is Ops.ASSIGN for x in group):
-      parents = deque((rbuf, *group))
+    if not forced_realize and any(x.op is Ops.ASSIGN for x in group):
+      parents = deque((r, *group))
       while parents and not forced_realize:
-        if (p_uop:=allbufs.get(p:=parents.pop())) is None: continue
-        if p_uop.op is Ops.ASSIGN and p not in group: forced_realize, can_chase = True, False
-        if p in realizes: continue
-        parents.extend([x.base.src[0] for x in p_uop.src if x.base.op in {Ops.LOAD, Ops.PRELOAD}])
+        if (p:=parents.pop().base).is_realized() or p in realizes:
+          if p.is_realized() and buf_uops[(b:=p.buffer)] in assigns and not any(x.buffer is b for x in group): forced_realize, can_chase = True, False
+          continue
+        parents.extend(p.srcs)
     if forced_realize or not group:
-      tr = rbuf
+      tr = r
       if can_chase:
         # can chase this down to contiguous children
-        st = unwrap(r.st)
+        st = tr.st
         while len(children[tr]) == 1:
-          tr_next_uop = allbufs[tr_next:=next(iter(children[tr]))]
-          st_childs = dedup(s for s in tr_next_uop.src if s.base.op is Ops.LOAD and s.base.src[0] == tr)
+          tr_next = next(iter(children[tr]))
+          st_childs = dedup(s.st for s in tr_next.srcs if s.base is tr)
           if len(st_childs) > 1: break
-          st_child: ShapeTracker = unwrap(st_childs[0].st)
-          if st.size != st_child.size: break
-          st = st + unwrap(st_childs[0].st)
-          if not st.contiguous or tr_next_uop.op is Ops.REDUCE_AXIS: break
+          if st.size != st_childs[0].size: break
+          st = st + st_childs[0]
+          if not st.contiguous or tr_next.op is Ops.REDUCE_AXIS: break
           tr = tr_next
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
-        if (tr_uop:=allbufs[tr]).op is Ops.CAST and tr_uop.dtype.itemsize > tr_uop.src[0].dtype.itemsize:
-          tr = tr_uop.src[0].base.src[0]
+        if tr.op is Ops.CAST and tr.dtype.base.itemsize > tr.srcs[0].dtype.base.itemsize:
+          tr = tr.srcs[0].base
       group = {tr: None}
-      realizes[tr] = tr
+      realizes[tr] = None
+    rbuf = buf_uops[r.buffer]
     reduce_for_op.update((tr, rbuf) for tr in group)
-    if FUSE_ARANGE and r.arg[0] is Ops.ADD and r.src[0].base.op not in {Ops.LOAD, Ops.PRELOAD}: reduce_of_const.append(rbuf)
+    if FUSE_ARANGE and r.arg[0] is Ops.ADD and r.srcs[0].base.op is Ops.CONST: reduce_of_const.append(rbuf)
 
   # fuse double reduces with no other child
   if FUSE_CONV_BW:
-    for rbuf in double_reduces:
-      top_reduce = allbufs[rbuf].base.src[0].base.src[0]
-      if len(children[top_reduce]) == 1: del realizes[top_reduce]
+    for reduceop in double_reduces:
+      top_reduce = reduceop.base.srcs[0].base
+      if len(children[top_reduce]) == 1:
+        del realizes[top_reduce]
+        if (ubuf:=buf_uops[top_reduce.buffer]) in ubuf_realizes: del ubuf_realizes[ubuf]
 
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
-    kernel_children = {c for tr in group for c in children[tr] if allbufs[c].op not in {Ops.COPY, Ops.BUFFER_VIEW}}
+    if any(tr.forced_realize for tr in group): continue
+    kernel_children = {c for tr in group for c in children[tr] if c.op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
-    for tr in group: del realizes[tr]
+    for tr in group:
+      del realizes[tr]
+      if (ubuf:=buf_uops[tr.buffer]) in ubuf_realizes: del ubuf_realizes[ubuf]
 
   output_groups: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-  for ubuf in realizes: output_groups[reduce_for_op.get(ubuf, ubuf)].append(ubuf)
+  for buf in realizes:
+    output_groups[reduce_for_op.get(buf, ubuf:=buf_uops[buf.buffer])].append(ubuf)
+    ubuf_realizes[ubuf] = ubuf
   return list(output_groups.values())
