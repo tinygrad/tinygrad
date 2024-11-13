@@ -10,6 +10,7 @@ from tinygrad.runtime.support.am.soc21 import SOC21_IP
 from tinygrad.runtime.support.am.smu import SMU_IP
 from tinygrad.runtime.support.am.psp import PSP_IP
 from tinygrad.runtime.support.am.gfx import GFX_IP
+from tinygrad.runtime.support.am.mes import MES_IP
 
 class AMRegister:
   def __init__(self, adev, regoff): self.adev, self.regoff = adev, regoff
@@ -38,6 +39,7 @@ class AMDev:
     self.smu = SMU_IP(self)
     self.psp = PSP_IP(self)
     self.gfx = GFX_IP(self)
+    self.mes = MES_IP(self)
 
     if self.psp.is_sos_alive():
       print("sOS is alive, issue mode1 reset...")
@@ -85,6 +87,12 @@ class AMDev:
   def wait_reg(self, reg, value, mask=0xffffffff):
     v = reg.read()
     while v & mask != value: v = reg.read()
+
+    # for i in range(100):
+    #   val = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_STAT, amdgpu_gc_11_0_0.regCP_STAT_BASE_IDX)
+    #   if val == 0: return
+    #   time.sleep(0.00001)
+    # raise Exception('gfx_v11_0_cp_gfx_enable timeout')
 
   def wdoorbell64(self, index, val): self.doorbell64[index//2] = val
 
