@@ -4,7 +4,7 @@ import functools, io, math, inspect
 from tinygrad.tensor import Tensor, Device, _broadcast_shape, ConstType
 from tinygrad.helpers import getenv, CI, OSX, prod, flatten, make_tuple
 from tinygrad.dtype import dtypes, DType
-# from tinygrad.device import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
 
 # TODO try to remove this np stuff later
@@ -24,13 +24,6 @@ def to_python_const(t:Any):
   if t.dtype is dtypes.uint8: return t.data().tobytes()
   return [] if 0 in t.shape else t.tolist()
 
-# copied from helpers.py
-def supported_device_dtypes(dtype, device):
-  if dtype is dtypes.bfloat16: return dtypes.default_float
-  if dtype is dtypes.half and (CI and device in {"GPU", "LLVM", "CUDA"}): return dtypes.default_float
-  if dtype is dtypes.float64 and (device == "METAL" or (OSX and device == "GPU")): return dtypes.default_float
-  return dtype
-
 # ======= parsers
 # src: onnx/mapping.py  https://onnx.ai/onnx/api/mapping.html#l-mod-onnx-mapping
 DTYPE_MAP: Dict[int, DType] = {
@@ -40,7 +33,7 @@ DTYPE_MAP: Dict[int, DType] = {
   TensorProto.BFLOAT16:dtypes.bfloat16, TensorProto.FLOAT8E4M3FN:dtypes.float, TensorProto.FLOAT8E4M3FNUZ:dtypes.float,
   TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float}
 def parse_dtype(onnx_dtype: int) -> DType:
-  if onnx_dtype in DTYPE_MAP: return supported_device_dtypes(DTYPE_MAP[onnx_dtype], Device.DEFAULT)
+  if onnx_dtype in DTYPE_MAP: return DTYPE_MAP[onnx_dtype] if is_dtype_supported(DTYPE_MAP[onnx_dtype], Device.DEFAULT) else dtypes.float
   raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
 
 def parse_buffer(inp: TensorProto) -> Tensor:
