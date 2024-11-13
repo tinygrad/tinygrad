@@ -554,7 +554,7 @@ class UPat(MathTrait):
     if custom_early_reject is not None: self.early_reject = custom_early_reject
     else:
       upat_match = [src] if isinstance(src, UPat) else ([] if src is None else self.src[0])
-      self.early_reject = set(pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1)
+      self.early_reject = {pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1}
 
   def named(self, name:str): return UPat(self.op, self.dtype, self._in_src, self.arg, name, self.allowed_len == -1, self.custom_early_reject)
 
@@ -647,7 +647,7 @@ class PatternMatcher:
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None) -> Optional[UOp]:
-    ler = set(u.op for u in uop.src)
+    ler = {u.op for u in uop.src}
     for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
       for match in p.match(uop, {}):
@@ -688,7 +688,7 @@ class TrackedPatternMatcher(PatternMatcher):
 
   def rewrite(self, uop:UOp, ctx=None) -> Optional[UOp]:
     ret = None
-    ler = set(u.op for u in uop.src)
+    ler = {u.op for u in uop.src}
     for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
       st = time.perf_counter()
       if not early_reject.issubset(ler):

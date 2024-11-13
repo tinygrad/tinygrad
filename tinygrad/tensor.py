@@ -1578,6 +1578,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.min(axis=1, keepdim=True).numpy())
     ```
     """
+    if dtypes.is_unsigned(self.dtype):
+      return dtypes.max(self.dtype) - (dtypes.max(self.dtype) - self).max(axis=axis, keepdim=keepdim)
     return -((-self).max(axis=axis, keepdim=keepdim))
 
   def any(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
