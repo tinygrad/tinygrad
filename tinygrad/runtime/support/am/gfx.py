@@ -14,8 +14,8 @@ class GFX_IP:
   def __init__(self, adev):
     self.adev = adev
 
-    self.clear_state_pm = self.adev.mm.palloc(0x10000)
-    self.eop_pm = self.adev.mm.palloc(0x1000)
+    # self.clear_state_pm = self.adev.mm.palloc(0x10000)
+    # self.eop_pm = self.adev.mm.palloc(0x1000)
 
   def init(self):
     print("GFX: init")
@@ -29,7 +29,7 @@ class GFX_IP:
     self.constants_init()
     self.nbio_v4_3_gc_doorbell_init()
 
-    self.init_csb()
+    # self.init_csb()
     self.cp_resume()
 
   def soc21_grbm_select(self, me, pipe, queue, vmid):
@@ -49,13 +49,13 @@ class GFX_IP:
     self.adev.regGRBM_CNTL.write(0xff)
 
     # TODO: Read configs here
-    for i in range(1, 16):
+    for i in range(8, 16):
       self.soc21_grbm_select(0, 0, 0, i)
       self.adev.regSH_MEM_CONFIG.write(self.DEFAULT_SH_MEM_CONFIG)
       self.adev.regSH_MEM_BASES.write((self.adev.gmc.private_aperture_base >> 48) | ((self.adev.gmc.shared_aperture_base >> 48) << 16))
     self.soc21_grbm_select(0, 0, 0, 0)
 
-    for i in range(1, 16):
+    for i in range(8, 16):
       # Initialize all compute VMIDs to have no GDS, GWS, or OA acccess. These should be enabled by FW for target VMIDs (?)
       getattr(self.adev, f"regGDS_VMID{i}_BASE").write(0)
       getattr(self.adev, f"regGDS_VMID{i}_SIZE").write(0)
@@ -76,10 +76,10 @@ class GFX_IP:
     self.adev.wreg(0x507a40, 0x30000007)
     self.adev.wreg(0x507a43, 0x3000000d)
 
-  def init_csb(self):
-    self.adev.regRLC_CSIB_ADDR_HI.write(self.clear_state_pm.mc_addr() >> 32)
-    self.adev.regRLC_CSIB_ADDR_LO.write(self.clear_state_pm.mc_addr() & 0xfffffffc)
-    self.adev.regRLC_CSIB_LENGTH.write(self.clear_state_pm.size)
+  # def init_csb(self):
+  #   self.adev.regRLC_CSIB_ADDR_HI.write(self.clear_state_pm.mc_addr() >> 32)
+  #   self.adev.regRLC_CSIB_ADDR_LO.write(self.clear_state_pm.mc_addr() & 0xfffffffc)
+  #   self.adev.regRLC_CSIB_LENGTH.write(self.clear_state_pm.size)
 
   def config_gfx_rs64(self):
     for pipe in range(2):
@@ -115,28 +115,32 @@ class GFX_IP:
     self.adev.wait_reg(self.adev.regCP_STAT, value=0x0)
 
   def kcq_init(self):
-    self.kcq_ring = AMRing(self.adev, size=0x100000, me=1, pipe=0, queue=0, vmid=0, doorbell_index=(self.AMDGPU_NAVI10_DOORBELL_MEC_RING0 << 1))
+    for i in range(1):
+      self.kcq_ring = AMRing(self.adev, size=0x100000, me=1, pipe=i, queue=0, vmid=8, doorbell_index=((self.AMDGPU_NAVI10_DOORBELL_MEC_RING0 + i) << 1))
 
-    self.adev.mes.kiq_set_resources(0xffffffffffffffff) # full mask
+      self.adev.mes.kiq_set_resources(0xffffffffffffffff) # full mask
 
-    # Directly map kcq with kiq, no MES map_legacy_queue.
-    self.adev.mes.kiq_map_queue(self.kcq_ring, is_compute=True)
+      # Directly map kcq with kiq, no MES map_legacy_queue.
+      self.adev.mes.kiq_map_queue(self.kcq_ring, is_compute=True)
 
-    # test kcq
-    self.adev.wreg(0xc040, 0xcafedead)
+      # test kcq
+      # self.adev.wreg(0xc040, 0xcafedead)
 
-    self.kcq_ring.write(amd_gpu.PACKET3(amd_gpu.PACKET3_SET_UCONFIG_REG, 1))
-    self.kcq_ring.write(0x40) # uconfreg
-    self.kcq_ring.write(0xdeadc0de)
+      # self.kcq_ring.write(amd_gpu.PACKET3(amd_gpu.PACKET3_SET_UCONFIG_REG, 1))
+      # self.kcq_ring.write(0x40) # uconfreg
+      # self.kcq_ring.write(0xdeadc0de)
 
-    self.adev.wdoorbell64(self.kcq_ring.doorbell_index, self.kcq_ring.next_ptr)
+      # self.adev.wdoorbell64(self.kcq_ring.doorbell_index, self.kcq_ring.next_ptr)
 
-    while True:
-      # self.adev.vmm.collect_pfs()
-      if self.adev.rreg(0xc040) == 0xdeadc0de:
-        break
+      # while True:
+      #   # self.adev.vmm.collect_pfs()
+      #   if self.adev.rreg(0xc040) == 0xdeadc0de:
+      #     break
 
-    print("GFX: kcq test done")
+      print("GFX: kcq test done")
+    # for i in range(10):
+    #   print("Cool down", i)
+      time.sleep(1)
 
   def cp_resume(self):
     self.cp_set_doorbell_range()

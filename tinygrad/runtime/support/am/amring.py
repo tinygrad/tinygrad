@@ -9,14 +9,14 @@ class AMRing:
     self.mqd_mv = memoryview(bytearray(ctypes.sizeof(amdgpu_2.struct_v11_compute_mqd)))
     self.mqd = amdgpu_2.struct_v11_compute_mqd.from_address(mv_address(self.mqd_mv))
 
-    self.eop_pm = self.adev.mm.palloc(0x8000)
-    self.mqd_pm = self.adev.mm.palloc(len(self.mqd_mv))
-    self.rptr_pm = self.adev.mm.palloc(0x1000)
-    self.wptr_pm = self.adev.mm.palloc(0x1000)
-    self.ring_pm = self.adev.mm.palloc(self.size)
+    self.eop_vm = self.adev.mm.valloc(0x8000)
+    self.mqd_vm = self.adev.mm.valloc(len(self.mqd_mv))
+    self.rptr_vm = self.adev.mm.valloc(0x1000, uncached=True)
+    self.wptr_vm = self.adev.mm.valloc(0x1000, uncached=True)
+    self.ring_vm = self.adev.mm.valloc(self.size, uncached=True)
 
-    self.rptr = self.rptr_pm.cpu_view().cast('Q')
-    self.wptr = self.wptr_pm.cpu_view().cast('Q')
+    self.rptr = self.rptr_vm.cpu_view().cast('Q')
+    self.wptr = self.wptr_vm.cpu_view().cast('Q')
 
     self.rptr[0] = 0x0
     self.wptr[0] = 0x0
@@ -38,8 +38,8 @@ class AMRing:
     self.mqd.compute_static_thread_mgmt_se7 = 0xffffffff
     self.mqd.compute_misc_reserved = 0x00000007
 
-    self.mqd.cp_hqd_eop_base_addr_lo = (self.eop_pm.mc_addr() >> 8) & 0xffffffff
-    self.mqd.cp_hqd_eop_base_addr_hi = (self.eop_pm.mc_addr() >> 40) & 0xffffffff
+    self.mqd.cp_hqd_eop_base_addr_lo = (self.eop_vm.vaddr >> 8) & 0xffffffff
+    self.mqd.cp_hqd_eop_base_addr_hi = (self.eop_vm.vaddr >> 40) & 0xffffffff
     self.mqd.cp_hqd_eop_control = 0x8
 
     # init it only once, fine to skip this.
@@ -48,24 +48,27 @@ class AMRing:
     # self.mqd.cp_hqd_pq_wptr_lo = 0
     # self.mqd.cp_hqd_pq_wptr_hi = 0
 
-    self.mqd.cp_mqd_base_addr_lo = self.mqd_pm.mc_addr() & 0xfffffffc
-    self.mqd.cp_mqd_base_addr_hi = (self.mqd_pm.mc_addr() >> 32) & 0xffffffff
+    self.mqd.cp_mqd_base_addr_lo = self.mqd_vm.vaddr & 0xfffffffc
+    self.mqd.cp_mqd_base_addr_hi = (self.mqd_vm.vaddr >> 32) & 0xffffffff
 
     self.mqd.cp_mqd_control = amdgpu_gc_11_0_0.CP_MQD_CONTROL__PRIV_STATE_MASK
 
-    self.mqd.cp_hqd_pq_base_lo = (self.ring_pm.mc_addr() >> 8) & 0xffffffff
-    self.mqd.cp_hqd_pq_base_hi = (self.ring_pm.mc_addr() >> 40) & 0xffffffff
+    # print(hex(self.ring_vm.vaddr))
+    self.mqd.cp_hqd_pq_base_lo = (self.ring_vm.vaddr >> 8) & 0xffffffff
+    self.mqd.cp_hqd_pq_base_hi = (self.ring_vm.vaddr >> 40) & 0xffffffff
 
-    self.mqd.cp_hqd_pq_rptr_report_addr_lo = self.rptr_pm.mc_addr() & 0xfffffffc
-    self.mqd.cp_hqd_pq_rptr_report_addr_hi = (self.rptr_pm.mc_addr() >> 32) & 0xffffffff
+    self.mqd.cp_hqd_pq_rptr_report_addr_lo = self.rptr_vm.vaddr & 0xfffffffc
+    self.mqd.cp_hqd_pq_rptr_report_addr_hi = (self.rptr_vm.vaddr >> 32) & 0xffffffff
 
-    self.mqd.cp_hqd_pq_wptr_poll_addr_lo = self.wptr_pm.mc_addr() & 0xfffffffc
-    self.mqd.cp_hqd_pq_wptr_poll_addr_hi = (self.wptr_pm.mc_addr() >> 32) & 0xffffffff
+    self.mqd.cp_hqd_pq_wptr_poll_addr_lo = self.wptr_vm.vaddr & 0xfffffffc
+    self.mqd.cp_hqd_pq_wptr_poll_addr_hi = (self.wptr_vm.vaddr >> 32) & 0xffffffff
 
     assert self.size in {0x100000}
     self.mqd.cp_hqd_pq_control = 5 << amdgpu_gc_11_0_0.CP_HQD_PQ_CONTROL__RPTR_BLOCK_SIZE__SHIFT | \
-			(1 << amdgpu_gc_11_0_0.CP_HQD_PQ_CONTROL__UNORD_DISPATCH__SHIFT) | \
-      (0 << amdgpu_gc_11_0_0.CP_HQD_PQ_CONTROL__TUNNEL_DISPATCH__SHIFT) | \
+			(1 << amdgpu_gc_11_0_0.CP_HQD_PQ_CONTROL__QUEUE_FULL_EN__SHIFT) | \
+      (1 << amdgpu_gc_11_0_0.CP_HQD_PQ_CONTROL__NO_UPDATE_RPTR__SHIFT) | \
+      (1 << amdgpu_gc_11_0_0.CP_HQD_PQ_CONTROL__UNORD_DISPATCH__SHIFT) | \
+      (1 << amdgpu_gc_11_0_0.CP_HQD_PQ_CONTROL__TUNNEL_DISPATCH__SHIFT) | \
       (1 << amdgpu_gc_11_0_0.CP_HQD_PQ_CONTROL__PRIV_STATE__SHIFT) | \
       (1 << amdgpu_gc_11_0_0.CP_HQD_PQ_CONTROL__KMD_QUEUE__SHIFT) | 0x11 # size
 
@@ -81,10 +84,10 @@ class AMRing:
     self.mqd.cp_hqd_queue_priority = 0xf
     self.mqd.cp_hqd_active = 1
 
-    self.mqd_pm.cpu_view()[:len(self.mqd_mv)] = self.mqd_mv
+    self.mqd_vm.cpu_view()[:len(self.mqd_mv)] = self.mqd_mv
     self.adev.gmc.flush_hdp()
 
   def write(self, value):
-    self.ring_pm.cpu_view().cast('I')[self.next_ptr % (self.size // 4)] = value
+    self.ring_vm.cpu_view().cast('I')[self.next_ptr % (self.size // 4)] = value
     self.next_ptr += 1
     self.wptr[0] = self.next_ptr

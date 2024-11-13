@@ -80,6 +80,11 @@ class SMU_IP:
   def smu_set_power_profile(self, enabled):
     self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetWorkloadMask, 0x24 if enabled else 0x1, poll=True)
 
+    for clck in [0x000009B2, 0x000204E1, 0x000105DC, 0x00050B76, 0x00070B76, 0x00040898, 0x00060898, 0x000308FD]:
+      self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetSoftMaxByFreq, clck, poll=True)
+      self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetSoftMinByFreq, clck, poll=True)
+
+
   def init(self):
     print("SMU init")
     self.smu_smc_hw_setup()

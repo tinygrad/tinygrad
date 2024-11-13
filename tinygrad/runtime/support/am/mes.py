@@ -59,17 +59,17 @@ class MES_IP:
       amd_gpu.PACKET3_MAP_QUEUES_VMID(ring_to_enable.vmid) |
       amd_gpu.PACKET3_MAP_QUEUES_QUEUE(ring_to_enable.queue) |
       amd_gpu.PACKET3_MAP_QUEUES_PIPE(ring_to_enable.pipe) |
-      amd_gpu.PACKET3_MAP_QUEUES_ME((me)) |
+      amd_gpu.PACKET3_MAP_QUEUES_ME(me) |
       amd_gpu.PACKET3_MAP_QUEUES_QUEUE_TYPE(0) | # queue_type: normal compute queue 
       amd_gpu.PACKET3_MAP_QUEUES_ALLOC_FORMAT(0x0) | # alloc format: all_on_one_pipe
       amd_gpu.PACKET3_MAP_QUEUES_ENGINE_SEL(eng_sel) |
       amd_gpu.PACKET3_MAP_QUEUES_NUM_QUEUES(1)
     )
     self.mes_kiq.write(amd_gpu.PACKET3_MAP_QUEUES_DOORBELL_OFFSET(ring_to_enable.doorbell_index))
-    self.mes_kiq.write(ring_to_enable.mqd_pm.mc_addr() & 0xffffffff)
-    self.mes_kiq.write(ring_to_enable.mqd_pm.mc_addr() >> 32)
-    self.mes_kiq.write(ring_to_enable.wptr_pm.mc_addr() & 0xffffffff)
-    self.mes_kiq.write(ring_to_enable.wptr_pm.mc_addr() >> 32)
+    self.mes_kiq.write(ring_to_enable.mqd_vm.vaddr & 0xffffffff)
+    self.mes_kiq.write(ring_to_enable.mqd_vm.vaddr >> 32)
+    self.mes_kiq.write(ring_to_enable.wptr_vm.vaddr & 0xffffffff)
+    self.mes_kiq.write(ring_to_enable.wptr_vm.vaddr >> 32)
 
     # Just to test if command is executed
     return self.kiq_ring_test_helper()
@@ -100,7 +100,7 @@ class MES_IP:
     self.adev.gfx.soc21_grbm_select(3, ring.pipe, 0, 0)
 
     self.adev.regCP_HQD_VMID.write(ring.mqd.cp_hqd_vmid)
-    self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.write(0x0)
+    # self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.write(0x0)
 
     self.adev.regCP_MQD_BASE_ADDR.write(ring.mqd.cp_mqd_base_addr_lo)
     self.adev.regCP_MQD_BASE_ADDR_HI.write(ring.mqd.cp_mqd_base_addr_hi)

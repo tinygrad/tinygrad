@@ -51,7 +51,6 @@ class AMDev:
     self.psp.init()
     self.smu.init()
     self.gfx.init()
-    exit(0)
 
   def _map_pci_range(self, bar, cast='I'):
     ret = libpciaccess.pci_device_map_range(ctypes.byref(self.pcidev), self.pcidev.regions[bar].base_addr, size:=self.pcidev.regions[bar].size,

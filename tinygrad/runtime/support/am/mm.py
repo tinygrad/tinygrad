@@ -1,4 +1,5 @@
 from __future__ import annotations
+import ctypes
 from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_gc_11_0_0, amdgpu_mmhub_3_0_0
 from tinygrad.helpers import to_mv, mv_address, round_up
 
@@ -25,18 +26,19 @@ class PhysicalAllocator:
 
 class PTE:
   def __init__(self, adev, pmem, lv): self.adev, self.pmem, self.view, self.lv, self.ptes = adev, pmem, pmem.cpu_view().cast('Q'), lv, {}
-  def set_table(self, entry_id, pte:PTE):
-    self.view[entry_id] = (pte.pmem.paddr & 0x0000FFFFFFFFF000) | amdgpu_2.AMDGPU_PTE_VALID | amdgpu_2.AMDGPU_PTE_FRAG(9)
+  def set_table(self, entry_id, pte:PTE): self.view[entry_id] = (pte.pmem.paddr & 0x0000FFFFFFFFF000) | amdgpu_2.AMDGPU_PTE_VALID
   def set_page(self, entry_id, paddr, uncached=False):
     flags = amdgpu_2.AMDGPU_PTE_VALID | amdgpu_2.AMDGPU_PTE_WRITEABLE | amdgpu_2.AMDGPU_PTE_READABLE | amdgpu_2.AMDGPU_PTE_EXECUTABLE
-    flags |= amdgpu_2.AMDGPU_PDE_PTE
-    if uncached: flags |= amdgpu_2.AMDGPU_PTE_SNOOPED | amdgpu_2.AMDGPU_PTE_MTYPE_NV10(0, 3) # 3 = MTYPE_UC
+    if self.lv > 0: flags |= amdgpu_2.AMDGPU_PDE_PTE
+    if uncached: flags |= amdgpu_2.AMDGPU_PTE_MTYPE_NV10(0, 3) # 3 = MTYPE_UC
+    else: flags |= amdgpu_2.AMDGPU_PTE_MTYPE_NV10(0, 0)
+    # print("flags", hex(flags))
     self.view[entry_id] = (paddr & 0x0000FFFFFFFFF000) | flags
   def get_entry(self, entry_id): return self.view[entry_id]
 
 class VirtualMapping(PhysicalMemory):
-  def __init__(self, adev, vaddr, paddr, size):
-    self.vaddr = vaddr
+  def __init__(self, adev, ptable_vaddr, paddr, size):
+    self.vaddr, ptable_vaddr = ptable_vaddr + adev.gmc.vm_base, ptable_vaddr
     super().__init__(adev, paddr, size)
 
 class MM:
@@ -44,47 +46,60 @@ class MM:
     self.adev = adev
     self.phys_allocator = PhysicalAllocator(adev, vram_size)
     self.next_vaddr = 0
-    self.root_pt = PTE(self.adev, self.phys_allocator.alloc(0x1000), lv=2) # 3rd level (2,1,0), 1gb pages
+    self.root_pt = PTE(self.adev, self.palloc(0x1000, zero=True), lv=2) # 3rd level (2,1,0), 1gb pages
 
   def map_range(self, pde, vaddr, paddr, size, uncached=False) -> VirtualMapping:
+    # print(f"map_range: {hex(vaddr)} -> {hex(paddr)} ({size}), level={pde.lv}")
     # pde.lv # 2, 1, 0
-    assert paddr & 0xFFF == 0 and vaddr & 0xFFF == 0 and size % 0x1000 == 0, "must be page aligned"
+    assert size != 0 and paddr & 0xFFF == 0 and vaddr & 0xFFF == 0 and size % 0x1000 == 0, "must be page aligned"
     pte_covers = 1 << ((9 * pde.lv) + 12)
-    entry_start_index = (vaddr >> ((9 * pde.lv) + 12)) % 512
-    entry_end_index = ((vaddr + size - 1) >> ((9 * pde.lv) + 12)) % 512
+    lvaddr = vaddr % (1 << ((9 * (pde.lv + 1)) + 12))
+    # entry_start_index = (lvaddr // pte_covers)
 
-    cur_vaddr, cur_paddr, cur_size = vaddr, paddr, size
-    for i in range(entry_start_index, entry_end_index + 1):
-      if cur_size >= pte_covers:
+    entry_idx, cur_vaddr, cur_paddr, cur_size = lvaddr // pte_covers, vaddr, paddr, size
+    while cur_size > 0:
+      i_pte_covers = min(cur_size, pte_covers - cur_vaddr % pte_covers)
+      assert i_pte_covers > 0
+
+      if cur_vaddr % pte_covers == 0 and cur_size >= pte_covers:
         # full cover, set as huge page
-        assert pde.get_entry(i) & amdgpu_2.AMDGPU_PTE_VALID == 0, "entry already set"
-        pde.set_page(i, cur_paddr, uncached=uncached)
+        assert pde.get_entry(entry_idx) & amdgpu_2.AMDGPU_PTE_VALID == 0, "entry already set"
+        pde.set_page(entry_idx, cur_paddr, uncached=uncached)
       else:
         # set up table and recurse
-        entry = pde.get_entry(i)
-        if entry & amdgpu_2.AMDGPU_PTE_VALID == 0:
-          pte = PTE(self.adev, self.phys_allocator.alloc(0x1000), pde.lv - 1)
-          pde.set_table(i, pte)
-          entry = pde.get_entry(i)
+        entry = pde.get_entry(entry_idx)
+        if (entry & amdgpu_2.AMDGPU_PTE_VALID) == 0:
+          pte = PTE(self.adev, self.palloc(0x1000, zero=True), lv=pde.lv - 1)
+          pde.set_table(entry_idx, pte)
+          entry = pde.get_entry(entry_idx)
 
-        assert entry & amdgpu_2.AMDGPU_PDE_PTE == 0, "must be table"
+        assert (entry & amdgpu_2.AMDGPU_PDE_PTE) == 0, "must be table"
         pte_addr = PhysicalMemory(self.adev, entry & 0x0000FFFFFFFFF000, 0x1000)
-        self.map_range(PTE(self.adev, pte_addr, pde.lv - 1), cur_vaddr, cur_paddr, min(cur_size, pte_covers), uncached=uncached)
+        
+        self.map_range(PTE(self.adev, pte_addr, lv=pde.lv - 1), cur_vaddr, cur_paddr, i_pte_covers, uncached=uncached)
 
-      cur_vaddr, cur_paddr, cur_size = cur_vaddr + pte_covers, cur_paddr + pte_covers, cur_size - pte_covers
+      cur_vaddr, cur_paddr, cur_size = cur_vaddr + i_pte_covers, cur_paddr + i_pte_covers, cur_size - i_pte_covers
+      entry_idx += 1
 
     if pde == self.root_pt:
-      self.adev.gmc.flush_tlb(0, 0, 0)
-      self.adev.gmc.mmhub_flush_tlb(0, 0, 0)
+      self.adev.gmc.flush_tlb_gfxhub(0, 0, 0)
+      self.adev.gmc.flush_tlb_mmhub(0, 0, 0)
     return VirtualMapping(self.adev, vaddr, paddr, size)
+
   def unmap_range(self, virtual_mapping:VirtualMapping): pass # TODO
 
-  def valloc(self, size:int, align=0x1000) -> VirtualMapping:
+  def valloc(self, size:int, align=0x1000, uncached=False) -> VirtualMapping:
+    print("valloc", size, uncached)
+
+    size = round_up(size, 0x1000)
     addr = round_up(self.next_vaddr, align)
     self.next_vaddr = addr + size
     assert self.next_vaddr <= self.adev.gmc.vm_end
-    return self.adev.map_range(self.root_pt, addr, self.palloc(size, align).paddr, size)
+    return self.map_range(self.root_pt, addr, self.palloc(size, align).paddr, size, uncached=uncached)
   def vfree(self, vm:VirtualMapping): pass
 
-  def palloc(self, size, align=0x1000) -> PhysicalMemory: return self.phys_allocator.alloc(size, align)
+  def palloc(self, size, align=0x1000, zero=False) -> PhysicalMemory:
+    pm = self.phys_allocator.alloc(size, align)
+    if zero: ctypes.memset(pm.cpu_addr(), 0, pm.size)
+    return pm
   def pfree(self, pm:PhysicalMemory): pass
