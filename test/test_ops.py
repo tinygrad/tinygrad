@@ -2242,7 +2242,8 @@ class TestOpsUint8(unittest.TestCase):
       lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[[0, 1, 2], [3, 4, 5]]])
     helper_test_op(None,
       lambda x: x.type(torch.uint8).min(),
-      lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[0, 128, 255, 64, 32, 16])
+      lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
+    
 
 if __name__ == '__main__':
   np.random.seed(1337)
