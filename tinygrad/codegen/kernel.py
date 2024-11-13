@@ -634,7 +634,7 @@ class Kernel:
             new_shape = st.shape[:tcd] + tc.expanded_shape + st.shape[tcd+len(tcd_dims):]  # expand the tcd
             permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in wd_pattern]  + list(range(wd+len(warp_dims),tcd)) + \
                                          [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd+len(tc.expanded_shape),len(new_shape)))
-            return st.reshape(new_shape).simplify().permute(tuple(permaxis)).reshape(st.shape).simplify()
+            return st.reshape(new_shape).permute(tuple(permaxis)).reshape(st.shape).simplify()
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
@@ -683,8 +683,7 @@ class Kernel:
 
     return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
       (UPat({*GroupOp.ALU,Ops.CAST,Ops.BITCAST,Ops.ASSIGN}, name="e").view(name="v"), lambda e,v: e.replace(src=tuple(s.view(v.st) for s in e.src))),
-      (UPat({Ops.LOAD, Ops.PRELOAD, Ops.VALID}, name="b").view(name="v"),
-       lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src)))]))
+      (UPat(Ops.LOAD, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src)))]))
 
   # **** this is the lowerer ****
 
