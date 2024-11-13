@@ -1020,7 +1020,6 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
        - For each axis, padding can be `None`, meaning no padding, or a tuple `(start, end)`.
        - `padding` must have the same length as `self.ndim`
 
-    Padding values can be negative, resulting in dimension shrinks that work similarly to Python negative slices.
     The `mode` parameter currently supports only `"constant"` padding, where the `value` specifies the padding value.
 
     ```python exec="true" source="above" session="tensor" result="python"
@@ -1043,6 +1042,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     pX = ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2])) if flat else padding
     if len(pX) != self.ndim: raise ValueError(f"padding length is improper, padding {padding} shape {self.shape}")
     X, pX = self, cast(Tuple[Tuple[sint, sint]], tuple((0,0) if p is None else p for p in pX))
+    # early return for symbolic with positive pads (no need to max)
+    if all(resolve(p >= 0) for p in flatten(pX)): return F.Pad.apply(X, arg=pX)
     pads, shrinks = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX), tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, self.shape))
     if value == 0: return F.Pad.apply(X.shrink(shrinks), arg=pads)
     return F.Pad.apply(shrunken := X.shrink(shrinks), arg=pads) + F.Pad.apply(Tensor.ones_like(shrunken), arg=pads).where(0, value)
@@ -1257,7 +1258,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     cat_dim_cumsum = [0, *itertools.accumulate(cat_dims)]
     slc:List[List[Optional[Tuple[sint, sint]]]] = [[None for _ in self.shape] for _ in catargs]
     for d,k,s in zip(cat_dims, cat_dim_cumsum[:-1], slc): s[dim] = (k, cat_dim_cumsum[-1] - k - d)
-    return functools.reduce(Tensor.add, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
+    return functools.reduce(Tensor.add, [arg.pad(s) for arg,s in zip(catargs, slc)])
 
   def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
