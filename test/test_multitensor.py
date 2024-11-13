@@ -601,12 +601,12 @@ class TestMultiTensor(unittest.TestCase):
     # axis=None
     t = Tensor.empty((16, 16)).shard((d1, d2), axis=None)
     with self.assertRaises(RuntimeError):
-      t2 = Tensor.rand_like(t, device=(d3, d4))
+      Tensor.rand_like(t, device=(d3, d4))
 
     # axis=1
     t = Tensor.empty((16, 16)).shard((d1, d2), axis=1)
     with self.assertRaises(RuntimeError):
-      t2 = Tensor.rand_like(t, device=(d3, d4))
+      Tensor.rand_like(t, device=(d3, d4))
 
   def test_dropout_on_shard(self):
     with Tensor.train():
