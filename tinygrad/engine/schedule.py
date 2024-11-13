@@ -104,10 +104,8 @@ def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
   tmp, rshape = permute_reduce(ShapeTracker.from_shape(unwrap(src.st).shape), r.axis_arg)
   prshape = prod(rshape)
   strides = strides_for_shape(rshape)
-  nv: List[View] = []
-  for v in st.views:
-    nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
-                          v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
+  nv = [View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
+                    v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None) for v in st.views]
   # update input_st and axis
   new_input_st = tmp + ShapeTracker(tuple(nv))
   _, new_rshape = permute_reduce(new_input_st, r.axis_arg)
