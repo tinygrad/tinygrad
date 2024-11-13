@@ -1014,12 +1014,12 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
     1. Flat padding: (padding_left, padding_right, padding_top, padding_bottom, ...)
        - This structure matches PyTorch's pad.
-       - `padding` length must be even
+       - `padding` length must be even.
 
     2. Group padding: (..., (padding_top, padding_bottom), (padding_left, padding_right))
        - This structure matches pad for jax, numpy, tensorflow and others.
        - For each axis, padding can be `None`, meaning no padding, or a tuple `(start, end)`.
-       - `padding` must have the same length as `self.ndim`
+       - `padding` must have the same length as `self.ndim`.
 
     Padding values can be negative, resulting in dimension shrinks that work similarly to Python negative slices.
 
