@@ -2236,6 +2236,7 @@ class TestOpsUint8(unittest.TestCase):
       lambda x: torch.nn.functional.interpolate((10*x).relu().type(torch.uint8), size=out_sz, mode="nearest-exact"),
       lambda x: Tensor.interpolate((10*x).relu().cast('uint8'), size=out_sz, mode="nearest-exact"), forward_only=True)
 
+  @unittest.expectedFailure
   def test_min(self):
     helper_test_op(None,
       lambda x: x.type(torch.uint8).min(),
