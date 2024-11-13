@@ -346,6 +346,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op] if op in GroupOp.Reduce else op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
 
+  # *** uop <-> Buffer ***
+
+  @property
+  def buffer(self) -> UOp:
+    match self.op:
+      case Ops.BUFFER: return self
+      case Ops.LOAD | Ops.PRELOAD | Ops.STORE | Ops.ASSIGN: return self.src[0]
+      case _: raise RuntimeError(f"buffer called on {self.op}")
+
   # *** uop movement ops ***
 
   def view(self, st:ShapeTracker): return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
