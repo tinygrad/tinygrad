@@ -124,7 +124,7 @@ def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp, src:UOp) -> UOp:
   return swizzle.src[0].r(root.arg[0], new_axis).view(ShapeTracker.from_shape(output_shape))
 
 def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
-  swizzles = [x for x in root.src if x.op is Ops.VIEW and len(x.src) != 0]
+  swizzles = [x for x in root.src if x.base is not x]
   if len(swizzles) == 0: return None
   swizzle_shapes = [(unwrap(x.st).shape, unwrap(x.src[0].st).shape) for x in swizzles]
   assert all_same([(x, prod(x), prod(y)) for x,y in swizzle_shapes]), f"swizzles must have the same size {swizzle_shapes}"
