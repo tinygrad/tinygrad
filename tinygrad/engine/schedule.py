@@ -69,8 +69,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children, allbufs, double_reduce
   if buf.is_realized(): return UOp(Ops.PRELOAD, dtype, (ubuf, buf.st.to_uop()))
   # everything else needs sources
   src = tuple(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in buf.srcs)
-  if buf.op in GroupOp.Reduce: ret = src[0].r(buf.op, buf.arg)
-  elif buf.op is Ops.CONTIGUOUS: ret = UOp(Ops.CONTIGUOUS, dtype, src)
+  if buf.op in {Ops.REDUCE_AXIS, Ops.CONTIGUOUS}: ret = UOp(buf.op, dtype, src, buf.arg)
   elif buf.op is Ops.ASSIGN:
     ctx.assigns.add(ubuf)
     ret = UOp(Ops.ASSIGN, dtype, (ubuf, src[1]), buf.arg)
@@ -82,7 +81,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children, allbufs, double_reduce
   ctx.lazybufs[b] = buf
   # things for fuse.py
   allbufs[buf] = None
-  if buf.op in GroupOp.Reduce and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[buf] = None
+  if buf.op is Ops.REDUCE_AXIS and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[buf] = None
   for x in buf.srcs:
     if x.base.realized is None: children[x.base][buf] = None
   return ret
