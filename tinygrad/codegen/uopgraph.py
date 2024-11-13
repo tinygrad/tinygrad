@@ -50,14 +50,12 @@ def fold_expanded(ex, buf):
           else:
             # for non image, we upcast the index pointer
             new_src[0] = new_src[0].cast(new_src[0].dtype.base.vec(fold_length).ptr(new_src[0].dtype.local))
-          # vectorize the store
-          if not is_load:
-            new_src[1] = UOp(Ops.VECTORIZE, new_src[1].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[1] for i in range(fold_length)))
           # generate the folded new_srcs
           if is_load:
             new_load = UOp(Ops.LOAD, load_1.dtype.vec(fold_length), tuple(new_src))
             for i in range(fold_length): new_srcs[offsets[o+i]] = new_load.gep(i)
-          else:
+          else: # vectorize the store
+            new_src[1] = UOp(Ops.VECTORIZE, new_src[1].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[1] for i in range(fold_length)))
             for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(Ops.STORE, dtypes.void, tuple(new_src)) if i == 0 else None
           for i in range(fold_length): used.add((rootsrc,o+i))
 
