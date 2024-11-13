@@ -580,6 +580,21 @@ class TestOps(unittest.TestCase):
 
     self.helper_test_exception([(4), (4)], torch.bitwise_or, Tensor.bitwise_or, expected=RuntimeError)
 
+  def test_bitwise_not(self):
+    data = [[1,-8,1],[32,1,6]]
+    tor = torch.tensor(data, dtype=torch.int)
+    ten = Tensor(data, dtype=dtypes.int32)
+    helper_test_op([], lambda: tor.bitwise_not(), lambda: ten.bitwise_not(), forward_only=True)
+    helper_test_op([], lambda: ~tor, lambda: ~ten, forward_only=True)
+
+    data = [[True, False]]
+    tor = torch.tensor(data, dtype=torch.bool)
+    ten = Tensor(data, dtype=dtypes.bool)
+    helper_test_op([], lambda: tor.bitwise_not(), lambda: ten.bitwise_not(), forward_only=True)
+    helper_test_op([], lambda: ~tor, lambda: ~ten, forward_only=True)
+
+    self.helper_test_exception([(4)], torch.bitwise_not, Tensor.bitwise_not, expected=RuntimeError)
+
   def test_lshift(self):
     data = [[0,1,2],[1<<8,1<<16,1<<31-1]]
     tor = torch.tensor(data, dtype=torch.int)
@@ -993,12 +1008,23 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,3)], lambda x: x.min())
     helper_test_op([(45,3)], lambda x: x.min().mul(0.5))
     helper_test_op([()], lambda x: x.min())
+
+    helper_test_op(None, lambda x: x.type(torch.int32).min(), lambda x: x.cast(dtypes.int32).min(), forward_only=True, vals=[[0, -2**31]])
+    helper_test_op(None, lambda x: x.type(torch.int32).min(), lambda x: x.cast(dtypes.int32).min(), forward_only=True, vals=[[-2**31, 0]])
+    helper_test_op(None, lambda x: x.type(torch.bool).min(), lambda x: x.cast(dtypes.bool).min(), forward_only=True, vals=[[False, True]])
+    helper_test_op(None, lambda x: x.type(torch.bool).min(), lambda x: x.cast(dtypes.bool).min(), forward_only=True, vals=[[True, False]])
+
   def test_max(self):
     helper_test_op([(45,3)], lambda x: x.max())
     helper_test_op([(45,3)], lambda x: x.max().mul(0.5))
     helper_test_op(None, lambda x: x.max().mul(0.5), vals=[[[1.0,1.0,0.0,1.0]],])
     helper_test_op([(3,4,5,6)], lambda x: x.max(axis=1)[0], lambda x: x.max(axis=1))
     helper_test_op([()], lambda x: x.max())
+
+    helper_test_op(None, lambda x: x.type(torch.int32).max(), lambda x: x.cast(dtypes.int32).max(), forward_only=True, vals=[[0, -2**31]])
+    helper_test_op(None, lambda x: x.type(torch.int32).max(), lambda x: x.cast(dtypes.int32).max(), forward_only=True, vals=[[-2**31, 0]])
+    helper_test_op(None, lambda x: x.type(torch.bool).max(), lambda x: x.cast(dtypes.bool).max(), forward_only=True, vals=[[False, True]])
+    helper_test_op(None, lambda x: x.type(torch.bool).max(), lambda x: x.cast(dtypes.bool).max(), forward_only=True, vals=[[True, False]])
 
   @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
   def test_any(self):
