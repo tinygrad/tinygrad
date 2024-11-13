@@ -21,8 +21,8 @@ def _recursive_group(tr:LazyBuffer, st:ShapeTracker, r:LazyBuffer, children:Defa
     # max one reduceop per kernel
     if tr_next.op in GroupOp.Reduce: return group.setdefault(r)
     # can only fuse contiguous
-    if len(st_childs:=dedup(s for s in tr_next.srcs if s.base == tr)) > 1: return group.setdefault(r)
-    _recursive_group(tr_next, st+st_childs[0].st, r, children, realizes, reduce_for_op, group, cache)
+    if len(st_childs:=dedup(s.st for s in tr_next.srcs if s.base == tr)) > 1: return group.setdefault(r)
+    _recursive_group(tr_next, st+st_childs[0], r, children, realizes, reduce_for_op, group, cache)
 
 def _get_isolated_children(r:LazyBuffer, reduce_for_op:Dict[LazyBuffer, UOp], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]],\
     realizes:Dict[LazyBuffer, None], group:Dict[LazyBuffer, None]) -> Dict[LazyBuffer, None]:
@@ -73,10 +73,10 @@ def get_realizes(children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbu
         st = tr.st
         while len(children[tr]) == 1:
           tr_next = next(iter(children[tr]))
-          st_childs = dedup(s for s in tr_next.srcs if s.base is tr)
+          st_childs = dedup(s.st for s in tr_next.srcs if s.base is tr)
           if len(st_childs) > 1: break
-          if st.size != st_childs[0].st.size: break
-          st = st + st_childs[0].st
+          if st.size != st_childs[0].size: break
+          st = st + st_childs[0]
           if not st.contiguous or tr_next.op in GroupOp.Reduce: break
           tr = tr_next
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
