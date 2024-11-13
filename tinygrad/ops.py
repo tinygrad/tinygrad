@@ -353,6 +353,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def view(self, st:ShapeTracker): return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
   def reshape(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).reshape(arg))
 
+  # *** uop Buffer stuff ***
+
+  @property
+  def buf_uop(self) -> UOp:
+    assert self.op in {*GroupOp.Buffer, Ops.ASSIGN} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
+    return self.src[0]
+
   # *** uop Variable stuff ***
 
   @staticmethod
