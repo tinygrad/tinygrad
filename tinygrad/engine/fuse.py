@@ -80,7 +80,7 @@ def get_realizes(children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbu
           if not st.contiguous or tr_next.op is Ops.REDUCE_AXIS: break
           tr = tr_next
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
-        if tr.op is Ops.CAST and tr.arg.itemsize > tr.srcs[0].dtype.itemsize:
+        if tr.op is Ops.CAST and tr.dtype.base.itemsize > tr.srcs[0].dtype.base.itemsize:
           tr = tr.srcs[0].base
       group = {tr: None}
       realizes[tr] = None
