@@ -1578,7 +1578,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.min(axis=1, keepdim=True).numpy())
     ```
     """
-    return self.max() - (self.max() - self).max(axis=axis, keepdim=keepdim)
+    return self.max(axis=axis, keepdim=keepdim) - (self.max(axis=axis, keepdim=keepdim) - self).max(axis=axis, keepdim=keepdim)
 
   def any(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
