@@ -61,8 +61,8 @@ def append_to_block(ctx, x:UOp):
     elif u.op is Ops.IF:
       pend_if = u
       blk = UOp(Ops.BLOCK, dtypes.void, u.src, BasicBlock(get_ranges_in_parents(u), []))
-      new_srcs.append(blk)
-      #new_srcs.append(UOp(Ops.BLOCKIF, dtypes.void, (blk,), BasicBlock(get_ranges_in_parents(u)+(u,), [u])))
+      #new_srcs.append(blk)
+      new_srcs.append(UOp(Ops.BLOCKIF, dtypes.void, (blk,), BasicBlock(get_ranges_in_parents(u)+(u,), [u])))
     elif u.op in DONT_PLACE_IN_BLOCK:
       # it stays in srcs if it has children not in the basic or is RANGE/CONST
       new_srcs.append(u)
@@ -92,7 +92,7 @@ def append_to_block(ctx, x:UOp):
       for c in closed[::-1]: new_src = UOp(Ops.BLOCKEND, dtypes.void, (new_src,), arg=BasicBlock([c], []))
     new_srcs.append(new_src)
   if pend_if is not None:
-    new_srcs = [UOp(Ops.BLOCKIF, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(get_ranges_in_parents(u)+(u,), [u]))]
+    new_srcs = [UOp(Ops.BLOCKIF, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(get_ranges_in_parents(u), [u]))]
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), x.arg.add(to_append))
 
 make_basic_blocks = PatternMatcher([
@@ -139,18 +139,6 @@ def block_uop(sink:UOp) -> UOp:
         del forks[k]
     if len(forks) == 0: break
 
-        #forks[u] = None #UOp(Ops.BLOCK, dtypes.void, u.src, BasicBlock(get_ranges_in_parents(u), [u]))
-        #if u not in forks:
-          #blk = UOp(Ops.BLOCK, dtypes.void, u.src, BasicBlock(get_ranges_in_parents(u), [u]))
-          #forks[u] = UOp(Ops.BLOCKFORK, dtypes.void, (u,))
-    #replace_forks = PatternMatcher([
-    #  (UPat(Ops.BLOCK, name="x"), lambda ctx,x: x.replace(src=tuple(ctx.get(u, u) for u in x.src)) if any(u in ctx for u in x.src) else None),
-    #])
-    #sink = graph_rewrite(sink, replace_forks, forks)
-
-    #for k,v in forks.items():
-    #  sink = sink.substitute({k:v})
-
   # terrible O(n^2) algo
   cc: DefaultDict[BasicBlock, List[UOp]] = defaultdict(list)
   for block in sink.sparents:
@@ -160,6 +148,28 @@ def block_uop(sink:UOp) -> UOp:
     if len(v) > 1:
       rep = UOp(Ops.BLOCKEND, dtypes.void, tuple(dedup(flatten(x.src for x in v))), k)
       sink = sink.substitute({u:rep for u in v})
+
+  """
+  # move ifs
+  def move_if(x):
+    move_me = []
+    dont_move_me = []
+    for u in x.src:
+      if u.op is Ops.BLOCK and u.arg.rngs == x.arg.rngs:
+        move_me.append(u)
+      else:
+        dont_move_me.append(u)
+    if len(move_me) == 0: return None
+    lst = []
+    for u in move_me: lst += u.arg.lst
+    bif = UOp(Ops.BLOCKIF, dtypes.void, tuple(dont_move_me), x.arg)
+    return UOp(Ops.BLOCK, dtypes.void, (bif,), BasicBlock(x.arg.rngs, lst))
+
+  move_ifs = PatternMatcher([
+    (UPat(Ops.BLOCKIF, name="x"), move_if),
+  ])
+  """
+  #sink = graph_rewrite(sink, move_ifs)
 
   # show graph for VIZ
   sink = graph_rewrite(sink, PatternMatcher([]))
