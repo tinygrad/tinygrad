@@ -1575,8 +1575,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.min(axis=1, keepdim=True).numpy())
     ```
     """
-    if dtypes.is_unsigned(self.dtype):
-      return dtypes.max(self.dtype) - (dtypes.max(self.dtype) - self).max(axis=axis, keepdim=keepdim)
+    if dtypes.is_int(self.dtype) or self.dtype == dtypes.bool: return ~((~self).max(axis=axis, keepdim=keepdim))
     return -((-self).max(axis=axis, keepdim=keepdim))
 
   def any(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
@@ -2982,6 +2981,20 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return F.BitwiseOr.apply(*self._broadcasted(x, reverse))
 
+  def bitwise_not(self) -> Tensor:
+    """
+    Compute the bit-wise NOT of `self`.
+    Equivalent to `~self`.
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([0, 2, 5, 255], dtype="int8").bitwise_not().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([True, False]).bitwise_not().numpy())
+    ```
+    """
+    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
+    return self.logical_not() if self.dtype == dtypes.bool else self ^ ((1<<8*self.dtype.itemsize)-1)
+
   def lshift(self, x:int):
     """
     Computes left arithmetic shift of `self` by `x` bits. `self` must have unsigned dtype.
@@ -3097,6 +3110,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
   def masked_fill(self:Tensor, mask:Tensor, value:Union[Tensor, ConstType]): return mask.where(value, self)
 
   # ***** op wrappers *****
+
+  def __invert__(self) -> Tensor: return self.bitwise_not()
 
   def __lshift__(self, x) -> Tensor: return self.lshift(x)
   def __rshift__(self, x) -> Tensor: return self.rshift(x)
