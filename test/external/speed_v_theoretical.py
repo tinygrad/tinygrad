@@ -10,10 +10,7 @@ class TestKernelSpeed(unittest.TestCase):
       return Tensor.randn(shape, dtype="half").realize()
 
   def _compare(self, tm, tflops, gbs, nv_tflops=None, nv_gbs=None, amd_tflops=None, amd_gbs=None):
-      if DEBUG >= 1:
-        print(f"{tm=:.6f}")
-        print(f"{tflops=:.6f}")
-        print(f"{gbs=:.3f}")
+      if DEBUG >= 1: print(f"{tm=:.6f}\n{tflops=:.6f}\n{gbs=:.3f}")
 
       if Device.DEFAULT == "NV":
         if nv_tflops is not None:
