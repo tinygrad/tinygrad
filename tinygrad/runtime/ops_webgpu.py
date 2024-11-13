@@ -54,10 +54,10 @@ class WebGpuAllocator(Allocator):
     # normal case and bool, char, uchar -> int32
     else: self.device.queue.write_buffer(dest, 0, memoryview(array.array('i', src)) if scale == 4 else src)
   def copyout(self, dest: memoryview, src):
-    scale = src.size // len(dest)
+    stride = src.size // len(dest)
     raw_data = self.device.queue.read_buffer(src, 0)
-    format = 'H' if scale == 2 else 'B'
-    dest[:] = memoryview(array.array(format, raw_data.cast(format)[::scale])).cast(dest.format) if scale > 1 else raw_data
+    f = 'H' if stride == 2 else 'B'
+    dest[:] = memoryview(array.array(f, raw_data.cast(f)[::stride])).cast(dest.format) if stride > 1 else raw_data
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
