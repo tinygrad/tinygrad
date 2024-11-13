@@ -2206,6 +2206,12 @@ class TestOps(unittest.TestCase):
                                                                              torch.clip(y,0).type(torch.long)),
                                     lambda x,y: x.log_softmax().nll_loss(y.clip(0).cast(dtypes.long)), forward_only=True)
 
+  @unittest.expectedFailure  # TODO: FIXME
+  def test_nll_loss_3d(self):
+    helper_test_op([(32,10, 3, 3, 3), (32, 3, 3, 3)],
+                   lambda x,y: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.clip(y,0).type(torch.long)),
+                   lambda x,y: x.log_softmax().nll_loss(y.clip(0).cast(dtypes.long)), forward_only=True)
+
   def test_nll_loss_reductions(self):
     for r in ("mean", "sum", "none"):
       helper_test_op([(32,10), (32)], lambda x,y: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1),
