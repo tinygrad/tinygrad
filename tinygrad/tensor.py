@@ -3355,12 +3355,10 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.log_softmax().nll_loss(Y, reduction='none').numpy())
     ```
     """
-    t, Y, target_shape = self.reshape(None, None, -1), Y.reshape(None, -1), Y.shape
-    mask = Tensor.ones_like(Y, requires_grad=False, device=t.device) if ignore_index is None else (Y != ignore_index)
-    masked_weight = mask if weight is None else weight[Y] * mask
-    ret = (-t.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight).reshape(target_shape)
-    if reduction == "mean": return ret.sum() / (masked_weight.sum())
-    return ret._do_reduction(reduction)
+    weight = Tensor.ones_like(Y, requires_grad=False) if weight is None else weight[Y]
+    masked_weight = weight if ignore_index is None else weight * (Y != ignore_index)
+    nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
+    return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
   # ***** Tensor Properties *****
 
