@@ -15,7 +15,7 @@ def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
   Loads a .safetensor file from disk, returning the data, metadata length, and metadata.
   """
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
-  json_len = t[0:8].bitcast(dtypes.int64).item()
+  json_len =int(t[0:8].bitcast(dtypes.int64).item())
   return t, json_len, json.loads(t[8:8+json_len].data().tobytes())
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:

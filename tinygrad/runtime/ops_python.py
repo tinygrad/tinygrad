@@ -2,7 +2,7 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Tuple, List, Optional, Any, Dict
+from typing import Tuple, List, Optional, Any, Dict, Union, Literal, TypeGuard, cast
 import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
 from tinygrad.helpers import all_same, getenv, flatten
@@ -11,6 +11,17 @@ from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
 
+_ValidFormats = Literal[
+    # Integer formats
+    "b", "B", "@b", "@B", "h", "H", "@h", "@H", "i", "I", "@i", "@I",
+    "l", "L", "@l", "@L", "q", "Q", "@q", "@Q", "P", "@P",
+    # Float formats
+    "f", "@f", "d", "@d",
+    # Byte formats
+    "c", "@c",
+    # Bool format
+    "?"
+]
 def _load(m, i):
   if i is None: return 0.0
   if i < 0 or i >= len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
@@ -23,6 +34,9 @@ def load(inp, j=0):
 def _store(m, i, v):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
   m[i] = v
+
+def is_valid_dtype_fmt(dtype: DType) -> TypeGuard[DType]:
+    return dtype.fmt is not None
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
@@ -67,12 +81,14 @@ class PythonProgram:
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
         if uop is Ops.DEFINE_GLOBAL:
-          assert dtype.fmt is not None
-          ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
+          assert dtype.fmt is not None, "dtype.fmt must not be None for DEFINE_GLOBAL"
+          fmt = cast(_ValidFormats, dtype.fmt)  
+          ul[i] = [pbufs.pop(0).cast(fmt)]* warp_size
         elif uop is Ops.DEFINE_LOCAL:
           assert dtype.fmt is not None
           lbuf = memoryview(bytearray(arg[1]*dtype.itemsize))
-          ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
+          fmt = cast(_ValidFormats, dtype.fmt)  
+          ul[i] = [lbuf.cast(fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:

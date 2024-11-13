@@ -16,6 +16,12 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 
+_ValidFormats = Literal[
+    # Integer formats
+    "b", "B", "@b", "@B", "h", "H", "@h", "@H", "i", "I", "@i", "@I",
+    "l", "L", "@l", "@L", "q", "Q", "@q", "@Q", "P", "@P",
+]
+
 # **** start with two base classes, Tensor and Function ****
 
 class Function:
@@ -277,7 +283,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self._data().cast(self.dtype.fmt, self.shape)
+    fmt = cast(_ValidFormats, self.dtype.fmt)  
+    return self._data().cast(fmt, self.shape)
 
   def item(self) -> ConstType:
     """
@@ -290,7 +297,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert self.numel() == 1, "must have one element for item"
-    return self._data().cast(self.dtype.fmt)[0]
+    fmt = cast(_ValidFormats, self.dtype.fmt)  
+    return self._data().cast(fmt)[0]
 
   # TODO: should be Tensor.tolist() -> Union[List[ConstType], ConstType]. The List is Sequence because mypy expects memoryview.tolist() -> list[int]
   # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803

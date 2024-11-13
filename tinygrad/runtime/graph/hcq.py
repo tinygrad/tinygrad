@@ -1,5 +1,5 @@
 import collections, time
-from typing import List, Any, Dict, cast, Optional, Tuple, Set
+from typing import List, Any, Dict, cast, Optional, Tuple, Set, Union, cast
 from tinygrad.helpers import round_up, PROFILE, memsize_to_str
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, HCQArgsState
 from tinygrad.device import Buffer, BufferOptions, Compiled, Device
@@ -52,8 +52,8 @@ class HCQGraph(MultiGraphRunner):
 
     for j,ji in enumerate(self.jit_cache):
       enqueue_dev = ji.prg.device if (is_exec_prg:=isinstance(ji.prg, CompiledRunner)) else Device[ji.bufs[1].device] #type:ignore
-      enqueue_queue = self.comp_queues[enqueue_dev] if is_exec_prg else self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
-      out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.signal_t(value=0))
+      enqueue_queue = self.comp_queues[enqueue_dev] if is_exec_prg else self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t()) #type: ignore
+      out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.signal_t(value=0)) #type: ignore
 
       # Get dependencies based on input and output buffers.
       rdeps = self._access_resources(ji.bufs, ji.prg.p.outs if is_exec_prg else [0], (enqueue_queue, j + 1)) #type:ignore
@@ -82,7 +82,7 @@ class HCQGraph(MultiGraphRunner):
 
       # Enable necessary signals in the schedule by setting the signal value.
       for sig, val in opt_deps: self.ji_schedule[val - 1] = self.ji_schedule[val - 1][:5] + (val,)
-      self.ji_schedule[j] = (enqueue_dev, enqueue_queue, sync_signals, opt_deps[::-1], out_signal, None if is_exec_prg else (j + 1))
+      self.ji_schedule[j] = (enqueue_dev, enqueue_queue, sync_signals, opt_deps[::-1], out_signal, None if is_exec_prg else (j + 1)) #type : ignore
 
       # Collect profile information if profiling is enabled.
       if PROFILE:
@@ -94,7 +94,7 @@ class HCQGraph(MultiGraphRunner):
         if is_exec_prg: prof_args = None
         else: prof_args = {"Size": memsize_to_str(ji.bufs[0].nbytes), "GB/S": lambda dur, b=ji.bufs[0].nbytes: f"{b/1e3/dur:.2f}"} # type: ignore
 
-        self.prof_records.append((sig_st, sig_en, enqueue_dev, prof_ji_desc, not is_exec_prg, [d - 1 for _, d in rdeps], prof_args))
+        self.prof_records.append((sig_st, sig_en, enqueue_dev, prof_ji_desc, not is_exec_prg, [d - 1 for _, d in rdeps], prof_args)) # type: ignore
 
       last_j[enqueue_queue] = j
 
@@ -108,7 +108,7 @@ class HCQGraph(MultiGraphRunner):
                            .wait(self.signals['CPU'], self.kickoff_value).signal(self.signals[dev], self.kickoff_value)
 
     for j,ji in enumerate(self.jit_cache):
-      enqueue_dev, enqueue_queue, sync_signals, deps, signal, signal_val = self.ji_schedule[j]
+      enqueue_dev, enqueue_queue, sync_signals, deps, signal, signal_val = self.ji_schedule[j] #type: ignore
 
       for i in range(len(sync_signals)): self.kickoff_wait_cmds[enqueue_queue].append(len(enqueue_queue) + i)
       for sig, val in sync_signals + deps: enqueue_queue.wait(sig, val)
