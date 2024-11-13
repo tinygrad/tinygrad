@@ -1,6 +1,6 @@
 import unittest, itertools
 from tinygrad.dtype import dtypes
-from tinygrad.ops import Ops, UOp, BinaryOps, TernaryOps, ReduceOps, UnaryOps # noqa: F401
+from tinygrad.ops import Ops, UOp, BinaryOps, TernaryOps, UnaryOps, GroupOp # noqa: F401
 from tinygrad.ops import PatternMatcher, UPat
 
 class TestPatternMatcher(unittest.TestCase):
@@ -54,16 +54,16 @@ class TestPatternMatcher(unittest.TestCase):
   def test_uop(self):
     matcher = PatternMatcher([(UPat(Ops.CONST, name="x"), lambda x: x)])
     c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
-    c2 = UOp(Ops.ALU, dtypes.float, (c1, c1), BinaryOps.ADD)
+    c2 = UOp(Ops.ADD, dtypes.float, (c1, c1))
     self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), None)
 
   def test_uop_set(self):
-    matcher = PatternMatcher([(UPat({Ops.CONST, Ops.CAST}, name="x"), lambda x: x)])
+    matcher = PatternMatcher([(UPat((Ops.CONST, Ops.CAST), name="x"), lambda x: x)])
     c1 = UOp(Ops.CONST, dtypes.bool, arg=False)
     c2 = UOp(Ops.CAST, dtypes.int, (c1,))
     c3 = UOp(Ops.CONST, dtypes.float, arg=1.0)
-    c4 = UOp(Ops.ALU, dtypes.float, (c3, c3), BinaryOps.ADD)
+    c4 = UOp(Ops.ADD, dtypes.float, (c3, c3))
     self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), c2)
     self.assertEqual(matcher.rewrite(c4), None)
@@ -72,12 +72,12 @@ class TestPatternMatcher(unittest.TestCase):
     matcher = PatternMatcher([
       (UPat(Ops.CONST, arg=0, name="x"), lambda x: x),
       (UPat(Ops.CONST, arg=False, name="x"), lambda x: x),
-      (UPat(Ops.ALU, arg=BinaryOps.MAX, name="x"), lambda x: x),
+      (UPat(Ops.MAX, name="x"), lambda x: x),
     ])
     c1 = UOp(Ops.CONST, dtypes.float, arg=0.0)
     c2 = UOp(Ops.CONST, dtypes.bool, arg=False)
-    c3 = UOp(Ops.ALU, dtypes.float, (c1, c1), arg=BinaryOps.MAX)
-    c4 = UOp(Ops.ALU, dtypes.float, (c1, c1), arg=BinaryOps.MUL)
+    c3 = UOp(Ops.MAX, dtypes.float, (c1, c1))
+    c4 = UOp(Ops.MUL, dtypes.float, (c1, c1))
     c5 = UOp(Ops.CONST, dtypes.int, arg=-1)
     self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), c2)
@@ -87,17 +87,17 @@ class TestPatternMatcher(unittest.TestCase):
 
   def test_filter_arg(self):
     matcher = PatternMatcher([
-      (UPat(Ops.ALU, arg=BinaryOps.MUL, src=[UPat(Ops.CONST, name="c"), UPat(Ops.CONST, arg=2)], name="x"),
+      (UPat(Ops.MUL, src=[UPat(Ops.CONST, name="c"), UPat(Ops.CONST, arg=2)], name="x"),
        lambda x,c: x if c.arg in {1, -1} else None)
     ])
     y1 = UOp(Ops.CONST, dtypes.int, arg=1)
     y2 = UOp(Ops.CONST, dtypes.int, arg=2)
     y3 = UOp(Ops.CONST, dtypes.int, arg=-1)
-    c1 = UOp(Ops.ALU, dtypes.int, (y1, y2), BinaryOps.MUL)
-    c2 = UOp(Ops.ALU, dtypes.int, (y2, y2), BinaryOps.MUL)
-    c3 = UOp(Ops.ALU, dtypes.int, (y3, y2), BinaryOps.MUL)
-    c4 = UOp(Ops.ALU, dtypes.int, (y2, y1), BinaryOps.MUL)
-    c5 = UOp(Ops.ALU, dtypes.int, (y2, y3), BinaryOps.MUL)
+    c1 = UOp(Ops.MUL, dtypes.int, (y1, y2))
+    c2 = UOp(Ops.MUL, dtypes.int, (y2, y2))
+    c3 = UOp(Ops.MUL, dtypes.int, (y3, y2))
+    c4 = UOp(Ops.MUL, dtypes.int, (y2, y1))
+    c5 = UOp(Ops.MUL, dtypes.int, (y2, y3))
     self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), None)
     self.assertEqual(matcher.rewrite(c3), c3)
@@ -105,11 +105,11 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c5), c5)
 
   def test_dup_name(self):
-    matcher = PatternMatcher([(UPat(Ops.ALU, name="x", src=(UPat(Ops.CONST, name="y"), UPat(Ops.CONST, name="y"))), lambda x, y: x)])
+    matcher = PatternMatcher([(UPat(GroupOp.ALU, name="x", src=(UPat(Ops.CONST, name="y"), UPat(Ops.CONST, name="y"))), lambda x, y: x)])
     y1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
     y2 = UOp(Ops.CONST, dtypes.float, arg=1.0)
-    c1 = UOp(Ops.ALU, dtypes.float, (y1, y1), BinaryOps.ADD)
-    c2 = UOp(Ops.ALU, dtypes.float, (y1, y2), BinaryOps.ADD)
+    c1 = UOp(Ops.ADD, dtypes.float, (y1, y1))
+    c2 = UOp(Ops.ADD, dtypes.float, (y1, y2))
     self.assertEqual(matcher.rewrite(c1), c1)
     self.assertEqual(matcher.rewrite(c2), c1)
 
@@ -132,10 +132,10 @@ class TestPatternMatcher(unittest.TestCase):
     self.assertEqual(matcher.rewrite(c4), None)
 
   def test_src_one(self):
-    matcher = PatternMatcher([(UPat(Ops.ALU, name="x", src=(UPat(Ops.CONST), UPat(Ops.CONST))), lambda x: x)])
+    matcher = PatternMatcher([(UPat(GroupOp.ALU, name="x", src=(UPat(Ops.CONST), UPat(Ops.CONST))), lambda x: x)])
     c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
     c2 = UOp(Ops.CONST, dtypes.float, arg=2.0)
-    c3 = UOp(Ops.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
+    c3 = UOp(Ops.ADD, dtypes.float, (c1,c2))
     self.assertEqual(matcher.rewrite(c3), c3)
     self.assertEqual(matcher.rewrite(c2), None)
     # that CONST/ALU -> ALU/CONST rewrite is now instant
@@ -149,35 +149,35 @@ class TestPatternMatcher(unittest.TestCase):
     """
 
   def test_src_permutations(self):
-    matcher = PatternMatcher([(UPat(Ops.ALU, name="x", src=[UPat(Ops.CONST), UPat(Ops.ALU)]), lambda x: x)])
+    matcher = PatternMatcher([(UPat(GroupOp.ALU, name="x", src=[UPat(Ops.CONST), UPat(GroupOp.ALU)]), lambda x: x)])
     c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
     c2 = UOp(Ops.CONST, dtypes.float, arg=2.0)
-    c3 = UOp(Ops.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
-    c4 = UOp(Ops.ALU, dtypes.float, (c3,c2), BinaryOps.ADD)
-    c5 = UOp(Ops.ALU, dtypes.float, (c2,c3), BinaryOps.ADD)
-    c6 = UOp(Ops.ALU, dtypes.float, (c3,c4), BinaryOps.ADD)
+    c3 = UOp(Ops.ADD, dtypes.float, (c1,c2))
+    c4 = UOp(Ops.ADD, dtypes.float, (c3,c2))
+    c5 = UOp(Ops.ADD, dtypes.float, (c2,c3))
+    c6 = UOp(Ops.ADD, dtypes.float, (c3,c4))
     self.assertEqual(matcher.rewrite(c3), None)
     self.assertEqual(matcher.rewrite(c4), c4)
     self.assertEqual(matcher.rewrite(c5), c5)
     self.assertEqual(matcher.rewrite(c6), None)
 
   def test_src_repeat(self):
-    matcher = PatternMatcher([(UPat(Ops.ALU, name="x", src=UPat(Ops.CONST)), lambda x: x)])
+    matcher = PatternMatcher([(UPat(GroupOp.ALU, name="x", src=UPat(Ops.CONST)), lambda x: x)])
     c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
     c2 = UOp(Ops.CONST, dtypes.float, arg=2.0)
-    c3 = UOp(Ops.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
-    c4 = UOp(Ops.ALU, dtypes.float, (c2,c3), BinaryOps.ADD)
+    c3 = UOp(Ops.ADD, dtypes.float, (c1,c2))
+    c4 = UOp(Ops.ADD, dtypes.float, (c2,c3))
     self.assertEqual(matcher.rewrite(c3), c3)
     self.assertEqual(matcher.rewrite(c4), None)
 
   def test_allow_len(self):
-    matcher = PatternMatcher([(UPat(Ops.ALU, name="x", src=(UPat(Ops.CONST),), allow_any_len=True, arg=TernaryOps.MULACC), lambda x: x)])
+    matcher = PatternMatcher([(UPat(Ops.MULACC, name="x", src=(UPat(Ops.CONST),), allow_any_len=True), lambda x: x)])
     c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
     c2 = UOp(Ops.CONST, dtypes.float, arg=2.0)
     c3 = UOp(Ops.CONST, dtypes.float, arg=3.0)
-    c4 = UOp(Ops.ALU, dtypes.float, (c1,), UnaryOps.EXP2)
-    c5 = UOp(Ops.ALU, dtypes.float, (c1,c2), BinaryOps.ADD)
-    c6 = UOp(Ops.ALU, dtypes.float, (c1,c2,c3), TernaryOps.MULACC)
+    c4 = UOp(Ops.EXP2, dtypes.float, (c1,))
+    c5 = UOp(Ops.ADD, dtypes.float, (c1,c2))
+    c6 = UOp(Ops.MULACC, dtypes.float, (c1,c2,c3))
     self.assertEqual(matcher.rewrite(c4), None)
     self.assertEqual(matcher.rewrite(c5), None)
     self.assertEqual(matcher.rewrite(c6), c6)
@@ -188,7 +188,7 @@ class TestPatternMatcher(unittest.TestCase):
     u1 = (c1 + c2) + c1
     u2 = (c2 + c1) + c1
     matcher = PatternMatcher([
-      (UPat(Ops.ALU, src=[UPat(Ops.ALU, src=[UPat(name='a'), UPat(name='b')]), UPat(name='b')]), lambda a,b: b)
+      (UPat(GroupOp.ALU, src=[UPat(GroupOp.ALU, src=[UPat(name='a'), UPat(name='b')]), UPat(name='b')]), lambda a,b: b)
     ])
     self.assertIsNotNone(matcher.rewrite(u1))
     self.assertIsNotNone(matcher.rewrite(u2))

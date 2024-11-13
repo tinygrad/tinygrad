@@ -5,6 +5,7 @@ import torch
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
+from tinygrad.device import is_dtype_supported
 
 if CI:
   import warnings
@@ -231,6 +232,20 @@ class TestOps(unittest.TestCase):
 
   def test_arange_4096(self):
     helper_test_op([], lambda: torch.arange(4096, dtype=torch.int32), lambda: Tensor.arange(4096), forward_only=True)
+
+  def test_linspace(self):
+    helper_test_op([], lambda: torch.linspace(5, 10, 3), lambda: Tensor.linspace(5, 10, 3), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5, 10, 1), lambda: Tensor.linspace(5, 10, 1), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5, 10, 0), lambda: Tensor.linspace(5, 10, 0), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5, 10, 30), lambda: Tensor.linspace(5, 10, 30), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(-5.5, 5.5, 10), lambda: Tensor.linspace(-5.5, 5.5, 10), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5.5, -5.5, 10), lambda: Tensor.linspace(5.5, -5.5, 10), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5, 10, 3, dtype=torch.int32), lambda: Tensor.linspace(5, 10, 3, dtype="int32"), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5, 10, 20, dtype=torch.int32), lambda: Tensor.linspace(5, 10, 20, dtype="int32"), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5, -5, 20, dtype=torch.int32), lambda: Tensor.linspace(5, -5, 20, dtype="int32"), forward_only=True)
+    self.helper_test_exception([], lambda: torch.linspace(5, 10, 3, dtype=torch.bool), lambda: Tensor.linspace(5, 10, 3, dtype="bool"),
+                               expected=(RuntimeError, ValueError))
+    self.helper_test_exception([], lambda: torch.linspace(1, 2, -1), lambda: Tensor.linspace(1, 2, -1), expected=(RuntimeError, ValueError))
 
   def test_sum_fake(self):
     helper_test_op([(256, 1)], lambda x: x.sum(axis=1))
@@ -1515,6 +1530,11 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), grad_rtol=1e-5)
 
+  def test_simple_conv2d_bias(self):
+    helper_test_op([(1,4,9,9), (4,4,3,3), (4,)],
+      lambda x,w,b: torch.nn.functional.conv2d(x,w,b).relu(),
+      lambda x,w,b: Tensor.conv2d(x,w,b).relu(), grad_rtol=1e-5)
+
   @unittest.skipIf(IMAGE>0, "no conv3d on images")
   def test_simple_conv3d(self):
     helper_test_op([(1,4,9,9,9), (4,4,3,3,3)],
@@ -1660,6 +1680,15 @@ class TestOps(unittest.TestCase):
   def test_conv2d_bs_4_cin_3(self): self._test_conv2d(bs=4, cin=3, cout=2)
   def test_conv2d_bs_1_cin_1(self): self._test_conv2d(bs=1, cin=1)
   def test_conv2d_bs_4_cin_1(self): self._test_conv2d(bs=4, cin=1)
+
+  def test_conv2d_errors(self):
+    # kernel size cannot be larger than input size
+    self.helper_test_exception([(1,1,6,7), (6,1,3,3)],
+                               lambda x,w:torch.nn.functional.conv2d(x,w,dilation=3),
+                               lambda x,w: Tensor.conv2d(x,w,dilation=3), expected=(RuntimeError, AssertionError))
+    # regression test for https://github.com/tinygrad/tinygrad/pull/7549/
+    self.helper_test_exception([(2,16,2,2), (32,16,3,3)], lambda x,w:torch.nn.functional.conv2d(x,w), lambda x,w: Tensor.conv2d(x,w),
+                               expected=(RuntimeError, AssertionError))
 
   def test_large_input_conv2d(self):
     bs = 4
@@ -2257,6 +2286,7 @@ class TestOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
+@unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
 class TestOpsUint8(unittest.TestCase):
   @unittest.skip('this is broken for negative numbers')
   def test_cast(self):
@@ -2282,6 +2312,14 @@ class TestOpsUint8(unittest.TestCase):
     helper_test_op([(2,3,64,64)],
       lambda x: torch.nn.functional.interpolate((10*x).relu().type(torch.uint8), size=out_sz, mode="nearest-exact"),
       lambda x: Tensor.interpolate((10*x).relu().cast('uint8'), size=out_sz, mode="nearest-exact"), forward_only=True)
+
+  def test_min(self):
+    helper_test_op(None,
+      lambda x: x.type(torch.uint8).min(),
+      lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[[0, 1, 2], [3, 4, 5]]])
+    helper_test_op(None,
+      lambda x: x.type(torch.uint8).min(),
+      lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
 
 if __name__ == '__main__':
   np.random.seed(1337)

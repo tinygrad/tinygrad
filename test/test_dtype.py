@@ -2,12 +2,13 @@ import unittest, operator, subprocess, math
 import numpy as np
 import torch
 from typing import Any, List
+from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, DEBUG, CI
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
 from hypothesis import given, settings, strategies as strat
-from test.helpers import is_dtype_supported, rand_for_dtype
+from test.helpers import rand_for_dtype
 import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
 
@@ -454,6 +455,7 @@ class TestTypeSpec(unittest.TestCase):
       subprocess.run(['DEFAULT_FLOAT=TYPO python3 -c "from tinygrad import dtypes"'],
                       shell=True, check=True)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.int8), f"no int8 on {Device.DEFAULT}")
   def test_dtype_str_arg(self):
     n = np.random.normal(0, 1, (10, 10)).astype(np.float32)
     tested = 0
@@ -484,7 +486,8 @@ class TestTypeSpec(unittest.TestCase):
 
     _assert_eq(Tensor.eye(0), dtypes.default_float, np.eye(0))
     _assert_eq(Tensor.eye(3), dtypes.default_float, np.eye(3))
-    _assert_eq(Tensor.eye(3, dtype=dtypes.int64), dtypes.int64, np.eye(3))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.eye(3, dtype=dtypes.int64), dtypes.int64, np.eye(3))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.eye(3, dtype=dtypes.float16), dtypes.float16, np.eye(3))
 
@@ -493,20 +496,23 @@ class TestTypeSpec(unittest.TestCase):
     dtypes.default_int, dtypes.default_float = default_int, default_float
 
     _assert_eq(Tensor.zeros((2, 3)), dtypes.default_float, np.zeros((2, 3)))
-    _assert_eq(Tensor.zeros((2, 3), dtype=dtypes.int64), dtypes.int64, np.zeros((2, 3)))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.zeros((2, 3), dtype=dtypes.int64), dtypes.int64, np.zeros((2, 3)))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.zeros((2, 3), dtype=dtypes.float16), dtypes.float16, np.zeros((2, 3)))
 
     _assert_eq(Tensor.ones((2, 3)), dtypes.default_float, np.ones((2, 3)))
-    _assert_eq(Tensor.ones((2, 3), dtype=dtypes.int64), dtypes.int64, np.ones((2, 3)))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.ones((2, 3), dtype=dtypes.int64), dtypes.int64, np.ones((2, 3)))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.ones((2, 3), dtype=dtypes.float16), dtypes.float16, np.ones((2, 3)))
 
     _assert_eq(Tensor.full((2, 3), 3.0), dtypes.default_float, np.full((2, 3), 3.0))
     _assert_eq(Tensor.full((2, 3), 3), dtypes.default_int, np.full((2, 3), 3))
     _assert_eq(Tensor.full((2, 3), True), dtypes.bool, np.full((2, 3), True))
-    _assert_eq(Tensor.full((2, 3), 3, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
-    _assert_eq(Tensor.full((2, 3), 3.0, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.full((2, 3), 3, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
+      _assert_eq(Tensor.full((2, 3), 3.0, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.full((2, 3), 3, dtype=dtypes.float16), dtypes.float16, np.full((2, 3), 3))
       _assert_eq(Tensor.full((2, 3), 3.0, dtype=dtypes.float16), dtypes.float16, np.full((2, 3), 3))
@@ -526,8 +532,10 @@ class TestTypeSpec(unittest.TestCase):
     _assert_eq(Tensor.arange(5), dtypes.default_int, np.arange(5))
     _assert_eq(Tensor.arange(120), dtypes.default_int, np.arange(120))
     _assert_eq(Tensor.arange(5.0), dtypes.default_float, np.arange(5))
-    _assert_eq(Tensor.arange(5, dtype=dtypes.int16), dtypes.int16, np.arange(5))
-    _assert_eq(Tensor.arange(5, dtype=dtypes.int64), dtypes.int64, np.arange(5))
+    if is_dtype_supported(dtypes.int16):
+      _assert_eq(Tensor.arange(5, dtype=dtypes.int16), dtypes.int16, np.arange(5))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.arange(5, dtype=dtypes.int64), dtypes.int64, np.arange(5))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.arange(5, dtype=dtypes.float16), dtypes.float16, np.arange(5))
     _assert_eq(Tensor.arange(3, 9, 0.7), dtypes.default_float, np.arange(3, 9, 0.7))
@@ -839,8 +847,9 @@ class TestTensorMethod(unittest.TestCase):
 class TestDtypeUsage(unittest.TestCase):
   def test_max_w_alu(self):
     for d in dtypes.ints:
-      t = Tensor([[1, 2], [3, 4]], dtype=d)
-      (t*t).max().item()
+      if is_dtype_supported(d):
+        t = Tensor([[1, 2], [3, 4]], dtype=d)
+        (t*t).max().item()
 
 if __name__ == '__main__':
   unittest.main()

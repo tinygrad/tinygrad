@@ -7,7 +7,7 @@ import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
-from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, Ops, UOp
+from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
 
@@ -106,14 +106,7 @@ class PythonProgram:
           assert dtp[0].fmt and dtype.fmt
           pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
           if uop is Ops.BITCAST: ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
-          else:
-            casted = [dtypes.as_const(x, dtype) for x in inp[0]]
-            if dtypes.is_int(dtype):
-              overflow_adjust = 2**(dtype.itemsize*8 - 1) if not dtypes.is_unsigned(dtype) else 0
-              casted = [((x + overflow_adjust) % 2**(dtype.itemsize*8) - overflow_adjust) for x in casted]
-            elif dtypes.is_float(dtype):
-              casted = [truncate.get(dtype, lambda dt: dt)(x) for x in casted]
-            ul[i] = list(struct.unpack(unpack_format, struct.pack(unpack_format, *casted)))
+          else: ul[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in inp[0]]
         elif uop is Ops.LOAD:
           if dtype.count > 1:
             ul[i] = [load([inp[i][j] if i != 0 and dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
@@ -180,10 +173,10 @@ class PythonProgram:
             def c_map(_, elem): return (elem%16, elem//16)
             ul[i] = wmma_helper(1, 1, 16, 16, 256, elem, elem, c_map)
           else: raise NotImplementedError(f"unimplemented tensor core {arg}")
-        elif uop is Ops.ALU:
-          assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {arg}"
-          assert all_same([dtype] + dtp) or arg in {BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE}, f"dtype mismatch on {arg}"
-          ul[i] = [exec_alu(arg, dtype, p) for p in zip(*inp)]
+        elif uop in GroupOp.ALU:
+          assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {uop}"
+          assert all_same([dtype] + dtp) or uop in {BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE}, f"dtype mismatch on {uop}"
+          ul[i] = [exec_alu(uop, dtype, p) for p in zip(*inp)]
         assert i in ul, (uop, dtype, idp, arg)
         i += 1
     return time.perf_counter() - st

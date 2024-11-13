@@ -5,7 +5,7 @@ import onnx.backend.test
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import getenv, OSX
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',

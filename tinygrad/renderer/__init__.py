@@ -2,7 +2,7 @@ from typing import Optional, List, Tuple, Dict, Callable, Any
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.ops import Op, Ops, UOp, flops_mem, sym_infer, sint, Variable
+from tinygrad.ops import Ops, UOp, flops_mem, sym_infer, sint, Variable
 from tinygrad.dtype import DType
 
 @dataclass(frozen=True)
@@ -83,7 +83,7 @@ class Renderer:
   shared_max: int = 32768
   tensor_cores: List[TensorCore] = []
   extra_matcher: Any = None
-  code_for_op: Dict[Op, Callable] = {}
+  code_for_op: Dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
   def render(self, name:str, uops:List[UOp]) -> str: raise NotImplementedError("needs a renderer")

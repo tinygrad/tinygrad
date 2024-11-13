@@ -5,8 +5,8 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict, Callable, Sequence
 from enum import Enum, auto
 
-from tinygrad.ops import UNSAFE_PAD_OPS, BUFFER_UOPS, BinaryOps, KernelInfo, UOp, Ops, PatternMatcher, print_uops, type_verify, resolve, \
-    graph_rewrite, track_rewrites, Variable, sint
+from tinygrad.ops import GroupOp, BinaryOps, KernelInfo, UOp, Ops, PatternMatcher, can_pad, print_uops, type_verify, resolve, Variable, sint, \
+    graph_rewrite, track_rewrites
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType
@@ -68,10 +68,10 @@ class Kernel:
     self.reduceops = dedup([x for x in ordered_parents(self.ast) if x.op is Ops.REDUCE_AXIS])
 
     self.vars: List[Variable] = self.ast.variables()
-    self.bufs: List[UOp] = [x for x in self.ast.parents if x.op in BUFFER_UOPS]
+    self.bufs: List[UOp] = [x for x in self.ast.parents if x.op in GroupOp.Buffer]
 
     # get earlybufs, before any reduceops
-    earlybufs: List[UOp] = [x for reduceop in self.reduceops for x in reduceop.parents if x.op in BUFFER_UOPS]
+    earlybufs: List[UOp] = [x for reduceop in self.reduceops for x in reduceop.parents if x.op in GroupOp.Buffer]
     self.full_buf_index: int = self.bufs.index(earlybufs[0]) if earlybufs else 0
     # NOTE: full_shape can be wrong if there's a tree of reduces
 
@@ -276,7 +276,7 @@ class Kernel:
     if has_cast and not (reduceop.src[0].op is Ops.CAST and reduceop.src[0].dtype == tc.dtype_out): return None
 
     mul_op = reduceop.src[0].src[0] if has_cast else reduceop.src[0]
-    if mul_op.arg is not BinaryOps.MUL: return None
+    if mul_op.op is not BinaryOps.MUL: return None
 
     def buf_index(src:UOp) -> Optional[int]:
       # TODO: apply tc even if the sources are not from LOAD
@@ -441,8 +441,7 @@ class Kernel:
       check(not self.vars, "does not work with symbolic shape")
       check(axis < self.first_upcast, "cannot pad upcasted")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
-      if (r:=self.reduceop) is not None and self.first_reduce <= axis:
-        check(r.arg[0] is BinaryOps.ADD and not any(u.op is Ops.ALU and u.arg in UNSAFE_PAD_OPS for u in r.parents), "cannot pad UNSAFE_PAD_OPS")
+      if (r:=self.reduceop) is not None and self.first_reduce <= axis: check(r.arg[0] is BinaryOps.ADD and can_pad(r), f"cannot pad {r}")
       padded = False
       for i,st in enumerate(self.sts):
         if (s:=st.shape[axis]) == 1: continue  # reduced
@@ -472,7 +471,7 @@ class Kernel:
     MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
     if self.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
         self.reduceop is not None and self.reduceop.arg[0] is BinaryOps.ADD and len(self.full_shape) >= 2 and self.opts.has_shared and \
-        (mulop:=self.reduceop.src[0]).arg is BinaryOps.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
+        (mulop:=self.reduceop.src[0]).op is BinaryOps.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
       st0, st1 = self.sts[self.bufs.index(mulop.src[0])], self.sts[self.bufs.index(mulop.src[1])]
       strides0, strides1 = st0.real_strides(), st1.real_strides()
       def has_expanded_axis(shape, strides): return any(resolve(s > 1) and not resolve(st != 0) for s,st in zip(shape,strides))
@@ -598,7 +597,7 @@ class Kernel:
   @functools.cached_property
   def name(self) -> str:
     # kernel name (before late upcast)
-    kernel_type = "r" if self.reduceop is not None else ("C" if all(x.op in BUFFER_UOPS for x in self.ast.parents) else "E")
+    kernel_type = "r" if self.reduceop is not None else ("C" if all(x.op in GroupOp.Buffer for x in self.ast.parents) else "E")
     suffix = colored('_', 'BLACK').join([colored(x.render() if isinstance(x, UOp) else str(x), c) for x,c in zip(self.full_shape, self.colors())])
     name = kernel_type + (f"{len(self.ast.src)}" if len(self.ast.src) > 1 else "") + "_" + suffix
 
@@ -613,7 +612,7 @@ class Kernel:
     @functools.lru_cache(None)
     def fixup_ast(op:UOp, apply_to_st=None) -> UOp:
       arg = op.arg
-      if op.op in BUFFER_UOPS:
+      if op.op in GroupOp.Buffer:
         # for locals, we use the ShapeTracker that's in the srcs
         st = op.st_arg if op.src[0].op is Ops.DEFINE_LOCAL else self.sts[self.bufs.index(op)]
         st_uop = (st if apply_to_st is None else apply_to_st(st)).to_uop()
@@ -622,13 +621,13 @@ class Kernel:
         return op.replace(src=(op.src[0], st_uop, *[fixup_ast(x, apply_to_st) for x in op.src[2:]]))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op)*2
-        alu_op: BinaryOps = op.arg[0]
+        alu_op: Ops = op.arg[0]
         axis = tuple(i for i in range(self.first_reduce+self.group_for_reduces, self.shape_len)
                     if resolve(self.sts[reduce_idx].shape[i] != self.sts[reduce_idx+1].shape[i]))
         if op in self.bufs_for_tensor_core and (tc := self.tensor_core):
           rsrc = op.src[0]
           if rsrc.op is Ops.CAST: rsrc = rsrc.src[0]
-          assert rsrc.op is Ops.ALU and rsrc.arg is BinaryOps.MUL
+          assert rsrc.op is Ops.MUL
 
           def fix_st(warp_dims, tcd_dims, tcd_expand, pattern_1, pattern_2, st1):
             wd, tcd = self.global_dims, self.first_upcast
@@ -728,7 +727,7 @@ class Kernel:
     # group non-local bufs by the op type (LOAD or STORE) and the buffer arg. take the max access of that buffer in bytes
     # TODO: these max and min don't work on symbolic, and results are very wrong.
     mem_bytes = sum(max(x.src[0].dtype.itemsize * x.st_arg.real_size() for x in group)
-      for _, group in itertools.groupby([x for x in self.ast.parents if x.op in BUFFER_UOPS and x.src[0].op is Ops.DEFINE_GLOBAL],
+      for _, group in itertools.groupby([x for x in self.ast.parents if x.op in GroupOp.Buffer and x.src[0].op is Ops.DEFINE_GLOBAL],
                         key=lambda x: (x.op, x.src[0].arg)))
     return Program(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
@@ -746,7 +745,9 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
   # only reduceuop is allowed to change shape, limited to turning n to 1
   if uop.op in {Ops.REDUCE_AXIS, Ops.WMMA}: st = ShapeTracker.from_shape(sts[uop.src[0]].reduce(uop.axis_arg))
   # movementops are pushed to VIEW
-  elif uop.op is Ops.VIEW: st = uop.arg
+  elif uop.op is Ops.VIEW:
+    assert len(uop.src) == 0, f"can't swizzle in kernel yet {uop}"
+    st = uop.arg
   # everything else inherits shape
   else:
     st = (src_sts:=[sts[x] for x in uop.src if x.has_st])[0]

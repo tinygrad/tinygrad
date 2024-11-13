@@ -1,4 +1,4 @@
-import unittest
+import unittest, itertools
 from typing import Tuple
 
 from tinygrad.codegen.uopgraph import full_graph_rewrite, is_increasing
@@ -7,18 +7,14 @@ from tinygrad.ops import UOp, Ops, simplify_valid
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
-    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0),
-    idx,
-    UOp.const(dtypes.float, 0.0),
-    valid
+    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0).index(idx, valid),
+    UOp.const(dtypes.float, 0.0)
   ))
 
 def get_load_image_uop(image_shape:Tuple[int, ...], valid:UOp, idx:Tuple[UOp, UOp]):
   return UOp(Ops.LOAD, dtypes.float.vec(4), (
-    UOp(Ops.DEFINE_GLOBAL, dtypes.imagef(image_shape), arg=0),
-    UOp(Ops.VECTORIZE, dtypes.int.vec(2), idx),
-    UOp(Ops.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0),)*4),
-    valid
+    UOp(Ops.DEFINE_GLOBAL, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.VECTORIZE, dtypes.int.vec(2), idx), valid),
+    UOp(Ops.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
 def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.int, (), (expr, nmax))
@@ -82,6 +78,26 @@ class TestValidIdxSimplification(unittest.TestCase):
     alu0 = gidx0+ridx0
     valid = alu0.lt(57) & alu0.ge(1)
     self.assertIsNone(simplify_valid(valid))
+
+  def test_valid_order_matters1(self):
+    ridx0 = Range(0, 2)
+    v0 = ridx0.lt(1)
+    v1 = ((ridx0*5+1)%6).lt(5)
+    self.assertEqual(simplify_valid(v0&v1).render(), "(ridx0<1)")
+    self.assertEqual(simplify_valid(v1&v0).render(), "(ridx0<1)")
+
+  def test_valid_order_matters2(self):
+    gidx0 = Special("gidx0", 13)
+    gidx1 = Special("gidx1", 13)
+    ridx0 = Range(0, 4)
+    alu0 = (gidx1+(ridx0*13))
+    v0 = ((gidx0+11)%14).lt(11)
+    v1 = ((alu0+((gidx0+39)//42))%14).lt(11)
+    v2 = gidx0.lt(3)
+    v3 = alu0.lt(42)
+
+    for v in itertools.permutations([v0,v1,v2,v3]):
+      self.assertEqual(simplify_valid(v[0]&v[1]&v[2]&v[3]).render(), "False")
 
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):

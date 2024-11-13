@@ -58,9 +58,13 @@ def test(test_val=None):
   Tensor.manual_seed(100)
   new_inputs = {nm:Tensor.randn(*st.shape, dtype=dtype).mul(8).realize() for nm, (st, _, dtype, _) in
                 sorted(zip(run.captured.expected_names, run.captured.expected_st_vars_dtype_device))}
+  new_inputs_numpy = {k:v.numpy() for k,v in new_inputs.items()}
   for _ in range(20):
     st = time.perf_counter()
-    out = run(**new_inputs)
+    # Need to cast non-image inputs from numpy, this is only realistic way to run it
+    inputs = {**{k:v for k,v in new_inputs.items() if 'img' in k},
+              **{k:Tensor(v) for k,v in new_inputs_numpy.items() if 'img' not in k}}
+    out = run(**inputs)
     mt = time.perf_counter()
     val = out['outputs'].numpy()
     et = time.perf_counter()

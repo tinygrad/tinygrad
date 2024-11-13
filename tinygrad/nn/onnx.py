@@ -4,6 +4,7 @@ import functools, io, math, inspect
 from tinygrad.tensor import Tensor, Device, _broadcast_shape, ConstType
 from tinygrad.helpers import getenv, CI, OSX, prod, flatten, make_tuple
 from tinygrad.dtype import dtypes, DType
+# from tinygrad.device import is_dtype_supported
 from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
 
 # TODO try to remove this np stuff later

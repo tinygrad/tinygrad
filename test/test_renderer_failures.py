@@ -33,9 +33,9 @@ class TestCStyleFailures(unittest.TestCase):
     a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     b = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
     idx = UOp.const(dtypes.int, 0)
-    ld = UOp(Ops.LOAD, dtypes.int, (b, idx))
+    ld = UOp(Ops.LOAD, dtypes.int, (b.index(idx),))
     alu = ld.alu(BinaryOps.MAX, UOp.const(dtypes.int, dtypes.min(dtypes.int)+1))
-    store = UOp.store(a, idx, alu)
+    store = UOp.store(a.index(idx), alu)
     sink = UOp(Ops.SINK, dtypes.void, (store,))
     uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
     # CLANG doesn't use the max function
@@ -47,7 +47,7 @@ class TestPTXFailures(unittest.TestCase):
   def test_gated_store_with_alu(self):
     a = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
-    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a, lidx0, UOp.const(dtypes.int, 1), gate_alu))
+    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0, gate_alu), UOp.const(dtypes.int, 1)))
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
     uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
@@ -58,7 +58,7 @@ class TestPTXFailures(unittest.TestCase):
     gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (), ('lidx0', 4))).ne(0)
     val = UOp.const(dtypes.int, 1)
     if_uop = UOp(Ops.IF, dtypes.void, (gate_alu,))
-    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a, lidx0, val, if_uop))
+    gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0, if_uop), val))
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
     uops = linearize_uop(full_graph_rewrite(sink, Device[Device.DEFAULT].renderer))
     ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
