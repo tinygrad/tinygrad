@@ -49,11 +49,11 @@ jobs:
     - name: reset process replay
       run: python3.11 test/external/process_replay/reset.py
     - name: Run Stable Diffusion
-      run: JIT=2 python3.11 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+      run: JIT=1 python3.11 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run Stable Diffusion with fp16
-      run: JIT=2 python3.11 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd_fp16.txt
+      run: JIT=1 python3.11 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd_fp16.txt
     - name: Run SDXL
-      run: JIT=2 python3.11 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
+      run: JIT=1 python3.11 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
     - name: Run model inference benchmark
       run: METAL=1 python3.11 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -89,13 +89,13 @@ jobs:
     - name: Train MNIST
       run: time PYTHONPATH=. TARGET_EVAL_ACC_PCT=96.0 python3.11 examples/beautiful_mnist.py | tee beautiful_mnist.txt
     - name: Run 10 CIFAR training steps
-      run: JIT=2 STEPS=10 python3.11 examples/hlb_cifar10.py | tee train_cifar.txt
+      run: JIT=1 STEPS=10 python3.11 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
-      run: JIT=2 STEPS=10 DEFAULT_FLOAT=HALF python3.11 examples/hlb_cifar10.py | tee train_cifar_half.txt
+      run: JIT=1 STEPS=10 DEFAULT_FLOAT=HALF python3.11 examples/hlb_cifar10.py | tee train_cifar_half.txt
     #- name: Run 10 CIFAR training steps w BF16
     #  run: STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3.11 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     - name: Run 10 CIFAR training steps w winograd
-      run: JIT=2 WINO=1 STEPS=10 python3.11 examples/hlb_cifar10.py | tee train_cifar_wino.txt
+      run: JIT=1 WINO=1 STEPS=10 python3.11 examples/hlb_cifar10.py | tee train_cifar_wino.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)
@@ -158,6 +158,8 @@ jobs:
       run: NV=1 RUN_PROCESS_REPLAY=0 NOCLANG=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: NV=1 RUN_PROCESS_REPLAY=0 HALF=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+    - name: Test speed vs theoretical
+      run: NV=1 IGNORE_BEAM_CACHE=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Test tensor cores
       run: |
         NV=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
@@ -172,8 +174,6 @@ jobs:
       run: NV=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_nv.txt
     # - name: Run Tensor Core GEMM (NV) with BEAM
     #   run: BEAM=4 NV=1 HALF=1 IGNORE_BEAM_CACHE=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
-    - name: Test speed vs theoretical
-      run: NV=1 IGNORE_BEAM_CACHE=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py
     - name: Run Stable Diffusion
       run: NV=1 python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run SDXL
@@ -344,13 +344,13 @@ jobs:
     #  run: |
     #    python3 -c "import torch; print(torch.__version__)"
     #    LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
+    - name: Test speed vs theoretical
+      run: AMD=1 IGNORE_BEAM_CACHE=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Test tensor cores
       run: |
         AMD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Run Tensor Core GEMM (AMD)
       run: AMD=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt
-    - name: Test speed vs theoretical
-      run: AMD=1 IGNORE_BEAM_CACHE=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py
     # TODO: AMD compiler bug causes this to fail
     #- name: Fuzz Padded Tensor Core GEMM
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py
