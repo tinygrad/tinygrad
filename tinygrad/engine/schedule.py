@@ -33,7 +33,7 @@ class ScheduleItem:
     """Read only buffers in the schedule."""
     return tuple(b for i,b in enumerate(self.bufs) if i not in self.output_idxs)
   @functools.cached_property
-  def output_idxs(self) -> Tuple[int, ...]: return tuple(x.buf_uop.arg for x in self.ast.src) if self.ast.op is Ops.SINK else (0,)
+  def output_idxs(self) -> Tuple[int, ...]: return tuple(x.src[0].arg for x in self.ast.src) if self.ast.op is Ops.SINK else (0,)
 
 # **** small wrapper for LazyBuffer -> UOp
 

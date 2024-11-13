@@ -355,7 +355,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def buf_uop(self) -> UOp:
-    assert self.op in {*GroupOp.Buffer, Ops.ASSIGN}, f"buf_uop called on {self.op}"
+    assert self.op in {*GroupOp.Buffer, Ops.ASSIGN} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
     return self.src[0]
 
   # *** uop Variable stuff ***
