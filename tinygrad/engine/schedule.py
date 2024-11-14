@@ -84,7 +84,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
   allbufs[ubuf] = ret
   if buf.op is Ops.REDUCE_AXIS and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[ubuf] = None
   for x in src:
-    if x.op is Ops.LOAD: children[x.buf_uop][ubuf] = None
+    if x.base.op is Ops.LOAD: children[x.base.buf_uop][ubuf] = None
   return ret
 
 # **** AST graph rewrite
