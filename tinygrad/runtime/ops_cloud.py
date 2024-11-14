@@ -32,6 +32,9 @@ class CopyIn(CloudRequest): buffer_num: int; datahash: str # noqa: E702
 class CopyOut(CloudRequest): buffer_num: int
 
 @dataclass(frozen=True)
+class Transfer(CloudRequest): dst_buffer_num: int; src_buffer_num: int; sz: int; src_dev: str; dst_dev: str # noqa: E702
+
+@dataclass(frozen=True)
 class ProgramAlloc(CloudRequest): name: str; datahash: str # noqa: E702
 
 @dataclass(frozen=True)
@@ -43,7 +46,7 @@ class ProgramExec(CloudRequest):
   global_size: Optional[Tuple[int, ...]]; local_size: Optional[Tuple[int, ...]]; wait: bool # noqa: E702
 
 # for safe deserialization
-whitelist = {x.__name__:x for x in [BufferAlloc, BufferFree, CopyIn, CopyOut, ProgramAlloc, ProgramFree, ProgramExec, BufferOptions]}
+whitelist = {x.__name__:x for x in [BufferAlloc, BufferFree, CopyIn, CopyOut, Transfer, ProgramAlloc, ProgramFree, ProgramExec, BufferOptions]}
 eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
   ast.Call: lambda x: safe_eval(x.func)(*[safe_eval(arg) for arg in x.args], **{kwarg.arg: safe_eval(kwarg.value) for kwarg in x.keywords}),
   ast.Name: lambda x: whitelist[x.id], ast.Attribute: lambda x: {"imagef": dtypes.imagef, "imageh": dtypes.imageh}[x.attr]}
@@ -108,6 +111,10 @@ class CloudHandler(BaseHTTPRequestHandler):
           case CopyOut():
             buf,sz,_ = session.buffers[c.buffer_num]
             Device[CloudHandler.dname].allocator.copyout(memoryview(ret:=bytearray(sz)), buf)
+          case Transfer():
+            assert CloudHandler.dname in {"CUDA", "HIP", "METAL"}, "only CUDA, HIP, and METAL devices can perform transfers"
+            src_buf,dst_buf = session.buffers[c.src_buffer_num][0], session.buffers[c.dst_buffer_num][0]
+            Device[CloudHandler.dname].allocator.transfer(dst_buf, src_buf, c.sz, Device[c.src_dev], Device[c.dst_dev])
           case ProgramAlloc():
             lib = Device[CloudHandler.dname].compiler.compile_cached(req._h[c.datahash].decode())
             session.programs[(c.name, c.datahash)] = Device[CloudHandler.dname].runtime(c.name, lib)
@@ -149,6 +156,7 @@ class CloudAllocator(Allocator):
     return self.device.buffer_num
   # TODO: options should not be here in any Allocator
   def _free(self, opaque:int, options): self.device.req.q(BufferFree(opaque))
+  def transfer(self, dest:int, src:int, sz:int, src_dev:str, dest_dev:str): self.device.req.q(Transfer(dest, src, sz, src_dev, dest_dev))
   def copyin(self, dest:int, src:memoryview): self.device.req.q(CopyIn(dest, self.device.req.h(bytes(src))))
   def copyout(self, dest:memoryview, src:int):
     self.device.req.q(CopyOut(src))
