@@ -1362,8 +1362,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     tensors = (self,) + args if indexing == "ij" else (args[0],) + (self,) + args[1:]
     tensors = tuple(t.reshape((-1,) + (1,)*(len(args) - i)) for i,t in enumerate(tensors))
-    tensors = tensors if indexing == "ij" else (tensors[1],) + (tensors[0],) + tensors[2:]
-    out_shape = _broadcast_shape(*(t.shape for t in tensors))
+    tensors, out_shape = (tensors if indexing == "ij" else (tensors[1],) + (tensors[0],) + tensors[2:]), _broadcast_shape(*(t.shape for t in tensors))
     return tuple(t._broadcast_to(out_shape) for t in tensors)
 
   def squeeze(self, dim:Optional[int]=None) -> Tensor:
@@ -2281,18 +2280,19 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
     assert mode in ("linear", "nearest", "nearest-exact"), "only supports linear, nearest or nearest-exact interpolate"
     assert not (align_corners and mode != "linear"), "align_corners option can only be set with the interpolating mode linear"
+    if mode in {"nearest", "nearest-exact"}:
+      def _generate_index(i):
+        arr, scale = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), (self.shape[i]-int(align_corners))/(size[i]-int(align_corners))
+        return (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32)
+      return self[(..., *Tensor.meshgrid(*(_generate_index(i) for i in range(len(size)))))]
     x, expand = self, list(self.shape)
     for i in range(-1,-len(size)-1,-1):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
       arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
       reshape[i] = expand[i] = size[i]
-      if mode == "linear":
-        index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
-        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
-        x = x.gather(i, low).lerp(x.gather(i, high), perc)
-      else:
-        index = (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
-        x = x.gather(i, index)
+      index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
+      low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+      x = x.gather(i, low).lerp(x.gather(i, high), perc)
     return x.cast(self.dtype)
 
   # ***** unary ops *****
