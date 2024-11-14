@@ -12,7 +12,7 @@ mov_sufix = {4: "d", 8: "q"}
 
 x86_mov_ops = {Ops.STORE: "mov", Ops.LOAD: "mov", Ops.ASSIGN: "mov", Ops.DEFINE_ACC: "mov"}
 x86_unsigned_ops = {**x86_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "div", Ops.CMPNE: "cmp",
-                    Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor", Ops.SQRT: "sqrt"}
+                    Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor", Ops.SHL: "shl", Ops.SHR: "shr"}
 x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv"}
 x86_float_ops = {Ops.ADD: "addss", Ops.SUB: "subss", Ops.MUL: "mulss", Ops.FDIV: "divss", Ops.CMPLT: "ucomiss", Ops.CMPNE: "ucomiss", Ops.SQRT: "sqrtss",
                  **{k:v+"ss" for k,v in x86_mov_ops.items()}}
@@ -35,19 +35,7 @@ def cflag(x:UOp) -> str:
   if x.op is Ops.CMPLT: return "setl" if x.src[0].dtype in dtypes.sints else "setb"
   if x.op is Ops.CMPNE: return "setne"
   assert False
-'''
-def opt(op:str, dt:DType) -> str:
-  if dtypes.is_float(dt) and not isinstance(dt, PtrDType):
-    s1 = 'p' if dt.count > 1 else 's'
-    s2 = 'd' if dt.scalar().itemsize == 8 else 's'
-    if op == "cmp": return "ucomi" + s1 + s2
-    if op == "mov":
-      s0 = 'l' if dt.count == 2 and dt.scalar() is dtypes.float32 else 'u' if dt.count > 1 else ''
-      return op + s0 + s1 + s2 # packed mov is unaligned
-    return (op if op[0] != 'i' else op[1:]) + s1 + s2
-  if dtypes.is_unsigned(dt) and op == 'idiv': return op[1:]
-  return op
-'''
+
 x86_rewrite = PatternMatcher([
   (UPat(Ops.INDEX, name="x"), lambda ctx,x: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx[x.src[1]]}*{x.src[0].dtype.itemsize}]"),
   (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]"),
@@ -96,22 +84,21 @@ class X86Renderer(Renderer):
     # rewrite MAX to CMPLT + WHERE
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
   ])
-  
-  #code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [Ops.NEG, Ops.EXP2, Ops.SIN, Ops.LOG2]})}
 
   def idiv(self, x:UOp, s:UOp) -> str:
     l = ""
+    # if dividend is rax/rdx we don't push because pop would overwrite result
     if self.r[x] != "rax": l += "push rax\n"
-    if self.r[s] == "rdx": l += "mov r15, rdx\n"
-    # divisor can't be rdx
-    divisor = self.r[s] if self.r[s] != "rdx" else "r15"
-    l += "push rdx\n"
+    if self.r[x] != "rdx": l += "push rdx\n"
+    # divisor can't be rax or rdx
+    if self.r[s] in ("rax", "rdx"): l += f"mov r15, {self.r[s]}\n"
+    divisor = self.r[s] if self.r[s] not in ("rax", "rdx") else "r15"
     l += f"mov {self.regt("rax", x.dtype)}, {self[x]}\n"
     l += "xor rdx, rdx\n" if dtypes.is_unsigned(x.dtype) else "cqo\n" if x.dtype.itemsize == 8 else "cdq\n"
     l += f"{x86op[x.dtype][x.op]} {self.regt(divisor, s.dtype)}\n"
     l += f"mov {self[x]}, {self.regt("rax", x.dtype)}\n"
-    l += "pop rdx\n"
-    if self.r[x] != "rax": l += "pop rax"
+    if self.r[x] != "rdx": l += "pop rdx\n"
+    if self.r[x] != "rax": l += "pop rax\n"
     return l
   
   def x86_cast(self, x:UOp, s:UOp) -> str:
