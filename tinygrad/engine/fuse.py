@@ -7,7 +7,8 @@ from tinygrad.shape.shapetracker import ShapeTracker
 
 def uval(u:UOp) -> UOp:
   assert u.op is Ops.LOAD and len(u.src) == 3 and u.src[2].op is Ops.STORE, f"must be a LOAD of STORE {u}"
-  return ret.src[0] if (ret:=u.src[2].src[2]).op is Ops.CONTIGUOUS and ret.src[0].op is not Ops.LOAD else ret
+  if (to_store:=u.src[2].src[2]).op is Ops.CONTIGUOUS and to_store.src[0].base.op is not Ops.LOAD: return to_store.src[0]
+  return to_store
 
 def _recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp],
                      realizes:Dict[UOp, UOp], reduce_for_op:Dict[UOp, UOp], group:Dict[UOp, None],
@@ -23,10 +24,9 @@ def _recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, D
     return group.setdefault(tr)
   for tr_next in children[tr]:
     # max one reduceop per kernel
-    if (tr_next_uop:=uval(allbufs[tr_next])).op is Ops.REDUCE_AXIS: return group.setdefault(r)
+    if (tr_next_uop:=uval(allbufs[tr_next]).base).op is Ops.REDUCE_AXIS: return group.setdefault(r)
     # can only fuse contiguous
-    st_childs = dedup([unwrap(x.st) for x in tr_next_uop.src if x.base.op is Ops.LOAD and x.base.buf_uop is tr])
-    if len(st_childs) > 1: return group.setdefault(r)
+    if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if x.base.op is Ops.LOAD and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
     _recursive_group(tr_next, st+st_childs[0], r, children, allbufs, realizes, reduce_for_op, group, cache)
 
 def _get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp],
