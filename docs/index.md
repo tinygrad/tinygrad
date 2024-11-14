@@ -24,7 +24,7 @@ The main class you will interact with is [Tensor](tensor/index.md). It functions
 * tinygrad has a JIT to make things fast. Decorate your pure function with `TinyJit`
 * tinygrad has amazing support for multiple GPUs, allowing you to shard your Tensors with `Tensor.shard`
 
-To understand what training looks like in tinygrad, you should read `beautiful_mnist.py`
+To understand what training looks like in tinygrad, you should [read](https://github.com/tinygrad/tinygrad/blob/master/examples/beautiful_mnist.py) `beautiful_mnist.py`
 
 We have a [quickstart guide](quickstart.md) and a [showcase](showcase.md)
 
