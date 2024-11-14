@@ -105,10 +105,8 @@ def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
   tmp, rshape = permute_reduce(ShapeTracker.from_shape(unwrap(src.st).shape), r.axis_arg)
   prshape = prod(rshape)
   strides = strides_for_shape(rshape)
-  nv: List[View] = []
-  for v in st.views:
-    nv.append(View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
-                          v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None))
+  nv = [View.create(v.shape+rshape, tuple(x*prshape for x in v.strides)+strides,
+                    v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None) for v in st.views]
   # update input_st and axis
   new_input_st = tmp + ShapeTracker(tuple(nv))
   _, new_rshape = permute_reduce(new_input_st, r.axis_arg)
@@ -250,8 +248,8 @@ do_realize = PatternMatcher([
   # always realize meta ops
   (UPatLoadStore(UPat((Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta))), realize),
   # don't realize image to image casts
-  (UPatLoadStore(UPat(Ops.CAST, src=(UPat(Ops.LOAD, name="x"),), dtype=dtypes.float)).view(name="view"), lambda ctx,x,view,**kwargs: r.view(view.st)
-   if (r:=ctx.get(b:=x.buf_uop)) is not None and r.op is Ops.STORE and isinstance(b.dtype, ImageDType) else None),
+  (UPatLoadStore(UPat(Ops.CAST, src=(UPat(Ops.LOAD, name="x"),), dtype=dtypes.float)).view(name="v"), lambda ctx,x,v,**kwargs: r.src[2].view(v.st)
+   if (r:=ctx.get(b:=x.buf_uop)) is not None and r.op is Ops.STORE and isinstance(b.dtype, ImageDType) and r.src[2].op not in GroupOp.Meta else None),
   # realize before expand or unsafe pad ops
   (UPatLoadStore(UPat.var("base")).view(name="view"), realize_view),
   # realize before COPY or BUFFER_VIEW
