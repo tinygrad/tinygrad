@@ -70,18 +70,14 @@ class MetalCompilerService:
 
   def compile(self, src: str, options: Optional[objc_instance] = None) -> bytes:
     compile_error = objc_instance()
-    library = msg(self.compiler_service, "newLibraryWithSource:options:error:", 
-                  to_ns_str(src), options, ctypes.byref(compile_error), restype=objc_instance)
-    
+    library = msg(self.compiler_service, "newLibraryWithSource:options:error:", to_ns_str(src), options, ctypes.byref(compile_error), restype=objc_instance)
     error_check(compile_error, CompileError)
-    
     library_contents = msg(library, "libraryDataContents", restype=objc_instance)
-    lib = ctypes.string_at(msg(library_contents, "bytes"), 
-                            cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
-    
+    lib = ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
+
     if not lib.startswith(b"MTLB"):
-        print("Library contents (first 64 bytes):", lib[:64])
-        raise AssertionError("Invalid Metal library.")
+      print("Library contents (first 64 bytes):", lib[:64])
+      raise AssertionError("Invalid Metal library.")
     
     return lib
 
