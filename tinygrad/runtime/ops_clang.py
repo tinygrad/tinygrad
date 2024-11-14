@@ -1,7 +1,7 @@
 from typing import Optional, List
 import ctypes, subprocess, pathlib, tempfile
 from tinygrad.device import Compiled, Compiler, MallocAllocator
-from tinygrad.helpers import cpu_time_execution, DEBUG, cpu_objdump
+from tinygrad.helpers import cpu_time_execution, cpu_objdump
 from tinygrad.renderer.cstyle import ClangRenderer
 
 class ClangCompiler(Compiler):

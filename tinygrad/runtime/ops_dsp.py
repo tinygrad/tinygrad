@@ -3,7 +3,7 @@ from typing import Tuple, Any
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys
 assert sys.platform != 'win32'
 from tinygrad.device import BufferOptions, Compiled, Allocator
-from tinygrad.helpers import from_mv, getenv, DEBUG, round_up, mv_address, to_mv
+from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv
 from tinygrad.runtime.ops_clang import ClangCompiler
 from tinygrad.renderer.cstyle import DSPRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
