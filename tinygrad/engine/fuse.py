@@ -34,14 +34,14 @@ def _get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:Default
                            realizes:Dict[UOp, UOp], group:Dict[UOp, None]) -> Dict[UOp, None]:
   rc_parents, cache = deque(group), set()
   while rc_parents:
-    if (p:=rc_parents.pop()) in cache: continue
+    if (p:=uval(allbufs[rc_parents.pop()])) in cache: continue
     cache.add(p)
     # max one reduceop per kernel
     if p.op is Ops.REDUCE_AXIS: return {}
-    rc_parents.extend(x.base for x in p.srcs if x.base.realized is None and x.base is not r)
+    rc_parents.extend(x.base.buf_uop for x in p.src if x.base.op is Ops.LOAD and x.base.buf_uop is not r)
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[UOp, None] = {}
-  for tr in group: _recursive_group(tr, tr.st, tr, children, allbufs, realizes, reduce_for_op, descendants, cache={})
+  for tr in group: _recursive_group(tr, unwrap(allbufs[tr].st), tr, children, allbufs, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
 def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], double_reduces:Dict[UOp, None],
