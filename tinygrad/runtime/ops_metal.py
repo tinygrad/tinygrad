@@ -67,11 +67,12 @@ def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
 class MetalCompilerService:
   def __init__(self):
     service_class = libobjc.objc_getClass(b"MTLCompilerService")
-      if not service_class:
-        raise RuntimeError("Failed to get MTLCompilerService class.")
-    self.compiler_service = msg(service_class,"sharedService",restype=objc_instance)
-      if not self.compiler_service:
-        raise RuntimeError("Failed to obtain shared MTLCompilerService instance.")
+    if not service_class:
+      raise RuntimeError("Failed to get MTLCompilerService class.")
+
+    self.compiler_service = msg(service_class, "sharedService", restype=objc_instance)
+    if not self.compiler_service:
+      raise RuntimeError("Failed to obtain shared MTLCompilerService instance.")
 
   def compile(self, src: str, options: Optional[objc_instance] = None) -> bytes:
     compile_error = objc_instance()
@@ -85,13 +86,20 @@ class MetalCompiler(Compiler):
   def __init__(self, device:Optional[MetalDevice]=None):
     self.device = device
     super().__init__("compile_metal_xcode" if self.device is None else "compile_metal")
-  def compile(self, src: str) -> bytes:
-    options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
-    msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
-
-    compiler_service = MetalCompilerService()
-    lib = compiler_service.compile(src, options)
-    return lib        
+  def compile(self, src:str) -> bytes:
+    if self.device is None:
+      # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
+      air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
+      lib = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+    else:
+      options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
+      fast_math_enabled = getenv("METAL_FAST_MATH")
+      if fast_math_enabled is not None:
+          msg(options, "setFastMathEnabled:", fast_math_enabled.lower() == 'true')
+      compiler_service = MetalCompilerService()
+      lib = compiler_service.compile(src, options)
+    assert lib[:4] == b"MTLB", "Invalid Metal library. Using conda? Corrupt XCode?"
+    return lib
   def disassemble(self, lib:bytes):
     with tempfile.NamedTemporaryFile(delete=True) as shader:
       shader.write(lib)
