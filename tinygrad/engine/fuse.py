@@ -4,7 +4,6 @@ from tinygrad.device import Buffer
 from tinygrad.ops import UOp, Ops
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, dedup, merge_dicts, unwrap
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.engine.lazy import UOp
 
 def uval(u:UOp) -> UOp:
   assert u.op is Ops.LOAD and len(u.src) == 3 and u.src[2].op is Ops.STORE, f"must be a LOAD of STORE {u}"
@@ -72,18 +71,18 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
       tr = r
       if can_chase:
         # can chase this down to contiguous children
-        st = unwrap((tr_uop:=uval(allbufs[tr])).st)
+        st = unwrap(r_uop.st)
         while len(children[tr]) == 1:
           tr_next_uop = uval(allbufs[(tr_next:=next(iter(children[tr])))])
           st_childs = dedup([unwrap(x.st) for x in tr_next_uop.src if x.base.op is Ops.LOAD and x.base.buf_uop is tr])
           if len(st_childs) > 1: break
           if st.size != st_childs[0].size: break
           st = st + st_childs[0]
-          if not st.contiguous or tr_next.op is Ops.REDUCE_AXIS: break
+          if not st.contiguous or tr_next_uop.op is Ops.REDUCE_AXIS: break
           tr = tr_next
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
-        if tr_uop.op is Ops.CAST and tr_uop.dtype.base.itemsize > tr_uop.src[0].dtype.base.itemsize:
-          tr = tr_uop.src[0].buf_uop
+        if (tr_uop:=uval(allbufs[tr])).op is Ops.CAST and tr_uop.dtype.base.itemsize > tr_uop.src[0].dtype.base.itemsize:
+          tr = tr_uop.src[0].base.buf_uop
       group = {tr: None}
       realizes[tr] = tr
     reduce_for_op.update((tr, r) for tr in group)
@@ -92,19 +91,15 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
   # fuse double reduces with no other child
   if FUSE_CONV_BW:
     for reduceop in double_reduces:
-      top_reduce = reduceop.base.srcs[0].base
-      if len(children[top_reduce]) == 1:
-        del realizes[top_reduce]
-        if (ubuf:=buf_uops[top_reduce.buffer]) in realizes: del realizes[ubuf]
+      top_reduce = uval(allbufs[reduceop]).src[0].base.buf_uop
+      if len(children[top_reduce]) == 1: del realizes[top_reduce]
 
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
     if any(tr.forced_realize for tr in group): continue
     kernel_children = {c for tr in group for c in children[tr] if c.op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
-    for tr in group:
-      del realizes[tr]
-      if (ubuf:=buf_uops[tr.buffer]) in realizes: del realizes[ubuf]
+    for tr in group: del realizes[tr]
 
   output_groups: DefaultDict[UOp, List[UOp]] = defaultdict(list)
   for ubuf in realizes: output_groups[reduce_for_op.get(ubuf, ubuf)].append(ubuf)
