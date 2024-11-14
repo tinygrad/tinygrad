@@ -64,21 +64,35 @@ def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   error_check(compileError, CompileError)
   return library
 
+class MetalCompilerService:
+    def __init__(self):
+        self.compiler_service = msg(libobjc.objc_getClass(b"MTLCompilerService"), "sharedService", restype=objc_instance)
+
+    def compile(self, src: str, options: Optional[objc_instance] = None) -> bytes:
+        compile_error = objc_instance()
+        library = msg(self.compiler_service, "newLibraryWithSource:options:error:", to_ns_str(src), options, 
+                      ctypes.byref(compile_error), restype=objc_instance)
+        error_check(compile_error, CompileError)
+        
+        library_contents = msg(library, "libraryDataContents", restype=objc_instance)
+        lib = ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
+        
+        assert lib[:4] == b"MTLB", "Invalid Metal library."
+        return lib
+
 class MetalCompiler(Compiler):
   def __init__(self, device:Optional[MetalDevice]=None):
     self.device = device
     super().__init__("compile_metal_xcode" if self.device is None else "compile_metal")
-  def compile(self, src:str) -> bytes:
-    if self.device is None:
-      # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
-      air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
-      lib = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-    else:
-      library = metal_src_to_library(self.device, src)
-      library_contents = msg(library, "libraryDataContents", restype=objc_instance)
-      lib = ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
-    assert lib[:4] == b"MTLB", "Invalid Metal library. Using conda? Corrupt XCode?"
-    return lib
+    
+  def compile(self, src: str) -> bytes:
+      options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
+      msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
+
+      compiler_service = MetalCompilerService()
+      lib = compiler_service.compile(src, options)
+      return lib
+             
   def disassemble(self, lib:bytes):
     with tempfile.NamedTemporaryFile(delete=True) as shader:
       shader.write(lib)
