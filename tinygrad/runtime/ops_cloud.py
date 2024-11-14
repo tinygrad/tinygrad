@@ -149,6 +149,12 @@ class CloudAllocator(Allocator):
     return self.device.buffer_num
   # TODO: options should not be here in any Allocator
   def _free(self, opaque:int, options): self.device.req.q(BufferFree(opaque))
+  def transfer(self, dest, src, sz:int, src_dev:CloudDevice, dest_dev:CloudDevice):
+    src_dev.req.q(CopyOut(src))
+    resp = src_dev.batch_submit()
+    assert len(resp) == sz, f"buffer length mismatch {len(resp)} != {sz}"
+    dest_dev.req.q(CopyIn(dest, dest_dev.req.h(bytes(resp))))
+    dest_dev.batch_submit()
   def copyin(self, dest:int, src:memoryview): self.device.req.q(CopyIn(dest, self.device.req.h(bytes(src))))
   def copyout(self, dest:memoryview, src:int):
     self.device.req.q(CopyOut(src))
