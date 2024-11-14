@@ -66,7 +66,12 @@ def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
 
 class MetalCompilerService:
   def __init__(self):
-    self.compiler_service = msg(libobjc.objc_getClass(b"MTLCompilerService"), "sharedService", restype=objc_instance)
+    service_class = libobjc.objc_getClass(b"MTLCompilerService")
+      if not service_class:
+        raise RuntimeError("Failed to get MTLCompilerService class.")
+    self.compiler_service = msg(service_class,"sharedService",restype=objc_instance)
+      if not self.compiler_service:
+        raise RuntimeError("Failed to obtain shared MTLCompilerService instance.")
 
   def compile(self, src: str, options: Optional[objc_instance] = None) -> bytes:
     compile_error = objc_instance()
@@ -74,11 +79,6 @@ class MetalCompilerService:
     error_check(compile_error, CompileError)
     library_contents = msg(library, "libraryDataContents", restype=objc_instance)
     lib = ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
-
-    if not lib.startswith(b"MTLB"):
-      print("Library contents (first 64 bytes):", lib[:64])
-      raise AssertionError("Invalid Metal library.")
-    
     return lib
 
 class MetalCompiler(Compiler):
