@@ -125,7 +125,6 @@ class TestRealStrides(unittest.TestCase):
     ))
     self.assertEqual(st.real_strides(), (None, 4, 1))
 
-  @unittest.expectedFailure  # FIXME
   def test_2(self):
     # test/test_ops.py::TestOps::test_simple_padding_conv1d
     st = ShapeTracker((
