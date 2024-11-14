@@ -95,7 +95,7 @@ class MetalCompiler(Compiler):
       options = msg(libobjc.objc_getClass(b"MTLCompileOptions"), "new", restype=objc_instance)
       fast_math_enabled = getenv("METAL_FAST_MATH")
       if fast_math_enabled is not None:
-          msg(options, "setFastMathEnabled:", fast_math_enabled.lower() == 'true')
+        msg(options, "setFastMathEnabled:", getenv("METAL_FAST_MATH"))
       compiler_service = MetalCompilerService()
       lib = compiler_service.compile(src, options)
     assert lib[:4] == b"MTLB", "Invalid Metal library. Using conda? Corrupt XCode?"
