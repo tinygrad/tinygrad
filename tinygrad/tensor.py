@@ -366,7 +366,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
       if axis < 0: axis += len(self.shape)
       if splits is None:
         if not isinstance(total:=self.shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {self.shape=}, {axis=}")
-        sz = round_up(total, len(devices)) // len(devices)
+        sz = ceildiv(total, len(devices))
         splits = tuple([max(0, min(sz, total - sz*i)) for i in range(len(devices))])
       assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
       boundaries = tuple(itertools.accumulate(splits))
@@ -502,7 +502,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     else: had_counter = True
 
     # if shape has 0, return zero tensor
-    if (num := ceildiv(((num_ := prod(shape)) * dtype.itemsize), 4)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
+    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
+    num = ceildiv(numel * dtype.itemsize, 4)
 
     # increment rng counter for devices
     if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num).contiguous()
@@ -520,7 +521,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     one = Tensor.ones_like(bits, device=bits.device, dtype=dtype).bitcast(uint_dtype)
     bits = bits.rshift((dtype.itemsize * 8) - nmant).bitwise_or(one)
     # bitcast back to the original dtype and reshape
-    out = bits.bitcast(dtype)[:num_].sub(1).reshape(shape)
+    out = bits.bitcast(dtype)[:numel].sub(1).reshape(shape)
 
     # move back to the original device if we were using MOCKGPU
     if getenv("MOCKGPU") and _device: out = out.to(_device)
@@ -708,16 +709,13 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     dtype = kwargs.pop("dtype", self.dtype)
-    device = kwargs.pop("device", self.device)
-    contiguous = kwargs.pop("contiguous", True)
-    if isinstance(self.device, tuple):
-      assert isinstance(self.lazydata, MultiLazyBuffer)
-      if self.lazydata.axis is not None:
-        rands = [cast(LazyBuffer, Tensor.rand(*lb.shape, device=lb.device, dtype=dtype, contiguous=contiguous, **kwargs).lazydata) \
-                 for lb in self.lazydata.lbs]
-        return Tensor(MultiLazyBuffer(rands, self.lazydata.axis), device=self.device, dtype=dtype, **kwargs)
-      return Tensor.rand(*self.shape, dtype=dtype, contiguous=contiguous, **kwargs).shard(self.device)
-    return Tensor.rand(*self.shape, device=device, dtype=dtype, contiguous=contiguous, **kwargs)
+    if isinstance(self.device, tuple) and isinstance(self.lazydata, MultiLazyBuffer):
+      if kwargs.get("device") is not None: raise RuntimeError("cannot specify `device` on `rand_like` of a multi device tensor")
+      if self.lazydata.axis is None: return Tensor.rand(*self.shape, dtype=dtype, **kwargs).shard(self.device)
+      contiguous = kwargs.pop("contiguous", True)
+      rands = [Tensor.rand(*lb.shape, device=lb.device, dtype=dtype, contiguous=contiguous, **kwargs).lazydata for lb in self.lazydata.lbs]
+      return Tensor(MultiLazyBuffer(cast(List[LazyBuffer], rands), self.lazydata.axis), device=self.device, dtype=dtype, **kwargs)
+    return Tensor.rand(*self.shape, device=kwargs.pop("device", self.device), dtype=dtype, **kwargs)
 
   # ***** rng hlops *****
 
@@ -983,7 +981,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     axis_arg = tuple(self._resolve_dim(x) for x in argfix(axis, *args))
-    if len(axis_arg) != len(dedup(axis_arg)): raise RuntimeError(f"dim can appear at least once, getting {axis_arg}")
+    if len(axis_arg) != len(dedup(axis_arg)): raise RuntimeError(f"dim can appear at most once, getting {axis_arg}")
     return F.Flip.apply(self, axis=axis_arg)
 
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor:
@@ -1577,6 +1575,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.min(axis=1, keepdim=True).numpy())
     ```
     """
+    if dtypes.is_int(self.dtype) or self.dtype == dtypes.bool: return ~((~self).max(axis=axis, keepdim=keepdim))
     return -((-self).max(axis=axis, keepdim=keepdim))
 
   def any(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
@@ -2949,6 +2948,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(Tensor([True, True, False, False]).xor(Tensor([True, False, True, False])).numpy())
     ```
     """
+    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return F.Xor.apply(*self._broadcasted(x, reverse))
 
   def bitwise_and(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
@@ -2963,7 +2963,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(Tensor([True, True, False, False]).bitwise_and(Tensor([True, False, True, False])).numpy())
     ```
     """
-    assert dtypes.is_int(self.dtype)
+    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return F.BitwiseAnd.apply(*self._broadcasted(x, reverse))
 
   def bitwise_or(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
@@ -2978,8 +2978,22 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(Tensor([True, True, False, False]).bitwise_or(Tensor([True, False, True, False])).numpy())
     ```
     """
-    assert dtypes.is_int(self.dtype)
+    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return F.BitwiseOr.apply(*self._broadcasted(x, reverse))
+
+  def bitwise_not(self) -> Tensor:
+    """
+    Compute the bit-wise NOT of `self`.
+    Equivalent to `~self`.
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([0, 2, 5, 255], dtype="int8").bitwise_not().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([True, False]).bitwise_not().numpy())
+    ```
+    """
+    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
+    return self.logical_not() if self.dtype == dtypes.bool else self ^ ((1<<8*self.dtype.itemsize)-1)
 
   def lshift(self, x:int):
     """
@@ -3096,6 +3110,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
   def masked_fill(self:Tensor, mask:Tensor, value:Union[Tensor, ConstType]): return mask.where(value, self)
 
   # ***** op wrappers *****
+
+  def __invert__(self) -> Tensor: return self.bitwise_not()
 
   def __lshift__(self, x) -> Tensor: return self.lshift(x)
   def __rshift__(self, x) -> Tensor: return self.rshift(x)
@@ -3334,6 +3350,30 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     Y = (1 - label_smoothing)*Y + label_smoothing / cast(int, Y.shape[1])
     ret = -self.log_softmax(axis=1).mul(Y).sum(axis=1)
     return ret._do_reduction(reduction)
+
+  def nll_loss(self, Y:Tensor, weight:Optional[Tensor]=None, ignore_index:Optional[int]=None, reduction:ReductionStr="mean") -> Tensor:
+    """
+    Compute the negative log likelihood loss between log-probabilities and target labels.
+
+    NOTE: `self` is log-probabilities and `Y` is the Y labels or class probabilities.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.nll_loss.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.log_softmax().nll_loss(Y).item())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.log_softmax().nll_loss(Y, reduction='none').numpy())
+    ```
+    """
+    weight = Tensor.ones_like(Y, requires_grad=False) if weight is None else weight[Y]
+    masked_weight = weight if ignore_index is None else weight * (Y != ignore_index)
+    nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
+    return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
   # ***** Tensor Properties *****
 

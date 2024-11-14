@@ -541,25 +541,59 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x.rsqrt())
 
   def test_xor(self):
-    tor = torch.tensor([[1,-8,1],[32,1,6]], dtype=torch.int)
-    ten = Tensor([[1,-8,1],[32,1,6]], dtype=dtypes.int32)
+    data = [[1,-8,1],[32,1,6]]
+    tor = torch.tensor(data, dtype=torch.int)
+    ten = Tensor(data, dtype=dtypes.int32)
     helper_test_op([], lambda: tor^tor, lambda: ten^ten, forward_only=True)
     helper_test_op([], lambda: tor^0x1337, lambda: ten^0x1337, forward_only=True)
     helper_test_op([], lambda: 0x1337^tor, lambda: 0x1337^ten, forward_only=True)
 
+    self.helper_test_exception([(4), (4)], torch.bitwise_xor, Tensor.xor, expected=RuntimeError)
+
   def test_and(self):
-    tor = torch.tensor([[1,-8,1],[32,1,6]], dtype=torch.int)
-    ten = Tensor([[1,-8,1],[32,1,6]], dtype=dtypes.int32)
+    data = [[1,-8,1],[32,1,6]]
+    tor = torch.tensor(data, dtype=torch.int)
+    ten = Tensor(data, dtype=dtypes.int32)
     helper_test_op([], lambda: tor&tor, lambda: ten&ten, forward_only=True)
     helper_test_op([], lambda: tor&0x1337, lambda: ten&0x1337, forward_only=True)
     helper_test_op([], lambda: 0x1337&tor, lambda: 0x1337&ten, forward_only=True)
 
+    data = [[True, True, False, False], [True, False, True, False]]
+    tor0, tor1 = torch.tensor(data[0], dtype=torch.bool),  torch.tensor(data[1], dtype=torch.bool)
+    ten0, ten1 = Tensor(data[0], dtype=dtypes.bool), Tensor(data[1], dtype=dtypes.bool)
+    helper_test_op([], lambda: tor0&tor1, lambda: ten0&ten1, forward_only=True)
+
+    self.helper_test_exception([(4), (4)], torch.bitwise_and, Tensor.bitwise_and, expected=RuntimeError)
+
   def test_or(self):
-    tor = torch.tensor([[1,-8,1],[32,1,6]], dtype=torch.int)
-    ten = Tensor([[1,-8,1],[32,1,6]], dtype=dtypes.int32)
+    data = [[1,-8,1],[32,1,6]]
+    tor = torch.tensor(data, dtype=torch.int)
+    ten = Tensor(data, dtype=dtypes.int32)
     helper_test_op([], lambda: tor|tor, lambda: ten|ten, forward_only=True)
     helper_test_op([], lambda: tor|0x1337, lambda: ten|0x1337, forward_only=True)
     helper_test_op([], lambda: 0x1337|tor, lambda: 0x1337|ten, forward_only=True)
+
+    data = [[True, True, False, False], [True, False, True, False]]
+    tor0, tor1 = torch.tensor(data[0], dtype=torch.bool),  torch.tensor(data[1], dtype=torch.bool)
+    ten0, ten1 = Tensor(data[0], dtype=dtypes.bool), Tensor(data[1], dtype=dtypes.bool)
+    helper_test_op([], lambda: tor0|tor1, lambda: ten0|ten1, forward_only=True)
+
+    self.helper_test_exception([(4), (4)], torch.bitwise_or, Tensor.bitwise_or, expected=RuntimeError)
+
+  def test_bitwise_not(self):
+    data = [[1,-8,1],[32,1,6]]
+    tor = torch.tensor(data, dtype=torch.int)
+    ten = Tensor(data, dtype=dtypes.int32)
+    helper_test_op([], lambda: tor.bitwise_not(), lambda: ten.bitwise_not(), forward_only=True)
+    helper_test_op([], lambda: ~tor, lambda: ~ten, forward_only=True)
+
+    data = [[True, False]]
+    tor = torch.tensor(data, dtype=torch.bool)
+    ten = Tensor(data, dtype=dtypes.bool)
+    helper_test_op([], lambda: tor.bitwise_not(), lambda: ten.bitwise_not(), forward_only=True)
+    helper_test_op([], lambda: ~tor, lambda: ~ten, forward_only=True)
+
+    self.helper_test_exception([(4)], torch.bitwise_not, Tensor.bitwise_not, expected=RuntimeError)
 
   def test_lshift(self):
     data = [[0,1,2],[1<<8,1<<16,1<<31-1]]
@@ -974,12 +1008,23 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,3)], lambda x: x.min())
     helper_test_op([(45,3)], lambda x: x.min().mul(0.5))
     helper_test_op([()], lambda x: x.min())
+
+    helper_test_op(None, lambda x: x.type(torch.int32).min(), lambda x: x.cast(dtypes.int32).min(), forward_only=True, vals=[[0, -2**31]])
+    helper_test_op(None, lambda x: x.type(torch.int32).min(), lambda x: x.cast(dtypes.int32).min(), forward_only=True, vals=[[-2**31, 0]])
+    helper_test_op(None, lambda x: x.type(torch.bool).min(), lambda x: x.cast(dtypes.bool).min(), forward_only=True, vals=[[False, True]])
+    helper_test_op(None, lambda x: x.type(torch.bool).min(), lambda x: x.cast(dtypes.bool).min(), forward_only=True, vals=[[True, False]])
+
   def test_max(self):
     helper_test_op([(45,3)], lambda x: x.max())
     helper_test_op([(45,3)], lambda x: x.max().mul(0.5))
     helper_test_op(None, lambda x: x.max().mul(0.5), vals=[[[1.0,1.0,0.0,1.0]],])
     helper_test_op([(3,4,5,6)], lambda x: x.max(axis=1)[0], lambda x: x.max(axis=1))
     helper_test_op([()], lambda x: x.max())
+
+    helper_test_op(None, lambda x: x.type(torch.int32).max(), lambda x: x.cast(dtypes.int32).max(), forward_only=True, vals=[[0, -2**31]])
+    helper_test_op(None, lambda x: x.type(torch.int32).max(), lambda x: x.cast(dtypes.int32).max(), forward_only=True, vals=[[-2**31, 0]])
+    helper_test_op(None, lambda x: x.type(torch.bool).max(), lambda x: x.cast(dtypes.bool).max(), forward_only=True, vals=[[False, True]])
+    helper_test_op(None, lambda x: x.type(torch.bool).max(), lambda x: x.cast(dtypes.bool).max(), forward_only=True, vals=[[True, False]])
 
   @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
   def test_any(self):
@@ -2182,6 +2227,49 @@ class TestOps(unittest.TestCase):
       helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, label_smoothing=ls),
                                          lambda x,y: x.cross_entropy(y, label_smoothing=ls))
 
+  def test_nll_loss(self):
+    helper_test_op([(32,10), (32)],
+                   lambda x,y: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.clip(y,0).type(torch.long)),
+                   lambda x,y: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.long)), forward_only=True)
+
+  def test_nll_loss_3d(self):
+    helper_test_op([(32,10,3,3,3), (32,3,3,3)],
+                   lambda x,y: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.clip(y,0).type(torch.long)),
+                   lambda x,y: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.long)), forward_only=True)
+
+  def test_nll_loss_reductions(self):
+    for r in ("mean", "sum", "none"):
+      helper_test_op([(32,10), (32)],
+        lambda x,y: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.clip(y,0).type(torch.long), reduction=r),
+        lambda x,y: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.long), reduction=r), forward_only=True)
+    self.helper_test_exception([(32,10), (32)],
+      lambda x,y: torch.nn.functional.nll_loss(x, torch.clip(y,0).type(torch.long), reduction="typo"),
+      lambda x,y: x.nll_loss(y.clip(0).cast(dtypes.long), reduction="typo"), expected=ValueError)
+
+  def test_nll_loss_weight(self):
+    for r in ("mean", "sum", "none"):
+      helper_test_op([(32,10), (32), (10)],
+        lambda x,y,z: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.clip(y,0).type(torch.long),
+                                                   weight=z, reduction=r),
+        lambda x,y,z: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.long), weight=z, reduction=r), forward_only=True)
+
+  def test_nll_loss_3d_weight(self):
+    for r in ("mean", "sum", "none"):
+      helper_test_op([(32,10,3,3,3), (32,3,3,3), (10)],
+          lambda x,y,z: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.clip(y,0).type(torch.long),
+                                                    weight=z, reduction=r),
+          lambda x,y,z: x.log_softmax(axis=1).nll_loss(y.clip(0).cast(dtypes.long), weight=z, reduction=r), forward_only=True)
+
+  def test_nll_loss_ignore_index(self):
+    logits = [[2.0, 0.5, -1.0],
+              [1.5, 2.5, -0.5],
+              [0.0, -2.0, 1.0]]
+    targets = [0, 1, 2]
+    helper_test_op(None, lambda x,y: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1),
+                                                                  torch.clip(y,0).type(torch.long), ignore_index=1),
+                         lambda x,y: x.log_softmax().nll_loss(y.clip(0).cast(dtypes.long), ignore_index=1),
+                         forward_only=True, vals=[logits, targets])
+
   def test_one_hot(self):
     data = [1, 2, 4]
     helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 6).type(torch.int32),
@@ -2235,6 +2323,14 @@ class TestOpsUint8(unittest.TestCase):
     helper_test_op([(2,3,64,64)],
       lambda x: torch.nn.functional.interpolate((10*x).relu().type(torch.uint8), size=out_sz, mode="nearest-exact"),
       lambda x: Tensor.interpolate((10*x).relu().cast('uint8'), size=out_sz, mode="nearest-exact"), forward_only=True)
+
+  def test_min(self):
+    helper_test_op(None,
+      lambda x: x.type(torch.uint8).min(),
+      lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[[0, 1, 2], [3, 4, 5]]])
+    helper_test_op(None,
+      lambda x: x.type(torch.uint8).min(),
+      lambda x: x.cast(dtypes.uint8).min(), forward_only=True, vals=[[0, 128, 255, 64, 32, 16]])
 
 if __name__ == '__main__':
   np.random.seed(1337)
