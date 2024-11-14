@@ -11,7 +11,7 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import GroupOp
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
-import pytest
+import pytest, math
 pytestmark = pytest.mark.filterwarnings("ignore")
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -41,8 +41,8 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.
 # TODO: (a+b)/2 in tensor.py's maximum can overflow. This requires a new implementation of maximum that can be backpropagated
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
-# TODO: CI CUDA segfaults on sin
-if getenv("MOCKGPU") and Device.DEFAULT == "NV": unary_operations.remove((Tensor.sin, np.sin))
+# TODO: CI CUDA segfaults on sin, WEBGPU sin is not precise enough for large numbers
+if (getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU": unary_operations.remove((Tensor.sin, np.sin))
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
@@ -88,6 +88,8 @@ def universal_test_cast(a, in_dtype, dtype):
   np.testing.assert_equal(tensor_value.numpy(), numpy_value)
 
 def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
+  # the 'inf' and 'nan' cases are wrong on WEBGPU
+  if (c in [math.inf, -math.inf] or math.isnan(c)) and Device.DEFAULT == "WEBGPU": return
   if not isinstance(op1, tuple): op1 = (op1, op1)
   if not isinstance(op2, tuple): op2 = (op2, op2)
   at, bt, ct = Tensor([a], dtype=d1), Tensor([b], dtype=d1), Tensor([c], dtype=d2)
@@ -112,7 +114,6 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
   def test_bfloat16(self, a, b, op): universal_test(a, b, dtypes.bfloat16, op)
 
-  @unittest.skipIf(Device.DEFAULT== "WEBGPU", "Precision issue on WebGPU")
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
@@ -156,7 +157,6 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.bool, ht.bool, strat.sampled_from(((operator.add, operator.add), (operator.mul, operator.mul))))
   def test_bool(self, a, b, op): universal_test(a, b, dtypes.bool, op)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Precision issue in WebGPU")
   @given(ht.int32, ht.int32, ht.float32, strat.sampled_from(integer_binary_operations), strat.sampled_from(binary_operations))
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
