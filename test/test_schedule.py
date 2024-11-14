@@ -16,7 +16,7 @@ from tinygrad.shape.view import View
 from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, Ops, graph_rewrite, track_rewrites
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, view_right, st_fixup, view_left
+from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, view_right, view_left
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
 from test.helpers import ast_const, timeit
@@ -1361,11 +1361,29 @@ class TestSchedule(unittest.TestCase):
       run_schedule(check_schedule(out, 4))
       np.testing.assert_allclose(out.numpy(), x.numpy()@y.numpy(), atol=1e-4, rtol=1e-4)
 
+  def _test_fusion(self, shapes, f, cnt):
+    with Context(DEBUG=0, TRACK_MATCH_STATS=0): args = [Tensor.randn(s).realize() for s in shapes]
+    run_schedule(check_schedule(compare:=f(*args), cnt))
+    if getenv("COMPARE", 1):
+      import torch
+      good = f(*[torch.tensor(x.numpy()) for x in args])
+      np.testing.assert_allclose(compare.numpy(), good.numpy(), atol=1e-4, rtol=1e-4)
+
+  def test_late_fusion_simple(self):
+    self._test_fusion([(4, 4), (4, 1)], lambda a,b:a.sum(1, keepdim=True)+b, 1)
+
+  def test_late_fusion_post_reshape(self):
+    self._test_fusion([(4, 4), (1, 4)], lambda a,b:a.sum(1).reshape(b.shape)+b, 1)
+
+  def test_late_fusion_post_permute(self):
+    self._test_fusion([(4, 6, 4), (4, 4, 1)], lambda a,b:a.sum(1, keepdim=True).permute((2, 0, 1))+b, 2)
+
   def test_late_fusion_double_transpose(self):
-    with Context(DEBUG=0): a = Tensor.randn(32, 16, 1).realize()
-    compare = (a.expand(32, 16, 16).sum((2,), keepdim=True).T+2).T.contiguous()
-    run_schedule(check_schedule(compare, 1))
-    np.testing.assert_allclose(compare.numpy(), (np.broadcast_to(a.numpy(), (32, 16, 16)).sum(axis=2, keepdims=True).T+2).T, atol=1e-4, rtol=1e-4)
+    self._test_fusion([(32, 16, 1)],
+                      lambda a:(a.expand(32, 16, 16).sum((2,), keepdim=True).permute((1, 0, 2))+2).permute((1, 0, 2)).contiguous(), 1)
+
+  def test_late_fusion_post_expand(self):
+    self._test_fusion([(32, 32)], lambda a:a-a.sum(1), 2)
 
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
@@ -1608,13 +1626,14 @@ class TestIndexing(unittest.TestCase):
       ref = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
     np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 
-  def test_recursive_st_fixup(self):
+  def test_recursive_swizzle(self):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
     ast = a.schedule()[0].ast
-    new_uop, et = timeit(st_fixup, ast.src[0].src[2], lambda st:st.reshape((4, 1)), {})
+    swizzle = ast.src[0].src[2].reshape((4, 1))
+    new_uop = swizzle_rewrite(swizzle)
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
-    self.assertLess(et, 1e3)
+    self.assertEqual(swizzle_cnt(new_uop), 0)
 
   def test_strongly_connected_DAG(self):
     val = 1.0
@@ -1642,9 +1661,8 @@ class TestIndexing(unittest.TestCase):
     r = r + ast_const(dtypes.int, 2, ())
     sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink = graph_rewrite(sink, view_right)
-    # NOTE: this AST is always correct in the entire lifecycle of graph_rewrite!
-    # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
-    verify_ast(sink)
+    # this AST first needs to swizzle, but it doesn't have implicit movementops
+    with self.assertRaisesRegex(AssertionError, "swizzle"): verify_ast(sink)
     verify_ast(rsink)
 
   def test_no_reshape_reduceop(self):
@@ -1664,9 +1682,8 @@ class TestIndexing(unittest.TestCase):
     for _ in range(24): r = r + ast_const(dtypes.int, 2, ())
     sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink, et = timeit(graph_rewrite, sink, view_right)
-    # NOTE: this AST is always correct in the entire lifecycle of graph_rewrite!
-    # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
-    verify_ast(sink)
+    # this AST first needs to swizzle, but it doesn't have implicit movementops
+    with self.assertRaisesRegex(AssertionError, "swizzle"): verify_ast(sink)
     verify_ast(rsink)
     self.assertLessEqual(et, 1e3)
 
@@ -1845,6 +1862,48 @@ class TestSwizzle(unittest.TestCase):
               UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                 UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(18, ('METAL', 128, dtypes.float)), src=()),
                 UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 16, 2, 3, 2, 3), strides=(64, 4, 2, 0, 1, 0), offset=0, mask=((0, 2), (0, 16), (0, 2), (0, 1), (0, 2), (0, 1)), contiguous=False), View(shape=(1, 2, 1, 16, 3, 2, 3, 2), strides=(0, 576, 0, 36, 12, 6, 2, 1), offset=0, mask=None, contiguous=True))), src=()),)),)),)),)),)),))
+    ret = swizzle_rewrite(sink)
+    self.assertEqual(swizzle_cnt(ret), 0)
+
+  @unittest.expectedFailure
+  def test_swizzle_failure_permute(self):
+    sink = UOp(Ops.SINK, dtypes.void, arg=None, src=(
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(20, ('METAL', 65, dtypes.float)), src=()),
+        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 65), strides=(0, 1), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(Ops.ADD, dtypes.float, arg=None, src=(
+          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (0,)), src=(
+            UOp(Ops.ADD, dtypes.float, arg=None, src=(
+              x6:=UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                  UOp(Ops.PRELOAD, dtypes.float, arg=None, src=(
+                    UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(8, ('METAL', 2925, dtypes.float)), src=()),
+                    x10:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(45, 65), strides=(65, 1), offset=0, mask=None, contiguous=True),)), src=()),)),
+                  UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+                    x12:=UOp(Ops.VALID, dtypes.bool, arg=None, src=(
+                      UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(45, 65), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                    UOp(Ops.CONST, dtypes.float, arg=1.0, src=()),
+                    x15:=UOp(Ops.CONST, dtypes.float, arg=0.0, src=()),)),)),
+                UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+                   x12,
+                  UOp(Ops.CONST, dtypes.float, arg=0.0003418803389649838, src=()),
+                   x15,)),)),
+               x6,)),)),
+          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (0,)), src=(
+            UOp(Ops.MUL, dtypes.float, arg=None, src=(
+              UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+                 x12,
+                UOp(Ops.CONST, dtypes.float, arg=-1.0, src=()),
+                 x15,)),
+              UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                UOp(Ops.PRELOAD, dtypes.float, arg=None, src=(
+                  UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(2, ('METAL', 2925, dtypes.float)), src=()),
+                   x10,)),
+                UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(45, 65), strides=(1, 89), offset=44, mask=None, contiguous=False),)), src=(
+                  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (2,)), src=(
+                    UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                      UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(4, ('METAL', 2925, dtypes.float)), src=()),
+                      UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(65, 45, 90), strides=(1, 0, 65), offset=0, mask=((0, 65), (0, 45), (0, 45)), contiguous=False), View(shape=(65, 4094), strides=(4050, 1), offset=0, mask=((0, 65), (0, 4050)), contiguous=False), View(shape=(1, 65, 46, 89), strides=(0, 4094, 89, 1), offset=0, mask=None, contiguous=True))), src=()),)),)),)),)),)),)),)),)),))
     ret = swizzle_rewrite(sink)
     self.assertEqual(swizzle_cnt(ret), 0)
 
