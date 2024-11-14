@@ -60,13 +60,13 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
     if not forced_realize and len(group) > 1:
       group = _get_isolated_children(r, reduce_for_op, children, allbufs, realizes, group)
     # can only fuse assign if no other assign_target is used in the kernel
-    if not forced_realize and any(x.op is Ops.ASSIGN for x in group):
+    if not forced_realize and any(x in assigns for x in group):
       parents = deque((r, *group))
       while parents and not forced_realize:
-        if (p:=parents.pop().base).is_realized() or p in realizes:
-          if p.is_realized() and buf_uops[(b:=p.buffer)] in assigns and not any(x.buffer is b for x in group): forced_realize, can_chase = True, False
-          continue
-        parents.extend(p.srcs)
+        if (p_uop:=allbufs.get(p:=parents.pop())) is None: continue
+        if (p_uop:=uval(p_uop)).op is Ops.ASSIGN and p not in group: forced_realize, can_chase = True, False
+        if p in realizes: continue
+        parents.extend([x.base.src[0] for x in p_uop.src if x.base.op in {Ops.LOAD, Ops.PRELOAD}])
     if forced_realize or not group:
       tr = r
       if can_chase:
