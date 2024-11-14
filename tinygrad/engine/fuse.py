@@ -72,18 +72,18 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
       tr = r
       if can_chase:
         # can chase this down to contiguous children
-        st = tr.st
+        st = unwrap((tr_uop:=uval(allbufs[tr])).st)
         while len(children[tr]) == 1:
-          tr_next = next(iter(children[tr]))
-          st_childs = dedup(s.st for s in tr_next.srcs if s.base is tr)
+          tr_next_uop = uval(allbufs[(tr_next:=next(iter(children[tr])))])
+          st_childs = dedup([unwrap(x.st) for x in tr_next_uop.src if x.base.op is Ops.LOAD and x.base.buf_uop is tr])
           if len(st_childs) > 1: break
           if st.size != st_childs[0].size: break
           st = st + st_childs[0]
           if not st.contiguous or tr_next.op is Ops.REDUCE_AXIS: break
           tr = tr_next
         # don't cast to higher size before store (tr cannot be realized if forced_realize)
-        if tr.op is Ops.CAST and tr.dtype.base.itemsize > tr.srcs[0].dtype.base.itemsize:
-          tr = tr.srcs[0].base
+        if tr_uop.op is Ops.CAST and tr_uop.dtype.base.itemsize > tr_uop.src[0].dtype.base.itemsize:
+          tr = tr_uop.src[0].buf_uop
       group = {tr: None}
       realizes[tr] = tr
     reduce_for_op.update((tr, r) for tr in group)
