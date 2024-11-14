@@ -30,6 +30,7 @@
 ::: tinygrad.Tensor.triu
 ::: tinygrad.Tensor.tril
 ::: tinygrad.Tensor.interpolate
+::: tinygrad.Tensor.affine_grid
 
 ## Neural Network (functional)
 

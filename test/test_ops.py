@@ -1997,6 +1997,20 @@ class TestOps(unittest.TestCase):
         lambda x: torch.nn.functional.interpolate(x, size=out_sz, mode="trilinear", align_corners=True),
         lambda x: Tensor.interpolate(x, size=out_sz, mode="linear", align_corners=True), atol=1e-4)
 
+  def test_affine_grid(self):
+    N, C = 32, 3
+    for theta_shape, size in (((N, 2, 3), (N, C, 24, 24)), ((N, 3, 4), (N, C, 12, 24, 24))):
+      helper_test_op([theta_shape],
+        lambda x: torch.nn.functional.affine_grid(x, size),
+        lambda x: x.affine_grid(size))
+
+  def test_affine_grid_corners_aligned(self):
+    N, C = 32, 3
+    for theta_shape, size in (((N, 2, 3), (N, C, 24, 24)), ((N, 3, 4), (N, C, 12, 24, 24))):
+      helper_test_op([theta_shape],
+        lambda x: torch.nn.functional.affine_grid(x, size, align_corners=True),
+        lambda x: x.affine_grid(size, align_corners=True))
+
   def test_cat(self):
     for dim in range(-2, 3):
       helper_test_op([(45,65,9), (45,65,9), (45,65,9)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
@@ -2025,6 +2039,16 @@ class TestOps(unittest.TestCase):
 
     a = Tensor(3.14)
     np.testing.assert_allclose(Tensor.stack(a, a).numpy(), Tensor([3.14, 3.14]).numpy())
+
+  def test_meshgrid(self):
+    x, xt = torch.arange(5).int(), Tensor.arange(5)
+    y, yt = torch.arange(6).int(), Tensor.arange(6)
+    z, zt = torch.arange(7).int(), Tensor.arange(7)
+    for indexing in ("ij", "xy"):
+      tor = torch.meshgrid(x,y,z, indexing=indexing)
+      ten = xt.meshgrid(yt,zt, indexing=indexing)
+      for i in range(len(tor)):
+        helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
 
   def test_repeat(self):
     x = Tensor.randn(4, 6, 3)

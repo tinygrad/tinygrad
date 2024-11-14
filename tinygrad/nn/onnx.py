@@ -253,6 +253,7 @@ def dispatch(op:str):
     "LogSoftmax": "log_softmax", "Not": "logical_not", "Tile": "repeat", "Range": "arange", "NegativeLogLikelihoodLoss": "nll_loss", "Concat": "cat",
     "ReduceMax": "max", "ReduceMin": "min", "ReduceSum": "sum", "ReduceMean": "mean", "ReduceProd": "prod", "GlobalAveragePool": "mean",
     "GlobalMaxPool": "max", "Conv": "conv2d", "Flatten": "reshape", "Transpose": "permute", "Pad": "pad2d", "Slice": "__getitem__",
+    "AffineGrid" :"affine_grid", "GridSample": "grid_sample",
     # "SpaceToDepth": "rearrange", "DepthToSpace": "rearrange",
     **{n:n.lower() for n in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Sinh", "Cosh", "Tanh",
     "Asinh", "Acosh", "Atanh", "Relu", "PRelu", "Elu", "Celu", "IsNaN", "IsInf",
@@ -566,20 +567,6 @@ def dispatch(op:str):
     if pixel_format == "RGB": return Tensor(np.array(img))
     if pixel_format == "Grayscale": return Tensor(np.array(img.convert("L"))).unsqueeze(-1) # (H, W) to (H, W, 1)
     raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
-
-  # TODO: can this be cleaned up? This can use linspace and meshgrid but idk about line save
-  def AffineGrid(theta: Tensor, size, align_corners=0):
-    _, _, *data_sz = size
-    size_zeros, original_grid = Tensor.zeros(data_sz), Tensor.ones(data_sz)
-    stackable = [original_grid]
-    for dim, dim_sz in enumerate(data_sz):
-      a = Tensor.arange(-1, 1.0001, 2/(dim_sz-1)) if align_corners == 1 else Tensor.arange(-1+1/dim_sz, 1, 2/dim_sz)
-      if dim == 0: stackable = [a.reshape(dim_sz, *[1]*(len(data_sz)-1)) + size_zeros, *stackable]
-      elif dim == 1: stackable = [a.reshape(1, dim_sz, *[1]*(len(data_sz)-2)) + size_zeros, *stackable]
-      else: stackable = [a.reshape(1, dim_sz) + size_zeros, *stackable]
-    original_grid = Tensor.stack(*stackable, dim=len(data_sz))
-    transformed_grid = theta.matmul(original_grid.reshape(-1, len(data_sz)+1).transpose()).transpose(1, 2)
-    return transformed_grid.reshape(size[0], *data_sz, theta.size(1))
 
   # **************** com.microsoft Ops ****************
 

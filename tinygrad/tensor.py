@@ -1343,6 +1343,29 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     dim = self._resolve_dim(dim)
     return list(self.split(ceildiv(self.shape[dim], chunks) if self.shape[dim] else [0]*chunks, dim=dim))
 
+  def meshgrid(self:Tensor, *args:Tensor, indexing:Union[Literal["ij"], Literal["xy"]]="ij") -> Tuple[Tensor, ...]:
+    """
+    Generates coordinate matrices from coordinate vectors.
+
+    When `indexing` is `"ij"` the dimensions are in the same order as the cardinality of the inputs.
+    When `indexing` is `"xy"` the cardinality of first and second dimensions are swapped.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    x, y = Tensor([1, 2, 3]), Tensor([4, 5, 6])
+    grid_x, grid_y = x.meshgrid(y)
+    print("\\n".join([repr(x.numpy()) for x in (grid_x, grid_y)]))
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    grid_x, grid_y = x.meshgrid(y, indexing="xy")
+    print("\\n".join([repr(x.numpy()) for x in (grid_x, grid_y)]))
+    ```
+    """
+    tensors = (self,) + args if indexing == "ij" else (args[0],) + (self,) + args[1:]
+    tensors = tuple(t.reshape((-1,) + (1,)*(len(args) - i)) for i,t in enumerate(tensors))
+    tensors = tensors if indexing == "ij" else (tensors[1],) + (tensors[0],) + tensors[2:]
+    out_shape = _broadcast_shape(*(t.shape for t in tensors))
+    return tuple(t._broadcast_to(out_shape) for t in tensors)
+
   def squeeze(self, dim:Optional[int]=None) -> Tensor:
     """
     Returns a tensor with specified dimensions of input of size 1 removed.
@@ -2318,6 +2341,31 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
         index = (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
         x = x.gather(i, index)
     return x.cast(self.dtype)
+
+  def affine_grid(self, size:Tuple[int, ...], align_corners:bool=False):
+    """
+    Generates a 2D or 3D sampling grid
+
+    The input tensor is a batch of affine matrices (theta) that can have shape (N, 2, 3) for 2D or (N, 3, 4) for 3D
+    Input `size` is the output image size (N, C, H, W) for 2D or (N, C, D, H, W) for 3D
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    theta = Tensor([[2, 0, 0.5], [0, 1, 0.3]]).expand(1, 2, 3)
+    size = (1, 1, 3, 3)
+    grid = theta.affine_grid(size=size)
+    print(grid.numpy())
+    ```
+    """
+    N, _, *spatial_dims = size
+    def generate_grid(steps):
+      return Tensor.linspace(-1, 1, steps, device=self.device) if align_corners else Tensor.linspace(-1+1/steps, 1-1/steps, steps, device=self.device)
+    grids = Tensor.meshgrid(*(generate_grid(d) for d in spatial_dims))
+    base_grid = Tensor.stack(*reversed(grids), Tensor.ones_like(grids[0], device=self.device), dim=-1)
+    base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
+    return (base_grid @ self.transpose(1, 2)).reshape(N, *spatial_dims, -1)
+
+  # TODO
+  def grid_sample(self, grid, mode='linear', align_corners=False): ...
 
   # ***** unary ops *****
 

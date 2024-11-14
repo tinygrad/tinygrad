@@ -126,7 +126,6 @@ backend_test.exclude('test_col2im_*')
 backend_test.exclude('test_hammingwindow_*')
 backend_test.exclude('test_hannwindow_*')
 backend_test.exclude('test_hardmax_*')
-backend_test.exclude('test_gridsample_*')
 backend_test.exclude('test_dft_*')
 backend_test.exclude('test_einsum_batch_diagonal_cpu*') # TODO: equation = '...ii ->...i'
 backend_test.exclude('test_einsum_inner_prod_cpu*') # TODO: equation = 'i,i'
