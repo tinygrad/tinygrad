@@ -10,7 +10,7 @@ from tinygrad.ops import GroupOp, BinaryOps, KernelInfo, UOp, Ops, PatternMatche
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
 from tinygrad.dtype import ImageDType
-from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put
+from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap
 from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
@@ -623,7 +623,7 @@ class Kernel:
         grouped_axes = reduced_axes(self.first_reduce, self.first_reduce + self.group_for_reduces)
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
-          def fix_st(st, wd_pattern, tcd_pattern):
+          def fix_st(st: ShapeTracker, wd_pattern, tcd_pattern):
             wd, warp_dims = self.global_dims,  tuple(sz for _, sz in tc.threads)
             tcd, tcd_dims = self.first_upcast, tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
 
@@ -638,7 +638,7 @@ class Kernel:
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
-            if tc_pattern: srcs[i] = srcs[i].view(fix_st(srcs[i].st, *tc_pattern))
+            if tc_pattern: srcs[i] = srcs[i].view(fix_st(unwrap(srcs[i].st), *tc_pattern))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
