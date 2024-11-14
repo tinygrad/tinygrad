@@ -16,9 +16,10 @@ class ClangCompiler(Compiler):
                                '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
       return pathlib.Path(output_file.name).read_bytes()
 
+  def disassemble(self, lib:bytes): cpu_objdump(lib)
+
 class ClangProgram:
   def __init__(self, name:str, lib:bytes):
-    if DEBUG >= 6: cpu_objdump(lib)
     self.name, self.lib = name, lib
     # write to disk so we can load it
     with tempfile.NamedTemporaryFile(delete=True) as cached_file_path:

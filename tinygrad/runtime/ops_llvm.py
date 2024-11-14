@@ -16,10 +16,10 @@ class LLVMCompiler(Compiler):
     self.device.optimizer.run(mod)
     if DEBUG >= 5: print(self.device.target_machine.emit_assembly(mod))
     return self.device.target_machine.emit_object(mod)
+  def disassemble(self, lib: bytes): cpu_objdump(lib)
 
 class LLVMProgram:
   def __init__(self, device:LLVMDevice, name:str, lib:bytes):
-    if DEBUG >= 6: cpu_objdump(lib)
     self.name, self.lib = name, lib
     device.engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
     self.fxn = device.engine.get_function_address(name)

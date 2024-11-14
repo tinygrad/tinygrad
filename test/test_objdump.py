@@ -1,5 +1,4 @@
 from tinygrad import Device
-from tinygrad.helpers import cpu_objdump
 from tinygrad.runtime.ops_clang import ClangCompiler
 import io, contextlib, unittest
 
@@ -10,7 +9,7 @@ class TestCpuObjDump(unittest.TestCase):
     lib = ClangCompiler().compile(src)
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-      cpu_objdump(lib)
+      ClangCompiler().disassemble(lib)
     assert "%" not in out.getvalue(), "objdump disassembly should be intel syntax"
 
 if __name__ == '__main__':
