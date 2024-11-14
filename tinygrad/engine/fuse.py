@@ -86,7 +86,7 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
       group = {tr: None}
       realizes[tr] = tr
     reduce_for_op.update((tr, r) for tr in group)
-    if FUSE_ARANGE and r.arg[0] is Ops.ADD and r.srcs[0].base.op is Ops.CONST: reduce_of_const.append(r)
+    if FUSE_ARANGE and r_uop.arg[0] is Ops.ADD and r_uop.src[0].base.op is Ops.WHERE: reduce_of_const.append(r)
 
   # fuse double reduces with no other child
   if FUSE_CONV_BW:
@@ -96,8 +96,8 @@ def get_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, U
 
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
-    if any(tr.forced_realize for tr in group): continue
-    kernel_children = {c for tr in group for c in children[tr] if c.op not in {Ops.COPY, Ops.BUFFER_VIEW}}
+    if any((tr_val:=allbufs[tr].src[2].src[2]).op is Ops.CONTIGUOUS and tr_val.src[0].op is not Ops.LOAD for tr in group): continue
+    kernel_children = {c for tr in group for c in children[tr] if uval(allbufs[c]).op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group: del realizes[tr]
 
