@@ -280,14 +280,12 @@ class MetalRenderer(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix, wmma_args = ["#include <metal_stdlib>","using namespace metal;"], set([uop.arg for uop in uops if uop.op is Ops.WMMA])
-    for name, _, dtype_in, dtype_out, _, _, _, _ in wmma_args:
-      wmma_dtype_in, wmma_dtype_out, new_line = self.render_dtype(dtype_in.vec(2)), self.render_dtype(dtype_out.vec(2)), "\n  "
-
-      prefix.append(f"""{wmma_dtype_out} __{name}({wmma_dtype_in} a, {wmma_dtype_in} b, {wmma_dtype_out} c) {{
-  simdgroup_{self.render_dtype(dtype_in)}8x8 mat_a, mat_b; simdgroup_{self.render_dtype(dtype_out)}8x8 mat_c;
-  {new_line.join([f'mat_{wmma_input}.thread_elements()[{elem}] = {wmma_input}[{elem}];' for wmma_input in 'abc' for elem in range(2)])}
-  simdgroup_multiply_accumulate(mat_c, mat_a, mat_b, mat_c);
-  return {wmma_dtype_out}(mat_c.thread_elements()[0], mat_c.thread_elements()[1]);\n}}""")
+    for arg in wmma_args: prefix.append(
+  f"""{(dtype_out:=self.render_dtype(arg[3].vec(2)))} __{arg[0]}({(dtype_in:=self.render_dtype(arg[2].vec(2)))} a, {dtype_in} b, {dtype_out} c){{
+  simdgroup_{self.render_dtype(arg[2])}8x8 mat_a, mat_b; simdgroup_{self.render_dtype(arg[3])}8x8 mat_c;
+  mat_a.thread_elements()[0] = a[0]; mat_b.thread_elements()[0] = b[0]; mat_c.thread_elements()[0] = c[0];
+  mat_a.thread_elements()[1] = a[1]; mat_b.thread_elements()[1] = b[1]; mat_c.thread_elements()[1] = c[1];
+  simdgroup_multiply_accumulate(mat_c, mat_a, mat_b, mat_c);\n  return {dtype_out}(mat_c.thread_elements()[0], mat_c.thread_elements()[1]);\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 _nms = "xyzwabcdefghijkl"
