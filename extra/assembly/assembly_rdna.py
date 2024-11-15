@@ -3,7 +3,7 @@ from typing import Tuple, Set, Dict
 from tinygrad import dtypes
 from tinygrad.codegen.assembly import AssemblyCodegen, Register
 from tinygrad.codegen.kernel import Ops
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
+from tinygrad.ops import BinaryOps, UnaryOps
 from tinygrad.runtime.ops_gpu import ROCM_LLVM_PATH
 
 # ugh, is this really needed?
@@ -43,7 +43,7 @@ class RDNACodegen(AssemblyCodegen):
     s_cnt = 5  # s[0:1] is the address, s[2:4] is global_xyz
 
     dtype_to_rdnatype = {dtypes.float32: "f32", dtypes.int64: "i64", dtypes.int32: "i32", dtypes.uint64: "u64", dtypes.bool: "i32"}
-    alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", TernaryOps.MULACC: "fma",
+    alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", Ops.MULACC: "fma",
            BinaryOps.MAX: "max", UnaryOps.RECIP: "rcp",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin", UnaryOps.LOG2: "log", UnaryOps.EXP2: "exp",
            BinaryOps.CMPLT: "cmp_lt"}
@@ -119,7 +119,7 @@ class RDNACodegen(AssemblyCodegen):
           ins.append(f"{'s' if out.scalar else 'v'}_{alu[arg]}_{dtype_to_rdnatype[out.dtype]} {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
         else:
           alu_arg = alu[arg]
-          if arg == TernaryOps.MULACC and out == vin[2]:
+          if arg == Ops.MULACC and out == vin[2]:
             alu_arg = "fmac"
             vin = vin[0:2]
           if out.dtype == dtypes.float.vec(4):

@@ -6,7 +6,7 @@ from dataclasses import replace
 from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
-from tinygrad.ops import UOp, Ops, BinaryOps, TernaryOps, UnaryOps, GroupOp
+from tinygrad.ops import UOp, Ops, BinaryOps, UnaryOps, GroupOp
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -1260,7 +1260,7 @@ class TestLinearizer(unittest.TestCase):
     lin = Kernel(sched_copy[-1].ast)
     lin.hand_coded_optimizations()
     lin.linearize()
-    assert not any(u.op == TernaryOps.WHERE for u in lin.uops), "found where where where should be folded"
+    assert not any(u.op == Ops.WHERE for u in lin.uops), "found where where where should be folded"
 
   def test_phi_simplification(self):
     def helper(t, max_ops=0):

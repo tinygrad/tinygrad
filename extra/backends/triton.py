@@ -1,6 +1,6 @@
 from typing import Dict, List, Final, Callable, DefaultDict
 from collections import defaultdict
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
+from tinygrad.ops import UnaryOps, BinaryOps, Op
 from tinygrad.helpers import DType, PtrDType, dtypes, ImageDType, DEBUG, getenv
 from tinygrad.codegen.kernel import  UOp, Ops
 from triton.compiler import compile as triton_compile
@@ -69,8 +69,8 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     BinaryOps.MAX: lambda x,y,dtype: f"tl.maximum({x},{y})",
     BinaryOps.CMPLT: lambda x,y,dtype: f"({x}<{y})",
     BinaryOps.MOD: lambda x,y,dtype: f"tl.abs({x})%tl.abs({y})*tl.where({x}<0,-1,1)",
-    TernaryOps.MULACC: lambda x,y,z,dtype: f"(({x}*{y})+{z})",
-    TernaryOps.WHERE: lambda x,y,z,dtype: f"tl.where({x},{y},{z})",
+    Ops.MULACC: lambda x,y,z,dtype: f"(({x}*{y})+{z})",
+    Ops.WHERE: lambda x,y,z,dtype: f"tl.where({x},{y},{z})",
   }
   def int_div(x,y): return f"({x}//{y})" if y != '0' else f"{x}*tl.where({x}==0, float('nan'), float('inf'))"
   for u in uops:

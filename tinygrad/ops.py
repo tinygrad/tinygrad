@@ -87,7 +87,7 @@ class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
 
   def maximum(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def minimum(self, x): return -(-self).maximum(-x)
-  def where(self, x, y): return self.alu(TernaryOps.WHERE, x, x.ufix(y))
+  def where(self, x, y): return self.alu(Ops.WHERE, x, x.ufix(y))
   def threefry(self, seed): return self.alu(BinaryOps.THREEFRY, seed)
   def reciprocal(self): return self.alu(UnaryOps.RECIP)
   def sqrt(self): return self.alu(UnaryOps.SQRT)
@@ -183,7 +183,7 @@ class GroupOp:
   UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV}
 
 # TODO: remove this?
-UnaryOps = BinaryOps = MetaOps = TernaryOps = Ops
+UnaryOps = BinaryOps = MetaOps = Ops
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
@@ -472,7 +472,7 @@ python_alu: Dict[Ops, Callable]  = {
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else x*math.inf,
   BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt, BinaryOps.XOR: operator.xor,
   BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_, BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
-  TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
+  Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z}
 
 def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
   if dtype.count > 1:
@@ -513,7 +513,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
     elif u.op is Ops.STORE:
       mem += u.src[1].dtype.itemsize * mults
     elif u.op in GroupOp.ALU and u not in dont_count:
-      flops += (mults * (2 if u.op is TernaryOps.MULACC else 1)) * u.dtype.count
+      flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
     elif u.op is Ops.WMMA and u not in dont_count:
       flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
   return flops, mem

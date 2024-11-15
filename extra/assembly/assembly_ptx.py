@@ -3,7 +3,7 @@ import struct
 from tinygrad.codegen.assembly import uops_to_asmstyle, AssemblyLanguage
 from tinygrad.codegen.kernel import Ops, UOp
 from tinygrad import dtypes
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
+from tinygrad.ops import BinaryOps, UnaryOps
 from tinygrad.runtime.ops_cuda import arch
 
 dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "f16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.int8: "s8", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32", dtypes.uint16: "u16", dtypes.uint8: "u8", "bits16": "b16", dtypes.float64: "f64"}
@@ -35,7 +35,7 @@ def specialize_to_ptx(lang, function_name):
          BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", UnaryOps.SQRT: "sqrt.approx",
          UnaryOps.NOOP: "mov", UnaryOps.NEG: "neg",
          UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
-         TernaryOps.MULACC: "fma.rn", TernaryOps.WHERE: "selp"}
+         Ops.MULACC: "fma.rn", Ops.WHERE: "selp"}
   for uop, out, vin, arg in lang.ins:
     if uop == Ops.ENDLOOP:
       ins.append("bar.sync 0;")
@@ -56,7 +56,7 @@ def specialize_to_ptx(lang, function_name):
         ins.append(f"and.pred {out}, {', '.join(str(x) for x in vin)};")
       else:
         otype = vin[0].dtype if arg in [BinaryOps.CMPLT] else out.dtype
-        if arg == TernaryOps.WHERE:
+        if arg == Ops.WHERE:
           if vin[0].dtype == dtypes.bool:
             reg = vin[0]
           else:

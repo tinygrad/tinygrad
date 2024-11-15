@@ -2,7 +2,7 @@ import struct
 from platform import system
 from typing import Tuple, Dict, List, Optional
 from tinygrad import dtypes
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
+from tinygrad.ops import BinaryOps, UnaryOps
 from tinygrad.codegen.kernel import Ops, UOp
 from tinygrad.helpers import CI
 from tinygrad.codegen.assembly import uops_to_asmstyle, AssemblyLanguage
@@ -28,7 +28,7 @@ def specialize_to_arm64(fn_nm, asm):
           BinaryOps.MOD: "", BinaryOps.CMPLT: "subs",
           UnaryOps.NOOP: "mov", UnaryOps.NEG: "neg",
           UnaryOps.SIN:'bl ' + get_name('sinf'), UnaryOps.LOG2: 'bl ' + get_name("log2f"), UnaryOps.EXP2: 'bl ' + get_name("exp2f"), UnaryOps.SQRT: 'bl ' + get_name("sqrtf"),
-          TernaryOps.MULACC: "madd", TernaryOps.WHERE: "fcsel"}
+          Ops.MULACC: "madd", Ops.WHERE: "fcsel"}
 
   def mov_imm(value, reg):
     # Manually move value into reg if value can't fit
@@ -106,7 +106,7 @@ def specialize_to_arm64(fn_nm, asm):
       if len(vin)==2 and vin[1].__class__ is int: mov_imm(vin[1], 'x15')
       if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
         ins.append(f"ands {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
-      elif arg == TernaryOps.WHERE:
+      elif arg == Ops.WHERE:
         ins.append(f"fcmp {rtor[vin[0].nm]}, #0.0" if rtor[vin[0].nm][0] == 's' else f"cmp {rtor[vin[0].nm]}, #0")
         ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[1].nm]}, {rtor[vin[2].nm]}, ne")
       elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
