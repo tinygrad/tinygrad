@@ -2023,7 +2023,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     padding_ = self._padding2d(padding, len(k_ := make_tuple(kernel_size, 2)))
-    return self.pad(padding_, value=float('-inf'))._pool(k_, stride if stride is not None else k_, dilation).max(axis=tuple(range(-len(k_), 0)))
+    return self.pad(padding_, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation).max(tuple(range(-len(k_), 0)))
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding:int|Tuple[int, ...]=0,
              acc_dtype:Optional[DTypeLike]=None) -> Tensor:
