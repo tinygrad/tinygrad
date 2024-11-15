@@ -330,8 +330,8 @@ def group_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp,
 # **** Schedule creation and BFS toposort
 
 def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> UOp:
-  ctx[b] = UOp.store(b, ShapeTracker.from_shape(unwrap(to_store.st).shape).to_uop(), to_store)
-  return UOp(Ops.LOAD, to_store.dtype, (b, unwrap(base.st).to_uop()))
+  ctx[b] = UOp.store(b, ShapeTracker.from_shape((st:=unwrap(base.st)).shape).to_uop(), to_store)
+  return UOp(Ops.LOAD, to_store.dtype, (b, st.to_uop()))
 
 def realize_view(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp, view:UOp) -> Optional[UOp]:
   base_shape = unwrap(base.st).shape
