@@ -6,7 +6,7 @@ from tinygrad.device import Compiled, BufferOptions, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
-from tinygrad.runtime.support.compiler_cuda import cuda_disassemble, pretty_ptx, CUDACompiler, PTXCompiler, PTX
+from tinygrad.runtime.support.compiler_cuda import ptx_disassemble, pretty_ptx, CUDACompiler, PTXCompiler, PTX
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 def check(status):
@@ -34,14 +34,13 @@ class CUDAProgram:
   def __init__(self, device:CUDADevice, name:str, lib:bytes, smem:int=0):
     self.device, self.name, self.lib, self.smem = device, name, lib, smem
     if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
-    if DEBUG >= 6: cuda_disassemble(lib, device.arch)
 
     check(cuda.cuCtxSetCurrent(self.device.context))
     self.module = cuda.CUmodule()
     status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
     if status != 0:
       del self.module
-      cuda_disassemble(lib, device.arch)
+      ptx_disassemble(lib, device.arch)
       raise RuntimeError(f"module load failed with status code {status}: {cuda.cudaError_enum__enumvalues[status]}")
     check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
     self.prg = prg
