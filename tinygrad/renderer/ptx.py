@@ -62,17 +62,17 @@ def render_store(ctx: "PTXRenderer", x: UOp, bidx: UOp, var: UOp, pred: Optional
     if var.dtype.count > 1 else [f"{gate}st.{mem_type(bidx)}.{ctx.mem_types[var.dtype]} [{ctx.r[bidx]}+0], {ctx.r[var]};"]
 
 def render_wmma(ctx: "PTXRenderer", x: UOp):
+  assert ctx.wmma_r, "registry values for wmma must be populated"
   _, (N, M, K), dtype_in, _, _, _, upcast_axes, _ = x.arg
   n_operands = tuple(prod(sz for _, sz in upc)*dtype_in.itemsize//4 for upc in upcast_axes[:2])
-  wmma = ctx.extra[x]
   dt_map = { dtypes.half: "f16" }
   _i = 0
   for vv in x.src[:2]:
     for i in range(0, len(ctx.r[vv]), 2):
-      yield f"mov.b32 {ctx.extra[x][_i]}, {{{', '.join(ctx.r[vv][i:i+2])}}};"
+      yield f"mov.b32 {ctx.wmma_r[_i]}, {{{', '.join(ctx.r[vv][i:i+2])}}};"
       _i += 1
   yield f'mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_map[dtype_in]}.{dt_map[dtype_in]}.f32{" "*12}' +\
-  f'{{{", ".join(ctx.r[x])}}}, {{{", ".join(wmma[:n_operands[0]])}}}, {{{", ".join(wmma[-n_operands[1]:])}}}, {{{", ".join(ctx.r[x.src[2]])}}};'
+  f'{{{", ".join(ctx.r[x])}}}, {{{", ".join(ctx.wmma_r[:n_operands[0]])}}}, {{{", ".join(ctx.wmma_r[-n_operands[1]:])}}}, {{{", ".join(ctx.r[x.src[2]])}}};'
 
 def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.is_float(b) else '.rn' if dtypes.is_float(a) and \
   (a.itemsize < b.itemsize or dtypes.is_int(b) or b == dtypes.bool) else ''
@@ -172,7 +172,6 @@ class PTXRenderer(Renderer):
     c: DefaultDict[str, int] = defaultdict(int)
     r: Dict[UOp, Union[List[str], str]] = {}
     self.r = r
-    self.extra: Dict[UOp, Union[List[str], str]] = {}
     def ssa(prefix:str, u:Optional[UOp]=None, dtype:Optional[str]=None) -> str:
       nonlocal c, r
       prefix += f"_{dtype if dtype is not None else self.types[cast(UOp, u).dtype]}_"
@@ -218,7 +217,7 @@ class PTXRenderer(Renderer):
         bufs.append((f"data{args}", dtype))
         r[u] = ssa('dat', u, self.types[dtypes.ulong if dtype.__class__ == PtrDType else dtype])
       elif uop is Ops.WMMA:
-        self.extra[u] = [ssa("wmma", dtype="b32") for vv in src[:2] for i in range(0, len(r[vv]), 2)]
+        self.wmma_r = [ssa("wmma", dtype="b32") for vv in src[:2] for i in range(0, len(r[vv]), 2)]
         r[u] = [ssa("wmma", dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
       if (l:=cast(Union[str, List[str]], string_rewrite.rewrite(u, ctx=self))) is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
@@ -226,5 +225,4 @@ class PTXRenderer(Renderer):
 
       if uop is Ops.ASSIGN: r[u] = r[src[0]]
       elif uop is Ops.SPECIAL: kernel = [f".reg .u32 %{args[0]};"] + kernel
-    return self.render_kernel(kernel, name, bufs, c.items())
-
+    return self.render_kernel(kernel, name, bufs, c.items()), kernel_uop
