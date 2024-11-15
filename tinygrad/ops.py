@@ -87,7 +87,7 @@ class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
 
   def maximum(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def minimum(self, x): return -(-self).maximum(-x)
-  def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
+  def where(self, x, y): return self.alu(TernaryOps.WHERE, x, x.ufix(y))
   def threefry(self, seed): return self.alu(BinaryOps.THREEFRY, seed)
   def reciprocal(self): return self.alu(UnaryOps.RECIP)
   def sqrt(self): return self.alu(UnaryOps.SQRT)
