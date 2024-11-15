@@ -250,6 +250,104 @@ class TestUint8DType(TestDType):
   def test_uint8_to_int8_overflow(self):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
+@unittest.skipUnless(is_dtype_supported(dtypes.fp8_e4m3), "fp8_e4m3 not supported")
+class TestFp8e4m3(unittest.TestCase):
+  def test_fp8_e4m3_creation_numpy(self):
+    data = [-1, 1, 2]
+    t = Tensor(data, dtype=dtypes.fp8_e4m3)
+    assert t.dtype == dtypes.fp8_e4m3
+    tnp = t.numpy()
+    assert tnp.dtype == np.float32
+    np.testing.assert_allclose(tnp, np.array(data))
+
+  def test_fp8_e4m3_ones(self):
+    t = Tensor.ones(3, 5, dtype=dtypes.fp8_e4m3)
+    assert t.dtype == dtypes.fp8_e4m3
+    np.testing.assert_allclose(t.numpy(), np.ones((3, 5)))
+
+  def test_arithmetic(self):
+    t1 = Tensor([1, 2, 3], dtype=dtypes.fp8_e4m3)
+    t2 = Tensor([4, 5, 4], dtype=dtypes.fp8_e4m3)
+    result = t1 + t2
+    np.testing.assert_allclose(result.numpy(), np.array([5., 7., 7.]))
+    t1 = Tensor([10, 20, 30], dtype=dtypes.fp8_e4m3)
+    t2 = Tensor([4, 5, 6], dtype=dtypes.fp8_e4m3)
+    result = t1 - t2
+    np.testing.assert_allclose(result.numpy(), np.array([6., 15., 24.]))
+    t1 = Tensor([10, 20, 30], dtype=dtypes.fp8_e4m3)
+    t2 = Tensor([2, 4, 6], dtype=dtypes.fp8_e4m3)
+    result = t1 / t2
+    np.testing.assert_allclose(result.numpy(), np.array([5., 5., 5.]))
+    t1 = Tensor([2, 3, 4], dtype=dtypes.fp8_e4m3)
+    t2 = Tensor([5, 6, 7], dtype=dtypes.fp8_e4m3)
+    result = t1 * t2
+    np.testing.assert_allclose(result.numpy(), np.array([10., 18., 28.]))
+    t = Tensor([2, 3, 4], dtype=dtypes.fp8_e4m3)
+    result = t ** 2
+    np.testing.assert_allclose(result.numpy(), np.array([4., 9., 16.]))
+    t = Tensor([4, 9, 16], dtype=dtypes.fp8_e4m3)
+    result = t.sqrt()
+    np.testing.assert_allclose(result.numpy(), np.array([2., 3., 4.]))
+    t1 = Tensor([1, 2, 5], dtype=dtypes.fp8_e4m3)
+    t2 = Tensor([1, 2, 3], dtype=dtypes.fp8_e4m3)
+    result = t1 != t2
+    assert result.dtype is dtypes.bool
+    np.testing.assert_allclose(result.numpy(), np.array([False, False, True]))
+    t1 = Tensor([1, 2, 3], dtype=dtypes.fp8_e4m3)
+    t2 = Tensor([2, 2, 2], dtype=dtypes.fp8_e4m3)
+    result = t1 < t2
+    assert result.dtype is dtypes.bool
+    np.testing.assert_allclose(result.numpy(), np.array([True, False, False]))
+
+@unittest.skipUnless(is_dtype_supported(dtypes.fp8_e5m2), "fp8_e5m2 not supported")
+class TestFp8e5m2(unittest.TestCase):
+  def test_fp8_e5m2_creation_numpy(self):
+    data = [-1, 1, 2]
+    t = Tensor(data, dtype=dtypes.fp8_e5m2)
+    assert t.dtype == dtypes.fp8_e5m2
+    tnp = t.numpy()
+    assert tnp.dtype == np.float32
+    np.testing.assert_allclose(tnp, np.array(data))
+
+  def test_fp8_e5m2_ones(self):
+    t = Tensor.ones(3, 5, dtype=dtypes.fp8_e5m2)
+    assert t.dtype == dtypes.fp8_e5m2
+    np.testing.assert_allclose(t.numpy(), np.ones((3, 5)))
+
+  def test_arithmetic(self):
+    t1 = Tensor([1, 2, 2], dtype=dtypes.fp8_e5m2)
+    t2 = Tensor([4, 5, 5], dtype=dtypes.fp8_e5m2)
+    result = t1 + t2
+    np.testing.assert_allclose(result.numpy(), np.array([5., 7., 7.]), rtol=0.15)
+    t1 = Tensor([1, 3, 3], dtype=dtypes.fp8_e5m2)
+    t2 = Tensor([2, 5, 2], dtype=dtypes.fp8_e5m2)
+    result = t1 - t2
+    np.testing.assert_allclose(result.numpy(), np.array([-1., -2., 1.]), rtol=0.15)
+    t1 = Tensor([10, 20, 30], dtype=dtypes.fp8_e5m2)
+    t2 = Tensor([2, 4, 6], dtype=dtypes.fp8_e5m2)
+    result = t1 / t2
+    np.testing.assert_allclose(result.numpy(), np.array([5., 5., 5.]), rtol=0.15)
+    t1 = Tensor([2, 3, 4], dtype=dtypes.fp8_e5m2)
+    t2 = Tensor([5, 6, 7], dtype=dtypes.fp8_e5m2)
+    result = t1 * t2
+    np.testing.assert_allclose(result.numpy(), np.array([10., 18., 28.]), rtol=0.15)
+    t = Tensor([2, 3, 4], dtype=dtypes.fp8_e5m2)
+    result = t ** 2
+    np.testing.assert_allclose(result.numpy(), np.array([4., 9., 16.]), rtol=0.15)
+    t = Tensor([4, 9, 16], dtype=dtypes.fp8_e5m2)
+    result = t.sqrt()
+    np.testing.assert_allclose(result.numpy(), np.array([2., 3., 4.]), rtol=0.15)
+    t1 = Tensor([1, 2, 5], dtype=dtypes.fp8_e5m2)
+    t2 = Tensor([1, 2, 3], dtype=dtypes.fp8_e5m2)
+    result = t1 != t2
+    assert result.dtype is dtypes.bool
+    np.testing.assert_allclose(result.numpy(), np.array([False, False, True]))
+    t1 = Tensor([1, 2, 3], dtype=dtypes.fp8_e5m2)
+    t2 = Tensor([2, 2, 2], dtype=dtypes.fp8_e5m2)
+    result = t1 < t2
+    assert result.dtype is dtypes.bool
+    np.testing.assert_allclose(result.numpy(), np.array([True, False, False]))
+
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
   @given(strat.sampled_from(dtype_ints + dtype_floats), strat.sampled_from(dtype_ints + dtype_floats))
