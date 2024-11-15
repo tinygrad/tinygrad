@@ -2349,6 +2349,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     The input tensor is a batch of affine matrices (theta) that can have shape (N, 2, 3) for 2D or (N, 3, 4) for 3D
     Input `size` is the output image size (N, C, H, W) for 2D or (N, C, D, H, W) for 3D
 
+    This function is often used in conjunction with `grid_sample` to build Spatial Transformer Networks.
+
     ```python exec="true" source="above" session="tensor" result="python"
     theta = Tensor([[2, 0, 0.5], [0, 1, 0.3]]).expand(1, 2, 3)
     size = (1, 1, 3, 3)
@@ -2364,8 +2366,39 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
     return (base_grid @ self.transpose(1, 2)).reshape(N, *spatial_dims, -1)
 
-  # TODO
-  def grid_sample(self, grid, mode='linear', align_corners=False): ...
+  def grid_sample(self, grid:Tensor, align_corners:bool=False, mode:Literal["linear"] | Literal["nearest"]="linear"):
+    """
+    Compute grid sample
+
+    The grid specifies the sampling pixel locations normalized to [-1, 1]
+    The interpolation algorithm is selected with `mode` which currently only supports `linear` and `nearest`
+
+    This function is often used in conjunction with `affine_grid` to build Spatial Transformer Networks.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(9).expand(1, 1, 3, 3)
+    grid = Tensor([[[[-1, -1], [1, -1]], [[-0.5, 0], [1, 0.5]]]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.grid_sample(grid, align_corners=True, mode="linear").numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.grid_sample(grid, align_corners=False, mode="nearest").numpy())
+    ```
+    """
+    flat_spatial, (N, C, H, W), (H_out, W_out) = self.flatten(2), self.shape, grid.shape[1:-1]
+    # Scale grid coordinates from [-1, 1] to [0, dim-1] if align corners else from [-1, 1] to [-0.5, dim-0.5]
+    x,y = ((grid[..., i] + 1) * (d - 1) / 2  if align_corners else ((grid[..., i] + 1) * d) / 2 - 0.5 for i,d in enumerate((W,H)))
+    if mode == "nearest": return flat_spatial.gather(2, (y.round() * W + x.round()).reshape(N, 1, -1).expand(-1, C, -1)).reshape(N, C, H_out, W_out)
+    # linear
+    (xs, ys), ws = tuple((c.floor(), c.ceil()) for c in (x,y)), tuple((c - c.floor()).unsqueeze(1) for c in (x,y))
+    idxs = ((y*W + x).reshape(N, -1) for y in ys for x in xs)
+    pixel_values = tuple(flat_spatial.gather(2, i.unsqueeze(1).expand(-1, C, -1)).reshape(N, C, H_out, W_out) for i in idxs)
+    # apply mask to corners
+    if not align_corners: pixel_values = tuple(p*m for p,m in zip(pixel_values, ((x>=0) * (x<=W-1) * (y>=0) * (y<=H-1) for y in ys for x in xs)))
+    for w in ws: pixel_values = tuple(pair[0].lerp(pair[1], w) for pair in list(zip(pixel_values[::2], pixel_values[1::2])))
+    return pixel_values[0]
 
   # ***** unary ops *****
 

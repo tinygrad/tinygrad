@@ -159,6 +159,17 @@ backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cp
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 backend_test.exclude('test_group_normalization_*') # numerical inaccuracy problem. Current Group Normalization OP fails test
 
+# don't support 3D, modes or padding for gridsample
+backend_test.exclude('test_gridsample_bicubic_align_corners_0_additional_1_cpu')
+backend_test.exclude('test_gridsample_bicubic_align_corners_1_additional_1_cpu')
+backend_test.exclude('test_gridsample_bicubic_cpu')
+backend_test.exclude('test_gridsample_border_padding_cpu')
+backend_test.exclude('test_gridsample_reflection_padding_cpu')
+backend_test.exclude('test_gridsample_volumetric_bilinear_align_corners_0_cpu')
+backend_test.exclude('test_gridsample_volumetric_bilinear_align_corners_1_cpu')
+backend_test.exclude('test_gridsample_volumetric_nearest_align_corners_0_cpu')
+backend_test.exclude('test_gridsample_volumetric_nearest_align_corners_1_cpu')
+
 # TODO: need a find a proper way to turn on gradients.. Or maybe we just requires_grad=True all the time like torch
 backend_test.exclude('test_gradient_of_add_and_mul_cpu')
 backend_test.exclude('test_gradient_of_add_cpu')

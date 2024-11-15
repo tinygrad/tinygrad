@@ -2011,6 +2011,27 @@ class TestOps(unittest.TestCase):
         lambda x: torch.nn.functional.affine_grid(x, size, align_corners=True),
         lambda x: x.affine_grid(size, align_corners=True))
 
+  def _grid_sample_2D(self, align_corners, mode):
+    torch_mode = {"linear": "bilinear"}.get(mode, mode)
+    helper_test_op([(1, 3, 7, 7), (1, 4, 4, 2)],
+      lambda x, grid: torch.nn.functional.grid_sample(x, grid, mode=torch_mode, align_corners=align_corners),
+      lambda x, grid: x.grid_sample(grid, mode=mode, align_corners=align_corners), high=1, low=-1, forward_only=True)
+    helper_test_op([(1, 3, 7, 9), (1, 6, 3, 2)],
+      lambda x, grid: torch.nn.functional.grid_sample(x, grid, mode=torch_mode, align_corners=align_corners),
+      lambda x, grid: x.grid_sample(grid, mode=mode, align_corners=align_corners), high=1, low=-1, forward_only=True)
+
+  def test_grid_sample(self):
+    self._grid_sample_2D(False, "linear")
+
+  def test_grid_sample_corners_aligned(self):
+    self._grid_sample_2D(True, "linear")
+
+  def test_grid_sample_nearest_mode(self):
+    self._grid_sample_2D(False, "nearest")
+
+  def test_grid_sample_nearest_mode_corners_aligned(self):
+    self._grid_sample_2D(True, "nearest")
+
   def test_cat(self):
     for dim in range(-2, 3):
       helper_test_op([(45,65,9), (45,65,9), (45,65,9)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))

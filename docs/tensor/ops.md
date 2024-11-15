@@ -31,6 +31,7 @@
 ::: tinygrad.Tensor.tril
 ::: tinygrad.Tensor.interpolate
 ::: tinygrad.Tensor.affine_grid
+::: tinygrad.Tensor.grid_sample
 
 ## Neural Network (functional)
 
