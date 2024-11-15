@@ -84,7 +84,6 @@ class SMU_IP:
       self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetSoftMaxByFreq, clck, poll=True)
       self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetSoftMinByFreq, clck, poll=True)
 
-
   def init(self):
-    print("SMU init")
+    # print("SMU init")
     self.smu_smc_hw_setup()

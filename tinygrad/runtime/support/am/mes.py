@@ -8,7 +8,12 @@ class MES_IP:
   AMDGPU_NAVI10_DOORBELL_MES_RING0 = 0x00B
   AMDGPU_NAVI10_DOORBELL_MES_RING1 = 0x00C
 
-  def __init__(self, adev): self.adev = adev
+  def __init__(self, adev):
+    self.adev = adev
+
+    self.sch_ctx_vm = self.adev.mm.valloc(0x1000, uncached=True)
+    self.query_status_fence_vm = self.adev.mm.valloc(0x1000, uncached=True)
+    self.write_fence_vm = self.adev.mm.valloc(0x1000, uncached=True)
 
   def mes_enable(self):
     self.adev.regCP_MES_CNTL.write((1 << amdgpu_gc_11_0_0.CP_MES_CNTL__MES_PIPE0_RESET__SHIFT) | (1 << amdgpu_gc_11_0_0.CP_MES_CNTL__MES_PIPE1_RESET__SHIFT))
@@ -96,6 +101,16 @@ class MES_IP:
     self.kiq_setting(self.mes_kiq)
     self.init_mes_regs(self.mes_kiq)
 
+    self.mes_hw_init()
+    print("MES done")
+
+  def mes_hw_init(self):
+    self.mes_ring = AMRing(self.adev, size=0x100000, me=3, pipe=0, queue=0, vmid=0, doorbell_index=(self.AMDGPU_NAVI10_DOORBELL_MES_RING0 << 1))
+    # self.queue_init(self.mes_ring, is_kiq=False)
+    self.kiq_map_queue(self.mes_ring, is_compute=False) # this is mes queue
+    self.set_hw_resources()
+    self.query_sched_status()
+
   def init_mes_regs(self, ring):
     self.adev.gfx.soc21_grbm_select(3, ring.pipe, 0, 0)
 
@@ -124,3 +139,76 @@ class MES_IP:
     self.adev.regCP_HQD_ACTIVE.write(ring.mqd.cp_hqd_active)
 
     self.adev.gfx.soc21_grbm_select(0, 0, 0, 0)
+
+  def submit_pkt_and_poll_completion(self, pkt):
+    self.write_fence_vm.cpu_view().cast('I')[0] = 0
+    pkt.api_status.api_completion_fence_addr = self.write_fence_vm.mc_addr()
+    pkt.api_status.api_completion_fence_value = 1
+
+    for i in range(ctypes.sizeof(pkt) // 4): self.mes_ring.write(pkt.max_dwords_in_api[i])
+
+    self.adev.gmc.flush_hdp()
+    self.adev.wdoorbell64(self.mes_ring.doorbell_index, self.mes_ring.next_ptr)
+
+    while self.write_fence_vm.cpu_view().cast('I')[0] != 1:
+      self.adev.gmc.collect_pfs()
+
+    return 0
+
+  def query_sched_status(self):
+    mes_sch_status_pkt = mes_v11_api_def.union_MESAPI__QUERY_MES_STATUS()
+    mes_sch_status_pkt.header.type = mes_v11_api_def.MES_API_TYPE_SCHEDULER
+    mes_sch_status_pkt.header.opcode = mes_v11_api_def.MES_SCH_API_QUERY_SCHEDULER_STATUS
+    mes_sch_status_pkt.header.dwsize = mes_v11_api_def.API_FRAME_SIZE_IN_DWORDS
+
+    return self.submit_pkt_and_poll_completion(mes_sch_status_pkt)
+
+  def set_hw_resources(self):
+    mes_set_hw_res_pkt = mes_v11_api_def.union_MESAPI_SET_HW_RESOURCES()
+    mes_set_hw_res_pkt.header.type = mes_v11_api_def.MES_API_TYPE_SCHEDULER
+    mes_set_hw_res_pkt.header.opcode = mes_v11_api_def.MES_SCH_API_SET_HW_RSRC
+    mes_set_hw_res_pkt.header.dwsize = mes_v11_api_def.API_FRAME_SIZE_IN_DWORDS
+
+    mes_set_hw_res_pkt.vmid_mask_mmhub = 0xffffff00
+    mes_set_hw_res_pkt.vmid_mask_gfxhub = 0xffffff00
+    mes_set_hw_res_pkt.gds_size = 0x1000
+    mes_set_hw_res_pkt.paging_vmid = 0
+    mes_set_hw_res_pkt.g_sch_ctx_gpu_mc_ptr = self.sch_ctx_vm.mc_addr()
+    mes_set_hw_res_pkt.query_status_fence_gpu_mc_ptr = self.query_status_fence_vm.mc_addr()
+
+    for i,v in enumerate([0xc, 0xc, 0xc, 0xc, 0x0, 0x0, 0x0, 0x0]): mes_set_hw_res_pkt.compute_hqd_mask[i] = v
+    for i,v in enumerate([0xfffffffe, 0x0]): mes_set_hw_res_pkt.gfx_hqd_mask[i] = v
+    for i,v in enumerate([0xfc, 0xfc]): mes_set_hw_res_pkt.sdma_hqd_mask[i] = v
+    for i,v in enumerate([2048, 2050, 2052, 2054, 2056]): mes_set_hw_res_pkt.aggregated_doorbells[i] = v
+
+    for i in range(5):
+      mes_set_hw_res_pkt.gc_base[i] = self.adev.ip_base("GC", 0, i)
+      mes_set_hw_res_pkt.mmhub_base[i] = self.adev.ip_base("MMHUB", 0, i)
+      mes_set_hw_res_pkt.osssys_base[i] = self.adev.ip_base("OSSSYS", 0, i)
+
+    mes_set_hw_res_pkt.disable_reset = 1
+    mes_set_hw_res_pkt.disable_mes_log = 1
+    mes_set_hw_res_pkt.use_different_vmid_compute = 1
+    mes_set_hw_res_pkt.enable_reg_active_poll = 1
+    mes_set_hw_res_pkt.enable_level_process_quantum_check = 1
+    mes_set_hw_res_pkt.oversubscription_timer = 50
+
+    return self.submit_pkt_and_poll_completion(mes_set_hw_res_pkt)
+
+  def map_legacy_queue(self, ring, qtype=mes_v11_api_def.MES_QUEUE_TYPE_COMPUTE):
+    mes_add_queue_pkt = mes_v11_api_def.union_MESAPI__ADD_QUEUE()
+
+    mes_add_queue_pkt.header.type = mes_v11_api_def.MES_API_TYPE_SCHEDULER
+    mes_add_queue_pkt.header.opcode = mes_v11_api_def.MES_SCH_API_ADD_QUEUE
+    mes_add_queue_pkt.header.dwsize = mes_v11_api_def.API_FRAME_SIZE_IN_DWORDS
+
+    mes_add_queue_pkt.pipe_id = ring.pipe
+    mes_add_queue_pkt.queue_id = ring.queue
+    mes_add_queue_pkt.doorbell_offset = ring.doorbell_index
+    mes_add_queue_pkt.mqd_addr = ring.mqd_vm.vaddr
+    mes_add_queue_pkt.wptr_addr = ring.wptr_vm.vaddr
+    mes_add_queue_pkt.queue_type = qtype
+    mes_add_queue_pkt.map_legacy_kq = 1
+
+    return self.submit_pkt_and_poll_completion(mes_add_queue_pkt)
+

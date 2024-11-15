@@ -14,7 +14,7 @@ class GFX_IP:
   def __init__(self, adev):
     self.adev = adev
 
-    # self.clear_state_pm = self.adev.mm.palloc(0x10000)
+    self.clear_state_pm = self.adev.mm.palloc(0x10000)
     # self.eop_pm = self.adev.mm.palloc(0x1000)
 
   def init(self):
@@ -73,13 +73,13 @@ class GFX_IP:
     time.sleep(0.5)
 
   def nbio_v4_3_gc_doorbell_init(self):
-    self.adev.wreg(0x507a40, 0x30000007)
-    self.adev.wreg(0x507a43, 0x3000000d)
+    self.adev.regS2A_DOORBELL_ENTRY_0_CTRL.write(0x30000007)
+    self.adev.regS2A_DOORBELL_ENTRY_3_CTRL.write(0x3000000d)
 
-  # def init_csb(self):
-  #   self.adev.regRLC_CSIB_ADDR_HI.write(self.clear_state_pm.mc_addr() >> 32)
-  #   self.adev.regRLC_CSIB_ADDR_LO.write(self.clear_state_pm.mc_addr() & 0xfffffffc)
-  #   self.adev.regRLC_CSIB_LENGTH.write(self.clear_state_pm.size)
+  def init_csb(self):
+    self.adev.regRLC_CSIB_ADDR_HI.write(self.clear_state_pm.mc_addr() >> 32)
+    self.adev.regRLC_CSIB_ADDR_LO.write(self.clear_state_pm.mc_addr() & 0xfffffffc)
+    self.adev.regRLC_CSIB_LENGTH.write(self.clear_state_pm.size)
 
   def config_gfx_rs64(self):
     for pipe in range(2):
@@ -114,14 +114,42 @@ class GFX_IP:
     self.adev.regCP_ME_CNTL.write(0x1000000)
     self.adev.wait_reg(self.adev.regCP_STAT, value=0x0)
 
+  def hqd_load(self, ring):
+    self.soc21_grbm_select(1, ring.pipe, ring.queue, 0)
+    
+    mqd_mv = ring.mqd_mv.cast('I')
+    mqd_load_off = 0x80
+
+    for reg in range(self.adev.regCP_MQD_BASE_ADDR.regoff, self.adev.regCP_HQD_PQ_WPTR_HI.regoff + 1):
+      self.adev.wreg(reg, mqd_mv[mqd_load_off])
+      mqd_load_off += 1
+
+    self.adev.regCP_HQD_PQ_BASE.write(ring.mqd.cp_hqd_pq_base_lo)
+    self.adev.regCP_HQD_PQ_BASE_HI.write(ring.mqd.cp_hqd_pq_base_hi)
+
+    self.adev.regCP_HQD_PQ_RPTR_REPORT_ADDR.write(ring.mqd.cp_hqd_pq_rptr_report_addr_lo)
+    self.adev.regCP_HQD_PQ_RPTR_REPORT_ADDR_HI.write(ring.mqd.cp_hqd_pq_rptr_report_addr_hi)
+
+    self.adev.regCP_HQD_PQ_WPTR_POLL_ADDR.write(ring.mqd.cp_hqd_pq_wptr_poll_addr_lo)
+    self.adev.regCP_HQD_PQ_WPTR_POLL_ADDR_HI.write(ring.mqd.cp_hqd_pq_wptr_poll_addr_hi)
+
+    self.adev.regCP_PQ_WPTR_POLL_CNTL1.write(1 << (ring.pipe * 4 + ring.queue)) # queue mask
+
+    self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.write(ring.mqd.cp_hqd_pq_doorbell_control)
+    self.adev.regCP_HQD_ACTIVE.write(0x1)
+
+    self.soc21_grbm_select(0, 0, 0, 0)
+
   def kcq_init(self):
     for i in range(1):
       self.kcq_ring = AMRing(self.adev, size=0x100000, me=1, pipe=i, queue=0, vmid=8, doorbell_index=((self.AMDGPU_NAVI10_DOORBELL_MEC_RING0 + i) << 1))
+      self.hqd_load(self.kcq_ring)
 
-      self.adev.mes.kiq_set_resources(0xffffffffffffffff) # full mask
+      # self.adev.mes.kiq_set_resources(0xffffffffffffffff) # full mask
 
       # Directly map kcq with kiq, no MES map_legacy_queue.
-      self.adev.mes.kiq_map_queue(self.kcq_ring, is_compute=True)
+      # self.adev.mes.map_legacy_queue(self.kcq_ring)
+      # self.adev.mes.kiq_map_queue(self.kcq_ring, is_compute=True)
 
       # test kcq
       # self.adev.wreg(0xc040, 0xcafedead)
@@ -137,15 +165,15 @@ class GFX_IP:
       #   if self.adev.rreg(0xc040) == 0xdeadc0de:
       #     break
 
-      print("GFX: kcq test done")
+      # print("GFX: kcq test done")
     # for i in range(10):
     #   print("Cool down", i)
-      time.sleep(1)
+      time.sleep(10)
 
   def cp_resume(self):
     self.cp_set_doorbell_range()
-    self.cp_gfx_enable()
     self.cp_compute_enable()
+    # self.cp_gfx_enable()
+    # self.adev.mes.kiq_hw_init()
 
-    self.adev.mes.kiq_hw_init()
     self.kcq_init()

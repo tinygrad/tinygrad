@@ -116,20 +116,58 @@ class GMC_IP:
   def flush_tlb_gfxhub(self, vmid, vmhub, flush_type):
     assert vmid == 0 and vmhub == 0 and flush_type == 0
 
-    # self.flush_hdp()
+    self.flush_hdp()
 
-    # self.adev.wreg(0x291c, 0xf80001)
-    # while self.adev.rreg(0x292e) != 1: pass
+    self.adev.wreg(0x291c, 0xf80001)
+    while self.adev.rreg(0x292e) != 1: pass
 
   def flush_tlb_mmhub(self, vmid, vmhub, flush_type):
     assert vmid == 0 and vmhub == 0 and flush_type == 0
 
-    # self.flush_hdp()
+    self.flush_hdp()
 
-    # self.adev.wreg(0x1a774, 0xf80001)
-    # while self.adev.rreg(0x1a786) != 1: pass
+    self.adev.wreg(0x1a774, 0xf80001)
+    while self.adev.rreg(0x1a786) != 1: pass
 
-    # self.adev.wreg(0x1a762, 0x0)
-    # while self.adev.rreg(0x1a786) != 1: pass
+    self.adev.wreg(0x1a762, 0x0)
+    while self.adev.rreg(0x1a786) != 1: pass
 
-    # self.adev.wreg(0x1a71b, 0x12104010)
+    self.adev.wreg(0x1a71b, 0x12104010)
+
+  def collect_pfs(self):
+    gfx = self.adev.regGCVM_L2_PROTECTION_FAULT_STATUS.read()
+
+    if gfx != 0:
+      addr = self.adev.regGCVM_L2_PROTECTION_FAULT_ADDR_LO32.read()
+      addr |= self.adev.regGCVM_L2_PROTECTION_FAULT_ADDR_HI32.read() << 32
+      addr <<= 12
+
+      client_mappings = ["CB/DB",
+        "Reserved",
+        "GE1",
+        "GE2",
+        "CPF",
+        "CPC",
+        "CPG",
+        "RLC",
+        "TCP",
+        "SQC (inst)",
+        "SQC (data)",
+        "SQG",
+        "Reserved",
+        "SDMA0",
+        "SDMA1",
+        "GCR",
+        "SDMA2",
+        "SDMA3"
+      ]
+      cid = (gfx & amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__CID_MASK) >> amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__CID__SHIFT
+      more_faults = (gfx & amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__MORE_FAULTS_MASK) >> amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__MORE_FAULTS__SHIFT
+      rw = (gfx & amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__RW_MASK) >> amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__RW__SHIFT
+      vmid = (gfx & amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__VMID_MASK) >> amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__VMID__SHIFT
+      mapping_error = (gfx & amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__MAPPING_ERROR_MASK) >> amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__MAPPING_ERROR__SHIFT
+      permission_faults = (gfx & amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__PERMISSION_FAULTS_MASK) >> amdgpu_gc_11_0_0.GCVM_L2_PROTECTION_FAULT_STATUS__PERMISSION_FAULTS__SHIFT
+      raise RuntimeError(f"GFX FAULT: {client_mappings[cid]} {addr=:X}: {more_faults=}, {rw=}, {vmid=}, {mapping_error=} {permission_faults=}")
+
+    mmhub = self.adev.regMMVM_L2_PROTECTION_FAULT_STATUS.read()
+    return gfx, mmhub
