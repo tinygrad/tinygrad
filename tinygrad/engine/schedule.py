@@ -193,10 +193,7 @@ to_si = PatternMatcher([
 
 # ** fusion
 
-lazy = PatternMatcher([
-  (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat.var("v"))), lambda ctx,b,v: v),
-  (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
-])
+lazy = PatternMatcher([(UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),])
 
 multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.get(b)),])
 
@@ -229,9 +226,9 @@ if getenv("RUN_PROCESS_REPLAY"):
 # **** Schedule grouping
 
 def uval(u:UOp) -> UOp:
-  assert u.op is Ops.LOAD and len(u.src) == 3 and u.src[2].op is Ops.STORE, f"must be a LOAD of STORE {u}"
-  if (to_store:=u.src[2].src[2]).op is Ops.CONTIGUOUS and to_store.src[0].base.op is not Ops.LOAD: return to_store.src[0]
-  return to_store
+  assert u.op is Ops.VIEW and len(u.src) == 2 and u.src[0].op is Ops.BUFFER, f"must be view of BUFFER {u}"
+  return u.src[1]
+
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], realizes:Dict[UOp, UOp],
                      reduce_for_op:Dict[UOp, UOp], group:Dict[UOp, None], cache:Dict[Tuple[UOp, ShapeTracker], None]) -> None:
@@ -357,7 +354,7 @@ do_realize = PatternMatcher([
   (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.var("u"), UPat.any(UPatSrc(), UPatSrc().view(name="view"))), name="root"),
    lambda ctx,root,u,view=None,**kwargs: root.replace(src=(u, realize(ctx,**kwargs) if view is None else realize(ctx,**kwargs).view(view.st))),),
 ])
-break_sched = PatternMatcher([(UPatSrc(), lambda ctx,b,to_store,base: realize(ctx, b, to_store, base) if b in ctx else None),])
+break_sched = PatternMatcher([(UPatSrc(), lambda ctx,b,to_store,base: realize(ctx, b, to_store, base) if b in ctx else to_store.view(base.st)),])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
