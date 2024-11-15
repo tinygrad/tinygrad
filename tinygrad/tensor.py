@@ -2280,19 +2280,18 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
     assert mode in ("linear", "nearest", "nearest-exact"), "only supports linear, nearest or nearest-exact interpolate"
     assert not (align_corners and mode != "linear"), "align_corners option can only be set with the interpolating mode linear"
-    if mode in {"nearest", "nearest-exact"}:
-      def _generate_index(i):
-        arr, scale = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), (self.shape[i]-int(align_corners))/(size[i]-int(align_corners))
-        return (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32)
-      return self[(..., *Tensor.meshgrid(*(_generate_index(i) for i in range(len(size)))))]
     x, expand = self, list(self.shape)
     for i in range(-1,-len(size)-1,-1):
       scale = (self.shape[i] - int(align_corners)) / (size[i] - int(align_corners))
       arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
       reshape[i] = expand[i] = size[i]
-      index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
-      low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
-      x = x.gather(i, low).lerp(x.gather(i, high), perc)
+      if mode == "linear":
+        index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+        x = x.gather(i, low).lerp(x.gather(i, high), perc)
+      else:
+        index = (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
+        x = x.gather(i, index)
     return x.cast(self.dtype)
 
   # ***** unary ops *****
