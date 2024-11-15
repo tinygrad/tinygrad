@@ -182,7 +182,6 @@ class PTXRenderer(Renderer):
       return f"%{prefix}{c[prefix]-1}"
 
     self.uops = uops
-    kernel_uop = OrderedDict()
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
 
@@ -225,9 +224,8 @@ class PTXRenderer(Renderer):
       if (l:=self.string_rewrite.rewrite(u, ctx=self)) is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       kernel.extend([l] if isinstance(l, str) else l)
-      kernel_uop[u] = [l] if isinstance(l, str) else l
 
       if uop is Ops.ASSIGN: r[u] = r[src[0]]
       elif uop is Ops.SPECIAL: kernel = [f".reg .u32 %{args[0]};"] + kernel
-    return self.render_kernel(kernel, name, bufs, c.items()), kernel_uop
+    return self.render_kernel(kernel, name, bufs, c.items())
 
