@@ -36,7 +36,7 @@ class SimpleMathTrait:
   def xor(self, x, reverse=False): return self._binop(BinaryOps.XOR, x, reverse)
   def idiv(self, x, reverse=False): return self._binop(BinaryOps.IDIV, x, reverse)
   def sub(self, x, reverse=False): return self.ufix(x).alu(BinaryOps.ADD, -self) if reverse else self.alu(BinaryOps.ADD, self.ufix(-x))
-  def div(self, x, reverse=False): return (self.ufix(x)*self.alu(UnaryOps.RECIP)) if reverse else (self*self.ufix(x).alu(UnaryOps.RECIP))
+  def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
 
   def __neg__(self): return self.neg()
 
@@ -89,11 +89,11 @@ class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
   def minimum(self, x): return -(-self).maximum(-x)
   def where(self, x, y): return self.alu(TernaryOps.WHERE, x, x.ufix(y))
   def threefry(self, seed): return self.alu(BinaryOps.THREEFRY, seed)
-  def reciprocal(self): return self.alu(UnaryOps.RECIP)
-  def sqrt(self): return self.alu(UnaryOps.SQRT)
-  def sin(self): return self.alu(UnaryOps.SIN)
-  def log2(self): return self.alu(UnaryOps.LOG2)
-  def exp2(self): return self.alu(UnaryOps.EXP2)
+  def reciprocal(self): return self.alu(Ops.RECIP)
+  def sqrt(self): return self.alu(Ops.SQRT)
+  def sin(self): return self.alu(Ops.SIN)
+  def log2(self): return self.alu(Ops.LOG2)
+  def exp2(self): return self.alu(Ops.EXP2)
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
@@ -183,7 +183,7 @@ class GroupOp:
   UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV}
 
 # TODO: remove this?
-UnaryOps = BinaryOps = MetaOps = TernaryOps = Ops
+BinaryOps = MetaOps = TernaryOps = Ops
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
@@ -467,10 +467,10 @@ def hook_overflow(dv, fxn):
   return wfxn
 
 python_alu: Dict[Ops, Callable]  = {
-  UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, UnaryOps.EXP2: hook_overflow(math.inf, lambda x: 2**x),
-  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
-  UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
-  UnaryOps.NEG: operator.neg, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul,
+  Ops.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, Ops.EXP2: hook_overflow(math.inf, lambda x: 2**x),
+  Ops.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, Ops.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
+  Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
+  Ops.NEG: operator.neg, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul,
   BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else x*math.inf,
   BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt, BinaryOps.XOR: operator.xor,
   BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_, BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,

@@ -13,7 +13,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, Ops, graph_rewrite, track_rewrites
+from tinygrad.ops import BinaryOps, MetaOps, UOp, Ops, graph_rewrite, track_rewrites
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, view_right, view_left
@@ -1287,14 +1287,14 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT not in view_supported_devices, "subbuffer not supported")
   def test_bitcast_subbufer(self):
     x = cast(LazyBuffer, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
-    a = x.alu(UnaryOps.EXP2).cast(dtypes.int32, True, allow_buffer_view=True)
+    a = x.alu(Ops.EXP2).cast(dtypes.int32, True, allow_buffer_view=True)
     b = x.cast(dtypes.int32, True, allow_buffer_view=True)
     b = a.alu(BinaryOps.ADD, b)
     check_schedule(b, 2) # this should fuse when it makes sense
 
   def test_bitcast_disable_subbufer(self):
     x = cast(LazyBuffer, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
-    a = x.alu(UnaryOps.EXP2).cast(dtypes.int32, True, allow_buffer_view=False)
+    a = x.alu(Ops.EXP2).cast(dtypes.int32, True, allow_buffer_view=False)
     b = x.cast(dtypes.int32, True, allow_buffer_view=False)
     b = a.alu(BinaryOps.ADD, b)
     check_schedule(b, 1)

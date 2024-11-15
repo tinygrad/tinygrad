@@ -2,7 +2,7 @@ import struct
 from platform import system
 from typing import Tuple, Dict, List, Optional
 from tinygrad import dtypes
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
+from tinygrad.ops import BinaryOps, TernaryOps
 from tinygrad.codegen.kernel import Ops, UOp
 from tinygrad.helpers import CI
 from tinygrad.codegen.assembly import uops_to_asmstyle, AssemblyLanguage
@@ -26,8 +26,8 @@ def specialize_to_arm64(fn_nm, asm):
   type_to_reg = {dtypes.double: "d", dtypes.half: 'h', dtypes.float32: 's', dtypes.bool: 'w', dtypes.int8:'w', dtypes.int32: 'w', dtypes.int64: 'x', dtypes.uint8:'w', dtypes.uint32: 'w', dtypes.uint64: 'x'}
   alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
           BinaryOps.MOD: "", BinaryOps.CMPLT: "subs",
-          UnaryOps.NOOP: "mov", UnaryOps.NEG: "neg",
-          UnaryOps.SIN:'bl ' + get_name('sinf'), UnaryOps.LOG2: 'bl ' + get_name("log2f"), UnaryOps.EXP2: 'bl ' + get_name("exp2f"), UnaryOps.SQRT: 'bl ' + get_name("sqrtf"),
+          Ops.NOOP: "mov", Ops.NEG: "neg",
+          Ops.SIN:'bl ' + get_name('sinf'), Ops.LOG2: 'bl ' + get_name("log2f"), Ops.EXP2: 'bl ' + get_name("exp2f"), Ops.SQRT: 'bl ' + get_name("sqrtf"),
           TernaryOps.MULACC: "madd", TernaryOps.WHERE: "fcsel"}
 
   def mov_imm(value, reg):
@@ -109,7 +109,7 @@ def specialize_to_arm64(fn_nm, asm):
       elif arg == TernaryOps.WHERE:
         ins.append(f"fcmp {rtor[vin[0].nm]}, #0.0" if rtor[vin[0].nm][0] == 's' else f"cmp {rtor[vin[0].nm]}, #0")
         ins.append(f"{alu[arg]} {rtor[out.nm]}, {rtor[vin[1].nm]}, {rtor[vin[2].nm]}, ne")
-      elif arg in [UnaryOps.LOG2, UnaryOps.SIN, UnaryOps.EXP2, UnaryOps.SQRT]:
+      elif arg in [Ops.LOG2, Ops.SIN, Ops.EXP2, Ops.SQRT]:
         #NOTE: Not a real instruction, use to emulate a ext call in unicorn
         if CI: ins.append(f"{alu[arg]} {rtor[out.nm]} {rtor[vin[0].nm]}")
         else:

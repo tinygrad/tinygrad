@@ -6,7 +6,7 @@ from dataclasses import replace
 from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps, KernelOptError, Kernel
 from tinygrad.codegen.lowerer import get_grouped_dims
-from tinygrad.ops import UOp, Ops, BinaryOps, TernaryOps, UnaryOps, GroupOp
+from tinygrad.ops import UOp, Ops, BinaryOps, TernaryOps, GroupOp
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -318,7 +318,7 @@ class TestLinearizer(unittest.TestCase):
     first_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 1, 32)).expand((4, 32, 32)).to_uop()))
     first_x_p = UOp(Ops.LOAD, dtypes.float, (g2, x_p.lazydata.st.reshape((4, 1, 32)).expand((4, 32, 32)).to_uop()))
     first_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.ADD, (2,)))
-    first_reduce_p = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x_p.alu(UnaryOps.EXP2),), (BinaryOps.ADD, (2,)))
+    first_reduce_p = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x_p.alu(Ops.EXP2),), (BinaryOps.ADD, (2,)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 32, 1)).to_uop()))
     diff = (second_x+(first_reduce + first_reduce_p)*ast_const(dtypes.float, -1, (4, 32, 1)))
     second_reduce = UOp(Ops.REDUCE_AXIS, dtypes.float, (diff,), (BinaryOps.ADD, (1,)))
@@ -456,7 +456,7 @@ class TestLinearizer(unittest.TestCase):
     squares = (second_x+neg_mean)*(second_x+neg_mean)
     squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (2,)))
     variance = squares_sum * ast_const(dtypes.float, 1/35, (15, 25, 1, 1))
-    std = variance.alu(UnaryOps.SQRT)
+    std = variance.alu(Ops.SQRT)
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((15, 25, 1, 1)).to_uop(), std))
     sink = UOp(Ops.SINK, src=(store,))
     wanna_output = x.numpy().std(axis=2, ddof=0).reshape((15,25,1,1))
@@ -474,7 +474,7 @@ class TestLinearizer(unittest.TestCase):
     squares = (second_x+neg_mean)*(second_x+neg_mean)
     squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (1,)))
     variance = squares_sum * ast_const(dtypes.float, 0.04, (15, 1, 1, 35))
-    std = variance.alu(UnaryOps.SQRT)
+    std = variance.alu(Ops.SQRT)
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((15, 1, 1, 35)).to_uop(), std))
     sink = UOp(Ops.SINK, src=(store,))
     wanna_output = x.numpy().std(axis=1, ddof=0).reshape((15,1,1,35))
@@ -494,7 +494,7 @@ class TestLinearizer(unittest.TestCase):
     squares = (second_x+neg_mean)*(second_x+neg_mean)
     squares_sum = UOp(Ops.REDUCE_AXIS, dtypes.float, (squares,), (BinaryOps.ADD, (2,)))
     variance = squares_sum * ast_const(dtypes.float, 1/35, (15, 25, 1, 1))
-    std = variance.alu(UnaryOps.SQRT)
+    std = variance.alu(Ops.SQRT)
     store_mean = UOp(Ops.STORE, src=(g1, ShapeTracker.from_shape((15, 25, 1, 1)).to_uop(), neg_mean))
     store_std = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((15, 25, 1, 1)).to_uop(), std))
     sink = UOp(Ops.SINK, src=(store_std, store_mean))
@@ -535,10 +535,10 @@ class TestLinearizer(unittest.TestCase):
     max_x = UOp(Ops.REDUCE_AXIS, dtypes.float, (first_x,), (BinaryOps.MAX, (2,)))
     second_x = UOp(Ops.LOAD, dtypes.float, (g1, x.lazydata.st.reshape((4, 32, 1,)).to_uop()))
     centered_x = second_x+max_x*ast_const(dtypes.float, -1, (4, 32, 1))
-    exp_x = centered_x.alu(UnaryOps.EXP2)
+    exp_x = centered_x.alu(Ops.EXP2)
     sum_exp_x = UOp(Ops.REDUCE_AXIS, dtypes.float, (exp_x,), (BinaryOps.ADD, (1,)))
-    # y = exp_x * sum_exp_x.alu(UnaryOps.RECIP) # kernels cannot do a return to full shape
-    recip_sum_exp_x = sum_exp_x.alu(UnaryOps.RECIP)
+    # y = exp_x * sum_exp_x.alu(Ops.RECIP) # kernels cannot do a return to full shape
+    recip_sum_exp_x = sum_exp_x.alu(Ops.RECIP)
     store = UOp(Ops.STORE, src=(g0, ShapeTracker.from_shape((4,1,1)).to_uop(), recip_sum_exp_x))
     sink = UOp(Ops.SINK, src=(store,))
     expected = 1/np.exp2(x.numpy() - x.numpy().max(axis=-1, keepdims=True)).sum(axis=-1, keepdims=True).reshape(4,1,1)
@@ -1219,20 +1219,20 @@ class TestLinearizer(unittest.TestCase):
       assert len(sched) == 1
 
       lin = Kernel(sched[0].ast)
-      assert sum(u.op in {UnaryOps.RECIP, BinaryOps.FDIV} for u in lin.linearize().uops) == max_ops, msg
+      assert sum(u.op in {Ops.RECIP, BinaryOps.FDIV} for u in lin.linearize().uops) == max_ops, msg
 
     a = Tensor.empty((4,4))
     b = Tensor.empty((4,4))
     d = Tensor.empty((4,4))
 
     c = (a*b)/b
-    helper(c, "found UnaryOps.RECIP in (a*b)/b operation")
+    helper(c, "found Ops.RECIP in (a*b)/b operation")
 
     c = a/a
-    helper(c, "found UnaryOps.RECIP in (a/a) operation")
+    helper(c, "found Ops.RECIP in (a/a) operation")
 
     c = (a/b)/d
-    helper(c, "found multiple UnaryOps.RECIP in (a/b)/d operation", 1)
+    helper(c, "found multiple Ops.RECIP in (a/b)/d operation", 1)
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()

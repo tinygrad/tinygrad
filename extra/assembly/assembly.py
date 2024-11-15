@@ -1,6 +1,6 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict, cast
 from tinygrad.codegen.kernel import Ops, MemOp, UOp
-from tinygrad.ops import BinaryOps, UnaryOps
+from tinygrad.ops import BinaryOps
 from tinygrad.dtype import DType, dtypes
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
@@ -87,7 +87,7 @@ class AssemblyLanguage:
     if self.supports_load3:
       if reg.scalar:
         new_reg = self.newreg((reg.nm, 'vec'), dtype=reg.dtype)
-        self.ins.append(AssemblyInstruction(Ops.ALU, new_reg, [reg], UnaryOps.NOOP))
+        self.ins.append(AssemblyInstruction(Ops.ALU, new_reg, [reg], Ops.NOOP))
         reg = new_reg
       return self.tor[args.name], reg, off
     reg = self.render_alu(BinaryOps.ADD, self.render_cast(reg, dtypes.uint64), self.tor[args.name], dtype=dtypes.uint64)
@@ -106,7 +106,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
     uop,dtype,vin,args,_ = u
     if uop == Ops.DEFINE_LOCAL:
       lang.ins.append(AssemblyInstruction(Ops.DEFINE_LOCAL, None, [], args))
-      lang.ins.append(AssemblyInstruction(Ops.ALU, lang.newreg(args[0], dtype=dtypes.uint64), [args[0]], UnaryOps.NOOP))
+      lang.ins.append(AssemblyInstruction(Ops.ALU, lang.newreg(args[0], dtype=dtypes.uint64), [args[0]], Ops.NOOP))
     elif uop == Ops.LOOP:
       if args[1] == "global":
         for i,var in enumerate(args[0]):
@@ -138,7 +138,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
       # TODO: we should reconsider outputting CAST in the linearizer. these are needless copies
       out = lang.newreg(u, dtype)
       for i,sr in enumerate(out.subregs()):
-        lang.ins.append(AssemblyInstruction(Ops.ALU, sr, [lang.tor[vin[i]]], UnaryOps.NOOP))
+        lang.ins.append(AssemblyInstruction(Ops.ALU, sr, [lang.tor[vin[i]]], Ops.NOOP))
     elif uop == Ops.ALU:
       out = lang.newreg(u, dtype) if u not in lang.tor else lang.tor[u]
       # this is the only thing that can violate SSA
@@ -148,9 +148,9 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         lang.ins.append(AssemblyInstruction(Ops.CAST, out, [pred_reg], args))
       elif args == BinaryOps.DIV and lang.no_div:
         tmp = lang.newreg((u, "rcp"))
-        lang.ins.append(AssemblyInstruction(Ops.ALU, tmp, [lang.tor[vin[1]]], UnaryOps.RECIP))
+        lang.ins.append(AssemblyInstruction(Ops.ALU, tmp, [lang.tor[vin[1]]], Ops.RECIP))
         lang.ins.append(AssemblyInstruction(Ops.ALU, out, [lang.tor[vin[0]], tmp], BinaryOps.MUL))
-      elif args == UnaryOps.SIN and lang.sin_is_sin2pi:
+      elif args == Ops.SIN and lang.sin_is_sin2pi:
         tmp = lang.newreg((u, "2pi"))
         lang.ins.append(AssemblyInstruction(Ops.ALU, tmp, [lang.tor[vin[0]], 1/(math.pi*2)], BinaryOps.MUL))
         lang.ins.append(AssemblyInstruction(Ops.ALU, out, [tmp], args))
@@ -179,7 +179,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
         skipload_branch += 1
     elif uop == Ops.STORE:
       if args is None:
-        lang.ins.append(AssemblyInstruction(Ops.ALU, lang.tor[vin[0]], [lang.tor[vin[1]]], UnaryOps.NOOP))
+        lang.ins.append(AssemblyInstruction(Ops.ALU, lang.tor[vin[0]], [lang.tor[vin[1]]], Ops.NOOP))
       else:
         idx, treg, off = lang.addr_w_offset(args)
         lang.ins.append(AssemblyInstruction(Ops.STORE, None, [idx, lang.tor[vin[0]]] + ([treg] if treg is not None else []), (off, 'global' if not args.local else 'shared', args.memory_dtype if args.memory_dtype != dtypes.float else None)))

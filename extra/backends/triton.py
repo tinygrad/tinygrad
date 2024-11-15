@@ -1,6 +1,6 @@
 from typing import Dict, List, Final, Callable, DefaultDict
 from collections import defaultdict
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
+from tinygrad.ops import BinaryOps, TernaryOps, Op
 from tinygrad.helpers import DType, PtrDType, dtypes, ImageDType, DEBUG, getenv
 from tinygrad.codegen.kernel import  UOp, Ops
 from triton.compiler import compile as triton_compile
@@ -59,11 +59,11 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
 
   def kk(s): kernel.append("  "*depth+s)
   code_for_op: Final[Dict[Op, Callable]] = {
-    UnaryOps.EXP2: lambda x,dtype,: f"tl.math.exp2({x})",
-    UnaryOps.LOG2: lambda x,dtype,: f"tl.math.log2({x})",
-    UnaryOps.SIN: lambda x,dtype: f"tl.sin({x})",
-    UnaryOps.SQRT: lambda x,dtype: f"tl.sqrt({x})",
-    UnaryOps.NEG: lambda x,dtype: f"-{x}",
+    Ops.EXP2: lambda x,dtype,: f"tl.math.exp2({x})",
+    Ops.LOG2: lambda x,dtype,: f"tl.math.log2({x})",
+    Ops.SIN: lambda x,dtype: f"tl.sin({x})",
+    Ops.SQRT: lambda x,dtype: f"tl.sqrt({x})",
+    Ops.NEG: lambda x,dtype: f"-{x}",
     BinaryOps.ADD: lambda x,y,dtype: f"({x}+{y})", BinaryOps.SUB: lambda x,y,: f"({x}-{y})",
     BinaryOps.MUL: lambda x,y,dtype: f"({x}*{y})", BinaryOps.DIV: lambda x,y,: f"({x}/{y})" if y != '0.0' else f"{x}*tl.where({x}==0.0, float('nan'), float('inf'))",
     BinaryOps.MAX: lambda x,y,dtype: f"tl.maximum({x},{y})",

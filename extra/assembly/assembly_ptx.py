@@ -3,7 +3,7 @@ import struct
 from tinygrad.codegen.assembly import uops_to_asmstyle, AssemblyLanguage
 from tinygrad.codegen.kernel import Ops, UOp
 from tinygrad import dtypes
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
+from tinygrad.ops import BinaryOps, TernaryOps
 from tinygrad.runtime.ops_cuda import arch
 
 dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "f16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.int8: "s8", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32", dtypes.uint16: "u16", dtypes.uint8: "u8", "bits16": "b16", dtypes.float64: "f64"}
@@ -32,9 +32,9 @@ def specialize_to_ptx(lang, function_name):
   param_cnt = 0
   ins = []
   alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
-         BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", UnaryOps.SQRT: "sqrt.approx",
-         UnaryOps.NOOP: "mov", UnaryOps.NEG: "neg",
-         UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
+         BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", Ops.SQRT: "sqrt.approx",
+         Ops.NOOP: "mov", Ops.NEG: "neg",
+         Ops.SIN: "sin.approx", Ops.LOG2: "lg2.approx", Ops.EXP2: "ex2.approx.ftz",
          TernaryOps.MULACC: "fma.rn", TernaryOps.WHERE: "selp"}
   for uop, out, vin, arg in lang.ins:
     if uop == Ops.ENDLOOP:

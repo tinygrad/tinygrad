@@ -1,6 +1,6 @@
 import unittest, itertools
 from tinygrad.dtype import dtypes
-from tinygrad.ops import Ops, UOp, BinaryOps, TernaryOps, UnaryOps, GroupOp # noqa: F401
+from tinygrad.ops import Ops, UOp, BinaryOps, TernaryOps, GroupOp # noqa: F401
 from tinygrad.ops import PatternMatcher, UPat
 
 class TestPatternMatcher(unittest.TestCase):
