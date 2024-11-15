@@ -12,7 +12,7 @@ mov_sufix = {4: "d", 8: "q"}
 
 x86_mov_ops = {Ops.STORE: "mov", Ops.LOAD: "mov", Ops.ASSIGN: "mov", Ops.DEFINE_ACC: "mov"}
 x86_unsigned_ops = {**x86_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "div", Ops.CMPNE: "cmp",
-                    Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor", Ops.SHL: "shl", Ops.SHR: "shr"}
+                    Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor"}
 x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv"}
 x86_float_ops = {Ops.ADD: "addss", Ops.SUB: "subss", Ops.MUL: "mulss", Ops.FDIV: "divss", Ops.CMPLT: "ucomiss", Ops.CMPNE: "ucomiss", Ops.SQRT: "sqrtss",
                  **{k:v+"ss" for k,v in x86_mov_ops.items()}}
@@ -55,7 +55,7 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.CAST, name="x"), lambda ctx,x: ctx.x86_cast(x, x.src[0])),
   # no cmov for floats
   (UPat(Ops.WHERE, dtype=dtypes.floats, name="x"),
-   lambda ctx,x: f"test {ctx[x.src[0]]}, 1\njnz .l{ctx.uop_i[x]}\n{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[2]]}\n.l{ctx.uop_i[x]}:"),
+   lambda ctx,x: f"test {ctx[x.src[0]]}, 1\njnz .L{ctx.uop_i[x]}\n{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[2]]}\n.L{ctx.uop_i[x]}:"),
   (UPat(Ops.WHERE, dtype=dtypes.ints, name="x"), lambda ctx,x: f"test {ctx[x.src[0]]}, 1\ncmovz {ctx[x]}, {ctx[x.src[2]]}"),
   
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
@@ -96,9 +96,9 @@ class X86Renderer(Renderer):
     l += f"mov {self.regt("rax", x.dtype)}, {self[x]}\n"
     l += "xor rdx, rdx\n" if dtypes.is_unsigned(x.dtype) else "cqo\n" if x.dtype.itemsize == 8 else "cdq\n"
     l += f"{x86op[x.dtype][x.op]} {self.regt(divisor, s.dtype)}\n"
-    l += f"mov {self[x]}, {self.regt("rax", x.dtype)}\n"
-    if self.r[x] != "rdx": l += "pop rdx\n"
-    if self.r[x] != "rax": l += "pop rax\n"
+    l += f"mov {self[x]}, {self.regt("rax", x.dtype)}"
+    if self.r[x] != "rdx": l += "\npop rdx"
+    if self.r[x] != "rax": l += "\npop rax"
     return l
   
   def x86_cast(self, x:UOp, s:UOp) -> str:
@@ -152,12 +152,8 @@ class X86Renderer(Renderer):
     uop_i = {u:i for i,u in enumerate(ops)}
     self.uop_i = uop_i
 
-    def is_imm(u:UOp) -> bool:
-      if u.op is Ops.CONST and not dtypes.is_float(u.dtype) and abs(u.arg) <= dtypes.max(dtypes.int32): return True
-      return False
-    
-    def is_reg(u:UOp) -> bool:
-      return True if r[u] in all_regs else False
+    def is_imm(u:UOp) -> bool: return u.op is Ops.CONST and not dtypes.is_float(u.dtype) and abs(u.arg) <= dtypes.max(dtypes.int32)
+    def is_reg(u:UOp) -> bool: return r[u] in all_regs
       
     def mov_to_reg(u:UOp) -> str:
       reg = assign_reg(i, u.dtype)
@@ -209,15 +205,11 @@ class X86Renderer(Renderer):
         # these can't take imms
         if u.op in (Ops.WHERE, Ops.IDIV) and not is_reg(s): mov_to_reg(s)
         # uop_i is greater in define_acc
-        elif not is_reg(s) and not is_imm(s) and uop_i[s] < i: mov_to_reg(s)
+        elif uop_i[s] < i and not is_reg(s) and not is_imm(s): mov_to_reg(s)
 
       if u.op is Ops.ASSIGN: r[u] = r[u.src[0]]
       elif u.op in GroupOp.ALU and u.op not in (Ops.CMPLT, Ops.CMPNE) and child_count[ss:=u.src[0 if u.op != Ops.WHERE else 1]] == 1 and is_reg(ss): r[u] = r[ss]
       else: r[u] = assign_reg(i, u.dtype)
-
-      if u.op is Ops.DEFINE_GLOBAL:
-        free_reg(r[u])
-        mov_to_stack(u, r[u])
 
       if u.op in GroupOp.ALU and u.op not in (Ops.CMPLT, Ops.CMPNE):
         # for cmp nothing to mov as reg depends on flag
@@ -232,11 +224,11 @@ class X86Renderer(Renderer):
         if is_imm(s) and is_reg(s):
           free_reg(r[s])
           r[s] = to_hex(s.arg)
-      if u.op is Ops.INDEX:
-        # when this happens INDEX is before range, everything before range that's not define_acc should be moved to the stack
-        if is_imm(u.src[1]):
-          free_reg(r[u])
-          mov_to_stack(u, r[u])
+
+      #if range_i and i < range_i and is_reg(u) and u.op is not Ops.DEFINE_ACC:
+      if next((True for uu in ops[i+1:] if uu.op is Ops.RANGE), False) and is_reg(u) and u.op is not Ops.DEFINE_ACC:
+        free_reg(r[u])
+        mov_to_stack(u, r[u])
           
       if u.op is Ops.GEP: assert u.dtype == dtypes.float32 and u.dtype.count == 1 and len(u.arg) == 1
       if u.op is Ops.VECTORIZE: assert u.dtype.scalar() == dtypes.float32
@@ -254,5 +246,4 @@ class X86Renderer(Renderer):
 # TODO: free loop counter for spilling
 # NOTE: for now we mov all operands to regs
 # TODO: handle func args in stack
-# TODO: logsumexp and softmax with NOOPT are incorrect, something about range
-# TODO: everything before a range should just mov to the stack
+# TODO: figure out spilling with loops
