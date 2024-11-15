@@ -230,7 +230,7 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 def uval(u:UOp) -> UOp:
   assert u.op is Ops.VIEW and len(u.src) == 2 and u.src[0].op is Ops.BUFFER, f"must be view of BUFFER {u}"
-  if (to_store:=u.src[1]).op is Ops.CONTIGUOUS and not (to_store.src[0].base.op is Ops.VIEW and len(to_store.src) == 2): return to_store.src[0]
+  if (to_store:=u.src[1]).op is Ops.CONTIGUOUS and not (to_store.src[0].base.op is Ops.VIEW and len(to_store.src[0].base.src) == 2): return to_store.src[0]
   return u.src[1]
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], realizes:Dict[UOp, UOp],
