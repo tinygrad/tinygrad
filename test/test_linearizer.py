@@ -1219,7 +1219,7 @@ class TestLinearizer(unittest.TestCase):
       assert len(sched) == 1
 
       lin = Kernel(sched[0].ast)
-      assert sum(u.op is UnaryOps.RECIP for u in lin.linearize().uops) == max_ops, msg
+      assert sum(u.op in {UnaryOps.RECIP, BinaryOps.FDIV} for u in lin.linearize().uops) == max_ops, msg
 
     a = Tensor.empty((4,4))
     b = Tensor.empty((4,4))

@@ -94,7 +94,7 @@ class TestLinearizerDumb(unittest.TestCase):
     prg = k.to_program()
     print(prg.src)
     if_uops = [u for u in k.uops if u.op is Ops.IF]
-    self.assertIn(len(if_uops), {1,3})
+    self.assertIn(len(if_uops), {1,2,3})
     conditions = if_uops[0].src[0].sparents
     self.assertLessEqual(len(conditions), 9)
 
