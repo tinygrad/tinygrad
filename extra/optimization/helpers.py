@@ -2,7 +2,7 @@
 from typing import Tuple
 from tinygrad import Variable
 from tinygrad.codegen.kernel import Opt, OptOps
-from tinygrad.ops import UOp, Ops, KernelInfo, BinaryOps
+from tinygrad.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View

@@ -141,8 +141,8 @@ class TestPatternMatcher(unittest.TestCase):
     # that CONST/ALU -> ALU/CONST rewrite is now instant
     """
     matcher = PatternMatcher([(UPat(UOps.ALU, name="x", src=(UPat(UOps.CONST), UPat(UOps.ALU))), lambda x: x)])
-    c4 = UOp(UOps.ALU, dtypes.float, (c1,c3), BinaryOps.ADD)
-    c5 = UOp(UOps.ALU, dtypes.float, (c3,c1), BinaryOps.ADD)
+    c4 = UOp(UOps.ALU, dtypes.float, (c1,c3), Ops.ADD)
+    c5 = UOp(UOps.ALU, dtypes.float, (c3,c1), Ops.ADD)
     self.assertEqual(matcher.rewrite(c3), None)
     self.assertEqual(matcher.rewrite(c4), c4)
     self.assertEqual(matcher.rewrite(c5), None)

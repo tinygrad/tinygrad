@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Context
 from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import Ops, UOp, UPat, BinaryOps, KernelInfo, exec_alu, spec # noqa F401
+from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu, spec # noqa F401
 from tinygrad.renderer import Program
 from tinygrad.engine.schedule import create_schedule, to_si
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
@@ -29,7 +29,7 @@ def uop(uops:List[UOp], uop:Ops, dtype:Optional[DType], src:Tuple[UOp, ...], arg
 
 def _test_single_value(vals, op, dts):
   uops = []
-  output_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dts[-1]
+  output_dtype = dtypes.bool if op in (Ops.CMPLT, Ops.CMPNE) else dts[-1]
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   buf_loads = [uop(uops, Ops.DEFINE_GLOBAL, dtype.ptr(), (), i+1) for i,dtype in enumerate(dts)]
   loads = (uop(uops, Ops.LOAD, dtype, [buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0))]) for i, dtype in enumerate(dts))
@@ -45,7 +45,7 @@ def _test_single_value(vals, op, dts):
 
 def _test_single_value_const(vals, op, dts):
   uops = []
-  output_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else dts[-1]
+  output_dtype = dtypes.bool if op in (Ops.CMPLT, Ops.CMPNE) else dts[-1]
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   loads = (uop(uops, Ops.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, op, output_dtype, loads)
@@ -111,11 +111,11 @@ class TestFloatUOps(TestUOps):
   def test_recip(self): self._test_uop_fxn(Ops.RECIP, lambda a: 1/a if a != 0 else float('inf'))
   def test_sqrt(self): self._test_uop_fxn(Ops.SQRT, lambda a: math.sqrt(a) if a >= 0 else float('nan'))
 
-  def test_add(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: a+b)
-  def test_mul(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: a*b)
-  def test_max(self): self._test_bop_fxn(BinaryOps.MAX, lambda a,b: max(a,b))
-  def test_cmplt(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: a<b)
-  def test_cmpne(self): self._test_bop_fxn(BinaryOps.CMPNE, lambda a,b: a!=b)
+  def test_add(self): self._test_bop_fxn(Ops.ADD, lambda a,b: a+b)
+  def test_mul(self): self._test_bop_fxn(Ops.MUL, lambda a,b: a*b)
+  def test_max(self): self._test_bop_fxn(Ops.MAX, lambda a,b: max(a,b))
+  def test_cmplt(self): self._test_bop_fxn(Ops.CMPLT, lambda a,b: a<b)
+  def test_cmpne(self): self._test_bop_fxn(Ops.CMPNE, lambda a,b: a!=b)
   # MOD isn't tested on floats
 
   def test_where(self):
@@ -126,23 +126,23 @@ class TestFloatUOps(TestUOps):
     self._test_top_fxn(Ops.MULACC, lambda a,b,c: a*b+c, (dtypes.float, dtypes.float, dtypes.float))
 
 class TestNonFloatUOps(TestUOps):
-  def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: int(a)+int(b), (dtypes.int32, dtypes.int32))
-  def test_mul_int32(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: int(a)*int(b), (dtypes.int32, dtypes.int32))
+  def test_add_int32(self): self._test_bop_fxn(Ops.ADD, lambda a,b: int(a)+int(b), (dtypes.int32, dtypes.int32))
+  def test_mul_int32(self): self._test_bop_fxn(Ops.MUL, lambda a,b: int(a)*int(b), (dtypes.int32, dtypes.int32))
   @unittest.skipUnless(getenv("PTX"), "only ptx uses bitshifts")
-  def test_shr_int32(self): self._test_bop_fxn(BinaryOps.SHR, lambda a,b: int(a)>>int(b), (dtypes.int32, dtypes.int32), no_b_neg=True)
+  def test_shr_int32(self): self._test_bop_fxn(Ops.SHR, lambda a,b: int(a)>>int(b), (dtypes.int32, dtypes.int32), no_b_neg=True)
   @unittest.skipUnless(getenv("PTX"), "only ptx uses bitshifts")
-  def test_shl_int32(self): self._test_bop_fxn(BinaryOps.SHL, lambda a,b: int(a)<<int(b), (dtypes.int32, dtypes.int32), no_b_neg=True)
+  def test_shl_int32(self): self._test_bop_fxn(Ops.SHL, lambda a,b: int(a)<<int(b), (dtypes.int32, dtypes.int32), no_b_neg=True)
   def test_div_int32(self):
-    self._test_bop_fxn(BinaryOps.IDIV, lambda a,b: int(a/b), (dtypes.int32, dtypes.int32), no_b_zero=True)
-  def test_and_int32(self): self._test_bop_fxn(BinaryOps.AND, lambda a,b: int(a)&int(b), (dtypes.int32, dtypes.int32))
-  def test_or_int32(self): self._test_bop_fxn(BinaryOps.OR, lambda a,b: int(a)|int(b), (dtypes.int32, dtypes.int32))
+    self._test_bop_fxn(Ops.IDIV, lambda a,b: int(a/b), (dtypes.int32, dtypes.int32), no_b_zero=True)
+  def test_and_int32(self): self._test_bop_fxn(Ops.AND, lambda a,b: int(a)&int(b), (dtypes.int32, dtypes.int32))
+  def test_or_int32(self): self._test_bop_fxn(Ops.OR, lambda a,b: int(a)|int(b), (dtypes.int32, dtypes.int32))
   def test_mod_int32(self):
-    self._test_bop_fxn(BinaryOps.MOD,
+    self._test_bop_fxn(Ops.MOD,
                        lambda a,b: abs(int(a))%abs(int(b))*(1,-1)[a<0], (dtypes.int32, dtypes.int32), no_b_zero=True)
-  def test_cmplt_int32(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: int(a)<int(b), (dtypes.int32, dtypes.int32))
-  def test_cmpne_int32(self): self._test_bop_fxn(BinaryOps.CMPNE, lambda a,b: int(a)!=int(b), (dtypes.int32, dtypes.int32))
+  def test_cmplt_int32(self): self._test_bop_fxn(Ops.CMPLT, lambda a,b: int(a)<int(b), (dtypes.int32, dtypes.int32))
+  def test_cmpne_int32(self): self._test_bop_fxn(Ops.CMPNE, lambda a,b: int(a)!=int(b), (dtypes.int32, dtypes.int32))
   @unittest.skipUnless(is_dtype_supported(dtypes.bool), "dtype not supported")
-  def test_mul_bool(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: bool(a) and bool(b), (dtypes.bool, dtypes.bool))
+  def test_mul_bool(self): self._test_bop_fxn(Ops.MUL, lambda a,b: bool(a) and bool(b), (dtypes.bool, dtypes.bool))
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "dtype not supported")
   def test_where_float16(self):
     self._test_top_fxn(Ops.WHERE, lambda a,b,c: b if a!=0 else c, (dtypes.bool, dtypes.float16, dtypes.float16))
@@ -166,13 +166,13 @@ class TestBoolUOps(TestUOps):
           for c in [False, True]:
             self._equal(f([a,b,c], op, (dtypes.bool, )*3), fxn(a,b,c))
 
-  def test_add_bool(self): self._test_bop_bool_fxn(BinaryOps.ADD, lambda a,b: a or b)
-  def test_mul_bool(self): self._test_bop_bool_fxn(BinaryOps.MUL, lambda a,b: a and b)
-  def test_xor_bool(self): self._test_bop_bool_fxn(BinaryOps.XOR, lambda a,b: a != b)
-  def test_and_bool(self): self._test_bop_bool_fxn(BinaryOps.AND, lambda a,b: a & b)
-  def test_or_bool(self): self._test_bop_bool_fxn(BinaryOps.OR, lambda a,b: a | b)
-  def test_cmpne_bool(self): self._test_bop_bool_fxn(BinaryOps.CMPNE, lambda a,b: a != b)
-  def test_cmplt_bool(self): self._test_bop_bool_fxn(BinaryOps.CMPLT, lambda a,b: a < b)
+  def test_add_bool(self): self._test_bop_bool_fxn(Ops.ADD, lambda a,b: a or b)
+  def test_mul_bool(self): self._test_bop_bool_fxn(Ops.MUL, lambda a,b: a and b)
+  def test_xor_bool(self): self._test_bop_bool_fxn(Ops.XOR, lambda a,b: a != b)
+  def test_and_bool(self): self._test_bop_bool_fxn(Ops.AND, lambda a,b: a & b)
+  def test_or_bool(self): self._test_bop_bool_fxn(Ops.OR, lambda a,b: a | b)
+  def test_cmpne_bool(self): self._test_bop_bool_fxn(Ops.CMPNE, lambda a,b: a != b)
+  def test_cmplt_bool(self): self._test_bop_bool_fxn(Ops.CMPLT, lambda a,b: a < b)
   def test_where_bool(self): self._test_top_bool_fxn(Ops.WHERE, lambda a,b,c: b if a else c)
 
 class TestExecALU(TestUOps):
@@ -180,13 +180,13 @@ class TestExecALU(TestUOps):
     self.assertEqual(exec_alu(Ops.SQRT, dtypes.float, (0.0,)), 0.0)
 
   def test_div(self):
-    self.assertEqual(exec_alu(BinaryOps.IDIV, dtypes.int8, (8, 2)), 4)
-    self.assertEqual(exec_alu(BinaryOps.IDIV, dtypes.int8, (7, 3)), 2)
-    self.assertEqual(exec_alu(BinaryOps.IDIV, dtypes.int8, (7, -3)), -2)
-    self.assertEqual(exec_alu(BinaryOps.IDIV, dtypes.int8, (-50, 6)), -8)
+    self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (8, 2)), 4)
+    self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (7, 3)), 2)
+    self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (7, -3)), -2)
+    self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (-50, 6)), -8)
 
-    np.testing.assert_allclose(exec_alu(BinaryOps.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIP, dtypes.float32, (3.0,)))), 2+(1.0/3.0))
-    np.testing.assert_allclose(exec_alu(BinaryOps.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIP, dtypes.float32, (-3.0,)))), -2-(1.0/3.0))
+    np.testing.assert_allclose(exec_alu(Ops.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIP, dtypes.float32, (3.0,)))), 2+(1.0/3.0))
+    np.testing.assert_allclose(exec_alu(Ops.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIP, dtypes.float32, (-3.0,)))), -2-(1.0/3.0))
 
   def test_recip(self):
     np.testing.assert_allclose(exec_alu(Ops.RECIP, dtypes.float32, (8,)), 1/8)
@@ -199,16 +199,16 @@ class TestExecALU(TestUOps):
     np.testing.assert_allclose(exec_alu(Ops.RECIP, dtypes.float32, (10,)), 1/10)
 
   def test_bool_cmplt(self):
-    self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (False, False)), False)
-    self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (False, True)), True)
-    self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (True, False)), False)
-    self.assertEqual(exec_alu(BinaryOps.CMPLT, dtypes.bool, (True, True)), False)
+    self.assertEqual(exec_alu(Ops.CMPLT, dtypes.bool, (False, False)), False)
+    self.assertEqual(exec_alu(Ops.CMPLT, dtypes.bool, (False, True)), True)
+    self.assertEqual(exec_alu(Ops.CMPLT, dtypes.bool, (True, False)), False)
+    self.assertEqual(exec_alu(Ops.CMPLT, dtypes.bool, (True, True)), False)
 
   def test_bool_cmpne(self):
-    self.assertEqual(exec_alu(BinaryOps.CMPNE, dtypes.bool, (False, False)), False)
-    self.assertEqual(exec_alu(BinaryOps.CMPNE, dtypes.bool, (False, True)), True)
-    self.assertEqual(exec_alu(BinaryOps.CMPNE, dtypes.bool, (True, False)), True)
-    self.assertEqual(exec_alu(BinaryOps.CMPNE, dtypes.bool, (True, True)), False)
+    self.assertEqual(exec_alu(Ops.CMPNE, dtypes.bool, (False, False)), False)
+    self.assertEqual(exec_alu(Ops.CMPNE, dtypes.bool, (False, True)), True)
+    self.assertEqual(exec_alu(Ops.CMPNE, dtypes.bool, (True, False)), True)
+    self.assertEqual(exec_alu(Ops.CMPNE, dtypes.bool, (True, True)), False)
 
   def test_bool_where(self):
     self.assertEqual(exec_alu(Ops.WHERE, dtypes.bool, (False, False, False)), False)
@@ -216,22 +216,22 @@ class TestExecALU(TestUOps):
     np.testing.assert_allclose(exec_alu(Ops.WHERE, dtypes.float, (False, 2.2, 4.5)), 4.5)
 
   def test_overflow(self):
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (250, 250)), 244)
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (256, 0)), 0)
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (0, -1)), 255)
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (0, -1000)), 24)
+    self.assertEqual(exec_alu(Ops.ADD, dtypes.uint8, (250, 250)), 244)
+    self.assertEqual(exec_alu(Ops.ADD, dtypes.uint8, (256, 0)), 0)
+    self.assertEqual(exec_alu(Ops.ADD, dtypes.uint8, (0, -1)), 255)
+    self.assertEqual(exec_alu(Ops.ADD, dtypes.uint8, (0, -1000)), 24)
 
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (127, 0)), 127)
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-128, 0)), -128)
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-100, -100)), 56)
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-1000, -0)), 24)
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-130, -0)), 126)
+    self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (127, 0)), 127)
+    self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (-128, 0)), -128)
+    self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (-100, -100)), 56)
+    self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (-1000, -0)), 24)
+    self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (-130, -0)), 126)
 
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (1, 1)), 2)
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.int8, (-128, 0)), -128)
+    self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (1, 1)), 2)
+    self.assertEqual(exec_alu(Ops.ADD, dtypes.int8, (-128, 0)), -128)
 
     # test no truncate
-    self.assertEqual(exec_alu(BinaryOps.ADD, dtypes.uint8, (250, 250), truncate_output=False), 500)
+    self.assertEqual(exec_alu(Ops.ADD, dtypes.uint8, (250, 250), truncate_output=False), 500)
 
 class TestConstantFolding(unittest.TestCase):
   def test_cast_const(self):
@@ -336,8 +336,8 @@ class TestAssembly(unittest.TestCase):
     a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops[-1].op, BinaryOps.SHL)
-    self.assertEqual(uops[-2].op, BinaryOps.MUL)
+    self.assertEqual(uops[-1].op, Ops.SHL)
+    self.assertEqual(uops[-2].op, Ops.MUL)
 
   def test_bitshift_right(self):
     g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
@@ -348,8 +348,8 @@ class TestAssembly(unittest.TestCase):
     a2 = UOp(Ops.IDIV, dtypes.int, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops[-1].op, BinaryOps.SHR)
-    self.assertEqual(uops[-2].op, BinaryOps.IDIV)
+    self.assertEqual(uops[-1].op, Ops.SHR)
+    self.assertEqual(uops[-2].op, Ops.IDIV)
 
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
