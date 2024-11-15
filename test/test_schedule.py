@@ -311,7 +311,6 @@ class TestSchedule(unittest.TestCase):
     img = Tensor.empty(64,64)
     x = (img.sum(0) + img.sum(1))
     out = x.relu()
-    del x    # is 3 without this
     check_schedule(out, 2)
 
   #@unittest.skip("failing in old lazy")
