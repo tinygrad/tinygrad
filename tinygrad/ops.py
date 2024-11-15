@@ -87,7 +87,7 @@ class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
 
   def maximum(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
   def minimum(self, x): return -(-self).maximum(-x)
-  def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
+  def where(self, x, y): return self.alu(TernaryOps.WHERE, x, x.ufix(y))
   def threefry(self, seed): return self.alu(BinaryOps.THREEFRY, seed)
   def reciprocal(self): return self.alu(UnaryOps.RECIP)
   def sqrt(self): return self.alu(UnaryOps.SQRT)
@@ -344,7 +344,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def base(self): return self.src[0] if self.op is Ops.VIEW and len(self.src) != 0 else self
-  def view(self, st:ShapeTracker): return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
+  def view(self, st:ShapeTracker):
+    assert self.op is not Ops.STORE, "VIEW of STORE is invalid, STORE is always base"
+    return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
   def reshape(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).reshape(arg))
 
   # *** uop Buffer stuff ***
@@ -760,8 +762,8 @@ spec = PatternMatcher([
   (UPat(Ops.SPECIAL, src=()), lambda: True),
 
   # TODO: confirm the args of both of these are shapetrackers
-  (UPat(Ops.VIEW, src=()), lambda: True),
-  (UPat(Ops.VIEW, src=(UPat(),)), lambda: True),
+  (UPat(Ops.VIEW, dtypes.void, src=()), lambda: True),
+  (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"), lambda x,src: src.op is not Ops.STORE and x.dtype == src.dtype),
 
   (UPat(Ops.VALID, dtypes.bool, (UPat(Ops.VIEW),)), lambda: True),
   (UPat(Ops.CONST, name="x"), lambda x: x.dtype == x.dtype.scalar() and (type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)))),
