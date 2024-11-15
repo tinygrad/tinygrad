@@ -1,7 +1,7 @@
 from typing import Dict, Set
 import yaml
 from tinygrad.codegen.uops import UOpGraph, UOps, UOp
-from tinygrad.ops import BinaryOps
+from tinygrad.ops import Ops
 from tinygrad.dtype import dtypes
 
 def uops_to_rdna(function_name:str, uops:UOpGraph) -> str:
@@ -16,7 +16,7 @@ def uops_to_rdna(function_name:str, uops:UOpGraph) -> str:
     # pointer indexing
     if u.uop in {UOps.LOAD, UOps.STORE} and u.vin[0].dtype.itemsize > 1:
       val = UOp(UOps.CONST, dtypes.int, tuple(), arg=u.vin[0].dtype.itemsize, insert_before=uops.uops.index(u))
-      ptr = UOp(UOps.ALU, dtypes.int, (u.vin[1], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(u))
+      ptr = UOp(UOps.ALU, dtypes.int, (u.vin[1], val), arg=Ops.MUL, insert_before=uops.uops.index(u))
       u.vin = (u.vin[0], ptr) + u.vin[2:]
   #uops.print()
 
@@ -47,11 +47,11 @@ def uops_to_rdna(function_name:str, uops:UOpGraph) -> str:
       v_cnt += 1
       ins.append(f"v_mov_b32 {r[u]}, {u.arg}")
     elif u.uop == UOps.ALU:
-      if u.arg == BinaryOps.ADD:
+      if u.arg == Ops.ADD:
         r[u] = f"v{v_cnt}"
         v_cnt += 1
         ins.append(f"v_add_f32_e32 {r[u]}, {r[u.vin[0]]}, {r[u.vin[1]]}")
-      elif u.arg == BinaryOps.MUL:
+      elif u.arg == Ops.MUL:
         r[u] = f"v{v_cnt}"
         v_cnt += 1
         if dtypes.is_float(u.dtype):

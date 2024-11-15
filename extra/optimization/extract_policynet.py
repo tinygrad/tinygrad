@@ -11,7 +11,7 @@ from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import getenv
 
 # stuff needed to unpack a kernel
-from tinygrad.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
+from tinygrad.ops import LazyOp, TernaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
 from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View

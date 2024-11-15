@@ -6,7 +6,7 @@ class WGSLLanguage(CStyleLanguage):
   generic_var_prefix = "var "
   external_local_bufs = True
   code_for_op = { **CStyleLanguage().code_for_op,
-                 BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})", BinaryOps.CMPEQ: lambda x,y,dtype: f"f32({x}=={y})",
+                 Ops.CMPLT: lambda x,y,dtype: f"f32({x}<{y})", Ops.CMPEQ: lambda x,y,dtype: f"f32({x}=={y})",
                  TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},bool({a}))" }
   # HACK: write bool as f32
   type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "f32"}
@@ -40,9 +40,9 @@ class GLSLLanguage(CStyleLanguage):
   fragment_center_offset = 0.5
   code_for_workitem = {"i": lambda x, offset=fragment_center_offset:f"int(gl_FragCoord.y-{offset}) * width + int(gl_FragCoord.x-{offset})"}
   code_for_op = {**CStyleLanguage().code_for_op, **{op: lambda a,b,dtype,charforop=charforop: f"bool(int({a}){charforop}int({b}))" \
-    if dtype == dtypes.bool else f"({a}{charforop}{b})" for op,charforop in [(BinaryOps.MUL,"*"),(BinaryOps.ADD,"+"),(BinaryOps.DIV,"/")]},
-    BinaryOps.CMPLT: lambda a,b,dtype: f"(float({a})<float({b}))" if dtype == dtypes.bool else f"({a}<{b})",
-    BinaryOps.MOD: lambda a,b,dtype: f"(int({a})%int({b}))", TernaryOps.WHERE: lambda a,b,c,dtype: f"(float({a})!=0.0?{b}:{c})"}
+    if dtype == dtypes.bool else f"({a}{charforop}{b})" for op,charforop in [(Ops.MUL,"*"),(Ops.ADD,"+"),(Ops.DIV,"/")]},
+    Ops.CMPLT: lambda a,b,dtype: f"(float({a})<float({b}))" if dtype == dtypes.bool else f"({a}<{b})",
+    Ops.MOD: lambda a,b,dtype: f"(int({a})%int({b}))", TernaryOps.WHERE: lambda a,b,c,dtype: f"(float({a})!=0.0?{b}:{c})"}
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): return "(0.0 / 0.0)"

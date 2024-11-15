@@ -2,7 +2,7 @@ import struct
 from platform import system
 from typing import Tuple, Dict, List, Optional
 from tinygrad import dtypes
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
+from tinygrad.ops import Ops, UnaryOps, TernaryOps
 from tinygrad.codegen.kernel import Ops, UOp
 from tinygrad.helpers import CI
 from tinygrad.codegen.assembly import uops_to_asmstyle, AssemblyLanguage
@@ -24,8 +24,8 @@ def specialize_to_arm64(fn_nm, asm):
   x_regs = ['x' + str(i) for i in reversed(range(12))]
   s_regs = ['s' + str(i) for i in reversed(range(3,32)) if i <= 7 or i >= 16]
   type_to_reg = {dtypes.double: "d", dtypes.half: 'h', dtypes.float32: 's', dtypes.bool: 'w', dtypes.int8:'w', dtypes.int32: 'w', dtypes.int64: 'x', dtypes.uint8:'w', dtypes.uint32: 'w', dtypes.uint64: 'x'}
-  alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
-          BinaryOps.MOD: "", BinaryOps.CMPLT: "subs",
+  alu = {Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "mul", Ops.DIV: "div", Ops.MAX: "max",
+          Ops.MOD: "", Ops.CMPLT: "subs",
           UnaryOps.NOOP: "mov", UnaryOps.NEG: "neg",
           UnaryOps.SIN:'bl ' + get_name('sinf'), UnaryOps.LOG2: 'bl ' + get_name("log2f"), UnaryOps.EXP2: 'bl ' + get_name("exp2f"), UnaryOps.SQRT: 'bl ' + get_name("sqrtf"),
           TernaryOps.MULACC: "madd", TernaryOps.WHERE: "fcsel"}
@@ -91,7 +91,7 @@ def specialize_to_arm64(fn_nm, asm):
         ins.append(f"mov {rtor[out.nm]}, #0")
         ins.append(f"loop_{arg}:")
     elif uop == Ops.CAST:
-      if arg == BinaryOps.CMPLT:
+      if arg == Ops.CMPLT:
         if rtor[out.nm][0] == 's':
           mov_imm(0.0, 's0')
           mov_imm(1.0, 's1')
@@ -104,7 +104,7 @@ def specialize_to_arm64(fn_nm, asm):
         ins.append(f"sxtw {rtor[out.nm]}, w{rtor[vin[0].nm][1:]}")
     elif uop == Ops.ALU:
       if len(vin)==2 and vin[1].__class__ is int: mov_imm(vin[1], 'x15')
-      if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
+      if arg == Ops.MUL and out.dtype == dtypes.bool:
         ins.append(f"ands {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
       elif arg == TernaryOps.WHERE:
         ins.append(f"fcmp {rtor[vin[0].nm]}, #0.0" if rtor[vin[0].nm][0] == 's' else f"cmp {rtor[vin[0].nm]}, #0")
@@ -128,14 +128,14 @@ def specialize_to_arm64(fn_nm, asm):
           for i,k in enumerate(save_regs,1):
             ins.append(f"ldr {rtor[k]}, [sp, #{16*i}]")
           ins.append(f"add sp, sp, #{len(save_regs)*16}")
-      elif arg == BinaryOps.CMPLT:
+      elif arg == Ops.CMPLT:
         ins.append(f"{alu[arg]} {','.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}" if not dtypes.is_float(vin[0][1]) else f"fcmp {rtor[vin[0].nm]}, {rtor[vin[1].nm]}")
-      elif arg == BinaryOps.MOD:
+      elif arg == Ops.MOD:
         rhs = 'x15' if vin[1].__class__ is int else rtor[vin[1].nm]
         ins.append(f"udiv x14, {rtor[vin[0].nm]}, {rhs}")
         ins.append(f"msub {rtor[out.nm]}, x14, {rhs}, {rtor[vin[0].nm]}")
       else:
-        ins.append(f"{'f' if dtypes.is_float(vin[0][1]) else 's' if arg == BinaryOps.DIV else ''}{alu[arg]} {', '.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
+        ins.append(f"{'f' if dtypes.is_float(vin[0][1]) else 's' if arg == Ops.DIV else ''}{alu[arg]} {', '.join('x15' if v.__class__ is int else rtor[v.nm] for v in [out] + vin)}")
     elif uop == Ops.LOAD:
       if arg.__class__ in (int, float):
         mov_imm(arg, rtor[out.nm])

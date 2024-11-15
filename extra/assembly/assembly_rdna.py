@@ -3,7 +3,7 @@ from typing import Tuple, Set, Dict
 from tinygrad import dtypes
 from tinygrad.codegen.assembly import AssemblyCodegen, Register
 from tinygrad.codegen.kernel import Ops
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
+from tinygrad.ops import Ops, UnaryOps, TernaryOps
 from tinygrad.runtime.ops_gpu import ROCM_LLVM_PATH
 
 # ugh, is this really needed?
@@ -43,10 +43,10 @@ class RDNACodegen(AssemblyCodegen):
     s_cnt = 5  # s[0:1] is the address, s[2:4] is global_xyz
 
     dtype_to_rdnatype = {dtypes.float32: "f32", dtypes.int64: "i64", dtypes.int32: "i32", dtypes.uint64: "u64", dtypes.bool: "i32"}
-    alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", TernaryOps.MULACC: "fma",
-           BinaryOps.MAX: "max", UnaryOps.RECIP: "rcp",
+    alu = {Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "mul", TernaryOps.MULACC: "fma",
+           Ops.MAX: "max", UnaryOps.RECIP: "rcp",
            UnaryOps.NOOP: "mov", UnaryOps.SIN: "sin", UnaryOps.LOG2: "log", UnaryOps.EXP2: "exp",
-           BinaryOps.CMPLT: "cmp_lt"}
+           Ops.CMPLT: "cmp_lt"}
 
     pend_regs:Set[Register] = set()
     rtor:Dict[Register, str] = {}
@@ -115,7 +115,7 @@ class RDNACodegen(AssemblyCodegen):
         else:
           ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(out)}, {arg}")
       elif uop == Ops.ALU:
-        if arg in [BinaryOps.CMPLT]:
+        if arg in [Ops.CMPLT]:
           ins.append(f"{'s' if out.scalar else 'v'}_{alu[arg]}_{dtype_to_rdnatype[out.dtype]} {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
         else:
           alu_arg = alu[arg]
@@ -126,7 +126,7 @@ class RDNACodegen(AssemblyCodegen):
             for rr in zip(*[x.subregs() if x.dtype == dtypes.float.vec(4) else [x,x,x,x] for x in [out]+vin]):
               ins.append(f"{'s_' if rr[0].scalar else 'v_'}{alu_arg}_{dtype_to_rdnatype[rr[0].dtype]} {reg_out(rr[0])}, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in rr[1:])}")
           else:
-            ins.append(f"{'s_' if out.scalar else 'v_'}{alu_arg}_{dtype_to_rdnatype[out.dtype] if arg != UnaryOps.NOOP else 'b32'}{'_i24' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 and not out.scalar else ''} {reg_out(out)}, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
+            ins.append(f"{'s_' if out.scalar else 'v_'}{alu_arg}_{dtype_to_rdnatype[out.dtype] if arg != UnaryOps.NOOP else 'b32'}{'_i24' if arg == Ops.MUL and out.dtype != dtypes.float32 and not out.scalar else ''} {reg_out(out)}, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
       elif uop == Ops.LOAD:
         if out.scalar:
           # swap arg order

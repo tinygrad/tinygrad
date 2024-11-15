@@ -3,7 +3,7 @@ import struct
 from tinygrad.codegen.assembly import uops_to_asmstyle, AssemblyLanguage
 from tinygrad.codegen.kernel import Ops, UOp
 from tinygrad import dtypes
-from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
+from tinygrad.ops import Ops, UnaryOps, TernaryOps
 from tinygrad.runtime.ops_cuda import arch
 
 dtype_to_nvtype = {dtypes.float32: "f32", dtypes.float16: "f16", dtypes.int64: "s64", dtypes.int32: "s32", dtypes.int8: "s8", dtypes.bool: "pred", dtypes.uint64: "u64", dtypes.uint32: "u32", dtypes.uint16: "u16", dtypes.uint8: "u8", "bits16": "b16", dtypes.float64: "f64"}
@@ -31,8 +31,8 @@ class PTXLanguage(AssemblyLanguage):
 def specialize_to_ptx(lang, function_name):
   param_cnt = 0
   ins = []
-  alu = {BinaryOps.ADD: "add", BinaryOps.SUB: "sub", BinaryOps.MUL: "mul", BinaryOps.DIV: "div", BinaryOps.MAX: "max",
-         BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", UnaryOps.SQRT: "sqrt.approx",
+  alu = {Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "mul", Ops.DIV: "div", Ops.MAX: "max",
+         Ops.MOD: "rem", Ops.CMPLT: "setp.lt", UnaryOps.SQRT: "sqrt.approx",
          UnaryOps.NOOP: "mov", UnaryOps.NEG: "neg",
          UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
          TernaryOps.MULACC: "fma.rn", TernaryOps.WHERE: "selp"}
@@ -52,10 +52,10 @@ def specialize_to_ptx(lang, function_name):
       elif arg.startswith('lid'):
         ins.append(f"mov.u32 {out}, %tid.{'xyz'[int(arg[3:])]};")
     elif uop == Ops.ALU:
-      if arg == BinaryOps.MUL and out.dtype == dtypes.bool:
+      if arg == Ops.MUL and out.dtype == dtypes.bool:
         ins.append(f"and.pred {out}, {', '.join(str(x) for x in vin)};")
       else:
-        otype = vin[0].dtype if arg in [BinaryOps.CMPLT] else out.dtype
+        otype = vin[0].dtype if arg in [Ops.CMPLT] else out.dtype
         if arg == TernaryOps.WHERE:
           if vin[0].dtype == dtypes.bool:
             reg = vin[0]
@@ -63,7 +63,7 @@ def specialize_to_ptx(lang, function_name):
             reg = lang.newreg((vin[0], 'bool'), dtypes.bool)
             ins.append(f"setp.ne.{dtype_to_nvtype[vin[0].dtype]} {reg}, {'0f00000000' if dtypes.is_float(vin[0].dtype) else '0'}, {vin[0]};")
           vin = vin[1:] + [reg]
-        ins.append(f"{alu[arg]}{'.lo' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 else ''}{'.rn' if arg == BinaryOps.DIV and out.dtype == dtypes.float32 else ''}.{dtype_to_nvtype[otype]} {out}, {', '.join(str(x) for x in vin)};")
+        ins.append(f"{alu[arg]}{'.lo' if arg == Ops.MUL and out.dtype != dtypes.float32 else ''}{'.rn' if arg == Ops.DIV and out.dtype == dtypes.float32 else ''}.{dtype_to_nvtype[otype]} {out}, {', '.join(str(x) for x in vin)};")
     elif uop == Ops.LOAD:
       if arg.__class__ in (int, float):
         ins.append(f"mov.{dtype_to_nvtype[out.dtype]} {out}, {'0f'+float_to_hex(arg) if dtypes.is_float(out.dtype) else int(arg)};")

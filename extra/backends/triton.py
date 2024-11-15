@@ -1,8 +1,8 @@
 from typing import Dict, List, Final, Callable, DefaultDict
 from collections import defaultdict
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
+from tinygrad.ops import UnaryOps, TernaryOps, Op, Ops
 from tinygrad.helpers import DType, PtrDType, dtypes, ImageDType, DEBUG, getenv
-from tinygrad.codegen.kernel import  UOp, Ops
+from tinygrad.codegen.kernel import  UOp
 from triton.compiler import compile as triton_compile
 import linecache
 import math
@@ -64,11 +64,11 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     UnaryOps.SIN: lambda x,dtype: f"tl.sin({x})",
     UnaryOps.SQRT: lambda x,dtype: f"tl.sqrt({x})",
     UnaryOps.NEG: lambda x,dtype: f"-{x}",
-    BinaryOps.ADD: lambda x,y,dtype: f"({x}+{y})", BinaryOps.SUB: lambda x,y,: f"({x}-{y})",
-    BinaryOps.MUL: lambda x,y,dtype: f"({x}*{y})", BinaryOps.DIV: lambda x,y,: f"({x}/{y})" if y != '0.0' else f"{x}*tl.where({x}==0.0, float('nan'), float('inf'))",
-    BinaryOps.MAX: lambda x,y,dtype: f"tl.maximum({x},{y})",
-    BinaryOps.CMPLT: lambda x,y,dtype: f"({x}<{y})",
-    BinaryOps.MOD: lambda x,y,dtype: f"tl.abs({x})%tl.abs({y})*tl.where({x}<0,-1,1)",
+    Ops.ADD: lambda x,y,dtype: f"({x}+{y})", Ops.SUB: lambda x,y,: f"({x}-{y})",
+    Ops.MUL: lambda x,y,dtype: f"({x}*{y})", Ops.DIV: lambda x,y,: f"({x}/{y})" if y != '0.0' else f"{x}*tl.where({x}==0.0, float('nan'), float('inf'))",
+    Ops.MAX: lambda x,y,dtype: f"tl.maximum({x},{y})",
+    Ops.CMPLT: lambda x,y,dtype: f"({x}<{y})",
+    Ops.MOD: lambda x,y,dtype: f"tl.abs({x})%tl.abs({y})*tl.where({x}<0,-1,1)",
     TernaryOps.MULACC: lambda x,y,z,dtype: f"(({x}*{y})+{z})",
     TernaryOps.WHERE: lambda x,y,z,dtype: f"tl.where({x},{y},{z})",
   }
@@ -82,7 +82,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     elif uop == Ops.ALU:
       assert dtype is not None
       val = code_for_op[args](*[r[x] for x in vin])
-      if child_count[u] <=1 or dtypes.is_int(dtype): r[u] = int_div(*[r[x] for x in vin]) if args == BinaryOps.DIV and dtypes.is_int(dtype) else val
+      if child_count[u] <=1 or dtypes.is_int(dtype): r[u] = int_div(*[r[x] for x in vin]) if args == Ops.DIV and dtypes.is_int(dtype) else val
       else: kk(f"{ssa(u, 'alu')} = ({val})")
     elif uop == Ops.LOAD:
       assert dtype is not None

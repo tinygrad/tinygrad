@@ -1,6 +1,6 @@
 from typing import Tuple, List, NamedTuple, Any, Dict, Optional, Union, DefaultDict, cast
 from tinygrad.codegen.kernel import Ops, MemOp, UOp
-from tinygrad.ops import BinaryOps, UnaryOps
+from tinygrad.ops import Ops, UnaryOps
 from tinygrad.dtype import DType, dtypes
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
@@ -67,12 +67,12 @@ class AssemblyLanguage:
     return self.tor[key]
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.tor[self], NumNode: lambda self, ops, ctx: ctx.render_numnode(self.b),
-                 MulNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.MUL, self.a.render(ops, ctx), self.b),
-                 DivNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.DIV, self.a.render(ops, ctx), self.b),
-                 ModNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.MOD, self.a.render(ops, ctx), self.b),
-                 LtNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.CMPLT, self.a.render(ops, ctx), self.b, dtype=dtypes.bool),
-    SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.render_alu(BinaryOps.ADD, a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
-    AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.render_alu(BinaryOps.MUL, a, b.render(ops,ctx), dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
+                 MulNode: lambda self, ops, ctx: ctx.render_alu(Ops.MUL, self.a.render(ops, ctx), self.b),
+                 DivNode: lambda self, ops, ctx: ctx.render_alu(Ops.DIV, self.a.render(ops, ctx), self.b),
+                 ModNode: lambda self, ops, ctx: ctx.render_alu(Ops.MOD, self.a.render(ops, ctx), self.b),
+                 LtNode: lambda self, ops, ctx: ctx.render_alu(Ops.CMPLT, self.a.render(ops, ctx), self.b, dtype=dtypes.bool),
+    SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.render_alu(Ops.ADD, a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
+    AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.render_alu(Ops.MUL, a, b.render(ops,ctx), dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
   def addr_w_offset(self, args):
     assert isinstance(args, MemOp)
@@ -90,7 +90,7 @@ class AssemblyLanguage:
         self.ins.append(AssemblyInstruction(Ops.ALU, new_reg, [reg], UnaryOps.NOOP))
         reg = new_reg
       return self.tor[args.name], reg, off
-    reg = self.render_alu(BinaryOps.ADD, self.render_cast(reg, dtypes.uint64), self.tor[args.name], dtype=dtypes.uint64)
+    reg = self.render_alu(Ops.ADD, self.render_cast(reg, dtypes.uint64), self.tor[args.name], dtype=dtypes.uint64)
     return reg, None, off
 
 def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
@@ -125,8 +125,8 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
       if args[1] not in ["global", "local", "global+local"]:
         for var in reversed(args[0]):
           if not isinstance(var, NumNode):  # TODO: why is this coming through?
-            lang.ins.append(AssemblyInstruction(Ops.ALU, lang.tor[var], [lang.tor[var], 1], BinaryOps.ADD))
-            pred = lang.render_alu(BinaryOps.CMPLT, lang.tor[var], var.max+1, dtypes.bool)
+            lang.ins.append(AssemblyInstruction(Ops.ALU, lang.tor[var], [lang.tor[var], 1], Ops.ADD))
+            pred = lang.render_alu(Ops.CMPLT, lang.tor[var], var.max+1, dtypes.bool)
             lang.ins.append(AssemblyInstruction(Ops.COND_BRANCH, None, [pred], ("$loop_"+var.expr, True)))
       elif args[1] == "global+local":
         for i, var in enumerate(reversed(args[0])):
@@ -142,17 +142,17 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
     elif uop == Ops.ALU:
       out = lang.newreg(u, dtype) if u not in lang.tor else lang.tor[u]
       # this is the only thing that can violate SSA
-      if args in [BinaryOps.CMPLT]:
+      if args in [Ops.CMPLT]:
         pred_reg = lang.newreg((u, 'pred'), dtype=dtypes.bool)
         lang.ins.append(AssemblyInstruction(Ops.ALU, pred_reg, [lang.tor[x] for x in vin], args))
         lang.ins.append(AssemblyInstruction(Ops.CAST, out, [pred_reg], args))
-      elif args == BinaryOps.DIV and lang.no_div:
+      elif args == Ops.DIV and lang.no_div:
         tmp = lang.newreg((u, "rcp"))
         lang.ins.append(AssemblyInstruction(Ops.ALU, tmp, [lang.tor[vin[1]]], UnaryOps.RECIP))
-        lang.ins.append(AssemblyInstruction(Ops.ALU, out, [lang.tor[vin[0]], tmp], BinaryOps.MUL))
+        lang.ins.append(AssemblyInstruction(Ops.ALU, out, [lang.tor[vin[0]], tmp], Ops.MUL))
       elif args == UnaryOps.SIN and lang.sin_is_sin2pi:
         tmp = lang.newreg((u, "2pi"))
-        lang.ins.append(AssemblyInstruction(Ops.ALU, tmp, [lang.tor[vin[0]], 1/(math.pi*2)], BinaryOps.MUL))
+        lang.ins.append(AssemblyInstruction(Ops.ALU, tmp, [lang.tor[vin[0]], 1/(math.pi*2)], Ops.MUL))
         lang.ins.append(AssemblyInstruction(Ops.ALU, out, [tmp], args))
       else:
         lang.ins.append(AssemblyInstruction(Ops.ALU, out, [lang.tor[x] for x in vin], args))

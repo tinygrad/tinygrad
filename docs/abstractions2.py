@@ -39,7 +39,7 @@ DEVICE = "CLANG"   # NOTE: you can change this!
 import struct
 from tinygrad.dtype import dtypes
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import BinaryOps, MetaOps, UOp, Ops
+from tinygrad.ops import MetaOps, UOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # allocate some buffers + load in values
@@ -89,7 +89,7 @@ del a.srcs
 del b.srcs
 
 # describe the computation
-out = a.alu(BinaryOps.ADD, b)
+out = a.alu(Ops.ADD, b)
 
 # schedule the computation as a list of kernels
 sched = create_schedule([out])
