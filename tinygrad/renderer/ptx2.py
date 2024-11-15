@@ -1,11 +1,11 @@
 from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable, Tuple
 import struct
-from collections import defaultdict, OrderedDict
+from collections import defaultdict
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Ops, UOp, PatternMatcher, UPat, GroupOp
-from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
+from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.helpers import prod, strip_parens, flatten
+from tinygrad.helpers import prod, flatten
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -55,7 +55,7 @@ ptx_matcher = PatternMatcher([
 ])
 
 def mem_type(x: UOp): return 'shared' if x.src[0].op is Ops.DEFINE_LOCAL or any(_x.op is Ops.DEFINE_LOCAL for _x in x.src[0].parents) else 'global'
-  
+
 def render_store(ctx: Renderer, x: UOp, bidx: UOp, var: UOp, pred: UOp=None):
   gate = f"@{ctx.r[pred]} " if pred is not None and pred.op is not Ops.IF else ""
   return [f"{gate}st.{mem_type(bidx)}.v{var.dtype.count}.{ctx.mem_types[var.dtype.scalar()]} [{ctx.r[bidx]}+0], {{{', '.join(ctx.r[var])}}};"] \
@@ -70,18 +70,18 @@ def render_wmma(ctx: Renderer, x: UOp):
   for vv in x.src[:2]:
     for i in range(0, len(ctx.r[vv]), 2):
       yield f"mov.b32 {ctx.extra[x][_i]}, {{{', '.join(ctx.r[vv][i:i+2])}}};"
-      _i += 1 
+      _i += 1
   yield f'mma.sync.aligned.m{M}n{N}k{K}.row.col.f32.{dt_map[dtype_in]}.{dt_map[dtype_in]}.f32{" "*12}' +\
   f'{{{", ".join(ctx.r[x])}}}, {{{", ".join(wmma[:n_operands[0]])}}}, {{{", ".join(wmma[-n_operands[1]:])}}}, {{{", ".join(ctx.r[x.src[2]])}}};'
 
 def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.is_float(b) else '.rn' if dtypes.is_float(a) and \
   (a.itemsize < b.itemsize or dtypes.is_int(b) or b == dtypes.bool) else ''
-  
+
 string_rewrite = PatternMatcher([
   (UPat(Ops.CONST, name="x", dtype=dtypes.bool), lambda ctx, x: f"setp.ne.s16 {ctx.r[x]}, {render_val(x.arg, x.dtype)}, 0;"),
   (UPat(Ops.CONST, name="x"), lambda ctx, x: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.arg, x.dtype)};"),
   (UPat(Ops.STORE, name="x", src=(UPat.var('bidx'), UPat.var("var"), UPat.var("pred")), allow_any_len=True), render_store),
-  (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"mov.u32 %{x.arg[0]}, %{'ctaid' if x.arg[0][0] == 'g' else 'tid'}.{chr(120+int(x.arg[0][-1]))};"), 
+  (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"mov.u32 %{x.arg[0]}, %{'ctaid' if x.arg[0][0] == 'g' else 'tid'}.{chr(120+int(x.arg[0][-1]))};"),
   (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx, x: f"ld.param.{ctx.types[dtypes.ulong]} {ctx.r[x]}, [data{x.arg}+0];"),
   (UPat((BinaryOps.CMPLT, BinaryOps.CMPNE), name="x"),
   lambda ctx, x: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], x.src[0].dtype, ctx.types[x.src[0].dtype])),
@@ -188,11 +188,11 @@ class PTXRenderer(Renderer):
       if uop is Ops.VECTORIZE:
         r[u] = [cast(str,r[x]) for x in src]
         continue
-      elif uop is Ops.GEP:
+      if uop is Ops.GEP:
         assert len(u.arg) == 1
         r[u] = r[src[0]][u.arg[0]]
         continue
-      elif uop in {Ops.CAST, Ops.BITCAST}:
+      if uop in {Ops.CAST, Ops.BITCAST}:
         if src[0].dtype == dtype or isinstance(src[0].dtype, PtrDType):
           r[u] = r[src[0]]
           continue
