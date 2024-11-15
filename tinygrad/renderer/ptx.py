@@ -138,7 +138,6 @@ class PTXRenderer(Renderer):
   tensor_cores = [tc for tc in CUDARenderer.tensor_cores if tc.dtype_in == dtypes.half]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
-  string_rewrite = string_rewrite
   def __init__(self, arch:str, device="CUDA"):
     self.device, self.tensor_cores, self.arch = device, PTXRenderer.tensor_cores if int(arch[3:]) >= 80 else [], arch
   def __reduce__(self): return self.__class__, (self.arch, self.device)
@@ -221,7 +220,7 @@ class PTXRenderer(Renderer):
       elif uop is Ops.WMMA:
         self.extra[u] = [ssa("wmma", dtype="b32") for vv in src[:2] for i in range(0, len(r[vv]), 2)]
         r[u] = [ssa("wmma", dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
-      if (l:=cast(Union[str, List[str]], self.string_rewrite.rewrite(u, ctx=self))) is None:
+      if (l:=cast(Union[str, List[str]], string_rewrite.rewrite(u, ctx=self))) is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       kernel.extend([l] if isinstance(l, str) else l)
 
