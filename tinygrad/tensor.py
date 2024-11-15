@@ -2389,7 +2389,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     flat_spatial, (N, C, H, W), (H_out, W_out) = self.flatten(2), self.shape, grid.shape[1:-1]
     # Scale grid coordinates from [-1, 1] to [0, dim-1] if align corners else from [-1, 1] to [-0.5, dim-0.5]
-    x,y = ((grid[..., i] + 1) * (d - 1) / 2  if align_corners else ((grid[..., i] + 1) * d) / 2 - 0.5 for i,d in enumerate((W,H)))
+    x,y = ((grid[..., i] + 1) * (d - 1) / 2 if align_corners else ((grid[..., i] + 1) * d) / 2 - 0.5 for i,d in enumerate((W,H)))
     if mode == "nearest": return flat_spatial.gather(2, (y.round() * W + x.round()).reshape(N, 1, -1).expand(-1, C, -1)).reshape(N, C, H_out, W_out)
     # linear
     (xs, ys), ws = tuple((c.floor(), c.ceil()) for c in (x,y)), tuple((c - c.floor()).unsqueeze(1) for c in (x,y))

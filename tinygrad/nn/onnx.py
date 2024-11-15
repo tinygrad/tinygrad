@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Dict, Tuple, Sequence, Callable, Union, Optional, List, cast, Literal, Any
 import functools, io, math, inspect
 from tinygrad.tensor import Tensor, Device, _broadcast_shape, ConstType
-from tinygrad.helpers import getenv, CI, OSX, prod, flatten, make_tuple
+from tinygrad.helpers import getenv, prod, flatten, make_tuple
 from tinygrad.dtype import dtypes, DType
 from tinygrad.device import is_dtype_supported
 from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
@@ -253,7 +253,7 @@ def dispatch(op:str):
     "LogSoftmax": "log_softmax", "Not": "logical_not", "Tile": "repeat", "Range": "arange", "NegativeLogLikelihoodLoss": "nll_loss", "Concat": "cat",
     "ReduceMax": "max", "ReduceMin": "min", "ReduceSum": "sum", "ReduceMean": "mean", "ReduceProd": "prod", "GlobalAveragePool": "mean",
     "GlobalMaxPool": "max", "Conv": "conv2d", "Flatten": "reshape", "Transpose": "permute", "Pad": "pad2d", "Slice": "__getitem__",
-    "AffineGrid" :"affine_grid", "GridSample": "grid_sample",
+    "AffineGrid":"affine_grid", "GridSample": "grid_sample",
     # "SpaceToDepth": "rearrange", "DepthToSpace": "rearrange",
     **{n:n.lower() for n in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Sinh", "Cosh", "Tanh",
     "Asinh", "Acosh", "Atanh", "Relu", "PRelu", "Elu", "Celu", "IsNaN", "IsInf",
