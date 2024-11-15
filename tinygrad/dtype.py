@@ -116,6 +116,8 @@ class dtypes:
   uint32: Final[DType] = DType.new(6, 4, "unsigned int", 'I')
   int64: Final[DType] = DType.new(7, 8, "long", 'q')
   uint64: Final[DType] = DType.new(8, 8, "unsigned long", 'Q')
+  fp8_e4m3: Final[DType] = DType.new(8, 1, "fp8_e4m3", None)
+  fp8_e5m2: Final[DType] = DType.new(9, 1, "fp8_e5m2", None)
   float16: Final[DType] = DType.new(9, 2, "half", 'e')
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
   bfloat16: Final[DType] = DType.new(10, 2, "__bf16", None)
@@ -136,7 +138,7 @@ class dtypes:
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
 
-  floats = (float16, bfloat16, float32, float64)
+  floats = (float16, bfloat16, float32, float64, fp8_e4m3, fp8_e5m2)
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints

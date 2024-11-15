@@ -143,7 +143,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
       if dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
         else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
-      if dtype == dtypes.bfloat16: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtypes.bfloat16).lazydata
+      if dtype in [dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2]:
+        data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtype).lazydata
       else: data = _frompy(data, dtype)
     elif data is None: data = _metaop(MetaOps.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif str(type(data)) == "<class 'numpy.ndarray'>":
@@ -315,7 +316,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     import numpy as np
-    if self.dtype == dtypes.bfloat16: return self.float().numpy()
+    if self.dtype in [dtypes.bfloat16, dtypes.fp8_e4m3, dtypes.fp8_e5m2]: return self.float().numpy()
     assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
@@ -3424,7 +3425,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
   def is_floating_point(self) -> bool:
     """
     Returns `True` if the tensor contains floating point types, i.e. is one of `dtype.float64`, `dtype.float32`,
-    `dtype.float16`, `dtype.bfloat16`.
+    `dtype.float16`, `dtype.bfloat16`, `dtype.fp8_e4m3`, `dtype.fp8_e5m2`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([8, 9], dtype=dtypes.float32)
