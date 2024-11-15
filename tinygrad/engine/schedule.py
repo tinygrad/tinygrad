@@ -194,7 +194,7 @@ to_si = PatternMatcher([
 # ** fusion
 
 lazy = PatternMatcher([
-  (UPat(Ops.BUFFER, name="b").view(name="st"), lambda ctx,b,st: UOp(Ops.PRELOAD, st.dtype, (b, st.replace(src=())))),
+  (UPat(Ops.BUFFER, name="b").view(name="st"), lambda ctx,b,st: UOp(Ops.PRELOAD, st.dtype, (b, st.st.to_uop()))),
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
 ])
 
