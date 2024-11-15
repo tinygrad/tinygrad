@@ -230,8 +230,7 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 def uval(u:UOp) -> UOp:
   assert u.op is Ops.LOAD and len(u.src) == 3 and u.src[2].op is Ops.STORE, f"must be a LOAD of STORE {u}"
-  if (to_store:=u.src[2].src[2]).op is Ops.CONTIGUOUS and to_store.src[0].base.op is not Ops.LOAD: return to_store.src[0]
-  return to_store
+  return to_store.src[0] if (to_store:=u.src[2].src[2]).is_contiguous_base else to_store
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], realizes:Dict[UOp, UOp],
                      reduce_for_op:Dict[UOp, UOp], group:Dict[UOp, None], cache:Dict[Tuple[UOp, ShapeTracker], None]) -> None:
@@ -318,7 +317,7 @@ def group_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp,
 
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
-    if any((tr_val:=allbufs[tr].src[2].src[2]).op is Ops.CONTIGUOUS and tr_val.src[0].op is not Ops.LOAD for tr in group): continue
+    if any(allbufs[tr].src[2].src[2].is_contiguous_base for tr in group): continue
     kernel_children = {c for tr in group for c in children[tr] if uval(allbufs[c]).op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group: del realizes[tr]
