@@ -348,12 +348,12 @@ def UPatSrc(*args, **kwargs): return UPat(Ops.VIEW, src=(UPat(Ops.BUFFER, name="
 do_realize = PatternMatcher([
   # always realize meta ops
   (UPatSrc((Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta)), realize),
-# don't realize image to image casts
+  # don't realize image to image casts
   (UPatSrc(Ops.CAST, src=(UPat(Ops.LOAD, name="x"),), dtype=dtypes.float).view(name="v"), lambda ctx,x,v,**kwargs: r.src[2].view(v.st)
    if (r:=ctx.get(b:=x.buf_uop)) is not None and r.op is Ops.STORE and isinstance(b.dtype, ImageDType) and r.src[2].op not in GroupOp.Meta else None),
-# realize before expand or unsafe pad ops
+  # realize before expand or unsafe pad ops
   (UPatSrc().view(name="view"), realize_view),
-# realize before COPY or BUFFER_VIEW
+  # realize before COPY or BUFFER_VIEW
   (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.var("u"), UPat.any(UPatSrc(), UPatSrc().view(name="view"))), name="root"),
    lambda ctx,root,u,view=None,**kwargs: root.replace(src=(u, realize(ctx,**kwargs) if view is None else realize(ctx,**kwargs).view(view.st))),),
 ])
