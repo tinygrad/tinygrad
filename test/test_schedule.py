@@ -13,7 +13,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, Ops, graph_rewrite, track_rewrites
+from tinygrad.ops import BinaryOps, UOp, UnaryOps, Ops, graph_rewrite, track_rewrites
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, view_right, view_left
@@ -1530,7 +1530,7 @@ class TestIndexing(unittest.TestCase):
   def test_arange_view_op(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
     assert isinstance(a.lazydata, LazyBuffer)
-    self.assertIs(a.lazydata.base.op, MetaOps.BUFFER_VIEW)
+    self.assertIs(a.lazydata.base.op, Ops.BUFFER_VIEW)
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
@@ -1538,7 +1538,7 @@ class TestIndexing(unittest.TestCase):
   def test_arange_shrink_copy(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).to("CLANG")
     assert isinstance(a.lazydata, LazyBuffer)
-    self.assertIs(a.lazydata.base.op, MetaOps.COPY)
+    self.assertIs(a.lazydata.base.op, Ops.COPY)
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
@@ -1546,7 +1546,7 @@ class TestIndexing(unittest.TestCase):
   def test_arange_expand_copy(self):
     a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).to("CLANG")
     assert isinstance(a.lazydata, LazyBuffer)
-    self.assertIs(a.lazydata.base.op, MetaOps.COPY)
+    self.assertIs(a.lazydata.base.op, Ops.COPY)
     self.assertIs(a.lazydata.base.srcs[0].base.op, BinaryOps.ADD)
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), [[[0, 0], [1, 1]], [[2, 2], [3, 3]]])
