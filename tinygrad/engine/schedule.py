@@ -67,7 +67,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
   # everything else has BUFFER
   ubuf = ctx.buf_uops.setdefault(b:=buf.buffer, UOp(Ops.BUFFER, b.dtype.ptr(), (), (len(ctx.buf_uops), (b.device, b.size, b.dtype))))
   # if the buffer is already realized we just load it
-  if buf.is_realized(): return UOp(Ops.VIEW, buf.dtype, (ubuf,), buf.st)
+  if buf.is_realized(): return UOp(Ops.VIEW, dtype, (ubuf,), buf.st)
   # everything else needs sources
   src = tuple(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in buf.srcs)
   if buf.op in {Ops.REDUCE_AXIS, Ops.CONTIGUOUS}: ret = UOp(buf.op, dtype, src, buf.arg)
@@ -193,7 +193,10 @@ to_si = PatternMatcher([
 
 # ** fusion
 
-lazy = PatternMatcher([(UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),])
+lazy = PatternMatcher([
+  (UPat(Ops.BUFFER, name="b").view(name="st"), lambda ctx,b,st: UOp(Ops.PRELOAD, st.dtype, (b, st.replace(src=())))),
+  (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
+])
 
 multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.get(b)),])
 
