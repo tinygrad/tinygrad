@@ -1,7 +1,7 @@
 from typing import DefaultDict, Dict, List, Union, Optional, cast, Callable, Tuple
 import struct
 from collections import defaultdict
-from tinygrad.ops import BinaryOps, TernaryOps, Ops, UOp, PatternMatcher, UPat, GroupOp
+from tinygrad.ops import BinaryOps, Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, ConstType
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -27,12 +27,12 @@ asm_for_op: Dict[Ops, Callable] = {
   BinaryOps.IDIV: lambda d,a,b,dt,name: f"div.{name} {d}, {a}, {b};",
   BinaryOps.MAX: lambda d,a,b,dt,name: f"max.{name} {d}, {a}, {b};", BinaryOps.MOD: lambda d,a,b,dt,name: f"rem.{name} {d}, {a}, {b};",
   BinaryOps.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};", BinaryOps.CMPNE: lambda d,a,b,dt,name: f"setp.ne.{name} {d}, {a}, {b};",
-  TernaryOps.MULACC: lambda d,a,b,c,dt,name: f"{'fma.rn' if dtypes.is_float(dt) else 'mad.lo'}.{name} {d}, {a}, {b}, {c};",
-  TernaryOps.WHERE: lambda d,a,b,c,dt,name:
+  Ops.MULACC: lambda d,a,b,c,dt,name: f"{'fma.rn' if dtypes.is_float(dt) else 'mad.lo'}.{name} {d}, {a}, {b}, {c};",
+  Ops.WHERE: lambda d,a,b,c,dt,name:
     f"@{a} mov.{name} {d}, {b};\n@!{a} mov.{name} {d}, {c};" if name == "pred" else f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
 }
 
-supports_half: List[Ops] = [Ops.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, TernaryOps.WHERE]
+supports_half: List[Ops] = [Ops.EXP2, BinaryOps.ADD, BinaryOps.MUL, BinaryOps.MAX, BinaryOps.CMPLT, Ops.WHERE]
 doesnt_support_half: Tuple[Ops, ...] = tuple(op for op in asm_for_op.keys() if op not in supports_half)
 ptx_matcher = PatternMatcher([
   # bool CMPNE is XOR, bool CMPLT is XOR+AND (universal makes this slow, this is for renderer only)

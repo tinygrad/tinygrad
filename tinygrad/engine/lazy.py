@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Any, Tuple, List, get_args
 from tinygrad.dtype import dtypes, DType, ConstType, to_dtype, ImageDType
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, SPLIT_REDUCEOP, LAZYCACHE
-from tinygrad.ops import MetaOps, BinaryOps, TernaryOps, exec_alu, python_alu
+from tinygrad.ops import MetaOps, BinaryOps, exec_alu, python_alu
 from tinygrad.ops import identity_element, MathTrait, resolve, UOp, sint, GroupOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
@@ -149,10 +149,10 @@ class LazyBuffer(MathTrait):
         srcs.append(root._view(s.base.contiguous_child[1]))
       else:
         srcs.append(s)
-    if not all_same(dts:=[x.dtype.base for x in (srcs[1:] if op is TernaryOps.WHERE else srcs)]):
+    if not all_same(dts:=[x.dtype.base for x in (srcs[1:] if op is Ops.WHERE else srcs)]):
       raise AssertionError(f"all dtypes must match {dts} on {op}")
     assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
-    if op is TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
+    if op is Ops.WHERE: assert srcs[0].dtype == dtypes.bool, "Ops.WHERE must have the first arg be bool"
 
     out_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPNE) else srcs[-1].dtype
 

@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Dict, List, TYPE_CHECKING, Any, DefaultDict,
 import functools, itertools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
-from tinygrad.ops import BinaryOps, TernaryOps, UOp, Ops, UPat, PatternMatcher, symbolic_flat, symbolic_simple
+from tinygrad.ops import BinaryOps, UOp, Ops, UPat, PatternMatcher, symbolic_flat, symbolic_simple
 from tinygrad.ops import graph_rewrite, split_uop, uop_given_valid, parse_valid, is_increasing, simplify_valid, GroupOp
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
@@ -138,8 +138,8 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
     if BinaryOps.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(BinaryOps.SUB, y))]
-  if TernaryOps.MULACC in ops:
-    pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(TernaryOps.MULACC, b, c))]
+  if Ops.MULACC in ops:
+    pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
   return PatternMatcher(pat)
 
 # ***** threefry *****
