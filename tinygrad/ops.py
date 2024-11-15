@@ -762,7 +762,7 @@ spec = PatternMatcher([
   (UPat(Ops.SPECIAL, src=()), lambda: True),
 
   # TODO: confirm the args of both of these are shapetrackers
-  (UPat(Ops.VIEW, src=()), lambda: True),
+  (UPat(Ops.VIEW, dtypes.void, src=()), lambda: True),
   (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"), lambda x,src: src.op is not Ops.STORE and x.dtype == src.dtype),
 
   (UPat(Ops.VALID, dtypes.bool, (UPat(Ops.VIEW),)), lambda: True),
