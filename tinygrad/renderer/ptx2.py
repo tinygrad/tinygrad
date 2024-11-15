@@ -56,12 +56,12 @@ ptx_matcher = PatternMatcher([
 
 def mem_type(x: UOp): return 'shared' if x.src[0].op is Ops.DEFINE_LOCAL or any(_x.op is Ops.DEFINE_LOCAL for _x in x.src[0].parents) else 'global'
 
-def render_store(ctx: Renderer, x: UOp, bidx: UOp, var: UOp, pred: UOp=None):
+def render_store(ctx: "PTXRenderer", x: UOp, bidx: UOp, var: UOp, pred: Optional[UOp]=None):
   gate = f"@{ctx.r[pred]} " if pred is not None and pred.op is not Ops.IF else ""
   return [f"{gate}st.{mem_type(bidx)}.v{var.dtype.count}.{ctx.mem_types[var.dtype.scalar()]} [{ctx.r[bidx]}+0], {{{', '.join(ctx.r[var])}}};"] \
     if var.dtype.count > 1 else [f"{gate}st.{mem_type(bidx)}.{ctx.mem_types[var.dtype]} [{ctx.r[bidx]}+0], {ctx.r[var]};"]
 
-def render_wmma(ctx: Renderer, x: UOp):
+def render_wmma(ctx: "PTXRenderer", x: UOp):
   _, (N, M, K), dtype_in, _, _, _, upcast_axes, _ = x.arg
   n_operands = tuple(prod(sz for _, sz in upc)*dtype_in.itemsize//4 for upc in upcast_axes[:2])
   wmma = ctx.extra[x]
@@ -221,7 +221,7 @@ class PTXRenderer(Renderer):
       elif uop is Ops.WMMA:
         self.extra[u] = [ssa("wmma", dtype="b32") for vv in src[:2] for i in range(0, len(r[vv]), 2)]
         r[u] = [ssa("wmma", dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
-      if (l:=self.string_rewrite.rewrite(u, ctx=self)) is None:
+      if (l:=cast(Union[str, List[str]], self.string_rewrite.rewrite(u, ctx=self))) is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       kernel.extend([l] if isinstance(l, str) else l)
 
