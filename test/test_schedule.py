@@ -17,7 +17,7 @@ from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, Ops, graph_rewrite, 
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, view_right, view_left
-from tinygrad.engine.realize import CompiledRunner, run_schedule
+from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
 from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
 from test.helpers import ast_const, timeit
 from extra.models.llama import precompute_freqs_cis
@@ -41,9 +41,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_pr
   # test the (sink) ops linearize
   for s in sched:
     if s.ast.op is not Ops.SINK: continue
-    l = Kernel(s.ast)
-    l.hand_coded_optimizations()
-    l.to_program()
+    get_runner(s.bufs[0].device, s.ast)
   return sched
 
 def _realize_weights(m):
