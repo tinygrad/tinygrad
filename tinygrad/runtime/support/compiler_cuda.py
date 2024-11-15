@@ -63,7 +63,7 @@ class CUDACompiler(Compiler):
 class NVCompiler(CUDACompiler):
   def __init__(self, arch:str): super().__init__(arch, cache_key="nv")
   def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize)
-  def disassemble(self, lib: bytes): cubin_disassemble(lib)
+  def disassemble(self, lib:bytes): cubin_disassemble(lib)
 
 class PTXCompiler(CUDACompiler):
   def __init__(self, arch:str, cache_key="ptx"): super().__init__(arch, cache_key=cache_key)
