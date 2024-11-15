@@ -84,7 +84,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
   allbufs[ubuf] = ret
   if buf.op is Ops.REDUCE_AXIS and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[ubuf] = None
   for x in src:
-    if x.base.op is Ops.LOAD: children[x.base.buf_uop][ubuf] = None
+    if len(x.base.src) == 2: children[x.base.buf_uop][ubuf] = None
   return ret
 
 # **** AST graph rewrite
@@ -230,8 +230,8 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 def uval(u:UOp) -> UOp:
   assert u.op is Ops.VIEW and len(u.src) == 2 and u.src[0].op is Ops.BUFFER, f"must be view of BUFFER {u}"
+  if (to_store:=u.src[1]).op is Ops.CONTIGUOUS and not (to_store.src[0].base.op is Ops.VIEW and len(to_store.src) == 2): return to_store.src[0]
   return u.src[1]
-
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], realizes:Dict[UOp, UOp],
                      reduce_for_op:Dict[UOp, UOp], group:Dict[UOp, None], cache:Dict[Tuple[UOp, ShapeTracker], None]) -> None:
@@ -248,7 +248,7 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Di
     # max one reduceop per kernel
     if (tr_next_uop:=uval(allbufs[tr_next]).base).op is Ops.REDUCE_AXIS: return group.setdefault(r)
     # can only fuse contiguous
-    if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if x.base.op is Ops.LOAD and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
+    if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if len(x.base.src) == 2 and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, allbufs, realizes, reduce_for_op, group, cache)
 
 def get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp],
@@ -296,7 +296,7 @@ def group_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp,
         st = unwrap(r_uop.st)
         while len(children[tr]) == 1:
           tr_next_uop = uval(allbufs[(tr_next:=next(iter(children[tr])))])
-          st_childs = dedup([unwrap(x.st) for x in tr_next_uop.src if x.base.op is Ops.LOAD and x.base.buf_uop is tr])
+          st_childs = dedup([unwrap(x.st) for x in tr_next_uop.src if len(x.base.src) == 2 and x.base.buf_uop is tr])
           if len(st_childs) > 1: break
           if st.size != st_childs[0].size: break
           st = st + st_childs[0]

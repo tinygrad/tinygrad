@@ -343,7 +343,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop movement ops ***
 
   @property
-  def base(self): return self.src[0] if self.op is Ops.VIEW and len(self.src) != 0 else self
+  def base(self): return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
   def view(self, st:ShapeTracker):
     assert self.op is not Ops.STORE, "VIEW of STORE is invalid, STORE is always base"
     return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
@@ -353,7 +353,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def buf_uop(self) -> UOp:
-    assert self.op in {*GroupOp.Buffer, Ops.ASSIGN} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
+    assert self.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
     return self.src[0]
 
   # *** uop Variable stuff ***

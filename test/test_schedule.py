@@ -17,7 +17,7 @@ from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, Ops, graph_rewrite, 
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, view_right, view_left
-from tinygrad.engine.realize import CompiledRunner, run_schedule
+from tinygrad.engine.realize import CompiledRunner, lower_schedule, run_schedule
 from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
 from test.helpers import ast_const, timeit
 from extra.models.llama import precompute_freqs_cis
@@ -38,12 +38,8 @@ def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_pr
         print("kernel", i+1)
         print(s.ast)
     raise KernelCountException(f"{len(sched)=} != {allowed}")
-  # test the (sink) ops linearize
-  for s in sched:
-    if s.ast.op is not Ops.SINK: continue
-    l = Kernel(s.ast)
-    l.hand_coded_optimizations()
-    l.to_program()
+  # lower a copy of the schedule
+  lower_schedule(sched.copy())
   return sched
 
 def _realize_weights(m):
@@ -311,8 +307,7 @@ class TestSchedule(unittest.TestCase):
     img = Tensor.empty(64,64)
     x = (img.sum(0) + img.sum(1))
     out = x.relu()
-    del x    # is 3 without this
-    check_schedule(out, 2)
+    run_schedule(check_schedule(out, 3))
 
   #@unittest.skip("failing in old lazy")
   def test_push_permute_through_reshape(self):
@@ -869,8 +864,8 @@ class TestSchedule(unittest.TestCase):
   # multireduce spec
   def test_multimatmul_fusion(self):
     Tensor.manual_seed(0)
-    a,b = Tensor.randn(4, 64).realize(), Tensor.rand(64,8).realize()
-    c,d = Tensor.randn(4, 64).realize(), Tensor.rand(64,8).realize()
+    a,b = Tensor.randn(4, 16).realize(), Tensor.rand(16, 8).realize()
+    c,d = Tensor.randn(4, 16).realize(), Tensor.rand(16, 8).realize()
     out = a@b + c@d
     # run_schedule(check_schedule(out, 1))
     run_schedule(check_schedule(out, 2))
