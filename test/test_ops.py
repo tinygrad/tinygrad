@@ -2047,6 +2047,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3, 3)], lambda x: x.repeat_interleave(6))
     helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, 1))
     helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, 0))
+    helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, -1))
+    helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, -2))
 
   def test_simple_repeat(self):
     repeats = [3, 3, 4]
