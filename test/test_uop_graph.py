@@ -314,7 +314,8 @@ class TestUOpGraph(unittest.TestCase):
   def test_wmma_vectorize_no_fold(self):
     for i in [4, 8]:
       vec = UOp.vectorize(*[UOp.const(dtypes.half, 0.0) for _ in range(i//2)],
-                          *[UOp(Ops.DEFINE_VAR, dtypes.half, arg=(f'tmp{j}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1))) for j in range(i//2)])
+                          *[UOp(Ops.DEFINE_VAR, dtypes.half, arg=(f'tmp{j}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
+                            for j in range(i//2)])
       var = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       acc = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (vec, var, acc))
@@ -592,24 +593,21 @@ class TestExpander(unittest.TestCase):
 class TestLoadStoreFolder(unittest.TestCase):
   def test_simple_load_fold(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
-    load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i)),)) for i in range(4)]
-    sink = UOp.vectorize(*load)
+    sink = UOp.vectorize(*[UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i)),)) for i in range(4)])
 
     sink = float4_rewrite(sink.sink())
     assert len([x for x in sink.sparents if x.op is Ops.LOAD]) == 1
 
   def test_two_load_fold(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
-    load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i)),)) for i in range(8)]
-    sink = UOp.vectorize(*load)
+    sink = UOp.vectorize(*[UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i)),)) for i in range(8)])
     sink = float4_rewrite(sink.sink())
     assert len([x for x in sink.sparents if x.op is Ops.LOAD]) == 2
 
   def test_simple_load_fold_gated(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
     gate = UOp(Ops.DEFINE_VAR, dtypes.bool)
-    load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i), gate),)) for i in range(4)]
-    sink = UOp.vectorize(*load)
+    sink = UOp.vectorize(*[UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i), gate),)) for i in range(4)])
     sink = float4_rewrite(sink.sink())
     assert len([x for x in sink.sparents if x.op is Ops.LOAD]) == 1
     single_load = [x for x in sink.sparents if x.op is Ops.LOAD][0]
