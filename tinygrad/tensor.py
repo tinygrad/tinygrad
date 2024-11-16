@@ -1207,8 +1207,13 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-
+    print(self.numpy())
     res = self.realize()._getitem(indices, v)
+    print("here")
+    print("here")
+    print("here")
+    print("here")
+    print(res.numpy())
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.lazydata is not self.lazydata:
       self.assign(res).realize()
@@ -1234,6 +1239,26 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     index = index.to(self.device)
     x = self.shrink(tuple((0, i) if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return ((index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * x).sum(-1, acc_dtype=self.dtype)
+
+  def scatter(self, dim:int, index:Tensor, src:Union[Tensor, ConstType], reduce:Union[None, Literal['multiply'], Literal['add']] = None):
+    """
+    haaaaaaacks!
+    """
+    index = index.to(self.device)
+    dim = self._resolve_dim(dim)
+    if not isinstance(src, Tensor): src = Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
+    else: src = src.shrink(tuple((0, sh) for sh in index.shape))
+    mask, x = (index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)).transpose(-1, dim), self.unsqueeze(-1)
+    mask = mask.pad(tuple((0, max(xs-ms, 0)) for ms, xs in zip(mask.shape, x.shape)))
+    src = src.unsqueeze(-1).transpose(-1, dim).expand(tuple(ms if i == dim else None for i,ms in enumerate(x.shape)))
+    src = src.pad(tuple((0, max(xs-ss, 0)) for ss, xs in zip(src.shape, x.shape)))
+    if reduce is None:
+      src = functools.reduce(lambda x,y: y.where(y, x), (src*mask).split(1, -1))   # WOAHHHH this is how he did it, man im retardeed
+      return mask.any(-1).where(src.squeeze(), x.squeeze())
+    if reduce == "add": return (mask*src).sum(-1) + self
+    if reduce == "multiply":
+      src = functools.reduce(lambda x,y: (y*x).where(y*x, y.where(y, x)), (src*mask).split(1, -1))
+      return mask.any(-1).where(src.squeeze() * x.squeeze(), x.squeeze())
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """

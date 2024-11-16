@@ -2196,6 +2196,42 @@ class TestOps(unittest.TestCase):
                          lambda x: x.gather(dim=0, index=Tensor([2, 1, 0, 1, 2])),
                          vals=[[1., 2., 3.]])
 
+  def test_scatter(self):
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
+    helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=0, index=b, src=src),
+    lambda x,src: x.scatter(dim=0, index=a, src=src))
+    helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=1, index=b, src=src),
+    lambda x,src: x.scatter(dim=1, index=a, src=src))
+    helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=2, index=b, src=src),
+    lambda x,src: x.scatter(dim=2, index=a, src=src))
+    helper_test_op([(3,4,5), (3,4,5)], lambda x,src: x.scatter(dim=0, index=b, src=src),
+    lambda x,src: x.scatter(dim=0, index=a, src=src))
+    helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=-1, index=b, src=src),
+    lambda x,src: x.scatter(dim=-1, index=a, src=src))
+    helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=-2, index=b, src=src),
+    lambda x,src: x.scatter(dim=-2, index=a, src=src))
+    helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=-3, index=b, src=src),
+    lambda x,src: x.scatter(dim=-3, index=a, src=src))
+    for r in ["add", "multiply"]:
+      helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=0, index=b, src=src, reduce=r),
+      lambda x,src: x.scatter(dim=0, index=a, src=src, reduce=r))
+      helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=1, index=b, src=src, reduce=r),
+      lambda x,src: x.scatter(dim=1, index=a, src=src, reduce=r))
+      helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=2, index=b, src=src, reduce=r),
+      lambda x,src: x.scatter(dim=2, index=a, src=src, reduce=r))
+      helper_test_op([(3,4,5), (3,4,5)], lambda x,src: x.scatter(dim=0, index=b, src=src, reduce=r),
+      lambda x,src: x.scatter(dim=0, index=a, src=src, reduce=r))
+      helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=-1, index=b, src=src, reduce=r),
+      lambda x,src: x.scatter(dim=-1, index=a, src=src, reduce=r))
+      helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=-2, index=b, src=src, reduce=r),
+      lambda x,src: x.scatter(dim=-2, index=a, src=src, reduce=r))
+      helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=-3, index=b, src=src, reduce=r),
+      lambda x,src: x.scatter(dim=-3, index=a, src=src, reduce=r))
+
+  def test_scatter_add(self): ...
+  def test_scatter_mul(self): ...
+
   def test_scaled_product_attention(self):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], torch.nn.functional.scaled_dot_product_attention, Tensor.scaled_dot_product_attention)
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64), (32,8,16,16)],
