@@ -100,7 +100,6 @@ def theta(states: Tensor) -> Tensor:
   """
   Theta step of Keccak-f
   states: [batch_size, height, width]
-  returns: [batch_size, height, width]
   """
   C = states[:, 0] ^ states[:, 1] ^ states[:, 2] ^ states[:, 3] ^ states[:, 4]
   left = C.roll(shifts=-4, dims=1)
@@ -114,7 +113,6 @@ def rho_pi(states: Tensor) -> Tensor:
   """
   Combined rho and pi steps of Keccak-f
   states: [batch_size, height, width]
-  returns: [batch_size, height, width]
   """
   batch_size = states.shape[0]
   rho_pi_state = Tensor.zeros(
@@ -162,7 +160,7 @@ def keccak_round(states: Tensor, round_idx: int) -> Tensor:
 def keccak_f(states: Tensor) -> Tensor:
   """
   Batched Keccack-f function
-  states: [batch_size, n_cells]
+  states: [batch_size, height, width]
   """
   new_states = states
   for round_idx in range(num_rounds):
