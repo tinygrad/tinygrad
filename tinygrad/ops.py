@@ -337,7 +337,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   @property
-  def is_contiguous_base(self): return self.op is Ops.CONTIGUOUS and self.src[0].base.op is not Ops.LOAD
+  def is_contiguous_base(self): return self.op is Ops.CONTIGUOUS and not (self.src[0].base.op is Ops.VIEW and len(self.src[0].base.src) == 2)
 
   # *** uop movement ops ***
 
@@ -352,7 +352,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def buf_uop(self) -> UOp:
-    assert self.op in {*GroupOp.Buffer, Ops.ASSIGN} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
+    assert self.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
     return self.src[0]
 
   # *** uop Variable stuff ***
