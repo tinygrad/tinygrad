@@ -54,9 +54,6 @@ iota_round_constants = [
 
 
 def message_to_bytearray(message: str) -> Tuple[bytearray, int]:
-  """
-  Convert a message to a bytearray and return the length of the encoded message before padding
-  """
   encoded = message.encode("utf-8")
   ljust = ((len(encoded) + rate_bytes - 1) // rate_bytes) * rate_bytes
   return (bytearray(encoded.ljust(ljust, b'\0')), len(encoded))
@@ -69,7 +66,7 @@ PADDING_UINT = Tensor.zeros((1, 1, n_cells - rate_uints), dtype=dtypes.uint64)
 
 def messages_to_blocks(messages: List[str]) -> Tuple[Tensor, int]:
   """
-  Convert a list of equal length messages to a tensor of blocks
+  Convert a list of equal length messages to a tensor of width x height blocks compatible with the state size.
   returns: ([num_blocks, batch_size, height, width], num_bytes)
   """
   batch_size = len(messages)
@@ -85,8 +82,8 @@ def messages_to_blocks(messages: List[str]) -> Tuple[Tensor, int]:
   # pad to fit the full state size
   state_padding = PADDING_UINT.expand(batch_size, num_blocks, -1)
   padded_blocks = Tensor.cat(uint64_blocks, state_padding, dim=-1)
-  padded_blocks = padded_blocks.permute(1, 0, 2).reshape(
-      num_blocks, batch_size, height, width)
+  padded_blocks = padded_blocks.permute(1, 0, 2)
+  padded_blocks = padded_blocks.reshape(num_blocks, batch_size, height, width)
   return padded_blocks, msg_num_bytes
 
 
@@ -97,10 +94,6 @@ def rotl64(n: Union[int, Tensor], shifts: int):
 
 
 def theta(states: Tensor) -> Tensor:
-  """
-  Theta step of Keccak-f
-  states: [batch_size, height, width]
-  """
   C = states[:, 0] ^ states[:, 1] ^ states[:, 2] ^ states[:, 3] ^ states[:, 4]
   left = C.roll(shifts=-4, dims=1)
   right = C.roll(shifts=-1, dims=1)
@@ -110,10 +103,6 @@ def theta(states: Tensor) -> Tensor:
 
 
 def rho_pi(states: Tensor) -> Tensor:
-  """
-  Combined rho and pi steps of Keccak-f
-  states: [batch_size, height, width]
-  """
   batch_size = states.shape[0]
   rho_pi_state = Tensor.zeros(
       (batch_size, n_cells), dtype=dtypes.uint64).contiguous()
@@ -127,20 +116,12 @@ def rho_pi(states: Tensor) -> Tensor:
 
 
 def chi(states: Tensor) -> Tensor:
-  """
-  Chi step of Keccak-f
-  states: [batch_size, height, width]
-  """
   shift1 = states.roll(shifts=-1, dims=2)
   shift2 = states.roll(shifts=-2, dims=2)
   return states ^ ((shift1 ^ Tensor.full_like(shift1, -1)) & shift2)
 
 
 def iota(states: Tensor, round_idx: int) -> Tensor:
-  """
-  Iota step of Keccak-f
-  states: [batch_size, height, width]
-  """
   states[:, 0, 0] ^= iota_round_constants[round_idx]
   return states
 
@@ -148,7 +129,6 @@ def iota(states: Tensor, round_idx: int) -> Tensor:
 def keccak_round(states: Tensor, round_idx: int) -> Tensor:
   """
   One round of batched Keccak-f
-  states: [batch_size, height, width]
   """
   theta_state = theta(states)
   rho_pi_state = rho_pi(theta_state)
@@ -191,20 +171,18 @@ def tinygrad_sha3_256(messages: List[str]) -> List[str]:
   Hash a batch of equal length messages using SHA3-256.
   """
   batch_size = len(messages)
-  states = Tensor.zeros((batch_size, height, width),
-                        dtype=dtypes.uint64).contiguous()
+  states = Tensor.zeros((batch_size, height, width), dtype=dtypes.uint64).contiguous()
   batched_blocks, msg_bytes = messages_to_blocks(messages)
   n_blocks = batched_blocks.shape[0]
-  # absorb
+  # absorb phase
   for block_idx in range(0, n_blocks):
     blocks = batched_blocks[block_idx]
     states = states ^ blocks
     if block_idx < n_blocks - 1 or (block_idx == n_blocks - 1 and msg_bytes % rate_bytes == 0):
       states = keccak_f(states)
-  # squeeze
+  # squeeze phase
   states = pad(states, min(msg_bytes % rate_bytes, rate_bytes - 1))
   states = keccak_f(states)
-  # digest
   return [digest(state) for state in states]
 
 
@@ -285,8 +263,7 @@ class TestSHA3(unittest.TestCase):
 
   def test_batch(self):
     """Test batching"""
-    texts = ['hello' * 100, 'world' * 100, 'tests' *
-             100, 'reall' * 100, 'cools' * 100] * 100
+    texts = ['hello' * 100, 'world' * 100, 'tests' * 100, 'reall' * 100, 'cools' * 100] * 100
     tinygrad_hashes = tinygrad_sha3_256(texts)
     hashlib_hashes = hashlib_sha3_256(texts)
     self.assertEqual(tinygrad_hashes, hashlib_hashes)
