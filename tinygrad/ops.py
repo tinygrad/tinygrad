@@ -303,10 +303,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def sink(self, *srcs:UOp): return UOp(Ops.SINK, dtypes.void, (self,)+srcs)
   def index(self, idx:UOp, valid:Optional[UOp]=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
   def const_like(self, b:ConstLike): return UOp.const(self.dtype, b)
+  @staticmethod
+  def vectorize(*srcs:UOp, arg:Tuple[int, ...]=tuple(), dtype:Optional[DType]=None):
+    dtype = srcs[0].dtype if dtype is None else dtype
+    return UOp(Ops.VECTORIZE, dtype.vec(len(srcs)), tuple(srcs), arg)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
-    return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
+    return UOp.vectorize(*([self]*count))
   def cast(self, dtype:DType): return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:Union[Tuple[int, ...], int]):

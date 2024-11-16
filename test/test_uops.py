@@ -398,7 +398,7 @@ class TestUOpStr(unittest.TestCase):
     self.assertEqual(sink, eval(str(sink)))
 
   def test_vectorized_str(self):
-    vec = UOp(Ops.VECTORIZE, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
+    vec = UOp.vectorize(*[UOp.const(dtypes.int, x) for x in range(4)])
     assert str(eval(str(vec))) == str(vec)
 
 @unittest.skip("uop no longer has order like this")

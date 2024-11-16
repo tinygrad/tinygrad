@@ -711,7 +711,6 @@ class Kernel:
       print(modified_ast)
       print(self.applied_opts)
     verify_ast(modified_ast)
-
     self.uops:List[UOp] = linearize_uop(full_graph_rewrite(rewrite_shapetracker_with_index(modified_ast, self.opts), self.opts))
     if DEBUG >= 5: print_uops(self.uops)
     return self

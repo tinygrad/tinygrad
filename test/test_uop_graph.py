@@ -237,7 +237,7 @@ class TestUOpGraph(unittest.TestCase):
     d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0)
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(Ops.LOAD, dtypes.float.vec(2), (d0, idx))
-    vec = UOp(Ops.VECTORIZE, dtypes.float.vec(2), (ld,))
+    vec = UOp.vectorize(ld, dtype=dtypes.float.vec(2))
     x = UOp(Ops.GEP, dtypes.float, (vec, ), arg=0)
     alu = UOp(Ops.SQRT, dtypes.float, (x, ))
     out = UOp(Ops.STORE, dtypes.void, (d0, idx, alu))
@@ -250,7 +250,7 @@ class TestUOpGraph(unittest.TestCase):
     d2 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 2)
     idx = UOp.const(dtypes.int, 0)
     def _test_vec(geps, count=4):
-      vec = UOp(Ops.VECTORIZE, dtypes.float.vec(count), geps)
+      vec = UOp.vectorize(*geps)
       out = UOp(Ops.STORE, dtypes.void, (d0.index(idx), vec))
       uops = to_uops_list([out])
       if DEBUG >= 4:
@@ -286,14 +286,14 @@ class TestUOpGraph(unittest.TestCase):
   def test_gep_vec_const_fold(self):
     for vec_size in [2, 4, 8]:
       consts = [UOp.const(dtypes.float, float(i)) for i in range(vec_size)]
-      vec = UOp(Ops.VECTORIZE, dtypes.float.vec(vec_size), tuple(consts))
+      vec = UOp.vectorize(*consts)
       uops = to_uops_list([UOp(Ops.GEP, dtypes.float, (vec,), (i,)) for i in range(vec_size)])
       for uop, const in zip(uops, consts):
         self.assertEqual(uop, const)
 
   def test_wmma_vectorize_fold(self):
     for i in [2, 4, 8]:
-      vec = UOp(Ops.VECTORIZE, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
+      vec = UOp.vectorize(*[UOp.const(dtypes.half, 0.0) for _ in range(i)])
       var = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i))
       acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
       wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (vec, var, acc))
@@ -303,7 +303,7 @@ class TestUOpGraph(unittest.TestCase):
 
     for i in [2, 4, 8]:
       var = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i))
-      vec = UOp(Ops.VECTORIZE, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
+      vec = UOp.vectorize(*[UOp.const(dtypes.half, 0.0) for _ in range(i)])
       acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
       wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (var, vec, acc))
       uops = to_uops_list([wmma])
@@ -313,9 +313,8 @@ class TestUOpGraph(unittest.TestCase):
   @unittest.skip("wmma is wrong here, it needs an arg")
   def test_wmma_vectorize_no_fold(self):
     for i in [4, 8]:
-      vec = UOp(Ops.VECTORIZE, dtypes.half.vec(i),
-                tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
-                tuple(UOp(Ops.DEFINE_VAR, dtypes.half, arg=(f'tmp{j}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1))) for j in range(i//2)))
+      vec = UOp.vectorize(*[UOp.const(dtypes.half, 0.0) for _ in range(i//2)],
+                          *[UOp(Ops.DEFINE_VAR, dtypes.half, arg=(f'tmp{j}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1))) for j in range(i//2)])
       var = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       acc = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (vec, var, acc))
@@ -324,17 +323,15 @@ class TestUOpGraph(unittest.TestCase):
 
     for i in [4, 8]:
       var = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
-      vec = UOp(Ops.VECTORIZE, dtypes.half.vec(i),
-                tuple(UOp.const(dtypes.half, 0.0) for _ in range(i//2)) +
-                tuple(UOp(Ops.DEFINE_VAR, dtypes.half, arg=(f'tmp{j}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1))) for j in range(i//2)))
+      vec = UOp.vectorize(*[UOp.const(dtypes.half, 0.0) for _ in range(i//2)],
+                *[UOp(Ops.DEFINE_VAR, dtypes.half, arg=(f'tmp{j}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1))) for j in range(i//2)])
       acc = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (var, vec, acc))
       uops = to_uops_list([wmma])
       self.assertEqual(uops[-1], wmma)
 
     for i in [2, 4, 8]:
-      vec = UOp(Ops.VECTORIZE, dtypes.half.vec(i),
-                tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
+      vec = UOp.vectorize(*[UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)])
       var = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       acc = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (vec, var, acc))
@@ -343,8 +340,7 @@ class TestUOpGraph(unittest.TestCase):
 
     for i in [2, 4, 8]:
       var = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=(f'tmp{i}', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
-      vec = UOp(Ops.VECTORIZE, dtypes.half.vec(i),
-                tuple(UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)))
+      vec = UOp.vectorize(*[UOp.const(dtypes.half, 1.0 if j == 0 else 0.0) for j in range(i)])
       acc = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i), arg=('acc', UOp.const(dtypes.half, 0), UOp.const(dtypes.half, 1)))
       wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (var, vec, acc))
       uops = to_uops_list([wmma])
@@ -597,7 +593,7 @@ class TestLoadStoreFolder(unittest.TestCase):
   def test_simple_load_fold(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
     load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i)),)) for i in range(4)]
-    sink = UOp(Ops.VECTORIZE, dtypes.float.vec(len(load)), tuple(load))
+    sink = UOp.vectorize(*load)
 
     sink = float4_rewrite(sink.sink())
     assert len([x for x in sink.sparents if x.op is Ops.LOAD]) == 1
@@ -605,7 +601,7 @@ class TestLoadStoreFolder(unittest.TestCase):
   def test_two_load_fold(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
     load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i)),)) for i in range(8)]
-    sink = UOp(Ops.VECTORIZE, dtypes.float.vec(len(load)), tuple(load))
+    sink = UOp.vectorize(*load)
     sink = float4_rewrite(sink.sink())
     assert len([x for x in sink.sparents if x.op is Ops.LOAD]) == 2
 
@@ -613,7 +609,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
     gate = UOp(Ops.DEFINE_VAR, dtypes.bool)
     load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i), gate),)) for i in range(4)]
-    sink = UOp(Ops.VECTORIZE, dtypes.float.vec(len(load)), tuple(load))
+    sink = UOp.vectorize(*load)
     sink = float4_rewrite(sink.sink())
     assert len([x for x in sink.sparents if x.op is Ops.LOAD]) == 1
     single_load = [x for x in sink.sparents if x.op is Ops.LOAD][0]
@@ -625,7 +621,7 @@ class TestLoadStoreFolder(unittest.TestCase):
     gate2 = UOp.variable("g2", False, True, dtypes.bool)
     load = [UOp(Ops.LOAD, dtypes.float, (buf.index(UOp.const(dtypes.int, i), gate if i == 0 else gate2),
                                           UOp.const(dtypes.float, 0))) for i in range(4)]
-    sink = UOp(Ops.VECTORIZE, dtypes.float.vec(len(load)), tuple(load))
+    sink = UOp.vectorize(*load)
     sink = float4_rewrite(sink.sink())
     assert len([x for x in sink.sparents if x.op is Ops.LOAD]) == 3
 
