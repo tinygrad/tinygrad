@@ -1,7 +1,7 @@
 import unittest, math
 from tinygrad import dtypes
 from tinygrad.helpers import all_same
-from tinygrad.ops import GroupOp, UOp, Ops, BinaryOps, exec_alu
+from tinygrad.ops import GroupOp, UOp, Ops, exec_alu
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 
 # Helper function to apply the graph rewrite
@@ -56,7 +56,7 @@ class TestFoldingAndReduction(unittest.TestCase):
     const1 = UOp.const(dtypes.int32, 5)
     const2 = UOp.const(dtypes.int32, 10)
     const3 = UOp.const(dtypes.int32, 20)
-    optimized_sink = apply_rewrite((const1 + const2 + const3).reduce(BinaryOps.ADD))
+    optimized_sink = apply_rewrite((const1 + const2 + const3).reduce(Ops.ADD))
     expected_sum = 5 + 10 + 20
     self.assertEqual(optimized_sink.arg, expected_sum)
 
@@ -65,14 +65,14 @@ class TestFoldingAndReduction(unittest.TestCase):
     const1 = UOp.const(dtypes.int32, 15)
     const2 = UOp.const(dtypes.int32, 25)
     rng = UOp.range(dtypes.int32, 0, 10, idx=0)
-    optimized_sink = apply_rewrite((const1 + const2).reduce(BinaryOps.ADD, rng))
+    optimized_sink = apply_rewrite((const1 + const2).reduce(Ops.ADD, rng))
     expected_sum = 10 * (15 + 25)
     self.assertEqual(optimized_sink.arg, expected_sum)
 
   @unittest.skip("currently failing")
   def test_full_graph_rewrite_range_reduction(self):
     simple_range = UOp.range(dtypes.int32, 0, 5, idx=0)
-    optimized_sink = apply_rewrite(simple_range.reduce(BinaryOps.ADD, simple_range))
+    optimized_sink = apply_rewrite(simple_range.reduce(Ops.ADD, simple_range))
     expected_sum = sum(range(5))
     self.assertEqual(optimized_sink.arg, expected_sum)
 
@@ -80,7 +80,7 @@ class TestFoldingAndReduction(unittest.TestCase):
   def test_full_graph_rewrite_simple_reduction_folding(self):
     simple_range = UOp.range(dtypes.int32, 0, 4, idx=0)
     add_uop = simple_range + UOp.const(dtypes.int32, 1)
-    optimized_sink = apply_rewrite(add_uop.reduce(BinaryOps.ADD, simple_range))
+    optimized_sink = apply_rewrite(add_uop.reduce(Ops.ADD, simple_range))
     expected_sum = sum(i + 1 for i in range(4))
     self.assertEqual(optimized_sink.arg, expected_sum)
 
@@ -89,7 +89,7 @@ class TestFoldingAndReduction(unittest.TestCase):
     outer_range = UOp.range(dtypes.int32, 0, 8, 0)
     inner_range = UOp.range(dtypes.int32, 0, 4, 1)
     expr = (outer_range * 10) + inner_range
-    optimized_reduce_uop = apply_rewrite(expr.reduce(BinaryOps.ADD, outer_range, inner_range))
+    optimized_reduce_uop = apply_rewrite(expr.reduce(Ops.ADD, outer_range, inner_range))
     self.assertEqual(optimized_reduce_uop.op, Ops.CONST)
     self.assertEqual(optimized_reduce_uop.arg, sum((i * 10) + j for i in range(8) for j in range(4)))
 
@@ -104,7 +104,7 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
   def test_full_graph_rewrite_division_folding_with_define_var(self):
     n_var_uop = UOp.variable('n', 1, 1000)
     optimized_div_uop = apply_rewrite((n_var_uop * 6) // 3)
-    self.assertEqual(optimized_div_uop.op, BinaryOps.MUL)
+    self.assertEqual(optimized_div_uop.op, Ops.MUL)
     self.assertEqual(optimized_div_uop.src[1].arg, 2)
 
   def test_full_graph_rewrite_complex_mod_div_folding(self):
