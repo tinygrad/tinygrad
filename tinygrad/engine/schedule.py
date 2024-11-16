@@ -72,7 +72,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
   # everything else has BUFFER
   ubuf = ctx.buf_uops.setdefault(b:=buf.buffer, UOp(Ops.BUFFER, b.dtype.ptr(), (), (len(ctx.buf_uops), (b.device, b.size, b.dtype))))
   # if the buffer is already realized we just load it
-  if buf.is_realized(): return UOp(Ops.PRELOAD, dtype, (ubuf, buf.st.to_uop()))
+  if buf.is_realized(): return UOp(Ops.VIEW, dtype, (ubuf, buf.st.to_uop()))
   # everything else needs sources
   src = tuple(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in buf.srcs)
   if buf.op in {Ops.REDUCE_AXIS, Ops.CONTIGUOUS}: ret = UOp(buf.op, dtype, src, buf.arg)
@@ -82,7 +82,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
   elif buf.op in GroupOp.Meta: ret = UOp(buf.op, buf.dtype, (ubuf, *src), buf.arg)
   else: ret = UOp(cast(Ops, buf.op), dtype, src)
   if buf.forced_realize: ret = UOp(Ops.CONTIGUOUS, dtype, (ret,))
-  cache[buf] = ret = UOp(Ops.LOAD, dtype, (ubuf, buf.st.to_uop(), UOp.store(ubuf, ShapeTracker.from_shape(buf.shape).to_uop(), ret)))
+  cache[buf] = ret = UOp(Ops.VIEW, dtype, (ubuf, ret), buf.st)
   if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
   ctx.lazybufs[b] = buf
   # things for fuse.py
