@@ -25,7 +25,7 @@ from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG, Timing
-from tinygrad.ops import UnaryOps, UOp, Ops
+from tinygrad.ops import UOp, Ops
 from tinygrad.device import is_dtype_supported
 
 def on_linearizer_will_run(): pass
@@ -252,7 +252,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
 def _is_simple(lin: Kernel) -> bool:
   if len(lin.ast.src) > 1: return False
   ast:UOp = lin.ast.src[0]
-  if ast.src[0].op is UnaryOps.CAST and ast.src[0].src[0].op is Ops.LOAD: return True
+  if ast.src[0].op is Ops.CAST and ast.src[0].src[0].op is Ops.LOAD: return True
   return False
 
 if __name__ == "__main__":
