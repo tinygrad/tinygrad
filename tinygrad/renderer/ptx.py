@@ -174,6 +174,7 @@ class PTXRenderer(Renderer):
     r: Dict[UOp, Union[List[str], str]] = {}
     self.r = r
     self.uops = uops
+
     def ssa(prefix:str, u:Optional[UOp]=None, dtype:Optional[str]=None) -> str:
       nonlocal c, r
       prefix += f"_{dtype if dtype is not None else self.types[cast(UOp, u).dtype]}_"
@@ -181,46 +182,44 @@ class PTXRenderer(Renderer):
       return f"%{prefix}{c[prefix]-1}"
 
     for u in uops:
-      uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
-
-      if uop is Ops.VECTORIZE:
-        r[u] = [cast(str,r[x]) for x in src]
+      if u.op is Ops.VECTORIZE:
+        r[u] = [cast(str,r[x]) for x in u.src]
         continue
-      if uop is Ops.GEP:
+      if u.op is Ops.GEP:
         assert len(u.arg) == 1
-        r[u] = r[src[0]][u.arg[0]]
+        r[u] = r[u.src[0]][u.arg[0]]
         continue
-      if uop in {Ops.CAST, Ops.BITCAST}:
-        if src[0].dtype == dtype or isinstance(src[0].dtype, PtrDType):
-          r[u] = r[src[0]]
+      if u.op in {Ops.CAST, Ops.BITCAST}:
+        if u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType):
+          r[u] = r[u.src[0]]
           continue
-        r[u] = ssa('cast', u, self.types[dtype])
-      elif uop is Ops.ENDRANGE: r[u] = ssa("pred", u, dtype="pred")
-      elif uop is Ops.RANGE: r[u] = ssa("ridx", u)
-      elif uop in GroupOp.ALU: r[u] = ssa("alu", u)
-      elif uop is Ops.DEFINE_ACC:
-        if dtype.scalar() in [dtypes.half, dtypes.bool]:
-          r[src[0]] = [ssa("const", src[0].src[0]) for _ in range(dtype.count)] if dtype.count > 1 else ssa("const", src[0])
-        r[u] = [ssa('acc', u, dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)] if dtype.count > 1 else ssa("acc", u)
-      elif uop is Ops.SPECIAL: r[u] = "%" + args[0]
-      elif uop is Ops.DEFINE_VAR:
-        bufs.append((args[0], dtype))
-        r[u] = ssa("dat", u, self.types[dtype])
-      elif uop is Ops.CONST: r[u] = ssa("const", u, dtype=self.types[dtype])
-      elif uop is Ops.LOAD:
-        assert src[0].dtype == dtypes.int64, "load isn't int64"
-        r[u] = [ssa('val', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)] if dtype.count > 1 else ssa('val', u)
-      elif uop is Ops.DEFINE_LOCAL: r[u] = ssa('local', u, self.types[dtypes.ulong])
-      elif uop is Ops.DEFINE_GLOBAL:
-        bufs.append((f"data{args}", dtype))
-        r[u] = ssa('dat', u, self.types[dtypes.ulong if dtype.__class__ == PtrDType else dtype])
-      elif uop is Ops.WMMA:
-        self.wmma_r = [ssa("wmma", dtype="b32") for vv in src[:2] for i in range(0, len(r[vv]), 2)]
-        r[u] = [ssa("wmma", dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)]
+        r[u] = ssa('cast', u, self.types[u.dtype])
+      elif u.op is Ops.ENDRANGE: r[u] = ssa("pred", u, dtype="pred")
+      elif u.op is Ops.RANGE: r[u] = ssa("ridx", u)
+      elif u.op in GroupOp.ALU: r[u] = ssa("alu", u)
+      elif u.op is Ops.DEFINE_ACC:
+        if u.dtype.scalar() in [dtypes.half, dtypes.bool]:
+          r[u.src[0]] = [ssa("const", u.src[0].src[0]) for _ in range(u.dtype.count)] if u.dtype.count > 1 else ssa("const", u.src[0])
+        r[u] = [ssa('acc', u, dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)] if u.dtype.count > 1 else ssa("acc", u)
+      elif u.op is Ops.SPECIAL: r[u] = "%" + u.arg[0]
+      elif u.op is Ops.DEFINE_VAR:
+        bufs.append((u.arg[0], u.dtype))
+        r[u] = ssa("dat", u, self.types[u.dtype])
+      elif u.op is Ops.CONST: r[u] = ssa("const", u, dtype=self.types[u.dtype])
+      elif u.op is Ops.LOAD:
+        assert u.src[0].dtype == dtypes.int64, "load isn't int64"
+        r[u] = [ssa('val', dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)] if u.dtype.count > 1 else ssa('val', u)
+      elif u.op is Ops.DEFINE_LOCAL: r[u] = ssa('local', u, self.types[dtypes.ulong])
+      elif u.op is Ops.DEFINE_GLOBAL:
+        bufs.append((f"data{u.arg}", u.dtype))
+        r[u] = ssa('dat', u, self.types[dtypes.ulong if u.dtype.__class__ == PtrDType else u.dtype])
+      elif u.op is Ops.WMMA:
+        self.wmma_r = [ssa("wmma", dtype="b32") for vv in u.src[:2] for i in range(0, len(r[vv]), 2)]
+        r[u] = [ssa("wmma", dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)]
       if (l:=cast(Union[str, List[str]], string_rewrite.rewrite(u, ctx=self))) is None:
-        raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
+        raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.u.src]}")
       kernel.extend([l] if isinstance(l, str) else l)
 
-      if uop is Ops.ASSIGN: r[u] = r[src[0]]
-      elif uop is Ops.SPECIAL: kernel = [f".reg .u32 %{args[0]};"] + kernel
+      if u.op is Ops.ASSIGN: r[u] = r[u.src[0]]
+      elif u.op is Ops.SPECIAL: kernel = [f".reg .u32 %{u.arg[0]};"] + kernel
     return self.render_kernel(kernel, name, bufs, c.items())
