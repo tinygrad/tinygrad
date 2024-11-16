@@ -342,7 +342,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop movement ops ***
 
   @property
-  def base(self): return self.src[0] if self.op is Ops.VIEW and len(self.src) != 0 else self
+  def base(self): return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
   def view(self, st:ShapeTracker):
     assert self.op is not Ops.STORE, "VIEW of STORE is invalid, STORE is always base"
     return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
