@@ -107,7 +107,7 @@ class ResNet:
     is_feature_only = self.fc is None
     if is_feature_only: features = []
     out = self.bn1(self.conv1(x)).relu()
-    out = out.pad2d([1,1,1,1]).max_pool2d((3,3), 2)
+    out = out.pad([1,1,1,1]).max_pool2d((3,3), 2)
     out = out.sequential(self.layer1)
     if is_feature_only: features.append(out)
     out = out.sequential(self.layer2)

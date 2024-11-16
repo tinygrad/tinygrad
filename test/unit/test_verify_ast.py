@@ -4,7 +4,7 @@ import unittest
 from tinygrad import Tensor
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import UOp, Ops, ReduceOps, print_uops
+from tinygrad.ops import UOp, Ops, print_uops
 from tinygrad.codegen.kernel import verify_ast
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad import dtypes
@@ -48,7 +48,7 @@ class TestVerifyAST(unittest.TestCase):
   def test_no_implicit_broadcasting(self):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), i) for i in range(2)]
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1], ShapeTracker.from_shape((4, 32)).to_uop()))
-    b = a + UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (ReduceOps.REDUCE_MAX, (1,)))
+    b = a + UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.MAX, (1,)))
     st = UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape((4, 32)).to_uop(), b))
     with self.assertRaises(InvalidASTException): helper_test_verify_ast(st)
 
@@ -62,14 +62,14 @@ class TestVerifyAST(unittest.TestCase):
   def test_reduce_store(self):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), i) for i in range(2)]
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1], ShapeTracker.from_shape((32, 1)).to_uop()))
-    r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (ReduceOps.SUM, (0,)))
+    r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
     st = UOp.store(bufs[0], ShapeTracker.from_shape((32, 1)).to_uop(), r)
     with self.assertRaisesRegex(InvalidASTException, "implicit expand"): helper_test_verify_ast(st)
 
   def test_reduce_add_store(self):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), i) for i in range(2)]
     a = UOp(Ops.LOAD, dtypes.float, (bufs[1], ShapeTracker.from_shape((32, 1)).to_uop()))
-    r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (ReduceOps.SUM, (0,)))
+    r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
     st = UOp.store(bufs[0], ShapeTracker.from_shape((32, 1)).to_uop(), r+a)
     with self.assertRaisesRegex(InvalidASTException, "implicit expand"): helper_test_verify_ast(st)
 
@@ -80,6 +80,13 @@ class TestVerifyAST(unittest.TestCase):
     self.assertEqual(store_st, ShapeTracker.from_shape((4, 4)))
     const_st = [st for u,st in uop_sts.items() if u.op is Ops.VALID][0]
     self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
+
+  def test_assert_swizzle(self):
+    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
+    a = UOp(Ops.LOAD, dtypes.float, (buf, ShapeTracker.from_shape((32, 1)).to_uop()))
+    r = UOp(Ops.REDUCE_AXIS, dtypes.float, (a,), (Ops.ADD, (0,)))
+    st = UOp.store(buf, ShapeTracker.from_shape((32, 1)).to_uop(), r.view(r.st.expand((32, 1)))+a)
+    with self.assertRaisesRegex(InvalidASTException, "swizzle"): helper_test_verify_ast(st)
 
 if __name__ == '__main__':
   unittest.main()
