@@ -56,7 +56,8 @@ iota_round_constants = [
 def message_to_bytearray(message: str) -> Tuple[bytearray, int]:
   encoded = message.encode("utf-8")
   ljust = ((len(encoded) + rate_bytes - 1) // rate_bytes) * rate_bytes
-  return (bytearray(encoded.ljust(ljust, b'\0')), len(encoded))
+  padded = bytearray(encoded.ljust(ljust, b'\0'))
+  return padded, len(encoded)
 
 
 # constants for converting bytes to uint64
@@ -127,7 +128,7 @@ def iota(states: Tensor, round_idx: int) -> Tensor:
 
 def keccak_round(states: Tensor, round_idx: int) -> Tensor:
   """
-  One round of batched Keccak-f
+  One round of batched Keccak-f.
   """
   x = theta(states)
   x = rho_pi(x)
@@ -138,7 +139,7 @@ def keccak_round(states: Tensor, round_idx: int) -> Tensor:
 
 def keccak_f(states: Tensor) -> Tensor:
   """
-  Batched Keccack-f function
+  Batched Keccak-f function.
   states: [batch_size, height, width]
   """
   for i in range(num_rounds):
@@ -150,11 +151,12 @@ def pad(states: Tensor, pad_idx_bytes: int):
   """
   Add padding bytes as defined by the SHA3 standard
   """
-  # adjust padding offsets to pick out the correct byte inside the uint64
   padpoint_uint = (pad_idx_bytes % rate_bytes) // 8
   padpoint_shift = ((pad_idx_bytes % rate_bytes) % 8) * 8
+  # start padding byte
   x, y = divmod(padpoint_uint, width)
   states[:, x, y] = states[:, x, y] ^ (0x06 << padpoint_shift)
+  # end padding byte
   x, y = divmod((rate_bytes // 8) - 1, width)
   states[:, x, y] = states[:, x, y] ^ (0x80 << 56)
   return states
