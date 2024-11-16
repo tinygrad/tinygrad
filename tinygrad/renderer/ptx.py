@@ -177,7 +177,6 @@ class PTXRenderer(Renderer):
       nonlocal c, r
       prefix += f"_{dtype if dtype is not None else self.types[cast(UOp, u).dtype]}_"
       c[prefix] += 1
-      if u is not None: r[u] = f"%{prefix}{c[prefix]-1}"
       return f"%{prefix}{c[prefix]-1}"
 
     self.uops = uops
@@ -195,10 +194,10 @@ class PTXRenderer(Renderer):
         if src[0].dtype == dtype or isinstance(src[0].dtype, PtrDType):
           r[u] = r[src[0]]
           continue
-        ssa('cast', u, self.types[dtype])
-      elif uop is Ops.ENDRANGE: ssa("pred", u, dtype="pred")
-      elif uop is Ops.RANGE: ssa("ridx", u)
-      elif uop in GroupOp.ALU: ssa("alu", u)
+        r[u] = ssa('cast', u, self.types[dtype])
+      elif uop is Ops.ENDRANGE: r[u] = ssa("pred", u, dtype="pred")
+      elif uop is Ops.RANGE: r[u] = ssa("ridx", u)
+      elif uop in GroupOp.ALU: r[u] = ssa("alu", u)
       elif uop is Ops.DEFINE_ACC:
         if dtype.scalar() in [dtypes.half, dtypes.bool]:
           r[src[0]] = [ssa("const", src[0].src[0]) for _ in range(dtype.count)] if dtype.count > 1 else ssa("const", src[0])
@@ -206,14 +205,12 @@ class PTXRenderer(Renderer):
       elif uop is Ops.SPECIAL: r[u] = "%" + args[0]
       elif uop is Ops.DEFINE_VAR:
         bufs.append((args[0], dtype))
-        r[u] = f"%{args[0]}"
-        ssa("dat", u, self.types[dtype])
-      elif uop is Ops.CONST: ssa("const", u, dtype=self.types[dtype])
+        r[u] = ssa("dat", u, self.types[dtype])
+      elif uop is Ops.CONST: r[u] = ssa("const", u, dtype=self.types[dtype])
       elif uop is Ops.LOAD:
         assert src[0].dtype == dtypes.int64, "load isn't int64"
         r[u] = [ssa('val', dtype=self.types[dtype.scalar()]) for _ in range(dtype.count)] if dtype.count > 1 else ssa('val', u)
-      elif uop is Ops.DEFINE_LOCAL:
-        ssa('local', u, self.types[dtypes.ulong])
+      elif uop is Ops.DEFINE_LOCAL: r[u] = ssa('local', u, self.types[dtypes.ulong])
       elif uop is Ops.DEFINE_GLOBAL:
         bufs.append((f"data{args}", dtype))
         r[u] = ssa('dat', u, self.types[dtypes.ulong if dtype.__class__ == PtrDType else dtype])
