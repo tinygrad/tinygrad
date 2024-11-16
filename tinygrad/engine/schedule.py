@@ -37,8 +37,7 @@ class ScheduleItem:
 
 # **** small wrapper for LazyBuffer -> UOp
 
-def UPatSrc(*args, **kwargs):
-  return UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat(*args, **{**kwargs, "name":"to_store"})), name="base")
+def UPatSrc(*args, **kwargs): return UPat(Ops.VIEW, src=(UPat.var("b"), UPat(*args, **{**kwargs, "name":"to_store"})), name="base")
 @functools.lru_cache(None)
 def is_scheduled(u:UOp): return u.op is Ops.LOAD and len(u.src) == 3
 
@@ -72,7 +71,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
   # everything else has BUFFER
   ubuf = ctx.buf_uops.setdefault(b:=buf.buffer, UOp(Ops.BUFFER, b.dtype.ptr(), (), (len(ctx.buf_uops), (b.device, b.size, b.dtype))))
   # if the buffer is already realized we just load it
-  if buf.is_realized(): return UOp(Ops.VIEW, dtype, (ubuf, buf.st.to_uop()))
+  if buf.is_realized(): return UOp(Ops.VIEW, dtype, (ubuf,), buf.st)
   # everything else needs sources
   src = tuple(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in buf.srcs)
   if buf.op in {Ops.REDUCE_AXIS, Ops.CONTIGUOUS}: ret = UOp(buf.op, dtype, src, buf.arg)
