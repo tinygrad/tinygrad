@@ -37,6 +37,9 @@ class ScheduleItem:
 
 # **** small wrapper for LazyBuffer -> UOp
 
+def UPatLoadStore(to_store=UPat()): return UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), to_store, name="store"), name="load")
+def is_scheduled(u:UOp): return len(UPatLoadStore().match(u, {})) != 0
+
 @dataclass(frozen=True)
 class ScheduleContext:
   buf_uops: Dict[Buffer, UOp] = field(default_factory=dict)        # this maps Buffers to BUFFER uops
@@ -84,7 +87,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
   allbufs[ubuf] = ret
   if buf.op is Ops.REDUCE_AXIS and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[ubuf] = None
   for x in src:
-    if x.base.op is Ops.LOAD: children[x.base.buf_uop][ubuf] = None
+    if is_scheduled(x.base): children[x.base.buf_uop][ubuf] = None
   return ret
 
 # **** AST graph rewrite
@@ -229,7 +232,7 @@ if getenv("RUN_PROCESS_REPLAY"):
 # **** Schedule grouping
 
 def uval(u:UOp) -> UOp:
-  assert u.op is Ops.LOAD and len(u.src) == 3 and u.src[2].op is Ops.STORE, f"must be a LOAD of STORE {u}"
+  assert is_scheduled(u), f"must be a scheduled op {u}"
   return to_store.src[0] if (to_store:=u.src[2].src[2]).is_contiguous_base else to_store
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], realizes:Dict[UOp, UOp],
@@ -247,7 +250,7 @@ def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Di
     # max one reduceop per kernel
     if (tr_next_uop:=uval(allbufs[tr_next]).base).op is Ops.REDUCE_AXIS: return group.setdefault(r)
     # can only fuse contiguous
-    if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if x.base.op is Ops.LOAD and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
+    if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
     recursive_group(tr_next, st+st_childs[0], r, children, allbufs, realizes, reduce_for_op, group, cache)
 
 def get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp],
@@ -258,7 +261,7 @@ def get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultD
     cache.add(p)
     # max one reduceop per kernel
     if p.op is Ops.REDUCE_AXIS: return {}
-    rc_parents.extend(x.base.buf_uop for x in p.src if x.base.op is Ops.LOAD and x.base.buf_uop is not r)
+    rc_parents.extend(x.base.buf_uop for x in p.src if is_scheduled(x.base) and x.base.buf_uop is not r)
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[UOp, None] = {}
   for tr in group: recursive_group(tr, unwrap(allbufs[tr].st), tr, children, allbufs, realizes, reduce_for_op, descendants, cache={})
@@ -295,7 +298,7 @@ def group_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp,
         st = unwrap(r_uop.st)
         while len(children[tr]) == 1:
           tr_next_uop = uval(allbufs[(tr_next:=next(iter(children[tr])))])
-          st_childs = dedup([unwrap(x.st) for x in tr_next_uop.src if x.base.op is Ops.LOAD and x.base.buf_uop is tr])
+          st_childs = dedup([unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop is tr])
           if len(st_childs) > 1: break
           if st.size != st_childs[0].size: break
           st = st + st_childs[0]
@@ -343,7 +346,6 @@ def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, **kwargs) -> Optional[U
   # otherwise safety check pads
   return None if (all(v.mask is None for v in st.views) or can_pad(base)) else realize(ctx, **kwargs).view(st)
 
-def UPatLoadStore(to_store=UPat()): return UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), to_store, name="store"), name="load")
 do_realize = PatternMatcher([
   # always realize meta ops
   (UPatLoadStore(UPat((Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta))), realize),
