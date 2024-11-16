@@ -1207,6 +1207,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
+
     res = self.realize()._getitem(indices, v)
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.lazydata is not self.lazydata:
@@ -1248,11 +1249,11 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     src = src.pad(tuple((0, max(xs-ss, 0)) for ss, xs in zip(src.shape, x.shape)))
     if reduce is None:
       src = functools.reduce(lambda x,y: y.where(y, x), (src*mask).split(1, -1))   # WOAHHHH this is how he did it, man im retardeed
-      return mask.any(-1).where(src.squeeze(), x.squeeze())
+      return mask.any(-1).where(src.squeeze(), x.squeeze()) # type: ignore
     if reduce == "add": return (mask*src).sum(-1) + self
     if reduce == "multiply":
       src = functools.reduce(lambda x,y: (y*x).where(y*x, y.where(y, x)), (src*mask).split(1, -1))
-      return mask.any(-1).where(src.squeeze() * x.squeeze(), x.squeeze())
+      return mask.any(-1).where(src.squeeze() * x.squeeze(), x.squeeze()) # type: ignore
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
