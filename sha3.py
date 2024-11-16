@@ -66,7 +66,7 @@ PADDING_UINT = Tensor.zeros((1, 1, n_cells - rate_uints), dtype=dtypes.uint64)
 
 def messages_to_blocks(messages: List[str]) -> Tuple[Tensor, int]:
   """
-  Convert a list of equal length messages to a tensor of width x height blocks compatible with the state size.
+  Convert a list of equal length messages to a tensor of message blocks compatible with the state size.
   returns: ([num_blocks, batch_size, height, width], num_bytes)
   """
   batch_size = len(messages)
@@ -104,15 +104,14 @@ def theta(states: Tensor) -> Tensor:
 
 def rho_pi(states: Tensor) -> Tensor:
   batch_size = states.shape[0]
-  rho_pi_state = Tensor.zeros(
-      (batch_size, n_cells), dtype=dtypes.uint64).contiguous()
+  rpi_state = Tensor.zeros((batch_size, n_cells), dtype=dtypes.uint64).contiguous()
   for i in range(n_cells):
     x, y = divmod(i, width)
     rho_offset = rho_offsets[x][y]
     rotated = rotl64(states[:, x, y], rho_offset)
     pi_offset = pi_offsets[x][y]
-    rho_pi_state[:, pi_offset] = rotated
-  return rho_pi_state.view(batch_size, height, width)
+    rpi_state[:, pi_offset] = rotated
+  return rpi_state.view(batch_size, height, width)
 
 
 def chi(states: Tensor) -> Tensor:
@@ -130,11 +129,11 @@ def keccak_round(states: Tensor, round_idx: int) -> Tensor:
   """
   One round of batched Keccak-f
   """
-  theta_state = theta(states)
-  rho_pi_state = rho_pi(theta_state)
-  chi_state = chi(rho_pi_state)
-  iota_state = iota(chi_state, round_idx)
-  return iota_state
+  x = theta(states)
+  x = rho_pi(x)
+  x = chi(x)
+  x = iota(x, round_idx)
+  return x
 
 
 def keccak_f(states: Tensor) -> Tensor:
@@ -142,10 +141,9 @@ def keccak_f(states: Tensor) -> Tensor:
   Batched Keccack-f function
   states: [batch_size, height, width]
   """
-  new_states = states
-  for round_idx in range(num_rounds):
-    new_states = keccak_round(new_states, round_idx)
-  return new_states
+  for i in range(num_rounds):
+    states = keccak_round(states, i)
+  return states
 
 
 def pad(states: Tensor, pad_idx_bytes: int):
@@ -192,8 +190,7 @@ def hashlib_sha3_256(messages: List[str]) -> List[str]:
     hash_obj = hashlib.sha3_256()
     message_bytes = message.encode("utf-8")
     hash_obj.update(message_bytes)
-    hash_hex = hash_obj.hexdigest()
-    results.append(hash_hex)
+    results.append(hash_obj.hexdigest())
   return results
 
 
