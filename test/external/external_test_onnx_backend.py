@@ -90,7 +90,6 @@ backend_test.exclude('test_regex_*')
 
 # no scatternd gathernd
 backend_test.exclude('test_gathernd_*')
-backend_test.exclude('test_scatternd_*')
 
 # no quantize
 backend_test.exclude('test_dynamicquantizelinear_*')

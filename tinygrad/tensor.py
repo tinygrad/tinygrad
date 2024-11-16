@@ -1207,13 +1207,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     if not isinstance(v, (Tensor, float, int, bool)): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-    print(self.numpy())
     res = self.realize()._getitem(indices, v)
-    print("here")
-    print("here")
-    print("here")
-    print("here")
-    print(res.numpy())
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.lazydata is not self.lazydata:
       self.assign(res).realize()
