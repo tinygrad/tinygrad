@@ -259,7 +259,7 @@ def get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultD
     cache.add(p)
     # max one reduceop per kernel
     if p.op is Ops.REDUCE_AXIS: return {}
-    rc_parents.extend(x.base.buf_uop for x in p.src if x.base.op is Ops.VIEW and x.base.buf_uop is not r)
+    rc_parents.extend(x.base.buf_uop for x in p.src if x.base.op is Ops.VIEW and x.base.buf_uop is not r and len(x.base.src) == 2)
   # search descendants of the reduceop that can cleanly group
   descendants: Dict[UOp, None] = {}
   for tr in group: recursive_group(tr, unwrap(allbufs[tr].st), tr, children, allbufs, realizes, reduce_for_op, descendants, cache={})
