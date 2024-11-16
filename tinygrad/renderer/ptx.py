@@ -173,13 +173,13 @@ class PTXRenderer(Renderer):
     c: DefaultDict[str, int] = defaultdict(int)
     r: Dict[UOp, Union[List[str], str]] = {}
     self.r = r
+    self.uops = uops
     def ssa(prefix:str, u:Optional[UOp]=None, dtype:Optional[str]=None) -> str:
       nonlocal c, r
       prefix += f"_{dtype if dtype is not None else self.types[cast(UOp, u).dtype]}_"
       c[prefix] += 1
       return f"%{prefix}{c[prefix]-1}"
 
-    self.uops = uops
     for u in uops:
       uop,dtype,src,args = u.op,u.dtype,u.src,u.arg
 
