@@ -38,7 +38,7 @@ class PSP_IP:
     self.adev.regMP0_SMN_C2PMSG_36.write(self.msg1_pm.mc_addr() >> 20)
     self.adev.regMP0_SMN_C2PMSG_35.write(compid)
 
-    print(f"PSP: loading fw: {fw} {compid}")
+    # print(f"PSP: loading fw: {fw} {compid}")
 
     return self.wait_for_bootloader()
 
@@ -78,12 +78,12 @@ class PSP_IP:
 
     resp = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.cmd_pm.cpu_addr())
     if resp.resp.status != 0: print(colored(f"PSP command failed {resp.cmd_id} {resp.resp.status}", "red"))
-    else: print(colored(f"PSP command success {resp.cmd_id}", "green"))
+    # else: print(colored(f"PSP command success {resp.cmd_id}", "green"))
     return resp
 
   def load_ip_fw_cmd(self, psp_desc):
     fw_type, fw_bytes = psp_desc
-    print('PSP: issue load ip fw:', fw_type, hex(len(fw_bytes)))
+    # print('PSP: issue load ip fw:', fw_type, hex(len(fw_bytes)))
 
     self.prep_msg1(fw_bytes)
     ctypes.memset(self.cmd_pm.cpu_addr(), 0, 0x1000)

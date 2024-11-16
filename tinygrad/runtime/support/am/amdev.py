@@ -10,7 +10,7 @@ from tinygrad.runtime.support.am.soc21 import SOC21_IP
 from tinygrad.runtime.support.am.smu import SMU_IP
 from tinygrad.runtime.support.am.psp import PSP_IP
 from tinygrad.runtime.support.am.gfx import GFX_IP
-from tinygrad.runtime.support.am.mes import MES_IP
+# from tinygrad.runtime.support.am.mes import MES_IP
 
 class AMRegister:
   def __init__(self, adev, regoff): self.adev, self.regoff = adev, regoff
@@ -39,7 +39,7 @@ class AMDev:
     self.smu = SMU_IP(self)
     self.psp = PSP_IP(self)
     self.gfx = GFX_IP(self)
-    self.mes = MES_IP(self)
+    # self.mes = MES_IP(self)
 
     if self.psp.is_sos_alive():
       print("sOS is alive, issue mode1 reset...")

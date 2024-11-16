@@ -19,6 +19,7 @@ class GMC_IP:
 
     self.memscratch_pm = self.adev.mm.palloc(0x1000)
     self.dummy_page_pm = self.adev.mm.palloc(0x1000)
+    self.gfx_enabled, self.mmhub_enabled = False, False
 
   def init(self, root_pt):
     print("GMC init")
@@ -33,8 +34,8 @@ class GMC_IP:
     getattr(self.adev, f"reg{block}VM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32").write((self.vm_end >> 12) & 0xffffffff)
     getattr(self.adev, f"reg{block}VM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32").write(self.vm_end >> 44)
 
-    getattr(self.adev, f"reg{block}VM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32").write((self.root_pt.pmem.paddr & 0xffffffff) | 1)
-    getattr(self.adev, f"reg{block}VM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32").write((self.root_pt.pmem.paddr >> 32) & 0xffffffff)
+    getattr(self.adev, f"reg{block}VM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32").write((self.root_pt.pm.paddr & 0xffffffff) | 1)
+    getattr(self.adev, f"reg{block}VM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32").write((self.root_pt.pm.paddr >> 32) & 0xffffffff)
 
     getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_START_ADDR_LO32").write((self.vm_base >> 12) & 0xffffffff)
     getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_START_ADDR_HI32").write(self.vm_base >> 44)
@@ -42,8 +43,8 @@ class GMC_IP:
     getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_END_ADDR_LO32").write((self.vm_end >> 12) & 0xffffffff)
     getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_END_ADDR_HI32").write(self.vm_end >> 44)
 
-    getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_BASE_ADDR_LO32").write((self.root_pt.pmem.paddr & 0xffffffff) | 1)
-    getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_BASE_ADDR_HI32").write((self.root_pt.pmem.paddr >> 32) & 0xffffffff)
+    getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_BASE_ADDR_LO32").write((self.root_pt.pm.paddr & 0xffffffff) | 1)
+    getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_BASE_ADDR_HI32").write((self.root_pt.pm.paddr >> 32) & 0xffffffff)
 
   def init_system_aperture_regs(self, block:Union["MM", "GC"]):
     getattr(self.adev, f"reg{block}MC_VM_AGP_BASE").write(0)
@@ -100,6 +101,7 @@ class GMC_IP:
     self.enable_vm("MM")
     self.disable_identity_aperture("MM")
     self.program_invalidation("MM")
+    self.mmhub_enabled = True
 
   def init_gfxhub(self):
     print("GFXHUB init")
@@ -111,6 +113,7 @@ class GMC_IP:
     self.enable_vm("GC")
     self.disable_identity_aperture("GC")
     self.program_invalidation("GC")
+    self.gfx_enabled = True
 
   def flush_hdp(self): self.adev.wreg(0x1fc00, 0x0) # TODO: write up!
   def flush_tlb_gfxhub(self, vmid, vmhub, flush_type):
