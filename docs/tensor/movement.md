@@ -20,7 +20,6 @@
 ::: tinygrad.Tensor.meshgrid
 ::: tinygrad.Tensor.squeeze
 ::: tinygrad.Tensor.unsqueeze
-::: tinygrad.Tensor.pad2d
 ::: tinygrad.Tensor.T
 ::: tinygrad.Tensor.transpose
 ::: tinygrad.Tensor.flatten

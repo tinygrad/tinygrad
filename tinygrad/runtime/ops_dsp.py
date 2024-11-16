@@ -3,7 +3,7 @@ from typing import Tuple, Any
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys
 assert sys.platform != 'win32'
 from tinygrad.device import BufferOptions, Compiled, Allocator
-from tinygrad.helpers import from_mv, getenv, DEBUG, round_up, mv_address, to_mv, cpu_objdump
+from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv
 from tinygrad.runtime.ops_clang import ClangCompiler
 from tinygrad.renderer.cstyle import DSPRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
@@ -23,7 +23,6 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
 class DSPProgram:
   def __init__(self, device:DSPDevice, name:str, lib:bytes):
     self.device, self.lib = device, lib
-    if DEBUG >= 6: cpu_objdump(lib, objdump_tool='llvm-objdump')
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
@@ -72,7 +71,8 @@ class DSPDevice(Compiled):
       self.link_ld.flush()
 
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib", "-mhvx=v65", "-mhvx-length=128b", f"-T{self.link_ld.name}"]
-    super().__init__(device, DSPAllocator(self), DSPRenderer(), ClangCompiler("compile_dsp", args=compiler_args), functools.partial(DSPProgram, self))
+    super().__init__(device, DSPAllocator(self), DSPRenderer(),
+                     ClangCompiler("compile_dsp", args=compiler_args, objdump_tool='llvm-objdump'), functools.partial(DSPProgram, self))
 
     fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
     self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferOptions(nolru=True))

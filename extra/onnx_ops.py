@@ -282,7 +282,7 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
   if outshape is not None and (outshape := to_python_const(outshape)) != ret.shape:
     diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
     pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
-    ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
+    ret = ret.pad((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
   return ret
 
 def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
@@ -334,7 +334,7 @@ def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
 
 def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
   bs, c, iy, ix = x.shape
-  return x / x.mul(x).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
+  return x / x.mul(x).reshape(bs,1,c,iy*ix).pad((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
 
 def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)):
   mean = x.mean(axis, keepdim=True)
