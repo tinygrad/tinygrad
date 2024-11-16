@@ -225,8 +225,9 @@ class TestOps(unittest.TestCase):
       for i in range(len(tor)):
         helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
 
-    tor = torch.meshgrid(x, y, torch.tensor(10).int())
-    ten = xt.meshgrid(yt, Tensor(10))
+    z, zt = torch.tensor([7,8,9]).int(), Tensor([7,8,9])
+    tor = torch.meshgrid(x, y, z, torch.tensor(10).int())
+    ten = xt.meshgrid(yt, zt, Tensor(10))
     for i in range(len(tor)):
       helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
 
