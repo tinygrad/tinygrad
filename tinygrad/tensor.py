@@ -1347,17 +1347,19 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     Generates coordinate matrices from coordinate vectors.
 
-    When `indexing` is `"ij"` the dimensions are in the same order as the cardinality of the inputs.
-    When `indexing` is `"xy"` the cardinality of first and second dimensions are swapped.
+    `indexing` determines how the output grids are aligned
+    `ij` indexing follows matrix-style indexing and `xy` indexing follows Cartesian-style indexing
 
     ```python exec="true" source="above" session="tensor" result="python"
     x, y = Tensor([1, 2, 3]), Tensor([4, 5, 6])
     grid_x, grid_y = x.meshgrid(y)
-    print("\\n".join([repr(x.numpy()) for x in (grid_x, grid_y)]))
+    print(grid_x.numpy())
+    print(grid_y.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     grid_x, grid_y = x.meshgrid(y, indexing="xy")
-    print("\\n".join([repr(x.numpy()) for x in (grid_x, grid_y)]))
+    print(grid_x.numpy())
+    print(grid_y.numpy())
     ```
     """
     tensors = (self,) + args if indexing == "ij" else (args[0],) + (self,) + args[1:]
