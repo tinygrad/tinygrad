@@ -38,7 +38,8 @@ class ScheduleItem:
 # **** small wrapper for LazyBuffer -> UOp
 
 def UPatLoadStore(to_store=UPat()): return UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), to_store, name="store"), name="load")
-def is_scheduled(u:UOp): return len(UPatLoadStore().match(u, {})) != 0
+@functools.lru_cache(None)
+def is_scheduled(u:UOp): return u.op is Ops.LOAD and len(u.src) == 3
 
 @dataclass(frozen=True)
 class ScheduleContext:
