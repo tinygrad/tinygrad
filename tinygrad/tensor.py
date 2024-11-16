@@ -9,7 +9,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN
 from tinygrad.multi import MultiLazyBuffer
-from tinygrad.ops import MetaOps, smax, smin, resolve, UOp, Ops, BinaryOps, sint, Variable, SimpleMathTrait
+from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait
 from tinygrad.device import Device, Buffer, BufferOptions
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule
@@ -51,7 +51,7 @@ def _to_np_dtype(dtype:DType) -> Optional[type]:
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 
 def _fromnp(x: 'np.ndarray') -> LazyBuffer:  # type: ignore [name-defined] # noqa: F821
-  ret = LazyBuffer.metaop(MetaOps.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
+  ret = LazyBuffer.metaop(Ops.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
   # fake realize
   ret.buffer.allocate(x)
   del ret.srcs
@@ -64,9 +64,9 @@ def get_shape(x) -> Tuple[int, ...]:
   return (len(subs),) + (subs[0] if subs else ())
 
 def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> LazyBuffer:
-  if isinstance(x, bytes): ret, data = LazyBuffer.metaop(MetaOps.EMPTY, (len(x)//dtype.itemsize,), dtype, "PYTHON"), x
+  if isinstance(x, bytes): ret, data = LazyBuffer.metaop(Ops.EMPTY, (len(x)//dtype.itemsize,), dtype, "PYTHON"), x
   else:
-    ret = LazyBuffer.metaop(MetaOps.EMPTY, get_shape(x), dtype, "PYTHON")
+    ret = LazyBuffer.metaop(Ops.EMPTY, get_shape(x), dtype, "PYTHON")
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
     data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
@@ -134,10 +134,10 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
     # create a LazyBuffer from the different types of inputs
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-    elif isinstance(data, get_args(ConstType)): data = _metaop(MetaOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
+    elif isinstance(data, get_args(ConstType)): data = _metaop(Ops.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, UOp):
       assert data.op is Ops.BIND and data.src[0].op is Ops.DEFINE_VAR and data.src[1].op is Ops.CONST, f"can't create tensor from UOp {data}"
-      data = _metaop(MetaOps.CONST, tuple(), dtype or data.dtype, device, data)
+      data = _metaop(Ops.CONST, tuple(), dtype or data.dtype, device, data)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if dtype is None else dtype)
     elif isinstance(data, (list, tuple)):
       if dtype is None:
@@ -145,15 +145,15 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
         else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
       if dtype == dtypes.bfloat16: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtypes.bfloat16).lazydata
       else: data = _frompy(data, dtype)
-    elif data is None: data = _metaop(MetaOps.EMPTY, (0,), dtype or dtypes.default_float, device)
+    elif data is None: data = _metaop(Ops.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif str(type(data)) == "<class 'numpy.ndarray'>":
       import numpy as np
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
-      if data.shape == (): data = _metaop(MetaOps.CONST, tuple(), dtype or _from_np_dtype(data.dtype), device, data.item())
+      if data.shape == (): data = _metaop(Ops.CONST, tuple(), dtype or _from_np_dtype(data.dtype), device, data.item())
       else: data = _fromnp(data.astype(npdtype) if dtype is not None and (npdtype:=_to_np_dtype(dtype)) is not None else data)  # type: ignore [name-defined]
     elif isinstance(data, pathlib.Path):
       dtype = dtype or dtypes.uint8
-      data = _metaop(MetaOps.EMPTY, (data.stat().st_size // dtype.itemsize,), dtype, f"DISK:{data.resolve()}")
+      data = _metaop(Ops.EMPTY, (data.stat().st_size // dtype.itemsize,), dtype, f"DISK:{data.resolve()}")
 
     # by this point, it has to be a LazyBuffer
     if not isinstance(data, (LazyBuffer, MultiLazyBuffer)):
@@ -384,9 +384,9 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
   def from_uop(y:UOp, **kwargs) -> Tensor:
     if y.op is Ops.BIND: return Tensor(y, **kwargs, requires_grad=False)   # this is the only UOp allowed in Tensor
     if y.op is Ops.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
-    if y.op is BinaryOps.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
-    if y.op is BinaryOps.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
-    if y.op is BinaryOps.MAX: return Tensor.from_uop(y.src[0]).maximum(Tensor.from_uop(y.src[1]))
+    if y.op is Ops.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
+    if y.op is Ops.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
+    if y.op is Ops.MAX: return Tensor.from_uop(y.src[0]).maximum(Tensor.from_uop(y.src[1]))
     raise RuntimeError(f"unhandled UOp {y}")
 
   # ***** creation entrypoint *****
@@ -412,7 +412,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.shape)
     ```
     """
-    return Tensor._metaop(MetaOps.EMPTY, argfix(*shape), **kwargs)
+    return Tensor._metaop(Ops.EMPTY, argfix(*shape), **kwargs)
 
   @staticmethod
   def from_blob(ptr:int, shape:Tuple[int, ...], **kwargs) -> Tensor:
@@ -424,7 +424,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
     """
 
-    r = Tensor._metaop(MetaOps.EMPTY, shape, **kwargs)
+    r = Tensor._metaop(Ops.EMPTY, shape, **kwargs)
     r.lazydata.buffer.allocate(external_ptr=ptr)
     del r.lazydata.srcs # fake realize
     return r
@@ -2023,7 +2023,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     padding_ = self._padding2d(padding, len(k_ := make_tuple(kernel_size, 2)))
-    return self.pad(padding_, value=float('-inf'))._pool(k_, stride if stride is not None else k_, dilation).max(axis=tuple(range(-len(k_), 0)))
+    return self.pad(padding_, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation).max(tuple(range(-len(k_), 0)))
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding:int|Tuple[int, ...]=0,
              acc_dtype:Optional[DTypeLike]=None) -> Tensor:
@@ -2115,11 +2115,19 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     return x.conv2d(w.flatten(end_dim=1), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
   def dot(self, w:Tensor, acc_dtype:Optional[DTypeLike]=None) -> Tensor:
+
     """
     Performs dot product between two tensors.
+    If `w` is 1-D, it's a sum product over the last axis of `self` and `w`.
+    If `w` is N-D with N>=2, it's a sum product over the last axis of `self` and the second-to-last axis of `w`.
 
     You can pass in the optional `acc_dtype` keyword argument to control the data type of the accumulation.
 
+    ```python exec="true" source="above" session="tensor" result="python"
+    a = Tensor([1, 2, 3])
+    b = Tensor([1, 1, 0])
+    print(a.dot(b).numpy())
+    ```
     ```python exec="true" source="above" session="tensor" result="python"
     a = Tensor([[1, 2], [3, 4]])
     b = Tensor([[5, 6], [7, 8]])
@@ -2127,11 +2135,11 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     if IMAGE: return self.image_dot(w, acc_dtype)
-    n1, n2 = len(self.shape), len(w.shape)
-    assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
-    if (L:=self.shape[-1]) != (R:=w.shape[-min(n2, 2)]): raise AssertionError(f"shapes {self.shape} and {w.shape} cannot be multiplied ({L} != {R})")
-    x = self.reshape(*self.shape[0:-1], *[1]*min(n1-1, n2-1, 1), self.shape[-1])
-    w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
+    x, dx, dw = self, self.ndim, w.ndim
+    if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
+    if x.shape[-1] != w.shape[axis_w:=-min(w.ndim,2)]: raise RuntimeError(f"cannot dot {x.shape} and {w.shape}")
+    x = x.reshape(*x.shape[0:-1], *[1]*min(dx-1, dw-1, 1), x.shape[-1])
+    w = w.reshape(*w.shape[0:-2], *[1]*min(dx-1, dw-1, 1), *w.shape[axis_w:]).transpose(-1, axis_w)
     return (x*w).sum(-1, acc_dtype=acc_dtype).cast(least_upper_dtype(x.dtype, w.dtype) if acc_dtype is None else acc_dtype)
 
   def matmul(self, x:Tensor, reverse=False, acc_dtype:Optional[DTypeLike]=None) -> Tensor:
@@ -3556,11 +3564,12 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
   # *** image Tensor function replacements ***
 
-  def image_dot(self, w:Tensor, acc_dtype=None) -> Tensor:
+  def image_dot(self, w:Tensor, acc_dtype:Optional[DTypeLike]=None) -> Tensor:
     # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
-    n1, n2 = len(self.shape), len(w.shape)
-    assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
-    assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"  # noqa: E501
+    x, dx, dw = self, self.ndim, w.ndim
+    if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
+    if x.shape[-1] != w.shape[-min(w.ndim, 2)]: raise RuntimeError(f"cannot image_dot {x.shape} and {w.shape}")
+
     bs, groups, cin, cout = prod(self.shape[0:-2]), prod(w.shape[0:-2]), w.shape[-2], w.shape[-1]
     out_shape_t = self.shape[0:-2] + (cout,-1) if len(self.shape) > 1 else (cout, )
 

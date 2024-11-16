@@ -2,8 +2,7 @@ from typing import List
 import unittest, time
 from tinygrad import dtypes, Device
 from tinygrad.helpers import DEBUG
-from tinygrad.ops import BinaryOps, Ops, UOp, KernelInfo
-from tinygrad.ops import UPat, PatternMatcher
+from tinygrad.ops import Ops, UOp, KernelInfo, UPat, PatternMatcher
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.codegen.uopgraph import full_graph_rewrite, graph_rewrite, expander, sym
@@ -541,7 +540,7 @@ class TestExpander(unittest.TestCase):
   @unittest.skip("no longer supported")
   def test_reduce_known_axis(self):
     e1 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
-    sink = UOp(Ops.REDUCE, dtypes.int, (3*e1,e1), BinaryOps.ADD)
+    sink = UOp(Ops.REDUCE, dtypes.int, (3*e1,e1), Ops.ADD)
     sink = expander_rewrite(sink)
     assert sink.op is Ops.CONST
     self.assertEqual(sink.arg, 3*(0+1+2+3))
@@ -549,7 +548,7 @@ class TestExpander(unittest.TestCase):
   @unittest.skip("no longer supported")
   def test_reduce_const(self):
     e1 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
-    sink = UOp(Ops.REDUCE, dtypes.int, (UOp.const(dtypes.int, 3), e1), BinaryOps.ADD)
+    sink = UOp(Ops.REDUCE, dtypes.int, (UOp.const(dtypes.int, 3), e1), Ops.ADD)
     sink = expander_rewrite(sink)
     assert sink.op is Ops.CONST
     self.assertEqual(sink.arg, 3*4)
@@ -590,7 +589,7 @@ class TestExpander(unittest.TestCase):
   def test_reduce_different_axis(self):
     e1 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
     e2 = UOp(Ops.EXPAND, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((2,4),))
-    sink = UOp(Ops.REDUCE, dtypes.int, (e1,e2), BinaryOps.ADD)
+    sink = UOp(Ops.REDUCE, dtypes.int, (e1,e2), Ops.ADD)
     sink = expander_rewrite(sink)
     print(sink)
 
