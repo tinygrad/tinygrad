@@ -132,15 +132,17 @@ def chi(states: Tensor) -> Tensor:
   """
   Chi step of Keccak-f
   states: [batch_size, height, width]
-  returns: [batch_size, height, width]
   """
   shift1 = states.roll(shifts=-1, dims=2)
   shift2 = states.roll(shifts=-2, dims=2)
-  # ~shift1
   return states ^ ((shift1 ^ Tensor.full_like(shift1, -1)) & shift2)
 
 
 def iota(states: Tensor, round_idx: int) -> Tensor:
+  """
+  Iota step of Keccak-f
+  states: [batch_size, height, width]
+  """
   states[:, 0, 0] ^= iota_round_constants[round_idx]
   return states
 
@@ -170,7 +172,7 @@ def keccak_f(states: Tensor) -> Tensor:
 
 def pad(states: Tensor, pad_idx_bytes: int):
   """
-  Pad the state to the correct byte
+  Add padding bytes as defined by the SHA3 standard
   """
   # adjust padding offsets to pick out the correct byte inside the uint64
   padpoint_uint = (pad_idx_bytes % rate_bytes) // 8
@@ -182,49 +184,33 @@ def pad(states: Tensor, pad_idx_bytes: int):
   return states
 
 
-def visualize_state(state: Tensor):
-  """
-  Print the state for debugging
-  """
-  for x in range(height):
-    for y in range(width):
-      print(f"{state.view(height, width)[x][y].numpy():016x}", end=" ")
-    print()
-
-
 def digest(state: Tensor) -> str:
   return state.flatten().numpy().tobytes()[:md_len].hex()
 
 
 def tinygrad_sha3_256(messages: List[str]) -> List[str]:
   """
-  Hash a batch of equal length messages using SHA3-256
+  Hash a batch of equal length messages using SHA3-256.
   """
   batch_size = len(messages)
   states = Tensor.zeros((batch_size, height, width),
                         dtype=dtypes.uint64).contiguous()
   batched_blocks, msg_bytes = messages_to_blocks(messages)
   n_blocks = batched_blocks.shape[0]
-
   # absorb
   for block_idx in range(0, n_blocks):
     blocks = batched_blocks[block_idx]
     states = states ^ blocks
     if block_idx < n_blocks - 1 or (block_idx == n_blocks - 1 and msg_bytes % rate_bytes == 0):
       states = keccak_f(states)
-
   # squeeze
   states = pad(states, min(msg_bytes % rate_bytes, rate_bytes - 1))
   states = keccak_f(states)
-
   # digest
   return [digest(state) for state in states]
 
 
 def hashlib_sha3_256(messages: List[str]) -> List[str]:
-  """
-  Compare against hashlib
-  """
   results = []
   for message in messages:
     hash_obj = hashlib.sha3_256()
@@ -235,31 +221,24 @@ def hashlib_sha3_256(messages: List[str]) -> List[str]:
   return results
 
 
-def test_keccak_step_helper(messages: List[str], step_fn):
-  blocks, _ = messages_to_blocks(messages)
-  states = Tensor.zeros((len(messages), height, width), dtype=dtypes.uint64)
-  states = states ^ blocks[0]
-  states = step_fn(states)
-  return states
-
-
 class TestSHA3(unittest.TestCase):
   def test_message_to_bytearray(self):
+    """Test converting a message to a bytearray"""
     msg = "a"
-    x, l = message_to_bytearray(msg)
-    self.assertEqual(l, 1)
-    self.assertEqual(len(x), rate_bytes)
-    self.assertEqual(x[1:], b'\0' * (rate_bytes - 1))
+    arr, msg_len = message_to_bytearray(msg)
+    self.assertEqual(msg_len, 1)
+    self.assertEqual(len(arr), rate_bytes)
+    self.assertEqual(arr[1:], b'\0' * (rate_bytes - 1))
     msg = "a" * (rate_bytes + 1)
-    x, l = message_to_bytearray(msg)
-    self.assertEqual(l, rate_bytes + 1)
-    self.assertEqual(x[rate_bytes + 1:], b'\0' * (rate_bytes - 1))
-    self.assertEqual(len(x), rate_bytes * 2)
+    arr, msg_len = message_to_bytearray(msg)
+    self.assertEqual(msg_len, rate_bytes + 1)
+    self.assertEqual(arr[rate_bytes + 1:], b'\0' * (rate_bytes - 1))
+    self.assertEqual(len(arr), rate_bytes * 2)
     msg = "界"
-    x, l = message_to_bytearray(msg)
-    self.assertEqual(l, 3)
-    self.assertEqual(len(x), rate_bytes)
-    self.assertEqual(x[3:], b'\0' * (rate_bytes - 3))
+    arr, msg_len = message_to_bytearray(msg)
+    self.assertEqual(msg_len, 3)
+    self.assertEqual(len(arr), rate_bytes)
+    self.assertEqual(arr[3:], b'\0' * (rate_bytes - 3))
 
   def test_rate_bytes_length(self):
     """Test string exactly rate_bytes length"""
@@ -307,11 +286,12 @@ class TestSHA3(unittest.TestCase):
     self.assertEqual(tinygrad_sha3_256(text), hashlib_sha3_256(text))
 
   def test_batch(self):
+    """Test batching"""
     texts = ['hello' * 100, 'world' * 100, 'tests' *
              100, 'reall' * 100, 'cools' * 100] * 100
-    t = tinygrad_sha3_256(texts)
-    p = hashlib_sha3_256(texts)
-    self.assertEqual(t, p)
+    tinygrad_hashes = tinygrad_sha3_256(texts)
+    hashlib_hashes = hashlib_sha3_256(texts)
+    self.assertEqual(tinygrad_hashes, hashlib_hashes)
 
 
 if __name__ == "__main__":
