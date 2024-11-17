@@ -9,8 +9,6 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import capturing
 from tinygrad.tensor import _to_np_dtype
 
-PUSH_PERMUTES = False
-
 class CLCache:
   def __init__(self, allowed=None, strict=False, preclear=True, var_vals=None):
     self.allowed, self.strict, self.preclear, self.var_vals = allowed, strict, preclear, var_vals if var_vals is not None else {}
@@ -44,12 +42,11 @@ class TestInferenceMinKernels(unittest.TestCase):
   def tearDown(self):
     Tensor.training = self.training_old
 
-  @unittest.skipIf(not PUSH_PERMUTES, "this test requires PUSH_PERMUTES")
   def test_convnext(self):
     model = ConvNeXt()
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=_to_np_dtype(p.dtype)))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(129):
+    with CLCache(143):
       model(img).realize()
 
   def test_enet(self):
@@ -189,9 +186,6 @@ class TestOpt(unittest.TestCase):
       d.realize()
     np.testing.assert_allclose(a.numpy().sum(-1).reshape(16,1,16).transpose(2,1,0), d.numpy(), rtol=1e-3, atol=1e-5)
 
-  # TODO: push permute through expansion reshape
-  @unittest.skip("expansion can't push expand permute yet")
-  @unittest.skipIf(not PUSH_PERMUTES, "this test requires PUSH_PERMUTES")
   def test_permute_was_pushed_through_expand_reshape(self):
     a = Tensor.randn(16, 16, 16)
     with CLCache(2):
@@ -222,7 +216,6 @@ class TestOpt(unittest.TestCase):
     np.testing.assert_allclose(c.numpy(), d.numpy().transpose(1,0), rtol=1e-3, atol=1e-5)
     assert cache_len == 1, "reduceop was rerun!"
 
-  # TODO with PUSH_PERMUTES these could be 2
   def test_expand_reduce_is_folded_on_same_axis(self):
     with Context(FUSE_CONV_BW=1):
       for axis in [0, 1]:

@@ -1,14 +1,17 @@
-import sys, time, logging, difflib
-from typing import Callable, Optional, Tuple, TypeVar
+import time, logging, difflib
+from typing import Callable, Optional, Tuple
 import numpy as np
-from tinygrad import Tensor, Device, dtypes
-from tinygrad.ops import UOp, UOps, sint
+from tinygrad import Tensor, dtypes
+from tinygrad.ops import UOp, Ops, sint
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
 from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import CI, OSX, getenv, colored
+from tinygrad.helpers import T, getenv, colored
+from tinygrad.codegen.linearize import linearize_uop
+from tinygrad.codegen.uopgraph import full_graph_rewrite
+from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler, PythonAllocator
 
 def derandomize_model(model):
   for p in get_parameters(model):
@@ -21,28 +24,12 @@ def assert_jit_cache_len(fxn, expected_len):
     return
   # until we have a better way of typing the prg in ExecItem
   if issubclass(type(fxn.jit_cache[0].prg), Runner) and not type(fxn.jit_cache[0].prg).__name__.endswith('Graph'):
-    assert len(fxn.jit_cache) == expected_len, len(fxn.jit_cache)
+    assert len(fxn.jit_cache) == expected_len, f"expected {expected_len}, got {len(fxn.jit_cache)}"
   else:
     assert len(fxn.jit_cache) == 1, len(fxn.jit_cache)
     # until we have a better way of typing the prg in ExecItem
     assert type(fxn.jit_cache[0].prg).__name__.endswith('Graph')
     assert len(fxn.jit_cache[0].prg.jit_cache) == expected_len
-
-def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
-  if dtype == dtypes.bfloat16:
-    # NOTE: this requires bf16 buffer support
-    return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
-  if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
-  # for CI GPU and OSX, cl_khr_fp16 isn't supported
-  # for CI LLVM, it segfaults because it can't link to the casting function
-  # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
-  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
-  if dtype == dtypes.half:
-    if device == "GPU": return not CI and not OSX
-    if device in ["LLVM", "CUDA", "NV"]: return not CI
-    if device == "PYTHON": return sys.version_info >= (3, 12)
-  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
-  return True
 
 def rand_for_dtype(dt:DType, size:int):
   if dtypes.is_unsigned(dt):
@@ -63,18 +50,20 @@ def print_diff(s0, s1, unified=getenv("UNIFIED_DIFF",1)):
     diff = ocdiff.console_diff(str(s0), str(s1))
   logging.info(diff)
 
-def assert_equiv_uops(u1:UOp, u2:UOp) -> None:
-  if u1 is not u2:
-    print_diff(u1, u2)
-    raise AssertionError("uops aren't equal.")
-
 def ast_const(dtype:DType, val:ConstType, shape:Tuple[sint, ...]=(), st:Optional[ShapeTracker]=None, st_src:Optional[Tuple[UOp]]=None) -> UOp:
   if st_src is None:
     st_src = (st.to_uop() if st is not None else ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)
-  return UOp(UOps.VALID, dtypes.bool, st_src).where(UOp.const(dtype, val), UOp.const(dtype, 0))
+  return UOp(Ops.VALID, dtypes.bool, st_src).where(UOp.const(dtype, val), UOp.const(dtype, 0))
 
-T = TypeVar("T")
 def timeit(fxn:Callable[..., T], *args, **kwargs) -> Tuple[T, float]:
   st = time.perf_counter_ns()
   ret = fxn(*args, **kwargs)
   return ret, (time.perf_counter_ns()-st)*1e-6
+
+def eval_uop(uop:UOp):
+  g = UOp(Ops.DEFINE_GLOBAL, uop.dtype.ptr(), arg=0, src=())
+  rw = full_graph_rewrite(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(), PythonRenderer)
+  prog = PythonProgram("run", PythonCompiler().compile(PythonRenderer().render("run", linearize_uop(rw))))
+  buf = PythonAllocator().alloc(uop.dtype.itemsize)
+  prog(buf)
+  return buf.cast(uop.dtype.fmt).tolist()[0]

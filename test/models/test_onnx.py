@@ -3,7 +3,10 @@ import os
 import time
 import unittest
 import numpy as np
-import onnx
+try:
+  import onnx
+except ModuleNotFoundError:
+  raise unittest.SkipTest("onnx not installed, skipping onnx test")
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI, fetch, temp

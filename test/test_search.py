@@ -3,12 +3,12 @@ import unittest
 from test.helpers import ast_const
 from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.ops import UOp, UOps, BinaryOps
+from tinygrad.ops import UOp, Ops
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.search import time_linearizer, bufs_from_lin, actions, beam_search
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.engine.realize import capturing
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -16,15 +16,15 @@ from tinygrad.shape.view import View
 
 class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
-    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is UOps.SINK][0]
+    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is Ops.SINK][0]
     out = Buffer(Device.DEFAULT, si.outputs[0].size, si.outputs[0].dtype).allocate()
-    memops = {x.src[0].arg:x.src[-1].arg.real_size() for x in si.ast.parents if x.op is UOps.LOAD}
+    memops = {x.src[0].arg:x.src[-1].arg.real_size() for x in si.ast.parents if x.op is Ops.LOAD}
     rawbufs = [out] + [Buffer(Device.DEFAULT, memops[i], x.dtype).allocate() for i,x in enumerate(si.inputs, start=len(si.outputs))]
     tm = time_linearizer(Kernel(si.ast), rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
     assert tm > 0 and tm != float('inf')
 
   def test_bufs_from_lin(self):
-    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is UOps.SINK][0]
+    si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is Ops.SINK][0]
     rawbufs = bufs_from_lin(lin:=Kernel(si.ast))
     assert len(rawbufs) == len(lin.membufs) == 2
     assert all(r is not None for r in rawbufs)
@@ -34,7 +34,7 @@ class TestTimeLinearizer(unittest.TestCase):
   def test_bufs_from_lin_alt(self):
     a = Tensor.randn(4, 4).realize()
     b = a+a[0]
-    si = [si for si in b.schedule() if si.ast.op is UOps.SINK][0]
+    si = [si for si in b.schedule() if si.ast.op is Ops.SINK][0]
     rawbufs = bufs_from_lin(k:=Kernel(si.ast))
     assert len(rawbufs) == len(k.membufs) == 2
     assert all(r is not None for r in rawbufs)
@@ -46,12 +46,12 @@ class TestTimeLinearizer(unittest.TestCase):
     Ensure that the kernel count is not incremented by time_linearizer when clearing l2
     """
     # ast of Tensor.zeros(16).contiguous().realize()
-    ast = UOp(UOps.SINK, src=(
-      UOp(UOps.STORE, src=(
-        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
-        UOp(UOps.VIEW, arg=ShapeTracker(views=(View(shape=(16,), strides=(1,), offset=0, mask=None, contiguous=True),))),
+    ast = UOp(Ops.SINK, src=(
+      UOp(Ops.STORE, src=(
+        UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()),
+        UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(16,), strides=(1,), offset=0, mask=None, contiguous=True),))),
         ast_const(dtypes.float, 0.0, st_src=(
-          UOp(UOps.VIEW, arg=ShapeTracker(views=(View(shape=(16,), strides=(0,), offset=0, mask=None, contiguous=False),))),)),)),))
+          UOp(Ops.VIEW, arg=ShapeTracker(views=(View(shape=(16,), strides=(0,), offset=0, mask=None, contiguous=False),))),)),)),))
     lin = Kernel(ast)
     bufs = bufs_from_lin(lin)
 
@@ -103,41 +103,41 @@ class TestBEAM(unittest.TestCase):
 
   def test_filter_global_buffer(self):
     # taken from https://github.com/tinygrad/tinygrad/issues/4612
-    ast = UOp(UOps.SINK, dtypes.void, arg=None, src=(
-      UOp(UOps.STORE, dtypes.void, arg=None, src=(
-        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=0, src=()),
-        UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1, 256), strides=(0, 0, 1), offset=0, mask=None, contiguous=True),)), src=()), # noqa: E501
-        UOp(UOps.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.MAX, (1,)), src=(
-          UOp(UOps.ALU, dtypes.float, arg=BinaryOps.MUL, src=(
-            UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-              UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-                UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-                  UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-                    UOp(UOps.ALU, dtypes.float, arg=BinaryOps.ADD, src=(
-                      UOp(UOps.LOAD, dtypes.float, arg=None, src=(
-                        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=1, src=()),
-                        UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=0, mask=((0, 64128),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)), # noqa: E501
-                      UOp(UOps.LOAD, dtypes.float, arg=None, src=(
-                        UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=2, src=()),
-                        UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=-64128, mask=((64128, 128256),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)),)), # noqa: E501
-                    UOp(UOps.LOAD, dtypes.float, arg=None, src=(
-                      UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=3, src=()),
-                      UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=-128256, mask=((128256, 192384),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)),)), # noqa: E501
-                  UOp(UOps.LOAD, dtypes.float, arg=None, src=(
-                    UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=4, src=()),
-                    UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=-192384, mask=((192384, 256512),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)),)), # noqa: E501
-                UOp(UOps.LOAD, dtypes.float, arg=None, src=(
-                  UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=5, src=()),
-                  UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=-256512, mask=((256512, 320640),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)),)), # noqa: E501
-              UOp(UOps.LOAD, dtypes.float, arg=None, src=(
-                UOp(UOps.DEFINE_GLOBAL, PtrDType(dtypes.float), arg=6, src=()),
-                UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=-320640, mask=((320640, 384768),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)),)), # noqa: E501
+    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()),
+        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 1, 256), strides=(0, 0, 1), offset=0, mask=None, contiguous=True),)), src=()), # noqa: E501
+        UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.MAX, (1,)), src=(
+          UOp(Ops.MUL, dtypes.float, arg=None, src=(
+            UOp(Ops.ADD, dtypes.float, arg=None, src=(
+              UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                  UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                    UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                      UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                        UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()),
+                        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=0, mask=((0, 64128),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)), # noqa: E501
+                      UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                        UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=2, src=()),
+                        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=-64128, mask=((64128, 128256),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)),)), # noqa: E501
+                    UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                      UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=3, src=()),
+                      UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=-128256, mask=((128256, 192384),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)),)), # noqa: E501
+                  UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=4, src=()),
+                    UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=-192384, mask=((192384, 256512),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)),)), # noqa: E501
+                UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                  UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=5, src=()),
+                  UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=-256512, mask=((256512, 320640),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)),)), # noqa: E501
+              UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=6, src=()),
+                UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(384768,), strides=(1,), offset=-320640, mask=((320640, 384768),), contiguous=False), View(shape=(1, 501, 256), strides=(0, 1, 501), offset=256512, mask=None, contiguous=False))), src=()),)),)), # noqa: E501
             ast_const(dtypes.float, 1.4285714285714286, st_src=(
-              UOp(UOps.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 501, 256), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)) # noqa: E501
+              UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 501, 256), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),)),)) # noqa: E501
     lin = Kernel(ast)
 
     bufs = bufs_from_lin(lin)
-    best_lin = beam_search(lin, bufs, 3)
+    best_lin = beam_search(lin, bufs, 2)
     assert best_lin
     # need disable_cache to trigger.
     tm = time_linearizer(best_lin, bufs, allow_test_size=False, cnt=2, disable_cache=True)

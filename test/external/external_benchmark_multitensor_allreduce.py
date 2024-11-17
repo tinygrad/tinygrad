@@ -1,7 +1,7 @@
 import time
 from tinygrad import Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.engine.lazy import LazyBuffer
-from tinygrad.ops import ReduceOps
+from tinygrad.ops import Ops
 from tinygrad.multi import MultiLazyBuffer, all_reduce
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
@@ -14,7 +14,7 @@ def realize(x: Union[LazyBuffer, List[LazyBuffer]]):
   for lb in x: Device[lb.device].synchronize()
 
 def test(devs: List[str], N: int, iters:int = 10):
-  def _wrapped(op: ReduceOps, t: Tensor) -> Tensor:
+  def _wrapped(op: Ops, t: Tensor) -> Tensor:
     return Tensor(MultiLazyBuffer(all_reduce(op, t.lazydata.lbs), 0), device=devs)
   _jitted = TinyJit(_wrapped) if getenv("USEJIT", 1) == 1 else _wrapped
 
@@ -24,7 +24,7 @@ def test(devs: List[str], N: int, iters:int = 10):
     realize(lbs)
     GlobalCounters.reset()
     start = time.time()
-    realize(_jitted(ReduceOps.SUM, Tensor(MultiLazyBuffer(lbs, 0), device=devs)).lazydata.lbs)
+    realize(_jitted(Ops.ADD, Tensor(MultiLazyBuffer(lbs, 0), device=devs)).lazydata.lbs)
     if i < 0: continue # warm up jit
     i_secs = time.time() - start
 

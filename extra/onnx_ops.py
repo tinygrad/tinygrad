@@ -8,7 +8,7 @@ import numpy as np
 
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
                   "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-                  "Elu", "Celu", "Xor", "Round"}
+                  "Elu", "Celu", "Xor", "Round", "Erf"}
 
 # **************** Free Ops ****************
 
@@ -43,7 +43,7 @@ def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, v
   if value_string is not None or value_strings is not None: raise NotImplementedError('value_string or value_strings not implemented for Constant op')
 
 def HardSigmoid(x: Tensor, alpha=0.2, beta=0.5): return (alpha*x + beta).clip(0, 1)
-def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + Erf(x/math.sqrt(2)))
+def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
 def Selu(X: Tensor, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
 def PRelu(X:Tensor, slope:Tensor):
   slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope # HACK OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
@@ -282,7 +282,7 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
   if outshape is not None and (outshape := to_python_const(outshape)) != ret.shape:
     diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
     pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
-    ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
+    ret = ret.pad((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
   return ret
 
 def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
@@ -334,7 +334,7 @@ def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
 
 def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
   bs, c, iy, ix = x.shape
-  return x / x.mul(x).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
+  return x / x.mul(x).reshape(bs,1,c,iy*ix).pad((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
 
 def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)):
   mean = x.mean(axis, keepdim=True)
@@ -504,17 +504,6 @@ def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
   ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
   cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
   return cond.where(values[1], values[0])
-
-def Erf(x: Tensor):
-  t = 1.0 / (1.0 + 0.3275911 * x.abs())
-  term1 = 0.254829592 * t
-  term2 = -0.284496736 * t ** 2
-  term3 = 1.421413741 * t ** 3
-  term4 = -1.453152027 * t ** 4
-  term5 = 1.061405429 * t ** 5
-  y = (term1 + term2 + term3 + term4 + term5)
-  z = 1.0 - y * (-x * x).exp()
-  return (x > 0).where(z, -z)
 
 def Compress(inp: Tensor, condition: Tensor, axis=None):
   if axis is None:

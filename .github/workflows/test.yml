@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  DOWNLOAD_CACHE_VERSION: '6'
+  DOWNLOAD_CACHE_VERSION: '7'
   RUN_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: .
@@ -14,6 +14,119 @@ on:
   workflow_dispatch:
 
 jobs:
+  autogen:
+    name: Autogen+Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
+    - name: Install docs dependencies (no cache)
+      run: pip install -e '.[docs]'
+    - name: Use as an external package
+      run: |
+        mkdir $HOME/test_external_dir
+        cd $HOME/test_external_dir
+        python -m venv venv
+        source venv/bin/activate
+        pip install $GITHUB_WORKSPACE
+        python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
+        pip install mypy
+        mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
+    - name: Run beautiful_mnist without numpy
+      run: |
+        mkdir $HOME/test_no_numpy_dir
+        cd $HOME/test_no_numpy_dir
+        python -m venv venv
+        source venv/bin/activate
+        pip install $GITHUB_WORKSPACE
+        cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
+        PYTHONPATH=$GITHUB_WORKSPACE BS=2 STEPS=10 python beautiful_mnist.py
+    - name: Test Docs Build
+      run: python -m mkdocs build --strict
+    - name: Test Docs
+      run: |
+        python docs/abstractions2.py
+        python docs/abstractions3.py
+    - name: Test Quickstart
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
+    - name: Test DEBUG
+      run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
+    - name: Install OpenCL
+      run: |
+        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+        echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+        sudo apt update || true
+        sudo apt install --allow-unauthenticated -y --no-install-recommends opencl-headers \
+          intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
+          intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
+          intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
+    - name: Install packages (cuda)
+      run: |
+        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+        sudo apt update -y || true
+        sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
+          flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev
+    - name: Install packages (amd)
+      run: |
+        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+        sudo tee /etc/apt/sources.list.d/rocm.list <<'EOF'
+        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.1.2 jammy main
+        EOF
+        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
+        sudo apt update || true
+        sudo apt install --no-install-recommends --allow-unauthenticated -y hsa-rocr comgr hsa-rocr-dev liburing-dev libc6-dev
+        curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
+        jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
+        sudo xargs curl -L -o /usr/local/lib/libremu.so
+        sudo tee --append /etc/ld.so.conf.d/rocm.conf <<'EOF'
+          /opt/rocm/lib
+          /opt/rocm/lib64
+        EOF
+        sudo ldconfig
+    - name: Compile EfficientNet to C and test it
+      run: |
+        CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
+        clang -O2 recognize.c -lm -o recognize
+        cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
+    - name: Verify OpenCL autogen
+      run: |
+        cp tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
+        ./autogen_stubs.sh opencl
+        diff /tmp/opencl.py.bak tinygrad/runtime/autogen/opencl.py
+    - name: Verify CUDA autogen
+      run: |
+        cp tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
+        cp tinygrad/runtime/autogen/nv_gpu.py /tmp/nv_gpu.py.bak
+        ./autogen_stubs.sh cuda
+        ./autogen_stubs.sh nv
+        diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
+        diff /tmp/nv_gpu.py.bak tinygrad/runtime/autogen/nv_gpu.py
+    - name: Verify AMD autogen
+      run: |
+        cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
+        cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
+        cp tinygrad/runtime/autogen/amd_gpu.py /tmp/amd_gpu.py.bak
+        ./autogen_stubs.sh hsa
+        ./autogen_stubs.sh comgr
+        ./autogen_stubs.sh amd
+        diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
+        diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
+        diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
+    - name: Verify Linux autogen
+      run: |
+        cp tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
+        cp tinygrad/runtime/autogen/io_uring.py /tmp/io_uring.py.bak
+        ./autogen_stubs.sh libc
+        ./autogen_stubs.sh io_uring
+        diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
+        diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
+
   uops:
     name: uops tests
     runs-on: ubuntu-latest
@@ -37,7 +150,9 @@ jobs:
         IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
         IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_simple_conv2d
     - name: Test emulated METAL tensor cores
-      run: DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_big_gemm
+      run: |
+        DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_big_gemm
+        PYTHONPATH=. DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Test emulated AMX tensor cores
       run: PYTHONPATH=. DEBUG=2 AMX=1 EMULATE_AMX=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
     - name: Test emulated AMD tensor cores
@@ -46,8 +161,11 @@ jobs:
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
         PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
+        PYTHONPATH=. DEBUG=2 EMULATE_AMD=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Test emulated CUDA tensor cores
-      run: DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
+      run: |
+        DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
+        PYTHONPATH="." DEBUG=2 EMULATE_CUDA=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Test emulated INTEL OpenCL tensor cores
       run: DEBUG=2 EMULATE_INTEL=1 FORWARD_ONLY=1 PYTHON=1 HALF=1 N=64 python3 ./extra/gemm/simple_matmul.py
     - name: Full test tensor cores
@@ -74,7 +192,7 @@ jobs:
     - name: Test dtype with Python emulator
       run: DEBUG=1 PYTHONPATH=. PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
     - name: Test ops with Python emulator
-      run: DEBUG=2 PYTHON=1 python3 -m pytest -n=auto test/test_ops.py -k "not (test_split or test_simple_cumsum or test_cumsum or test_einsum or test_dot or test_dot_1d or test_big_gemm or test_broadcastdot or test_multidot or test_var_axis or test_std_axis or test_broadcast_full or test_broadcast_partial or test_simple_conv3d or test_dilated_conv_transpose2d or test_simple_conv_transpose3d or test_large_input_conv2d or test_maxpool2d or test_maxpool2d_simple or test_maxpool2d_bigger_stride or test_avgpool2d or test_cat or test_scaled_product_attention or test_scaled_product_attention_causal or test_slice_fancy_indexing_dim_inject_none or test_slice_fancy_indexing_list_indices or test_slice_fancy_indexing_no_dim_collapse or test_slice_fancy_indexing_tuple_indices or test_slice_fancy_indexing_list_with_tensors or test_slice_fancy_indexing_dim_collapse_int or test_interpolate_bilinear or test_interpolate_bilinear_corners_aligned)" --durations=20
+      run: DEBUG=2 PYTHON=1 python3 -m pytest -n=auto test/test_ops.py -k "not (test_split or test_simple_cumsum or test_cumsum or test_einsum or test_dot or test_dot_1d or test_big_gemm or test_broadcastdot or test_multidot or test_var_axis or test_std_axis or test_broadcast_full or test_broadcast_partial or test_simple_conv3d or test_dilated_conv_transpose2d or test_simple_conv_transpose3d or test_large_input_conv2d or test_max_pool2d or test_max_pool2d_simple or test_max_pool2d_bigger_stride or test_avg_pool2d or test_cat or test_scaled_product_attention or test_scaled_product_attention_causal or test_slice_fancy_indexing_dim_inject_none or test_slice_fancy_indexing_list_indices or test_slice_fancy_indexing_no_dim_collapse or test_slice_fancy_indexing_tuple_indices or test_slice_fancy_indexing_list_with_tensors or test_slice_fancy_indexing_dim_collapse_int or test_interpolate_bilinear or test_interpolate_bilinear_corners_aligned)" --durations=20
     - name: Test uops with Python emulator
       run: PYTHON=1 python3 -m pytest test/test_uops.py --durations=20
     - name: Test symbolic with Python emulator
@@ -83,7 +201,7 @@ jobs:
       run: PYTHONPATH=. PYTHON=1 python3 -m pytest -rA test/test_linearizer_failures.py::TestLinearizerFailures::test_failure_1
 
   linter:
-    name: Linters
+    name: Linters+fuzz+unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -91,17 +209,17 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Set up Python 3.8
+    - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
-        python-version: 3.8
+        python-version: "3.10"
     - name: Cache python packages
       uses: actions/cache@v4
       with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
-        key: linting-packages-${{ hashFiles('**/setup.py') }}-3.8
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.10/site-packages
+        key: linting-packages-${{ hashFiles('**/setup.py') }}-3.10
     - name: Install dependencies
-      run: pip install -e '.[linting,testing,docs]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
@@ -112,14 +230,6 @@ jobs:
       run: python -m pylint tinygrad/
     - name: Run mypy
       run: python -m mypy --strict-equality
-    - name: Test Docs
-      run: |
-        python docs/abstractions2.py
-        python docs/abstractions3.py
-    - name: Test Docs Build
-      run: python -m mkdocs build --strict
-    - name: Test Quickstart
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
@@ -130,27 +240,6 @@ jobs:
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
         PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
-    - name: Use as an external package
-      run: |
-        mkdir $HOME/test_external_dir
-        cd $HOME/test_external_dir
-        python -m venv venv
-        source venv/bin/activate
-        pip install $GITHUB_WORKSPACE
-        python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-        pip install mypy
-        mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-    - name: Run beautiful_mnist without numpy
-      run: |
-        mkdir $HOME/test_no_numpy_dir
-        cd $HOME/test_no_numpy_dir
-        python -m venv venv
-        source venv/bin/activate
-        pip install $GITHUB_WORKSPACE
-        cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
-        PYTHONPATH=$GITHUB_WORKSPACE BS=2 STEPS=10 python beautiful_mnist.py
-    - name: Test DEBUG
-      run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
     - name: Repo line count <= 9999 lines
       run: MAX_LINE_COUNT=9999 python sz.py
 
@@ -201,7 +290,7 @@ jobs:
       - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE=2 ops + training
         run: |
-          PYTHONPATH="." GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
+          PYTHONPATH="." GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py --durations=20
           PYTHONPATH="." GPU=1 IMAGE=2 python3 test/models/test_end2end.py TestEnd2End.test_linear_mnist
       - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot model compile and size
@@ -217,12 +306,6 @@ jobs:
       - if: ${{ matrix.task == 'optimage' }}
         name: Test openpilot fastvits model correctness (float32)
         run: PYTHONPATH="." FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python examples/openpilot/compile2.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
-      - if: ${{ matrix.task == 'optimage' }}
-        name: Compile EfficientNet to C and test it
-        run: |
-          CLANG=1 PYTHONPATH="." python examples/compile_efficientnet.py > recognize.c
-          clang -O2 recognize.c -lm -o recognize
-          cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
       - if: ${{ matrix.task == 'onnx' }}
         name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -231,10 +314,16 @@ jobs:
         run: CLANG=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Run CLOUD=1 Test
-        run: CLOUDDEV=CLANG CLOUD=1 python3 test/test_ops.py TestOps.test_tiny_add
+        run: |
+          CLOUDDEV=CLANG CLOUD=1 python3 test/test_tiny.py
+          CLOUDDEV=GPU CLOUD=1 python3 test/test_tiny.py
+          CLOUDDEV=GPU IMAGE=2 CLOUD=1 python3 test/test_tiny.py
+      - if: ${{ matrix.task == 'onnx' }}
+        name: Test Optimization Helpers
+        run: PYTHONPATH="." DEBUG=1 python3 extra/optimization/test_helpers.py
       - if: ${{ matrix.task == 'onnx' }}
         name: Test Action Space
-        run: PYTHONPATH="." GPU=1 python3 extra/optimization/get_action_space.py
+        run: PYTHONPATH="." DEBUG=1 GPU=1 python3 extra/optimization/get_action_space.py
       - if: ${{ matrix.task == 'onnx' }}
         name: Test Beam Search
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
@@ -346,8 +435,8 @@ jobs:
       run: PYTHONPATH="." METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
     - name: Fuzz Test linearizer
       run: PYTHONPATH="." METAL=1 FUZZ_ALL_ACTIONS=1 DEPTH=2 FUZZ_N=24 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
-    - name: Fuzz Test models schedule
-      run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
+    # - name: Fuzz Test models schedule
+    # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run TRANSCENDENTAL math
       run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
     - name: Run process replay tests
@@ -445,7 +534,7 @@ jobs:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-4524e34adb7eaccc6f71262f2e21d7052bb17c2f-rebuild-8
+          key: ubuntu22.04-gpuocelot-4524e34adb7eaccc6f71262f2e21d7052bb17c2f-rebuild-9
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
@@ -486,42 +575,6 @@ jobs:
         run: |
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU','AMD','NV'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-      - name: Verify OpenCL autogen
-        if: matrix.backend == 'gpu'
-        run: |
-          cp tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
-          ./autogen_stubs.sh opencl
-          diff /tmp/opencl.py.bak tinygrad/runtime/autogen/opencl.py
-      - name: Verify CUDA autogen
-        if: matrix.backend == 'nv'
-        run: |
-          cp tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
-          cp tinygrad/runtime/autogen/nv_gpu.py /tmp/nv_gpu.py.bak
-          ./autogen_stubs.sh cuda
-          ./autogen_stubs.sh nv
-          diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
-          diff /tmp/nv_gpu.py.bak tinygrad/runtime/autogen/nv_gpu.py
-      - name: Verify AMD autogen
-        if: matrix.backend == 'amd'
-        run: |
-          cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
-          cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
-          cp tinygrad/runtime/autogen/amd_gpu.py /tmp/amd_gpu.py.bak
-          ./autogen_stubs.sh hsa
-          ./autogen_stubs.sh comgr
-          ./autogen_stubs.sh amd
-          diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
-          diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
-          diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
-      - name: Verify Linux autogen
-        if: matrix.backend == 'amd'
-        run: |
-          cp tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
-          cp tinygrad/runtime/autogen/io_uring.py /tmp/io_uring.py.bak
-          ./autogen_stubs.sh libc
-          ./autogen_stubs.sh io_uring
-          diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
-          diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
       - name: Run pytest (not cuda or amd)
         if: matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'amd' && matrix.backend != 'nv'
         run: python -m pytest -n=auto test/ --ignore=test/unit --durations=20

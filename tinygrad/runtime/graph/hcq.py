@@ -56,7 +56,7 @@ class HCQGraph(MultiGraphRunner):
       out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.signal_t(value=0))
 
       # Get dependencies based on input and output buffers.
-      rdeps = self._access_resources(ji.bufs[(wb:=ji.prg.p.outcount if is_exec_prg else 1):], ji.bufs[:wb], (enqueue_queue, j + 1)) #type:ignore
+      rdeps = self._access_resources(ji.bufs, ji.prg.p.outs if is_exec_prg else [0], (enqueue_queue, j + 1)) #type:ignore
 
       # Update dependencies to include previous kernel in queue. This is required for timeline signals.
       opt_deps, deps = [], rdeps + ([(enqueue_queue, prev_ji + 1)] if (prev_ji:=last_j[enqueue_queue]) is not None else [])

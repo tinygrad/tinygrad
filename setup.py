@@ -22,14 +22,14 @@ setup(name='tinygrad',
         "License :: OSI Approved :: MIT License"
       ],
       install_requires=[],
-      python_requires='>=3.8',
+      python_requires='>=3.10',
       extras_require={
         'llvm': ["llvmlite"],
         'arm': ["unicorn"],
         'triton': ["triton-nightly>=2.1.0.dev20231014192330"],
         'linting': [
             "pylint",
-            "mypy",
+            "mypy==1.11.2",
             "typing-extensions",
             "pre-commit",
             "ruff",
@@ -57,6 +57,7 @@ setup(name='tinygrad',
             "hypothesis",
             "nibabel",
             "bottle",
+            "ggml-python"
         ],
         'docs': [
             "mkdocs",

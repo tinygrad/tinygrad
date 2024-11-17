@@ -1,14 +1,15 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal
+import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal, sys
+assert sys.platform != 'win32'
 from typing import Tuple, List, Any, cast, Union, Dict, Type
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command
 from tinygrad.runtime.support.hcq import HCQArgsState, HCQProgram, HCQSignal
 from tinygrad.device import BufferOptions
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod
-from tinygrad.renderer.assembly import PTXRenderer
+from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
-from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler, nv_disassemble
+from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
 from tinygrad.runtime.autogen import nv_gpu, libc
 from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
@@ -27,7 +28,9 @@ def rm_alloc(fd, clss, root, parant, params):
   made = nv_gpu.NVOS21_PARAMETERS(hRoot=root, hObjectParent=parant, hClass=clss,
                                   pAllocParms=ctypes.cast(ctypes.byref(params), ctypes.c_void_p) if params is not None else None)
   nv_iowr(fd, nv_gpu.NV_ESC_RM_ALLOC, made)
-  if made.status != 0: raise RuntimeError(f"rm_alloc returned {get_error_str(made.status)}")
+  if made.status != 0:
+    if made.status == nv_gpu.NV_ERR_NO_MEMORY: raise MemoryError(f"rm_alloc returned {get_error_str(made.status)}")
+    raise RuntimeError(f"rm_alloc returned {get_error_str(made.status)}")
   return made
 
 def rm_control(cmd, sttyp, fd, client, obj, **kwargs):
@@ -220,7 +223,6 @@ class NVArgsState(HCQArgsState):
 class NVProgram(HCQProgram):
   def __init__(self, device:NVDevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
-    if DEBUG >= 6: nv_disassemble(lib)
 
     if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
     else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
@@ -228,17 +230,20 @@ class NVProgram(HCQProgram):
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
     self.lib_gpu = self.device.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, BufferOptions(cpu_access=True))
 
-    self.program_addr, self.program_sz, self.registers_usage, self.shmem_usage = self.lib_gpu.va_addr, image.nbytes, 0, 0
+    self.prog_addr, self.prog_sz, self.regs_usage, self.shmem_usage, self.lcmem_usage = self.lib_gpu.va_addr, image.nbytes, 0, 0x400, 0
     self.constbufs: Dict[int, Tuple[int, int]] = {0: (0, 0x160)} # Dict[constbuf index, Tuple[va_addr, size]]
     for sh in sections:
-      if sh.name == f".nv.shared.{self.name}": self.shmem_usage = sh.header.sh_size
+      if sh.name == f".nv.shared.{self.name}": self.shmem_usage = round_up(0x400 + sh.header.sh_size, 128)
       if sh.name == f".text.{self.name}":
-        self.program_addr, self.program_sz, self.registers_usage = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size, sh.header.sh_info>>24
+        self.prog_addr, self.prog_sz, self.regs_usage = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size, max(sh.header.sh_info>>24, 16)
       elif m:=re.match(r'\.nv\.constant(\d+)', sh.name): self.constbufs[int(m.group(1))] = (self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size)
       elif sh.name == ".nv.info":
         for off in range(0, sh.header.sh_size, 12):
           typ, _, val = struct.unpack_from("III", sh.content, off)
-          if typ & 0xffff == 0x1204: self.device._ensure_has_local_memory(val + 0x240)
+          if typ & 0xffff == 0x1204: self.lcmem_usage = val + 0x240
+
+    # Ensure device has enough local memory to run the program
+    self.device._ensure_has_local_memory(self.lcmem_usage)
 
     # Apply relocs
     for apply_image_offset, rel_sym_offset, typ, _ in relocs:
@@ -253,15 +258,14 @@ class NVProgram(HCQProgram):
     self.constbuffer_0 = [0] * 88
     self.constbuffer_0[6:12] = [*data64_le(self.device.shared_mem_window), *data64_le(self.device.local_mem_window), *data64_le(0xfffdc0)]
 
-    smem_config = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
+    smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
     self.qmd = qmd_struct_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
                             invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
                             cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3, constant_buffer_invalidate_0=1,
-                            shared_memory_size=max(0x400, round_up(self.shmem_usage, 0x100)), min_sm_config_shared_mem_size=smem_config,
-                            max_sm_config_shared_mem_size=0x1a, register_count_v=self.registers_usage, target_sm_config_shared_mem_size=smem_config,
-                            barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.program_sz>>8,
-                            program_address=self.program_addr, sass_version=0x89,
-                            program_prefetch_addr_lower_shifted=self.program_addr>>8, program_prefetch_addr_upper_shifted=self.program_addr>>40)
+                            shared_memory_size=self.shmem_usage, min_sm_config_shared_mem_size=smem_cfg, target_sm_config_shared_mem_size=smem_cfg,
+                            max_sm_config_shared_mem_size=0x1a, register_count_v=self.regs_usage, program_address=self.prog_addr, sass_version=0x89,
+                            barrier_count=1, shader_local_memory_high_size=self.device.slm_per_thread, program_prefetch_size=self.prog_sz>>8,
+                            program_prefetch_addr_lower_shifted=self.prog_addr>>8, program_prefetch_addr_upper_shifted=self.prog_addr>>40)
 
     for i,(addr,sz) in self.constbufs.items():
       self.qmd.__setattr__(f'constant_buffer_addr_upper_{i}', (addr) >> 32)
@@ -270,7 +274,7 @@ class NVProgram(HCQProgram):
       self.qmd.__setattr__(f'constant_buffer_valid_{i}', 1)
 
     # Registers allocation granularity per warp is 256, warp allocaiton granularity is 4. Register file size is 65536.
-    self.max_threads = ((65536 // round_up(max(1, self.registers_usage) * 32, 256)) // 4) * 4 * 32
+    self.max_threads = ((65536 // round_up(max(1, self.regs_usage) * 32, 256)) // 4) * 4 * 32
 
     # NV's kernargs is constbuffer (size 0x160), then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
     super().__init__(NVArgsState, self.device, self.name, kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8))
@@ -279,7 +283,8 @@ class NVProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True))
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    if prod(local_size) > 1024 or self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
+    if prod(local_size) > 1024 or self.max_threads < prod(local_size) or self.lcmem_usage > cast(NVDevice, self.device).slm_per_thread:
+      raise RuntimeError("Too many resources requested for launch")
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
     return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
@@ -480,9 +485,9 @@ class NVDevice(HCQCompiled):
     self.cmdq: memoryview = to_mv(self.cmdq_page.va_addr, 0x200000).cast("I")
     self.cmdq_wptr: int = 0 # in bytes
 
-    sm_info = nv_gpu.NV2080_CTRL_GR_INFO(index=nv_gpu.NV2080_CTRL_GR_INFO_INDEX_SM_VERSION)
-    rmctrl.gr_get_info(self.fd_ctl, self.root, self.subdevice, grInfoListSize=1, grInfoList=ctypes.addressof(sm_info))
-    self.arch: str = f"sm_{(sm_info.data>>8)&0xff}{(val>>4) if (val:=sm_info.data&0xff) > 0xf else val}"
+    self.num_gpcs, self.num_tpc_per_gpc, self.num_sm_per_tpc, self.max_warps_per_sm, self.sm_version = self._query_gpu_info('num_gpcs',
+      'num_tpc_per_gpc', 'num_sm_per_tpc', 'max_warps_per_sm', 'sm_version')
+    self.arch: str = f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
 
     compiler_t = (PTXCompiler if PTX else CUDACompiler) if MOCKGPU else (NVPTXCompiler if PTX else NVCompiler)
     super().__init__(device, NVAllocator(self), PTXRenderer(self.arch, device="NV") if PTX else NVRenderer(self.arch), compiler_t(self.arch),
@@ -514,9 +519,15 @@ class NVDevice(HCQCompiled):
     return GPFifo(ring=to_mv(gpfifo_area.va_addr + offset, entries * 8).cast("Q"), entries_count=entries, token=ws_token_params.workSubmitToken,
                   controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.va_addr + offset + entries * 8))
 
+  def _query_gpu_info(self, *reqs):
+    nvrs = [getattr(nv_gpu,'NV2080_CTRL_GR_INFO_INDEX_'+r.upper(), getattr(nv_gpu,'NV2080_CTRL_GR_INFO_INDEX_LITTER_'+r.upper(),None)) for r in reqs]
+    infos = (nv_gpu.NV2080_CTRL_GR_INFO*len(nvrs))(*[nv_gpu.NV2080_CTRL_GR_INFO(index=nvr) for nvr in nvrs])
+    rmctrl.gr_get_info(self.fd_ctl, self.root, self.subdevice, grInfoListSize=len(infos), grInfoList=ctypes.addressof(infos))
+    return [x.data for x in infos]
+
   def _setup_gpfifos(self):
     # Set windows addresses to not collide with other allocated buffers.
-    self.shared_mem_window, self.local_mem_window, self.slm_per_thread = 0xfe000000, 0xff000000, 0
+    self.shared_mem_window, self.local_mem_window, self.slm_per_thread, self.shader_local_mem = 0xfe000000, 0xff000000, 0, None
 
     NVComputeQueue().setup(compute_class=self.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
@@ -528,15 +539,19 @@ class NVDevice(HCQCompiled):
     self.timeline_value += 2
 
   def _ensure_has_local_memory(self, required):
-    if self.slm_per_thread >= required: return
+    if self.slm_per_thread >= required or ((maxlm:=getenv("NV_MAX_LOCAL_MEMORY_PER_THREAD")) > 0 and required >= maxlm): return
 
-    self.synchronize()
-    if hasattr(self, 'shader_local_mem'): self._gpu_free(self.shader_local_mem) # type: ignore # pylint: disable=access-member-before-definition
+    if self.shader_local_mem is not None: self.allocator.free(self.shader_local_mem, self.shader_local_mem.size)
 
-    self.slm_per_thread = round_up(required, 32)
-    bytes_per_warp = round_up(self.slm_per_thread * 32, 0x200)
-    bytes_per_tpc = round_up(bytes_per_warp * 48 * 2, 0x8000)
-    self.shader_local_mem = self._gpu_alloc(round_up(bytes_per_tpc * 64, 0x20000), huge_page=True, contig=True, tag="local_memory")
+    self.slm_per_thread, old_slm_per_thread = round_up(required, 32), self.slm_per_thread
+    bytes_per_tpc = round_up(round_up(self.slm_per_thread * 32, 0x200) * self.max_warps_per_sm * self.num_sm_per_tpc, 0x8000)
+
+    try: self.shader_local_mem = self.allocator.alloc(round_up(bytes_per_tpc * self.num_tpc_per_gpc * self.num_gpcs, 0x20000))
+    except MemoryError:
+      # If can't allocate a new size, reallocator the old buffer.
+      self.slm_per_thread = old_slm_per_thread
+      bytes_per_tpc = round_up(round_up(self.slm_per_thread * 32, 0x200) * self.max_warps_per_sm * self.num_sm_per_tpc, 0x8000)
+      self.shader_local_mem = self.allocator.alloc(round_up(bytes_per_tpc * self.num_tpc_per_gpc * self.num_gpcs, 0x20000))
 
     NVComputeQueue().wait(self.timeline_signal, self.timeline_value - 1) \
                     .setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
@@ -560,9 +575,10 @@ class NVDevice(HCQCompiled):
       for i in range(mmu_info.count):
         pfinfo = mmu_info.mmuFaultInfoList[i]
         report += [f"MMU fault: 0x{pfinfo.faultAddress:X} | {NV_PFAULT_FAULT_TYPE[pfinfo.faultType]} | {NV_PFAULT_ACCESS_TYPE[pfinfo.accessType]}"]
-        report += ["GPU mappings:\n"+"\n".join([f"\t0x{x:X} - 0x{x+y-1:X} | {self._debug_mappings[(x,y)]}" for x,y in sorted(self._debug_mappings)])]
+        if DEBUG >= 5:
+          report += ["GPU mappings:\n"+"\n".join(f"\t0x{x:X} - 0x{x+y-1:X} | {self._debug_mappings[(x,y)]}" for x,y in sorted(self._debug_mappings))]
     else:
       for i, e in enumerate(sm_errors.smErrorStateArray):
-        if e.hwwGlobalEsr or e.hwwWarpEsr: report += [f"SM{i} fault: esr={e.hwwGlobalEsr} warp_esr={e.hwwWarpEsr} warp_pc={e.hwwWarpEsrPc64}"]
+        if e.hwwGlobalEsr or e.hwwWarpEsr: report += [f"SM {i} fault: esr={e.hwwGlobalEsr} warp_esr={e.hwwWarpEsr} warp_pc={e.hwwWarpEsrPc64}"]
 
     raise RuntimeError("\n".join(report))

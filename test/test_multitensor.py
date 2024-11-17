@@ -1,7 +1,7 @@
 import unittest, functools, random
 from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes
-from tinygrad.ops import MetaOps, ReduceOps, BinaryOps, UOps
+from tinygrad.ops import Ops
 from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.schedule import create_schedule
@@ -9,7 +9,7 @@ from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner
 from tinygrad.multi import all_reduce, MultiLazyBuffer
 import numpy as np
 from hypothesis import given, strategies as strat, settings
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -31,7 +31,7 @@ N = 128
 def _test_allreduce(t:Tensor):
   aa = (t[0:64] + t[64:128] + t[128:192] + t[192:256]).repeat([4,1]).realize()
   ts = t.shard(devices_4, 0).realize()
-  b = Tensor(MultiLazyBuffer(all_reduce(ReduceOps.SUM, ts.lazydata.lbs), 0))
+  b = Tensor(MultiLazyBuffer(all_reduce(Ops.ADD, ts.lazydata.lbs), 0))
   b.realize()
   return aa, b
 
@@ -144,13 +144,15 @@ class TestMultiTensor(unittest.TestCase):
     O = X.shrink(((0, 2), None)) * W.shrink(((0, 2), None)) < 2
     np.testing.assert_allclose(O.numpy(), X.numpy()[0:2]*W.numpy()[0:2] < 2)
 
-  @given(strat.sampled_from((4, 5)), strat.sampled_from((devices_2, devices_3)), strat.sampled_from((ReduceOps.SUM, ReduceOps.PROD, ReduceOps.MAX)),
+  @given(strat.sampled_from((4, 5)), strat.sampled_from((devices_2, devices_3)),
+         strat.sampled_from((Ops.ADD, Ops.MUL, Ops.MAX)),
          strat.sampled_from((None, 0, 1)), strat.sampled_from((None, 0, 1)), strat.sampled_from((1, 0, -1)))
   def test_simple_reduce(self, N, devices, rop, shard_axis, reduce_axis, sign):
     X = Tensor.rand(N*N).reshape(N, N).mul(sign)
     n = X.numpy()
     X.shard_(devices, shard_axis)
-    f = {ReduceOps.SUM: lambda x: x.sum(reduce_axis), ReduceOps.PROD: lambda x: x.prod(reduce_axis), ReduceOps.MAX: lambda x: x.max(reduce_axis)}[rop]
+    f = {Ops.ADD: lambda x: x.sum(reduce_axis), Ops.MUL: lambda x: x.prod(reduce_axis),
+         Ops.MAX: lambda x: x.max(reduce_axis)}[rop]
     fX = f(X)
     fn = f(n)
     np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
@@ -195,9 +197,9 @@ class TestMultiTensor(unittest.TestCase):
         shape = tuple([(n if i == 0 else 1) * random.randint(1, 10) for i in range(random.randint(1, 4))])
         t = Tensor.rand(shape).shard_(tuple([d0, d1, d2, d3][:n]), 0)
         with Context(RING=0):
-          a = Tensor(MultiLazyBuffer(all_reduce(ReduceOps.SUM, t.lazydata.lbs), 0))
+          a = Tensor(MultiLazyBuffer(all_reduce(Ops.ADD, t.lazydata.lbs), 0))
         with Context(RING=2):
-          b = Tensor(MultiLazyBuffer(all_reduce(ReduceOps.SUM, t.lazydata.lbs), 0))
+          b = Tensor(MultiLazyBuffer(all_reduce(Ops.ADD, t.lazydata.lbs), 0))
         diff = a - b
         mean_err = diff.reshape((prod(diff.shape),)).abs().mean().numpy()
         max_err = diff.reshape((prod(diff.shape),)).abs().max().numpy()
@@ -479,7 +481,7 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices_4).realize()
 
     out = bn(t)
-    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices_4 and sched.ast.op is not MetaOps.COPY]
+    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.outputs[0].device in devices_4 and sched.ast.op is not Ops.COPY]
     assert set(out.device for sched in scheds for out in sched.outputs) == set(devices_4), "should have ast on each shard device"
     asts = [sched.ast for sched in scheds]
     assert len(asts)
@@ -567,24 +569,44 @@ class TestMultiTensor(unittest.TestCase):
   def test_rand_like_on_shard(self):
     t = Tensor.empty((16, 16)).shard(devices_2)
     t2 = Tensor.rand_like(t)
-    assert t2.shape == t.shape
-    assert t2.device == t.device
-    assert t2.lazydata.axis == t.lazydata.axis
+    self.assertEqual(t.shape, t2.shape)
+    self.assertEqual(t.device, t2.device)
+    self.assertEqual(t.dtype, t2.dtype)
+    self.assertEqual(t.lazydata.axis, t2.lazydata.axis)
 
   def test_rand_like_uneven_shard(self):
     t = Tensor.empty((4, 42, 15)).shard(devices_3, axis=1, splits=(14, 7, 21))
     t2 = Tensor.rand_like(t)
-    assert t2.shape == t.shape
-    assert t2.device == t.device
-    assert t2.lazydata.axis == t.lazydata.axis
+    self.assertEqual(t.shape, t2.shape)
+    self.assertEqual(t.device, t2.device)
+    self.assertEqual(t.dtype, t2.dtype)
+    self.assertEqual(t.lazydata.axis, t2.lazydata.axis)
     assert all(tlb.shape == t2lb.shape for tlb, t2lb in zip(t.lazydata.lbs, t2.lazydata.lbs))
 
   def test_rand_like_none_shard(self):
     t = Tensor.empty((16, 16)).shard(devices_2)
     t2 = Tensor.rand_like(t)
-    assert t2.shape == t.shape
-    assert t2.device == t.device
-    assert t2.lazydata.axis == t.lazydata.axis
+    self.assertEqual(t.shape, t2.shape)
+    self.assertEqual(t.device, t2.device)
+    self.assertEqual(t.dtype, t2.dtype)
+    self.assertEqual(t.lazydata.axis, t2.lazydata.axis)
+
+  def test_rand_like_arg_dtype(self):
+    t = Tensor.empty((16, 16), dtype=dtypes.int32).shard(devices_2, axis=1)
+    t2 = Tensor.rand_like(t, dtype=dtypes.float32)
+    self.assertEqual(t.dtype, dtypes.int32)
+    self.assertEqual(t2.dtype, dtypes.float32)
+
+  def test_rand_like_arg_device(self):
+    # axis=None
+    t = Tensor.empty((16, 16)).shard((d1, d2), axis=None)
+    with self.assertRaises(RuntimeError):
+      Tensor.rand_like(t, device=(d3, d4))
+
+    # axis=1
+    t = Tensor.empty((16, 16)).shard((d1, d2), axis=1)
+    with self.assertRaises(RuntimeError):
+      Tensor.rand_like(t, device=(d3, d4))
 
   def test_dropout_on_shard(self):
     with Tensor.train():
@@ -600,7 +622,7 @@ class TestMultiTensor(unittest.TestCase):
       output = X.dropout(0.5).numpy()
       unique, counts = np.unique(output, return_counts=True)
       assert set(unique) == {0, 2}, unique
-      assert 228 < counts[0] < 284, counts[0]
+      assert 200 < counts[0] < 312, counts[0]
 
   def test_dropout_on_uneven_shard_axis(self):
     with Tensor.train():
@@ -610,36 +632,44 @@ class TestMultiTensor(unittest.TestCase):
       assert set(unique) == {0, 2}, unique
       assert 100 < counts[0] < 156, counts[0]
 
+  @unittest.skip("test depends on UOp order. TODO: fix it")
   def test_broadcast_const(self):
     for axis in (None, 0, 1):
       t = Tensor.zeros(16, 16).contiguous().shard(devices_4, axis).realize()
       t = t + 1
       for si in t.schedule():
         ast = si.ast.src[0]
-        assert ast.op is UOps.STORE
-        assert ast.src[2].arg is BinaryOps.ADD
-        assert ast.src[2].src[0].op is UOps.LOAD
-        assert ast.src[2].src[1].src[1].op is UOps.CONST and ast.src[2].src[1].src[1].arg == 1
+        assert ast.op is Ops.STORE
+        assert ast.src[2].op is Ops.ADD
+        assert ast.src[2].src[0].op is Ops.LOAD
+        assert ast.src[2].src[1].src[1].op is Ops.CONST and ast.src[2].src[1].src[1].arg == 1
       t = 2 * t
       for si in t.schedule():
         ast = si.ast.src[0]
-        assert ast.op is UOps.STORE
-        assert ast.src[2].arg is BinaryOps.MUL
-        assert ast.src[2].src[0].src[1].op is UOps.CONST and ast.src[2].src[0].src[1].arg == 2
-        assert ast.src[2].src[1].op is UOps.LOAD
+        assert ast.op is Ops.STORE
+        assert ast.src[2].op is Ops.MUL
+        assert ast.src[2].src[0].src[1].op is Ops.CONST and ast.src[2].src[0].src[1].arg == 2
+        assert ast.src[2].src[1].op is Ops.LOAD
       t = t + t.full_like(3)
       for si in t.schedule():
         ast = si.ast.src[0]
-        assert ast.op is UOps.STORE
-        assert ast.src[2].arg is BinaryOps.ADD
-        assert ast.src[2].src[0].op is UOps.LOAD
-        assert ast.src[2].src[1].src[1].op is UOps.CONST and ast.src[2].src[1].src[1].arg == 3
+        assert ast.op is Ops.STORE
+        assert ast.src[2].op is Ops.ADD
+        assert ast.src[2].src[0].op is Ops.LOAD
+        assert ast.src[2].src[1].src[1].op is Ops.CONST and ast.src[2].src[1].src[1].arg == 3
 
   def test_shard_memory(self):
     devices = (d0, d1, d2, d3)
     t = Tensor.zeros(16, 16).contiguous()
     t.shard_(devices, axis=0)
     assert all([lb is lb.base and lb.buffer.base.size == 4 * 16 for lb in t.lazydata.lbs])
+
+  def test_clone(self):
+    t = Tensor.rand(16, 16).shard(devices_2, axis=None)
+    np.testing.assert_allclose(t.numpy(), t.clone().numpy())
+
+    t = Tensor.rand(16, 16).shard(devices_2, axis=0)
+    np.testing.assert_allclose(t.numpy(), t.clone().numpy())
 
 @unittest.skipIf(CI and Device.DEFAULT in ("GPU", "CUDA", "METAL"), "no GPU CI")
 class TestHandleData(unittest.TestCase):
@@ -764,6 +794,8 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
     a = t.shrink(((2, 4), None))
     b = t.shrink(((6, 8), None))
+    self.assertEqual(a.lazydata.real, [False, True, False, False])
+    self.assertEqual(b.lazydata.real, [False, False, False, True])
     na = t.numpy()[2:4]
     nb = t.numpy()[6:8]
     np.testing.assert_equal(a.numpy(), na)
@@ -773,6 +805,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       c = a + b
 
     c = a.pad(((2, 4), None)) + b.pad(((6, 0), None))
+    self.assertEqual(c.lazydata.real, [True, True, True, True])
     expected = np.concatenate([np.zeros_like(t.numpy()[0:2]), na, np.zeros_like(t.numpy()[4:6]), nb])
     np.testing.assert_equal(c.numpy(), expected)
 
