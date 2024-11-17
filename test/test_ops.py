@@ -1032,6 +1032,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x.prod(0))
     helper_test_op([()], lambda x: x.prod(-1))
 
+  def test_prod_acc_dtype(self):
+    with self.assertRaises(AttributeError): Tensor([1.0, 2.0]).prod(acc_dtype="")
+
   def test_min(self):
     helper_test_op([(3,3)], lambda x: x.min())
     helper_test_op([(45,3)], lambda x: x.min())
