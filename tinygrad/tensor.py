@@ -1254,11 +1254,11 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     src = src.pad(tuple((0, max(xs-ss, 0)) for ss, xs in zip(src.shape, x.shape)))
     if reduce is None:
       src = src * mask
-      src = functools.reduce(lambda x,y: y.isnan().where(x, y), (src.where(src, float("nan"))).split(1, -1))
+      src = functools.reduce(lambda x,y: y.isnan().where(x, y), (src.where(src, float("nan"))).split(1, -1)) # type: ignore
       return mask.any(-1).where(src.squeeze(), self)
     if reduce == "add": return (mask*src).sum(-1) + self
     if reduce == "multiply":
-      src = functools.reduce(lambda x,y: (y*x).where(y*x, y.where(y, x)), (src*mask).split(1, -1))
+      src = functools.reduce(lambda x,y: (y*x).where(y*x, y.where(y, x)), (src*mask).split(1, -1)) # type: ignore
       return mask.any(-1).where(src.squeeze() * self, self)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
