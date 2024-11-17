@@ -63,7 +63,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
     buf.dtype = buf.buffer.dtype = buf.dtype.base
     assert not buf.is_realized(), "can't fixup allocated buffer"
     buf.buffer.options = None
-  dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) and buf.op not in GroupOp.Meta else buf.dtype
+  dtype = buf.dtype if buf.op in GroupOp.Meta else buf.dtype.base
   # consts are always fused and generated
   if buf.op is Ops.CONST:
     if isinstance(val:=buf.arg, UOp): ctx.var_vals.update([val.unbind()])
@@ -79,7 +79,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
     ret = UOp(Ops.ASSIGN, dtype, (ubuf, src[1]), buf.arg)
   else: ret = UOp(cast(Ops, buf.op), dtype, src, None if buf.op in {Ops.CAST, Ops.BITCAST} else buf.arg)
   if buf.forced_realize: ret = UOp(Ops.CONTIGUOUS, dtype, (ret,))
-  cache[buf] = ret = UOp(Ops.VIEW, dtype, (ubuf, ret), buf.st)
+  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf, ret), buf.st)
   if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
   ctx.lazybufs[b] = buf
   # things for fuse.py
