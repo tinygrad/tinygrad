@@ -350,6 +350,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop Buffer stuff ***
 
+  @staticmethod
+  def new_buffer(device:str, size:int, dtype:DType, num=-1): return  UOp(Ops.BUFFER, dtype.ptr(), (), (num, (device, size, dtype)))
+
   @property
   def buf_uop(self) -> UOp:
     assert self.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"

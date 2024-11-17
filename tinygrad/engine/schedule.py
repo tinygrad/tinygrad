@@ -46,7 +46,7 @@ class ScheduleContext:
   buf_uops: Dict[Buffer, UOp] = field(default_factory=dict)        # this maps Buffers to BUFFER uops
   ubuf_metadata: Dict[UOp, Metadata] = field(default_factory=dict) # this maps BUFFER uops to Metadata
   var_vals: Dict[Variable, int] = field(default_factory=dict)      # this maps a BIND's DEFINE_VAR to its value
-  assigns: Set[UOp] = field(default_factory=set)                   # this holds all the UOps.BUFFERs we ASSIGN to in this schedule
+  assigns: Set[UOp] = field(default_factory=set)                   # this holds all the BUFFER uops we ASSIGN to in this schedule
   lazybufs: Dict[Buffer, LazyBuffer] = field(default_factory=dict) # this is a lookup for the LazyBuffers we need to mark as realized
 
 def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp],
@@ -69,7 +69,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
     if isinstance(val:=buf.arg, UOp): ctx.var_vals.update([val.unbind()])
     return UOp(Ops.VALID, dtypes.bool, (buf.st.to_uop(),)).where(UOp.const(dtype, val), 0)
   # everything else has BUFFER
-  ubuf = ctx.buf_uops.setdefault(b:=buf.buffer, UOp(Ops.BUFFER, b.dtype.ptr(), (), (len(ctx.buf_uops), (b.device, b.size, b.dtype))))
+  ubuf = ctx.buf_uops.setdefault(b:=buf.buffer, UOp.new_buffer(b.device, b.size, b.dtype, num=len(ctx.buf_uops)))
   # if the buffer is already realized we just load it
   if buf.is_realized(): return UOp(Ops.VIEW, dtype, (ubuf,), buf.st)
   # everything else needs sources
