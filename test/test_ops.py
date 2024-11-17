@@ -512,13 +512,15 @@ class TestOps(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_mod(self):
-    helper_test_op([(1,), (1,)], lambda x,y: x%y, Tensor.mod)
-    helper_test_op([(1,), (1,)], lambda x,y: x%y)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x%y, Tensor.mod)
+    helper_test_op([(45,65), (45,65)], lambda x,y: x%y)
+    helper_test_op([(45,65), (1,)], lambda x,y: x%y)
+    helper_test_op([(45,65), ()], lambda x,y: x%y)
     helper_test_op([(), ()], lambda x,y: x%y)
   @unittest.expectedFailure
   def test_mod_scalar(self):
-    helper_test_op([(1,)], lambda x: x%2)
-    helper_test_op([(1,)], lambda x: 2%x)
+    helper_test_op([(45,65)], lambda x: x%2)
+    helper_test_op([(45,65)], lambda x: 2%x)
     helper_test_op([(),], lambda x: x%2)
     helper_test_op([(),], lambda x: 2%x)
 
