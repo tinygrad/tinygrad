@@ -37,6 +37,7 @@ class SimpleMathTrait:
   def idiv(self, x, reverse=False): return self._binop(Ops.IDIV, x, reverse)
   def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
   def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
+  def mod(self, x, reverse=False): return self._binop(Ops.MOD, x, reverse)
 
   def __neg__(self): return self.neg()
 
@@ -45,6 +46,7 @@ class SimpleMathTrait:
   def __mul__(self, x): return self.mul(x)
   def __truediv__(self, x): return self.div(x)
   def __floordiv__(self, x): return self.idiv(x)
+  def __mod__(self, x): return self.mod(x)
   def __and__(self, x): return self.bitwise_and(x)
   def __or__(self, x): return self.bitwise_or(x)
   def __xor__(self, x): return self.xor(x)
@@ -54,6 +56,7 @@ class SimpleMathTrait:
   def __rmul__(self, x): return self.mul(x, True)
   def __rtruediv__(self, x): return self.div(x, True)
   def __rfloordiv__(self, x): return self.idiv(x, True)
+  def __rmod__(self, x): return self.mod(x, True)
   def __rand__(self, x): return self.bitwise_and(x, True)
   def __ror__(self, x): return self.bitwise_or(x, True)
   def __rxor__(self, x): return self.xor(x, True)
@@ -81,9 +84,9 @@ class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
   def __rlshift__(self, x): return self.lshift(x, True)
   def __rrshift__(self, x): return self.rshift(x, True)
 
-  # not in Tensor
-  def __mod__(self, x): return self.alu(Ops.MOD, self.ufix(x))
-  def __rmod__(self, x): return self.ufix(x).alu(Ops.MOD, self)
+  # # not in Tensor
+  # def __mod__(self, x): return self.alu(Ops.MOD, self.ufix(x))
+  # def __rmod__(self, x): return self.ufix(x).alu(Ops.MOD, self)
 
   def maximum(self, x): return self.alu(Ops.MAX, self.ufix(x))
   def minimum(self, x): return -(-self).maximum(-x)
