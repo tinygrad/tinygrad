@@ -63,7 +63,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
     buf.dtype = buf.buffer.dtype = buf.dtype.base
     assert not buf.is_realized(), "can't fixup allocated buffer"
     buf.buffer.options = None
-  dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
+  dtype = buf.dtype if buf.op in GroupOp.Meta else buf.dtype.base
   # consts are always fused and generated
   if buf.op is Ops.CONST:
     if isinstance(val:=buf.arg, UOp): ctx.var_vals.update([val.unbind()])
@@ -74,14 +74,12 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
   if buf.is_realized(): return UOp(Ops.VIEW, dtype, (ubuf,), buf.st)
   # everything else needs sources
   src = tuple(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in buf.srcs)
-  if buf.op in {Ops.REDUCE_AXIS, Ops.CONTIGUOUS}: ret = UOp(buf.op, dtype, src, buf.arg)
-  elif buf.op is Ops.ASSIGN:
+  if buf.op is Ops.ASSIGN:
     ctx.assigns.add(ubuf)
     ret = UOp(Ops.ASSIGN, dtype, (ubuf, src[1]), buf.arg)
-  elif buf.op in GroupOp.Meta: ret = UOp(buf.op, buf.dtype, (ubuf, *src), buf.arg)
-  else: ret = UOp(cast(Ops, buf.op), dtype, src)
+  else: ret = UOp(cast(Ops, buf.op), dtype, src, None if buf.op in {Ops.CAST, Ops.BITCAST} else buf.arg)
   if buf.forced_realize: ret = UOp(Ops.CONTIGUOUS, dtype, (ret,))
-  cache[buf] = ret = UOp(Ops.VIEW, dtype, (ubuf, ret), buf.st)
+  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf, ret), buf.st)
   if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
   ctx.lazybufs[b] = buf
   # things for fuse.py
@@ -192,7 +190,7 @@ def _append_preload(ctx:ScheduleItemContext, x:UOp, b:UOp) -> UOp:
 to_si = PatternMatcher([
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
   (UPat(Ops.PRELOAD, src=(UPat.var("b"), UPat()), name="x"), _append_preload),
-  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,x: x),
+  (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,b,x: x.replace(src=(b, *x.src))),
 ])
 
 # ** fusion
@@ -357,8 +355,8 @@ do_realize = PatternMatcher([
   # realize before expand or unsafe pad ops
   (UPatSrc().view(name="view"), realize_view),
   # realize before COPY or BUFFER_VIEW
-  (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.var("u"), UPat.any(UPatSrc(), UPatSrc().view(name="view"))), name="root"),
-   lambda ctx,root,u,view=None,**kwargs: root.replace(src=(u, realize(ctx,**kwargs) if view is None else realize(ctx,**kwargs).view(view.st))),),
+  (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatSrc(), UPatSrc().view(name="view")),), name="root"),
+   lambda ctx,root,view=None,**kwargs: root.replace(src=(realize(ctx,**kwargs) if view is None else realize(ctx,**kwargs).view(view.st),)),),
 ])
 break_sched = PatternMatcher([(UPatSrc(), lambda ctx,b,to_store,base: realize(ctx, b, to_store, base) if b in ctx else None),])
 
