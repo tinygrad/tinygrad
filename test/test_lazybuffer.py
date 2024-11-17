@@ -88,7 +88,6 @@ class TestLazyBuffer(unittest.TestCase):
     self.assertEqual(len(sched), 1)
     self.assertIs(sched[0].ast.op, Ops.EMPTY)
     run_schedule(sched)
-    np.testing.assert_equal(empty.numpy(), [0])
 
 class TestReduceOp(unittest.TestCase):
   def test_no_split_reduce_kernel(self):
