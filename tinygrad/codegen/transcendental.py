@@ -169,7 +169,7 @@ def sin_poly_large(d:UOp, q:UOp) -> UOp:
 
 def xsin(d:UOp, fast:bool=False, switch_over:float=30.0) -> UOp:
   """
-  Implements a 1.0 ULP approximation for UnaryOps.SIN.
+  Implements a 1.0 ULP approximation for Ops.SIN.
   - fast=True assumes x <= switch_over.
   - switch_over is the threshold for switching to payne_hanek_reduction.
   """
@@ -192,7 +192,7 @@ def xsin(d:UOp, fast:bool=False, switch_over:float=30.0) -> UOp:
 
 def xexp2(d:UOp) -> UOp:
   """
-  Implements a 1.0 ULP approximation for UnaryOps.EXP2
+  Implements a 1.0 ULP approximation for Ops.EXP2
   - Paper: https://arxiv.org/pdf/2001.09258
   """
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
@@ -218,7 +218,7 @@ def xexp2(d:UOp) -> UOp:
 
 def xlog2(d:UOp) -> UOp:
   """
-  Implements a 1.0 ULP approximation for UnaryOps.LOG2
+  Implements a 1.0 ULP approximation for Ops.LOG2
   Paper: https://arxiv.org/pdf/2001.09258 5.5
   """
   assert d.dtype in TRANSCENDENTAL_SUPPORTED_DTYPES
