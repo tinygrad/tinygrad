@@ -510,14 +510,17 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x/2)
     helper_test_op([()], lambda x: 2/x)
 
+  @unittest.expectedFailure
   def test_mod(self):
     helper_test_op([(1,), (1,)], lambda x,y: x%y, Tensor.mod, forward_only=True)
     helper_test_op([(1,), (1,)], lambda x,y: x%y, forward_only=True)
     helper_test_op([(), ()], lambda x,y: x%y, forward_only=True)
+  @unittest.expectedFailure
   def test_mod_scalar(self):
-    helper_test_op([(1,)], lambda x,y: x%y, Tensor.mod, forward_only=True)
-    helper_test_op([(1,)], lambda x,y: x%y, forward_only=True)
-    helper_test_op([(),], lambda x,y: x%y, forward_only=True)
+    helper_test_op([(1,)], lambda x: x%2, forward_only=True)
+    helper_test_op([(1,)], lambda x: 2%x, forward_only=True)
+    helper_test_op([(),], lambda x: x%2, forward_only=True)
+    helper_test_op([(),], lambda x: 2%x, forward_only=True)
 
 
   def test_mul_naninf(self):

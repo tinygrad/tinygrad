@@ -1,9 +1,13 @@
 from tinygrad import Tensor
 
 a = Tensor([6])
-b = Tensor([8])
-c = 8
-# a % b
-# a.__mod__(b)
-# a % c
-c % a
+b1 = Tensor([8])
+b2 = 8
+
+a.__mod__(b1)
+
+a % b1
+b1 % a
+
+a % b2
+b2 % a
