@@ -43,7 +43,7 @@ def is_scheduled(u:UOp): return u.op is Ops.VIEW and len(u.src) == 2
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  buf_uops: Dict[Buffer, UOp] = field(default_factory=dict)        # this maps Buffers to BUFFER uops
+  buf_uops: Dict[UOp, Buffer] = field(default_factory=dict)        # this maps BUFFER uops to Buffers
   ubuf_metadata: Dict[UOp, Metadata] = field(default_factory=dict) # this maps BUFFER uops to Metadata
   var_vals: Dict[Variable, int] = field(default_factory=dict)      # this maps a BIND's DEFINE_VAR to its value
   assigns: Set[UOp] = field(default_factory=set)                   # this holds all the BUFFER uops we ASSIGN to in this schedule
@@ -70,14 +70,14 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
     return UOp(Ops.VALID, dtypes.bool, (buf.st.to_uop(),)).where(UOp.const(dtype, val), 0)
   # everything else is a VIEW of BUFFER (with an optional op)
   if buf.is_realized():
-    ctx.buf_uops[buf.buffer] = ubuf = UOp.new_buffer((b:=buf.buffer).device, b.size, b.dtype, num=len(ctx.buf_uops))
+    ctx.buf_uops[ubuf:=UOp.new_buffer((b:=buf.buffer).device, b.size, b.dtype, num=len(ctx.buf_uops))] = buf.buffer
     op = None
   elif buf.op is Ops.ASSIGN:
     target, new_val = [to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in buf.srcs]
     ctx.assigns.add(ubuf:=target.buf_uop)
     op = UOp(Ops.ASSIGN, dtype, (ubuf, new_val), buf.arg)
   else:
-    ctx.buf_uops[buf.buffer] = ubuf = UOp.new_buffer((b:=buf.buffer).device, b.size, b.dtype, num=len(ctx.buf_uops))
+    ctx.buf_uops[ubuf:=UOp.new_buffer((b:=buf.buffer).device, b.size, b.dtype, num=len(ctx.buf_uops))] = buf.buffer
     op = UOp(cast(Ops, buf.op), dtype, tuple(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in buf.srcs),
              None if buf.op in {Ops.CAST, Ops.BITCAST} else buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
@@ -381,19 +381,18 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   graph_rewrite(big_graph, break_sched, realizes)
   sinks = [UOp.sink(*(realizes[u] for u in stores)) for stores in store_groups]
   # preschedule all realizes
-  bufs = list(ctx.buf_uops)
   prescheduled: List[ScheduleItem] = []
   for sink in sinks:
     metadata = tuple({mx for x in sink.sparents if (x.op is Ops.STORE or is_scheduled(x)) and (mx:=ctx.ubuf_metadata.get(x.buf_uop))})
     ast, ast_ctx = full_ast_rewrite(sink, ctx.var_vals, ctx.assigns)
-    prescheduled.append(ScheduleItem(ast, tuple(b for u in ast_ctx.bufs if (b:=bufs[u.arg[0]]).size != 0), metadata, tuple(ast_ctx.assign_preloads)))
+    prescheduled.append(ScheduleItem(ast, tuple(b for u in ast_ctx.bufs if (b:=ctx.buf_uops[u]).size != 0), metadata, tuple(ast_ctx.assign_preloads)))
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
   in_degree: DefaultDict[ScheduleItem, int] = defaultdict(int)
   for si in prescheduled:
     # realize outputs before a parent is assigned to
-    parents_assigns = dedup(xsi for x in si.assign_preloads if (xsi:=schedule_targets.get(bufs[x.arg[0]])) and xsi is not si)
+    parents_assigns = dedup(xsi for x in si.assign_preloads if (xsi:=schedule_targets.get(ctx.buf_uops[x])) and xsi is not si)
     for assign in parents_assigns:
       graph[si].append(assign)
       in_degree[assign] += 1
