@@ -2199,7 +2199,7 @@ class TestOps(unittest.TestCase):
   def test_scatter(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
-    helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=0, index=b, src=src),
+    helper_test_op([(4,5,6), (3,4,8)], lambda x,src: x.scatter(dim=0, index=b, src=src),
     lambda x,src: x.scatter(dim=0, index=a, src=src), forward_only=True)
     helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=1, index=b, src=src),
     lambda x,src: x.scatter(dim=1, index=a, src=src), forward_only=True)
