@@ -182,7 +182,7 @@ class ExecItem:
     return et
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is Ops.COPY, f"schedule item buffers have to be on same device in order to be lowered" # noqa: E501
+  assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is Ops.COPY, "schedule item buffers have to be on same device in order to be lowered" # noqa: E501
   if si.ast.op is Ops.SINK:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
