@@ -18,6 +18,16 @@ from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
 
+#moving SPLIT_REDUCEOP to kernel
+SPLIT_REDUCEOP = getenv("SPLIT_REDUCEOP", 1)
+
+def split_reduceop(lazy_buffer, op, axis):
+    buffer = lazy_buffer._reduce_op(op, axis)
+    buffer.realize()  # Realize buffer
+    return buffer
+
+__all__ = ["split_reduceop", "SPLIT_REDUCEOP"]
+
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
   GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702

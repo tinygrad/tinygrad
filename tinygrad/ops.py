@@ -121,6 +121,7 @@ class Ops(FastEnum):
 
   # reduce
   REDUCE_AXIS = auto()
+  SUM = auto()  # Add SUM operation
 
   # helper ops
   GEP = auto()
@@ -186,7 +187,14 @@ class GroupOp:
 UnaryOps = BinaryOps = MetaOps = TernaryOps = Ops
 
 # https://en.wikipedia.org/wiki/Identity_element
-def identity_element(op:Ops, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
+def identity_element(op: Ops, dt: DType):
+    return dtypes.as_const({
+        BinaryOps.ADD: 0,
+        BinaryOps.MUL: 1,
+        BinaryOps.MAX: dtypes.min(dt),
+        Ops.SUM: 0  # Add identity for SUM operation
+    }.get(op, dtypes.min(dt)),  # Default to min for unsupported ops
+    dt)
 
 def can_pad(u:UOp) -> bool: return not any(x.op in GroupOp.UnsafePad for x in u.sparents)
 

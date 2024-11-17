@@ -7,6 +7,7 @@ from tinygrad.ops import identity_element, MathTrait, resolve, UOp, sint, GroupO
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
+from tinygrad.codegen.kernel import split_reduceop, SPLIT_REDUCEOP
 
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Ops]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
@@ -28,6 +29,7 @@ class LazyBuffer(MathTrait):
                op:Optional[Ops]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None, metadata:Optional[Metadata]=None):
     self.device, self.st, self.dtype, self.shape, self.size, self.metadata = device, st, to_dtype(dtype), st.shape, st.size, metadata
+    self.op = op if op is not None else Ops.CONST  # Initialize op with default value
     self._base: Optional[LazyBuffer] = None
     if base is None:
       # properties on base
@@ -172,13 +174,40 @@ class LazyBuffer(MathTrait):
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, None, tuple(srcs))
 
   # *** reduce ops ***
-
-  def _reduce_op(self, op:Ops, axis:Tuple[int, ...]) -> LazyBuffer:
+  def _reduce_op(self, op: Ops, axis: Tuple[int, ...]) -> LazyBuffer:
     assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
-    if len(axis) == 0: return self
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.st.reduce(axis)), self.dtype, Ops.REDUCE_AXIS, (op, axis), (self,))
+    if len(axis) == 0: 
+        return self
 
+    # Split logic
+    new_shape = self.st.reduce(axis)
+    if 0 in self.shape and 0 not in new_shape: 
+        return self.const_with_shape(identity_element(op, self.dtype), new_shape)
+
+    if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
+        reduced_st = ShapeTracker.from_shape(self.st.reduce(axis))
+        reduced_buffer = create_lazybuffer(self.device, reduced_st, self.dtype, Ops.REDUCE_AXIS, (op, axis), (self,))
+        reduced_buffer.realize()  # Realize reduced buffer
+        return reduced_buffer
+
+    # Split reduce
+    self_real_strides = self.st.real_strides(ignore_valid=True)
+    split_candidates = [(i, x) for i in axis for x in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(new_shape)),8-1,-1)
+                        if self.shape[i] % x == 0 and self_real_strides[i] != 0]
+    if not split_candidates: 
+        reduced_st = ShapeTracker.from_shape(self.st.reduce(axis))
+        reduced_buffer = create_lazybuffer(self.device, reduced_st, self.dtype, Ops.REDUCE_AXIS, (op, axis), (self,))
+        reduced_buffer.realize()  # Realize reduced buffer
+        return reduced_buffer
+
+    dim_to_split, divisor = split_candidates[0]
+    splitted_shape = self.shape[:dim_to_split] + (divisor,) + (self.shape[dim_to_split]//divisor,) + self.shape[dim_to_split+1:]
+    splitted = self.reshape(splitted_shape).permute(tuple([x for x in range(len(splitted_shape)) if x != dim_to_split]+[dim_to_split]))
+    if DEBUG >= 3: 
+        print(f"split {divisor}: {self.shape} -> {splitted.shape} -> {new_shape}")
+    return splitted._reduce_op(op, axis)._reduce_op(op, (len(new_shape),)).reshape(new_shape)
+    
   def r(self, op:Ops, axis:Tuple[int, ...]) -> LazyBuffer:
     new_shape = self.st.reduce(axis)
     # TODO: this logic should move to the scheduler
@@ -192,7 +221,7 @@ class LazyBuffer(MathTrait):
       if op is Ops.MAX: return self.const_with_shape(self.base.arg, new_shape)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
-    if not SPLIT_REDUCEOP or not all_int(self.shape) or (0 in self.shape) or \
+    if not split_reduceop  or not all_int(self.shape) or (0 in self.shape) or \
       prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, axis)
 
@@ -225,3 +254,43 @@ class LazyBuffer(MathTrait):
   def permute(self, arg:Tuple[int, ...]): return self._view(self.st.permute(arg))
   def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.shrink(arg))
   def stride(self, arg:Tuple[int, ...]): return self._view(self.st.stride(arg))
+  def realize(self):
+    if self.base.realized is None:
+        if self.op is MetaOps.CONST:
+          if hasattr(self, 'arg'):  # Check if 'arg' attribute exists
+            self.buffer = Buffer(self.device, self.size, self.dtype).fill(self.arg)
+          else:
+            # Handle case without 'arg' attribute
+            self.buffer = Buffer(self.device, self.size, self.dtype)
+        elif self.op is MetaOps.BUFFER_VIEW:
+            self.buffer = self.srcs[0].base.buffer.view(self.size, self.dtype, self.srcs[0].st.views[0].offset * self.srcs[0].dtype.itemsize)
+        elif self.op is MetaOps.ASSIGN:
+            self.buffer = self.srcs[0].realize().buffer
+        elif self.op is Ops.REDUCE_AXIS:
+            reduced_st = ShapeTracker.from_shape(self.st.reduce(self.arg[1]))
+            reduced_buffer = create_lazybuffer(self.device, reduced_st, self.dtype, Ops.REDUCE_AXIS, (self.arg[0], self.arg[1]), (self,))
+            self.buffer = reduced_buffer._reduce_op(self.arg[0], self.arg[1]).buffer
+        elif self.op is not None and self.op in UnaryOps:
+            self.buffer = exec_alu(self.op, self.dtype, [self.srcs[0].realize().buffer])
+        elif self.op in BinaryOps:
+            self.buffer = exec_alu(self.op, self.dtype, [self.srcs[0].realize().buffer, self.srcs[1].realize().buffer])
+        elif self.op in TernaryOps:
+            self.buffer = exec_alu(self.op, self.dtype, [self.srcs[0].realize().buffer, self.srcs[1].realize().buffer, self.srcs[2].realize().buffer])
+        else:
+            raise NotImplementedError(f"Operation {self.op} not implemented")
+
+    self.buffer.ref(1)  # Increase reference count
+    return self.buffer
+  def reduce_axis(self, op: Ops, axis: Tuple[int, ...]) -> LazyBuffer:
+    if self.size == 0:  # Check for empty buffer
+        raise ValueError("Cannot reduce axis on empty buffer")
+    if SPLIT_REDUCEOP:
+        buffer = split_reduceop(self, op, axis)
+    else:
+        buffer = self._reduce_op(op, axis)
+    
+    # Ensure buffer is realized
+    if buffer.realized is None:
+        buffer.realize()
+    
+    return buffer

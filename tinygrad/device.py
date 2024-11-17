@@ -132,6 +132,14 @@ class Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
     if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
     return Buffer(self.device, size, dtype, base=self, offset=offset)
+  def fill(self, value):
+        if self.is_allocated():
+            mv = self.as_buffer()
+            for i in range(len(mv)):
+                mv[i] = value
+        else:
+            raise ValueError("Buffer not allocated")
+        return self
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:

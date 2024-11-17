@@ -10,6 +10,7 @@ from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.fuse import get_realizes
 from tinygrad.device import Buffer
+from tinygrad.renderer import Program
 
 # creation can recurse a lot
 sys.setrecursionlimit(10000)
@@ -24,6 +25,7 @@ class ScheduleItem:
   bufs: Tuple[Buffer, ...]
   metadata: Tuple[Metadata, ...]
   assign_preloads: Tuple[UOp, ...]
+  programs: List[Program]  # New field for multiple programs
   @property
   def outputs(self) -> Tuple[Buffer, ...]:
     """Read/write or write only buffers in the schedule."""

@@ -159,7 +159,7 @@ def get_runner(dname:str, ast:UOp) -> CompiledRunner:
 
 @dataclass(frozen=True)
 class ExecItem:
-  prg: Runner
+  prg: List[Runner]  # Updated to list of runners
   bufs: List[Optional[Buffer]]
   metadata: Optional[Tuple[Metadata, ...]] = None
   def run(self, _var_vals:Optional[Dict[Variable, int]]=None, wait=False, jit=False, do_update_stats=True) -> Optional[float]:
@@ -181,37 +181,52 @@ class ExecItem:
       self.prg.first_run = False
     return et
 
-def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is Ops.COPY
-  if si.ast.op is Ops.SINK:
-    runner = get_runner(si.outputs[0].device, si.ast)
-    return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
-  out, arg = si.outputs[0], si.ast.arg
-  if si.ast.op is Ops.COPY:
-    kernel_type = BufferCopy
-    if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
-      kernel_type = BufferXfer
-    return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
-  if si.ast.op is Ops.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
-  if si.ast.op is Ops.BUFFER_VIEW: return ExecItem(ViewOp(out), list(si.bufs))
-  raise RuntimeError(f"don't know how to lower {si.ast}")
+def lower_schedule_item(si: ScheduleItem) -> ExecItem:
+    assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is Ops.COPY
 
-def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
-  while len(schedule):
-    si = schedule.pop(0)
-    try: yield lower_schedule_item(si)
-    except Exception as e:
-      if DEBUG >= 2:
-        print(f"error lowering {si.ast.op}")
-        print("tensor operations:")
-        pprint.pprint(si.metadata, indent=2)
-      raise e
+    # Check for split operations (Ops.SINK)
+    if si.ast.op is Ops.SINK:
+        runners = [get_runner(si.outputs[0].device, p.ast) for p in si.programs]
+        return ExecItem(runners, [si.bufs[x] for x in runners[0].p.globals], si.metadata)
+
+    # Handle Ops.REDUCE_AXIS
+    if si.ast.op is Ops.REDUCE_AXIS:
+        kernel = get_kernel(Device[si.outputs[0].device].renderer, si.ast)
+        runner = CompiledRunner(kernel.to_program())
+        return ExecItem([runner], list(si.bufs), si.metadata)
+
+    # Continue
+    out, arg = si.outputs[0], si.ast.arg
+    if si.ast.op is Ops.COPY:
+        kernel_type = BufferCopy
+        if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
+            kernel_type = BufferXfer
+        return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
+    if si.ast.op is Ops.EMPTY:
+        return ExecItem(EmptyOp(out), list(si.bufs))
+    if si.ast.op is Ops.BUFFER_VIEW:
+        return ExecItem(ViewOp(out), list(si.bufs))
+    raise RuntimeError(f"don't know how to lower {si.ast}")
+    
+def lower_schedule(schedule: List[ScheduleItem]) -> Generator[ExecItem, None, None]:
+    while len(schedule):
+        si = schedule.pop(0)
+        try:
+            yield lower_schedule_item(si)
+        except Exception as e:
+            if DEBUG >= 2:
+                print(f"error lowering {si.ast.op}")
+                print("tensor operations:")
+                pprint.pprint(si.metadata, indent=2)
+            raise e
 
 # **************** main run function ****************
 
 capturing: List = []  # put classes with an add method in here
 
-def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, int]]=None, do_update_stats=True):
-  for ei in lower_schedule(schedule):
-    if len(capturing) and CAPTURING: capturing[0].add(ei)
-    ei.run(var_vals, do_update_stats=do_update_stats)
+def run_schedule(schedule: List[ScheduleItem], var_vals: Optional[Dict[Variable, int]] = None, do_update_stats=True):
+    for ei in lower_schedule(schedule):
+        if len(capturing) and CAPTURING:
+            capturing[0].add(ei)
+        for prg in ei.prg:  # Iterate over multiple runners
+            prg(ei.bufs, var_vals, wait=True, do_update_stats=do_update_stats)
