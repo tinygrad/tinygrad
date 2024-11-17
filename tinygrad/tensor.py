@@ -1377,6 +1377,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(grid_y.numpy())
     ```
     """
+    if indexing not in ("ij", "xy"): raise RuntimeError(f'indexing must be in ("ij", "xy"), got {indexing}')
+    if not args: return (self,)
     tensors = (self,) + args if indexing == "ij" else (args[0],) + (self,) + args[1:]
     tensors = tuple(t.reshape((-1,) + (1,)*(len(args) - i)) for i,t in enumerate(tensors))
     tensors, out_shape = (tensors if indexing == "ij" else (tensors[1],) + (tensors[0],) + tensors[2:]), _broadcast_shape(*(t.shape for t in tensors))
