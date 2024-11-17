@@ -74,12 +74,10 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
   if buf.is_realized(): return UOp(Ops.VIEW, dtype, (ubuf,), buf.st)
   # everything else needs sources
   src = tuple(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in buf.srcs)
-  if buf.op in {Ops.REDUCE_AXIS, Ops.CONTIGUOUS}: ret = UOp(buf.op, dtype, src, buf.arg)
-  elif buf.op is Ops.ASSIGN:
+  if buf.op is Ops.ASSIGN:
     ctx.assigns.add(ubuf)
     ret = UOp(Ops.ASSIGN, dtype, (ubuf, src[1]), buf.arg)
-  elif buf.op in GroupOp.Meta: ret = UOp(buf.op, dtype, src, buf.arg)
-  else: ret = UOp(cast(Ops, buf.op), dtype, src)
+  else: ret = UOp(cast(Ops, buf.op), dtype, src, None if buf.op in {Ops.CAST, Ops.BITCAST} else buf.arg)
   if buf.forced_realize: ret = UOp(Ops.CONTIGUOUS, dtype, (ret,))
   cache[buf] = ret = UOp(Ops.VIEW, dtype, (ubuf, ret), buf.st)
   if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
