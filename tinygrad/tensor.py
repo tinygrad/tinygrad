@@ -1182,14 +1182,20 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
       # for advanced setitem, returns whole tensor with indices replaced
       if v is not None:
+        print(v.numpy())
         vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(ret.shape, v.shape))
+        print(vb.numpy())
         # add back reduced dims from sum
         for dim in sum_axis: vb = vb.unsqueeze(dim)
+        print(vb.numpy())
         # axis to be reduced to match self.shape
         axis = tuple(range(first_dim, first_dim + len(big_shape)))
         # apply mask to v(broadcasted) and reduce such that if v contains repeated indices the last one remains
+        print(mask.numpy())
         vb = vb * mask
+        print(vb.numpy())
         for dim in axis: vb = functools.reduce(lambda x,y: y.where(y, x), vb.split(1, dim))
+        print(vb.numpy())
         # reduce mask and select from v(get rid of extra dims from reduce) for each True element in mask else select from self
         ret = mask.any(axis).where(vb.squeeze(), self)
 
@@ -1239,8 +1245,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     haaaaaaacks!
     """
-    index = index.to(self.device)
-    dim = self._resolve_dim(dim)
+    index, dim  = index.to(self.device), self._resolve_dim(dim)
     if not isinstance(src, Tensor): src = Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
     else: src = src.shrink(tuple((0, sh) for sh in index.shape))
     mask, x = (index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)).transpose(-1, dim), self.unsqueeze(-1)
@@ -1248,12 +1253,13 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     src = src.unsqueeze(-1).transpose(-1, dim).expand(tuple(ms if i == dim else None for i,ms in enumerate(x.shape)))
     src = src.pad(tuple((0, max(xs-ss, 0)) for ss, xs in zip(src.shape, x.shape)))
     if reduce is None:
-      src = functools.reduce(lambda x,y: y.where(y, x), (src*mask).split(1, -1))   # WOAHHHH this is how he did it, man im retardeed
-      return mask.any(-1).where(src.squeeze(), x.squeeze()) # type: ignore
+      src = src * mask
+      src = functools.reduce(lambda x,y: y.isnan().where(x, y), (src.where(src, float("nan"))).split(1, -1))
+      return mask.any(-1).where(src.squeeze(), self)
     if reduce == "add": return (mask*src).sum(-1) + self
     if reduce == "multiply":
       src = functools.reduce(lambda x,y: (y*x).where(y*x, y.where(y, x)), (src*mask).split(1, -1))
-      return mask.any(-1).where(src.squeeze() * x.squeeze(), x.squeeze()) # type: ignore
+      return mask.any(-1).where(src.squeeze() * self, self)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
