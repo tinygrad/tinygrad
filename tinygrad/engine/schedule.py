@@ -37,10 +37,9 @@ class ScheduleItem:
 
 # **** small wrapper for LazyBuffer -> UOp
 
-def UPatSrc(*args, **kwargs):
-  return UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat(*args, **{**kwargs, "name":"to_store"})), name="base")
+def UPatSrc(*args, **kwargs): return UPat(Ops.VIEW, src=(UPat.var("b"), UPat(*args, **{**kwargs, "name":"to_store"})), name="base")
 @functools.lru_cache(None)
-def is_scheduled(u:UOp): return u.op is Ops.LOAD and len(u.src) == 3
+def is_scheduled(u:UOp): return u.op is Ops.VIEW and len(u.src) == 2
 
 @dataclass(frozen=True)
 class ScheduleContext:
@@ -72,7 +71,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
   # everything else has BUFFER
   ubuf = ctx.buf_uops.setdefault(b:=buf.buffer, UOp(Ops.BUFFER, b.dtype.ptr(), (), (len(ctx.buf_uops), (b.device, b.size, b.dtype))))
   # if the buffer is already realized we just load it
-  if buf.is_realized(): return UOp(Ops.PRELOAD, dtype, (ubuf, buf.st.to_uop()))
+  if buf.is_realized(): return UOp(Ops.VIEW, dtype, (ubuf,), buf.st)
   # everything else needs sources
   src = tuple(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in buf.srcs)
   if buf.op in {Ops.REDUCE_AXIS, Ops.CONTIGUOUS}: ret = UOp(buf.op, dtype, src, buf.arg)
@@ -82,7 +81,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
   elif buf.op in GroupOp.Meta: ret = UOp(buf.op, buf.dtype, (ubuf, *src), buf.arg)
   else: ret = UOp(cast(Ops, buf.op), dtype, src)
   if buf.forced_realize: ret = UOp(Ops.CONTIGUOUS, dtype, (ret,))
-  cache[buf] = ret = UOp(Ops.LOAD, dtype, (ubuf, buf.st.to_uop(), UOp.store(ubuf, ShapeTracker.from_shape(buf.shape).to_uop(), ret)))
+  cache[buf] = ret = UOp(Ops.VIEW, dtype, (ubuf, ret), buf.st)
   if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
   ctx.lazybufs[b] = buf
   # things for fuse.py
@@ -200,6 +199,7 @@ to_si = PatternMatcher([
 
 lazy = PatternMatcher([
   (UPatSrc(), lambda ctx,to_store,**kwargs: to_store),
+  (UPat(Ops.BUFFER, name="b").view(name="view"), lambda ctx,b,view: UOp(Ops.PRELOAD, view.dtype, (b, view.st.to_uop()))),
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
 ])
 
@@ -235,7 +235,7 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 def uval(u:UOp) -> UOp:
   assert is_scheduled(u), f"must be a scheduled op {u}"
-  return to_store.src[0] if (to_store:=u.src[2].src[2]).is_contiguous_base else to_store
+  return to_store.src[0] if (to_store:=u.src[1]).is_contiguous_base else to_store
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], realizes:Dict[UOp, UOp],
                      reduce_for_op:Dict[UOp, UOp], group:Dict[UOp, None], cache:Dict[Tuple[UOp, ShapeTracker], None]) -> None:
@@ -292,7 +292,7 @@ def group_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp,
         if (p_uop:=allbufs.get(p:=parents.pop())) is None: continue
         if (p_uop:=uval(p_uop)).op is Ops.ASSIGN and p not in group: forced_realize, can_chase = True, False
         if p in realizes: continue
-        parents.extend([x.base.src[0] for x in p_uop.src if x.base.op in {Ops.LOAD, Ops.PRELOAD}])
+        parents.extend([x.base.src[0] for x in p_uop.src if x.base.op is Ops.VIEW and len(x.base.src) != 0])
     if forced_realize or not group:
       tr = r
       if can_chase:
@@ -322,7 +322,7 @@ def group_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp,
 
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
-    if any(allbufs[tr].src[2].src[2].is_contiguous_base for tr in group): continue
+    if any(allbufs[tr].src[1].is_contiguous_base for tr in group): continue
     kernel_children = {c for tr in group for c in children[tr] if uval(allbufs[c]).op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group: del realizes[tr]

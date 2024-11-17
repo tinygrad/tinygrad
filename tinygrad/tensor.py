@@ -1279,7 +1279,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.repeat_interleave(2).numpy())
     ```
     """
-    x, dim = (self.flatten(), 0) if dim is None else (self, dim)
+    x, dim = (self.flatten(), 0) if dim is None else (self, self._resolve_dim(dim))
     shp = x.shape
     return x.reshape(*shp[:dim+1], 1, *shp[dim+1:]).expand(*shp[:dim+1], repeats, *shp[dim+1:]).reshape(*shp[:dim], shp[dim]*repeats, *shp[dim+1:])
 
@@ -1297,16 +1297,16 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     repeats = argfix(repeats, *args)
-    base_shape = (1,) * (len(repeats) - self.ndim) + self.shape
-    new_shape = [x for b in base_shape for x in [1, b]]
-    expand_shape = [x for rs in zip(repeats, base_shape) for x in rs]
+    base_shape = _pad_left(self.shape, repeats)[0]
+    unsqueezed_shape = flatten([[1, s] for s in base_shape])
+    expanded_shape = flatten([[r, s] for r,s in zip(repeats, base_shape)])
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
-    return self.reshape(new_shape).expand(expand_shape).reshape(final_shape)
+    return self.reshape(unsqueezed_shape).expand(expanded_shape).reshape(final_shape)
 
-  def _resolve_dim(self, dim:int, *, outer:bool=False) -> int:
-    if not -max(1, self.ndim+outer) <= dim < max(1, self.ndim+outer):
-      raise IndexError(f"{dim=} out of range {[-max(1, self.ndim+outer), max(1, self.ndim+outer)-1]}")
-    return dim + self.ndim+outer if dim < 0 else dim
+  def _resolve_dim(self, dim:int, *, extra:bool=False) -> int:
+    total = self.ndim + int(extra)
+    if not -max(1, total) <= dim <= max(1, total)-1: raise IndexError(f"{dim=} out of range {[-max(1, total), max(1, total)-1]}")
+    return dim + total if dim < 0 else dim
 
   def split(self, sizes:Union[int, List[int]], dim:int=0) -> Tuple[Tensor, ...]:
     """
@@ -1414,7 +1414,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.unsqueeze(1).numpy())
     ```
     """
-    dim = self._resolve_dim(dim, outer=True)
+    dim = self._resolve_dim(dim, extra=True)
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
   @property
