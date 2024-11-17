@@ -1360,9 +1360,10 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
   def meshgrid(self:Tensor, *args:Tensor, indexing:Union[Literal["ij"], Literal["xy"]]="ij") -> Tuple[Tensor, ...]:
     """
     Generates coordinate matrices from coordinate vectors.
+    Input tensors can be scalars or 1D tensors.
 
-    `indexing` determines how the output grids are aligned
-    `ij` indexing follows matrix-style indexing and `xy` indexing follows Cartesian-style indexing
+    `indexing` determines how the output grids are aligned.
+    `ij` indexing follows matrix-style indexing and `xy` indexing follows Cartesian-style indexing.
 
     ```python exec="true" source="above" session="tensor" result="python"
     x, y = Tensor([1, 2, 3]), Tensor([4, 5, 6])
