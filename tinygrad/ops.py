@@ -84,10 +84,6 @@ class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
   def __rlshift__(self, x): return self.lshift(x, True)
   def __rrshift__(self, x): return self.rshift(x, True)
 
-  # not in Tensor
-  # def __mod__(self, x): return self.alu(Ops.MOD, self.ufix(x))
-  # def __rmod__(self, x): return self.ufix(x).alu(Ops.MOD, self)
-
   def maximum(self, x): return self.alu(Ops.MAX, self.ufix(x))
   def minimum(self, x): return -(-self).maximum(-x)
   def where(self, x, y): return self.alu(Ops.WHERE, x, x.ufix(y))
