@@ -1553,7 +1553,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.prod(axis=1).numpy())
     ```
     """
-    return self.cast(acc_dtype or self.dtype)._reduce(F.Prod, axis, keepdim)
+    return self.cast(acc_dtype if acc_dtype is not None else self.dtype)._reduce(F.Prod, axis, keepdim)
 
   def max(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
