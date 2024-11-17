@@ -216,6 +216,20 @@ class TestOps(unittest.TestCase):
     for i in range(len(tor)):
       helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
 
+  def test_meshgrid(self):
+    x, xt = torch.tensor([0.,1.,2.], requires_grad=True), Tensor([0.,1.,2.], requires_grad=True)
+    y, yt = torch.tensor([3.,4.,5.,6.], requires_grad=True), Tensor([3.,4.,5.,6.], requires_grad=True)
+    z, zt = torch.tensor([7.,8.,9.], requires_grad=True), Tensor([7.,8.,9.], requires_grad=True)
+    for indexing in ("ij", "xy"):
+      tor = torch.meshgrid(x, y, indexing=indexing)
+      ten = xt.meshgrid(yt, indexing=indexing)
+      for i in range(len(tor)):
+        helper_test_op([], lambda: tor[i], lambda: ten[i])
+      tor = torch.meshgrid(x, torch.tensor(10., requires_grad=True), y, z, indexing=indexing)
+      ten = xt.meshgrid(Tensor(10., requires_grad=True), yt, zt, indexing=indexing)
+      for i in range(len(tor)):
+        helper_test_op([], lambda: tor[i], lambda: ten[i])
+
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10, dtype=torch.int32), lambda: Tensor.arange(10), forward_only=True)
     helper_test_op([], lambda: torch.arange(36, dtype=torch.int32), lambda: Tensor.arange(36), forward_only=True)

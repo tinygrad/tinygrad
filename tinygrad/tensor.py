@@ -1357,6 +1357,31 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     dim = self._resolve_dim(dim)
     return list(self.split(ceildiv(self.shape[dim], chunks) if self.shape[dim] else [0]*chunks, dim=dim))
 
+  def meshgrid(self:Tensor, *args:Tensor, indexing:Union[Literal["ij"], Literal["xy"]]="ij") -> Tuple[Tensor, ...]:
+    """
+    Generates coordinate matrices from coordinate vectors.
+    Input tensors can be scalars or 1D tensors.
+
+    `indexing` determines how the output grids are aligned.
+    `ij` indexing follows matrix-style indexing and `xy` indexing follows Cartesian-style indexing.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    x, y = Tensor([1, 2, 3]), Tensor([4, 5, 6])
+    grid_x, grid_y = x.meshgrid(y)
+    print(grid_x.numpy())
+    print(grid_y.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    grid_x, grid_y = x.meshgrid(y, indexing="xy")
+    print(grid_x.numpy())
+    print(grid_y.numpy())
+    ```
+    """
+    tensors = (self,) + args if indexing == "ij" else (args[0],) + (self,) + args[1:]
+    tensors = tuple(t.reshape((-1,) + (1,)*(len(args) - i)) for i,t in enumerate(tensors))
+    tensors, out_shape = (tensors if indexing == "ij" else (tensors[1],) + (tensors[0],) + tensors[2:]), _broadcast_shape(*(t.shape for t in tensors))
+    return tuple(t._broadcast_to(out_shape) for t in tensors)
+
   def squeeze(self, dim:Optional[int]=None) -> Tensor:
     """
     Returns a tensor with specified dimensions of input of size 1 removed.
