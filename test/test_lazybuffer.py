@@ -2,6 +2,7 @@
 import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import Ops
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.schedule import create_schedule
@@ -68,6 +69,26 @@ class TestLazyBuffer(unittest.TestCase):
     lb: LazyBuffer = Tensor([1], dtype=dtypes.float).lazydata
     assert lb.const_like(1).base.arg == 1.0
     assert type(lb.const_like(1).base.arg) is float
+
+  def test_forced_realized_alu(self):
+    a = Tensor.randn(2, 2).realize()
+    b = Tensor.randn(2, 2).realize()
+    add = a + b
+    add.lazydata.forced_realize = True
+    out = add+2
+    sched = create_schedule([out.lazydata])
+    self.assertEqual(len(sched), 2)
+    run_schedule(sched)
+    np.testing.assert_allclose(out.numpy(), a.numpy()+b.numpy()+2)
+
+  def test_forced_realized_metaop(self):
+    empty = Tensor.empty(1)
+    empty.lazydata.forced_realize = True
+    sched = create_schedule([empty.lazydata])
+    self.assertEqual(len(sched), 1)
+    self.assertIs(sched[0].ast.op, Ops.EMPTY)
+    run_schedule(sched)
+    np.testing.assert_equal(empty.numpy(), [0])
 
 class TestReduceOp(unittest.TestCase):
   def test_no_split_reduce_kernel(self):
