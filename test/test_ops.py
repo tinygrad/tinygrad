@@ -2197,10 +2197,15 @@ class TestOps(unittest.TestCase):
                          vals=[[1., 2., 3.]])
 
   def test_scatter(self):
+    # RuntimeError: Expected index [3, 4, 5] to be smaller than self [4, 5, 6] apart from dimension 0 and to be smaller size than src [4, 2, 8]
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
-    helper_test_op([(4,5,6), (3,4,8)], lambda x,src: x.scatter(dim=0, index=b, src=src),
+    helper_test_op([(10,10,10), (10,10,10)], lambda x,src: x.scatter(dim=0, index=b, src=src),
     lambda x,src: x.scatter(dim=0, index=a, src=src), forward_only=True)
+    helper_test_op([(5,3,5), (9,9,9)], lambda x,src: x.scatter(dim=1, index=b, src=src),
+    lambda x,src: x.scatter(dim=1, index=a, src=src), forward_only=True)
+    helper_test_op([(3,4,5), (3,4,5)], lambda x,src: x.scatter(dim=1, index=b, src=src),
+    lambda x,src: x.scatter(dim=1, index=a, src=src), forward_only=True)
     helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=1, index=b, src=src),
     lambda x,src: x.scatter(dim=1, index=a, src=src), forward_only=True)
     helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=2, index=b, src=src),
@@ -2213,6 +2218,8 @@ class TestOps(unittest.TestCase):
     lambda x,src: x.scatter(dim=-2, index=a, src=src), forward_only=True)
     helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=-3, index=b, src=src),
     lambda x,src: x.scatter(dim=-3, index=a, src=src), forward_only=True)
+    helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=1, index=b, src=src),
+    lambda x,src: x.scatter(dim=1, index=a, src=src), forward_only=True)
     for r in ["add", "multiply"]:
       helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=0, index=b, src=src, reduce=r),
       lambda x,src: x.scatter(dim=0, index=a, src=src, reduce=r), forward_only=True)
@@ -2228,6 +2235,19 @@ class TestOps(unittest.TestCase):
       lambda x,src: x.scatter(dim=-2, index=a, src=src, reduce=r), forward_only=True)
       helper_test_op([(4,5,6), (3,4,5)], lambda x,src: x.scatter(dim=-3, index=b, src=src, reduce=r),
       lambda x,src: x.scatter(dim=-3, index=a, src=src, reduce=r), forward_only=True)
+      helper_test_op(None,
+        lambda x,index,src: x.scatter(1, index, src, reduce=r),
+        lambda x,index,src: x.scatter(1, index, src, reduce=r), forward_only=True, vals=[[[0, 0, 2], [3, 4, 5]], [[0,1,2],[1,1,0]], [[1,1,0],[2,1,3]]])
+      helper_test_op(None,
+        lambda x,index,src: x.scatter(1, index, src, reduce=r),
+        lambda x,index,src: x.scatter(1, index, src, reduce=r), forward_only=True, vals=[[[0, 0, 0], [0, 0, 0]], [[0,1,2],[1,1,0]], [[1,1,0],[2,1,3]]])
+      helper_test_op(None,
+        lambda x,index,src: x.scatter(1, index, src, reduce=r),
+        lambda x,index,src: x.scatter(1, index, src, reduce=r), forward_only=True, vals=[[[0, 0, 0], [0, 0, 0]], [[0,1,2],[1,1,0]], [[0,1,0],[0,0,1]]])
+
+    helper_test_op(None,
+      lambda x,index,src: x.scatter(1, index, src),
+      lambda x,index,src: x.scatter(1, index, src), forward_only=True, vals=[[[0, 0, 2], [3, 4, 5]], [[0,1,2],[1,1,0]], [[1,1,0],[2,1,3]]])
 
   def test_scatter_add(self): ...
   def test_scatter_mul(self): ...

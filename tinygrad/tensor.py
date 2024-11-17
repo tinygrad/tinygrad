@@ -1242,16 +1242,20 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     index, dim  = index.to(self.device), self._resolve_dim(dim)
     if not isinstance(src, Tensor): src = Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
-    mask, x = (index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)).transpose(-1, dim), self.unsqueeze(-1)
-    mask = mask.pad(tuple((0, max(xs-ms, 0)) for ms, xs in zip(mask.shape, x.shape)))
-    src = src.shrink(tuple((0, sh) for sh in index.shape)).unsqueeze(-1).transpose(-1, dim).expand(tuple(ms if i == dim else None for i,ms in enumerate(x.shape)))
-    src = src.pad(tuple((0, max(xs-ss, 0)) for ss, xs in zip(src.shape, x.shape)))
+    assert index.ndim == self.ndim == src.ndim, f"self.ndim must equal index.ndim, {self.ndim=}, {index.ndim=}"
+    assert all((s >= i if d != dim else True) and srcs >= i for d,(s,i,srcs) in enumerate(zip(self.shape, index.shape, src.shape))), \
+      f"Expected {index.shape=} to be <= {self.shape=} apart from dimension {dim} and to be <= {src.shape=}"
+    mask = (index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)).transpose(-1, dim)
+    src = src.shrink(tuple((0, sh) for sh in index.shape)).unsqueeze(-1).transpose(-1, dim)
+    src = src.expand(tuple(self.size(i) if i == dim else None for i in range(src.ndim)))
+    src = src.pad(tuple((0, max(xs-ss, 0)) for ss, xs in zip(src.shape[:-1], self.shape)) + (None,))
+    mask = mask.pad(tuple((0, max(xs-ms, 0)) for ms, xs in zip(mask.shape[:-1], self.shape)) + (None,))
     if reduce is None:
       nan_masked = mask.where(mask*src, float("nan"))
       masked_src = functools.reduce(lambda x,y: y.isnan().where(x, y), nan_masked.split(1, -1))
-      return mask.any(-1).where(masked_src.squeeze(), self)
-    if reduce == "add": return (mask*src).sum(-1) + self
-    if reduce == "multiply": return mask.where(mask*src, 1).prod(-1) * self
+      return (mask.any(-1).where(masked_src.squeeze(), self)).cast(self.dtype)
+    if reduce == "add": return ((mask*src).sum(-1) + self).cast(self.dtype)
+    if reduce == "multiply": return (mask.where(mask*src, 1).prod(-1) * self).cast(self.dtype)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
