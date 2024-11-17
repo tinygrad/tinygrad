@@ -510,6 +510,16 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x/2)
     helper_test_op([()], lambda x: 2/x)
 
+  def test_mod(self):
+    helper_test_op([(1,), (1,)], lambda x,y: x%y, Tensor.mod, forward_only=True)
+    helper_test_op([(1,), (1,)], lambda x,y: x%y, forward_only=True)
+    helper_test_op([(), ()], lambda x,y: x%y, forward_only=True)
+  def test_mod_scalar(self):
+    helper_test_op([(1,)], lambda x,y: x%y, Tensor.mod, forward_only=True)
+    helper_test_op([(1,)], lambda x,y: x%y, forward_only=True)
+    helper_test_op([(),], lambda x,y: x%y, forward_only=True)
+
+
   def test_mul_naninf(self):
     helper_test_op([(45,65)], lambda x: x*math.inf)
     helper_test_op([(45,65)], lambda x: x*-math.inf)

@@ -5,5 +5,5 @@ b = Tensor([8])
 c = 8
 # a % b
 # a.__mod__(b)
-a % c
-# c % a
+# a % c
+c % a
