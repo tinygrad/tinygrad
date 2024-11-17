@@ -522,7 +522,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(),], lambda x: x%2, forward_only=True)
     helper_test_op([(),], lambda x: 2%x, forward_only=True)
 
-
   def test_mul_naninf(self):
     helper_test_op([(45,65)], lambda x: x*math.inf)
     helper_test_op([(45,65)], lambda x: x*-math.inf)
