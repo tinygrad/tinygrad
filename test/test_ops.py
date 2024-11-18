@@ -216,6 +216,29 @@ class TestOps(unittest.TestCase):
     for i in range(len(tor)):
       helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
 
+  def test_meshgrid(self):
+    x, xt = torch.tensor([0.,1.,2.], requires_grad=True), Tensor([0.,1.,2.], requires_grad=True)
+    y, yt = torch.tensor([3.,4.,5.,6.], requires_grad=True), Tensor([3.,4.,5.,6.], requires_grad=True)
+    z, zt = torch.tensor([7.,8.,9.], requires_grad=True), Tensor([7.,8.,9.], requires_grad=True)
+    for indexing in ("ij", "xy"):
+      tor = torch.meshgrid(x, indexing=indexing)
+      ten = xt.meshgrid(indexing=indexing)
+      self.assertEqual(len(tor), len(ten))
+      for tor_i, ten_i in zip(tor, ten):
+        helper_test_op([], lambda: tor_i, lambda: ten_i)
+      tor = torch.meshgrid(x, y, indexing=indexing)
+      ten = xt.meshgrid(yt, indexing=indexing)
+      self.assertEqual(len(tor), len(ten))
+      for tor_i, ten_i in zip(tor, ten):
+        helper_test_op([], lambda: tor_i, lambda: ten_i)
+      tor = torch.meshgrid(x, torch.tensor(10., requires_grad=True), y, z, indexing=indexing)
+      ten = xt.meshgrid(Tensor(10., requires_grad=True), yt, zt, indexing=indexing)
+      self.assertEqual(len(tor), len(ten))
+      for tor_i, ten_i in zip(tor, ten):
+        helper_test_op([], lambda: tor_i, lambda: ten_i)
+
+    self.helper_test_exception([], lambda: torch.meshgrid(x, indexing="bad"), lambda: xt.meshgrid(indexing="bad"), expected=RuntimeError)
+
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10, dtype=torch.int32), lambda: Tensor.arange(10), forward_only=True)
     helper_test_op([], lambda: torch.arange(36, dtype=torch.int32), lambda: Tensor.arange(36), forward_only=True)
@@ -988,6 +1011,12 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([()], lambda x: x.sum(1), lambda x: x.sum(1), expected=IndexError)
     self.helper_test_exception([()], lambda x: x.sum((1,)), lambda x: x.sum((1,)), expected=IndexError)
 
+  def test_sum_acc_dtype(self):
+    helper_test_op([(45,3)], lambda x: x.sum(), lambda x: x.sum(acc_dtype=dtypes.float32))
+    if is_dtype_supported(dtypes.float64): helper_test_op([(45,3)], lambda x: x.sum(dtype=torch.float64), lambda x: x.sum(acc_dtype=dtypes.float64))
+
+    with self.assertRaises(AttributeError): Tensor([1.0, 2.0]).sum(acc_dtype="")
+
   def test_sum_with_zeros_shape(self):
     helper_test_op([(4, 0)], lambda x: x.sum(axis=(0,)))
     helper_test_op([(4, 0)], lambda x: x.sum(axis=(1,)))
@@ -1002,6 +1031,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x.prod())
     helper_test_op([()], lambda x: x.prod(0))
     helper_test_op([()], lambda x: x.prod(-1))
+
+  def test_prod_acc_dtype(self):
+    with self.assertRaises(AttributeError): Tensor([1.0, 2.0]).prod(acc_dtype="")
 
   def test_min(self):
     helper_test_op([(3,3)], lambda x: x.min())
@@ -2047,6 +2079,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3, 3)], lambda x: x.repeat_interleave(6))
     helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, 1))
     helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, 0))
+    helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, -1))
+    helper_test_op([(3, 3)], lambda x: x.repeat_interleave(2, -2))
 
   def test_simple_repeat(self):
     repeats = [3, 3, 4]

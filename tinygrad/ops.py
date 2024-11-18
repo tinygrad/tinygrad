@@ -336,8 +336,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
                                              UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=(idx, False))
   def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
+  def contiguous(self): return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
   @property
-  def is_contiguous_base(self): return self.op is Ops.CONTIGUOUS and self.src[0].base.op is not Ops.LOAD
+  def is_contiguous_base(self): return self.op is Ops.CONTIGUOUS and not (self.src[0].base.op is Ops.VIEW and len(self.src[0].base.src) == 2)
 
   # *** uop movement ops ***
 
@@ -350,9 +351,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop Buffer stuff ***
 
+  @staticmethod
+  def new_buffer(device:str, size:int, dtype:DType, num=-1): return  UOp(Ops.BUFFER, dtype.ptr(), (), (num, (device, size, dtype)))
+
   @property
   def buf_uop(self) -> UOp:
-    assert self.op in {*GroupOp.Buffer, Ops.ASSIGN} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
+    assert self.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
     return self.src[0]
 
   # *** uop Variable stuff ***
@@ -1034,6 +1038,7 @@ symbolic_simple = PatternMatcher([
   ((UPat.var("x") & UPat.var("x")), lambda x: x),
   ((UPat.var("x") | UPat.var("x")), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
+  (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, True), UPat.const(dtypes.bool, False)), lambda x: x),
   # ** zero folding **
   (UPat.var("x") < UPat.var("x"), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x < x -> False
   (UPat.var("x", dtype=dtypes.ints) != UPat.var("x", dtype=dtypes.ints),

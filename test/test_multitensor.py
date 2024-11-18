@@ -51,6 +51,15 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (128,)
     (X + X).realize()
 
+  def test_tensor_from_multi(self):
+    X = Tensor([1, 2], dtype=dtypes.int).shard_(devices_2, 0)
+    Y = Tensor(X.lazydata)
+    self.assertEqual(Y.device, Device.DEFAULT)
+    np.testing.assert_equal(X.numpy(), Y.numpy())
+
+    with self.assertRaises(AssertionError):
+      _ = Tensor(X.lazydata, dtype=dtypes.float)
+
   def test_sharded_arange(self):
     sharded_arange = Tensor.arange(1000).shard(devices_2, 0)
     sharded_arange.realize()
