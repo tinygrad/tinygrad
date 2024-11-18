@@ -386,6 +386,7 @@ class AMDDevice(HCQCompiled):
     vgpr_size_per_cu = 0x60000 if self.target in {110000, 110001, 120000, 120001} else 0x40000
     wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * (max_cu_id + 1), mmap.PAGESIZE)
     ctl_stack_size = round_up(12 * (max_cu_id + 1) * (max_wave_id + 1) + 8 + 40, mmap.PAGESIZE)
+    self.debug_memory_size = round_up((max_cu_id + 1) * (max_wave_id + 1) * 32, 64)
 
     self.compute_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x100000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size)
@@ -459,14 +460,15 @@ class AMDDevice(HCQCompiled):
     assert stm.n_success == len(mem.mapped_gpu_ids)
 
   def _driver_alloc_queue(self, queue_type, ring_size, ctx_save_restore_size=None, eop_buffer_size=None, ctl_stack_size=0) -> AMDQueueDesc:
-    gart = self._gpu_alloc(0x1000, uncached=True)
-    ring = self._gpu_alloc(ring_size, uncached=True)
-    cwsr_ctx = self._gpu_alloc(ctx_save_restore_size) if ctx_save_restore_size else None
-    eop_buffer = self._gpu_alloc(eop_buffer_size) if eop_buffer_size else None
+    gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    ring = self._gpu_alloc(ring_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    cwsr_ctx = self._gpu_alloc(round_up(ctx_save_restore_size + self.debug_memory_size, mmap.PAGESIZE),
+                               kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) if ctx_save_restore_size else None
+    eop_buffer = self._gpu_alloc(eop_buffer_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) if eop_buffer_size else None
     queue = kfd.AMDKFD_IOC_CREATE_QUEUE(AMDDevice.kfd, ring_base_address=ring.va_addr, ring_size=ring.size, gpu_id=self.gpu_id,
       queue_type=queue_type, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       eop_buffer_address=eop_buffer.va_addr if eop_buffer else 0, eop_buffer_size=eop_buffer.size if eop_buffer else 0, ctl_stack_size=ctl_stack_size,
-      ctx_save_restore_address=cwsr_ctx.va_addr if cwsr_ctx else 0, ctx_save_restore_size=cwsr_ctx.size if cwsr_ctx else 0,
+      ctx_save_restore_address=cwsr_ctx.va_addr if cwsr_ctx else 0, ctx_save_restore_size=ctx_save_restore_size if cwsr_ctx else 0,
       write_pointer_address=gart.va_addr, read_pointer_address=gart.va_addr + 8)
 
     if not hasattr(self, 'doorbells'):
