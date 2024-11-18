@@ -1015,6 +1015,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
        - `padding` must have the same length as `self.ndim`.
 
     Padding values can be negative, resulting in dimension shrinks that work similarly to Python negative slices.
+    Padding modes is selected with `mode` which supports `constant` and `reflect`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(9).reshape(1, 1, 3, 3)
@@ -1030,6 +1031,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.pad((1, 2, 0, -1), value=-float('inf')).numpy())
     ```
     """
+    if mode not in {"constant", "reflect"}: raise NotImplementedError(f"{mode=} is not supported")
     if (flat:=all(isinstance(p, (int,UOp)) for p in padding)) and len(padding)%2 != 0: raise ValueError("Flat padding must have even number of pads")
     # turn flat padding into group padding
     pX = ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2])) if flat else padding

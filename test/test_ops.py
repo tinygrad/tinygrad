@@ -1390,6 +1390,9 @@ class TestOps(unittest.TestCase):
     # raise error for too many or too little pads
     self.helper_test_exception([(3,3)], lambda x: torch.nn.functional.pad(x, (0,0,0,0,1,0,3,0)), lambda x: x.pad((0,0,0,0,1,0,3,0)),
                                expected=(RuntimeError, ValueError))
+    # raise error for mode string typo
+    self.helper_test_exception([(3,3,3)], lambda x: torch.nn.functional.pad(x, (3,0), mode="typo"), lambda x: x.pad((3,0), mode="typo"),
+                               expected=(NotImplementedError, NotImplementedError))
     x = Tensor.ones(3,3)
     with self.assertRaises(ValueError): x.pad((None,(0,1),(3,0)))
     with self.assertRaises(ValueError): x.pad(((0,1),))
