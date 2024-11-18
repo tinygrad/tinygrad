@@ -2,7 +2,7 @@ from __future__ import annotations
 import ctypes, functools
 from typing import Tuple
 from tinygrad.device import Compiled, Compiler, MallocAllocator
-from tinygrad.helpers import DEBUG, cpu_time_execution, cpu_objdump, getenv
+from tinygrad.helpers import cpu_time_execution, getenv, cpu_objdump
 from tinygrad.renderer.llvmir import LLVMRenderer
 import llvmlite.binding as llvm
 
@@ -16,16 +16,17 @@ class LLVMCompiler(Compiler):
         builder.opt_level = 3; builder.size_level = 0; builder.loop_vectorize = True; builder.slp_vectorize = True  # noqa: E702
         builder.populate(self.optimizer)
     super().__init__("compile_llvm_opt" if opt else "compile_llvm")
+
   def compile(self, src:str) -> bytes:
     mod = llvm.parse_assembly(src)
     mod.verify()
     self.optimizer.run(mod)
-    if DEBUG >= 5: print(self.device.target_machine.emit_assembly(mod))
     return self.device.target_machine.emit_object(mod)
+
+  def disassemble(self, lib:bytes): cpu_objdump(lib)
 
 class LLVMProgram:
   def __init__(self, device:LLVMDevice, name:str, lib:bytes):
-    if DEBUG >= 6: cpu_objdump(lib)
     self.name, self.lib = name, lib
     device.engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
     self.fxn = device.engine.get_function_address(name)

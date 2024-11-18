@@ -3,12 +3,12 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Set, Tuple, List, Dict, Optional, DefaultDict, cast
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, sint
-from tinygrad.helpers import DEBUG, Context, Metadata, all_int, all_same, colored, diskcache_put, prod, dedup, getenv, unwrap
+from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.engine.lazy import LazyBuffer
-from tinygrad.engine.fuse import get_realizes
 from tinygrad.device import Buffer
 
 # creation can recurse a lot
@@ -37,16 +37,20 @@ class ScheduleItem:
 
 # **** small wrapper for LazyBuffer -> UOp
 
+def UPatSrc(*args, **kwargs): return UPat(Ops.VIEW, src=(UPat.var("b"), UPat(*args, **{**kwargs, "name":"to_store"})), name="base")
+@functools.lru_cache(None)
+def is_scheduled(u:UOp): return u.op is Ops.VIEW and len(u.src) == 2
+
 @dataclass(frozen=True)
 class ScheduleContext:
-  buf_uops: Dict[Buffer, UOp] = field(default_factory=dict)        # this maps Buffers to BUFFER uops
+  buf_uops: Dict[UOp, Buffer] = field(default_factory=dict)        # this maps BUFFER uops to Buffers
   ubuf_metadata: Dict[UOp, Metadata] = field(default_factory=dict) # this maps BUFFER uops to Metadata
   var_vals: Dict[Variable, int] = field(default_factory=dict)      # this maps a BIND's DEFINE_VAR to its value
-  assigns: Set[UOp] = field(default_factory=set)                   # this holds all the UOps.BUFFERs we ASSIGN to in this schedule
+  assigns: Set[UOp] = field(default_factory=set)                   # this holds all the BUFFER uops we ASSIGN to in this schedule
   lazybufs: Dict[Buffer, LazyBuffer] = field(default_factory=dict) # this is a lookup for the LazyBuffers we need to mark as realized
 
-def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], allbufs:Dict[LazyBuffer, None],
-           double_reduces:Dict[LazyBuffer, None], cache:Dict[LazyBuffer, UOp]) -> UOp:
+def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp],
+           double_reduces:Dict[UOp, None], cache:Dict[LazyBuffer, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, children, allbufs, double_reduces, cache).view(buf.st)
@@ -57,34 +61,33 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[LazyBuffer,
     if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to {buf.dtype.base}")
     # hack the underlying buffer too
     buf.dtype = buf.buffer.dtype = buf.dtype.base
-    assert not buf.is_realized(), "can't fixup allocated buffer"
+    assert not buf.is_realized, "can't fixup allocated buffer"
     buf.buffer.options = None
-  dtype = buf.dtype.base if isinstance(buf.dtype, ImageDType) else buf.dtype
+  dtype = buf.dtype if buf.op in GroupOp.Meta else buf.dtype.base
   # consts are always fused and generated
   if buf.op is Ops.CONST:
     if isinstance(val:=buf.arg, UOp): ctx.var_vals.update([val.unbind()])
-    return UOp(Ops.VALID, dtypes.bool, (buf.st.to_uop(),)).where(v:=UOp.const(dtype, buf.arg), v.const_like(0))
-  # everything else has BUFFER
-  ubuf = ctx.buf_uops.setdefault(b:=buf.buffer, UOp(Ops.BUFFER, b.dtype.ptr(), (), (len(ctx.buf_uops), (b.device, b.size, b.dtype))))
-  # if the buffer is already realized we just load it
-  if buf.is_realized(): return UOp(Ops.PRELOAD, dtype, (ubuf, buf.st.to_uop()))
-  # everything else needs sources
-  src = tuple(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in buf.srcs)
-  if buf.op in {Ops.REDUCE_AXIS, Ops.CONTIGUOUS}: ret = UOp(buf.op, dtype, src, buf.arg)
+    return UOp(Ops.VALID, dtypes.bool, (buf.st.to_uop(),)).where(UOp.const(dtype, val), 0)
+  # everything else is a VIEW of BUFFER (with an optional op)
+  if buf.is_realized:
+    ctx.buf_uops[ubuf:=UOp.new_buffer((b:=buf.buffer).device, b.size, b.dtype, num=len(ctx.buf_uops))] = buf.buffer
+    op = None
   elif buf.op is Ops.ASSIGN:
-    ctx.assigns.add(ubuf)
-    ret = UOp(Ops.ASSIGN, dtype, (ubuf, src[1]), buf.arg)
-  elif buf.op in GroupOp.Meta: ret = UOp(buf.op, buf.dtype, (ubuf, *src), buf.arg)
-  else: ret = UOp(cast(Ops, buf.op), dtype, src)
-  if buf.forced_realize: ret = UOp(Ops.CONTIGUOUS, dtype, (ret,))
-  cache[buf] = ret = UOp(Ops.LOAD, dtype, (ubuf, buf.st.to_uop(), UOp.store(ubuf, ShapeTracker.from_shape(buf.shape).to_uop(), ret)))
-  if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
-  ctx.lazybufs[b] = buf
-  # things for fuse.py
-  allbufs[buf] = None
-  if buf.op is Ops.REDUCE_AXIS and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[buf] = None
-  for x in buf.srcs:
-    if x.base.realized is None: children[x.base][buf] = None
+    target, new_val = [to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in buf.srcs]
+    ctx.assigns.add(ubuf:=target.buf_uop)
+    op = UOp(Ops.ASSIGN, dtype, (ubuf, new_val), buf.arg)
+  else:
+    ctx.buf_uops[ubuf:=UOp.new_buffer((b:=buf.buffer).device, b.size, b.dtype, num=len(ctx.buf_uops))] = buf.buffer
+    op = UOp(cast(Ops, buf.op), dtype, tuple(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in buf.srcs),
+             None if buf.op in {Ops.CAST, Ops.BITCAST} else buf.arg)
+  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
+  if op is not None:
+    if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
+    ctx.lazybufs[buf.buffer] = buf
+    for x in op.src:
+      if is_scheduled(x.base): children[x.base.buf_uop][ubuf] = None
+    allbufs[ubuf] = ret
+    if buf.op is Ops.REDUCE_AXIS and buf.srcs[0].base.op is buf.op and buf.srcs[0] is not buf.srcs[0].base: double_reduces[ubuf] = None
   return ret
 
 # **** AST graph rewrite
@@ -188,13 +191,14 @@ def _append_preload(ctx:ScheduleItemContext, x:UOp, b:UOp) -> UOp:
 to_si = PatternMatcher([
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
   (UPat(Ops.PRELOAD, src=(UPat.var("b"), UPat()), name="x"), _append_preload),
-  (UPat(Ops.SINK, src=(UPat.store(UPat(), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,x: x),
+  (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,b,x: x.replace(src=(b, *x.src))),
 ])
 
 # ** fusion
 
 lazy = PatternMatcher([
-  (UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), UPat.var("v"))), lambda ctx,b,v: v),
+  (UPatSrc(), lambda ctx,to_store,**kwargs: to_store),
+  (UPat(Ops.BUFFER, name="b").view(name="view"), lambda ctx,b,view: UOp(Ops.PRELOAD, view.dtype, (b, view.st.to_uop()))),
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
 ])
 
@@ -226,37 +230,136 @@ if getenv("RUN_PROCESS_REPLAY"):
   def save_process_replay():
     for x,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(x[0].key), (x, {}, ret))
 
+# **** Schedule grouping
+
+def uval(u:UOp) -> UOp:
+  assert is_scheduled(u), f"must be a scheduled op {u}"
+  return to_store.src[0] if (to_store:=u.src[1]).is_contiguous_base else to_store
+
+def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], realizes:Dict[UOp, UOp],
+                     reduce_for_op:Dict[UOp, UOp], group:Dict[UOp, None], cache:Dict[Tuple[UOp, ShapeTracker], None]) -> None:
+  """recursively search the uop for groupable children, realize the UOp if a child can't group"""
+  if (tr, st) in cache: return
+  cache.setdefault((tr, st))
+  rsize = unwrap(allbufs[r].st).size
+  if tr in realizes and tr is not r:
+    # can only fuse contiguous
+    # max one reduceop per kernel
+    if not st.contiguous or st.size != rsize or tr in reduce_for_op: group.setdefault(r)
+    return group.setdefault(tr)
+  for tr_next in children[tr]:
+    # max one reduceop per kernel
+    if (tr_next_uop:=uval(allbufs[tr_next]).base).op is Ops.REDUCE_AXIS: return group.setdefault(r)
+    # can only fuse contiguous
+    if len(st_childs:=dedup(unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop == tr)) > 1: return group.setdefault(r)
+    recursive_group(tr_next, st+st_childs[0], r, children, allbufs, realizes, reduce_for_op, group, cache)
+
+def get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp],
+                           realizes:Dict[UOp, UOp], group:Dict[UOp, None]) -> Dict[UOp, None]:
+  rc_parents, cache = deque(group), set()
+  while rc_parents:
+    if (p:=uval(allbufs[rc_parents.pop()])) in cache: continue
+    cache.add(p)
+    # max one reduceop per kernel
+    if p.op is Ops.REDUCE_AXIS: return {}
+    rc_parents.extend(x.base.buf_uop for x in p.src if is_scheduled(x.base) and x.base.buf_uop is not r)
+  # search descendants of the reduceop that can cleanly group
+  descendants: Dict[UOp, None] = {}
+  for tr in group: recursive_group(tr, unwrap(allbufs[tr].st), tr, children, allbufs, realizes, reduce_for_op, descendants, cache={})
+  return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
+
+def group_realizes(children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], double_reduces:Dict[UOp, None],
+                 realizes:Dict[UOp, UOp], assigns:Set[UOp]) -> List[List[UOp]]:
+  """search the big graph for all the reduceops that need to realize, sometimes group/fuse the reduceop"""
+  # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
+  reduce_for_op: Dict[UOp, UOp] = {}
+  reduce_of_const: List[UOp] = []
+  for r, r_uop in allbufs.items():
+    if r in realizes or (r_uop:=uval(r_uop)).op is not Ops.REDUCE_AXIS: continue
+    group: Dict[UOp, None] = {}
+    recursive_group(r, unwrap(r_uop.st), r, children, allbufs, realizes, reduce_for_op, group, cache={})
+    # max one reduceop per kernel
+    can_chase = all(tr not in reduce_for_op for tr in group)
+    # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
+    forced_realize = r in group
+    if not forced_realize and len(group) > 1:
+      group = get_isolated_children(r, reduce_for_op, children, allbufs, realizes, group)
+    # can only fuse assign if no other assign_target is used in the kernel
+    if not forced_realize and any(x in assigns for x in group):
+      parents = deque((r, *group))
+      while parents and not forced_realize:
+        if (p_uop:=allbufs.get(p:=parents.pop())) is None: continue
+        if (p_uop:=uval(p_uop)).op is Ops.ASSIGN and p not in group: forced_realize, can_chase = True, False
+        if p in realizes: continue
+        parents.extend([x.base.src[0] for x in p_uop.src if x.base.op is Ops.VIEW and len(x.base.src) != 0])
+    if forced_realize or not group:
+      tr = r
+      if can_chase:
+        # can chase this down to contiguous children
+        st = unwrap(r_uop.st)
+        while len(children[tr]) == 1:
+          tr_next_uop = uval(allbufs[(tr_next:=next(iter(children[tr])))])
+          st_childs = dedup([unwrap(x.st) for x in tr_next_uop.src if is_scheduled(x.base) and x.base.buf_uop is tr])
+          if len(st_childs) > 1: break
+          if st.size != st_childs[0].size: break
+          st = st + st_childs[0]
+          if not st.contiguous or tr_next_uop.op is Ops.REDUCE_AXIS: break
+          tr = tr_next
+        # don't cast to higher size before store (tr cannot be realized if forced_realize)
+        if (tr_uop:=uval(allbufs[tr])).op is Ops.CAST and tr_uop.dtype.base.itemsize > tr_uop.src[0].dtype.base.itemsize:
+          tr = tr_uop.src[0].base.buf_uop
+      group = {tr: None}
+      realizes[tr] = tr
+    reduce_for_op.update((tr, r) for tr in group)
+    if FUSE_ARANGE and r_uop.arg[0] is Ops.ADD and r_uop.src[0].base.op is Ops.WHERE: reduce_of_const.append(r)
+
+  # fuse double reduces with no other child
+  if FUSE_CONV_BW:
+    for reduceop in double_reduces:
+      top_reduce = uval(allbufs[reduceop]).src[0].base.buf_uop
+      if len(children[top_reduce]) == 1: del realizes[top_reduce]
+
+  for rbuf in reduce_of_const:
+    group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
+    if any(allbufs[tr].src[1].is_contiguous_base for tr in group): continue
+    kernel_children = {c for tr in group for c in children[tr] if uval(allbufs[c]).op not in {Ops.COPY, Ops.BUFFER_VIEW}}
+    if len(kernel_children) == 0: continue
+    for tr in group: del realizes[tr]
+
+  output_groups: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+  for ubuf in realizes: output_groups[reduce_for_op.get(ubuf, ubuf)].append(ubuf)
+  return list(output_groups.values())
+
 # **** Schedule creation and BFS toposort
 
-def realize(ctx:Dict[UOp, UOp], b:UOp, load:UOp, store:UOp) -> UOp:
-  ctx[b] = store
-  return UOp(Ops.LOAD, load.dtype, (b, load.st_arg.to_uop()))
+def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> UOp:
+  ctx[b] = UOp.store(b, ShapeTracker.from_shape((st:=unwrap(base.st)).shape).to_uop(), to_store)
+  return UOp(Ops.LOAD, base.dtype, (b, st.to_uop()))
 
-def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, **kwargs) -> Optional[UOp]:
+def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, to_store:UOp, b:UOp) -> Optional[UOp]:
   base_shape = unwrap(base.st).shape
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(base_shape) and resolve(prod(base_shape) >= prod([y-x for x,y in m])):
-    return None if can_pad(base) else realize(ctx, **kwargs).view(st)
+    return None if can_pad(base) else realize(ctx, b, to_store, base).view(st)
   # early realize before expand
-  if resolve(prod(base_shape) < prod(st.shape)): return realize(ctx, **kwargs).view(st)
+  if resolve(prod(base_shape) < prod(st.shape)): return realize(ctx, b, to_store, base).view(st)
   # otherwise safety check pads
-  return None if (all(v.mask is None for v in st.views) or can_pad(base)) else realize(ctx, **kwargs).view(st)
+  return None if (all(v.mask is None for v in st.views) or can_pad(base)) else realize(ctx, b, to_store, base).view(st)
 
-def UPatLoadStore(to_store=UPat()): return UPat.load(b:=UPat.var("b"), UPat(), UPat.store(b, UPat(), to_store, name="store"), name="load")
 do_realize = PatternMatcher([
   # always realize meta ops
-  (UPatLoadStore(UPat((Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta))), realize),
+  (UPatSrc((Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta)), realize),
   # don't realize image to image casts
-  (UPatLoadStore(UPat(Ops.CAST, src=(UPat(Ops.LOAD, name="x"),), dtype=dtypes.float)).view(name="v"), lambda ctx,x,v,**kwargs: r.src[2].view(v.st)
+  (UPatSrc(Ops.CAST, src=(UPat(Ops.LOAD, name="x"),), dtype=dtypes.float).view(name="v"), lambda ctx,x,v,**kwargs: r.src[2].view(v.st)
    if (r:=ctx.get(b:=x.buf_uop)) is not None and r.op is Ops.STORE and isinstance(b.dtype, ImageDType) and r.src[2].op not in GroupOp.Meta else None),
   # realize before expand or unsafe pad ops
-  (UPatLoadStore(UPat.var("base")).view(name="view"), realize_view),
+  (UPatSrc().view(name="view"), realize_view),
   # realize before COPY or BUFFER_VIEW
-  (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.var("u"), UPat.any(UPatLoadStore(), UPatLoadStore().view(name="view"))), name="root"),
-   lambda ctx,root,u,view=None,**kwargs: root.replace(src=(u, realize(ctx,**kwargs) if view is None else realize(ctx,**kwargs).view(view.st))),),
+  (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatSrc(), UPatSrc().view(name="view")),), name="root"),
+   lambda ctx,root,view=None,**kwargs: root.replace(src=(realize(ctx,**kwargs) if view is None else realize(ctx,**kwargs).view(view.st),)),),
 ])
-break_sched = PatternMatcher([(UPatLoadStore(), lambda ctx,b,store,load: realize(ctx, b, load, store) if b in ctx else None),])
+break_sched = PatternMatcher([(UPatSrc(), lambda ctx,b,to_store,base: realize(ctx, b, to_store, base) if b in ctx else None),])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
@@ -266,31 +369,30 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
   # **** TODO: delete these next 3 after big graph
-  children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
-  allbufs: Dict[LazyBuffer, None] = {}
-  double_reduces: Dict[LazyBuffer, None] = {}
+  children: DefaultDict[UOp, Dict[UOp, None]] = defaultdict(dict)
+  allbufs: Dict[UOp, UOp] = {}
+  double_reduces: Dict[UOp, None] = {}
   big_graph = UOp.sink(*(to_uop(x, ctx, children, allbufs, double_reduces, cache) for x in outs))
   # get realizes
   realizes: Dict[UOp, UOp] = {}
   graph_rewrite(big_graph, do_realize, realizes)
-  store_groups = get_realizes(children, allbufs, double_reduces, realizes, ctx.assigns, ctx.buf_uops)
+  store_groups = group_realizes(children, allbufs, double_reduces, realizes, ctx.assigns)
   # split realizes into small graphs
   graph_rewrite(big_graph, break_sched, realizes)
   sinks = [UOp.sink(*(realizes[u] for u in stores)) for stores in store_groups]
   # preschedule all realizes
-  bufs = list(ctx.buf_uops)
   prescheduled: List[ScheduleItem] = []
   for sink in sinks:
-    metadata = tuple({mx for x in sink.sparents if x.op in GroupOp.Buffer and len(x.src) > 2 and (mx:=ctx.ubuf_metadata.get(x.buf_uop))})
+    metadata = tuple({mx for x in sink.sparents if (x.op is Ops.STORE or is_scheduled(x)) and (mx:=ctx.ubuf_metadata.get(x.buf_uop))})
     ast, ast_ctx = full_ast_rewrite(sink, ctx.var_vals, ctx.assigns)
-    prescheduled.append(ScheduleItem(ast, tuple(b for u in ast_ctx.bufs if (b:=bufs[u.arg[0]]).size != 0), metadata, tuple(ast_ctx.assign_preloads)))
+    prescheduled.append(ScheduleItem(ast, tuple(b for u in ast_ctx.bufs if (b:=ctx.buf_uops[u]).size != 0), metadata, tuple(ast_ctx.assign_preloads)))
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
   in_degree: DefaultDict[ScheduleItem, int] = defaultdict(int)
   for si in prescheduled:
     # realize outputs before a parent is assigned to
-    parents_assigns = dedup(xsi for x in si.assign_preloads if (xsi:=schedule_targets.get(bufs[x.arg[0]])) and xsi is not si)
+    parents_assigns = dedup(xsi for x in si.assign_preloads if (xsi:=schedule_targets.get(ctx.buf_uops[x])) and xsi is not si)
     for assign in parents_assigns:
       graph[si].append(assign)
       in_degree[assign] += 1
