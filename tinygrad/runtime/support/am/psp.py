@@ -29,12 +29,12 @@ class PSP_IP:
     raise RuntimeError("PSP: bootloader timeout")
 
   def bootloader_load_component(self, fw, compid):
-    if fw not in self.adev.fw.sos_fw_infos: return 0
+    if fw not in self.adev.fw.sos_fw: return 0
     if self.is_sos_alive(): return 0
 
     self.wait_for_bootloader()
 
-    self.prep_msg1(self.adev.fw.sos_fw_infos[fw])
+    self.prep_msg1(self.adev.fw.sos_fw[fw])
     self.adev.regMP0_SMN_C2PMSG_36.write(self.msg1_pm.mc_addr() >> 20)
     self.adev.regMP0_SMN_C2PMSG_35.write(compid)
 
@@ -155,5 +155,5 @@ class PSP_IP:
     self.load_ip_fw_cmd(self.adev.fw.smu_psp_desc)
     self.tmr_cmd()
 
-    for psp_desc in self.adev.fw.psp_descs: self.load_ip_fw_cmd(psp_desc)
+    for psp_desc in self.adev.fw.descs: self.load_ip_fw_cmd(psp_desc)
     self.rlc_autoload_cmd()

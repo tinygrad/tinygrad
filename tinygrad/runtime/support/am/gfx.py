@@ -116,7 +116,7 @@ class GFX_IP:
 
   def hqd_load(self, ring):
     self.soc21_grbm_select(1, ring.pipe, ring.queue, 0)
-    
+
     mqd_mv = ring.mqd_mv.cast('I')
     for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.regoff, self.adev.regCP_HQD_PQ_WPTR_HI.regoff + 1)):
       self.adev.wreg(reg, mqd_mv[0x80 + i])
