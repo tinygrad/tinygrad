@@ -267,14 +267,16 @@ def group_realizes(big_graph:UOp, realizes:Dict[UOp, UOp]) -> Tuple[List[List[UO
   allbufs: Dict[UOp, UOp] = {}
   double_reduces: Dict[UOp, None] = {}
   assigns: Set[UOp] = set()
-  for uop in big_graph.parents:
-    if not is_scheduled(uop): continue
+  q: List[UOp] = list(big_graph.src)
+  while q:
+    uop = q.pop()
     allbufs[ubuf:=uop.buf_uop] = uop
     if (op:=uval(uop)).op is Ops.ASSIGN: assigns.add(ubuf)
     for x in op.src:
       if is_scheduled(x.base):
         children[x.base.buf_uop][ubuf] = None
         if FUSE_CONV_BW and op.op is Ops.REDUCE_AXIS and uval(x.base).op is op.op and x.base is not x: double_reduces[ubuf] = None
+        q.append(x.base)
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[UOp, UOp] = {}
   reduce_of_const: List[UOp] = []
