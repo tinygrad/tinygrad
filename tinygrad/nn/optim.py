@@ -152,8 +152,6 @@ class LAMB(Optimizer):
 class ADOPT(Optimizer):
   """
   ADOPT: ADaptive gradient method with the OPTimal convergence rate.
-  
-  Modified Adam Can Converge with Any B2 with the Optimal Rate.
 
   - Paper (preprint): https://arxiv.org/abs/2411.02853
   - Author implementation: https://github.com/iShohei220/adopt/blob/main/adopt.py
