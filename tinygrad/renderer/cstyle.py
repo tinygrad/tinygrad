@@ -317,7 +317,17 @@ class CUDARenderer(CStyleLanguage):
     Ops.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",
     Ops.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
     Ops.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})" }
-  type_map = {dtypes.bfloat16: "nv_bfloat16"}
+  type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.fp8_e4m3: "__nv_fp8_e4m3", dtypes.fp8_e5m2: "__nv_fp8_e5m2"}
+
+  extra_matcher = PatternMatcher([
+    # upcast comparisons to float32. They don't support fp8
+    (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.var("x", dtype=(dtypes.fp8_e4m3, dtypes.fp8_e5m2)), 
+                                      UPat.var("y", dtype=(dtypes.fp8_e4m3, dtypes.fp8_e5m2))), name="cmp"),
+      lambda cmp,x,y: UOp(cmp.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), cmp.arg)),
+    # upcast to float32 all the ops that don't support fp8
+    (UPat(GroupOp.ALU, dtype=(dtypes.fp8_e4m3, dtypes.fp8_e5m2), name="x"),
+      lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(x.dtype))
+  ]) + extra_pm
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
@@ -331,9 +341,10 @@ class CUDARenderer(CStyleLanguage):
     used_dtypes = uops_to_dtypes(uops)
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#include <cuda_fp16.h>")
     if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("#include <cuda_bf16.h>")
+    if any(dt.scalar() in {dtypes.fp8_e5m2, dtypes.fp8_e4m3} for dt in used_dtypes): prefix.append("#include <cuda_fp8.h>")
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count in (4,8) and dt.scalar() in {dtypes.half, dtypes.bfloat16}]
 
-    dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16" }
+    dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.fp8_e4m3: "e4m3", dtypes.fp8_e5m2: "e5m2" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
       upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
       wmma_dtypes = [self.render_dtype(dtype.vec(size)) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
