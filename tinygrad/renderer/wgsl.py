@@ -1,6 +1,6 @@
 from typing import List, Tuple
 from tinygrad.dtype import DType, PtrDType, dtypes
-from tinygrad.ops import UOp, Ops, UnaryOps, TernaryOps, PatternMatcher, UPat
+from tinygrad.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, extra_pm
 from tinygrad.helpers import strip_parens
 import math
@@ -16,14 +16,14 @@ wgsl_matcher = PatternMatcher([
     lambda a,b,c: UOp(c.op, dtypes.int, (a.cast(dtypes.int), b.cast(dtypes.int))).cast(dtypes.bool)),
   *[(UPat(a, src=(UPat(name="b", dtype=(dtypes.uint, dtypes.int, dtypes.bool))), name="a"),
      lambda a,b: UOp(a, dtypes.float, (b.cast(dtypes.float),)).cast(b.dtype))
-    for a in (UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.LOG2, UnaryOps.SQRT)],
+    for a in (Ops.EXP2, Ops.SIN, Ops.LOG2, Ops.SQRT)],
   (UPat.store(UPat.var("bidx"), UPat.var("var", dtype=dtypes.bool), UPat.var("gate")),
    lambda bidx,val,gate: UOp.store(bidx, val.cast(dtypes.int), gate)),
   (UPat.store(UPat.var("bidx"), UPat.var("var", dtype=dtypes.bool)), lambda bidx,var: UOp.store(bidx, var.cast(dtypes.int))),
   # fix nan propagation: 'a * select(1, nan, cond) -> select(a, nan, cond)'
-  (UPat(Ops.MUL, name="m", src=(UPat(name="a"), UPat(TernaryOps.WHERE, src=(UPat.var("g"), \
+  (UPat(Ops.MUL, name="m", src=(UPat(name="a"), UPat(Ops.WHERE, src=(UPat.var("g"), \
     UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2"))))), \
-    lambda m,a,g,c1,c2: UOp(TernaryOps.WHERE, dtype=m.dtype, src=(g, UOp.const(dtype=dtypes.float, b=float('nan')), a)) \
+    lambda m,a,g,c1,c2: UOp(Ops.WHERE, dtype=m.dtype, src=(g, UOp.const(dtype=dtypes.float, b=float('nan')), a)) \
     if math.isnan(c1.arg) and c2.arg == 1.0 else None),
   ]) + extra_pm
 
@@ -46,7 +46,7 @@ class WGSLRenderer(CStyleLanguage):
   extra_matcher = wgsl_matcher
   supports_float4 = False
   barrier = "workgroupBarrier();"
-  code_for_op = {**CStyleLanguage.code_for_op, TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a})"}
+  code_for_op = {**CStyleLanguage.code_for_op, Ops.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a})"}
   nan = "nan()"
   type_map = type_map
 
