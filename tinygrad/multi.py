@@ -84,6 +84,7 @@ class MultiLazyBuffer(MathTrait):
     return functools.reduce(operator.add, llbs)
 
   # passthroughs
+  @property
   def is_realized(self) -> bool: return all(lb.base.realized is not None for lb in self.real_lbs)
   def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True):
     return MultiLazyBuffer([x.cast(dtype, bitcast, allow_buffer_view) for x in self.lbs], self.axis, self.real)

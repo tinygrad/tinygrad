@@ -76,11 +76,12 @@ class LazyBuffer(MathTrait):
     assert isinstance(val, get_args(ConstType)), f"{val=} has {type(val)=}, not a ConstType"
     return LazyBuffer.metaop(Ops.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(shape)).expand(shape)
 
+  @property
   def is_realized(self) -> bool: return self.base.realized is not None
 
   def assign(self, x:LazyBuffer) -> LazyBuffer:
     assert x.size == self.size, f"assign target must have same size {self.size=} != {x.size=}"
-    assert self.is_realized(), f"assign target must be realized {self}"
+    assert self.is_realized, f"assign target must be realized {self}"
     return LazyBuffer.metaop(Ops.ASSIGN, self.shape, self.dtype, self.device, arg=() if self.st.contiguous else (self.st,),
                              src=(self.base, x), enable_cache=True)
 
