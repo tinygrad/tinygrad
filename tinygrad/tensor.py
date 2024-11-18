@@ -115,7 +115,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
   training: ClassVar[bool] = False
   no_grad: ClassVar[bool] = False
 
-  def __init__(self, data:Union[None, ConstType, List, Tuple, LazyBuffer, 'np.ndarray', bytes, MultiLazyBuffer, UOp, pathlib.Path],  # type: ignore [name-defined] # noqa: F821
+  def __init__(self, data:Union[None, ConstType, UOp, bytes, List, Tuple, LazyBuffer, MultiLazyBuffer, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
@@ -134,6 +134,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
 
     # create a LazyBuffer from the different types of inputs
     if isinstance(data, (LazyBuffer, MultiLazyBuffer)): assert dtype is None or dtype==data.dtype, "dtype doesn't match, and casting isn't supported"
+    elif data is None: data = _metaop(Ops.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif isinstance(data, get_args(ConstType)): data = _metaop(Ops.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, UOp):
       assert data.op is Ops.BIND and data.src[0].op is Ops.DEFINE_VAR and data.src[1].op is Ops.CONST, f"can't create tensor from UOp {data}"
@@ -145,7 +146,6 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
         else: dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float
       if dtype == dtypes.bfloat16: data = Tensor(_frompy(data, dtypes.float32), device=device).cast(dtypes.bfloat16).lazydata
       else: data = _frompy(data, dtype)
-    elif data is None: data = _metaop(Ops.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif str(type(data)) == "<class 'numpy.ndarray'>":
       import numpy as np
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
@@ -156,19 +156,15 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
       data = _metaop(Ops.EMPTY, (data.stat().st_size // dtype.itemsize,), dtype, f"DISK:{data.resolve()}")
 
     # by this point, it has to be a LazyBuffer
-    if not isinstance(data, (LazyBuffer, MultiLazyBuffer)):
-      raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
+    if not isinstance(data, (LazyBuffer, MultiLazyBuffer)): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
-    # data is a LazyBuffer, but it might be on the wrong device
-    if isinstance(device, tuple):
-      # if device is a tuple, we should have/construct a MultiLazyBuffer
-      if isinstance(data, MultiLazyBuffer):
-        assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
-        self.lazydata: Union[LazyBuffer, MultiLazyBuffer] = data
-      else:
-        self.lazydata = MultiLazyBuffer.from_sharded(data, device, None, None)
+    # data might be on a different device
+    if isinstance(device, str): self.lazydata:Union[LazyBuffer, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
+    # if device is a tuple, we should have/construct a MultiLazyBuffer
+    elif isinstance(data, LazyBuffer): self.lazydata = MultiLazyBuffer.from_sharded(data, device, None, None)
     else:
-      self.lazydata = data if data.device == device else data.copy_to_device(device)
+      assert data.device == device, f"MultiLazyBuffer device mismatch, {data.device} != {device}"
+      self.lazydata = data
 
   class train(ContextDecorator):
     def __init__(self, mode:bool = True): self.mode = mode
