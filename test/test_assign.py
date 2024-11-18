@@ -360,7 +360,7 @@ class TestAssign(unittest.TestCase):
 
   def test_permuted_assignment_masked_view_possible(self):
     a = Tensor.ones(4, 4).contiguous().realize()
-    b = a.shrink((None, (0, 2))).pad((None, (0, 2)), 2)
+    b = a.shrink((None, (0, 2))).pad((None, (0, 2)), value=2)
     a.assign(a + b)
     kc = GlobalCounters.kernel_count
     a.realize()
@@ -370,7 +370,7 @@ class TestAssign(unittest.TestCase):
   def test_permuted_assignment_masked_view_not_contiguous(self):
     a = Tensor.ones(4, 4).contiguous().realize()
     with self.assertRaisesRegex(RuntimeError, "contiguous"):
-      b = a.shrink((None, (0, 2))).pad((None, (0, 2)), 2).permute(1, 0)
+      b = a.shrink((None, (0, 2))).pad((None, (0, 2)), value=2).permute(1, 0)
       a.assign(a + b)
       a.realize()
 
