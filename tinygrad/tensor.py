@@ -1068,7 +1068,7 @@ class Tensor(SimpleMathTrait):
     pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX)
     if mode == "constant":
       def _constant(x,px,v): return F.Pad.apply(x, arg=px) if v == 0 else F.Pad.apply(x, arg=px) + F.Pad.apply(Tensor.ones_like(x), arg=px).where(0,v)
-      return _constant(X, pX, value) if all(resolve(p >= 0) for p in flatten(pX)) else \
+      return _constant(X, pX, value) if all(resolve(p >= 0, False) for p in flatten(pX)) else \
              _constant(X.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, X.shape))), pads, value)
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     if mode == "circular":

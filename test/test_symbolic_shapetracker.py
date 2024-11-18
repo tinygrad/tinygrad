@@ -229,5 +229,10 @@ class TestSymbolicPad(unittest.TestCase):
     st = t.lazydata.st
     print(st)
 
+  def test_pad_maybe_negative_symbolic(self):
+    v = Variable("v", 1, 10).bind(3)
+    t = Tensor.empty(5).pad(((0, 5-v),))
+    self.assertEqual(t.shape[0].render(), "((max((v+-10), -5)*-1)+max(((v*-1)+5), 0))")
+
 if __name__ == '__main__':
   unittest.main()
