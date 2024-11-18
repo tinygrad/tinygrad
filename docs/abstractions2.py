@@ -39,7 +39,7 @@ DEVICE = "CLANG"   # NOTE: you can change this!
 import struct
 from tinygrad.dtype import dtypes
 from tinygrad.device import Buffer, Device
-from tinygrad.ops import BinaryOps, MetaOps, UOp, Ops
+from tinygrad.ops import UOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # allocate some buffers + load in values
@@ -81,15 +81,15 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule
 
 # allocate some values + load in values
-a = LazyBuffer.metaop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
-b = LazyBuffer.metaop(MetaOps.EMPTY, (1,), dtypes.int32, DEVICE)
+a = LazyBuffer.metaop(Ops.EMPTY, (1,), dtypes.int32, DEVICE)
+b = LazyBuffer.metaop(Ops.EMPTY, (1,), dtypes.int32, DEVICE)
 a.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
 b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
 del a.srcs
 del b.srcs
 
 # describe the computation
-out = a.alu(BinaryOps.ADD, b)
+out = a.alu(Ops.ADD, b)
 
 # schedule the computation as a list of kernels
 sched = create_schedule([out])

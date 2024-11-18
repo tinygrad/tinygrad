@@ -2,7 +2,7 @@
 import unittest
 
 from tinygrad import Device
-from tinygrad.ops import UOp, Ops, BinaryOps
+from tinygrad.ops import UOp, Ops
 from tinygrad.engine.search import Opt, OptOps
 from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -20,7 +20,7 @@ class TestOpenpilotValidhack(unittest.TestCase):
         UOp(Ops.ADD, dtypes.float, arg=None, src=(
           UOp(Ops.MAX, dtypes.float, arg=None, src=(
             x5:=UOp(Ops.ADD, dtypes.float, arg=None, src=(
-              UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (7, 8, 9, 10)), src=(
+              UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (7, 8, 9, 10)), src=(
                 UOp(Ops.CAST, dtypes.float, arg=None, src=(
                   UOp(Ops.MUL, dtypes.float, arg=None, src=(
                     UOp(Ops.LOAD, dtypes.float, arg=None, src=(

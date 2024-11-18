@@ -8,7 +8,7 @@ from tinygrad.helpers import dedup, to_function_name, flatten, getenv, GlobalCou
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_kernel, run_schedule
 from tinygrad.engine.memory import memory_planner
-from tinygrad.ops import MetaOps, Ops
+from tinygrad.ops import Ops
 
 TIMING = getenv("TIMING")
 
