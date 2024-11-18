@@ -177,3 +177,4 @@ class ADOPT(Optimizer):
         self._first_step = False
       t.assign((t.detach() - self.lr * self.m[i]))
       self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
+    return self.m + self.v
