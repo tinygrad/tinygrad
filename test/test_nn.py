@@ -612,5 +612,5 @@ class TestNN(unittest.TestCase):
     assert layer.bias_ih is None
 
 if __name__ == '__main__':
-
+  unittest.main()
 
