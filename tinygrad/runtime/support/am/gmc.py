@@ -27,24 +27,15 @@ class GMC_IP:
     self.vm_config = 0x1fffe05 # 2 level, 1 gb huge pages
     self.init_mmhub()
 
-  def init_aperture_regs(self, block:Union["MM", "GC"]):
-    getattr(self.adev, f"reg{block}VM_CONTEXT0_PAGE_TABLE_START_ADDR_LO32").write((self.vm_base >> 12) & 0xffffffff)
-    getattr(self.adev, f"reg{block}VM_CONTEXT0_PAGE_TABLE_START_ADDR_HI32").write(self.vm_base >> 44)
+  def init_page_table_regs(self, block:Union["MM", "GC"], vmid=0):
+    getattr(self.adev, f"reg{block}VM_CONTEXT{vmid}_PAGE_TABLE_START_ADDR_LO32").write((self.vm_base >> 12) & 0xffffffff)
+    getattr(self.adev, f"reg{block}VM_CONTEXT{vmid}_PAGE_TABLE_START_ADDR_HI32").write(self.vm_base >> 44)
 
-    getattr(self.adev, f"reg{block}VM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32").write((self.vm_end >> 12) & 0xffffffff)
-    getattr(self.adev, f"reg{block}VM_CONTEXT0_PAGE_TABLE_END_ADDR_HI32").write(self.vm_end >> 44)
+    getattr(self.adev, f"reg{block}VM_CONTEXT{vmid}_PAGE_TABLE_END_ADDR_LO32").write((self.vm_end >> 12) & 0xffffffff)
+    getattr(self.adev, f"reg{block}VM_CONTEXT{vmid}_PAGE_TABLE_END_ADDR_HI32").write(self.vm_end >> 44)
 
-    getattr(self.adev, f"reg{block}VM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32").write((self.root_pt.pm.paddr & 0xffffffff) | 1)
-    getattr(self.adev, f"reg{block}VM_CONTEXT0_PAGE_TABLE_BASE_ADDR_HI32").write((self.root_pt.pm.paddr >> 32) & 0xffffffff)
-
-    getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_START_ADDR_LO32").write((self.vm_base >> 12) & 0xffffffff)
-    getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_START_ADDR_HI32").write(self.vm_base >> 44)
-
-    getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_END_ADDR_LO32").write((self.vm_end >> 12) & 0xffffffff)
-    getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_END_ADDR_HI32").write(self.vm_end >> 44)
-
-    getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_BASE_ADDR_LO32").write((self.root_pt.pm.paddr & 0xffffffff) | 1)
-    getattr(self.adev, f"reg{block}VM_CONTEXT8_PAGE_TABLE_BASE_ADDR_HI32").write((self.root_pt.pm.paddr >> 32) & 0xffffffff)
+    getattr(self.adev, f"reg{block}VM_CONTEXT{vmid}_PAGE_TABLE_BASE_ADDR_LO32").write((self.root_pt.pm.paddr & 0xffffffff) | 1)
+    getattr(self.adev, f"reg{block}VM_CONTEXT{vmid}_PAGE_TABLE_BASE_ADDR_HI32").write((self.root_pt.pm.paddr >> 32) & 0xffffffff)
 
   def init_system_aperture_regs(self, block:Union["MM", "GC"]):
     getattr(self.adev, f"reg{block}MC_VM_AGP_BASE").write(0)
@@ -71,10 +62,7 @@ class GMC_IP:
     getattr(self.adev, f"reg{block}VM_L2_CNTL4").write(0x1)
     getattr(self.adev, f"reg{block}VM_L2_CNTL5").write(0x3fe0)
 
-  def enable_vm(self, block:Union["MM", "GC"]):
-    # TODO: take from PTEs
-    getattr(self.adev, f"reg{block}VM_CONTEXT0_CNTL").write(self.vm_config) # 2 level
-    getattr(self.adev, f"reg{block}VM_CONTEXT8_CNTL").write(self.vm_config) # 2 level
+  def enable_vm(self, block:Union["MM", "GC"], vmid): getattr(self.adev, f"reg{block}VM_CONTEXT{vmid}_CNTL").write(self.vm_config) # 2 level
 
   def disable_identity_aperture(self, block:Union["MM", "GC"]):
     getattr(self.adev, f"reg{block}VM_L2_CONTEXT1_IDENTITY_APERTURE_LOW_ADDR_LO32").write(0xffffffff)
@@ -91,28 +79,26 @@ class GMC_IP:
       getattr(self.adev, f"reg{block}VM_INVALIDATE_ENG{i}_ADDR_RANGE_LO32").write(0xffffffff)
       getattr(self.adev, f"reg{block}VM_INVALIDATE_ENG{i}_ADDR_RANGE_HI32").write(0x1f)
 
+  def init_hub(self, block:Union["MM", "GC"]):
+    self.init_page_table_regs(block, vmid=0)
+    self.init_system_aperture_regs(block)
+    self.init_tlb_regs(block)
+    self.init_cache_regs(block)
+
+    self.enable_vm(block, vmid=0)
+    self.disable_identity_aperture(block)
+    self.program_invalidation(block)
+  
   def init_mmhub(self):
     print("MMHUB init")
-    self.init_aperture_regs("MM")
-    self.init_system_aperture_regs("MM")
-    self.init_tlb_regs("MM")
-    self.init_cache_regs("MM")
-
-    self.enable_vm("MM")
-    self.disable_identity_aperture("MM")
-    self.program_invalidation("MM")
+    self.init_hub("MM")
     self.mmhub_enabled = True
 
   def init_gfxhub(self):
     print("GFXHUB init")
-    self.init_aperture_regs("GC")
-    self.init_system_aperture_regs("GC")
-    self.init_tlb_regs("GC")
-    self.init_cache_regs("GC")
-
-    self.enable_vm("GC")
-    self.disable_identity_aperture("GC")
-    self.program_invalidation("GC")
+    self.init_hub("GC")
+    # self.init_page_table_regs("GC", vmid=8)
+    # self.enable_vm("GC", vmid=8)
     self.gfx_enabled = True
 
   def flush_hdp(self): self.adev.wreg(0x1fc00, 0x0) # TODO: write up!

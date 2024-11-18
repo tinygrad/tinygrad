@@ -16,17 +16,38 @@ class PSP_IP:
 
   def init(self):
     print("PSP init")
-    self.load_fw()
+
+    # Load sOS components
+    components_load_order = [
+      (amdgpu_2.PSP_FW_TYPE_PSP_KDB, 0x80000),
+      (amdgpu_2.PSP_FW_TYPE_PSP_KDB, 0x10000000),
+      (amdgpu_2.PSP_FW_TYPE_PSP_SYS_DRV, 0x10000),
+      (amdgpu_2.PSP_FW_TYPE_PSP_SOC_DRV, 0xB0000),
+      (amdgpu_2.PSP_FW_TYPE_PSP_INTF_DRV, 0xD0000),
+      (amdgpu_2.PSP_FW_TYPE_PSP_DBG_DRV, 0xC0000),
+      (amdgpu_2.PSP_FW_TYPE_PSP_RAS_DRV, 0xE0000),
+    ]
+    for fw, compid in components_load_order: self.bootloader_load_component(fw, compid)
+
+    # Load sOS itself
+    self.bootloader_load_component(amdgpu_2.PSP_FW_TYPE_PSP_SOS, 0x20000)
+    while not self.is_sos_alive(): time.sleep(0.01)
+    self.sos_fw_version = self.adev.regMP0_SMN_C2PMSG_58.read()
+
+    self.ring_create()
+    self.tmr_init()
+
+    self.load_ip_fw_cmd(self.adev.fw.smu_psp_desc)
+    self.tmr_cmd()
+
+    for psp_desc in self.adev.fw.descs: self.load_ip_fw_cmd(psp_desc)
+    self.rlc_autoload_cmd()
+
+  def wait_for_bootloader(self): self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_35, mask=0xFFFFFFFF, value=0x80000000)
 
   def prep_msg1(self, data):
     ctypes.memset(self.msg1_pm.cpu_addr(), 0, self.msg1_pm.size)
     self.msg1_pm.cpu_view()[:len(data)] = data
-
-  def wait_for_bootloader(self):
-    for i in range(1000):
-      if (self.adev.regMP0_SMN_C2PMSG_35.read() & 0xffffffff) == 0x80000000: return 0
-      time.sleep(0.01)
-    raise RuntimeError("PSP: bootloader timeout")
 
   def bootloader_load_component(self, fw, compid):
     if fw not in self.adev.fw.sos_fw: return 0
@@ -37,8 +58,6 @@ class PSP_IP:
     self.prep_msg1(self.adev.fw.sos_fw[fw])
     self.adev.regMP0_SMN_C2PMSG_36.write(self.msg1_pm.mc_addr() >> 20)
     self.adev.regMP0_SMN_C2PMSG_35.write(compid)
-
-    # print(f"PSP: loading fw: {fw} {compid}")
 
     return self.wait_for_bootloader()
 
@@ -83,7 +102,6 @@ class PSP_IP:
 
   def load_ip_fw_cmd(self, psp_desc):
     fw_type, fw_bytes = psp_desc
-    # print('PSP: issue load ip fw:', fw_type, hex(len(fw_bytes)))
 
     self.prep_msg1(fw_bytes)
     ctypes.memset(self.cmd_pm.cpu_addr(), 0, 0x1000)
@@ -104,7 +122,7 @@ class PSP_IP:
     cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = self.tmr_pm.paddr & 0xffffffff
     cmd.cmd.cmd_setup_tmr.system_phy_addr_hi = self.tmr_pm.paddr >> 32
     cmd.cmd.cmd_setup_tmr.bitfield.virt_phy_addr = 1
-    cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_size
+    cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_pm.size
     return self.ring_submit()
 
   def load_toc_cmd(self, toc_size):
@@ -124,36 +142,7 @@ class PSP_IP:
   
   def tmr_init(self):
     # Load toc
-    self.prep_msg1(fwm:=self.adev.fw.sos_fw_infos[amdgpu_2.PSP_FW_TYPE_PSP_TOC])
+    self.prep_msg1(fwm:=self.adev.fw.sos_fw[amdgpu_2.PSP_FW_TYPE_PSP_TOC])
     resp = self.load_toc_cmd(len(fwm))
 
-    self.tmr_size = resp.resp.tmr_size
-    self.tmr_pm = self.adev.mm.palloc(self.tmr_size, align=0x100000)
-    print("TMR allocated size: ", hex(self.tmr_size))
-
-  def load_fw(self):
-    # Load sOS components
-    components_load_order = [
-      (amdgpu_2.PSP_FW_TYPE_PSP_KDB, 0x80000),
-      (amdgpu_2.PSP_FW_TYPE_PSP_KDB, 0x10000000),
-      (amdgpu_2.PSP_FW_TYPE_PSP_SYS_DRV, 0x10000),
-      (amdgpu_2.PSP_FW_TYPE_PSP_SOC_DRV, 0xB0000),
-      (amdgpu_2.PSP_FW_TYPE_PSP_INTF_DRV, 0xD0000),
-      (amdgpu_2.PSP_FW_TYPE_PSP_DBG_DRV, 0xC0000),
-      (amdgpu_2.PSP_FW_TYPE_PSP_RAS_DRV, 0xE0000),
-    ]
-    for fw, compid in components_load_order: self.bootloader_load_component(fw, compid)
-
-    # Load sOS itself
-    self.bootloader_load_component(amdgpu_2.PSP_FW_TYPE_PSP_SOS, 0x20000)
-    while not self.is_sos_alive(): time.sleep(0.01)
-    self.sos_fw_version = self.adev.regMP0_SMN_C2PMSG_58.read()
-
-    self.ring_create()
-    self.tmr_init()
-
-    self.load_ip_fw_cmd(self.adev.fw.smu_psp_desc)
-    self.tmr_cmd()
-
-    for psp_desc in self.adev.fw.descs: self.load_ip_fw_cmd(psp_desc)
-    self.rlc_autoload_cmd()
+    self.tmr_pm = self.adev.mm.palloc(resp.resp.tmr_size, align=0x100000)
