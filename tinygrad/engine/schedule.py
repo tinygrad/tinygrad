@@ -2,7 +2,7 @@ import sys, atexit, functools, itertools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Set, Tuple, List, Dict, Optional, DefaultDict, cast
-from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, sint, uop_metadata
+from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, sint
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ImageDType, dtypes
@@ -377,7 +377,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   # preschedule all realizes
   prescheduled: List[ScheduleItem] = []
   for sink in sinks:
-    metadata = tuple({mx for x in sink.sparents if (x.op is Ops.STORE or is_scheduled(x)) and (mx:=uop_metadata.get(x.buf_uop))})
+    metadata = tuple({x.metadata for x in sink.sparents if (x.op is Ops.STORE or is_scheduled(x)) and x.metadata is not None})
     ast, ast_ctx = full_ast_rewrite(sink, ctx.var_vals, ctx.assigns)
     prescheduled.append(ScheduleItem(ast, tuple(b for u in ast_ctx.bufs if (b:=buffers[u]).size != 0), metadata, tuple(ast_ctx.assign_preloads)))
   # do BFS

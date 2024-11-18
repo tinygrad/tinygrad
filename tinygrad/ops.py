@@ -341,6 +341,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def is_contiguous_base(self): return self.op is Ops.CONTIGUOUS and not (self.src[0].base.op is Ops.VIEW and len(self.src[0].base.src) == 2)
 
+  # *** this was LazyBuffer ***
+  @property
+  def metadata(self) -> Optional[Metadata]: return uop_metadata.get(self.buf_uop)
+
   # *** uop movement ops ***
 
   @property
