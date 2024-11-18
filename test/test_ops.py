@@ -2237,17 +2237,21 @@ class TestOps(unittest.TestCase):
       lambda x,src: x.scatter(dim=-3, index=a, src=src, reduce=r), forward_only=True)
       helper_test_op(None,
         lambda x,index,src: x.scatter(1, index, src, reduce=r),
-        lambda x,index,src: x.scatter(1, index, src, reduce=r), forward_only=True, vals=[[[0, 0, 2], [3, 4, 5]], [[0,1,2],[1,1,0]], [[1,1,0],[2,1,3]]])
+        lambda x,index,src: x.scatter(1, index, src, reduce=r), forward_only=True,
+        vals=[[[0, 0, 2], [3, 4, 5]], [[0,1,2],[1,1,0]], [[1,1,0],[2,1,3]]])
       helper_test_op(None,
         lambda x,index,src: x.scatter(1, index, src, reduce=r),
-        lambda x,index,src: x.scatter(1, index, src, reduce=r), forward_only=True, vals=[[[0, 0, 0], [0, 0, 0]], [[0,1,2],[1,1,0]], [[1,1,0],[2,1,3]]])
+        lambda x,index,src: x.scatter(1, index, src, reduce=r), forward_only=True,
+        vals=[[[0, 0, 0], [0, 0, 0]], [[0,1,2],[1,1,0]], [[1,1,0],[2,1,3]]])
       helper_test_op(None,
         lambda x,index,src: x.scatter(1, index, src, reduce=r),
-        lambda x,index,src: x.scatter(1, index, src, reduce=r), forward_only=True, vals=[[[0, 0, 0], [0, 0, 0]], [[0,1,2],[1,1,0]], [[0,1,0],[0,0,1]]])
+        lambda x,index,src: x.scatter(1, index, src, reduce=r), forward_only=True,
+        vals=[[[0, 0, 0], [0, 0, 0]], [[0,1,2],[1,1,0]], [[0,1,0],[0,0,1]]])
 
     helper_test_op(None,
       lambda x,index,src: x.scatter(1, index, src),
-      lambda x,index,src: x.scatter(1, index, src), forward_only=True, vals=[[[0, 0, 2], [3, 4, 5]], [[0,1,2],[1,1,0]], [[1,1,0],[2,1,3]]])
+      lambda x,index,src: x.scatter(1, index, src), forward_only=True,
+      vals=[[[0, 0, 2], [3, 4, 5]], [[0,1,2],[1,1,0]], [[1,1,0],[2,1,3]]])
 
   def test_scatter_add(self): ...
   def test_scatter_mul(self): ...

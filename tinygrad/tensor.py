@@ -1188,8 +1188,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
         # axis to be reduced to match self.shape
         axis = tuple(range(first_dim, first_dim + len(big_shape)))
         # apply mask to v(broadcasted) and reduce such that if v contains repeated indices the last one remains
-        vb = vb * mask.where(mask, float("nan"))
-        for dim in axis: vb = (functools.reduce(lambda x,y: y.isnan().where(x, y), vb.split(1, dim))).cast(self.dtype)
+        vb = vb * mask
+        for dim in axis: vb = (functools.reduce(lambda x,y: y.where(y, x), vb.split(1, dim))).cast(self.dtype)
         # reduce mask and select from v(get rid of extra dims from reduce) for each True element in mask else select from self
         ret = mask.any(axis).where(vb.squeeze(), self)
 
@@ -1251,7 +1251,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     src = src.pad(tuple((0, max(xs-ss, 0)) for ss, xs in zip(src.shape[:-1], self.shape)) + (None,))
     mask = mask.pad(tuple((0, max(xs-ms, 0)) for ms, xs in zip(mask.shape[:-1], self.shape)) + (None,))
     if reduce is None:
-      nan_masked = mask.where(mask*src, float("nan"))
+      nan_masked = mask.where(src*mask, float("nan"))
       masked_src = functools.reduce(lambda x,y: y.isnan().where(x, y), nan_masked.split(1, -1))
       return (mask.any(-1).where(masked_src.squeeze(), self)).cast(self.dtype)
     if reduce == "add": return ((mask*src).sum(-1) + self).cast(self.dtype)
