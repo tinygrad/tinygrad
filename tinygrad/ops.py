@@ -1089,6 +1089,9 @@ symbolic = symbolic_simple+PatternMatcher([
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
+  # alu of two where with same conds can combine
+  (UPat(Ops.ADD, name="alu", src=(UPat.var("c").where(UPat.var("t0"), UPat.var("f0")), UPat.var("c").where(UPat.var("t1"), UPat.var("f1")))), \
+   lambda alu,c,t0,t1,f0,f1: c.where(t0.alu(alu.op, t1), f0.alu(alu.op, f1))),
   # ALU min==max -> CONST (slow!)
   (UPat(GroupOp.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
