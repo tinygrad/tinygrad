@@ -1186,7 +1186,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     a = Tensor.rand(3, 4, 5).realize()
     b = Tensor.rand(3, 4, 5).realize()
-    out = (a + b).pad(((0, 1), (0, 1), (0, 1)), 1.0).sum().contiguous()
+    out = (a + b).pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum().contiguous()
     run_schedule(check_schedule(out, 1))
     np.testing.assert_allclose(out.numpy(), np.pad(a.numpy()+b.numpy(), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), atol=1e-5, rtol=1e-6)
 
@@ -1195,7 +1195,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     a = Tensor.randn(3, 4, 5).realize()
     b = Tensor.randn(3, 4, 5).realize()
-    out = (a.pad(((0, 1), (0, 1), (0, 1)), 1.0).sum(keepdim=True)+b.pad(((0, 1), (0, 1), (0, 1)), 1.0).sum()).contiguous()
+    out = (a.pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum(keepdim=True)+b.pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum()).contiguous()
     # run_schedule(check_schedule(out, 1))
     run_schedule(check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), np.pad(a.numpy(), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(keepdims=True) + \
@@ -1204,7 +1204,7 @@ class TestSchedule(unittest.TestCase):
   def test_pad_reduce_unsafe(self):
     Tensor.manual_seed(0)
     a = Tensor.rand(3, 4, 5).realize()
-    out = a.log2().pad(((0, 1), (0, 1), (0, 1)), 1.0).sum().contiguous()
+    out = a.log2().pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum().contiguous()
     run_schedule(check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), np.pad(np.log2(a.numpy()), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), atol=1e-5, rtol=1e-6)
 
@@ -1213,7 +1213,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     a = Tensor.randn(3, 4, 5).abs().realize()
     b = Tensor.randn(3, 4, 5).abs().realize()
-    out = (a.log2().pad(((0, 1), (0, 1), (0, 1)), 1.0).sum()+b).abs().log2().pad(((0, 1), (0, 1), (0, 1)), 1.0).sum().contiguous()
+    out = (a.log2().pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum()+b).abs().log2().pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum().contiguous()
     # run_schedule(check_schedule(out, 1))
     run_schedule(check_schedule(out, 4))
     np.testing.assert_allclose(out.numpy(), np.pad(np.log2(np.abs(np.pad(np.log2(a.numpy()), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum() + \
