@@ -61,7 +61,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
     if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to {buf.dtype.base}")
     # hack the underlying buffer too
     buf.dtype = buf.buffer.dtype = buf.dtype.base
-    assert not buf.is_realized(), "can't fixup allocated buffer"
+    assert not buf.is_realized, "can't fixup allocated buffer"
     buf.buffer.options = None
   dtype = buf.dtype if buf.op in GroupOp.Meta else buf.dtype.base
   # consts are always fused and generated
@@ -69,7 +69,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, children:DefaultDict[UOp, Dict[U
     if isinstance(val:=buf.arg, UOp): ctx.var_vals.update([val.unbind()])
     return UOp(Ops.VALID, dtypes.bool, (buf.st.to_uop(),)).where(UOp.const(dtype, val), 0)
   # everything else is a VIEW of BUFFER (with an optional op)
-  if buf.is_realized():
+  if buf.is_realized:
     ctx.buf_uops[ubuf:=UOp.new_buffer((b:=buf.buffer).device, b.size, b.dtype, num=len(ctx.buf_uops))] = buf.buffer
     op = None
   elif buf.op is Ops.ASSIGN:

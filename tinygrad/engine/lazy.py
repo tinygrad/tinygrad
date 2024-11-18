@@ -76,6 +76,7 @@ class LazyBuffer(MathTrait):
     assert isinstance(val, get_args(ConstType)), f"{val=} has {type(val)=}, not a ConstType"
     return LazyBuffer.metaop(Ops.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(shape)).expand(shape)
 
+  @property
   def is_realized(self) -> bool: return self.base.realized is not None
 
   def assign(self, x:LazyBuffer) -> LazyBuffer:
