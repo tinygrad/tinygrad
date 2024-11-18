@@ -7,7 +7,7 @@ from tinygrad.ops import Ops
 from tinygrad.helpers import CI, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
-from tinygrad.nn.state import load_state_dict
+from tinygrad.nn.state import safe_save, safe_load, get_state_dict, load_state_dict
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from tinygrad.device import is_dtype_supported
@@ -569,6 +569,14 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
+  def test_load_state_dict_shape_mismatch(self):
+    d1, d2 = 2, 4
+    layer = Linear(d1, d1, bias=False)
+    state_dict = {'weight': Tensor.randn(d2, d2)}
+    with self.assertRaises(ValueError) as cm:
+      load_state_dict(layer, state_dict)
+    self.assertEqual(cm.exception, ValueError('Shape mismatch in layer `weight`: Expected shape (2, 2), but found (4, 4) in state dict.'))
+
   def test_lstm_cell(self):
     layer = LSTMCell(32, 16)
     with torch.no_grad():
@@ -604,4 +612,5 @@ class TestNN(unittest.TestCase):
     assert layer.bias_ih is None
 
 if __name__ == '__main__':
-  unittest.main()
+
+
