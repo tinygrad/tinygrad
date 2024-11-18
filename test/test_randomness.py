@@ -266,6 +266,11 @@ class TestRandomness(unittest.TestCase):
     self.assertTrue(equal_distribution(Tensor.glorot_uniform, lambda x: torch.nn.init.xavier_uniform_(torch.empty(x)),
                                                               lambda x: np.random.uniform(-1, 1, size=x) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
+  def test_xavier_uniform(self):
+    self.assertFalse(normal_test(Tensor.xavier_uniform))
+    self.assertTrue(equal_distribution(Tensor.xavier_uniform, lambda x: torch.nn.init.xavier_uniform_(torch.empty(x)),
+                                                              lambda x: np.random.uniform(-1, 1, size=x) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
+
   def test_kaiming_uniform(self):
     for shape in [(256, 128, 3, 3), (80, 44), (3, 55, 35)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), shape=shape))

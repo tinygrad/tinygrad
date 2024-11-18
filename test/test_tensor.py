@@ -219,7 +219,7 @@ class TestTinygrad(unittest.TestCase):
     self.assertFalse(gradcheck(tiny_func, tiny_x, eps = 1e-5))
 
   def test_random_fns_are_deterministic_with_seed(self):
-    for random_fn in [Tensor.randn, Tensor.normal, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform, Tensor.kaiming_normal]:
+    for random_fn in [Tensor.randn, Tensor.normal, Tensor.uniform, Tensor.scaled_uniform, Tensor.glorot_uniform, Tensor.kaiming_normal, Tensor.xavier_uniform]: # noqa: E501
       with self.subTest(msg=f"Tensor.{random_fn.__name__}"):
         Tensor.manual_seed(1337)
         a = random_fn(10,10).realize()

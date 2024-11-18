@@ -815,6 +815,14 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     return Tensor.uniform(*shape, low=-1.0, high=1.0, **kwargs).mul((6/(argfix(*shape)[0]+prod(argfix(*shape)[1:])))**0.5)
 
+  # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#xavier_uniform_
+  @staticmethod
+  def xavier_uniform(*shape, **kwargs) -> Tensor:
+    """
+    Alias for `Tensor.glorot_uniform`.
+    """
+    return Tensor.glorot_uniform(*shape, **kwargs)
+
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @staticmethod
   def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:

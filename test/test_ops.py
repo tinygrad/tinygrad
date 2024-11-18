@@ -109,7 +109,8 @@ class TestOps(unittest.TestCase):
       Tensor.normal,
       Tensor.uniform,
       Tensor.scaled_uniform,
-      Tensor.glorot_uniform
+      Tensor.glorot_uniform,
+      Tensor.xavier_uniform
     ]
 
     for method in creation_methods:

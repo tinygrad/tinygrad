@@ -28,3 +28,4 @@
 ::: tinygrad.Tensor.glorot_uniform
 ::: tinygrad.Tensor.kaiming_uniform
 ::: tinygrad.Tensor.kaiming_normal
+::: tinygrad.Tensor.xavier_uniform
