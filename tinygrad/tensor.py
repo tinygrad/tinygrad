@@ -1000,7 +1000,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     if (shrink_arg:=[x if x is not None else (0,s) for x,s in zip(arg, self.shape)]) == [(0,s) for s in self.shape]: return self
     return F.Shrink.apply(self, arg=tuple(shrink_arg))
 
-  def pad(self, padding:Union[Sequence[sint], Sequence[Optional[Tuple[sint, sint]]]], value:float=0.0) -> Tensor:
+  def pad(self, padding:Union[Sequence[sint], Sequence[Optional[Tuple[sint, sint]]]], mode:str="constant", value:float=0.0) -> Tensor:
     """
     Returns a tensor with padding applied based on the input `padding`.
     `padding` supports two padding structures:
@@ -1015,6 +1015,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
        - `padding` must have the same length as `self.ndim`.
 
     Padding values can be negative, resulting in dimension shrinks that work similarly to Python negative slices.
+    Padding modes is selected with `mode` which supports `constant` and `reflect`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(9).reshape(1, 1, 3, 3)
@@ -1030,6 +1031,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.pad((1, 2, 0, -1), value=-float('inf')).numpy())
     ```
     """
+    if mode not in {"constant", "reflect"}: raise NotImplementedError(f"{mode=} is not supported")
     if (flat:=all(isinstance(p, (int,UOp)) for p in padding)) and len(padding)%2 != 0: raise ValueError("Flat padding must have even number of pads")
     # turn flat padding into group padding
     pX = ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2])) if flat else padding
@@ -1037,9 +1039,16 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     X, pX = self, cast(Tuple[Tuple[sint, sint]], tuple((0,0) if p is None else p for p in pX))
     def _constant(x,px,v): return F.Pad.apply(x, arg=px) if v == 0 else F.Pad.apply(x, arg=px) + F.Pad.apply(Tensor.ones_like(x), arg=px).where(0, v)
     # early return for symbolic with positive pads (no need to max)
-    if all(resolve(p >= 0) for p in flatten(pX)): return _constant(X, pX, value)
-    pads, shrinks = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX), tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, self.shape))
-    return _constant(X.shrink(shrinks), pads, value)
+    if mode == "constant" and all(resolve(p >= 0) for p in flatten(pX)): return _constant(X, pX, value)
+    pads, shrinks = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX), lambda shape: tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, shape))
+    if mode == "constant": return _constant(X.shrink(shrinks(X.shape)), pads, value)
+    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+    for d,(pB,pA) in enumerate(pads):
+      if pB >= (s:=X.shape[d]) or pA>=s: raise ValueError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
+      slcB, slcA, = slice(pB,0,-1), slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1)
+      xB, xA = (X[[slc if i == d else slice(None) for i in range(X.ndim)]] if p > 0 else None for slc, p in ((slcB, pB), (slcA, pA)))
+      X = Tensor.cat(*(X_ for X_ in (xB, X, xA) if X_ is not None), dim=d)
+    return X.shrink(shrinks(X.shape))
 
   # ***** movement high level ops *****
 
