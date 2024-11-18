@@ -861,7 +861,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_two_nested_range_alt_indexing(self):
     a = Tensor([2, 2]).realize()
-    out = a.reshape(2, 1).pad(((1, 1), (1, 1)), 2).sum()
+    out = a.reshape(2, 1).pad(((1, 1), (1, 1)), value=2).sum()
     lin = helper_linearizer_opt(out, wanna_output=[24])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is Ops.RANGE]
     # RANGE -> ALU -> RANGE -> ALU + LOAD -> ASSIGN
