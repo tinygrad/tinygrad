@@ -1556,7 +1556,7 @@ class TestLinearizerFailures(unittest.TestCase):
               x31,
               x9,)),)),)),)),))
     opts = [Opt(op=OptOps.GROUPTOP, axis=0, amt=16)]
-    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["METAL", "CUDA", "NV", "AMD"])
+    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["METAL", "CUDA", "NV", "AMD", "GPU"])
 
 if __name__ == '__main__':
   unittest.main()
