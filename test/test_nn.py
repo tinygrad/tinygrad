@@ -573,9 +573,8 @@ class TestNN(unittest.TestCase):
     d1, d2 = 2, 4
     layer = Linear(d1, d1, bias=False)
     state_dict = {'weight': Tensor.randn(d2, d2)}
-    with self.assertRaises(ValueError) as cm:
+    with self.assertRaisesRegex(ValueError, r'Shape mismatch in layer `weight`: Expected shape \(2, 2\), but found \(4, 4\) in state dict.'):
       load_state_dict(layer, state_dict)
-    self.assertEqual(cm.exception, ValueError('Shape mismatch in layer `weight`: Expected shape (2, 2), but found (4, 4) in state dict.'))
 
   def test_lstm_cell(self):
     layer = LSTMCell(32, 16)
