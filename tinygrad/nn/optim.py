@@ -148,3 +148,34 @@ class LAMB(Optimizer):
         r = 1.0
       t.assign((t.detach() - self.lr * r * up).cast(t.dtype))
     return [self.b1_t, self.b2_t] + self.m + self.v
+
+class ADOPT(Optimizer):
+  """
+  ADOPT: ADaptive gradient method with the OPTimal convergence rate.
+  
+  Modified Adam Can Converge with Any B2 with the Optimal Rate.
+
+  - Paper (preprint): https://arxiv.org/abs/2411.02853
+  - Author implementation: https://github.com/iShohei220/adopt/blob/main/adopt.py
+  """
+  def __init__(self, params: List[Tensor], lr=1e-3, b1=0.9, b2=0.9999, eps=1e-6, weight_decay=0.0):
+    super().__init__(params, lr)
+    self.b1, self.b2, self.eps, self.wd = b1, b2, eps, weight_decay
+    self.m = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
+    self.v = [Tensor.zeros(*t.shape, dtype=dtypes.float32, device=t.device, requires_grad=False).contiguous() for t in self.params]
+    self._first_step = True
+
+  def _step(self) -> List[Tensor]:
+    for i, t in enumerate(self.params):
+      assert t.grad is not None
+      vi_sqrt = self.v[i].sqrt()
+      denom = self.eps if self.eps > vi_sqrt else vi_sqrt
+      if self._first_step:
+        self.m[i].assign(t.grad / denom)
+      else:
+        self.m[i].assign(
+          self.b1 * self.m[i] + (1 - self.b1) * (t.grad / denom)
+        )
+        self._first_step = False
+      t.assign((t.detach() - self.lr * self.m[i]))
+      self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (t.grad * t.grad))
