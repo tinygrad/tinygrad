@@ -1431,5 +1431,132 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.UPCAST, axis=0, amt=0), Opt(op=OptOps.PADTO, axis=1, amt=32)]
     helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["METAL"])
 
+  def test_failure_58(self):
+    ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()),
+        x2:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(128, 1, 1), strides=(1, 0, 0), offset=0, mask=None, contiguous=True),)), src=()),
+        x3:=UOp(Ops.ADD, dtypes.float, arg=None, src=(
+          UOp(Ops.MUL, dtypes.float, arg=None, src=(
+            UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+              x6:=UOp(Ops.VALID, dtypes.bool, arg=None, src=(
+                x7:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(128, 1, 1), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+              UOp(Ops.CONST, dtypes.float, arg=0.9, src=()),
+              x9:=UOp(Ops.CONST, dtypes.float, arg=0.0, src=()),)),
+            x10:=UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+              UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()),
+              x2,)),)),
+          UOp(Ops.MUL, dtypes.float, arg=None, src=(
+            UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+              x6,
+              UOp(Ops.CONST, dtypes.float, arg=0.09999999999999998, src=()),
+              x9,)),
+            x15:=UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (1,)), src=(
+              UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                x17:=UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(local=True), arg=('temp1', 16), src=()),
+                x18:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 16, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=True),)), src=()),
+                UOp(Ops.STORE, dtypes.void, arg=None, src=(
+                  x17,
+                  x18,
+                  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (2,)), src=(
+                    UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                      UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                        x23:=UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                          x24:=UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                            UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=2, src=()),
+                            x26:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 112, 48, 128), strides=(688128, 48, 1, 5376), offset=0, mask=None, contiguous=False), View(shape=(128, 16, 1344), strides=(1, 172032, 128), offset=0, mask=None, contiguous=False))), src=()),)),
+                          UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                            x24,
+                            UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+                              x29:=UOp(Ops.VALID, dtypes.bool, arg=None, src=(
+                                UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(128, 16, 1344), strides=(0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                              x31:=UOp(Ops.CONST, dtypes.float, arg=-1.0, src=()),
+                              x9,)),)),)),
+                        UOp(Ops.SQRT, dtypes.float, arg=None, src=(
+                          UOp(Ops.RECIP, dtypes.float, arg=None, src=(
+                            UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                              UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                                x23,
+                                x23,)),
+                              UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+                                x29,
+                                UOp(Ops.CONST, dtypes.float, arg=1e-05, src=()),
+                                x9,)),)),)),)),)),
+                      UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                        UOp(Ops.CAST, dtypes.float, arg=None, src=(
+                          UOp(Ops.CMPLT, dtypes.bool, arg=None, src=(
+                            UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+                              x29,
+                              x9,
+                              x9,)),
+                            UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                              UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=3, src=()),
+                              x26,)),)),)),
+                        UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                          UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=4, src=()),
+                          UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(4, 112, 48, 128), strides=(5753088, 198, 2, 22473), offset=200, mask=None, contiguous=False), View(shape=(128, 16, 1344), strides=(1, 172032, 128), offset=0, mask=None, contiguous=False))), src=()),)),)),)),)),)),)),)),)),)),)),
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=5, src=()),
+        x2,
+        x49:=UOp(Ops.ADD, dtypes.float, arg=None, src=(
+          UOp(Ops.MUL, dtypes.float, arg=None, src=(
+            UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+              x6,
+              UOp(Ops.CONST, dtypes.float, arg=0.999, src=()),
+              x9,)),
+            x10,)),
+          UOp(Ops.MUL, dtypes.float, arg=None, src=(
+            UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+              x6,
+              UOp(Ops.CONST, dtypes.float, arg=0.0010000000000000009, src=()),
+              x9,)),
+            UOp(Ops.MUL, dtypes.float, arg=None, src=(
+              x15,
+              x15,)),)),)),)),
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=6, src=()),
+        x2,
+        UOp(Ops.ADD, dtypes.float, arg=None, src=(
+          UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+            x6,
+            UOp(Ops.CONST, dtypes.float, arg=1.0, src=()),
+            x9,)),
+          UOp(Ops.MUL, dtypes.float, arg=None, src=(
+            UOp(Ops.MUL, dtypes.float, arg=None, src=(
+              UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=7, src=()),
+                x7,)),
+              UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                  UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                    x3,
+                    UOp(Ops.RECIP, dtypes.float, arg=None, src=(
+                      UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                        UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=8, src=()),
+                        x7,)),)),)),
+                  UOp(Ops.RECIP, dtypes.float, arg=None, src=(
+                    UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                      UOp(Ops.SQRT, dtypes.float, arg=None, src=(
+                        UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                          x49,
+                          UOp(Ops.RECIP, dtypes.float, arg=None, src=(
+                            UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                              UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=9, src=()),
+                              x7,)),)),)),)),
+                      UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+                        x6,
+                        UOp(Ops.CONST, dtypes.float, arg=1e-08, src=()),
+                        x9,)),)),)),)),
+                UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+                  x6,
+                  UOp(Ops.CONST, dtypes.float, arg=0.009999999776482582, src=()),
+                  x9,)),)),)),
+            UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+              x6,
+              x31,
+              x9,)),)),)),)),))
+    opts = [Opt(op=OptOps.GROUPTOP, axis=0, amt=16)]
+    helper_test_lin(Kernel(ast, opts=Device[Device.DEFAULT].renderer), opts=opts, failed_platforms=["METAL"])
+
 if __name__ == '__main__':
   unittest.main()
