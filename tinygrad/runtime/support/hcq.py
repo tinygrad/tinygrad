@@ -251,7 +251,8 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
     if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
 
 class HCQArgsState:
-  def __init__(self, ptr:int, prg:HCQProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): self.ptr, self.prg = ptr, prg
+  def __init__(self, ptr:Tuple[int, int], prg:HCQProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
+    (self.ptr, self.cpu_ptr), self.prg = ptr, prg
   def update_buffer(self, index:int, buf:HCQBuffer): raise NotImplementedError("need update_buffer")
   def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
 
@@ -259,7 +260,7 @@ class HCQProgram:
   def __init__(self, args_state_t:Type[HCQArgsState], device:HCQCompiled, name:str, kernargs_alloc_size:int):
     self.args_state_t, self.device, self.name, self.kernargs_alloc_size = args_state_t, device, name, kernargs_alloc_size
 
-  def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> HCQArgsState:
+  def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[Tuple[int, int]]=None) -> HCQArgsState:
     """
     Fills arguments for the kernel, optionally allocating space from the device if `kernargs_ptr` is not provided.
     Args:
@@ -373,13 +374,13 @@ class HCQCompiled(Compiled):
       self.raw_prof_records += [(st.timestamp, en.timestamp, name, is_cp, None) for st, en, name, is_cp in self.sig_prof_records]
       self.sig_prof_records = []
 
-  def _alloc_kernargs(self, alloc_size:int) -> int:
+  def _alloc_kernargs(self, alloc_size:int) -> Tuple[int, int]:
     """
     Allocates space for arguments passed to the kernel.
     """
     if self.kernargs_ptr >= (self.kernargs_page.va_addr + self.kernargs_page.size - alloc_size): self.kernargs_ptr = self.kernargs_page.va_addr
     self.kernargs_ptr = (res:=self.kernargs_ptr) + alloc_size
-    return res
+    return res, res - self.kernargs_page.va_addr + self.kernargs_page.cpu_addr
 
   def _ensure_shared_time_base(self):
     if not self.gpu2cpu_compute_time_diff.is_nan(): return
@@ -458,7 +459,7 @@ class HCQCompiled(Compiled):
     cast(HCQAllocator, self.allocator).b_timeline = [0] * len(cast(HCQAllocator, self.allocator).b)
 
 # Protocol for hcq compatible allocators for allocated buffers to contain VA address and it's size.
-class HCQBuffer(Protocol): va_addr:int; size:int # noqa: E702
+class HCQBuffer(Protocol): va_addr:int; size:int; cpu_addr:int # noqa: E702
 
 class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
   """
