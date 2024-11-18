@@ -293,6 +293,8 @@ class tqdm:
       yield item
       self.update(1)
     self.update(close=True)
+  def __enter__(self): return self
+  def __exit__(self, *_): self.update(close=True)
   def set_description(self, desc:str): self.desc = f"{desc}: " if desc else ""
   def update(self, n:int=0, close:bool=False):
     self.n, self.i = self.n+n, self.i+1
