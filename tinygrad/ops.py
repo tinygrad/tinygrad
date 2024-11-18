@@ -4,9 +4,9 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
-from weakref import WeakValueDictionary
+from weakref import WeakKeyDictionary, WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp, unwrap, T
+from tinygrad.helpers import ContextVar, Metadata, prod, getenv, all_same, Context, partition, temp, unwrap, T
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -225,6 +225,7 @@ class UOpMetaClass(type):
     UOpMetaClass.ucache[key] = ret = super().__call__(op, dtype, src, arg)
     return ret
 
+uop_metadata:WeakKeyDictionary[UOp, Metadata] = WeakKeyDictionary()
 class UOp(MathTrait, metaclass=UOpMetaClass):
   __slots__ = ["op", "dtype", "src", "arg"]
   def __init__(self, op:Ops, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
@@ -352,8 +353,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop Buffer stuff ***
 
   @staticmethod
-  def new_buffer(device:str, size:int, dtype:DType, num=-1): return  UOp(Ops.BUFFER, dtype.ptr(), (), (num, (device, size, dtype)))
-
+  def new_buffer(device:str, size:int, dtype:DType, num=-1, metadata:Optional[Metadata]=None):
+    ret = UOp(Ops.BUFFER, dtype.ptr(), (), (num, (device, size, dtype)))
+    if metadata is not None: uop_metadata[ret] = metadata
+    return ret
   @property
   def buf_uop(self) -> UOp:
     assert self.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"

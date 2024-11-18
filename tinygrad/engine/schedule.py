@@ -2,7 +2,7 @@ import sys, atexit, functools, itertools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Set, Tuple, List, Dict, Optional, DefaultDict, cast
-from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, sint
+from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, sint, uop_metadata
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ImageDType, dtypes
@@ -43,7 +43,6 @@ def is_scheduled(u:UOp): return u.op is Ops.VIEW and len(u.src) == 2
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  ubuf_metadata: Dict[UOp, Metadata] = field(default_factory=dict)   # this maps BUFFER uops to Metadata
   var_vals: Dict[Variable, int] = field(default_factory=dict)        # this maps a BIND's DEFINE_VAR to its value
   assigns: Set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
   allbufs: Dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
@@ -76,12 +75,11 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], lazyb
     ctx.assigns.add(ubuf:=target.buf_uop)
     op = UOp(Ops.ASSIGN, dtype, (ubuf, new_val), buf.arg)
   else:
-    buffers[ubuf:=UOp.new_buffer((b:=buf.buffer).device, b.size, b.dtype, num=len(buffers))] = buf.buffer
+    buffers[ubuf:=UOp.new_buffer((b:=buf.buffer).device, b.size, b.dtype, num=len(buffers), metadata=buf.metadata)] = buf.buffer
     op = UOp(cast(Ops, buf.op), dtype, tuple(to_uop(x, ctx, buffers, lazybufs, cache) for x in buf.srcs),
              None if buf.op in {Ops.CAST, Ops.BITCAST} else buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
   if op is not None:
-    if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
     lazybufs[buf.buffer] = buf
     for x in op.src:
       if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[ubuf] = None
@@ -379,7 +377,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   # preschedule all realizes
   prescheduled: List[ScheduleItem] = []
   for sink in sinks:
-    metadata = tuple({mx for x in sink.sparents if (x.op is Ops.STORE or is_scheduled(x)) and (mx:=ctx.ubuf_metadata.get(x.buf_uop))})
+    metadata = tuple({mx for x in sink.sparents if (x.op is Ops.STORE or is_scheduled(x)) and (mx:=uop_metadata.get(x.buf_uop))})
     ast, ast_ctx = full_ast_rewrite(sink, ctx.var_vals, ctx.assigns)
     prescheduled.append(ScheduleItem(ast, tuple(b for u in ast_ctx.bufs if (b:=buffers[u]).size != 0), metadata, tuple(ast_ctx.assign_preloads)))
   # do BFS
