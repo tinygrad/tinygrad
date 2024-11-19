@@ -40,8 +40,8 @@ c = hipallocator.alloc(N*N*2)
 na = np.empty(N*N, np.float32)
 nb = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32).astype(np.float16)
 nc = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32).astype(np.float16)
-hipallocator.copyin(b, memoryview(bytearray(nb)))
-hipallocator.copyin(c, memoryview(bytearray(nc)))
+hipallocator._copyin(b, memoryview(bytearray(nb)))
+hipallocator._copyin(c, memoryview(bytearray(nc)))
 
 prog_str = f"""
 #define F32
@@ -126,13 +126,13 @@ def timeit(fxn):
   if RAND:
     nb = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32).astype(np.float16)
     nc = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32).astype(np.float16)
-    hipallocator.copyin(b, memoryview(bytearray(nb)))
-    hipallocator.copyin(c, memoryview(bytearray(nc)))
+    hipallocator._copyin(b, memoryview(bytearray(nb)))
+    hipallocator._copyin(c, memoryview(bytearray(nc)))
   return et
 
 print("global/local size", global_size, local_size, f"local_size:{prod(local_size)} total_size:{prod(global_size+local_size)}")
 tm = min([timeit(lambda: prog(a, b, c, global_size=global_size, local_size=local_size, wait=True)) for _ in range(CNT)])
-hipallocator.copyout(flat_mv(na.data),a)
+hipallocator._copyout(flat_mv(na.data),a)
 na = na.reshape(N,N)
 comp = nb.astype(np.float32) @ nc.astype(np.float32)
 print(f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:9.2f} GFLOPS matmul, {BW*1e-9/tm:.2f} GB/s")

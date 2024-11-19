@@ -199,8 +199,8 @@ class PythonCompiler(Compiler):
 
 class PythonAllocator(Allocator):
   def _alloc(self, size, options): return memoryview(bytearray(size))
-  def copyin(self, dest, src:memoryview): dest[:] = src
-  def copyout(self, dest:memoryview, src): dest[:] = src
+  def _copyin(self, dest, src:memoryview): dest[:] = src
+  def _copyout(self, dest:memoryview, src): dest[:] = src
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):

@@ -39,8 +39,8 @@ class RawWebGLAllocator(Allocator):
     tex = ctx.texture(dtype.shape, 1, dtype=dtype_map[dtype.base])
     tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
     return tex
-  def copyin(self, dest:moderngl.Texture, src: memoryview): dest.write(src)
-  def copyout(self, dest:memoryview, src: moderngl.Texture):
+  def _copyin(self, dest:moderngl.Texture, src: memoryview): dest.write(src)
+  def _copyout(self, dest:memoryview, src: moderngl.Texture):
     src.read_into(dest)
     return dest
 

@@ -1397,9 +1397,29 @@ class TestOps(unittest.TestCase):
     # raise error for too many or too little pads
     self.helper_test_exception([(3,3)], lambda x: torch.nn.functional.pad(x, (0,0,0,0,1,0,3,0)), lambda x: x.pad((0,0,0,0,1,0,3,0)),
                                expected=(RuntimeError, ValueError))
+    # raise error for mode string typo
+    self.helper_test_exception([(3,3,3)], lambda x: torch.nn.functional.pad(x, (3,0), mode="typo"), lambda x: x.pad((3,0), mode="typo"),
+                               expected=NotImplementedError)
     x = Tensor.ones(3,3)
     with self.assertRaises(ValueError): x.pad((None,(0,1),(3,0)))
     with self.assertRaises(ValueError): x.pad(((0,1),))
+
+  def test_pad_reflect_mode(self):
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (0,2,3,2), mode="reflect"), lambda x: x.pad((0,2,3,2), mode="reflect"))
+    helper_test_op([(5,5,5)], lambda x: torch.nn.functional.pad(x, (0,2), mode="reflect"), lambda x: x.pad((0,2), mode="reflect"))
+    helper_test_op([(1,1,5,5,5)], lambda x: torch.nn.functional.pad(x, (1,2,3,4,1,2), mode="reflect"),
+                                  lambda x: x.pad((1,2,3,4,1,2), mode="reflect"))
+    helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (-1,2,2,-1), mode="reflect"), lambda x: x.pad((-1,2,2,-1), mode="reflect"))
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,-3,0,-3), mode="reflect"), lambda x: x.pad((3,-3,0,-3), mode="reflect"))
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,-5,1,-5), mode="reflect"), lambda x: x.pad((3,-5,1,-5), mode="reflect"))
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (0,0,0,-5), mode="reflect"), lambda x: x.pad((0,0,0,-5), mode="reflect"))
+
+    # max pad size for reflect is exactly once: pad < input size
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (4,4,0,4), mode="reflect"), lambda x:x.pad((4,4,0,4),mode="reflect"))
+    # raise error for relfection padding when: pad >= input size
+    self.helper_test_exception([(1,1,5,5)],
+                                lambda x: torch.nn.functional.pad(x, (3,5,0,0),mode="reflect"), lambda x: x.pad((3,5,0,0),mode="reflect"),
+                                expected=(RuntimeError, ValueError))
 
   def test_pad_reshape(self):
     helper_test_op([(1, 2)],
