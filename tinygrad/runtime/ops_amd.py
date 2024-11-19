@@ -35,7 +35,7 @@ class AMDSignal(HCQSignal):
   def __init__(self, value=0, is_timeline=False):
     self._value_addr, self._timestamp_addr = (va:=AMDDevice.signals_pool.pop()), va + 8
     self._signal = to_mv(va - AMDDevice.signals_page.va_addr + AMDDevice.signals_page.cpu_addr, 16).cast("Q")
-    if is_timeline and AMDDevice.kfd >= 0:
+    if is_timeline and not AMDDevice.driverless:
       self._event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, auto_reset=1)
       self._event_mailbox_ptr = AMDDevice.event_page.va_addr + self._event.event_slot_index*8
       self._evt_array = (kfd.struct_kfd_event_data)(event_id=self._event.event_id)
@@ -342,6 +342,7 @@ class AMDQueueDesc:
   put_value: int = 0
 
 class AMDDevice(HCQCompiled):
+  driverless:bool = False
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
@@ -349,6 +350,7 @@ class AMDDevice(HCQCompiled):
   gpus:List[pathlib.Path] = []
 
   def __init__(self, device:str=""):
+    AMDDevice.driverless = not os.path.isdir('/sys/module/amdgpu/') or getenv("AMD_DRIVERLESS", 0)
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
 
     self._setup_device = self._driver_setup_device if os.path.isdir('/sys/module/amdgpu/') else self._pci_setup_device
@@ -365,8 +367,8 @@ class AMDDevice(HCQCompiled):
       AMDDevice.signals_page = self._gpu_alloc(16 * 65536, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
       AMDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
       AMDDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
-      if AMDDevice.kfd >= 0: kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_page_offset=AMDDevice.event_page.handle)
-    elif AMDDevice.kfd >= 0:
+      if not AMDDevice.driverless: kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_page_offset=AMDDevice.event_page.handle)
+    elif not AMDDevice.driverless:
       self._gpu_map(AMDDevice.signals_page)
       self._gpu_map(AMDDevice.event_page)
 
@@ -391,7 +393,7 @@ class AMDDevice(HCQCompiled):
     self.compute_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x100000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size)
 
-    if self.kfd >= 0:
+    if not self.driverless:
       self.sdma_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000)
 
       self.mem_fault_event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_type=kfd.KFD_IOC_EVENT_MEMORY)
