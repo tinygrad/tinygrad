@@ -116,7 +116,7 @@ class HSAAllocator(LRUAllocator):
     HSADevice.synchronize_system()
     check(hsa.hsa_amd_memory_pool_free(opaque))
 
-  def copyin(self, dest:T, src: memoryview):
+  def _copyin(self, dest:T, src: memoryview):
     # Async copyin sync model uses barriers on the main hw queue, since barriers are guaranteed to execute in order with all other packets.
     self.device.hw_queue.submit_barrier([], sync_signal := self.device.alloc_signal(reusable=True))
     mem = self._alloc(src.nbytes, BufferOptions(host=True))
@@ -164,7 +164,7 @@ class HSAAllocator(LRUAllocator):
     if copies_called > 1: wait_signals.append(self.hb_signals[self.hb_polarity])
     self.device.hw_queue.submit_barrier(wait_signals)
 
-  def copyout(self, dest:memoryview, src:T):
+  def _copyout(self, dest:memoryview, src:T):
     HSADevice.synchronize_system()
     copy_signal = self.device.alloc_signal(reusable=True)
     c_agents = (hsa.hsa_agent_t*2)(self.device.agent, HSADevice.cpu_agent)

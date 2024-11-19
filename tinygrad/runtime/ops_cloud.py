@@ -104,10 +104,10 @@ class CloudHandler(BaseHTTPRequestHandler):
             buf,sz,buffer_options = session.buffers[c.buffer_num]
             Device[CloudHandler.dname].allocator.free(buf,sz,buffer_options)
             del session.buffers[c.buffer_num]
-          case CopyIn(): Device[CloudHandler.dname].allocator.copyin(session.buffers[c.buffer_num][0], memoryview(bytearray(req._h[c.datahash])))
+          case CopyIn(): Device[CloudHandler.dname].allocator._copyin(session.buffers[c.buffer_num][0], memoryview(bytearray(req._h[c.datahash])))
           case CopyOut():
             buf,sz,_ = session.buffers[c.buffer_num]
-            Device[CloudHandler.dname].allocator.copyout(memoryview(ret:=bytearray(sz)), buf)
+            Device[CloudHandler.dname].allocator._copyout(memoryview(ret:=bytearray(sz)), buf)
           case ProgramAlloc():
             lib = Device[CloudHandler.dname].compiler.compile_cached(req._h[c.datahash].decode())
             session.programs[(c.name, c.datahash)] = Device[CloudHandler.dname].runtime(c.name, lib)
@@ -149,8 +149,8 @@ class CloudAllocator(Allocator):
     return self.device.buffer_num
   # TODO: options should not be here in any Allocator
   def _free(self, opaque:int, options): self.device.req.q(BufferFree(opaque))
-  def copyin(self, dest:int, src:memoryview): self.device.req.q(CopyIn(dest, self.device.req.h(bytes(src))))
-  def copyout(self, dest:memoryview, src:int):
+  def _copyin(self, dest:int, src:memoryview): self.device.req.q(CopyIn(dest, self.device.req.h(bytes(src))))
+  def _copyout(self, dest:memoryview, src:int):
     self.device.req.q(CopyOut(src))
     resp = self.device.batch_submit()
     assert len(resp) == len(dest), f"buffer length mismatch {len(resp)} != {len(dest)}"
