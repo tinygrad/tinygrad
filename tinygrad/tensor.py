@@ -2527,7 +2527,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     if self.dtype == dtypes.uint8 and isinstance(weight, Tensor):
       w_i = (weight * (1<<(W_PREC:=7)) + 0.5).cast(dtypes.int16)
-      return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
+      return (self+(((end - self).cast(dtypes.int16) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
     return self + (end - self) * weight
 
   def square(self):
