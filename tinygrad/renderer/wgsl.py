@@ -6,21 +6,12 @@ from tinygrad.helpers import strip_parens
 import math
 
 wgsl_matcher = PatternMatcher([
-  (UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL), dtype=dtypes.bool.ptr(), name="a"), lambda a: UOp(a.op, dtypes.int32.ptr(), a.src, a.arg)),
-  (UPat(Ops.LOAD, name="root", dtype=dtypes.bool, src=(UPat.var("x"),UPat.var("y"),UPat.var("g", dtype=dtypes.bool))),
-    lambda root,x,y,g: UOp(root.op, dtypes.int, (x,y.cast(dtypes.int), g), root.arg).cast(dtypes.bool)),
-  (UPat(Ops.LOAD, name="root", dtype=dtypes.bool, src=(UPat())), lambda root: UOp(root.op, dtypes.int, root.src, root.arg).cast(dtypes.bool)),
   (UPat(Ops.CMPLT, src=(UPat(name="a", dtype=dtypes.bool), UPat(name="b")), name="c"),
     lambda a,b,c: UOp(c.op, c.dtype, (a.cast(dtypes.int), b.cast(dtypes.int)))),
   (UPat(Ops.XOR, dtype=dtypes.bool, src=(UPat(name="a"), UPat(name="b")), name="c"),
     lambda a,b,c: UOp(c.op, dtypes.int, (a.cast(dtypes.int), b.cast(dtypes.int))).cast(dtypes.bool)),
   *[(UPat(a, src=(UPat(name="b", dtype=(dtypes.uint, dtypes.int, dtypes.bool))), name="a"),
-     lambda a,b: UOp(a, dtypes.float, (b.cast(dtypes.float),)).cast(b.dtype))
-    for a in (Ops.EXP2, Ops.SIN, Ops.LOG2, Ops.SQRT)],
-  (UPat.store(UPat.var("bidx"), UPat.var("var", dtype=dtypes.bool), UPat.var("gate")),
-   lambda bidx,val,gate: UOp.store(bidx, val.cast(dtypes.int), gate)),
-  (UPat.store(UPat.var("bidx"), UPat.var("var", dtype=dtypes.bool)), lambda bidx,var: UOp.store(bidx, var.cast(dtypes.int))),
-  # fix nan propagation: 'a * select(1, nan, cond) -> select(a, nan, cond)'
+     lambda a,b: UOp(a, dtypes.float, (b.cast(dtypes.float),)).cast(b.dtype)) for a in (Ops.EXP2, Ops.SIN, Ops.LOG2, Ops.SQRT)],
   (UPat(Ops.MUL, name="m", src=(UPat(name="a"), UPat(Ops.WHERE, src=(UPat.var("g"), \
     UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2"))))), \
     lambda m,a,g,c1,c2: UOp(Ops.WHERE, dtype=m.dtype, src=(g, UOp.const(dtype=dtypes.float, b=float('nan')), a)) \
@@ -29,14 +20,28 @@ wgsl_matcher = PatternMatcher([
 
 type_map = { dtypes.float: "f32", dtypes.uchar: "u32", dtypes.ushort: "u32", dtypes.short: "i32",
             dtypes.char: "i32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool" }
+buffer_map = { **type_map, dtypes.bool: "i32" }
 
-# convert from pointer style indexing to array style
-def render_load_store(r, bidx, sext = False, sext_am = 8):
+def sign_extend(val, sext_am): return f"bitcast<i32>(select(0u, 0xffffffffu << {sext_am}, (({val} >> {sext_am-1}) > 0)) | bitcast<u32>({val}))"
+def render_shift_am(idx, itemsize): return f"(((u32({idx}))%{4//itemsize}u)*{8*itemsize}u)"
+
+def render_load(r, bidx, dtype):
   sbidx = strip_parens(r[bidx])
   buf, idx = sbidx.split("+")[0], '+'.join(sbidx.split("+")[1:])
-  # sign-extend when loading char/short
-  return f"bitcast<i32>(select(0u, 0xffffffffu << {sext_am}, (({buf}[{idx}] >> {sext_am-1}) > 0)) | bitcast<u32>({buf}[{idx}]))" \
-    if sext else f"{buf}[{idx}]"
+  # packed load for bool, char, short
+  if dtype.itemsize < 4:
+    idx_by_itemsize = f"({idx})/{4//dtype.itemsize}"
+    val = f"(({buf}[{idx_by_itemsize}]) >> {render_shift_am(idx, dtype.itemsize)} & { "0xFF" if dtype.itemsize == 1 else "0xFFFF" })"
+    val = f"bool({val})" if dtype == dtypes.bool else val
+    return sign_extend(val, 8*dtype.itemsize) if dtype in [dtypes.char, dtypes.short] else val
+  return f"{buf}[{idx}]"
+
+def render_store(r, bidx, var, dtype):
+  sbidx = strip_parens(r[bidx])
+  buf, idx = sbidx.split("+")[0], '+'.join(sbidx.split("+")[1:])
+  arr = f"{buf}[u32({idx})/{4//dtype.itemsize}u]"
+  return f"atomicAdd(&{arr}, (({buffer_map[dtype]}({r[var]}) & { "0xFF" if dtype.itemsize == 1 else "0xFFFF" }) << \
+    {render_shift_am(idx, dtype.itemsize)}));" if dtype.itemsize < 4 else f"{arr} = {r[var]};"
 
 class WGSLRenderer(CStyleLanguage):
   device = "WEBGPU"
@@ -60,14 +65,10 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.BITCAST, dtype=(dtypes.char, dtypes.uchar), name="x"), lambda ctx,x: f"bitcast<{type_map[x.dtype]}>({ctx[x.src[0]]}&0xFF)"),
     (UPat(Ops.BITCAST, dtype=(dtypes.short, dtypes.ushort), name="x"), lambda ctx,x: f"bitcast<{type_map[x.dtype]}>({ctx[x.src[0]]}&0xFFFF)"),
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"bitcast<{type_map[x.dtype]}>({ctx[x.src[0]]})"),
-    # sign extended loads for char, short
-    (UPat(Ops.LOAD, name="l", src=(UPat.var("bidx"), UPat.var('var'), UPat.var("gate"))),
-      lambda ctx,l,bidx,var,gate: f"select({ctx[var]}, "
-        f"{render_load_store(ctx, bidx, l.dtype in [dtypes.char, dtypes.short], 8 * l.dtype.itemsize)}, {ctx[gate]})"),
-    (UPat(Ops.LOAD, name="l", src=(UPat.var('bidx'),), allow_any_len=True), lambda ctx,l, bidx:
-     f"{render_load_store(ctx, bidx, l.dtype in [dtypes.char, dtypes.short], 8*l.dtype.itemsize)}"),
-    (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var")), allow_any_len=True),
-     lambda ctx,bidx,var: f"{render_load_store(ctx,bidx)} = {ctx[var]};"),
+    (UPat(Ops.LOAD, name="l", src=(UPat.var("b"), UPat.var('v'), UPat.var("g"))),
+      lambda ctx,l,b,v,g: f"select({ctx[v]}, "f"{render_load(ctx, b, l.dtype)}, {ctx[g]})"),
+    (UPat(Ops.LOAD, name="l", src=(UPat.var('b'),), allow_any_len=True), lambda ctx,l, b: f"{render_load(ctx, b, l.dtype)}"),
+    (UPat(Ops.STORE, src=(UPat.var('b'), UPat.var("v")), allow_any_len=True),lambda ctx,b,v: f"{render_store(ctx, b, v, v.dtype)}"),
     # fix nan check: 'a != a -> is_nan()'
     (UPat(Ops.CMPNE, src=(UPat.var("a"), UPat.var("b"))), lambda ctx,a,b: f"is_nan({ctx[a]})" if a == b else None),
   ]) + base_rewrite
@@ -84,6 +85,8 @@ class WGSLRenderer(CStyleLanguage):
     # trick to obfuscate compiler so that nan is detected properly
     prg += "fn is_nan(v:f32) -> bool { return min(v, 1.0) == 1.0 && max(v, -1.0) == -1.0; }\n"
     prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
-    prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)+1}) {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}: {f'array<{self.type_map[dtype.base]}>' if isinstance(dtype, PtrDType) else 'i32'};" for name,(dtype,rw) in bufs])  # noqa: E501
-    prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501
-    return prg
+    prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)+1}) {'var<storage,read_write>' if isinstance(dtype, PtrDType)\
+      else 'var<uniform>'} {name}: {f'array<{f'atomic<{buffer_map[dtype.base]}>' if rw and (dtype.itemsize < 4) else buffer_map[dtype.base]}>'\
+      if isinstance(dtype, PtrDType) else buffer_map[dtype]};" for name,(dtype,rw) in bufs])
+    prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>,"
+    return prg + "@builtin(local_invocation_id) lindex: vec3<u32>) {\n" + "\n".join(kernel) + "\n}"
