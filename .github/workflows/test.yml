@@ -37,10 +37,10 @@ jobs:
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
         pip install mypy
         mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-    - name: Run beautiful_mnist without numpy
+    - name: Run beautiful_mnist with tinygrad only
       run: |
-        mkdir $HOME/test_no_numpy_dir
-        cd $HOME/test_no_numpy_dir
+        mkdir $GITHUB_WORKSPACE/test_dir
+        cd $GITHUB_WORKSPACE/test_dir
         python -m venv venv
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE
