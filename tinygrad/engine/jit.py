@@ -161,13 +161,13 @@ class CapturedJit(Generic[ReturnType]):
 
   # jit exec
   def __call__(self, input_buffers:List[Buffer], var_vals:Dict[Variable, int]) -> ReturnType:
-    if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
-    self._assign_inputs(input_buffers)
     # Condense the items into a graph executor.
     if JIT < 2 and not self._graphed:
-      self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
-      self._input_replace = get_input_replace(self._jit_cache, input_buffers)
+      self._jit_cache = apply_graph_to_jit(self.jit_cache, self._empty_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
+      self._input_replace = get_input_replace(self._jit_cache, self._empty_buffers)
       self._graphed = True
+    if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
+    self._assign_inputs(input_buffers)
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
     self._assign_inputs(self._empty_buffers)
     return self.ret
