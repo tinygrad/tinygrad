@@ -2,6 +2,11 @@ import os, ctypes
 from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_gc_11_0_0
 from tinygrad.helpers import to_mv, mv_address
 
+class AMRegister:
+  def __init__(self, adev, regoff): self.adev, self.regoff = adev, regoff
+  def write(self, value, inst=0): return self.adev.wreg(self.regoff, value)
+  def read(self, inst=0): return self.adev.rreg(self.regoff)
+
 class AMRing:
   def __init__(self, adev, size, pipe, queue, me, vmid, doorbell_index):
     self.adev, self.size, self.pipe, self.queue, self.me, self.vmid, self.doorbell_index = adev, size, pipe, queue, me, vmid, doorbell_index
@@ -137,7 +142,7 @@ class AMRing:
     self.mqd_vm.cpu_view()[:len(self.mqd_mv)] = self.mqd_mv
     self.adev.gmc.flush_hdp()
 
-  def write(self, value):
-    self.ring_vm.cpu_view().cast('I')[self.next_ptr % (self.size // 4)] = value
-    self.next_ptr += 1
-    self.wptr[0] = self.next_ptr
+  # def write(self, value):
+  #   self.ring_vm.cpu_view().cast('I')[self.next_ptr % (self.size // 4)] = value
+  #   self.next_ptr += 1
+  #   self.wptr[0] = self.next_ptr

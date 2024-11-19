@@ -10,17 +10,12 @@ from tinygrad.runtime.support.am.soc21 import SOC21_IP
 from tinygrad.runtime.support.am.smu import SMU_IP
 from tinygrad.runtime.support.am.psp import PSP_IP
 from tinygrad.runtime.support.am.gfx import GFX_IP
+from tinygrad.runtime.support.am.amring import AMRegister
 # from tinygrad.runtime.support.am.mes import MES_IP
-
-class AMRegister:
-  def __init__(self, adev, regoff): self.adev, self.regoff = adev, regoff
-  def write(self, value, inst=0): return self.adev.wreg(self.regoff, value)
-  def read(self, inst=0): return self.adev.rreg(self.regoff)
 
 class AMDev:
   def __init__(self, pcidev):
     self.pcidev = pcidev
-    self.usec_timeout = 1000000
 
     self.vram_cpu_addr, self.vram = self._map_pci_range(bar=0, cast='B')
     self.doorbell_cpu_addr, self.doorbell64 = self._map_pci_range(bar=2, cast='Q')
@@ -44,7 +39,7 @@ class AMDev:
     if self.psp.is_sos_alive():
       print("sOS is alive, issue mode1 reset...")
       self.smu.mode1_reset()
-      time.sleep(1)
+      time.sleep(0.5)
 
     self.soc21.init()
     self.gmc.init(self.mm.root_pt)
@@ -84,14 +79,10 @@ class AMDev:
     else: self.mmio[reg] = val
 
   def wait_reg(self, reg, value, mask=0xffffffff):
-    v = reg.read()
-    while v & mask != value: v = reg.read()
-
-    # for i in range(100):
-    #   val = self.adev.rreg_ip("GC", 0, amdgpu_gc_11_0_0.regCP_STAT, amdgpu_gc_11_0_0.regCP_STAT_BASE_IDX)
-    #   if val == 0: return
-    #   time.sleep(0.00001)
-    # raise Exception('gfx_v11_0_cp_gfx_enable timeout')
+    for _ in range(10000):
+      if ((rval:=reg.read()) & mask) == value: return rval
+      time.sleep(0.001)
+    raise Exception(f'wait_reg timeout reg=0x{reg.regoff:X} mask=0x{mask:X} value=0x{value:X} last_val=0x{rval}')
 
   def wdoorbell64(self, index, val): self.doorbell64[index//2] = val
 
@@ -109,13 +100,10 @@ class AMDev:
     DISCOVERY_TMR_SIZE = (10 << 10)
 
     # Wait for IFWI init to complete.
-    for i in range(1000):
-      if self.rreg(mmMP0_SMN_C2PMSG_33) & 0x80000000: break
-      time.sleep(0.001)
+    # self.wait_reg(AMRegister(self, mmMP0_SMN_C2PMSG_33), mask=0x80000000, value=0x80000000)
 
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
     self.discovery_pm = PhysicalMemory(self, self.vram_size - DISCOVERY_TMR_OFFSET, DISCOVERY_TMR_SIZE)
-    print("Detected VRAM size", self.vram_size)
 
     bhdr = amdgpu_discovery.struct_binary_header.from_address(self.discovery_pm.cpu_addr())
 
@@ -123,10 +111,7 @@ class AMDev:
     ihdr = amdgpu_discovery.struct_ip_discovery_header.from_address(ctypes.addressof(bhdr) + ip_offset)
     assert ihdr.signature == amdgpu_discovery.DISCOVERY_TABLE_SIGNATURE
 
-    hw_id_map = {}
-    for x,y in amdgpu_discovery.hw_id_map:
-      hw_id_map[amdgpu_discovery.__dict__[x]] = int(y)
-
+    hw_id_map = {amdgpu_discovery.__dict__[x]: int(y) for x,y in amdgpu_discovery.hw_id_map}
     self.regs_offset = collections.defaultdict(dict)
 
     num_dies = ihdr.num_dies
