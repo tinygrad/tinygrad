@@ -37,15 +37,13 @@ jobs:
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
         pip install mypy
         mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-    - name: Run quickstart and beautiful_mnist with just tinygrad
+    - name: Run beautiful_mnist with tinygrad only
       run: |
         mkdir $GITHUB_WORKSPACE/test_dir
         cd $GITHUB_WORKSPACE/test_dir
         python -m venv venv
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE
-        cp $GITHUB_WORKSPACE/docs/quickstart.md .
-        awk '/```python/{flag=1;next}/```/{flag=0}flag' quickstart.md > quickstart.py && PYTHONPATH=$GITHUB_WORKSPACE python quickstart.py
         cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
         PYTHONPATH=$GITHUB_WORKSPACE BS=2 STEPS=10 python beautiful_mnist.py
     - name: Test Docs Build
@@ -54,6 +52,8 @@ jobs:
       run: |
         python docs/abstractions2.py
         python docs/abstractions3.py
+    - name: Test Quickstart
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
     - name: Install OpenCL
