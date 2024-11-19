@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional, Any
+from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, Optional, Any
 import functools, collections
 from tinygrad.tensor import Tensor
 from tinygrad.engine.lazy import LazyBuffer
@@ -161,14 +161,13 @@ class CapturedJit(Generic[ReturnType]):
 
   # jit exec
   def __call__(self, input_buffers:List[Buffer], var_vals:Dict[Variable, int]) -> ReturnType:
-    # Condense the items into a graph executor.
-    if JIT < 2 and not self._graphed:
-      self._jit_cache = apply_graph_to_jit(self.jit_cache, self._empty_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
-      self._input_replace = get_input_replace(self._jit_cache, self._empty_buffers)
-      self._graphed = True
-
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
     self._assign_inputs(input_buffers)
+    # Condense the items into a graph executor.
+    if JIT < 2 and not self._graphed:
+      self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
+      self._input_replace = get_input_replace(self._jit_cache, input_buffers)
+      self._graphed = True
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
     self._assign_inputs(self._empty_buffers)
     return self.ret
@@ -264,7 +263,7 @@ class TinyJit(Generic[ReturnType]):
         for ei in jit_cache:
           if any(b in depends for b in ei.bufs):
             if isinstance(ei.prg, CompiledRunner):
-              for out in ei.prg.p.outs: depends.update(ei.bufs[out])
+              for out in ei.prg.p.outs: depends.add(ei.bufs[out])
         pruned, onetime = partition(jit_cache,
                                     lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
