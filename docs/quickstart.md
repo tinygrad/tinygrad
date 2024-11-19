@@ -8,7 +8,6 @@ This guide is also structured as a tutorial which at the end of it you will have
 We need some imports to get started:
 
 ```python
-import numpy as np
 from tinygrad.helpers import Timing
 ```
 
@@ -27,8 +26,7 @@ Tensors can be created from an existing data structure like a python list or num
 
 ```python
 t1 = Tensor([1, 2, 3, 4, 5])
-na = np.array([1, 2, 3, 4, 5])
-t2 = Tensor(na)
+# t2 = Tensor(numpy.array([1, 2, 3, 4, 5]))  # `pip install numpy` to use
 ```
 
 Tensors can also be created using one of the many factory methods:
@@ -68,11 +66,11 @@ t5 = (t4 + 1) * 2
 t6 = (t5 * t4).relu().log_softmax()
 ```
 
-All of these operations are lazy and are only executed when you realize the tensor using `.realize()` or `.numpy()`.
+All of these operations are lazy and are only executed when you realize the tensor using `.realize()`, `.tolist()`, or `.numpy()`.
 
 ```python
-print(t6.numpy())
-# [-56. -48. -36. -20.   0.]
+print(t6.tolist())
+# [-56.0, -48.0, -36.0, -20.0, 0.0]
 ```
 
 There are a lot more operations that can be performed on tensors, you can find them in the [Tensor Ops](tensor/ops.md) file.
@@ -109,6 +107,7 @@ class TinyNet:
     self.l2 = Linear(128, 10, bias=False)
 
   def __call__(self, x):
+    x = x.reshape(-1, 784)
     x = self.l1(x)
     x = x.leakyrelu()
     x = self.l2(x)
@@ -159,7 +158,7 @@ There are a couple of dataset loaders in tinygrad located in [/extra/datasets](h
 We will be using the MNIST dataset loader.
 
 ```python
-from extra.datasets import fetch_mnist
+from tinygrad.nn.datasets import mnist
 ```
 
 Now we have everything we need to start training our neural network.
@@ -169,15 +168,16 @@ We use `with Tensor.train()` to set the internal flag `Tensor.training` to `True
 Upon exit, the flag is restored to its previous value by the context manager.
 
 ```python
-X_train, Y_train, X_test, Y_test = fetch_mnist()
+X_train, Y_train, X_test, Y_test = mnist()
 
 with Tensor.train():
   for step in range(1000):
     # random sample a batch
-    samp = np.random.randint(0, X_train.shape[0], size=(64))
-    batch = Tensor(X_train[samp], requires_grad=False)
+    batch_size = 64
+    samp = Tensor.randint(batch_size, low=0, high=X_train.shape[0])
+    batch = X_train[samp]
     # get the corresponding labels
-    labels = Tensor(Y_train[samp])
+    labels = Y_train[samp]
 
     # forward pass
     out = net(batch)
@@ -199,7 +199,7 @@ with Tensor.train():
     acc = (pred == labels).mean()
 
     if step % 100 == 0:
-      print(f"Step {step+1} | Loss: {loss.numpy()} | Accuracy: {acc.numpy()}")
+      print(f"Step {step+1} | Loss: {loss.item()} | Accuracy: {acc.item()}")
 ```
 
 ## Evaluation
@@ -212,8 +212,9 @@ with Timing("Time: "):
   avg_acc = 0
   for step in range(1000):
     # random sample a batch
-    samp = np.random.randint(0, X_test.shape[0], size=(64))
-    batch = Tensor(X_test[samp], requires_grad=False)
+    batch_size = 64
+    samp = Tensor.randint(batch_size, low=0, high=X_test.shape[0])
+    batch = X_test[samp]
     # get the corresponding labels
     labels = Y_test[samp]
 
@@ -221,8 +222,8 @@ with Timing("Time: "):
     out = net(batch)
 
     # calculate accuracy
-    pred = out.argmax(axis=-1).numpy()
-    avg_acc += (pred == labels).mean()
+    pred = out.argmax(axis=-1)
+    avg_acc = avg_acc + (pred == labels).mean()
   print(f"Test Accuracy: {avg_acc / 1000}")
 ```
 
@@ -256,8 +257,9 @@ with Timing("Time: "):
   avg_acc = 0
   for step in range(1000):
     # random sample a batch
-    samp = np.random.randint(0, X_test.shape[0], size=(64))
-    batch = Tensor(X_test[samp], requires_grad=False)
+    batch_size = 64
+    samp = Tensor.randint(batch_size, low=0, high=X_test.shape[0])
+    batch = X_test[samp]
     # get the corresponding labels
     labels = Y_test[samp]
 
@@ -265,8 +267,8 @@ with Timing("Time: "):
     out = jit(batch)
 
     # calculate accuracy
-    pred = out.argmax(axis=-1).numpy()
-    avg_acc += (pred == labels).mean()
+    pred = out.argmax(axis=-1)
+    avg_acc = avg_acc + (pred == labels).mean()
   print(f"Test Accuracy: {avg_acc / 1000}")
 ```
 
