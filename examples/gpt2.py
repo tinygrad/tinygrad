@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-import os
+import os, argparse
 from typing import Optional, Union
-import argparse
-import numpy as np
 import tiktoken
-from tinygrad import Tensor, TinyJit, Device, GlobalCounters, Variable
-from tinygrad.dtype import dtypes
+from tinygrad import Tensor, TinyJit, Device, GlobalCounters, Variable, dtypes
 from tinygrad.ops import UOp
 from tinygrad.helpers import Timing, DEBUG, JIT, getenv, fetch, colored, trange
 from tinygrad.nn import Embedding, Linear, LayerNorm
@@ -218,7 +215,6 @@ if __name__ == "__main__":
 
   if args.seed is not None:
     Tensor.manual_seed(args.seed)
-    np.random.seed(args.seed)
 
   print(f"using {args.model_size}")
   gpt2 = GPT2.build_gguf(args.model_size) if args.model_size.startswith("gpt2_gguf_") else GPT2.build(args.model_size)
