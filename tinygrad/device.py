@@ -85,8 +85,8 @@ class Buffer:
       self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferOptions(external_ptr=external_ptr)
     if self._base is not None:
       self._base.ensure_allocated()
-      assert hasattr(self.allocator, "offset"), "offset function required for view"
-      self._buf: Any = self.allocator.offset(self.base._buf, self.nbytes, self.offset)
+      assert hasattr(self.allocator, "_offset"), "offset function required for view"
+      self._buf: Any = self.allocator._offset(self.base._buf, self.nbytes, self.offset)
     else:
       self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
@@ -143,6 +143,9 @@ class Allocator:
   def _free(self, opaque, options:BufferOptions): pass  # if opaque is a Python object, you don't need a free
   def _copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
   def _copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
+  # def _as_buffer(self, src) -> memoryview:
+  # def _offset(self, buf, size:int, offset:int):
+  # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   """
@@ -170,7 +173,7 @@ class _MallocAllocator(LRUAllocator):
   def _as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
-  def offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
+  def _offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
 
 MallocAllocator = _MallocAllocator()
 

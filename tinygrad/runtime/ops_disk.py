@@ -65,7 +65,7 @@ class DiskAllocator(Allocator):
         DiskDevice.io_uring.cq.khead[0] = head + 1 # advance
         processed_reqs_cnt += 1
 
-  def offset(self, buf:DiskBuffer, size:int, offset:int): return DiskBuffer(buf.device, size, offset)
+  def _offset(self, buf:DiskBuffer, size:int, offset:int): return DiskBuffer(buf.device, size, offset)
 
 class DiskDevice(Compiled):
   _tried_io_uring_init = False

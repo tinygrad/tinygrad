@@ -139,7 +139,7 @@ class MetalAllocator(LRUAllocator):
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): msg(opaque.buf, "release")
-  def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
+  def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = msg(src_dev.mtl_queue, "commandBuffer", restype=objc_instance)
     encoder = msg(src_command_buffer, "blitCommandEncoder", restype=objc_instance)
@@ -155,6 +155,7 @@ class MetalAllocator(LRUAllocator):
       src_dev.timeline_value += 1
     msg(src_command_buffer, "commit")
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
+  # NOTE: this is unused
   def from_buffer(self, src:memoryview) -> Optional[Any]:
     ptr = (ctypes.c_char * src.nbytes).from_buffer(src)
     ret = msg(self.device.device, "newBufferWithBytesNoCopy:length:options:deallocator:", ptr, src.nbytes, 0, None, restype=objc_instance)
@@ -167,7 +168,7 @@ class MetalAllocator(LRUAllocator):
     return memoryview(array).cast("B")[src.offset:]
   def _copyin(self, dest:MetalBuffer, src:memoryview): self._as_buffer(dest)[:] = src
   def _copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self._as_buffer(src)
-  def offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
+  def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):

@@ -136,7 +136,7 @@ class BufferCopy(Runner):
       return time.perf_counter() - st
 
 class BufferXfer(BufferCopy):
-  def copy(self, dest, src): dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
+  def copy(self, dest, src): dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
 
 # **************** method cache ****************
 
@@ -189,7 +189,7 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   out, arg = si.outputs[0], si.ast.arg
   if si.ast.op is Ops.COPY:
     kernel_type = BufferCopy
-    if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
+    if hasattr(Device[out.device].allocator, '_transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       kernel_type = BufferXfer
     return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
   if si.ast.op is Ops.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))

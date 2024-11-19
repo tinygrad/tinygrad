@@ -80,14 +80,14 @@ class CUDAAllocator(LRUAllocator):
     CUDADevice.synchronize_system()
     check(cuda.cuCtxSetCurrent(self.device.context))
     check(cuda.cuMemcpyDtoH_v2(from_mv(dest), src, len(dest)))
-  def transfer(self, dest, src, sz:int, src_dev, dest_dev):
+  def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
     check(cuda.cuCtxSetCurrent(src_dev.context))
     check(cuda.cuEventCreate(ctypes.byref(sync_event := cuda.CUevent()), 0))
     check(cuda.cuMemcpyDtoDAsync_v2(dest, src, sz, None))
     check(cuda.cuEventRecord(sync_event, None))
     check(cuda.cuCtxSetCurrent(dest_dev.context))
     check(cuda.cuStreamWaitEvent(None, sync_event, 0)) # sync the default stream on the dest dev
-  def offset(self, buf, size:int, offset:int): return cuda.CUdeviceptr_v2(buf.value + offset)
+  def _offset(self, buf, size:int, offset:int): return cuda.CUdeviceptr_v2(buf.value + offset)
 
 class CUDADevice(Compiled):
   devices: List[CUDADevice] = []
