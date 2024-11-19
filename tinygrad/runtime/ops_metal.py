@@ -160,13 +160,13 @@ class MetalAllocator(LRUAllocator):
     ret = msg(self.device.device, "newBufferWithBytesNoCopy:length:options:deallocator:", ptr, src.nbytes, 0, None, restype=objc_instance)
     if ret: self.device.mv_in_metal.append(src)
     return MetalBuffer(ret, src.nbytes)
-  def as_buffer(self, src:MetalBuffer) -> memoryview:
+  def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.device.synchronize()
     ptr = msg(src.buf, "contents", restype=objc_id) # Shared memory, do not release here
     array = (ctypes.c_char * (src.offset + src.size)).from_address(ptr.value)
     return memoryview(array).cast("B")[src.offset:]
-  def _copyin(self, dest:MetalBuffer, src:memoryview): self.as_buffer(dest)[:] = src
-  def _copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self.as_buffer(src)
+  def _copyin(self, dest:MetalBuffer, src:memoryview): self._as_buffer(dest)[:] = src
+  def _copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self._as_buffer(src)
   def offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
 
 class MetalDevice(Compiled):

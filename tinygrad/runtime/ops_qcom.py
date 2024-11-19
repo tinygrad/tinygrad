@@ -332,7 +332,7 @@ class QCOMAllocator(HCQAllocator):
     if (qs:=cast(QCOMBuffer, src)).pitch is not None: self._do_copy(qs.va_addr, mv_address(dest), qs.size, qs.real_stride, qs.pitch, qs.real_stride)
     else: ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
 
-  def as_buffer(self, src:HCQBuffer) -> memoryview:
+  def _as_buffer(self, src:HCQBuffer) -> memoryview:
     self.device.synchronize()
     return to_mv(src.va_addr, src.size)
 

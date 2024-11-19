@@ -55,7 +55,7 @@ class MetalGraph(GraphRunner):
     self.all_resources = dedup(all_resources)
     self.all_pipelines = dedup(all_pipelines)
     self.command_buffer: Any = None
-    if len(self.vars): self.int_buf_view = self.device.allocator.as_buffer(self.int_buf).cast('i')
+    if len(self.vars): self.int_buf_view = self.device.allocator._as_buffer(self.int_buf).cast('i')
     self.range = to_struct(0, len(self.jit_cache))
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
