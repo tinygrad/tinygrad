@@ -152,22 +152,24 @@ class CapturedJit(Generic[ReturnType]):
     assert len(self._empty_buffers) == len(input_buffers), "some input buffers didn't match?"
     self._assign_inputs(self._empty_buffers)
 
-  def _assign_inputs(self, input_buffers:List[Buffer]) -> None:
-    input_buffers_copy = input_buffers.copy()
+  def _assign_inputs(self, input_buffers:List[Buffer]) -> List[Buffer]:
+    input_buffers_total = input_buffers.copy()
     # assign inputs
     for idx, offset, device, size, dtype in self.extra_view_inputs:
-      input_buffers_copy.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset))
-    for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers_copy[input_idx]
+      input_buffers_total.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset))
+    for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers_total[input_idx]
+    return input_buffers_total
 
   # jit exec
   def __call__(self, input_buffers:List[Buffer], var_vals:Dict[Variable, int]) -> ReturnType:
-    # Condense the items into a graph executor.
-    if JIT < 2 and not self._graphed:
-      self._jit_cache = apply_graph_to_jit(self.jit_cache, self._empty_buffers, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
-      self._input_replace = get_input_replace(self._jit_cache, self._empty_buffers)
-      self._graphed = True
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
-    self._assign_inputs(input_buffers)
+    input_buffers_total = self._assign_inputs(input_buffers)
+    # Condense the items into a graph executor.
+    # TODO: HCQ doesn't support building graphs with _empty_buffers, fix this
+    if JIT < 2 and not self._graphed:
+      self._jit_cache = apply_graph_to_jit(self.jit_cache, input_buffers_total, var_vals, max_batch_size=getenv("JIT_BATCH_SIZE", 32))
+      self._input_replace = get_input_replace(self._jit_cache, input_buffers_total)
+      self._graphed = True
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
     self._assign_inputs(self._empty_buffers)
     return self.ret
