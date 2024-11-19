@@ -165,9 +165,9 @@ class ScheduleItemContext:
   var_vals: Dict[Variable, int]
   assigned: Set[UOp]
   sinked: Dict[UOp, UOp]
+  metadata: Set[Metadata]
   sts: Set[ShapeTracker] = field(default_factory=set)
   bufs: List[UOp] = field(default_factory=list)
-  metadata: Set[Metadata] = field(default_factory=set)
   assign_preloads: List[UOp] = field(default_factory=list)
 
 def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
@@ -207,8 +207,7 @@ lazy = PatternMatcher([
 multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.sinked.get(b)),])
 
 def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemContext]:
-  si_ctx = ScheduleItemContext(ctx.var_vals, ctx.assigns, {x.buf_uop:x.src[2] for x in pre.src},
-                               metadata={x.buf_uop.metadata for x in pre.src if x.buf_uop.metadata is not None})
+  si_ctx = ScheduleItemContext(ctx.var_vals, ctx.assigns, {x.buf_uop:x.src[2] for x in pre.src}, {x.metadata for x in pre.src if x.metadata})
   # fuse and fold store -> loads
   sink = graph_rewrite(pre, lazy+multioutput if len(pre.src)>1 else lazy, si_ctx)
   # assert cyclic dependency
