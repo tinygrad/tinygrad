@@ -79,9 +79,23 @@ class TestSetitem(unittest.TestCase):
     t[1] -= 1
     np.testing.assert_allclose(t.numpy(), [[0, 1], [3, 4]])
 
-  # TODO: #7739 fix when setting value 0 to overlapping indices
-  @unittest.expectedFailure
   def test_setitem_overlapping_indices(self):
+    t = Tensor([1,2,3,4])
+    n = np.array([1,2,3,4])
+    # regular overlapping indices
+    t[[1,1]] = Tensor([5,6])
+    n[[1,1]] = np.array([5,6])
+    np.testing.assert_allclose(t.numpy(), n)
+
+    # overlapping indices with zero value overlapped
+    t[[1,1]] = Tensor([0,1])
+    n[[1,1]] = np.array([0,1])
+    np.testing.assert_allclose(t.numpy(), n)
+
+  # TODO: #7739 fix when setting value 0 to overlapping indices
+  # error occurs when previous overlapped values are non-zero and last overlapping value is zero
+  @unittest.expectedFailure
+  def test_setitem_overlapping_indices_failure(self):
     t = Tensor([1,2,3,4])
     n = np.array([1,2,3,4])
     t[[1,1]] = Tensor([1,0])
