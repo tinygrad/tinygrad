@@ -81,11 +81,11 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], lazyb
              None if buf.op in {Ops.CAST, Ops.BITCAST} else buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
   if op is not None:
-    if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
     lazybufs[buf.buffer] = buf
+    ctx.allbufs[ubuf] = ret
+    if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
     for x in op.src:
       if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[ubuf] = None
-    ctx.allbufs[ubuf] = ret
   return ret
 
 # **** AST graph rewrite
@@ -166,8 +166,11 @@ view_right = merge_views+PatternMatcher([
 class ScheduleItemContext:
   var_vals: Dict[Variable, int]
   assigned: Set[UOp]
+  ubuf_metadata: Dict[UOp, Metadata]
+  sinked: Dict[UOp, UOp]
   sts: Set[ShapeTracker] = field(default_factory=set)
   bufs: List[UOp] = field(default_factory=list)
+  metadata: Set[Metadata] = field(default_factory=set)
   assign_preloads: List[UOp] = field(default_factory=list)
 
 def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
@@ -194,19 +197,25 @@ to_si = PatternMatcher([
 
 # ** fusion
 
+def fuse_src(ctx:ScheduleItemContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
+  if (metadata:=ctx.ubuf_metadata.get(b)) is not None: ctx.metadata.add(metadata)
+  return to_store
+
 lazy = PatternMatcher([
-  (UPatSrc(), lambda ctx,to_store,**kwargs: to_store),
+  (UPatSrc(), fuse_src),
   (UPat(Ops.BUFFER, name="b").view(name="view"), lambda ctx,b,view: UOp(Ops.PRELOAD, view.dtype, (b, view.st.to_uop()))),
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
 ])
 
-multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.get(b)),])
+multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.sinked.get(b)),])
 
-def full_ast_rewrite(pre:UOp, var_vals:Dict[Variable, int], assigned:Set[UOp]) -> Tuple[UOp, ScheduleItemContext]:
+def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemContext]:
+  si_ctx = ScheduleItemContext(ctx.var_vals, ctx.assigns, ctx.ubuf_metadata, {x.buf_uop:x.src[2] for x in pre.src},
+                               metadata={mx for x in pre.src if (mx:=ctx.ubuf_metadata.get(x.buf_uop))})
   # fuse and fold store -> loads
-  sink = graph_rewrite(pre, lazy+multioutput if len(pre.src)>1 else lazy, {x.buf_uop:x.src[2] for x in pre.src})
+  sink = graph_rewrite(pre, lazy+multioutput if len(pre.src)>1 else lazy, si_ctx)
   # assert cyclic dependency
-  for b,ops in itertools.groupby((x for x in sink.sparents if x.op in {Ops.PRELOAD,Ops.LOAD} and x.buf_uop in assigned), key=lambda x:x.buf_uop):
+  for b,ops in itertools.groupby((x for x in sink.sparents if x.op in {Ops.PRELOAD,Ops.LOAD} and x.buf_uop in ctx.assigns), key=lambda x:x.buf_uop):
     if not all_same([x.op for x in ops]):
       raise RuntimeError(f"cycle detected in kernel.\nhelp: use .contiguous() to break the part loading pre-assign {b} into a different kernel.")
   # do movementops
@@ -218,9 +227,9 @@ def full_ast_rewrite(pre:UOp, var_vals:Dict[Variable, int], assigned:Set[UOp]) -
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
   # convert to AST
-  sink = graph_rewrite(graph_rewrite(sink, to_si, ctx:=ScheduleItemContext(var_vals, assigned)), append_bufs, ctx)
-  if getenv("RUN_PROCESS_REPLAY"): PROCESS_REPLAY_CAPTURE.append(((pre, var_vals, assigned), sink))
-  return sink, ctx
+  sink = graph_rewrite(graph_rewrite(sink, to_si, si_ctx), append_bufs, si_ctx)
+  if getenv("RUN_PROCESS_REPLAY"): PROCESS_REPLAY_CAPTURE.append(((pre, ctx), sink))
+  return sink, si_ctx
 
 PROCESS_REPLAY_CAPTURE: List[Tuple[Tuple, UOp]] = []
 if getenv("RUN_PROCESS_REPLAY"):
@@ -375,13 +384,12 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   store_groups = group_realizes(ctx, realizes)
   # split realizes into small graphs
   graph_rewrite(big_graph, break_sched, realizes)
-  sinks = [UOp.sink(*(realizes[u] for u in stores)) for stores in store_groups]
   # preschedule all realizes
   prescheduled: List[ScheduleItem] = []
-  for sink in sinks:
-    metadata = tuple({mx for x in sink.sparents if (x.op is Ops.STORE or is_scheduled(x)) and (mx:=ctx.ubuf_metadata.get(x.buf_uop))})
-    ast, ast_ctx = full_ast_rewrite(sink, ctx.var_vals, ctx.assigns)
-    prescheduled.append(ScheduleItem(ast, tuple(b for u in ast_ctx.bufs if (b:=buffers[u]).size != 0), metadata, tuple(ast_ctx.assign_preloads)))
+  for store_uops in store_groups:
+    ast, ast_ctx = full_ast_rewrite(UOp.sink(*(realizes[u] for u in store_uops)), ctx)
+    prescheduled.append(ScheduleItem(ast, tuple(b for u in ast_ctx.bufs if (b:=buffers[u]).size != 0),
+                                     tuple(ast_ctx.metadata), tuple(ast_ctx.assign_preloads)))
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
