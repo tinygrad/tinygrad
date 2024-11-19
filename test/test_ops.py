@@ -2300,7 +2300,6 @@ class TestOps(unittest.TestCase):
   @unittest.expectedFailure
   def test_scatter_overlapping_0(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
-    a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     # overlapping 0's
     helper_test_op(None,
       lambda x,index,src: x.scatter(1, index, src),
