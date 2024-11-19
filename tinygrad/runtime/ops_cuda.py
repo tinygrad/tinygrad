@@ -70,13 +70,13 @@ class CUDAAllocator(LRUAllocator):
   def _free(self, opaque, options:BufferOptions):
     if options.host: check(cuda.cuMemFreeHost(opaque))
     else: check(cuda.cuMemFree_v2(opaque))
-  def copyin(self, dest, src:memoryview):
+  def _copyin(self, dest, src:memoryview):
     check(cuda.cuCtxSetCurrent(self.device.context))
     host_mem = self.alloc(len(src), BufferOptions(host=True))
     self.device.pending_copyin.append((host_mem, len(src), BufferOptions(host=True)))
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(cuda.cuMemcpyHtoDAsync_v2(dest, host_mem, len(src), None))
-  def copyout(self, dest:memoryview, src):
+  def _copyout(self, dest:memoryview, src):
     CUDADevice.synchronize_system()
     check(cuda.cuCtxSetCurrent(self.device.context))
     check(cuda.cuMemcpyDtoH_v2(from_mv(dest), src, len(dest)))

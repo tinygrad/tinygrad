@@ -48,8 +48,8 @@ a = MallocAllocator.alloc(na.size * np.dtype(np.float32).itemsize)
 b = MallocAllocator.alloc(nb.size * np.dtype(np.float32).itemsize)
 c = MallocAllocator.alloc(nc.size * np.dtype(np.float32).itemsize)
 
-MallocAllocator.copyin(b, flat_mv(nb.data))
-MallocAllocator.copyin(c, flat_mv(nc.data))
+MallocAllocator._copyin(b, flat_mv(nb.data))
+MallocAllocator._copyin(c, flat_mv(nc.data))
 
 module = ir.Module(name=__file__)
 func = ir.Function(module, ir.FunctionType(ir.IntType(64), [ir.FloatType().as_pointer()]*3), name='exec')
@@ -171,7 +171,7 @@ def timeit(fxn):
   return time.perf_counter() - st
 
 tm = min([timeit(lambda: prog(a, b, c, N**2)) for _ in range(20)])
-MallocAllocator.copyout(flat_mv(na.data), a)
+MallocAllocator._copyout(flat_mv(na.data), a)
 print(f"{N*N:10d} {tm*1e6:9.2f} us, {BW*1e-9/tm:.2f} GB/s")
 
 np.testing.assert_allclose(na[:ns.shape[0]], ns, atol=1e-4, rtol=1e-4)

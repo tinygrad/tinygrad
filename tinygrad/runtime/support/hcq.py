@@ -475,7 +475,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
 
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer: raise NotImplementedError("need hcq compat alloc")
 
-  def copyin(self, dest:HCQBuffer, src:memoryview):
+  def _copyin(self, dest:HCQBuffer, src:memoryview):
     with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"CPU -> {self.device.dname}", enabled=PROFILE):
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
@@ -503,7 +503,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
         self.b_timeline[batch_info[1]] = self.device.timeline_value
         self.device.timeline_value += 1
 
-  def copyout(self, dest:memoryview, src:HCQBuffer):
+  def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.device.synchronize()
 
     with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"{self.device.dname} -> CPU", enabled=PROFILE):
