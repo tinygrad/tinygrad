@@ -2,8 +2,9 @@
 import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import Ops
-from tinygrad.engine.lazy import LazyBuffer, MetaOps
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.schedule import create_schedule
 
 class TestLazyBuffer(unittest.TestCase):
@@ -69,6 +70,25 @@ class TestLazyBuffer(unittest.TestCase):
     assert lb.const_like(1).base.arg == 1.0
     assert type(lb.const_like(1).base.arg) is float
 
+  def test_forced_realized_alu(self):
+    a = Tensor.randn(2, 2).realize()
+    b = Tensor.randn(2, 2).realize()
+    add = a + b
+    add.lazydata.forced_realize = True
+    out = add+2
+    sched = create_schedule([out.lazydata])
+    self.assertEqual(len(sched), 2)
+    run_schedule(sched)
+    np.testing.assert_allclose(out.numpy(), a.numpy()+b.numpy()+2)
+
+  def test_forced_realized_metaop(self):
+    empty = Tensor.empty(1)
+    empty.lazydata.forced_realize = True
+    sched = create_schedule([empty.lazydata])
+    self.assertEqual(len(sched), 1)
+    self.assertIs(sched[0].ast.op, Ops.EMPTY)
+    run_schedule(sched)
+
 class TestReduceOp(unittest.TestCase):
   def test_no_split_reduce_kernel(self):
     a = Tensor.rand(4, 4).realize()
@@ -95,24 +115,24 @@ class TestReduceOp(unittest.TestCase):
 
 class TestView(unittest.TestCase):
   def test_all_masked_out(self):
-    # start with non CONST MetaOps
+    # start with non CONST Ops
     a = Tensor.rand(10, 10)
-    assert a.lazydata.base.op is not MetaOps.CONST
+    assert a.lazydata.base.op is not Ops.CONST
 
     # all masked out, degrades to const 0
     b = a.pad(((0, 10), None))[10:]
     assert b.shape == (10, 10)
-    assert b.lazydata.base.op is MetaOps.CONST and b.lazydata.base.arg == 0
+    assert b.lazydata.base.op is Ops.CONST and b.lazydata.base.arg == 0
 
     # mask out dim = 1 works too
     b = a.pad((None, (0, 10)))[:, 10:]
     assert b.shape == (10, 10)
-    assert b.lazydata.base.op is MetaOps.CONST and b.lazydata.base.arg == 0
+    assert b.lazydata.base.op is Ops.CONST and b.lazydata.base.arg == 0
 
     # partial masked out does not degrade into CONST
     b = a.pad(((0, 5), None))[5:]
     assert b.shape == (10, 10)
-    assert b.lazydata.base.op is not MetaOps.CONST
+    assert b.lazydata.base.op is not Ops.CONST
 
 if __name__ == "__main__":
   unittest.main()
