@@ -199,7 +199,7 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
   while len(schedule):
     si = schedule.pop(0)
-    try: yield lower_schedule_item(si)
+    try: yield from (lowered if isinstance(lowered:=lower_schedule_item(si), Generator) else iter([lowered]))
     except Exception as e:
       if DEBUG >= 2:
         print(f"error lowering {si.ast.op}")
