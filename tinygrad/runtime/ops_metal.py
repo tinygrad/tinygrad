@@ -155,12 +155,6 @@ class MetalAllocator(LRUAllocator):
       src_dev.timeline_value += 1
     msg(src_command_buffer, "commit")
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
-  # NOTE: this is unused
-  def from_buffer(self, src:memoryview) -> Optional[Any]:
-    ptr = (ctypes.c_char * src.nbytes).from_buffer(src)
-    ret = msg(self.device.device, "newBufferWithBytesNoCopy:length:options:deallocator:", ptr, src.nbytes, 0, None, restype=objc_instance)
-    if ret: self.device.mv_in_metal.append(src)
-    return MetalBuffer(ret, src.nbytes)
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.device.synchronize()
     ptr = msg(src.buf, "contents", restype=objc_id) # Shared memory, do not release here
