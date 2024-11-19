@@ -227,7 +227,7 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemCon
       and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in si_ctx.assign_preloads if si_ctx.sinked.get(x.buf_uop) is not None):
     raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                        +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  if getenv("RUN_PROCESS_REPLAY"): PROCESS_REPLAY_CAPTURE.append(((pre, ctx.var_vals, ctx.assigns), sink))
+  if getenv("RUN_PROCESS_REPLAY"): PROCESS_REPLAY_CAPTURE.append(((pre, ctx), sink))
   return sink, si_ctx
 
 PROCESS_REPLAY_CAPTURE: List[Tuple[Tuple, UOp]] = []
