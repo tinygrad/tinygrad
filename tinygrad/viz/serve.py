@@ -96,25 +96,27 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
 # ** HTTP server
 
 class Handler(BaseHTTPRequestHandler):
+  protocol_version = 'HTTP/1.1'
+
   def do_GET(self):
+    ret, status_code, content_type = b"", 200, "text/html"
+
     if (url:=urlparse(self.path)).path == "/":
-      self.send_response(200)
-      self.send_header("Content-type", "text/html")
-      self.end_headers()
-      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f:
-        ret = f.read()
+      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
     elif url.path == "/kernels":
-      self.send_response(200)
-      self.send_header("Content-type", "application/json")
-      self.end_headers()
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
         g = get_details(*kernels[int(qkernel[0])][int(query["idx"][0])])
-        ret = json.dumps({**asdict(g), "graphs": list(map(uop_to_json, g.graphs)), "uops": list(map(lambda x:pcall(str,x), g.graphs))}).encode()
-      else: ret = json.dumps([list(map(lambda x:asdict(x[2]), v)) for v in kernels]).encode()
-    else:
-      self.send_response(404)
-      ret = b""
+        jret: Any = {**asdict(g), "graphs": [uop_to_json(x) for x in g.graphs], "uops": [pcall(str,x) for x in g.graphs]}
+      else: jret = [list(map(lambda x:asdict(x[2]), v)) for v in kernels]
+      ret, content_type = json.dumps(jret).encode(), "application/json"
+    else: status_code = 404
+
+    # send response
+    self.send_response(status_code)
+    self.send_header('Content-Type', content_type)
+    self.send_header('Content-Length', str(len(ret)))
+    self.end_headers()
     return self.wfile.write(ret)
 
 # ** main loop
