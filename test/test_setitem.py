@@ -81,7 +81,7 @@ class TestSetitem(unittest.TestCase):
 
   # TODO: #7739 fix when setting value 0 to overlapping indices
   @unittest.expectedFailure
-  def test_setitem_overlapping_0s(self):
+  def test_setitem_overlapping_indices(self):
     t = Tensor([1,2,3,4])
     n = np.array([1,2,3,4])
     t[[1,1]] = Tensor([1,0])
