@@ -108,7 +108,7 @@ class dtypes:
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
-  int8: Final[DType] = DType.new(1, 1, "char", 'b')
+  int8: Final[DType] = DType.new(1, 1, "signed char", 'b')
   uint8: Final[DType] = DType.new(2, 1, "unsigned char", 'B')
   int16: Final[DType] = DType.new(3, 2, "short", 'h')
   uint16: Final[DType] = DType.new(4, 2, "unsigned short", 'H')
