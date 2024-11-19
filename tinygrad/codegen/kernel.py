@@ -9,14 +9,27 @@ from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, PatternMatcher, can_pad,
     graph_rewrite, track_rewrites, UPat
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, Program
-from tinygrad.dtype import ImageDType
+from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap
-from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
+from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX, KERNEL_SPLIT
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
+
+@functools.lru_cache(None)
+def ordered_parents(op:UOp) -> List[UOp]: return dedup([item for x in op.src for item in ordered_parents(x)] + [op])
+
+def UPatSrc(*args, **kwargs): return UPat(Ops.VIEW, src=(UPat.var("b"), UPat(*args, **{**kwargs, "name":"to_store"})), name="base")
+
+def reduceop(ctx, base, g, dest_view, reduce, src_view):
+  ret = base.replace(src=(g, dest_view, reduce))
+  return ret
+
+rewrite_split = PatternMatcher([
+  (UPat(Ops.REDUCE_AXIS, src=(UPat(src=(UPat.var(), UPat(Ops.VIEW, name="view"))))), lambda ctx, view: view.replace(arg=view.arg.reshape((64, 4, 16))))
+])
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
@@ -63,8 +76,7 @@ class Kernel:
       print(self.ast)
       raise e
 
-    @functools.lru_cache(None)
-    def ordered_parents(op:UOp) -> List[UOp]: return dedup([item for x in op.src for item in ordered_parents(x)] + [op])
+    
     self.reduceops = dedup([x for x in ordered_parents(self.ast) if x.op is Ops.REDUCE_AXIS])
 
     self.vars: List[Variable] = self.ast.variables()
@@ -606,15 +618,43 @@ class Kernel:
     num = f"n{Kernel.kernel_cnt[function_name]-1}" if Kernel.kernel_cnt[function_name] > 1 else ""
     return name + colored(num, 'BLACK')
 
+  def split_reduce(self, op:UOp) -> List[UOp]:
+    if op.op is Ops.SINK:
+      store = op.src[0]
+      define_global, dest_view, reduce = store.src
+      if reduce.op is Ops.REDUCE_AXIS:
+        load = reduce.src[0]
+        define_global2, src_view = load.src
+        def new_kernel(shape1, shape2, axis):
+          return UOp(Ops.SINK, op.dtype, arg=op.arg, src=(
+            UOp(Ops.STORE, store.dtype, src=(
+              UOp(Ops.DEFINE_GLOBAL, dtype=define_global, arg=define_global.arg),
+              UOp(Ops.VIEW, dtype=src_view.dtype, arg=ShapeTracker.from_shape(shape1)),
+              UOp(Ops.REDUCE_AXIS, reduce.dtype, arg=(reduce.arg[0], axis), src=(
+               UOp(Ops.LOAD, dtypes.float, src=(
+                  UOp(Ops.DEFINE_GLOBAL, define_global2.dtype, ),
+                  UOp(Ops.VIEW, dtype=src_view.dtype, arg=ShapeTracker.from_shape(shape2))
+                )), 
+              ))
+            )),
+          ))
+        kernel1 = new_kernel((64, 1, 16), (64, 4, 16), (1,))
+        kernel2 = new_kernel((64, 1, 1), (64, 1, 16), (2,))
+        print(f"{kernel1=}")
+        print(f"{kernel2=}")
+        return kernel1, kernel2
   def get_optimized_ast(self) -> UOp:
     @functools.lru_cache(None)
     def fixup_ast(op:UOp) -> UOp:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
       if op.op in GroupOp.Buffer and op in self.bufs:
         st_uop = self.sts[self.bufs.index(op)].to_uop()
-        return ret.replace(src=(st_uop,)) if op.op is Ops.VALID else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
-      if op.op is Ops.SINK: return ret.replace(arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
+        ret = ret.replace(src=(st_uop,)) if op.op is Ops.VALID else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
+        return ret
+      if op.op is Ops.SINK:
+        return ret.replace(arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
       if op.op is Ops.REDUCE_AXIS:
+        self.reduceops = dedup([x for x in ordered_parents(op) if x.op is Ops.REDUCE_AXIS])
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
 
         def reduced_axes(start, stop):
@@ -675,21 +715,24 @@ class Kernel:
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local=True), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
           local_load = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, ret)))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
-          if op is self.reduceops[-1]: return grouped_reduce
+          if op is self.reduceops[-1]:
+            return grouped_reduce
           st_uop = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else a for i,a in enumerate(local_shape)])).to_uop()
           return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
 
       return ret
-
-    return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
-      (UPat({*GroupOp.ALU,Ops.CAST,Ops.BITCAST,Ops.ASSIGN}, name="e").view(name="v"), lambda e,v: e.replace(src=tuple(s.view(v.st) for s in e.src))),
-      (UPat(Ops.LOAD, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src)))]))
+    
+    fixedup = fixup_ast(self.ast)
+    rewritten = graph_rewrite(fixedup, PatternMatcher([
+    (UPat({*GroupOp.ALU,Ops.CAST,Ops.BITCAST,Ops.ASSIGN}, name="e").view(name="v"), lambda e,v: e.replace(src=tuple(s.view(v.st) for s in e.src))),
+    (UPat(Ops.LOAD, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src)))]))
+    return rewritten
 
   # **** this is the lowerer ****
 
   @track_rewrites()
-  def linearize(self, modified_ast: UOp) -> Kernel:
-
+  def linearize(self, modified_ast: Optional[UOp]=None) -> Kernel:
+    modified_ast = self.get_optimized_ast()[0] if modified_ast is None else modified_ast 
     if DEBUG >= 3:
       print(self.name)
       if getenv("RAWAST"): print(self.ast)
@@ -701,7 +744,7 @@ class Kernel:
     if DEBUG >= 5: print_uops(self.uops)
     return self
 
-  def to_program(self, modified_ast: UOp, name_override:Optional[str]=None) -> Program:
+  def to_program(self,  name_override:Optional[str]=None, modified_ast: Optional[UOp]=None) -> Program:
     self.linearize(modified_ast)
     src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
 

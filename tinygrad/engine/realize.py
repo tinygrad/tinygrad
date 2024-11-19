@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, cast, Generator, Tuple
+from typing import List, Dict, Optional, cast, Generator, Tuple, Union, Iterator
 import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA
@@ -150,13 +150,24 @@ def get_runner(dname:str, ast:UOp) -> CompiledRunner:
   else:
     kernel = get_kernel(Device[dname].renderer, ast)
     modified_ast = kernel.get_optimized_ast()
-    prg: Program = kernel.to_program(modified_ast)
+    prg: Program = kernel.to_program(modified_ast=modified_ast)
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
       return UOpsFuzzerRunner(replace(prg, dname=dname))
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=dname))
   return ret
 
+def get_runners(dname:str, ast:UOp) -> Iterator[CompiledRunner]:
+  kernel = get_kernel(Device[dname].renderer, ast)
+  splitted = kernel.split_reduce(kernel.ast)
+  # if splitted:
+  #   for _ast in splitted:
+  #     kernel = get_kernel(Device[dname].renderer, _ast)
+  #     modified_asts = kernel.get_optimized_ast()
+  modified_ast = kernel.get_optimized_ast()
+  prg: Program = kernel.to_program(modified_ast=modified_ast)
+  ret = CompiledRunner(replace(prg, dname=dname))
+  yield (ret, None)
 # **************** lowering functions ****************
 
 @dataclass(frozen=True)
@@ -183,25 +194,31 @@ class ExecItem:
       self.prg.first_run = False
     return et
 
-def lower_schedule_item(si:ScheduleItem) -> ExecItem:
+def lower_schedule_item(si:ScheduleItem) -> Union[ExecItem, List[ExecItem]]:
   assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is Ops.COPY
   if si.ast.op is Ops.SINK:
-    runner = get_runner(si.outputs[0].device, si.ast)
-    return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
+    output_buf = si.bufs[0]
+    input_bufs = si.bufs[1:]
+    runners_bufs = get_runners(si.outputs[0].device, si.ast)
+    eis: List[ExecItem] = []
+    for runner, interim_buf in runners_bufs:
+      eis.append(ExecItem(runner, [output_buf, *input_bufs], si.metadata))
+    return eis
   out, arg = si.outputs[0], si.ast.arg
   if si.ast.op is Ops.COPY:
     kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       kernel_type = BufferXfer
     return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
-  if si.ast.op is Ops.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
+  if si.ast.op is Ops.EMPTY:
+    return ExecItem(EmptyOp(out), list(si.bufs))
   if si.ast.op is Ops.BUFFER_VIEW: return ExecItem(ViewOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {si.ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:
   while len(schedule):
     si = schedule.pop(0)
-    try: yield from (lowered if isinstance(lowered:=lower_schedule_item(si), Generator) else iter([lowered]))
+    try: yield from (lowered if isinstance(lowered:=lower_schedule_item(si), list) else iter([lowered]))
     except Exception as e:
       if DEBUG >= 2:
         print(f"error lowering {si.ast.op}")
