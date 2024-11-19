@@ -688,8 +688,7 @@ class Kernel:
   # **** this is the lowerer ****
 
   @track_rewrites()
-  def linearize(self) -> Kernel:
-    modified_ast = self.get_optimized_ast()
+  def linearize(self, modified_ast: UOp) -> Kernel:
 
     if DEBUG >= 3:
       print(self.name)
@@ -702,8 +701,8 @@ class Kernel:
     if DEBUG >= 5: print_uops(self.uops)
     return self
 
-  def to_program(self, name_override:Optional[str]=None) -> Program:
-    self.linearize()
+  def to_program(self, modified_ast: UOp, name_override:Optional[str]=None) -> Program:
+    self.linearize(modified_ast)
     src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
 
     if getenv("RUN_PROCESS_REPLAY"):
