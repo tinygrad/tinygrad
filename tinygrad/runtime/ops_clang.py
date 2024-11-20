@@ -5,9 +5,10 @@ from tinygrad.helpers import cpu_time_execution, cpu_objdump
 from tinygrad.renderer.cstyle import ClangRenderer
 
 class ClangCompiler(Compiler):
-  def __init__(self, cachekey="compile_clang", args:Optional[List[str]]=None, lang:Optional[List[str]]=None):
+  def __init__(self, cachekey="compile_clang", args:Optional[List[str]]=None, lang:Optional[List[str]]=None, objdump_tool='objdump'):
     self.args = ['-march=native'] if args is None else args
     self.lang_args = ['c', '-ffreestanding'] if lang is None else lang
+    self.objdump_tool = objdump_tool
     super().__init__(None)
 
   def compile(self, src:str) -> bytes:

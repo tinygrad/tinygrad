@@ -30,7 +30,7 @@ class _Device:
   def default(self) -> Compiled: return self[self.DEFAULT]
   def get_available_devices(self) -> Iterator[str]:
     for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM", "X86"]:
-      with contextlib.suppress(Exception): yield self[device].dname
+      with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
     if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
