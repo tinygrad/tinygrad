@@ -2007,9 +2007,9 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
       # xup = xup.shrink(tuple(noop + flatten(((0,o), (0,k), (0,1)) for o,k in zip(o_,k_)))).reshape(noop + flatten((o,k) for o,k in zip(o_,k_)))
       # # permute to move reduce to the end
       # return xup.permute(*range(len(noop)), *[len(noop)+i*2 for i in range(len(i_))], *[len(noop)+i*2+1 for i in range(len(i_))])
-      x = self.repeat([1]*len(noop) + [ceildiv(k*(i+d), i) for k,i,d in zip(k_,i_,d_)])
+      x = self.repeat([1]*len(noop) + [ceildiv(k*(i*2+d),i) for k,i,d in zip(k_,i_,d_)])
       # handle dilation
-      x = x.shrink(tuple(noop + [(0,k*(i+d)) for k,i,d in zip(k_,i_,d_)])).reshape(noop + flatten((k,i+d) for k,i,d in zip(k_,i_,d_)))
+      x = x.shrink(tuple(noop + [(0,k*(i*2+d)) for k,i,d in zip(k_,i_,d_)])).reshape(noop + flatten((k,(i*2+d)) for k,i,d in zip(k_,i_,d_)))
       # handle stride
       x = x.shrink(tuple(noop + flatten(((0,k), (0,o*s)) for k,o,s in zip(k_,o_,s_)))).reshape(noop + flatten((k,o,s) for k,o,s in zip(k_,o_,s_)))
       x = x.shrink(tuple(noop + flatten(((0,k), (0,o), (0,1)) for k,o in zip(k_,o_)))).reshape(noop + flatten((k,o) for k,o in zip(k_,o_)))
