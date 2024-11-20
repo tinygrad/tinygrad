@@ -1195,8 +1195,10 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
         # apply mask to vb(broadcasted) and reduce such that if mask contains repeated indices the last one remains
         vb = vb * mask
         for dim in axis: mask, vb = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), vb.split(1, dim)))
-        # select from vb for each True element in mask else select from self, squeeze to remove extra dims from reduce
-        ret = mask.squeeze().where(vb.squeeze(), self)
+        # remove extra dims from reduce
+        for dim in reversed(axis): mask, vb = mask.squeeze(dim), vb.squeeze(dim)
+        # select from vb for each True element in mask else select from self
+        ret = mask.where(vb, self)
 
     return ret
 
