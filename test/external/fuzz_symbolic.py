@@ -42,9 +42,9 @@ def gt(expr, rng=None):
   return expr > rng, rng
 
 # NOTE: you have to replace these for this test to pass
-from tinygrad.ops import python_alu, BinaryOps
-python_alu[BinaryOps.MOD] = lambda x,y: x%y
-python_alu[BinaryOps.IDIV] = lambda x,y: x//y
+from tinygrad.ops import python_alu, Ops
+python_alu[Ops.MOD] = lambda x,y: x%y
+python_alu[Ops.IDIV] = lambda x,y: x//y
 
 if __name__ == "__main__":
   ops = [add_v, div, mul, add_num, mod]

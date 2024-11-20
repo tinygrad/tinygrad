@@ -69,7 +69,7 @@ class CLAllocator(LRUAllocator):
                                         options.image.shape[1], options.image.shape[0], 0, None, status := ctypes.c_int32()), status), options)
     return (checked(cl.clCreateBuffer(self.device.context, cl.CL_MEM_READ_WRITE, size, None, status := ctypes.c_int32()), status), options)
   def _free(self, opaque:Tuple[ctypes._CData, BufferOptions], options:BufferOptions): check(cl.clReleaseMemObject(opaque[0]))
-  def copyin(self, dest:Tuple[ctypes._CData, BufferOptions], src:memoryview):
+  def _copyin(self, dest:Tuple[ctypes._CData, BufferOptions], src:memoryview):
     if dest[1].image is not None:
       check(cl.clEnqueueWriteImage(self.device.queue, dest[0], False, (ctypes.c_size_t * 3)(0,0,0),
                                    (ctypes.c_size_t * 3)(dest[1].image.shape[1],dest[1].image.shape[0],1), 0, 0, from_mv(src), 0, None, None))
@@ -77,7 +77,7 @@ class CLAllocator(LRUAllocator):
       if mv_address(src) % 16: src = memoryview(bytearray(src))
       check(cl.clEnqueueWriteBuffer(self.device.queue, dest[0], False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
     self.device.pending_copyin.append(src)    # NOTE: these can't be freed until the GPU actually executes this command
-  def copyout(self, dest:memoryview, src:Tuple[ctypes._CData, BufferOptions]):
+  def _copyout(self, dest:memoryview, src:Tuple[ctypes._CData, BufferOptions]):
     if src[1].image is not None:
       check(cl.clEnqueueReadImage(self.device.queue, src[0], False, (ctypes.c_size_t * 3)(0,0,0),
                                   (ctypes.c_size_t * 3)(src[1].image.shape[1],src[1].image.shape[0],1), 0, 0, from_mv(dest), 0, None, None))

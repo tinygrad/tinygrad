@@ -126,13 +126,13 @@ class HIPAllocator(LRUAllocator):
       copied_in += copy_size
       self.hb_polarity = (self.hb_polarity+1) % len(self.hb)
       minor_offset = 0 # only on the first
-  def copyin(self, dest:T, src: memoryview):
+  def _copyin(self, dest:T, src: memoryview):
     hip_set_device(self.device.device)
     host_mem = self._alloc_with_options(len(src), BufferOptions(host=True))
     self.device.pending_copyin.append(host_mem)
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(hip.hipMemcpyAsync(dest, host_mem, len(src), hip.hipMemcpyHostToDevice, None))
-  def copyout(self, dest:memoryview, src:T):
+  def _copyout(self, dest:memoryview, src:T):
     self.full_synchronize()
     hip_set_device(self.device.device)
     check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
