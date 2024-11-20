@@ -439,16 +439,13 @@ class TestJit(unittest.TestCase):
     # First run
     a = Tensor([1, 2])
     result1 = foo(a)
-    
     # Second run with different input
-    b = Tensor([3, 4]) 
+    b = Tensor([3, 4])
     result2 = foo(b)
-
     # Without the fix, result2 would incorrectly reuse result1's buffer
     # With the fix, we should get correct results
     np.testing.assert_allclose(result1.numpy(), [2, 3], atol=1e-4, rtol=1e-5)
     np.testing.assert_allclose(result2.numpy(), [4, 5], atol=1e-4, rtol=1e-5)
-
     # Third run to verify consistent behavior
     c = Tensor([5, 6])
     result3 = foo(c)
