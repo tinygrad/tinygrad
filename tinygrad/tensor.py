@@ -1039,7 +1039,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     X, pX = self, cast(Tuple[Tuple[sint, sint]], tuple((0,0) if p is None else p for p in pX))
     def _constant(x,px,v): return F.Pad.apply(x, arg=px) if v == 0 else F.Pad.apply(x, arg=px) + F.Pad.apply(Tensor.ones_like(x), arg=px).where(0, v)
     # early return for symbolic with positive pads (no need to max)
-    if mode == "constant" and all(resolve(p >= 0) for p in flatten(pX)): return _constant(X, pX, value)
+    if mode == "constant" and all(resolve(p >= 0, False) for p in flatten(pX)): return _constant(X, pX, value)
     pads, shrinks = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX), lambda shape: tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, shape))
     if mode == "constant": return _constant(X.shrink(shrinks(X.shape)), pads, value)
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
