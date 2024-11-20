@@ -28,7 +28,7 @@ class MetalGraph(GraphRunner):
     msg(icb_descriptor, "setInheritPipelineState:", False)
     msg(icb_descriptor, "setMaxKernelBufferBindCount:", 31)
 
-    self.icb = msg(self.dev.device, "newIndirectCommandBufferWithDescriptor:maxCommandCount:options:",
+    self.icb = msg(self.dev.sysdevice, "newIndirectCommandBufferWithDescriptor:maxCommandCount:options:",
       icb_descriptor, len(self.jit_cache), MTLResourceOptions.MTLResourceCPUCacheModeDefaultCache, restype=objc_instance)
     if self.icb.value is None: raise GraphException("create indirect command buffer failed, does your system support this?")
     icb_label = bytes(msg(msg(self.icb, "description", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode()

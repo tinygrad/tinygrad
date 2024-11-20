@@ -81,7 +81,7 @@ class DiskDevice(Compiled):
     self.count += 1
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
     if self.size is not None: return
-    filename = self.dname[len("disk:"):]
+    filename = self.device[len("disk:"):]
     self.size = size
 
     if sys.platform != "win32" and filename.startswith("shm:"):
