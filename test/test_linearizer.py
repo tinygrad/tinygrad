@@ -386,7 +386,7 @@ class TestLinearizer(unittest.TestCase):
 
     ast = UOp(Ops.SINK, src=(store0, store1))
     k = Kernel(ast)
-    prg = CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
+    prg = CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
     inbufs = [x.lazydata.base.buffer]
     outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
     prg.exec(outbufs+inbufs)
@@ -1782,7 +1782,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:List[Buffer], opts=[]
   lins: List[Kernel] = []
   outbufs = [real_bufs[x.src[0].arg] for x in realized_ast.src]
 
-  def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
+  def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
 
   def check_opt(opts, create_k, expected_color_size):
     k = create_k()
