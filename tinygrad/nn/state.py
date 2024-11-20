@@ -114,7 +114,7 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
   ```
   """
   start_mem_used = GlobalCounters.mem_used
-  with Timing("loaded weights in ", lambda et_ns: f", {(GlobalCounters.mem_used-start_mem_used)/1e9:.2f} GB loaded at {(GlobalCounters.mem_used-start_mem_used)/et_ns:.2f} GB/s"):  # noqa: E501
+  with Timing("loaded weights in ", lambda et_ns: f", {(B:=(GlobalCounters.mem_used-start_mem_used))/1e9:.2f} GB loaded at {B/et_ns:.2f} GB/s"):
     model_state_dict = get_state_dict(model)
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
@@ -123,6 +123,8 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
       if k not in state_dict and not strict:
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
+      if v.shape != state_dict[k].shape:
+        raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.shape}, but found {state_dict[k].shape} in state dict.')
       if isinstance((mlb:=v.lazydata), MultiLazyBuffer):
         if isinstance(state_dict[k].lazydata, MultiLazyBuffer): v.replace(state_dict[k]).realize()
         else: v.replace(state_dict[k].shard(mlb.device, mlb.axis)).realize()

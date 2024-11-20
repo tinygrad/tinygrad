@@ -28,13 +28,13 @@ class MetalGraph(GraphRunner):
     msg(icb_descriptor, "setInheritPipelineState:", False)
     msg(icb_descriptor, "setMaxKernelBufferBindCount:", 31)
 
-    self.icb = msg(self.device.device, "newIndirectCommandBufferWithDescriptor:maxCommandCount:options:",
+    self.icb = msg(self.dev.sysdevice, "newIndirectCommandBufferWithDescriptor:maxCommandCount:options:",
       icb_descriptor, len(self.jit_cache), MTLResourceOptions.MTLResourceCPUCacheModeDefaultCache, restype=objc_instance)
     if self.icb.value is None: raise GraphException("create indirect command buffer failed, does your system support this?")
     icb_label = bytes(msg(msg(self.icb, "description", restype=objc_instance), "UTF8String", restype=ctypes.c_char_p)).decode()
     self.needs_icb_fix = int("AGXG15XFamilyIndirectCommandBuffer" not in icb_label)    # not required on M3
 
-    if len(self.vars): self.int_buf = self.device.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
+    if len(self.vars): self.int_buf = self.dev.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
     all_resources = [self.int_buf.buf] if len(self.vars) else []
     all_pipelines = []
     for j,ji in enumerate(self.jit_cache):
@@ -55,12 +55,12 @@ class MetalGraph(GraphRunner):
     self.all_resources = dedup(all_resources)
     self.all_pipelines = dedup(all_pipelines)
     self.command_buffer: Any = None
-    if len(self.vars): self.int_buf_view = self.device.allocator.as_buffer(self.int_buf).cast('i')
+    if len(self.vars): self.int_buf_view = self.dev.allocator._as_buffer(self.int_buf).cast('i')
     self.range = to_struct(0, len(self.jit_cache))
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False) -> Optional[float]:
 
-    if self.command_buffer is not None and self.command_buffer in self.device.mtl_buffers_in_flight: wait_check(self.command_buffer)
+    if self.command_buffer is not None and self.command_buffer in self.dev.mtl_buffers_in_flight: wait_check(self.command_buffer)
     all_resources = dedup(self.all_resources + [x._buf.buf for x in input_rawbuffers])
 
     for (j,i),input_idx in self.input_replace.items():
@@ -76,7 +76,7 @@ class MetalGraph(GraphRunner):
                   to_struct(*cast(tuple, global_size)), to_struct(*cast(tuple, local_size)))
     for j, var in enumerate(self.vars): self.int_buf_view[j] = var_vals[var]
 
-    command_buffer = msg(self.device.mtl_queue, "commandBuffer", restype=objc_instance)
+    command_buffer = msg(self.dev.mtl_queue, "commandBuffer", restype=objc_instance)
     encoder = msg(command_buffer, "computeCommandEncoder", restype=objc_instance)
     msg(encoder, "useResources:count:usage:", (objc_id * len(all_resources))(*all_resources), len(all_resources),
         MTLResourceUsage.MTLResourceUsageRead | MTLResourceUsage.MTLResourceUsageWrite)
@@ -99,5 +99,5 @@ class MetalGraph(GraphRunner):
     if wait:
       wait_check(command_buffer)
       return elapsed_time(command_buffer)
-    self.device.mtl_buffers_in_flight.append(command_buffer)
+    self.dev.mtl_buffers_in_flight.append(command_buffer)
     return None
