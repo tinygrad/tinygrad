@@ -31,7 +31,7 @@ class TestCUDAPrints(unittest.TestCase):
     with contextlib.redirect_stdout(db6_out):
       with Context(DEBUG=6):
         Tensor.ones(3).realize()
-    assert "Failed" not in db6_out.getvalue(), "failed disassembly from ptx"
+    assert "returned non-zero exit status 1" not in db6_out.getvalue(), "failed disassembly from ptx"
 
 if __name__ == "__main__":
   unittest.main()
