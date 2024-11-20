@@ -31,8 +31,8 @@ class WebGPUProgram:
 class WebGpuAllocator(Allocator):
   def _alloc(self, size: int):
     return wgpu_device.create_buffer(size=size, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)
-  def copyin(self, dest, src: memoryview): wgpu_device.queue.write_buffer(dest, 0, src)
-  def copyout(self, dest, src: memoryview): dest[:] = wgpu_device.queue.read_buffer(src, 0)    # TODO: remove this copy
+  def _copyin(self, dest, src: memoryview): wgpu_device.queue.write_buffer(dest, 0, src)
+  def _copyout(self, dest, src: memoryview): dest[:] = wgpu_device.queue.read_buffer(src, 0)    # TODO: remove this copy
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):

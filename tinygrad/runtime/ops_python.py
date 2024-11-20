@@ -7,7 +7,7 @@ import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
-from tinygrad.ops import BinaryOps, TernaryOps, exec_alu, Ops, UOp, GroupOp
+from tinygrad.ops import exec_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, MetalRenderer, AMDRenderer, IntelRenderer, ClangRenderer
 
@@ -175,7 +175,7 @@ class PythonProgram:
           else: raise NotImplementedError(f"unimplemented tensor core {arg}")
         elif uop in GroupOp.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {uop}"
-          assert all_same([dtype] + dtp) or uop in {BinaryOps.CMPNE, BinaryOps.CMPLT, TernaryOps.WHERE}, f"dtype mismatch on {uop}"
+          assert all_same([dtype] + dtp) or uop in {Ops.CMPNE, Ops.CMPLT, Ops.WHERE}, f"dtype mismatch on {uop}"
           ul[i] = [exec_alu(uop, dtype, p) for p in zip(*inp)]
         assert i in ul, (uop, dtype, idp, arg)
         i += 1
@@ -199,8 +199,8 @@ class PythonCompiler(Compiler):
 
 class PythonAllocator(Allocator):
   def _alloc(self, size, options): return memoryview(bytearray(size))
-  def copyin(self, dest, src:memoryview): dest[:] = src
-  def copyout(self, dest:memoryview, src): dest[:] = src
+  def _copyin(self, dest, src:memoryview): dest[:] = src
+  def _copyout(self, dest:memoryview, src): dest[:] = src
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):

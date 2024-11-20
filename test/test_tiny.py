@@ -29,6 +29,14 @@ class TestTiny(unittest.TestCase):
     self.assertListEqual((out:=a@b).flatten().tolist(), [1.0]*(N*N))
     if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
 
+  # *** randomness ***
+
+  def test_random(self):
+    out = Tensor.rand(10)
+    for x in out.tolist():
+      self.assertGreaterEqual(x, 0.0)
+      self.assertLessEqual(x, 1.0)
+
   # *** JIT (for Python speed) ***
 
   def test_jit(self):

@@ -1,9 +1,9 @@
 from __future__ import annotations
-from typing import Optional, Tuple, Dict, List, TYPE_CHECKING, Any, DefaultDict, Callable
+from typing import Optional, Tuple, Dict, List, TYPE_CHECKING, Any, DefaultDict, Callable, Set
 import functools, itertools, operator
 from collections import defaultdict
 from tinygrad.dtype import dtypes, ImageDType, PtrDType
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, UOp, Ops, UPat, PatternMatcher, symbolic_flat, symbolic_simple
+from tinygrad.ops import UOp, Ops, UPat, PatternMatcher, symbolic_flat, symbolic_simple
 from tinygrad.ops import graph_rewrite, split_uop, uop_given_valid, parse_valid, is_increasing, simplify_valid, GroupOp
 from tinygrad.helpers import DEBUG, getenv, flatten, dedup, TRANSCENDENTAL, AMX, prod, partition, all_same
 from tinygrad.codegen.transcendental import xexp2, xlog2, xsin, TRANSCENDENTAL_SUPPORTED_DTYPES
@@ -23,7 +23,7 @@ def fold_expanded(ex, buf):
   for i,s in enumerate(new_srcs):
     idx = s.src[0].src[1]
     if s.dtype.count != 1 or (is_image and idx.dtype.count == 2): continue
-    if idx.op is BinaryOps.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
+    if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
     # add gates for gated
@@ -33,7 +33,7 @@ def fold_expanded(ex, buf):
 
   # then rewrite everything we can
   lengths = [4] if is_image else ([8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2]))
-  used = set()
+  used: Set[Tuple[UOp, UOp]] = set()
   for rootsrc, offsets in offsets_rootsrc.items():
     for o in offsets:
       for fold_length in lengths:
@@ -50,16 +50,14 @@ def fold_expanded(ex, buf):
           else:
             # for non image, we upcast the index pointer
             new_src[0] = new_src[0].cast(new_src[0].dtype.base.vec(fold_length).ptr(new_src[0].dtype.local))
-          # vectorize the store
-          if not is_load:
-            new_src[1] = UOp(Ops.VECTORIZE, new_src[1].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[1] for i in range(fold_length)))
           # generate the folded new_srcs
           if is_load:
             new_load = UOp(Ops.LOAD, load_1.dtype.vec(fold_length), tuple(new_src))
             for i in range(fold_length): new_srcs[offsets[o+i]] = new_load.gep(i)
-          else:
+          else: # vectorize the store
+            new_src[1] = UOp(Ops.VECTORIZE, new_src[1].dtype.vec(fold_length), tuple(new_srcs[offsets[o+i]].src[1] for i in range(fold_length)))
             for i in range(fold_length): new_srcs[offsets[o+i]] = UOp(Ops.STORE, dtypes.void, tuple(new_src)) if i == 0 else None
-          for i in range(fold_length): used.add((rootsrc,o+i))
+          used.update((rootsrc,o+i) for i in range(fold_length))
 
   # dedup expand for LOAD
   if is_load and len(old_new_srcs) != len(ex.src): new_srcs = [new_srcs[old_new_srcs.index(s)] for s in ex.src]
@@ -94,12 +92,12 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> Optional[UOp]:
 
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
-  for stmt in split_uop(valid, BinaryOps.AND):
+  for stmt in split_uop(valid, Ops.AND):
     X, is_upper_bound, c = parse_valid(stmt)
 
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
-    if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in split_uop(X, BinaryOps.ADD)):
-      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), split_uop(X, BinaryOps.ADD), idx)
+    if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in split_uop(X, Ops.ADD)):
+      testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), split_uop(X, Ops.ADD), idx)
       testidx = testidx.simplify()
       if testidx.gep(0).vmax < 0 or testidx.gep(1).vmax < 0:
         drop_stmt.append(stmt)
@@ -116,7 +114,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> Optional[UOp]:
           break
 
   if not drop_stmt and idx is start_idx: return None
-  new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in split_uop(valid, BinaryOps.AND) if s not in drop_stmt]) else None
+  new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in split_uop(valid, Ops.AND) if s not in drop_stmt]) else None
   return buf.index(idx, new_valid)
 
 # ***** optional patterns *****
@@ -125,23 +123,23 @@ powers_of_two = {2**i:i for i in range(64)}
 @functools.lru_cache(None)
 def get_late_rewrite_patterns(ops, force_transcendental=False):
   pat: List[Tuple[UPat, Callable]] = [(UPat(op, dtype=TRANSCENDENTAL_SUPPORTED_DTYPES, src=(UPat.var("d"),)), f) for op,f in \
-           ((UnaryOps.EXP2, xexp2), (UnaryOps.LOG2, xlog2), (UnaryOps.SIN, xsin)) if op not in ops or force_transcendental]
+           ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)) if op not in ops or force_transcendental]
   # rewrite MOD to AND (which should always be supported, but not for generic in tests)
-  if BinaryOps.AND in ops:
+  if Ops.AND in ops:
     pat += [(UPat(Ops.MOD, src=(UPat.var('base'), UPat.cvar("const"))),
             lambda base,const: base & (const.arg-1) if const.arg in powers_of_two else None)]
   # rewrite MUL/IDIV to SHL+SHR
-  if BinaryOps.SHL in ops and BinaryOps.SHR in ops:
+  if Ops.SHL in ops and Ops.SHR in ops:
     pat += [
     (UPat(Ops.MUL, dtype=dtypes.ints, src=[UPat.cvar("const"), UPat.var("mul")]), lambda mul, const:
       mul << powers_of_two[const.arg] if const.arg in powers_of_two else None), # (x  * (2**y)) -> shl(x,y)
     (UPat(Ops.IDIV, src=(UPat.var("div"), UPat.cvar("const"))), lambda div, const:
       div >> powers_of_two[const.arg] if const.arg in powers_of_two else None)] # (x // (2**y)) -> shr(x,y)
-  if UnaryOps.NEG in ops:
-    pat += [(UPat.var('x')*-1, lambda x: x.alu(UnaryOps.NEG))]
-    if BinaryOps.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(UnaryOps.NEG), lambda x,y: x.alu(BinaryOps.SUB, y))]
-  if TernaryOps.MULACC in ops:
-    pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(TernaryOps.MULACC, b, c))]
+  if Ops.NEG in ops:
+    pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
+    if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
+  if Ops.MULACC in ops:
+    pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
   return PatternMatcher(pat)
 
 # ***** threefry *****
@@ -227,7 +225,7 @@ def reduce_collapse(acc:UOp, ret:UOp, alu:UOp):
   if len(reduce_unparented) == 0: return None
   new_acc = acc.replace(src=acc.src[0:1]+tuple(reduce_parented))
   ret = new_acc.assign(new_acc.alu(alu.op, ret))
-  if alu.op is BinaryOps.ADD:
+  if alu.op is Ops.ADD:
     for r in reduce_unparented: ret = ret * (r.src[1]-r.src[0]).cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
@@ -274,8 +272,17 @@ sym = symbolic_flat+PatternMatcher([
   # tensor core cleanups
   (UPat.var("add") + UPat(Ops.WMMA, name="wmma"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
-  # threefry
+  # threefry + remove longs
   (UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32),
+  (UPat.var('x', dtypes.uint32).cast(dtypes.uint64).cast(dtypes.uint32), lambda x: x),   # cast there and back is noop (TODO: genericize)
+  ((UPat.var('x', dtypes.uint64)&0xFFFFFFFF).cast(dtypes.uint32), lambda x: x.cast(dtypes.uint32)),  # cast does truncation
+  (((UPat.var(None, dtypes.uint64)*(1<<32)) | UPat.var('y',  dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
+  (((UPat.var('x',  dtypes.uint64)*(1<<32)) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))//(1<<32), lambda x: x),
+  # hacks for threefry long removal when padded (TODO: genericize)
+  (UPat.var('x', dtypes.uint32).cast(dtypes.uint64) * UPat.var('y').where(UPat.const(dtypes.uint64, 1<<32), UPat.const(dtypes.uint64, 0)),
+   lambda x,y: y.where(x, UOp.const(dtypes.uint32, 0)).cast(dtypes.uint64) * (1<<32)),
+  ((UPat.var('x', dtypes.uint64)&(UPat.var('y').where(UPat.const(dtypes.uint64, 0xFFFFFFFF), UPat.const(dtypes.uint64, 0)))).cast(dtypes.uint32),
+   lambda x,y: y.where(x.cast(dtypes.uint32), UOp.const(dtypes.uint32, 0))),
   # arange loop folding
   (acc_pat.assign(UPat.any(arange_m, arange_m+UPat.var("extra"))+acc_pat), loop_collapse),
   # indexing, with cast or where

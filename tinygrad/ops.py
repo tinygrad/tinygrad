@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp, T
+from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp, unwrap, T
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -29,14 +29,14 @@ class SimpleMathTrait:
     dtype: Optional[DType] = getattr(self, 'dtype', None)
     assert dtype is not None, "MathTraits __neg__ requires a dtype"
     return self.logical_not() if dtype.scalar() == dtypes.bool else self*(-1)
-  def add(self, x, reverse=False): return self._binop(BinaryOps.ADD, x, reverse)
-  def mul(self, x, reverse=False): return self._binop(BinaryOps.MUL, x, reverse)
-  def bitwise_and(self, x, reverse=False): return self._binop(BinaryOps.AND, x, reverse)
-  def bitwise_or(self, x, reverse=False): return self._binop(BinaryOps.OR, x, reverse)
-  def xor(self, x, reverse=False): return self._binop(BinaryOps.XOR, x, reverse)
-  def idiv(self, x, reverse=False): return self._binop(BinaryOps.IDIV, x, reverse)
-  def sub(self, x, reverse=False): return self.ufix(x).alu(BinaryOps.ADD, -self) if reverse else self.alu(BinaryOps.ADD, self.ufix(-x))
-  def div(self, x, reverse=False): return (self.ufix(x)*self.alu(UnaryOps.RECIP)) if reverse else (self*self.ufix(x).alu(UnaryOps.RECIP))
+  def add(self, x, reverse=False): return self._binop(Ops.ADD, x, reverse)
+  def mul(self, x, reverse=False): return self._binop(Ops.MUL, x, reverse)
+  def bitwise_and(self, x, reverse=False): return self._binop(Ops.AND, x, reverse)
+  def bitwise_or(self, x, reverse=False): return self._binop(Ops.OR, x, reverse)
+  def xor(self, x, reverse=False): return self._binop(Ops.XOR, x, reverse)
+  def idiv(self, x, reverse=False): return self._binop(Ops.IDIV, x, reverse)
+  def sub(self, x, reverse=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
+  def div(self, x, reverse=False): return (self.ufix(x)*self.alu(Ops.RECIP)) if reverse else (self*self.ufix(x).alu(Ops.RECIP))
 
   def __neg__(self): return self.neg()
 
@@ -58,9 +58,9 @@ class SimpleMathTrait:
   def __ror__(self, x): return self.bitwise_or(x, True)
   def __rxor__(self, x): return self.xor(x, True)
 
-  def lt(self, x): return self.alu(BinaryOps.CMPLT, self.ufix(x))
-  def gt(self, x): return self.ufix(x).alu(BinaryOps.CMPLT, self)
-  def ne(self, x): return self.alu(BinaryOps.CMPNE, self.ufix(x))
+  def lt(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
+  def gt(self, x): return self.ufix(x).alu(Ops.CMPLT, self)
+  def ne(self, x): return self.alu(Ops.CMPNE, self.ufix(x))
   def ge(self, x): return self.lt(x).logical_not()
   def le(self, x): return self.gt(x).logical_not()
   def eq(self, x): return self.ne(x).logical_not()
@@ -74,26 +74,26 @@ class SimpleMathTrait:
 
 class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
   # TODO: move to Tensor when new backward is done
-  def lshift(self, x, reverse=False): return self._binop(BinaryOps.SHL, x, reverse)
-  def rshift(self, x, reverse=False): return self._binop(BinaryOps.SHR, x, reverse)
+  def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
+  def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)
   def __lshift__(self, x): return self.lshift(x)
   def __rshift__(self, x): return self.rshift(x)
   def __rlshift__(self, x): return self.lshift(x, True)
   def __rrshift__(self, x): return self.rshift(x, True)
 
   # not in Tensor
-  def __mod__(self, x): return self.alu(BinaryOps.MOD, self.ufix(x))
-  def __rmod__(self, x): return self.ufix(x).alu(BinaryOps.MOD, self)
+  def __mod__(self, x): return self.alu(Ops.MOD, self.ufix(x))
+  def __rmod__(self, x): return self.ufix(x).alu(Ops.MOD, self)
 
-  def maximum(self, x): return self.alu(BinaryOps.MAX, self.ufix(x))
+  def maximum(self, x): return self.alu(Ops.MAX, self.ufix(x))
   def minimum(self, x): return -(-self).maximum(-x)
-  def where(self, x, y): return self.alu(TernaryOps.WHERE, x, y)
-  def threefry(self, seed): return self.alu(BinaryOps.THREEFRY, seed)
-  def reciprocal(self): return self.alu(UnaryOps.RECIP)
-  def sqrt(self): return self.alu(UnaryOps.SQRT)
-  def sin(self): return self.alu(UnaryOps.SIN)
-  def log2(self): return self.alu(UnaryOps.LOG2)
-  def exp2(self): return self.alu(UnaryOps.EXP2)
+  def where(self, x, y): return self.alu(Ops.WHERE, x, x.ufix(y))
+  def threefry(self, seed): return self.alu(Ops.THREEFRY, seed)
+  def reciprocal(self): return self.alu(Ops.RECIP)
+  def sqrt(self): return self.alu(Ops.SQRT)
+  def sin(self): return self.alu(Ops.SIN)
+  def log2(self): return self.alu(Ops.LOG2)
+  def exp2(self): return self.alu(Ops.EXP2)
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
@@ -122,9 +122,6 @@ class Ops(FastEnum):
   # reduce
   REDUCE_AXIS = auto()
 
-  # ReduceOps
-  SUM = auto(); PROD = auto(); REDUCE_MAX = auto() # noqa: E702
-
   # helper ops
   GEP = auto()
   VECTORIZE = auto()
@@ -140,7 +137,7 @@ class Ops(FastEnum):
 
   # BinaryOps
   ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
-  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto() # noqa: E702
+  SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto() # noqa: E702
 
   # TernaryOps
   WHERE = auto(); MULACC = auto() # noqa: E702
@@ -168,11 +165,11 @@ class Ops(FastEnum):
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
-  Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB}
+  Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY,
+            Ops.SUB, Ops.FDIV}
   Ternary = {Ops.WHERE, Ops.MULACC}
   ALU = set.union(Unary, Binary, Ternary)
 
-  Reduce = {Ops.SUM, Ops.PROD, Ops.REDUCE_MAX}
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
 
   # meta ops
@@ -185,13 +182,8 @@ class GroupOp:
   # do not preserve f(0) = 0
   UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV}
 
-# TODO: remove this?
-UnaryOps = BinaryOps = ReduceOps = MetaOps = TernaryOps = Ops
-
-REDUCE_ALU: Dict[Ops, Ops] = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.PROD:BinaryOps.MUL, ReduceOps.REDUCE_MAX:BinaryOps.MAX}
-
 # https://en.wikipedia.org/wiki/Identity_element
-def identity_element(op:Ops, dt:DType): return dtypes.as_const({BinaryOps.ADD:0, BinaryOps.MUL:1, BinaryOps.MAX:dtypes.min(dt)}[op], dt)
+def identity_element(op:Ops, dt:DType): return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
 def can_pad(u:UOp) -> bool: return not any(x.op in GroupOp.UnsafePad for x in u.sparents)
 
@@ -310,7 +302,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   def sink(self, *srcs:UOp): return UOp(Ops.SINK, dtypes.void, (self,)+srcs)
   def index(self, idx:UOp, valid:Optional[UOp]=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
-  def view(self, st:ShapeTracker): return UOp(Ops.VIEW, self.dtype, (self,), st)
   def const_like(self, b:ConstLike): return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
@@ -331,7 +322,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
   def alu(self, arg, *src:UOp):
     out_dtype = (self, *src)[-1].dtype
-    if arg in {BinaryOps.CMPLT, BinaryOps.CMPNE} and out_dtype is not None:
+    if arg in {Ops.CMPLT, Ops.CMPNE} and out_dtype is not None:
       out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(arg, out_dtype, (self,)+src)
   @staticmethod
@@ -343,8 +334,30 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
                                              UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=(idx, False))
-  def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (REDUCE_ALU[op] if op in GroupOp.Reduce else op, axis))
+  def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
+  def contiguous(self): return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
+  @property
+  def is_contiguous_base(self): return self.op is Ops.CONTIGUOUS and not (self.src[0].base.op is Ops.VIEW and len(self.src[0].base.src) == 2)
+
+  # *** uop movement ops ***
+
+  @property
+  def base(self): return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
+  def view(self, st:ShapeTracker):
+    assert self.op is not Ops.STORE, "VIEW of STORE is invalid, STORE is always base"
+    return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
+  def reshape(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).reshape(arg))
+
+  # *** uop Buffer stuff ***
+
+  @staticmethod
+  def new_buffer(device:str, size:int, dtype:DType, num=-1): return  UOp(Ops.BUFFER, dtype.ptr(), (), (num, (device, size, dtype)))
+
+  @property
+  def buf_uop(self) -> UOp:
+    assert self.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
+    return self.src[0]
 
   # *** uop Variable stuff ***
 
@@ -379,16 +392,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const_factor(self) -> int:
     """largest known int that divides self"""
     if self.op is Ops.CONST: return self.arg
-    if self.op is Ops.VCONST: return functools.reduce(math.gcd, self.arg)
-    if self.op is BinaryOps.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
-    if self.op is BinaryOps.MUL: return self.src[0].arg if self.src[0].op is Ops.CONST else self.src[1].arg if self.src[1].op is Ops.CONST else 1
+    if self.op is Ops.VCONST: return math.gcd(*self.arg)
+    if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
+    if self.op is Ops.MUL: return self.src[0].arg if self.src[0].op is Ops.CONST else self.src[1].arg if self.src[1].op is Ops.CONST else 1
     return 1
   def divides(self, v) -> Optional[UOp]:
     if v==1: return self
     if self.op is Ops.CONST: return self.const_like(self.arg//v) if self.arg%v == 0 else None
     if self.op is Ops.VCONST: return self.const_like(tuple(x//v for x in self.arg)) if all(x%v == 0 for x in self.arg) else None
-    if self.op is BinaryOps.ADD: return d0+d1 if (d0:=self.src[0].divides(v)) is not None and (d1:=self.src[1].divides(v)) is not None else None
-    if self.op is BinaryOps.MUL:
+    if self.op is Ops.ADD: return d0+d1 if (d0:=self.src[0].divides(v)) is not None and (d1:=self.src[1].divides(v)) is not None else None
+    if self.op is Ops.MUL:
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
@@ -400,18 +413,18 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def _min_max(self) -> Tuple[ConstType, ConstType]:
     if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):
       (s0_vmin, s0_vmax), (s1_vmin, s1_vmax) = self.src[0]._min_max, self.src[1]._min_max
-      if self.op is BinaryOps.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
-      if self.op is BinaryOps.MUL: return min(vals:=(s0_vmin*s1_vmin, s0_vmin*s1_vmax, s0_vmax*s1_vmin, s0_vmax*s1_vmax)), max(vals)
-      if self.op is BinaryOps.MOD and s1_vmin > 0: return 0, s1_vmax-1
-      if self.op is BinaryOps.IDIV and s1_vmin == s1_vmax:  # min/max are equal in a CONST
+      if self.op is Ops.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
+      if self.op is Ops.MUL: return min(vals:=(s0_vmin*s1_vmin, s0_vmin*s1_vmax, s0_vmax*s1_vmin, s0_vmax*s1_vmax)), max(vals)
+      if self.op is Ops.MOD and s1_vmin > 0: return 0, s1_vmax-1
+      if self.op is Ops.IDIV and s1_vmin == s1_vmax:  # min/max are equal in a CONST
         if s1_vmin > 0: return s0_vmin//s1_vmin, s0_vmax//s1_vmin
         if s1_vmin < 0 and s0_vmin >= 0: return -(s0_vmax//-s1_vmin), -(s0_vmin//-s1_vmin)
-      if self.op is BinaryOps.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
-      if self.op is BinaryOps.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
-      if self.op is BinaryOps.CMPNE: return ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin), not (s0_vmin == s0_vmax == s1_vmin == s1_vmax))
+      if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
+      if self.op is Ops.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
+      if self.op is Ops.CMPNE: return ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin), not (s0_vmin == s0_vmax == s1_vmin == s1_vmax))
       if self.dtype == dtypes.bool:
-        if self.op is BinaryOps.OR: return s0_vmin or s1_vmin, s0_vmax or s1_vmax
-        if self.op is BinaryOps.AND: return s0_vmin and s1_vmin, s0_vmax and s1_vmax
+        if self.op is Ops.OR: return s0_vmin or s1_vmin, s0_vmax or s1_vmax
+        if self.op is Ops.AND: return s0_vmin and s1_vmin, s0_vmax and s1_vmax
     # float has NAN issue and we use explicit NAN in transcendental
     if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
@@ -455,14 +468,14 @@ def hook_overflow(dv, fxn):
   return wfxn
 
 python_alu: Dict[Ops, Callable]  = {
-  UnaryOps.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, UnaryOps.EXP2: hook_overflow(math.inf, lambda x: 2**x),
-  UnaryOps.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, UnaryOps.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
-  UnaryOps.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
-  UnaryOps.NEG: operator.neg, BinaryOps.ADD: operator.add, BinaryOps.SUB: operator.sub, BinaryOps.MUL: operator.mul,
-  BinaryOps.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], BinaryOps.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else x*math.inf,
-  BinaryOps.MAX: max, BinaryOps.CMPNE: operator.ne, BinaryOps.CMPLT: operator.lt, BinaryOps.XOR: operator.xor,
-  BinaryOps.OR: operator.or_, BinaryOps.AND: operator.and_, BinaryOps.SHR: operator.rshift, BinaryOps.SHL: operator.lshift,
-  TernaryOps.MULACC: lambda x,y,z: (x*y)+z, TernaryOps.WHERE: lambda x,y,z: y if x else z}
+  Ops.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, Ops.EXP2: hook_overflow(math.inf, lambda x: 2**x),
+  Ops.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, Ops.RECIP: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
+  Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
+  Ops.NEG: operator.neg, Ops.ADD: operator.add, Ops.SUB: operator.sub, Ops.MUL: operator.mul,
+  Ops.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], Ops.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else x*math.inf,
+  Ops.MAX: max, Ops.CMPNE: operator.ne, Ops.CMPLT: operator.lt, Ops.XOR: operator.xor,
+  Ops.OR: operator.or_, Ops.AND: operator.and_, Ops.SHR: operator.rshift, Ops.SHL: operator.lshift,
+  Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z}
 
 def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
   if dtype.count > 1:
@@ -503,7 +516,7 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
     elif u.op is Ops.STORE:
       mem += u.src[1].dtype.itemsize * mults
     elif u.op in GroupOp.ALU and u not in dont_count:
-      flops += (mults * (2 if u.op is TernaryOps.MULACC else 1)) * u.dtype.count
+      flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
     elif u.op is Ops.WMMA and u not in dont_count:
       flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
   return flops, mem
@@ -546,7 +559,7 @@ class UPat(MathTrait):
     if custom_early_reject is not None: self.early_reject = custom_early_reject
     else:
       upat_match = [src] if isinstance(src, UPat) else ([] if src is None else self.src[0])
-      self.early_reject = set(pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1)
+      self.early_reject = {pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1}
 
   def named(self, name:str): return UPat(self.op, self.dtype, self._in_src, self.arg, name, self.allowed_len == -1, self.custom_early_reject)
 
@@ -630,7 +643,6 @@ class PatternMatcher:
     for p,fxn in self.patterns:
       assert p.op is not None
       tuple_fxn = fxn if isinstance(fxn, tuple) else deconstruct_function(fxn)
-      tuple_fxn[1]['__builtins__'] = __builtins__  # NOTE: Python 3.8 requires this for "all" and "len" and friends
       real_fxn = types.FunctionType(*tuple_fxn)
       for uop in p.op: self.pdict.setdefault(uop, []).append((p, real_fxn, p.early_reject, 'ctx' in inspect.signature(real_fxn).parameters))
 
@@ -640,7 +652,7 @@ class PatternMatcher:
   def __add__(self, more:PatternMatcher): return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None) -> Optional[UOp]:
-    ler = set(u.op for u in uop.src)
+    ler = {u.op for u in uop.src}
     for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
       if not early_reject.issubset(ler): continue
       for match in p.match(uop, {}):
@@ -681,7 +693,7 @@ class TrackedPatternMatcher(PatternMatcher):
 
   def rewrite(self, uop:UOp, ctx=None) -> Optional[UOp]:
     ret = None
-    ler = set(u.op for u in uop.src)
+    ler = {u.op for u in uop.src}
     for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
       st = time.perf_counter()
       if not early_reject.issubset(ler):
@@ -753,8 +765,8 @@ spec = PatternMatcher([
   (UPat(Ops.SPECIAL, src=()), lambda: True),
 
   # TODO: confirm the args of both of these are shapetrackers
-  (UPat(Ops.VIEW, src=()), lambda: True),
-  (UPat(Ops.VIEW, src=(UPat(),)), lambda: True),
+  (UPat(Ops.VIEW, dtypes.void, src=()), lambda: True),
+  (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"), lambda x,src: src.op is not Ops.STORE and x.dtype == src.dtype),
 
   (UPat(Ops.VALID, dtypes.bool, (UPat(Ops.VIEW),)), lambda: True),
   (UPat(Ops.CONST, name="x"), lambda x: x.dtype == x.dtype.scalar() and (type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)))),
@@ -802,7 +814,7 @@ spec = PatternMatcher([
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(), UPat(Ops.BARRIER))), lambda: True),
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
 
-  (UPat(Ops.REDUCE_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in REDUCE_ALU.values()),
+  (UPat(Ops.REDUCE_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in {Ops.ADD, Ops.MUL, Ops.MAX}),
   (UPat(Ops.GEP, src=(UPat(name="src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
   (UPat(Ops.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.count and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat((Ops.BITCAST, Ops.CAST), src=(UPat(),), name="x"), lambda x: x.arg is None),
@@ -846,7 +858,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   if 0 < c and 0 <= x.vmin and (quotient:=x.vmin//c) == x.vmax//c: return x-quotient*c
 
   remainder, something_changed = [], False
-  for u in split_uop(x, BinaryOps.ADD):
+  for u in split_uop(x, Ops.ADD):
     if (factor:=u.const_factor())%c != factor:
       divides = u.divides(factor)*(factor%c)
       assert divides is not None
@@ -866,7 +878,7 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   if 0 <= x.vmin and x.vmax < c: return x.const_like(0)
 
   quotient, remainder, rem_const, something_changed, gcd, divisor = [], [], 0, False, c, 1
-  for u in split_uop(x, BinaryOps.ADD):
+  for u in split_uop(x, Ops.ADD):
     if u.op is Ops.CONST:
       # add all const together first
       if rem_const != 0: something_changed = True
@@ -900,15 +912,15 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   return quo if rem is None else cast(UOp, div_folding(rem, div))//(c//div)+quo
 
 def lt_folding(x:UOp, c:int) -> Optional[UOp]:
-  p, np = partition(split_uop(x, BinaryOps.ADD), lambda u: u.const_factor() == 1)
-  if np and (d:=functools.reduce(math.gcd, [u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
+  p, np = partition(split_uop(x, Ops.ADD), lambda u: u.const_factor() == 1)
+  if np and (d:=math.gcd(*[u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
     return cast(UOp, functools.reduce(operator.add, np).divides(d)).lt(c//d)
   return None
 
 def fold_unrolled_divs(divs:UOp):
   # div pattern in unrolled arange
   # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  add_chain, denominator, seen_const, ans = list(split_uop(divs, BinaryOps.ADD)), None, [], None
+  add_chain, denominator, seen_const, ans = list(split_uop(divs, Ops.ADD)), None, [], None
   for u in add_chain:
     if not (u.op is Ops.IDIV and u.src[1].op is Ops.CONST): return None
     if denominator is None: denominator = u.src[1].arg
@@ -930,9 +942,9 @@ def canonicalize_simplex(X:UOp) -> Optional[UOp]:
   # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
   # returns x0 + x1 + ... in such case, or None if not
   changed, ret = False, []
-  for u in split_uop(X, BinaryOps.ADD):
+  for u in split_uop(X, Ops.ADD):
     # assumed the const is the last src of MUL
-    if u.op is BinaryOps.MUL and u.src[1].op is Ops.CONST and u.src[1].arg > 0:
+    if u.op is Ops.MUL and u.src[1].op is Ops.CONST and u.src[1].arg > 0:
       changed = True
       u = u.src[0]
     if not (u.op in GroupOp.Irreducible and u.vmin >= 0): return None
@@ -942,8 +954,8 @@ def canonicalize_simplex(X:UOp) -> Optional[UOp]:
 def is_increasing(f:UOp) -> bool:
   # is f a monotonically increasing function regards its input
   if f.op in GroupOp.Irreducible: return True
-  if f.op is BinaryOps.ADD: return is_increasing(f.src[0]) and is_increasing(f.src[1])
-  if f.op in (BinaryOps.MUL, BinaryOps.IDIV) and f.src[1].op is Ops.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
+  if f.op is Ops.ADD: return is_increasing(f.src[0]) and is_increasing(f.src[1])
+  if f.op in (Ops.MUL, Ops.IDIV) and f.src[1].op is Ops.CONST and f.src[1].arg >= 0: return is_increasing(f.src[0])
   return False  # False if not sure
 
 def parse_valid(valid:UOp) -> Tuple[UOp, bool, int]:
@@ -951,10 +963,10 @@ def parse_valid(valid:UOp) -> Tuple[UOp, bool, int]:
   # if it's X >= c, returns X, False, c
 
   # (X < c).ne(True) -> X >= c
-  if valid.op is BinaryOps.CMPNE and valid.src[1].op is Ops.CONST and valid.src[1].arg == 1 and \
-    (s0:=valid.src[0]).op is BinaryOps.CMPLT and s0.src[1].op is Ops.CONST: return s0.src[0], False, s0.src[1].arg
+  if valid.op is Ops.CMPNE and valid.src[1].op is Ops.CONST and valid.src[1].arg == 1 and \
+    (s0:=valid.src[0]).op is Ops.CMPLT and s0.src[1].op is Ops.CONST: return s0.src[0], False, s0.src[1].arg
   # X < c -> X <= c-1
-  if valid.op is BinaryOps.CMPLT and valid.src[1].op is Ops.CONST: return valid.src[0], True, valid.src[1].arg-1
+  if valid.op is Ops.CMPLT and valid.src[1].op is Ops.CONST: return valid.src[0], True, valid.src[1].arg-1
   raise ValueError(f"not able to parse {valid=}")
 
 def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
@@ -962,7 +974,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
 
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:DefaultDict[UOp, List[Optional[ConstType]]] = defaultdict(lambda: [None, None])
-  for stmt in split_uop(valid, BinaryOps.AND):
+  for stmt in split_uop(valid, Ops.AND):
     try: expr, is_upper, c = parse_valid(stmt)
     except ValueError: return uop  # give up if we cannot parse the valid
     bounds[expr][int(is_upper)] = c
@@ -974,9 +986,9 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
 
     # every candidate is a set of contrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
     candidates = []
-    if expr.op is Ops.ADD and v[0] == 1 and all(u.op in GroupOp.Irreducible for u in split_uop(expr, BinaryOps.ADD)):
+    if expr.op is Ops.ADD and v[0] == 1 and all(u.op in GroupOp.Irreducible for u in split_uop(expr, Ops.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, BinaryOps.ADD)])
+      candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
     # try checking the whole clause
     if expr in uop.sparents:
       candidates.append([(expr, UOp.variable("fake", expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1], expr.dtype))])
@@ -1026,6 +1038,7 @@ symbolic_simple = PatternMatcher([
   ((UPat.var("x") & UPat.var("x")), lambda x: x),
   ((UPat.var("x") | UPat.var("x")), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
+  (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, True), UPat.const(dtypes.bool, False)), lambda x: x),
   # ** zero folding **
   (UPat.var("x") < UPat.var("x"), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x < x -> False
   (UPat.var("x", dtype=dtypes.ints) != UPat.var("x", dtype=dtypes.ints),
@@ -1050,6 +1063,8 @@ symbolic = symbolic_simple+PatternMatcher([
   (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
   # group like
   ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
+  # ** boolean algebra **
+  (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
   (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
   (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
@@ -1115,8 +1130,8 @@ symbolic_flat = symbolic+PatternMatcher([
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 
 # for debug
-syms = { BinaryOps.ADD: "+", BinaryOps.SUB: "-", BinaryOps.IDIV: "//", BinaryOps.MOD: "%", BinaryOps.SHL: "<<", BinaryOps.SHR: ">>",
-         BinaryOps.MUL: "*", BinaryOps.CMPLT: "<", BinaryOps.CMPNE: "!=", BinaryOps.AND: "&", BinaryOps.OR: "|", BinaryOps.XOR: "^"}
+syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.IDIV: "//", Ops.MOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
+         Ops.MUL: "*", Ops.CMPLT: "<", Ops.CMPNE: "!=", Ops.AND: "&", Ops.OR: "|", Ops.XOR: "^"}
 renderer = PatternMatcher([
   (UPat((Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg[0])),
   (UPat(Ops.RANGE, name="x"), lambda x: UOp(Ops.NOOP, arg=f"ridx{x.arg[0]}")),

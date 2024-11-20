@@ -108,7 +108,7 @@ class dtypes:
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
-  int8: Final[DType] = DType.new(1, 1, "char", 'b')
+  int8: Final[DType] = DType.new(1, 1, "signed char", 'b')
   uint8: Final[DType] = DType.new(2, 1, "unsigned char", 'B')
   int16: Final[DType] = DType.new(3, 2, "short", 'h')
   uint16: Final[DType] = DType.new(4, 2, "unsigned short", 'H')
@@ -184,5 +184,5 @@ truncate: Dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.float16: truncate_fp16, dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
   dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
-  dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value \
-      if isinstance(x,int) else x, dtypes.int64: lambda x: ctypes.c_int64(x).value}
+  dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value,
+  dtypes.int64: lambda x: ctypes.c_int64(x).value}

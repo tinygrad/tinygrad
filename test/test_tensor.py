@@ -258,6 +258,11 @@ class TestTinygrad(unittest.TestCase):
     assert a.dtype == dtypes.default_int and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
     assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
+  def test_rand_like_device(self):
+    a = Tensor.ones(3, 3, device="CLANG")
+    b = Tensor.rand_like(a)
+    self.assertEqual(b.device, a.device)
+
   def test_ndim(self):
     assert Tensor(1).ndim == 0
     assert Tensor.randn(1).ndim == 1

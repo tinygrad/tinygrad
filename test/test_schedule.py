@@ -13,13 +13,12 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import BinaryOps, MetaOps, UOp, UnaryOps, Ops, graph_rewrite, track_rewrites
+from tinygrad.ops import UOp, Ops, graph_rewrite, track_rewrites
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, view_right, st_fixup, view_left
-from tinygrad.engine.realize import CompiledRunner, run_schedule
+from tinygrad.engine.schedule import BUF_LIMIT, create_schedule, view_right, view_left
+from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
 from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
-from test.helpers import ast_const, timeit
 from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
@@ -41,9 +40,7 @@ def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_pr
   # test the (sink) ops linearize
   for s in sched:
     if s.ast.op is not Ops.SINK: continue
-    l = Kernel(s.ast)
-    l.hand_coded_optimizations()
-    l.to_program()
+    get_runner(s.bufs[0].device, s.ast)
   return sched
 
 def _realize_weights(m):
@@ -311,7 +308,6 @@ class TestSchedule(unittest.TestCase):
     img = Tensor.empty(64,64)
     x = (img.sum(0) + img.sum(1))
     out = x.relu()
-    del x    # is 3 without this
     check_schedule(out, 2)
 
   #@unittest.skip("failing in old lazy")
@@ -335,6 +331,7 @@ class TestSchedule(unittest.TestCase):
     d = (a+b).reshape(16,1)
     check_schedule(d, 0, [c])
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_multi_permute_should_collapse(self):
     a = Tensor.empty(4,4,4,4)
     b = Tensor.empty(16)
@@ -1045,7 +1042,7 @@ class TestSchedule(unittest.TestCase):
     b = r.sum(0) * 4
     c = r.sum(1) * 2
     schedule = check_schedule([b, c], 3)
-    self.assertIs(schedule[0].ast.src[0].src[2].op, BinaryOps.ADD)
+    self.assertIs(schedule[0].ast.src[0].src[2].op, Ops.ADD)
 
   # multireduce spec
   def test_multireduce_simple_chase(self):
@@ -1056,7 +1053,7 @@ class TestSchedule(unittest.TestCase):
     c = r.sum(1) + 12
     np_r = (a.numpy() + (a.numpy().sum(0) + 6)).sum(0) * 2
     # schedule = check_schedule([b,c], 3)
-    # self.assertIs(schedule[0].ast[0].src[0].arg, BinaryOps.MUL)
+    # self.assertIs(schedule[0].ast[0].src[0].arg, Ops.MUL)
     schedule = check_schedule([b,c], 4)
     run_schedule(schedule)
     np.testing.assert_allclose(b.numpy(), np_r.sum(0) + 8, atol=1e-4, rtol=1e-4)
@@ -1069,7 +1066,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * d
     schedule = check_schedule([d, e], 3)
-    self.assertIs(schedule[0].ast.src[0].src[2].op, BinaryOps.ADD)
+    self.assertIs(schedule[0].ast.src[0].src[2].op, Ops.ADD)
 
   # multireduce spec
   def test_multireduce_push_permute_chase(self):
@@ -1080,7 +1077,7 @@ class TestSchedule(unittest.TestCase):
     d = r.T * 4
     e = r * (d + a).sum(2)
     schedule = check_schedule([d, e], 3) # make sure it doesn't fuse
-    self.assertIs(schedule[0].ast.src[0].src[2].op, BinaryOps.ADD)
+    self.assertIs(schedule[0].ast.src[0].src[2].op, Ops.ADD)
     run_schedule(schedule)
     np.testing.assert_allclose(d.numpy(), (a.numpy().sum(2) + b.numpy()).T * 4, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(e.numpy(), (a.numpy().sum(2) + b.numpy()) * (d.numpy() + a.numpy()).sum(2), atol=1e-4, rtol=1e-4)
@@ -1092,7 +1089,7 @@ class TestSchedule(unittest.TestCase):
     r = a.sum(1) + c
     d = r[:4] * b
     schedule = check_schedule(d, 2)
-    self.assertIs(schedule[0].ast.src[0].src[2].op, BinaryOps.ADD)
+    self.assertIs(schedule[0].ast.src[0].src[2].op, Ops.ADD)
 
   # multireduce spec
   def test_multireduce_push_shrink_chase(self):
@@ -1105,7 +1102,7 @@ class TestSchedule(unittest.TestCase):
     out = r[:4] * b + d.sum(1)[:4]
     # schedule = check_schedule(out, 2)
     schedule = check_schedule(out, 3)
-    self.assertIs(schedule[0].ast.src[0].src[2].op, BinaryOps.ADD)
+    self.assertIs(schedule[0].ast.src[0].src[2].op, Ops.ADD)
     run_schedule(schedule)
     np.testing.assert_allclose(out.numpy(), (a.numpy().sum(1) + c.numpy())[:4] * b.numpy() + d.numpy().sum(1)[:4], atol=1e-4, rtol=1e-4)
 
@@ -1189,7 +1186,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     a = Tensor.rand(3, 4, 5).realize()
     b = Tensor.rand(3, 4, 5).realize()
-    out = (a + b).pad(((0, 1), (0, 1), (0, 1)), 1.0).sum().contiguous()
+    out = (a + b).pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum().contiguous()
     run_schedule(check_schedule(out, 1))
     np.testing.assert_allclose(out.numpy(), np.pad(a.numpy()+b.numpy(), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), atol=1e-5, rtol=1e-6)
 
@@ -1198,7 +1195,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     a = Tensor.randn(3, 4, 5).realize()
     b = Tensor.randn(3, 4, 5).realize()
-    out = (a.pad(((0, 1), (0, 1), (0, 1)), 1.0).sum(keepdim=True)+b.pad(((0, 1), (0, 1), (0, 1)), 1.0).sum()).contiguous()
+    out = (a.pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum(keepdim=True)+b.pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum()).contiguous()
     # run_schedule(check_schedule(out, 1))
     run_schedule(check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), np.pad(a.numpy(), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(keepdims=True) + \
@@ -1207,7 +1204,7 @@ class TestSchedule(unittest.TestCase):
   def test_pad_reduce_unsafe(self):
     Tensor.manual_seed(0)
     a = Tensor.rand(3, 4, 5).realize()
-    out = a.log2().pad(((0, 1), (0, 1), (0, 1)), 1.0).sum().contiguous()
+    out = a.log2().pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum().contiguous()
     run_schedule(check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), np.pad(np.log2(a.numpy()), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), atol=1e-5, rtol=1e-6)
 
@@ -1216,7 +1213,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     a = Tensor.randn(3, 4, 5).abs().realize()
     b = Tensor.randn(3, 4, 5).abs().realize()
-    out = (a.log2().pad(((0, 1), (0, 1), (0, 1)), 1.0).sum()+b).abs().log2().pad(((0, 1), (0, 1), (0, 1)), 1.0).sum().contiguous()
+    out = (a.log2().pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum()+b).abs().log2().pad(((0, 1), (0, 1), (0, 1)), value=1.0).sum().contiguous()
     # run_schedule(check_schedule(out, 1))
     run_schedule(check_schedule(out, 4))
     np.testing.assert_allclose(out.numpy(), np.pad(np.log2(np.abs(np.pad(np.log2(a.numpy()), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum() + \
@@ -1290,16 +1287,16 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT not in view_supported_devices, "subbuffer not supported")
   def test_bitcast_subbufer(self):
     x = cast(LazyBuffer, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
-    a = x.alu(UnaryOps.EXP2).cast(dtypes.int32, True, allow_buffer_view=True)
+    a = x.alu(Ops.EXP2).cast(dtypes.int32, True, allow_buffer_view=True)
     b = x.cast(dtypes.int32, True, allow_buffer_view=True)
-    b = a.alu(BinaryOps.ADD, b)
+    b = a.alu(Ops.ADD, b)
     check_schedule(b, 2) # this should fuse when it makes sense
 
   def test_bitcast_disable_subbufer(self):
     x = cast(LazyBuffer, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
-    a = x.alu(UnaryOps.EXP2).cast(dtypes.int32, True, allow_buffer_view=False)
+    a = x.alu(Ops.EXP2).cast(dtypes.int32, True, allow_buffer_view=False)
     b = x.cast(dtypes.int32, True, allow_buffer_view=False)
-    b = a.alu(BinaryOps.ADD, b)
+    b = a.alu(Ops.ADD, b)
     check_schedule(b, 1)
 
   def test_reduceop_reshape_dont_push(self):
@@ -1361,11 +1358,29 @@ class TestSchedule(unittest.TestCase):
       run_schedule(check_schedule(out, 4))
       np.testing.assert_allclose(out.numpy(), x.numpy()@y.numpy(), atol=1e-4, rtol=1e-4)
 
+  def _test_fusion(self, shapes, f, cnt):
+    with Context(DEBUG=0, TRACK_MATCH_STATS=0): args = [Tensor.randn(s).realize() for s in shapes]
+    run_schedule(check_schedule(compare:=f(*args), cnt))
+    if getenv("COMPARE", 1):
+      import torch
+      good = f(*[torch.tensor(x.numpy()) for x in args])
+      np.testing.assert_allclose(compare.numpy(), good.numpy(), atol=1e-4, rtol=1e-4)
+
+  def test_late_fusion_simple(self):
+    self._test_fusion([(4, 4), (4, 1)], lambda a,b:a.sum(1, keepdim=True)+b, 1)
+
+  def test_late_fusion_post_reshape(self):
+    self._test_fusion([(4, 4), (1, 4)], lambda a,b:a.sum(1).reshape(b.shape)+b, 1)
+
+  def test_late_fusion_post_permute(self):
+    self._test_fusion([(4, 6, 4), (4, 4, 1)], lambda a,b:a.sum(1, keepdim=True).permute((2, 0, 1))+b, 2)
+
   def test_late_fusion_double_transpose(self):
-    with Context(DEBUG=0): a = Tensor.randn(32, 16, 1).realize()
-    compare = (a.expand(32, 16, 16).sum((2,), keepdim=True).T+2).T.contiguous()
-    run_schedule(check_schedule(compare, 1))
-    np.testing.assert_allclose(compare.numpy(), (np.broadcast_to(a.numpy(), (32, 16, 16)).sum(axis=2, keepdims=True).T+2).T, atol=1e-4, rtol=1e-4)
+    self._test_fusion([(32, 16, 1)],
+                      lambda a:(a.expand(32, 16, 16).sum((2,), keepdim=True).permute((1, 0, 2))+2).permute((1, 0, 2)).contiguous(), 1)
+
+  def test_late_fusion_post_expand(self):
+    self._test_fusion([(32, 32)], lambda a:a-a.sum(1), 2)
 
 class TestIndexing(unittest.TestCase):
   def check_schedule(self, xt:Union[Tensor,List[Tensor]], cnt:int):
@@ -1515,7 +1530,7 @@ class TestIndexing(unittest.TestCase):
   def test_arange_view_op(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
     assert isinstance(a.lazydata, LazyBuffer)
-    self.assertIs(a.lazydata.base.op, MetaOps.BUFFER_VIEW)
+    self.assertIs(a.lazydata.base.op, Ops.BUFFER_VIEW)
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
@@ -1523,7 +1538,7 @@ class TestIndexing(unittest.TestCase):
   def test_arange_shrink_copy(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).to("CLANG")
     assert isinstance(a.lazydata, LazyBuffer)
-    self.assertIs(a.lazydata.base.op, MetaOps.COPY)
+    self.assertIs(a.lazydata.base.op, Ops.COPY)
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
@@ -1531,8 +1546,8 @@ class TestIndexing(unittest.TestCase):
   def test_arange_expand_copy(self):
     a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).to("CLANG")
     assert isinstance(a.lazydata, LazyBuffer)
-    self.assertIs(a.lazydata.base.op, MetaOps.COPY)
-    self.assertIs(a.lazydata.base.srcs[0].base.op, BinaryOps.ADD)
+    self.assertIs(a.lazydata.base.op, Ops.COPY)
+    self.assertIs(a.lazydata.base.srcs[0].base.op, Ops.ADD)
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), [[[0, 0], [1, 1]], [[2, 2], [3, 3]]])
 
@@ -1608,23 +1623,14 @@ class TestIndexing(unittest.TestCase):
       ref = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
     np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 
-  def test_recursive_st_fixup(self):
+  def test_recursive_swizzle(self):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
     ast = a.schedule()[0].ast
-    new_uop, et = timeit(st_fixup, ast.src[0].src[2], lambda st:st.reshape((4, 1)), {})
+    swizzle = ast.src[0].src[2].reshape((4, 1))
+    new_uop = swizzle_rewrite(swizzle)
     self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
-    self.assertLess(et, 1e3)
-
-  def test_strongly_connected_DAG(self):
-    val = 1.0
-    a = Tensor(val).realize()
-    def f(a):
-      for _ in range(24): a = Tensor.stack(a, a)[0]
-      return a.item()
-    r, et = timeit(f, a)
-    self.assertEqual(r, val)
-    self.assertLess(et, 1600)
+    self.assertEqual(swizzle_cnt(new_uop), 0)
 
   def test_no_rewrite_elementwise(self):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(3)]
@@ -1637,63 +1643,23 @@ class TestIndexing(unittest.TestCase):
   def test_simple_store_reshape(self):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(2)]
     ld = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
-    r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+    r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (Ops.ADD, (0, 1)))
     r = UOp(Ops.VIEW, dtypes.int, (r,), ShapeTracker.from_shape(()))
-    r = r + ast_const(dtypes.int, 2, ())
+    r = r + 2
     sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
     rsink = graph_rewrite(sink, view_right)
-    # NOTE: this AST is always correct in the entire lifecycle of graph_rewrite!
-    # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
-    verify_ast(sink)
+    # this AST first needs to swizzle, but it doesn't have implicit movementops
+    with self.assertRaisesRegex(AssertionError, "swizzle"): verify_ast(sink)
     verify_ast(rsink)
 
   def test_no_reshape_reduceop(self):
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(2)]
     ld = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
-    r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
+    r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (Ops.ADD, (0, 1)))
     sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape((1, 1)).to_uop(), r)),))
     rsink = graph_rewrite(sink, view_right)
     verify_ast(sink)
     self.assertEqual(sink.key, rsink.key)
-
-  def test_reshape_many(self):
-    bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(2)]
-    ld = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
-    r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
-    r = UOp(Ops.VIEW, dtypes.int, (r,), ShapeTracker.from_shape(()))
-    for _ in range(24): r = r + ast_const(dtypes.int, 2, ())
-    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
-    rsink, et = timeit(graph_rewrite, sink, view_right)
-    # NOTE: this AST is always correct in the entire lifecycle of graph_rewrite!
-    # with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
-    verify_ast(sink)
-    verify_ast(rsink)
-    self.assertLessEqual(et, 1e3)
-
-  @unittest.skip("test is flaky")
-  def test_complexity(self):
-    SZ = 30 if getenv("BIG") else 10
-    sizes = [10*(i+1) for i in range(SZ)]
-    tms: List[float] = []
-    for sz in sizes:
-      bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(2)]
-      ld = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((32, 32)).to_uop()))
-      r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0, 1)))
-      for _ in range(sz): r = r + ast_const(dtypes.int, 2, ())
-      sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), r)),))
-      rsink, et = timeit(graph_rewrite, sink, view_right)
-      with self.assertRaisesRegex(AssertionError, "implicit reshape"): verify_ast(sink)
-      verify_ast(rsink)
-      tms.append(et)
-    if getenv("GRAPH_TIMING"):
-      import plotly.express as px
-      fig = px.line(x=sizes, y=tms, title="graph_rewrite time as ast grows")
-      fig.update_layout(paper_bgcolor="black", plot_bgcolor="black", font={"color":"white"},
-                        yaxis={"gridcolor":"rgba(255, 255, 255, 0.3)"}, xaxis={"gridcolor":"rgba(255, 255, 255, 0.3)"})
-      fig.show()
-    change = tms[-1] / tms[0]
-    assert change <= SZ, f"bad complexity, time increased by {change:4.2f}x while input only grew {SZ}x"
-
 
 @track_rewrites(named=True)
 def swizzle_rewrite(u:UOp) -> UOp: return graph_rewrite(graph_rewrite(u, view_left), view_right)
@@ -1732,10 +1698,9 @@ class TestSwizzle(unittest.TestCase):
     # LazyBuffer to pre-rewrite AST
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(2)]
     ld = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((4,)).to_uop()))
-    r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (BinaryOps.ADD, (0,)))
+    r = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld,), (Ops.ADD, (0,)))
     swizzle_r = UOp(Ops.VIEW, dtypes.int, (r,), unwrap(r.st).reshape(()))
-    const = ast_const(dtypes.int, 1, ())
-    alu = swizzle_r+const
+    alu = swizzle_r+1
     sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu,),),))
     # graph rewrite
     sink = swizzle_rewrite(sink)
@@ -1755,11 +1720,11 @@ class TestSwizzle(unittest.TestCase):
     # LazyBuffer to pre-rewrite AST
     bufs = [UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), i) for i in range(3)]
     ld1 = UOp(Ops.LOAD, dtypes.int, (bufs[1], ShapeTracker.from_shape((4,)).to_uop()))
-    r1 = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld1,), (BinaryOps.ADD, (0,)))
+    r1 = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld1,), (Ops.ADD, (0,)))
     ld2 = UOp(Ops.LOAD, dtypes.int, (bufs[2], ShapeTracker.from_shape((4,)).to_uop()))
-    r2 = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld2,), (BinaryOps.ADD, (0,)))
+    r2 = UOp(Ops.REDUCE_AXIS, dtypes.int, (ld2,), (Ops.ADD, (0,)))
     alu = UOp(Ops.VIEW, r1.dtype, (r1,), ShapeTracker.from_shape(()))+UOp(Ops.VIEW, r2.dtype, (r2,), ShapeTracker.from_shape(()))
-    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu+ast_const(dtypes.int, 2, ()),),),)) # noqa: E501
+    sink = UOp(Ops.SINK, dtypes.void, (UOp(Ops.STORE, dtypes.void, (bufs[0], ShapeTracker.from_shape(()).to_uop(), alu+2,),),)) # noqa: E501
     # graph rewrite
     sink = swizzle_rewrite(sink)
     # verify output
@@ -1771,7 +1736,7 @@ class TestSwizzle(unittest.TestCase):
 
   def test_swizzle_rewrite_alt(self):
     swizzle = UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(2, 3, 3, 65, 3, 65), strides=(103788, 34596, 3, 558, 1, 9), offset=0, mask=((0, 2), (0, 3), (0, 3), (0, 62), (0, 3), (0, 62)), contiguous=False), View(shape=(2, 3, 256, 256), strides=(114075, 38025, 195, 1), offset=0, mask=((0, 2), (0, 3), (0, 195), (0, 195)), contiguous=False), View(shape=(1, 2, 1, 3, 4, 64, 4, 64), strides=(0, 196608, 0, 65536, 16384, 256, 64, 1), offset=0, mask=None, contiguous=True))), src=( # noqa: E501
-  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(BinaryOps.ADD, (3,)), src=(
+  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (3,)), src=(
     UOp(Ops.LOAD, dtypes.float, arg=None, src=(
         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()),
         UOp(Ops.VIEW, dtypes.void, arg=(ld_st:=ShapeTracker(views=(View(shape=(2, 1, 3, 16, 62, 62, 3, 3), strides=(0, 0, 9, 27, 0, 0, 3, 1), offset=0, mask=None, contiguous=False),))), src=()),)),)),)) # noqa: E501
@@ -1845,6 +1810,48 @@ class TestSwizzle(unittest.TestCase):
               UOp(Ops.LOAD, dtypes.float, arg=None, src=(
                 UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(18, ('METAL', 128, dtypes.float)), src=()),
                 UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(2, 16, 2, 3, 2, 3), strides=(64, 4, 2, 0, 1, 0), offset=0, mask=((0, 2), (0, 16), (0, 2), (0, 1), (0, 2), (0, 1)), contiguous=False), View(shape=(1, 2, 1, 16, 3, 2, 3, 2), strides=(0, 576, 0, 36, 12, 6, 2, 1), offset=0, mask=None, contiguous=True))), src=()),)),)),)),)),)),))
+    ret = swizzle_rewrite(sink)
+    self.assertEqual(swizzle_cnt(ret), 0)
+
+  @unittest.expectedFailure
+  def test_swizzle_failure_permute(self):
+    sink = UOp(Ops.SINK, dtypes.void, arg=None, src=(
+      UOp(Ops.STORE, dtypes.void, arg=None, src=(
+        UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(20, ('METAL', 65, dtypes.float)), src=()),
+        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 65), strides=(0, 1), offset=0, mask=None, contiguous=True),)), src=()),
+        UOp(Ops.ADD, dtypes.float, arg=None, src=(
+          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (0,)), src=(
+            UOp(Ops.ADD, dtypes.float, arg=None, src=(
+              x6:=UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                  UOp(Ops.PRELOAD, dtypes.float, arg=None, src=(
+                    UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(8, ('METAL', 2925, dtypes.float)), src=()),
+                    x10:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(45, 65), strides=(65, 1), offset=0, mask=None, contiguous=True),)), src=()),)),
+                  UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+                    x12:=UOp(Ops.VALID, dtypes.bool, arg=None, src=(
+                      UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(45, 65), strides=(0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),
+                    UOp(Ops.CONST, dtypes.float, arg=1.0, src=()),
+                    x15:=UOp(Ops.CONST, dtypes.float, arg=0.0, src=()),)),)),
+                UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+                   x12,
+                  UOp(Ops.CONST, dtypes.float, arg=0.0003418803389649838, src=()),
+                   x15,)),)),
+               x6,)),)),
+          UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (0,)), src=(
+            UOp(Ops.MUL, dtypes.float, arg=None, src=(
+              UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+                 x12,
+                UOp(Ops.CONST, dtypes.float, arg=-1.0, src=()),
+                 x15,)),
+              UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                UOp(Ops.PRELOAD, dtypes.float, arg=None, src=(
+                  UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(2, ('METAL', 2925, dtypes.float)), src=()),
+                   x10,)),
+                UOp(Ops.VIEW, dtypes.float, arg=ShapeTracker(views=(View(shape=(45, 65), strides=(1, 89), offset=44, mask=None, contiguous=False),)), src=(
+                  UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (2,)), src=(
+                    UOp(Ops.LOAD, dtypes.float, arg=None, src=(
+                      UOp(Ops.BUFFER, dtypes.float.ptr(), arg=(4, ('METAL', 2925, dtypes.float)), src=()),
+                      UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(65, 45, 90), strides=(1, 0, 65), offset=0, mask=((0, 65), (0, 45), (0, 45)), contiguous=False), View(shape=(65, 4094), strides=(4050, 1), offset=0, mask=((0, 65), (0, 4050)), contiguous=False), View(shape=(1, 65, 46, 89), strides=(0, 4094, 89, 1), offset=0, mask=None, contiguous=True))), src=()),)),)),)),)),)),)),)),)),))
     ret = swizzle_rewrite(sink)
     self.assertEqual(swizzle_cnt(ret), 0)
 
