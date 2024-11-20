@@ -9,8 +9,8 @@ def clear_cache():
 
 @unittest.skipIf(Device.DEFAULT != "CUDA", "test prints for cuda")
 class TestCUDAPrints(unittest.TestCase):
-  clear_cache()
   def test_cuda_print_order_debug_6(self):
+    clear_cache()
     db5_out = io.StringIO()
     with contextlib.redirect_stdout(db5_out):
       with Context(DEBUG=5):
