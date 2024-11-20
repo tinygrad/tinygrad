@@ -1192,11 +1192,13 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
         for dim in sum_axis: vb = vb.unsqueeze(dim)
         # axis to be reduced to match self.shape
         axis = tuple(range(first_dim, first_dim + len(big_shape)))
-        # apply mask to v(broadcasted) and reduce such that if v contains repeated indices the last one remains
+        # apply mask to vb(broadcasted) and reduce such that if mask contains repeated indices the last one remains
         vb = vb * mask
-        for dim in axis: vb = functools.reduce(lambda x,y: y.where(y, x), vb.split(1, dim))
-        # reduce mask and select from v(get rid of extra dims from reduce) for each True element in mask else select from self
-        ret = mask.any(axis).where(vb.squeeze(), self)
+        for dim in axis: mask, vb = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), vb.split(1, dim)))
+        # remove extra dims from reduce
+        for dim in reversed(axis): mask, vb = mask.squeeze(dim), vb.squeeze(dim)
+        # select from vb for each True element in mask else select from self
+        ret = mask.where(vb, self)
 
     return ret
 

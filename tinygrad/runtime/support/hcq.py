@@ -104,7 +104,7 @@ class HWCommandQueue:
     return self
   def _update_wait(self, cmd_idx:int, signal:Optional[Any], value:Optional[int]): raise NotImplementedError("backend should overload this function")
 
-  def bind(self, device:HCQCompiled):
+  def bind(self, dev:HCQCompiled):
     """
     Associates the queue with a specific device for optimized execution.
 
@@ -112,22 +112,22 @@ class HWCommandQueue:
     the need to copy queues into the device, thereby enhancing performance.
 
     Args:
-      device: The target device for queue optimization.
+      dev: The target device for queue optimization.
 
     Note:
       Implementing this method is optional but recommended for performance gains.
     """
 
-  def submit(self, device:HCQCompiled):
+  def submit(self, dev:HCQCompiled):
     """
     Submits the command queue to a specific device for execution.
 
     Args:
-      device: The device to submit the queue to
+      dev: The device to submit the queue to
     """
-    if self.q: self._submit(device)
+    if self.q: self._submit(dev)
     return self
-  def _submit(self, device:HCQCompiled): raise NotImplementedError("backend should overload this function")
+  def _submit(self, dev:HCQCompiled): raise NotImplementedError("backend should overload this function")
 
 class HWComputeQueue(HWCommandQueue):
   @hcq_command
@@ -256,8 +256,8 @@ class HCQArgsState:
   def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
 
 class HCQProgram:
-  def __init__(self, args_state_t:Type[HCQArgsState], device:HCQCompiled, name:str, kernargs_alloc_size:int):
-    self.args_state_t, self.device, self.name, self.kernargs_alloc_size = args_state_t, device, name, kernargs_alloc_size
+  def __init__(self, args_state_t:Type[HCQArgsState], dev:HCQCompiled, name:str, kernargs_alloc_size:int):
+    self.args_state_t, self.dev, self.name, self.kernargs_alloc_size = args_state_t, dev, name, kernargs_alloc_size
 
   def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> HCQArgsState:
     """
@@ -269,7 +269,7 @@ class HCQProgram:
     Returns:
       Arguments state with the given buffers and values set for the program.
     """
-    return self.args_state_t(kernargs_ptr or self.device._alloc_kernargs(self.kernargs_alloc_size), self, bufs, vals=vals)
+    return self.args_state_t(kernargs_ptr or self.dev._alloc_kernargs(self.kernargs_alloc_size), self, bufs, vals=vals)
 
   def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
                vals:Tuple[int, ...]=(), wait:bool=False) -> Optional[float]:
@@ -288,15 +288,15 @@ class HCQProgram:
     """
 
     kernargs = self.fill_kernargs(bufs, vals)
-    q = self.device.hw_compute_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1).memory_barrier()
+    q = self.dev.hw_compute_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1).memory_barrier()
 
-    with hcq_profile(self.device, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
+    with hcq_profile(self.dev, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
       q.exec(self, kernargs, global_size, local_size)
 
-    q.signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-    self.device.timeline_value += 1
+    q.signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
+    self.dev.timeline_value += 1
 
-    if wait: self.device.synchronize()
+    if wait: self.dev.synchronize()
     return (float(sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
 
 class ProfileLogger:
@@ -467,8 +467,8 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
   This class implements basic copy operations following the HCQ API, utilizing both `HWComputeQueue` and `HWCopyQueue`.
   """
 
-  def __init__(self, device:HCQCompiled, batch_size:int=(2 << 20), batch_cnt:int=32):
-    self.device:Any = device
+  def __init__(self, dev:HCQCompiled, batch_size:int=(2 << 20), batch_cnt:int=32):
+    self.dev:Any = dev
     self.b = [self._alloc(batch_size, BufferOptions(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
     super().__init__()
@@ -476,43 +476,43 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer: raise NotImplementedError("need hcq compat alloc")
 
   def _copyin(self, dest:HCQBuffer, src:memoryview):
-    with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"CPU -> {self.device.dname}", enabled=PROFILE):
+    with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"CPU -> {self.dev.dname}", enabled=PROFILE):
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
-        self.device.timeline_signal.wait(self.b_timeline[self.b_next])
+        self.dev.timeline_signal.wait(self.b_timeline[self.b_next])
         ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
-        self.device.hw_copy_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+        self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                      .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
-                                     .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-        self.b_timeline[self.b_next] = self.device.timeline_value
-        self.device.timeline_value += 1
+                                     .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
+        self.b_timeline[self.b_next] = self.dev.timeline_value
+        self.dev.timeline_value += 1
 
   def copy_from_disk(self, dest:HCQBuffer, src, size):
     def _get_temp_buf():
       # Check if the next buffer is safe to be used (its signal has passed) and reserve it.
-      if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.device.timeline_signal.value:
+      if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.dev.timeline_signal.value:
         self.b_timeline[(self.b_next + 1) % len(self.b)], self.b_next = (1 << 64), (self.b_next + 1) % len(self.b)
         return (self.b[self.b_next].va_addr, self.b_next)
       return None
 
-    with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"DISK -> {self.device.dname}", enabled=PROFILE):
+    with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"DISK -> {self.dev.dname}", enabled=PROFILE):
       for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
-        self.device.hw_copy_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+        self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                      .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
-                                     .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-        self.b_timeline[batch_info[1]] = self.device.timeline_value
-        self.device.timeline_value += 1
+                                     .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
+        self.b_timeline[batch_info[1]] = self.dev.timeline_value
+        self.dev.timeline_value += 1
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
-    self.device.synchronize()
+    self.dev.synchronize()
 
-    with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"{self.device.dname} -> CPU", enabled=PROFILE):
+    with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"{self.dev.dname} -> CPU", enabled=PROFILE):
       for i in range(0, dest.nbytes, self.b[0].size):
-        self.device.hw_copy_queue_t().wait(self.device.timeline_signal, self.device.timeline_value - 1) \
+        self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                      .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i)) \
-                                     .signal(self.device.timeline_signal, self.device.timeline_value).submit(self.device)
-        self.device.timeline_signal.wait(self.device.timeline_value)
-        self.device.timeline_value += 1
+                                     .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
+        self.dev.timeline_signal.wait(self.dev.timeline_value)
+        self.dev.timeline_value += 1
 
         ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 

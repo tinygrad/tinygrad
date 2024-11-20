@@ -96,17 +96,17 @@ class QCOMComputeQueue(HWComputeQueue):
                                               cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
     return submit_req, obj
 
-  def bind(self, device):
-    self.binded_device = device
-    self.hw_page = device.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True))
+  def bind(self, dev):
+    self.binded_device = dev
+    self.hw_page = dev.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True))
     self.submit_req, self.obj = self._build_gpu_command(self.binded_device, self.hw_page.va_addr)
     # From now on, the queue is on the device for faster submission.
     self.q = to_mv(self.obj.gpuaddr, len(self.q) * 4).cast("I") # type: ignore
 
-  def _submit(self, device):
-    if self.binded_device == device: submit_req = self.submit_req
-    else: submit_req, _ = self._build_gpu_command(device)
-    device.last_cmd = kgsl.IOCTL_KGSL_GPU_COMMAND(device.fd, __payload=submit_req).timestamp
+  def _submit(self, dev):
+    if self.binded_device == dev: submit_req = self.submit_req
+    else: submit_req, _ = self._build_gpu_command(dev)
+    dev.last_cmd = kgsl.IOCTL_KGSL_GPU_COMMAND(dev.fd, __payload=submit_req).timestamp
 
   def _exec(self, prg, args_state, global_size, local_size):
     global_size_mp = [int(g*l) for g,l in zip(global_size, local_size)]
@@ -131,7 +131,7 @@ class QCOMComputeQueue(HWComputeQueue):
     self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
              qreg.a6xx_sp_cs_ctrl_reg0(threadsize=adreno.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
              qreg.a6xx_sp_cs_unknown_a9b1(unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
-             qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.device._stack.va_addr),
+             qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.dev._stack.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
 
     self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
@@ -151,7 +151,7 @@ class QCOMComputeQueue(HWComputeQueue):
                                                                  state_block=adreno.SB6_CS_TEX, num_unit=args_state.prg.samp_cnt),
                *data64_le(args_state.ptr + args_state.prg.samp_off))
       self.reg(adreno.REG_A6XX_SP_CS_TEX_SAMP, *data64_le(args_state.ptr + args_state.prg.samp_off))
-      self.reg(adreno.REG_A6XX_SP_PS_TP_BORDER_COLOR_BASE_ADDR, *data64_le(prg.device._border_color_base()))
+      self.reg(adreno.REG_A6XX_SP_PS_TP_BORDER_COLOR_BASE_ADDR, *data64_le(prg.dev._border_color_base()))
 
     if args_state.prg.tex_cnt > 0:
       self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
@@ -208,11 +208,11 @@ class QCOMArgsState(HCQArgsState):
   def update_var(self, index:int, val:int): self.args_view[self.args_info[index].offset//8] = val
 
 class QCOMProgram(HCQProgram):
-  def __init__(self, device: QCOMDevice, name: str, lib: bytes):
-    self.device, self.name, self.lib = device, name, lib
+  def __init__(self, dev: QCOMDevice, name: str, lib: bytes):
+    self.dev, self.name, self.lib = dev, name, lib
     self._parse_lib()
 
-    self.lib_gpu = self.device.allocator.alloc(self.image_size, options=BufferOptions(cpu_access=True, nolru=True))
+    self.lib_gpu = self.dev.allocator.alloc(self.image_size, options=BufferOptions(cpu_access=True, nolru=True))
     to_mv(self.lib_gpu.va_addr, self.image_size)[:] = self.image
 
     self.pvtmem_size_per_item = round_up(self.pvtmem, 512) >> 9
@@ -220,10 +220,10 @@ class QCOMProgram(HCQProgram):
     self.hw_stack_offset = round_up(next_power2(round_up(self.pvtmem, 512)) * 128 * 16, 0x1000)
     self.shared_size = max(1, (self.shmem - 1) // 1024)
     self.max_threads = min(1024, ((384 * 32) // (max(1, (self.fregs + round_up(self.hregs, 2) // 2)) * 128)) * 128)
-    device._ensure_stack_size(self.hw_stack_offset * 4)
+    dev._ensure_stack_size(self.hw_stack_offset * 4)
 
     kernargs_alloc_size = round_up(2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + self.samp_cnt * 0x10, 0x100)
-    super().__init__(QCOMArgsState, self.device, self.name, kernargs_alloc_size=kernargs_alloc_size)
+    super().__init__(QCOMArgsState, self.dev, self.name, kernargs_alloc_size=kernargs_alloc_size)
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
@@ -282,7 +282,7 @@ class QCOMProgram(HCQProgram):
     self.fregs, self.hregs = _read_lib(reg_desc_off + 0x14), _read_lib(reg_desc_off + 0x18)
 
   def __del__(self):
-    if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True, nolru=True))
+    if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True, nolru=True))
 
 class QCOMBuffer(HCQBuffer):
   def __init__(self, va_addr:int, size:int, info=None, mapped=False, desc=None, ibo=None, pitch=None, real_stride=None, **kwargs):
@@ -303,7 +303,7 @@ class QCOMAllocator(HCQAllocator):
       pitch = round_up((real_stride:=imgw * 4 * options.image.itemsize), 1 << pitchalign) + pitch_add
 
       if options.external_ptr: texture = QCOMBuffer(options.external_ptr, size)
-      else: texture = self.device._gpu_alloc(pitch * imgh, kgsl.KGSL_MEMTYPE_TEXTURE)
+      else: texture = self.dev._gpu_alloc(pitch * imgh, kgsl.KGSL_MEMTYPE_TEXTURE)
 
       texture.pitch, texture.real_stride = pitch, real_stride
 
@@ -316,7 +316,7 @@ class QCOMAllocator(HCQAllocator):
 
       return texture
 
-    return QCOMBuffer(options.external_ptr, size) if options.external_ptr else self.device._gpu_alloc(size)
+    return QCOMBuffer(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
 
   def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, dest_off=0, src_off=0):
     while src_off < src_size:
@@ -328,17 +328,17 @@ class QCOMAllocator(HCQAllocator):
     else: ctypes.memmove(dest.va_addr, mv_address(src), src.nbytes)
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
-    self.device.synchronize()
+    self.dev.synchronize()
     if (qs:=cast(QCOMBuffer, src)).pitch is not None: self._do_copy(qs.va_addr, mv_address(dest), qs.size, qs.real_stride, qs.pitch, qs.real_stride)
     else: ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
 
   def _as_buffer(self, src:HCQBuffer) -> memoryview:
-    self.device.synchronize()
+    self.dev.synchronize()
     return to_mv(src.va_addr, src.size)
 
   def _free(self, opaque, options:BufferOptions):
-    self.device.synchronize()
-    self.device._gpu_free(opaque)
+    self.dev.synchronize()
+    self.dev._gpu_free(opaque)
 
 class QCOMDevice(HCQCompiled):
   signals_page: Any = None
