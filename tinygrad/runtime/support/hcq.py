@@ -475,7 +475,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
 
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer: raise NotImplementedError("need hcq compat alloc")
 
-  def copyin(self, dest:HCQBuffer, src:memoryview):
+  def _copyin(self, dest:HCQBuffer, src:memoryview):
     with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"CPU -> {self.device.dname}", enabled=PROFILE):
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
@@ -503,7 +503,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
         self.b_timeline[batch_info[1]] = self.device.timeline_value
         self.device.timeline_value += 1
 
-  def copyout(self, dest:memoryview, src:HCQBuffer):
+  def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.device.synchronize()
 
     with hcq_profile(self.device, queue_type=self.device.hw_copy_queue_t, desc=f"{self.device.dname} -> CPU", enabled=PROFILE):
@@ -516,7 +516,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
 
         ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
-  def transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev, dest_dev):
+  def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev, dest_dev):
     src_dev.allocator.map(dest)
 
     with hcq_profile(src_dev, queue_type=src_dev.hw_copy_queue_t, desc=f"{src_dev.dname} -> {dest_dev.dname}", enabled=PROFILE):
@@ -534,6 +534,6 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
 
   def map(self, buf:HCQBuffer): pass
 
-  def offset(self, buf, size:int, offset:int) -> HCQBuffer:
+  def _offset(self, buf, size:int, offset:int) -> HCQBuffer:
     return type(buf)(va_addr=buf.va_addr + offset, size=size, **{k:v for k,v in buf.__dict__.items() if k not in ['va_addr', 'size']},
                      **{x[0]:getattr(buf, x[0]) for x in getattr(buf, '_fields_', []) if x[0] not in ['va_addr', 'size']}, _base=buf)

@@ -6,8 +6,6 @@
 from pathlib import Path
 from typing import List, Optional
 import argparse, json
-import numpy as np
-np.set_printoptions(linewidth=200)
 from tinygrad import Tensor, Device, GlobalCounters, nn
 from tinygrad.helpers import Context, Timing, Profiling, DEBUG, JIT, getenv, colored
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
@@ -250,6 +248,8 @@ class LLaMa:
     self.tokenizer = tokenizer
 
   def greedy_until(self, prompt:str, until, max_length, temperature):
+    # only used in old eval script
+    import numpy as np
     toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)
     start_pos = 0
     for i in range(max_length):
