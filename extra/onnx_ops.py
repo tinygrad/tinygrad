@@ -7,8 +7,8 @@ from extra.onnx import DTYPE_MAP, to_python_const
 import numpy as np
 
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
-                  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-                  "Elu", "Celu", "Xor", "Round", "Erf"}
+                  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh", "Asin",
+                  "Acos", "Atan", "Elu", "Celu", "Xor", "Round", "Erf"}
 
 # **************** Free Ops ****************
 
@@ -87,22 +87,6 @@ def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > 
 def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
 def Not(x:Tensor): return x.logical_not()
-
-def Asin(x): return Atan(x / (1 - x * x).sqrt())
-def Acos(x: Tensor):
-  negate = (x < 0)
-  x = x.abs()
-  ret = ((((-0.0187293 * x) + 0.0742610)*x - 0.2121144) * x + 1.5707288) * (1.0 - x).sqrt()
-  ret = ret - 2 * negate * ret
-  return negate * math.pi + ret
-def Atan(y: Tensor):
-  t1 = y.abs()
-  t3 = (1 > t1).where(t1, t1.reciprocal())
-  t4 = t3 * t3
-  t0 = ((((-0.013480470 * t4 + 0.057477314) * t4 - 0.121239071) * t4 + 0.195635925) * t4 - 0.332994597) * t4 + 0.999995630
-  t3 = t0 * t3
-  t3 = (t1 > 1).where(1.570796327 - t3, t3)
-  return y.sign() * t3
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
   k = to_python_const(k) if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0

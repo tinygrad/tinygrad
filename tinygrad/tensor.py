@@ -2461,6 +2461,40 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     return self.sin() / self.cos()
 
+  def asin(self):
+    """
+    Computes the inverse sine (arcsine) of the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).asin().numpy())
+    ```
+    """
+    return (self / (1 - self * self).sqrt()).atan()
+
+  def acos(self: Tensor):
+    """
+    Computes the inverse cosine (arccosine) of the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).acos().numpy())
+    ```
+    """
+    approximation = (1.0 - self.abs()).sqrt() * polyN(self.abs(), [-0.0187293, 0.0742610, -0.2121144, 1.5707288])
+    return (self < 0) * math.pi + approximation * (1 - 2 * (self < 0))
+
+  def atan(self: Tensor):
+    """
+    Computes the inverse tangent (arctan) of the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).atan().numpy())
+    ```
+    """
+    x = (1 > self.abs()).detach().where(self.abs(), self.abs().reciprocal())
+    x = x * polyN(x*x, [-0.013480470, 0.057477314, -0.121239071, 0.195635925, -0.332994597, 0.999995630])
+    x = (self.abs() > 1).detach().where(1.570796327 - x, x)
+    return self.sign() * x
+
   # ***** math functions *****
 
   def trunc(self: Tensor) -> Tensor:

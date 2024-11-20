@@ -1233,6 +1233,15 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.atanh(), grad_atol=1e-6)
     helper_test_op([(45,65)], lambda x: x.atanh(), grad_atol=1e-6, low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.atanh(), grad_atol=1e-6, low=300, high=303)
+  def test_asin(self):
+    helper_test_op([(45,65)], lambda x: x.asin(), low=-1, high=1)
+  def test_acos(self):
+    # high grad atol
+    helper_test_op([(45,65)], lambda x: x.acos(), grad_atol=3e-6, low=-1, high=1)
+  def test_atan(self):
+    helper_test_op([(45,65)], lambda x: x.atan())
+    helper_test_op([(45,65)], lambda x: x.atan(), low=-300, high=-297)
+    helper_test_op([(45,65)], lambda x: x.atan(), low=300, high=303)
 
   def test_topo_sort(self):
     helper_test_op([(45,65)], lambda x: (x+x)*x, grad_atol=1e-6)
