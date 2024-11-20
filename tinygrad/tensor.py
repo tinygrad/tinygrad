@@ -2490,10 +2490,10 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).atan().numpy())
     ```
     """
-    x = (1 > self.abs()).detach().where(self.abs(), self.abs().reciprocal())
+    magnitude = self.abs()
+    x = (1 > magnitude).detach().where(magnitude, magnitude.reciprocal())
     x = x * polyN(x*x, [-0.013480470, 0.057477314, -0.121239071, 0.195635925, -0.332994597, 0.999995630])
-    x = (self.abs() > 1).detach().where(1.570796327 - x, x)
-    return self.sign() * x
+    return self.sign() * (magnitude > 1).detach().where(1.570796327 - x, x)
 
   # ***** math functions *****
 
