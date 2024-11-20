@@ -56,11 +56,6 @@ def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
   check(comgr.amd_comgr_destroy_action_info(action_info))
   return ret
 
-# this should probably be a method on the Compiler
-def disasm(lib):
-  asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
-  return '\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x])
-
 class AMDCompiler(Compiler):
   def __init__(self, arch:str):
     self.arch = arch
@@ -68,3 +63,6 @@ class AMDCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     try: return compile_hip(src, self.arch)
     except RuntimeError as e: raise CompileError(e) from e
+  def disassemble(self, lib:bytes):
+    asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
+    print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))

@@ -231,12 +231,7 @@ class BertOutput:
     return hidden_states
 
 def gelu(x):
-  return x * 0.5 * (1.0 + erf(x / 1.41421))
-
-# approximation of the error function
-def erf(x):
-  t = (1 + 0.3275911 * x.abs()).reciprocal()
-  return x.sign() * (1 - ((((1.061405429 * t + -1.453152027) * t + 1.421413741) * t + -0.284496736) * t + 0.254829592) * t * (-(x.square())).exp())
+  return x * 0.5 * (1.0 + (x / 1.41421).erf())
 
 class BertIntermediate:
   def __init__(self, hidden_size, intermediate_size):

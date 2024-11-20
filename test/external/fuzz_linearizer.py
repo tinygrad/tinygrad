@@ -25,12 +25,12 @@ from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG, Timing
-from tinygrad.ops import UnaryOps, UOp, UOps
-from test.helpers import is_dtype_supported
+from tinygrad.ops import UOp, Ops
+from tinygrad.device import is_dtype_supported
 
 def on_linearizer_will_run(): pass
 def on_linearizer_did_run(): pass
-def compare_states(x, y): return True
+def compare_states(x, y): return (True, "")
 
 if getenv("VALIDATE_HCQ"):
   if Device.DEFAULT == "NV":
@@ -116,7 +116,7 @@ def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None) -> Tuple[str, Any]:
 
 def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=None, rtol=1e-2, atol=1e-2):
   # TODO: for bfloat16 it compiles linearizer, but it does not run because numpy cannot generate bf16 buffer.
-  has_bf16 = any(b.dtype == dtypes.bfloat16 for b in lin.membufs)
+  has_bf16 = any(b.dtype.base == dtypes.bfloat16 for b in lin.membufs)
 
   # TODO: raise specific fuzzing errors instead of str, and propagate the error message
   try:
@@ -228,7 +228,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
           validate_lin = test_lin.copy()
           validate_lin.opts = validate_device.renderer
           if validate_rawbufs is None:
-            validate_rawbufs = [get_fuzz_rawbuf_like(x, copy=True, force_device=validate_device.dname) for x in rawbufs]
+            validate_rawbufs = [get_fuzz_rawbuf_like(x, copy=True, force_device=validate_device.device) for x in rawbufs]
           (_msg, _, _, _, state2) = compare_linearizer(validate_lin, validate_rawbufs, var_vals, ground_truth, rtol=rtol, atol=atol)
 
           if _msg != "PASS": failures[f"VALIDATE_DEV_{_msg}"].append((validate_lin.ast, validate_lin.applied_opts))
@@ -252,7 +252,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
 def _is_simple(lin: Kernel) -> bool:
   if len(lin.ast.src) > 1: return False
   ast:UOp = lin.ast.src[0]
-  if ast.src[0].arg is UnaryOps.CAST and ast.src[0].src[0].op is UOps.LOAD: return True
+  if ast.src[0].op is Ops.CAST and ast.src[0].src[0].op is Ops.LOAD: return True
   return False
 
 if __name__ == "__main__":
@@ -277,7 +277,7 @@ if __name__ == "__main__":
   elif args.beamreplay is not None:
     print(f"loading BEAM replay from file '{args.beamreplay}'")
     with open(args.beamreplay, 'r') as file: fdata = file.readlines()
-    ast_strs, opts_list = [x.split(' :: ')[0] for x in fdata], [x.split(' :: ')[1] for x in fdata]
+    ast_strs, opts_list = [x.split(' :: ')[0] for x in fdata if not x.startswith("#")], [x.split(' :: ')[1] for x in fdata if not x.startswith("#")]
 
     # dedup ast_strs and opts_list
     dct = defaultdict(list)

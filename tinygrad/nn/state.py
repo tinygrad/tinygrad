@@ -123,6 +123,8 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
       if k not in state_dict and not strict:
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
+      if v.lazydata.shape != state_dict[k].shape:
+        raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.lazydata.shape}, but found {state_dict[k].shape} in state dict.')
       if isinstance((mlb:=v.lazydata), MultiLazyBuffer):
         if isinstance(state_dict[k].lazydata, MultiLazyBuffer): v.replace(state_dict[k]).realize()
         else: v.replace(state_dict[k].shard(mlb.device, mlb.axis)).realize()
@@ -243,7 +245,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   def q_to_uint8(t: Tensor, b: int) -> Tensor:
     # TODO: rewrite with arange?
     shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
-    return t.unsqueeze(-1).expand((*t.shape,8//b)).div(shift_tensor, upcast=False).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
+    return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
   # map to (number of elements, number of bytes)
   if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 14: (256, 210), 8: (32, 34) }.get(ggml_type)) is not None:

@@ -2,7 +2,7 @@ from typing import List
 from extra.models.resnet import ResNet50
 from tinygrad import Tensor, Device, nn
 from tinygrad.helpers import Profiling, Timing, getenv, BEAM, NOOPT, DEBUG, Context, ansilen
-from tinygrad.ops import UOps
+from tinygrad.ops import Ops
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index
 from tinygrad.codegen.linearize import linearize_uop
@@ -27,7 +27,7 @@ if __name__ == "__main__":
         sched = out.schedule()
 
       if not SCHEDULE_ONLY:
-        asts = list({x.ast.key:x.ast for x in sched if x.ast.op is UOps.SINK}.values())
+        asts = list({x.ast.key:x.ast for x in sched if x.ast.op is Ops.SINK}.values())
         if (restrict_kernel := getenv("RESTRICT_KERNEL", -1)) != -1: asts = asts[restrict_kernel:restrict_kernel+1]
         kernels: List[Kernel] = []
         with Timing(f"***** model opts({len(asts):2d}) in  "):

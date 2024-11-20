@@ -3,7 +3,7 @@ import math
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort
 from tinygrad.dtype import dtypes, DType, sum_acc_dtype
-from tinygrad.ops import ReduceOps, resolve, sint
+from tinygrad.ops import Ops, resolve, sint
 from tinygrad.tensor import Function
 from tinygrad.engine.lazy import LazyBuffer
 
@@ -28,7 +28,7 @@ class Cast(Function):
 
 class Reciprocal(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.recip()
+    self.ret = x.reciprocal()
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return -grad_output * self.ret * self.ret
@@ -42,7 +42,7 @@ class Sin(Function):
 
 class Relu(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.max(0)
+    self.ret = x.maximum(0)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.gt(0).cast(grad_output.dtype) * grad_output
@@ -73,7 +73,7 @@ class Sqrt(Function):
 # TODO: have the backend automatically find this
 class Sigmoid(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = (1 + (x * (-1/math.log(2))).exp2()).recip()
+    self.ret = (1 + (x * (-1/math.log(2))).exp2()).reciprocal()
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
@@ -142,13 +142,13 @@ class Where(Function):
 class Sum(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
     self.input_shape = x.shape
-    return x.r(ReduceOps.SUM, axis)
+    return x.r(Ops.ADD, axis)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.expand(self.input_shape)
 
 class Prod(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
-    self.x, self.ret = x, x.r(ReduceOps.PROD, axis)
+    self.x, self.ret = x, x.r(Ops.MUL, axis)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
@@ -156,13 +156,13 @@ class Prod(Function):
 
 class Max(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
-    self.x, self.ret, self.axis = x, x.r(ReduceOps.MAX, axis), axis
+    self.x, self.ret, self.axis = x, x.r(Ops.MAX, axis), axis
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # 1s in locations where the max was chosen (can be two locations)
     max_is_1s = self.x.ne(self.ret.expand(self.x.shape)).ne(self.x.const_like(1).cast(dtypes.bool)).cast(grad_output.dtype)
-    div = max_is_1s.r(ReduceOps.SUM, self.axis).expand(self.x.shape)
+    div = max_is_1s.r(Ops.ADD, self.axis).expand(self.x.shape)
     return (max_is_1s/div) * grad_output.expand(self.x.shape)
 
 # ************* movement ops *************
@@ -174,7 +174,7 @@ class Expand(Function):
     return x.expand(shape)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.cast(sum_acc_dtype(grad_output.dtype)).r(ReduceOps.SUM, self.expanded_axis).cast(grad_output.dtype)
+    return grad_output.cast(sum_acc_dtype(grad_output.dtype)).r(Ops.ADD, self.expanded_axis).cast(grad_output.dtype)
 
 class Reshape(Function):
   def forward(self, x:LazyBuffer, shape:Tuple[int, ...]) -> LazyBuffer:

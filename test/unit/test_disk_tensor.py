@@ -4,7 +4,7 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load, tar_extract
 from tinygrad.helpers import Timing, fetch, temp, CI
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 def compare_weights_both(url):
   import torch

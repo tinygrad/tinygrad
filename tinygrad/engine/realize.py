@@ -2,7 +2,7 @@ from typing import List, Dict, Optional, cast, Generator, Tuple
 import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA
-from tinygrad.ops import UOps, UOp, Variable, sym_infer, sint
+from tinygrad.ops import Ops, UOp, Variable, sym_infer, sint
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, Program
@@ -64,11 +64,11 @@ def get_kernel(renderer:Renderer, ast:UOp) -> Kernel:
 # **************** Runners ****************
 
 class Runner:
-  def __init__(self, display_name:str, dname:str, op_estimate:sint=0, mem_estimate:sint=0, lds_estimate:Optional[sint]=None):
-    self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate, self.lds_estimate = \
-      True, display_name, dname, op_estimate, mem_estimate, mem_estimate if lds_estimate is None else lds_estimate
+  def __init__(self, display_name:str, device:str, op_estimate:sint=0, mem_estimate:sint=0, lds_estimate:Optional[sint]=None):
+    self.first_run, self.display_name, self.device, self.op_estimate, self.mem_estimate, self.lds_estimate = \
+      True, display_name, device, op_estimate, mem_estimate, mem_estimate if lds_estimate is None else lds_estimate
   @property
-  def device(self): return Device[self.dname]
+  def dev(self): return Device[self.device]
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     return self(rawbufs, {} if var_vals is None else var_vals)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
@@ -78,9 +78,10 @@ class CompiledRunner(Runner):
   def __init__(self, p:Program, precompiled:Optional[bytes]=None):
     if DEBUG >= 4: print(p.src)
     self.p:Program = p
-    self.lib:bytes = precompiled if precompiled is not None else Device[p.dname].compiler.compile_cached(p.src)
-    self.clprg = Device[p.dname].runtime(p.function_name, self.lib)
-    super().__init__(p.name, p.dname, p.op_estimate, p.mem_estimate, p.lds_estimate)
+    self.lib:bytes = precompiled if precompiled is not None else Device[p.device].compiler.compile_cached(p.src)
+    if DEBUG >= 6: Device[p.device].compiler.disassemble(self.lib)
+    self.clprg = Device[p.device].runtime(p.function_name, self.lib)
+    super().__init__(p.name, p.device, p.op_estimate, p.mem_estimate, p.lds_estimate)
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)
 
@@ -116,13 +117,13 @@ class BufferCopy(Runner):
     else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
     super().__init__(colored(name, "yellow"), dest_device, 0, total_sz)
   def copy(self, dest, src):
-    disk_supports_fast_copyout = src.device.startswith("DISK") and hasattr(src.allocator.device, 'io_uring') and \
-      getattr(src.allocator.device, 'fd', None) is not None
+    disk_supports_fast_copyout = src.device.startswith("DISK") and hasattr(src.allocator.dev, 'io_uring') and \
+      getattr(src.allocator.dev, 'fd', None) is not None
     if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_disk') and disk_supports_fast_copyout and src.nbytes >= 4096:
       dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-    elif src.device.startswith("DISK") and hasattr(dest.allocator, 'as_buffer'):
+    elif src.device.startswith("DISK") and hasattr(dest.allocator, '_as_buffer'):
       # fast(ish) path, uses readinto in diskbuffers
-      src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
+      src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
     else:
       dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False):
@@ -135,23 +136,23 @@ class BufferCopy(Runner):
       return time.perf_counter() - st
 
 class BufferXfer(BufferCopy):
-  def copy(self, dest, src): dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
+  def copy(self, dest, src): dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=dest.allocator.dev)
 
 # **************** method cache ****************
 
 method_cache: Dict[Tuple[str, bytes, int, int, bool], CompiledRunner] = {}
-def get_runner(dname:str, ast:UOp) -> CompiledRunner:
-  ckey = (dname, ast.key, BEAM.value, NOOPT.value, False)
+def get_runner(device:str, ast:UOp) -> CompiledRunner:
+  ckey = (device, ast.key, BEAM.value, NOOPT.value, False)
   if cret:=method_cache.get(ckey): return cret
-  bkey = (dname.split(":")[0], ast.key, BEAM.value, NOOPT.value, True)
+  bkey = (device.split(":")[0], ast.key, BEAM.value, NOOPT.value, True)
   if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
+    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
-    prg: Program = get_kernel(Device[dname].renderer, ast).to_program()
+    prg: Program = get_kernel(Device[device].renderer, ast).to_program()
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
-      return UOpsFuzzerRunner(replace(prg, dname=dname))
-    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=dname))
+      return UOpsFuzzerRunner(replace(prg, device=device))
+    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
 # **************** lowering functions ****************
@@ -174,25 +175,25 @@ class ExecItem:
         lds_est = sym_infer(self.prg.lds_estimate, var_vals)
         mem_est = min(mem_est, lds_est)   # there can't be more memory accessed than loads/stores. remove this when symbolic is fixed
         ptm = (colored(f"{et*1e3:9.2f}ms", "yellow") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
-        print(f"{colored(f'*** {self.prg.dname[:7]:7s} {GlobalCounters.kernel_count:4d}', 'magenta' if jit else ('green' if self.prg.first_run else None))} {self.prg.display_name+' '*(41-ansilen(self.prg.display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
+        print(f"{colored(f'*** {self.prg.device[:7]:7s} {GlobalCounters.kernel_count:4d}', 'magenta' if jit else ('green' if self.prg.first_run else None))} {self.prg.display_name+' '*(41-ansilen(self.prg.display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
               (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_est/((et or 1e-20)*1e9):9.2f} GFLOPS {mem_est/((et or 1e-20)*1e9):6.1f}|{lds_est/((et or 1e-20)*1e9):<7.1f} GB/s)" +  # noqa: E501
                f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}"))
       self.prg.first_run = False
     return et
 
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is UOps.COPY
-  if si.ast.op is UOps.SINK:
+  assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is Ops.COPY
+  if si.ast.op is Ops.SINK:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
   out, arg = si.outputs[0], si.ast.arg
-  if si.ast.op is UOps.COPY:
+  if si.ast.op is Ops.COPY:
     kernel_type = BufferCopy
-    if hasattr(Device[out.device].allocator, 'transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
+    if hasattr(Device[out.device].allocator, '_transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       kernel_type = BufferXfer
     return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
-  if si.ast.op is UOps.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
-  if si.ast.op is UOps.BUFFER_VIEW: return ExecItem(ViewOp(out), list(si.bufs))
+  if si.ast.op is Ops.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
+  if si.ast.op is Ops.BUFFER_VIEW: return ExecItem(ViewOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {si.ast}")
 
 def lower_schedule(schedule:List[ScheduleItem]) -> Generator[ExecItem, None, None]:

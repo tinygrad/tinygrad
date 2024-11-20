@@ -1,4 +1,5 @@
 #!/bin/bash
+export PAGE_SIZE=1
 export LOGOPS=/tmp/ops
 export RUN_PROCESS_REPLAY=1
 rm $LOGOPS

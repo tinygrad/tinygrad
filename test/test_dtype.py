@@ -2,12 +2,13 @@ import unittest, operator, subprocess, math
 import numpy as np
 import torch
 from typing import Any, List
+from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, DEBUG, CI
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
 from hypothesis import given, settings, strategies as strat
-from test.helpers import is_dtype_supported, rand_for_dtype
+from test.helpers import rand_for_dtype
 import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
 
@@ -295,13 +296,50 @@ class TestUint64DType(TestDType):
 
 class TestBoolDType(TestDType): DTYPE = dtypes.bool
 
+class TestPtrDType(unittest.TestCase):
+  def test_vec_double(self):
+    dt1 = dtypes.float.vec(4).ptr().vec(4)
+    dt2 = dtypes.float.vec(4).ptr().vec(4)
+    self.assertEqual(dt1, dt2)
+    self.assertEqual(str(dt1), str(dt2))
+
+  def test_scalar(self):
+    dt = dtypes.float.vec(4).ptr().scalar()
+    self.assertEqual(dt.base, dtypes.float.vec(4))
+
+    dt = dtypes.float.vec(4).ptr().vec(4).scalar()
+    self.assertEqual(dt.base, dtypes.float.vec(4))
+
+    dt = dtypes.float.vec(4).scalar()
+    self.assertEqual(dt, dtypes.float)
+
+  def test_serialize(self):
+    dt = dtypes.float.vec(4).ptr().vec(4)
+    self.assertEqual(dt, eval(str(dt)))
+
+  def test_vcount(self):
+    dt = dtypes.float.ptr().vec(4)
+    self.assertEqual(dt.vcount, 4)
+    self.assertEqual(dt.v, 4)
+    self.assertEqual(dt.count, 1)
+
+    dt = dtypes.float.vec(4).ptr()
+    self.assertEqual(dt.vcount, 1)
+    self.assertEqual(dt.v, 1)
+    self.assertEqual(dt.count, 4)
+
+    dt = dtypes.float.vec(4).ptr().vec(4)
+    self.assertEqual(dt.vcount, 4)
+    self.assertEqual(dt.v, 4)
+    self.assertEqual(dt.count, 4)
+
 class TestImageDType(unittest.TestCase):
   def test_image_scalar(self):
-    assert dtypes.imagef((10,10)).scalar() == dtypes.float32
-    assert dtypes.imageh((10,10)).scalar() == dtypes.float32
+    assert dtypes.imagef((10,10)).base.scalar() == dtypes.float32
+    assert dtypes.imageh((10,10)).base.scalar() == dtypes.float32
   def test_image_vec(self):
-    assert dtypes.imagef((10,10)).vec(4) == dtypes.float32.vec(4)
-    assert dtypes.imageh((10,10)).vec(4) == dtypes.float32.vec(4)
+    assert dtypes.imagef((10,10)).base.vec(4) == dtypes.float32.vec(4)
+    assert dtypes.imageh((10,10)).base.vec(4) == dtypes.float32.vec(4)
 
 class TestEqStrDType(unittest.TestCase):
   def test_image_ne(self):
@@ -311,14 +349,9 @@ class TestEqStrDType(unittest.TestCase):
     assert dtypes.imageh((1,2,4)) != dtypes.imageh((1,4,2)), "different shape doesn't match"
     assert dtypes.imageh((1,2,4)) == dtypes.imageh((1,2,4)), "same shape matches"
     assert isinstance(dtypes.imageh((1,2,4)), ImageDType)
-  def test_ptr_ne(self):
-    if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
-    # TODO: is this the wrong behavior?
-    assert dtypes.float32.ptr() == dtypes.float32
-    assert not (dtypes.float32.ptr() != dtypes.float32)
+  def test_ptr_eq(self):
     assert dtypes.float32.ptr() == dtypes.float32.ptr()
     assert not (dtypes.float32.ptr() != dtypes.float32.ptr())
-    #assert dtypes.float32.ptr() != dtypes.float32
   def test_strs(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
@@ -422,6 +455,7 @@ class TestTypeSpec(unittest.TestCase):
       subprocess.run(['DEFAULT_FLOAT=TYPO python3 -c "from tinygrad import dtypes"'],
                       shell=True, check=True)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.int8), f"no int8 on {Device.DEFAULT}")
   def test_dtype_str_arg(self):
     n = np.random.normal(0, 1, (10, 10)).astype(np.float32)
     tested = 0
@@ -452,7 +486,8 @@ class TestTypeSpec(unittest.TestCase):
 
     _assert_eq(Tensor.eye(0), dtypes.default_float, np.eye(0))
     _assert_eq(Tensor.eye(3), dtypes.default_float, np.eye(3))
-    _assert_eq(Tensor.eye(3, dtype=dtypes.int64), dtypes.int64, np.eye(3))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.eye(3, dtype=dtypes.int64), dtypes.int64, np.eye(3))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.eye(3, dtype=dtypes.float16), dtypes.float16, np.eye(3))
 
@@ -461,20 +496,23 @@ class TestTypeSpec(unittest.TestCase):
     dtypes.default_int, dtypes.default_float = default_int, default_float
 
     _assert_eq(Tensor.zeros((2, 3)), dtypes.default_float, np.zeros((2, 3)))
-    _assert_eq(Tensor.zeros((2, 3), dtype=dtypes.int64), dtypes.int64, np.zeros((2, 3)))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.zeros((2, 3), dtype=dtypes.int64), dtypes.int64, np.zeros((2, 3)))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.zeros((2, 3), dtype=dtypes.float16), dtypes.float16, np.zeros((2, 3)))
 
     _assert_eq(Tensor.ones((2, 3)), dtypes.default_float, np.ones((2, 3)))
-    _assert_eq(Tensor.ones((2, 3), dtype=dtypes.int64), dtypes.int64, np.ones((2, 3)))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.ones((2, 3), dtype=dtypes.int64), dtypes.int64, np.ones((2, 3)))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.ones((2, 3), dtype=dtypes.float16), dtypes.float16, np.ones((2, 3)))
 
     _assert_eq(Tensor.full((2, 3), 3.0), dtypes.default_float, np.full((2, 3), 3.0))
     _assert_eq(Tensor.full((2, 3), 3), dtypes.default_int, np.full((2, 3), 3))
     _assert_eq(Tensor.full((2, 3), True), dtypes.bool, np.full((2, 3), True))
-    _assert_eq(Tensor.full((2, 3), 3, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
-    _assert_eq(Tensor.full((2, 3), 3.0, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.full((2, 3), 3, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
+      _assert_eq(Tensor.full((2, 3), 3.0, dtype=dtypes.int64), dtypes.int64, np.full((2, 3), 3))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.full((2, 3), 3, dtype=dtypes.float16), dtypes.float16, np.full((2, 3), 3))
       _assert_eq(Tensor.full((2, 3), 3.0, dtype=dtypes.float16), dtypes.float16, np.full((2, 3), 3))
@@ -494,8 +532,10 @@ class TestTypeSpec(unittest.TestCase):
     _assert_eq(Tensor.arange(5), dtypes.default_int, np.arange(5))
     _assert_eq(Tensor.arange(120), dtypes.default_int, np.arange(120))
     _assert_eq(Tensor.arange(5.0), dtypes.default_float, np.arange(5))
-    _assert_eq(Tensor.arange(5, dtype=dtypes.int16), dtypes.int16, np.arange(5))
-    _assert_eq(Tensor.arange(5, dtype=dtypes.int64), dtypes.int64, np.arange(5))
+    if is_dtype_supported(dtypes.int16):
+      _assert_eq(Tensor.arange(5, dtype=dtypes.int16), dtypes.int16, np.arange(5))
+    if is_dtype_supported(dtypes.int64):
+      _assert_eq(Tensor.arange(5, dtype=dtypes.int64), dtypes.int64, np.arange(5))
     if is_dtype_supported(dtypes.float16):
       _assert_eq(Tensor.arange(5, dtype=dtypes.float16), dtypes.float16, np.arange(5))
     _assert_eq(Tensor.arange(3, 9, 0.7), dtypes.default_float, np.arange(3, 9, 0.7))
@@ -550,7 +590,7 @@ class TestTypePromotion(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_promo_resulted_higher_than_inputs(self, dtype1, dtype2):
     result = least_upper_dtype(dtype1, dtype2)
-    assert result >= dtype1 and result >= dtype2
+    assert not (result < dtype1) and not (result < dtype2)
 
   def test_dtype_promo(self):
     assert least_upper_dtype(dtypes.bool, dtypes.int8) == dtypes.int8
@@ -807,8 +847,9 @@ class TestTensorMethod(unittest.TestCase):
 class TestDtypeUsage(unittest.TestCase):
   def test_max_w_alu(self):
     for d in dtypes.ints:
-      t = Tensor([[1, 2], [3, 4]], dtype=d)
-      (t*t).max().item()
+      if is_dtype_supported(d):
+        t = Tensor([[1, 2], [3, 4]], dtype=d)
+        (t*t).max().item()
 
 if __name__ == '__main__':
   unittest.main()

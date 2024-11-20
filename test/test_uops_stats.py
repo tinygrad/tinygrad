@@ -4,7 +4,7 @@ from tinygrad.helpers import getenv, GlobalCounters
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item
 from tinygrad.codegen.linearize import linearize_uop
-from tinygrad.ops import BinaryOps, TernaryOps, flops_mem, UOps, UOp
+from tinygrad.ops import flops_mem, Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
 
@@ -119,23 +119,23 @@ class TestUOpsStats(unittest.TestCase):
 
   #MULACC should have the same stats as MUL + ADD
   def test_mulacc(self):
-    globl = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), tuple())
-    o1 = UOp(UOps.CONST, dtypes.int, tuple(), 1)
-    o2 = UOp(UOps.CONST, dtypes.int, tuple(), 2)
-    u1 = UOp(UOps.LOAD, dtypes.int, (globl, o1))
-    u2 = UOp(UOps.LOAD, dtypes.int, (globl, o2))
-    u3 = UOp(UOps.CONST, dtypes.int, tuple(), 3)
-    u4 = UOp(UOps.ALU, dtypes.int, (u1,u2), BinaryOps.MUL)
-    u5 = UOp(UOps.ALU, dtypes.int, (u4,u3), BinaryOps.ADD)
+    globl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), tuple())
+    o1 = UOp(Ops.CONST, dtypes.int, tuple(), 1)
+    o2 = UOp(Ops.CONST, dtypes.int, tuple(), 2)
+    u1 = UOp(Ops.LOAD, dtypes.int, (globl.index(o1),))
+    u2 = UOp(Ops.LOAD, dtypes.int, (globl.index(o2),))
+    u3 = UOp(Ops.CONST, dtypes.int, tuple(), 3)
+    u4 = UOp(Ops.MUL, dtypes.int, (u1,u2))
+    u5 = UOp(Ops.ADD, dtypes.int, (u4,u3))
     uops = linearize_uop(u5.sink())
 
-    globl = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), tuple())
-    o1 = UOp(UOps.CONST, dtypes.int, tuple(), 1)
-    o2 = UOp(UOps.CONST, dtypes.int, tuple(), 2)
-    u1 = UOp(UOps.LOAD, dtypes.int, (globl, o1))
-    u2 = UOp(UOps.LOAD, dtypes.int, (globl, o2))
-    u3 = UOp(UOps.CONST, dtypes.int, tuple(), 3)
-    u4 = UOp(UOps.ALU, dtypes.int, (u1,u2,u3), TernaryOps.MULACC)
+    globl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), tuple())
+    o1 = UOp(Ops.CONST, dtypes.int, tuple(), 1)
+    o2 = UOp(Ops.CONST, dtypes.int, tuple(), 2)
+    u1 = UOp(Ops.LOAD, dtypes.int, (globl.index(o1),))
+    u2 = UOp(Ops.LOAD, dtypes.int, (globl.index(o2),))
+    u3 = UOp(Ops.CONST, dtypes.int, tuple(), 3)
+    u4 = UOp(Ops.MULACC, dtypes.int, (u1,u2,u3))
     uops_fma = linearize_uop(u4.sink())
 
     self.assertEqual(flops_mem(uops), flops_mem(uops_fma))

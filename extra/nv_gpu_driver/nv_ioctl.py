@@ -247,7 +247,7 @@ def compare_launch_state(states, good_states):
     for n in ['qmd_major_version', 'invalidate_shader_data_cache', 'invalidate_shader_data_cache',
               'sm_global_caching_enable', 'invalidate_texture_header_cache', 'invalidate_texture_sampler_cache',
               'barrier_count', 'sampler_index', 'api_visible_call_limit', 'cwd_membar_type', 'sass_version',
-              'max_sm_config_shared_mem_size', 'register_count_v']:
+              'max_sm_config_shared_mem_size', 'register_count_v', 'shared_memory_size']:
       if getattr(state, n) != getattr(good_state, n):
         return False, f"Field {n} mismatch: {getattr(state, n)} vs {getattr(good_state, n)}"
 

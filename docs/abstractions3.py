@@ -1,7 +1,6 @@
 # abstractions2 goes from back to front, here we will go from front to back
 from typing import List
-from tqdm import tqdm
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import tqdm
 
 # *****
 # 0. Load mnist on the device

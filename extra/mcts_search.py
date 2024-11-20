@@ -35,7 +35,7 @@ def _sample_tree(node:MCTSNode, best_tm:float) -> MCTSNode:
   if node.children is None or len(node.children) == 0: return node
   unexplored_children = []
   explored_children = []
-  ucb_explored_children = []
+  ucb_explored_children: List[float] = []
   for child in node.children:
     if child.n == 0: unexplored_children.append(child)
     else:
@@ -45,7 +45,8 @@ def _sample_tree(node:MCTSNode, best_tm:float) -> MCTSNode:
         ucb_explored_children.append(ucb)
   if len(unexplored_children): return random.choice(unexplored_children)
   if not len(explored_children): return node
-  ucb_exp = np.exp(np.array(ucb_explored_children)/TEMP)
+  # safe softmax
+  ucb_exp = np.exp((np.array(ucb_explored_children)-max(ucb_explored_children))/TEMP)
   return _sample_tree(explored_children[np.random.choice(len(ucb_exp), p=ucb_exp/np.sum(ucb_exp))], best_tm)
 
 # this will expand/remove sometimes
