@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, Any
+from typing import Tuple, List, Any, Optional
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib, decimal, sys
 assert sys.platform != 'win32'
 from dataclasses import dataclass
@@ -152,11 +152,11 @@ class AMDComputeQueue(HWComputeQueue):
       self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal._event_mailbox_ptr,
                         value=signal._event.event_id, cst=signal._event.event_id, cache_flush=False)
 
-  def _update_wait(self, cmd_idx, signal=None, value=None):
+  def _update_wait(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
     if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(signal._value_addr))
     if value is not None: self._patch(cmd_idx, offset=4, data=[value])
 
-  def _update_signal(self, cmd_idx, signal=None, value=None):
+  def _update_signal(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
     if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(signal._value_addr))
     if value is not None: self._patch(cmd_idx, offset=5, data=data64_le(value))
 

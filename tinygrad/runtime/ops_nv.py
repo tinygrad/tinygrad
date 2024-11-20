@@ -115,7 +115,7 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
     # From now on, the queue is on the device for faster submission.
     self.q = hw_view # type: ignore
 
-  def _submit_to_gpfifo(self, dev, gpfifo:GPFifo):
+  def _submit_to_gpfifo(self, dev:NVDevice, gpfifo:GPFifo):
     if dev == self.binded_device: cmdq_addr = self.hw_page.va_addr
     else:
       if dev.cmdq_wptr + len(self.q) * 4 > dev.cmdq_page.size:
