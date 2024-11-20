@@ -13,8 +13,8 @@ def check(status):
 
 class HIPProgram:
   def __init__(self, device:HIPDevice, name:str, lib:bytes):
-    self.device, self.name, self.lib = device, name, lib
-    check(hip.hipSetDevice(self.device.device_id))
+    self.dev, self.name, self.lib = device, name, lib
+    check(hip.hipSetDevice(self.dev.device_id))
     self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
     self.prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
 
@@ -22,7 +22,7 @@ class HIPProgram:
     if hasattr(self, 'module'): check(hip.hipModuleUnload(self.module))
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    check(hip.hipSetDevice(self.device.device_id))
+    check(hip.hipSetDevice(self.dev.device_id))
     if not hasattr(self, "vargs"):
       self.c_args = init_c_struct_t(tuple([(f'f{i}', hip.hipDeviceptr_t) for i in range(len(args))] +
                                           [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))(*args, *vals)
@@ -32,14 +32,14 @@ class HIPProgram:
     for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
     for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
 
-    if wait: check(hip.hipEventRecord(self.device.time_event_st, None))
+    if wait: check(hip.hipEventRecord(self.dev.time_event_st, None))
 
     check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, self.vargs))
 
     if wait:
-      check(hip.hipEventRecord(self.device.time_event_en, None))
-      check(hip.hipEventSynchronize(self.device.time_event_en))
-      check(hip.hipEventElapsedTime(ctypes.byref(ret := ctypes.c_float()), self.device.time_event_st, self.device.time_event_en))
+      check(hip.hipEventRecord(self.dev.time_event_en, None))
+      check(hip.hipEventSynchronize(self.dev.time_event_en))
+      check(hip.hipEventElapsedTime(ctypes.byref(ret := ctypes.c_float()), self.dev.time_event_st, self.dev.time_event_en))
       return ret.value * 1e-3
 
 class HIPAllocator(LRUAllocator):

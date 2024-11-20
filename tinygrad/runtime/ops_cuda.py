@@ -32,11 +32,11 @@ def cu_time_execution(cb, enable=False) -> Optional[float]:
 
 class CUDAProgram:
   def __init__(self, device:CUDADevice, name:str, lib:bytes, smem:int=0):
-    self.device, self.name, self.lib, self.smem = device, name, lib, smem
+    self.dev, self.name, self.lib, self.smem = device, name, lib, smem
     if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
     if DEBUG >= 6: cuda_disassemble(lib, device.arch)
 
-    check(cuda.cuCtxSetCurrent(self.device.context))
+    check(cuda.cuCtxSetCurrent(self.dev.context))
     self.module = cuda.CUmodule()
     status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
     if status != 0:
@@ -51,7 +51,7 @@ class CUDAProgram:
     if hasattr(self, 'module'): check(cuda.cuModuleUnload(self.module))
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    check(cuda.cuCtxSetCurrent(self.device.context))
+    check(cuda.cuCtxSetCurrent(self.dev.context))
     if not hasattr(self, "vargs"):
       self.c_args, self.vargs = encode_args(args, vals)
     else:

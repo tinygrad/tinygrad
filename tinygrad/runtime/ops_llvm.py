@@ -8,9 +8,9 @@ import llvmlite.binding as llvm
 
 class LLVMCompiler(Compiler):
   def __init__(self, device:LLVMDevice, opt:bool=False):
-    self.device = device
+    self.dev = device
     self.optimizer: llvm.passmanagers.ModulePassManager = llvm.create_module_pass_manager()
-    self.device.target_machine.add_analysis_passes(self.optimizer)
+    self.dev.target_machine.add_analysis_passes(self.optimizer)
     if opt:
       with llvm.create_pass_manager_builder() as builder:
         builder.opt_level = 3; builder.size_level = 0; builder.loop_vectorize = True; builder.slp_vectorize = True  # noqa: E702
@@ -21,7 +21,7 @@ class LLVMCompiler(Compiler):
     mod = llvm.parse_assembly(src)
     mod.verify()
     self.optimizer.run(mod)
-    return self.device.target_machine.emit_object(mod)
+    return self.dev.target_machine.emit_object(mod)
 
   def disassemble(self, lib:bytes): cpu_objdump(lib)
 

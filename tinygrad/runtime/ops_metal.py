@@ -88,22 +88,22 @@ class MetalCompiler(Compiler):
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
-    self.device, self.name, self.lib = device, name, lib
+    self.dev, self.name, self.lib = device, name, lib
     if lib[:4] == b"MTLB":
       # binary metal library
       data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
       error_library_creation = objc_instance()
-      self.library = msg(self.device.device, "newLibraryWithData:error:", data, ctypes.byref(error_library_creation), restype=objc_instance)
+      self.library = msg(self.dev.device, "newLibraryWithData:error:", data, ctypes.byref(error_library_creation), restype=objc_instance)
       error_check(error_library_creation)
     else:
       # metal source. rely on OS caching
-      try: self.library = metal_src_to_library(self.device, lib.decode())
+      try: self.library = metal_src_to_library(self.dev, lib.decode())
       except CompileError as e: raise RuntimeError from e
     self.fxn = msg(self.library, "newFunctionWithName:", to_ns_str(name), restype=objc_instance)
     descriptor = msg(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"), "new", restype=objc_instance)
     msg(descriptor, "setComputeFunction:", self.fxn)
     msg(descriptor, "setSupportIndirectCommandBuffers:", True)
-    self.pipeline_state = msg(self.device.device, "newComputePipelineStateWithDescriptor:options:reflection:error:",
+    self.pipeline_state = msg(self.dev.device, "newComputePipelineStateWithDescriptor:options:reflection:error:",
       descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()), restype=objc_instance)
     error_check(error_pipeline_creation)
 
@@ -113,7 +113,7 @@ class MetalProgram:
       exec_width = msg(self.pipeline_state, "threadExecutionWidth", restype=ctypes.c_ulong)
       memory_length = msg(self.pipeline_state, "staticThreadgroupMemoryLength", restype=ctypes.c_ulong)
       raise RuntimeError(f"local size {local_size} bigger than {max_total_threads} with exec width {exec_width} memory length {memory_length}")
-    command_buffer = msg(self.device.mtl_queue, "commandBuffer", restype=objc_instance)
+    command_buffer = msg(self.dev.mtl_queue, "commandBuffer", restype=objc_instance)
     encoder = msg(command_buffer, "computeCommandEncoder", restype=objc_instance)
     msg(encoder, "setComputePipelineState:", self.pipeline_state)
     for i,a in enumerate(bufs): msg(encoder, "setBuffer:offset:atIndex:", a.buf, a.offset, i)
@@ -124,7 +124,7 @@ class MetalProgram:
     if wait:
       wait_check(command_buffer)
       return elapsed_time(command_buffer)
-    self.device.mtl_buffers_in_flight.append(command_buffer)
+    self.dev.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalBuffer:
   def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
