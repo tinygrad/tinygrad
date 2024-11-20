@@ -1015,7 +1015,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
        - `padding` must have the same length as `self.ndim`.
 
     Padding values can be negative, resulting in dimension shrinks that work similarly to Python negative slices.
-    Padding modes is selected with `mode` which supports `constant` and `reflect`.
+    Padding modes is selected with `mode` which supports `constant`, `reflect` and `replicate`.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(9).reshape(1, 1, 3, 3)
@@ -1049,8 +1049,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
         slcB, slcA, = slice(pB,0,-1), slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1)
         xB, xA = (X[[slc if i == d else slice(None) for i in range(X.ndim)]] if p > 0 else None for slc, p in ((slcB, pB), (slcA, pA)))
       if mode == "replicate":
-        xB = X[[slice(None,1) if i==d else slice(None) for i in range(X.ndim)]].expand([pB if i==d else None for i in range(X.ndim)]) if pB else None
-        xA = X[[slice(-1,None) if i==d else slice(None) for i in range(X.ndim)]].expand([pA if i==d else None for i in range(X.ndim)]) if pA else None
+        shrB, shrA, = tuple((0,1) if i==d else None for i in range(X.ndim)), tuple((X.shape[i]-1,X.shape[i]) if i==d else None for i in range(X.ndim))
+        xB, xA = (X.shrink(shr).expand(tuple(p if i==d else None for i in range(X.ndim))) if p > 0 else None for shr, p in ((shrB, pB), (shrA, pA)))
       X = Tensor.cat(*(X_ for X_ in (xB, X, xA) if X_ is not None), dim=d)
     return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
 
