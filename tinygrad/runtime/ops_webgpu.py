@@ -48,12 +48,12 @@ class WebGpuAllocator(Allocator):
   def _alloc(self, size: int, options):
     aligned_size = (size + 3) & ~3
     return self.device.create_buffer(size=aligned_size, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)
-  def copyin(self, dest, src: memoryview):
+  def _copyin(self, dest, src: memoryview):
     if src.nbytes % 4:
       padded_src = bytearray((src.nbytes + 3) & ~3)
       padded_src[:src.nbytes] = src
     self.device.queue.write_buffer(dest, 0, padded_src if src.nbytes % 4 else src)
-  def copyout(self, dest: memoryview, src):
+  def _copyout(self, dest: memoryview, src):
     buffer_data = self.device.queue.read_buffer(src, 0)
     dest[:] = buffer_data[:dest.nbytes] if src._nbytes > dest.nbytes else buffer_data
 
