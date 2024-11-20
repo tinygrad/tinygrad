@@ -38,13 +38,6 @@ def ptx_disassemble(lib, arch):
     print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
   except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains ptxas/nvdisasm binary of compatible version.")
 
-def cubin_disassemble(lib):
-  try:
-    fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
-    with open(fn + ".cubin", "wb") as f: f.write(lib)
-    print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
-  except Exception as e: print("Failed to disasm cubin:", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
-
 class CUDACompiler(Compiler):
   def __init__(self, arch:str, cache_key:str="cuda"):
     self.arch, self.compile_options = arch, [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"]
@@ -63,7 +56,12 @@ class CUDACompiler(Compiler):
 class NVCompiler(CUDACompiler):
   def __init__(self, arch:str): super().__init__(arch, cache_key="nv")
   def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize)
-  def disassemble(self, lib:bytes): cubin_disassemble(lib)
+  def disassemble(self, lib:bytes):
+    try:
+      fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
+      with open(fn + ".cubin", "wb") as f: f.write(lib)
+      print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
+    except Exception as e: print("Failed to disasm cubin:", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
 
 class PTXCompiler(CUDACompiler):
   def __init__(self, arch:str, cache_key="ptx"): super().__init__(arch, cache_key=cache_key)
