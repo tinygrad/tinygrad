@@ -633,6 +633,13 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
+  def test_load_state_dict_shape_mismatch(self):
+    d1, d2 = 2, 4
+    layer = Linear(d1, d1, bias=False)
+    state_dict = {'weight': Tensor.randn(d2, d2)}
+    with self.assertRaisesRegex(ValueError, r'Shape mismatch in layer `weight`: Expected shape \(2, 2\), but found \(4, 4\) in state dict.'):
+      load_state_dict(layer, state_dict)
+
   def test_lstm_cell(self):
     layer = LSTMCell(32, 16)
     with torch.no_grad():

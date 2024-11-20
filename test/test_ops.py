@@ -2262,6 +2262,11 @@ class TestOps(unittest.TestCase):
     lambda x,src: x.scatter(dim=1, index=a, src=src), forward_only=True)
     helper_test_op([(10,3,10), (10,10,10)], lambda x,src: x.scatter(dim=1, index=b, src=src),
     lambda x,src: x.scatter(dim=1, index=a, src=src), forward_only=True)
+    helper_test_op(None,
+      lambda x,index,src: x.scatter(0, index, src),
+      lambda x,index,src: x.scatter(0, index, src), forward_only=True,
+      vals=[[1,2,3,4], [0,0], [1,0]])
+
 
   def test_scatter_add(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
@@ -2314,13 +2319,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5)],
       lambda x: x.scatter(1, b, float("nan"), reduce="add"),
       lambda x: x.scatter(1, a, float("nan"), reduce="add"), forward_only=True,)
-
-  @unittest.expectedFailure
-  def test_scatter_overlapping_0_failure(self):
-    helper_test_op(None,
-      lambda x,index,src: x.scatter(0, index, src),
-      lambda x,index,src: x.scatter(0, index, src), forward_only=True,
-      vals=[[1,2,3,4], [0,0], [1,0]])
 
   def test_scaled_product_attention(self):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], torch.nn.functional.scaled_dot_product_attention, Tensor.scaled_dot_product_attention)

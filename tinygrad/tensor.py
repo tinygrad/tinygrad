@@ -232,8 +232,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
-      if x.__class__ is not Tensor: x = Tensor(x, device="NPY", dtype=self.dtype)
-      self.contiguous().realize().lazydata.base.realized.copyin(x.numpy().data)
+      if x.__class__ is not Tensor: x = Tensor(x, device="CLANG", dtype=self.dtype)
+      self.contiguous().realize().lazydata.base.realized.copyin(x._data())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
@@ -1192,11 +1192,13 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
         for dim in sum_axis: vb = vb.unsqueeze(dim)
         # axis to be reduced to match self.shape
         axis = tuple(range(first_dim, first_dim + len(big_shape)))
-        # apply mask to v(broadcasted) and reduce such that if v contains repeated indices the last one remains
+        # apply mask to vb(broadcasted) and reduce such that if mask contains repeated indices the last one remains
         vb = vb * mask
-        for dim in axis: vb = (functools.reduce(lambda x,y: y.where(y, x), vb.split(1, dim))).cast(self.dtype)
-        # reduce mask and select from v(get rid of extra dims from reduce) for each True element in mask else select from self
-        ret = mask.any(axis).where(vb.squeeze(), self)
+        for dim in axis: mask, vb = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), vb.split(1, dim)))
+        # remove extra dims from reduce
+        for dim in reversed(axis): mask, vb = mask.squeeze(dim), vb.squeeze(dim)
+        # select from vb for each True element in mask else select from self
+        ret = mask.where(vb, self)
 
     return ret
 
@@ -1265,8 +1267,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
     if reduce == "add": return ((mask*src).sum(-1, acc_dtype=self.dtype) + self)
     if reduce == "multiply": return (mask.where(mask*src, 1).prod(-1, acc_dtype=self.dtype) * self)
-    masked_src = functools.reduce(lambda x,y: y.where(y, x), (mask*src).split(1, -1))
-    return (mask.any(-1).where(masked_src.squeeze(), self)).cast(self.dtype)
+    mask, masked_src = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, -1), (mask*src).split(1, -1)))
+    return (mask.squeeze(-1).where(masked_src.squeeze(-1), self)).cast(self.dtype)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
