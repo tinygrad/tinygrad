@@ -31,7 +31,7 @@ def render_load(r, bidx, dtype):
   # packed load for bool, char, short
   if dtype.itemsize < 4:
     idx_by_itemsize = f"({idx})/{4//dtype.itemsize}"
-    val = f"(({buf}[{idx_by_itemsize}]) >> {render_shift_am(idx, dtype.itemsize)} & { "0xFF" if dtype.itemsize == 1 else "0xFFFF" })"
+    val = f"(({buf}[{idx_by_itemsize}]) >> {render_shift_am(idx, dtype.itemsize)} & { '0xFF' if dtype.itemsize == 1 else '0xFFFF' })"
     val = f"bool({val})" if dtype == dtypes.bool else val
     return sign_extend(val, 8*dtype.itemsize) if dtype in [dtypes.char, dtypes.short] else val
   return f"{buf}[{idx}]"
@@ -40,7 +40,7 @@ def render_store(r, bidx, var, dtype):
   sbidx = strip_parens(r[bidx])
   buf, idx = sbidx.split("+")[0], '+'.join(sbidx.split("+")[1:])
   arr = f"{buf}[u32({idx})/{4//dtype.itemsize}u]"
-  return f"atomicAdd(&{arr}, (({buffer_map[dtype]}({r[var]}) & { "0xFF" if dtype.itemsize == 1 else "0xFFFF" }) << \
+  return f"atomicAdd(&{arr}, (({buffer_map[dtype]}({r[var]}) & { '0xFF' if dtype.itemsize == 1 else '0xFFFF' }) << \
     {render_shift_am(idx, dtype.itemsize)}));" if dtype.itemsize < 4 else f"{arr} = {r[var]};"
 
 class WGSLRenderer(CStyleLanguage):
