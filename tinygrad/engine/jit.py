@@ -262,7 +262,7 @@ class TinyJit(Generic[ReturnType]):
         for ei in jit_cache:
           if any(b in depends for b in ei.bufs):
             if isinstance(ei.prg, CompiledRunner):
-              for out in ei.prg.p.outs: depends.add(cast(Buffer, ei.bufs[out]))
+              depends.update(cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs)
         pruned, onetime = partition(jit_cache,
                                     lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")

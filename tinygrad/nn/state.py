@@ -123,6 +123,8 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
       if k not in state_dict and not strict:
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
+      if v.lazydata.shape != state_dict[k].shape:
+        raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.lazydata.shape}, but found {state_dict[k].shape} in state dict.')
       if isinstance((mlb:=v.lazydata), MultiLazyBuffer):
         if isinstance(state_dict[k].lazydata, MultiLazyBuffer): v.replace(state_dict[k]).realize()
         else: v.replace(state_dict[k].shard(mlb.device, mlb.axis)).realize()

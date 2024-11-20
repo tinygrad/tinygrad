@@ -97,7 +97,8 @@ class MetalProgram:
       error_check(error_library_creation)
     else:
       # metal source. rely on OS caching
-      self.library = metal_src_to_library(self.device, lib.decode())
+      try: self.library = metal_src_to_library(self.device, lib.decode())
+      except CompileError as e: raise RuntimeError from e
     self.fxn = msg(self.library, "newFunctionWithName:", to_ns_str(name), restype=objc_instance)
     descriptor = msg(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"), "new", restype=objc_instance)
     msg(descriptor, "setComputeFunction:", self.fxn)
@@ -138,7 +139,7 @@ class MetalAllocator(LRUAllocator):
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): msg(opaque.buf, "release")
-  def transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
+  def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = msg(src_dev.mtl_queue, "commandBuffer", restype=objc_instance)
     encoder = msg(src_command_buffer, "blitCommandEncoder", restype=objc_instance)
@@ -154,19 +155,14 @@ class MetalAllocator(LRUAllocator):
       src_dev.timeline_value += 1
     msg(src_command_buffer, "commit")
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
-  def from_buffer(self, src:memoryview) -> Optional[Any]:
-    ptr = (ctypes.c_char * src.nbytes).from_buffer(src)
-    ret = msg(self.device.device, "newBufferWithBytesNoCopy:length:options:deallocator:", ptr, src.nbytes, 0, None, restype=objc_instance)
-    if ret: self.device.mv_in_metal.append(src)
-    return MetalBuffer(ret, src.nbytes)
-  def as_buffer(self, src:MetalBuffer) -> memoryview:
+  def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.device.synchronize()
     ptr = msg(src.buf, "contents", restype=objc_id) # Shared memory, do not release here
     array = (ctypes.c_char * (src.offset + src.size)).from_address(ptr.value)
     return memoryview(array).cast("B")[src.offset:]
-  def copyin(self, dest:MetalBuffer, src:memoryview): self.as_buffer(dest)[:] = src
-  def copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self.as_buffer(src)
-  def offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
+  def _copyin(self, dest:MetalBuffer, src:memoryview): self._as_buffer(dest)[:] = src
+  def _copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self._as_buffer(src)
+  def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):

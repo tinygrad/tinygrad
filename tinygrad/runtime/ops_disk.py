@@ -22,9 +22,9 @@ class DiskAllocator(Allocator):
     self.device._might_open(size)
     return DiskBuffer(self.device, size)
   def _free(self, opaque, options): self.device._might_close()
-  def as_buffer(self, src:DiskBuffer): return src._buf()
-  def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
-  def copyout(self, dest:memoryview, src:DiskBuffer):
+  def _as_buffer(self, src:DiskBuffer): return src._buf()
+  def _copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
+  def _copyout(self, dest:memoryview, src:DiskBuffer):
     if OSX and self.device.fd is not None:
       # OSX doesn't seem great at mmap, this is faster
       with io.FileIO(self.device.fd, "a+b", closefd=False) as fo:
@@ -65,7 +65,7 @@ class DiskAllocator(Allocator):
         DiskDevice.io_uring.cq.khead[0] = head + 1 # advance
         processed_reqs_cnt += 1
 
-  def offset(self, buf:DiskBuffer, size:int, offset:int): return DiskBuffer(buf.device, size, offset)
+  def _offset(self, buf:DiskBuffer, size:int, offset:int): return DiskBuffer(buf.device, size, offset)
 
 class DiskDevice(Compiled):
   _tried_io_uring_init = False

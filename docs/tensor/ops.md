@@ -44,3 +44,4 @@
 ::: tinygrad.Tensor.binary_crossentropy_logits
 ::: tinygrad.Tensor.sparse_categorical_crossentropy
 ::: tinygrad.Tensor.cross_entropy
+::: tinygrad.Tensor.nll_loss

@@ -27,6 +27,7 @@ def compile():
 
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
   input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input}
+  if getenv("FLOAT16", 0) == 0: input_types = {k:(np.float32 if v==np.float16 else v) for k,v in input_types.items()}
   Tensor.manual_seed(100)
   new_inputs = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in sorted(input_shapes.items())}
   print("created tensors")
@@ -58,9 +59,13 @@ def test(test_val=None):
   Tensor.manual_seed(100)
   new_inputs = {nm:Tensor.randn(*st.shape, dtype=dtype).mul(8).realize() for nm, (st, _, dtype, _) in
                 sorted(zip(run.captured.expected_names, run.captured.expected_st_vars_dtype_device))}
+  new_inputs_numpy = {k:v.numpy() for k,v in new_inputs.items()}
   for _ in range(20):
     st = time.perf_counter()
-    out = run(**new_inputs)
+    # Need to cast non-image inputs from numpy, this is only realistic way to run it
+    inputs = {**{k:v for k,v in new_inputs.items() if 'img' in k},
+              **{k:Tensor(v) for k,v in new_inputs_numpy.items() if 'img' not in k}}
+    out = run(**inputs)
     mt = time.perf_counter()
     val = out['outputs'].numpy()
     et = time.perf_counter()

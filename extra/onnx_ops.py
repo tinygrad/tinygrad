@@ -282,7 +282,7 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
   if outshape is not None and (outshape := to_python_const(outshape)) != ret.shape:
     diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
     pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
-    ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
+    ret = ret.pad((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
   return ret
 
 def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
@@ -334,7 +334,7 @@ def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
 
 def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
   bs, c, iy, ix = x.shape
-  return x / x.mul(x).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
+  return x / x.mul(x).reshape(bs,1,c,iy*ix).pad((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
 
 def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)):
   mean = x.mean(axis, keepdim=True)
@@ -563,29 +563,13 @@ def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
   raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
 def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
-  _, _, *data_sz = to_python_const(size)
-  size_zeros, original_grid = Tensor.zeros(data_sz), Tensor.ones(data_sz)
-  stackable = [original_grid]
-  for dim, dim_sz in enumerate(data_sz):
-    a = Tensor.arange(-1, 1.0001, 2/(dim_sz-1)) if align_corners == 1 else Tensor.arange(-1+1/dim_sz, 1, 2/dim_sz)
-    if dim == 0: stackable = [a.reshape(dim_sz, *[1]*(len(data_sz)-1)) + size_zeros, *stackable]
-    elif dim == 1: stackable = [a.reshape(1, dim_sz, *[1]*(len(data_sz)-2)) + size_zeros, *stackable]
-    else: stackable = [a.reshape(1, dim_sz) + size_zeros, *stackable]
-  original_grid = Tensor.stack(*stackable, dim=len(data_sz))
-  if original_grid.ndim == 3:
-    N, dim_2d, dim_homo = theta.shape
-    assert dim_2d == 2 and dim_homo == 3
-    H, W, dim_homo = original_grid.shape
-    assert dim_homo == 3
-    original_grid = original_grid.reshape(H*W, dim_homo).transpose()
-    return theta.matmul(original_grid).permute(0,2,1).reshape(N, H, W, dim_2d)
-  assert original_grid.ndim == 4
-  N, dim_3d, dim_homo = theta.shape
-  assert dim_3d == 3 and dim_homo == 4
-  D, H, W, dim_homo = original_grid.shape
-  assert dim_homo == 4
-  original_grid = original_grid.reshape(D*H*W, dim_homo).transpose()
-  return theta.matmul(original_grid).permute(0,2,1).reshape(N, D, H, W, dim_3d)
+  N, _, *spatial_dims = to_python_const(size)
+  def generate_grid(steps):
+    return Tensor.linspace(-1, 1, steps, device=theta.device) if align_corners else Tensor.linspace(-1+1/steps, 1-1/steps, steps, device=theta.device)
+  grids = Tensor.meshgrid(*(generate_grid(d) for d in spatial_dims))
+  base_grid = Tensor.stack(*reversed(grids), Tensor.ones_like(grids[0], device=theta.device), dim=-1)
+  base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
+  return (base_grid @ theta.transpose(1, 2)).reshape(N, *spatial_dims, -1)
 
 # **************** com.microsoft Ops ****************
 
