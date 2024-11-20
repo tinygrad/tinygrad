@@ -431,11 +431,10 @@ class TestJit(unittest.TestCase):
     b = f(Tensor([2.0]))
     assert abs((a - b).item()) > 0.5
 
-def test_jit_buffer_reuse_bug(self):
+  def test_jit_buffer_reuse_bug(self):
     """Test to verify buffer reuse bug in JIT execution"""
     @TinyJit
-    def foo(x) -> Tensor:
-      return (x + 1).realize()  # Simple operation that should give different results each time
+    def foo(x) -> Tensor: return (x + 1).realize()  # Simple operation that should give different results each time
 
     # First run
     a = Tensor([1, 2])
