@@ -79,7 +79,7 @@ class TestProfiler(unittest.TestCase):
     TestProfiler.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
 
-    TestProfiler.runner = get_runner(TestProfiler.d0.dname, si.ast)
+    TestProfiler.runner = get_runner(TestProfiler.d0.device, si.ast)
     TestProfiler.b.lazydata.buffer.allocate()
 
     TestProfiler.kernargs_ba_ptr = TestProfiler.runner.clprg.fill_kernargs([TestProfiler.b.lazydata.buffer._buf, TestProfiler.a.lazydata.buffer._buf])
@@ -155,9 +155,9 @@ class TestProfiler(unittest.TestCase):
 
     def f(a):
       x = (a + 1).realize()
-      return x, x.to(d1.dname).realize()
+      return x, x.to(d1.device).realize()
 
-    a = Tensor.randn(10, 10, device=TestProfiler.d0.dname).realize()
+    a = Tensor.randn(10, 10, device=TestProfiler.d0.device).realize()
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
       jf = TinyJit(f)
       for _ in range(3): jf(a)
@@ -176,9 +176,9 @@ class TestProfiler(unittest.TestCase):
 
     def f(a):
       x = (a + 1).realize()
-      return x, x.to(d1.dname).realize()
+      return x, x.to(d1.device).realize()
 
-    a = Tensor.randn(10, 10, device=TestProfiler.d0.dname).realize()
+    a = Tensor.randn(10, 10, device=TestProfiler.d0.device).realize()
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
       jf = TinyJit(f)
       for _ in range(3):
