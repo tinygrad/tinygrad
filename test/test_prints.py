@@ -19,8 +19,8 @@ class TestPrints(unittest.TestCase):
         Tensor.arange(0,6).realize()
 
     # get rif of trailing "\n" and final print with kernel time/flops/mem usage
-    str = db5_out.getvalue()[:-1].rpartition("\n")[0]
-    assert db6_out.getvalue().startswith(str), "DEBUG=6 output should start with DEBUG=5 output"
+    db_str = db5_out.getvalue()[:-1].rpartition("\n")[0]
+    assert db6_out.getvalue().startswith(db_str), "DEBUG=6 output should start with DEBUG=5 output"
 
 if __name__ == "__main__":
   unittest.main()
