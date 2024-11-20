@@ -242,7 +242,7 @@ class HCQSignal:
     raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
 
 @contextlib.contextmanager
-def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
+def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type=None, queue=None):
   st, en = (dev.signal_t(), dev.signal_t()) if enabled else (None, None)
 
   if enabled and queue is not None: queue.timestamp(st)
@@ -257,7 +257,7 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
       queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(en).signal(dev.timeline_signal, dev.timeline_value).submit(dev)
       dev.timeline_value += 1
 
-    if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
+    if enabled and PROFILE: dev.sig_prof_records.append((cast(HCQSignal, st), cast(HCQSignal, en), desc, queue_type is dev.hw_copy_queue_t))
 
 class HCQArgsState(Generic[ProgramType]):
   def __init__(self, ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): self.ptr, self.prg = ptr, prg
@@ -393,7 +393,7 @@ class HCQCompiled(Compiled):
   def _ensure_shared_time_base(self):
     if not self.gpu2cpu_compute_time_diff.is_nan(): return
 
-    def _sync_cpu_queue(d, q_t):
+    def _sync_cpu_queue(d:HCQCompiled, q_t:Type[HWCommandQueue]):
       q_t().timestamp(d.timeline_signal).signal(d.timeline_signal, d.timeline_value).submit(d)
       d.timeline_value += 1
       st = time.perf_counter_ns()
@@ -411,7 +411,7 @@ class HCQCompiled(Compiled):
       if q == d.hw_compute_queue_t: d.gpu2cpu_compute_time_diff = statistics.median(l)
       if q == d.hw_copy_queue_t: d.gpu2cpu_copy_time_diff = statistics.median(l)
 
-    def _sync_gpu_to_gpu_queue(d1, d2, q1_t, q2_t):
+    def _sync_gpu_to_gpu_queue(d1:HCQCompiled, d2:HCQCompiled, q1_t:Type[HWCommandQueue], q2_t:Type[HWCommandQueue]):
       q1_t().signal(d1.timeline_signal, d1.timeline_value).wait(d2.timeline_signal, d2.timeline_value) \
             .timestamp(d1.timeline_signal).signal(d1.timeline_signal, d1.timeline_value+1).submit(d1)
       q2_t().signal(d2.timeline_signal, d2.timeline_value).wait(d1.timeline_signal, d1.timeline_value) \

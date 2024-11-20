@@ -26,7 +26,7 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
 class Program:
   name:str
   src:str
-  dname:str
+  device:str
   uops:Optional[List[UOp]]=None
   mem_estimate:sint=0  # TODO: get this from the load/store uops once min/max are good
 
