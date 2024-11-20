@@ -1,13 +1,13 @@
 from __future__ import annotations
-from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type, Union, TypeVar, Generic
+from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Callable, Any
 import contextlib, decimal, statistics, random, json, atexit, time, array, ctypes
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv
 from tinygrad.renderer import Renderer
-from tinygrad.device import BufferOptions, Allocator, Compiler, Compiled, LRUAllocator
+from tinygrad.device import BufferOptions, Compiler, Compiled, LRUAllocator
 
 # **************** for HCQ Compatible Devices ****************
 
-def hcq_command(func):
+def hcq_command(func: Callable[..., None]) -> Callable[..., Any]:
   """
   Decorator for HWCommandQueue commands. Enables command indexing and stores metadata for command updates.
 
@@ -17,7 +17,7 @@ def hcq_command(func):
       def command_method(self, ...): ...
     ```
   """
-  def __wrapper(self, *args, **kwargs):
+  def __wrapper(self:HWCommandQueue, *args, **kwargs):
     self.cmds_offset.append(len(self.q))
     func(self, *args, **kwargs)
     self.cmds_len.append(len(self.q) - self.cmds_offset[-1])
@@ -354,7 +354,7 @@ class HCQCompiled(Compiled):
   gpu2cpu_copy_time_diff: decimal.Decimal = decimal.Decimal('nan')
   gpu2cpu_compute_time_diff: decimal.Decimal = decimal.Decimal('nan')
 
-  def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[HCQSignal],
+  def __init__(self, device:str, allocator:HCQAllocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[HCQSignal],
                comp_queue_t:Type[HWComputeQueue], copy_queue_t:Optional[Type[HWCopyQueue]]):
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
@@ -469,15 +469,15 @@ class HCQCompiled(Compiled):
 # Protocol for hcq compatible allocators for allocated buffers to contain VA address and it's size.
 class HCQBuffer(Protocol): va_addr:int; size:int # noqa: E702
 
-class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
+class HCQAllocator(LRUAllocator, Generic[DeviceType]): # pylint: disable=abstract-method
   """
   A base allocator class compatible with the HCQ (Hardware Command Queue) API.
 
   This class implements basic copy operations following the HCQ API, utilizing both `HWComputeQueue` and `HWCopyQueue`.
   """
 
-  def __init__(self, dev:HCQCompiled, batch_size:int=(2 << 20), batch_cnt:int=32):
-    self.dev:Any = dev
+  def __init__(self, dev:DeviceType, batch_size:int=(2 << 20), batch_cnt:int=32):
+    self.dev:DeviceType = dev
     self.b = [self._alloc(batch_size, BufferOptions(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
     super().__init__()
@@ -485,6 +485,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer: raise NotImplementedError("need hcq compat alloc")
 
   def _copyin(self, dest:HCQBuffer, src:memoryview):
+    assert self.dev.hw_copy_queue_t is not None
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"CPU -> {self.dev.dname}", enabled=PROFILE):
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
@@ -504,6 +505,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
         return (self.b[self.b_next].va_addr, self.b_next)
       return None
 
+    assert self.dev.hw_copy_queue_t is not None
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"DISK -> {self.dev.dname}", enabled=PROFILE):
       for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
@@ -515,6 +517,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
 
+    assert self.dev.hw_copy_queue_t is not None
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"{self.dev.dname} -> CPU", enabled=PROFILE):
       for i in range(0, dest.nbytes, self.b[0].size):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
@@ -525,9 +528,10 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
 
         ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
-  def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev, dest_dev):
-    src_dev.allocator.map(dest)
+  def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:DeviceType, dest_dev:DeviceType):
+    cast(HCQAllocator, src_dev.allocator).map(dest)
 
+    assert src_dev.hw_copy_queue_t is not None
     with hcq_profile(src_dev, queue_type=src_dev.hw_copy_queue_t, desc=f"{src_dev.dname} -> {dest_dev.dname}", enabled=PROFILE):
       src_dev.hw_copy_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
                                .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
