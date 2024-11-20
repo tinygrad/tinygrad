@@ -17,7 +17,7 @@ class TestPrints(unittest.TestCase):
     with contextlib.redirect_stdout(db6_out):
       with Context(DEBUG=6):
         Tensor.arange(0,6).realize()
-    
+
     # get rif of trailing "\n" and final print with kernel time/flops/mem usage
     str = db5_out.getvalue()[:-1].rpartition("\n")[0]
     assert db6_out.getvalue().startswith(str), "DEBUG=6 output should start with DEBUG=5 output"
