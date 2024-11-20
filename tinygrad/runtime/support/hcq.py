@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type, Union
+from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type, Union, TypeVar, Generic
 import contextlib, decimal, statistics, random, json, atexit, time, array, ctypes
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv
 from tinygrad.renderer import Renderer
@@ -25,7 +25,10 @@ def hcq_command(func):
     return self
   return __wrapper
 
-class HWCommandQueue:
+SignalType = TypeVar('SignalType', bound='HCQSignal')
+DeviceType = TypeVar('DeviceType', bound='HCQCompiled')
+
+class HWCommandQueue(Generic[SignalType, DeviceType]):
   """
   A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
   Both compute and copy queues should have the following commands implemented.
@@ -42,7 +45,7 @@ class HWCommandQueue:
     return len(self) - 1
 
   @hcq_command
-  def signal(self, signal:HCQSignal, value:int):
+  def signal(self, signal:SignalType, value:int):
     """
     Enqueues a signal command which sets the signal to the given value, ensuring all previous operations are completed.
 
@@ -51,10 +54,10 @@ class HWCommandQueue:
       value: The value to set the signal to
     """
     self._signal(signal, value)
-  def _signal(self, signal:HCQSignal, value:int): raise NotImplementedError("backend should overload this function")
+  def _signal(self, signal:SignalType, value:int): raise NotImplementedError("backend should overload this function")
 
   @hcq_command
-  def wait(self, signal:HCQSignal, value:int):
+  def wait(self, signal:SignalType, value:int):
     """
     Enqueues a wait command which halts execution until the signal is greater than or equal to a specific value.
 
@@ -66,7 +69,7 @@ class HWCommandQueue:
   def _wait(self, signal, value): raise NotImplementedError("backend should overload this function")
 
   @hcq_command
-  def timestamp(self, signal:HCQSignal):
+  def timestamp(self, signal:SignalType):
     """
     Enqueues a timestamp command which records the current time in a signal after all previously enqueued commands are completed.
 
@@ -104,7 +107,7 @@ class HWCommandQueue:
     return self
   def _update_wait(self, cmd_idx:int, signal:Optional[Any], value:Optional[int]): raise NotImplementedError("backend should overload this function")
 
-  def bind(self, dev:HCQCompiled):
+  def bind(self, dev:DeviceType):
     """
     Associates the queue with a specific device for optimized execution.
 
@@ -118,7 +121,7 @@ class HWCommandQueue:
       Implementing this method is optional but recommended for performance gains.
     """
 
-  def submit(self, dev:HCQCompiled):
+  def submit(self, dev:DeviceType):
     """
     Submits the command queue to a specific device for execution.
 
@@ -127,9 +130,9 @@ class HWCommandQueue:
     """
     if self.q: self._submit(dev)
     return self
-  def _submit(self, dev:HCQCompiled): raise NotImplementedError("backend should overload this function")
+  def _submit(self, dev:DeviceType): raise NotImplementedError("backend should overload this function")
 
-class HWComputeQueue(HWCommandQueue):
+class HWComputeQueue(HWCommandQueue[SignalType, DeviceType], Generic[SignalType, DeviceType]):
   @hcq_command
   def memory_barrier(self):
     """

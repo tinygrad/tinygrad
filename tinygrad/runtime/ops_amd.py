@@ -54,7 +54,7 @@ class AMDSignal(HCQSignal):
         kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(self._evt_array), num_events=1, wait_for_all=1, timeout=1000)
     raise RuntimeError(f"wait_signal: not set to {value}, but {self._signal[0]}, {timeout} ms TIMEOUT!")
 
-class AMDComputeQueue(HWComputeQueue):
+class AMDComputeQueue(HWComputeQueue[AMDSignal, 'AMDDevice']):
   def __init__(self):
     self.cmd_idx_to_local_offset, self.cmd_idx_to_global_offset, self.cmd_idx_to_dispatch_packet = {}, {}, {}
     super().__init__()
@@ -137,14 +137,15 @@ class AMDComputeQueue(HWComputeQueue):
       if global_size is not None:
         dp.grid_size_x,dp.grid_size_y,dp.grid_size_z = [g*l for g,l in zip(global_size,[dp.workgroup_size_x,dp.workgroup_size_y,dp.workgroup_size_z])]
 
-  def _wait(self, signal, value=0):
+  def _wait(self, signal:AMDSignal, value=0):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
       amd_gpu.WAIT_REG_MEM_MEM_SPACE(1) | amd_gpu.WAIT_REG_MEM_OPERATION(0) | amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.WAIT_REG_MEM_ENGINE(0), *data64_le(signal._value_addr), value, 0xffffffff, 4]
 
-  def _timestamp(self, signal): self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=signal._timestamp_addr)
+  def _timestamp(self, signal:AMDSignal):
+    self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=signal._timestamp_addr)
 
-  def _signal(self, signal, value=0):
+  def _signal(self, signal:AMDSignal, value=0):
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
     self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal._value_addr, value=value, cache_flush=True)
     if signal._event_mailbox_ptr != 0:
@@ -163,7 +164,7 @@ class AMDComputeQueue(HWComputeQueue):
     if signal is not None and self.cmds_len[cmd_idx] > 8:
       self._patch(cmd_idx, offset=11, data=[*data64_le(signal._event_mailbox_ptr), *data64_le(signal._event.event_id), signal._event.event_id])
 
-  def bind(self, dev):
+  def bind(self, dev:AMDDevice):
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True, uncached=True))
     hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
@@ -173,7 +174,7 @@ class AMDComputeQueue(HWComputeQueue):
                          len(self.q) | amd_gpu.INDIRECT_BUFFER_VALID]
     self.q = hw_view # type: ignore
 
-  def _submit(self, dev):
+  def _submit(self, dev:AMDDevice):
     cmds = self.indirect_cmd if dev == self.binded_device else self.q
 
     for i, value in enumerate(cmds): dev.compute_queue.ring[(dev.compute_queue.put_value + i) % len(dev.compute_queue.ring)] = value
