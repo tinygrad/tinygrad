@@ -101,7 +101,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     self.w_dependency_map: Dict[int, Any] = {}
     self.r_dependency_map: Dict[int, List[Any]] = collections.defaultdict(list)
 
-    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
+    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.device.split(":")[0],
                      ssimplify(op_estimate), ssimplify(mem_estimate), ssimplify(lds_estimate))
 
   def updated_vars(self, var_vals: Dict[Variable, int]):
