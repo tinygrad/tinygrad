@@ -40,19 +40,19 @@ class DSPBuffer:
 
 class DSPAllocator(Allocator):
   def __init__(self, device:DSPDevice):
-    self.device = device
+    self.dev = device
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
-    b = qcom_dsp.ION_IOC_ALLOC(self.device.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
-    share_info = qcom_dsp.ION_IOC_SHARE(self.device.ion_fd, handle=b.handle)
+    b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
+    share_info = qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)
     va_addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, share_info.fd, 0)
     return DSPBuffer(va_addr, size, share_info, offset=0)
 
   def _free(self, opaque:DSPBuffer, options:BufferOptions):
     libc.munmap(opaque.va_addr, opaque.size)
     os.close(opaque.share_info.fd)
-    qcom_dsp.ION_IOC_FREE(self.device.ion_fd, handle=opaque.share_info.handle)
+    qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
 
   def _as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
   def _copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)

@@ -305,15 +305,15 @@ class AMDAllocator(HCQAllocator):
   def __init__(self, device:AMDDevice): super().__init__(device, batch_size=SDMA_MAX_COPY_SIZE)
 
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
-    if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
-    if options.cpu_access and options.uncached: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
+    if options.host: return self.dev._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
+    if options.cpu_access and options.uncached: return self.dev._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    return self.dev._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
 
   def _free(self, opaque, options:BufferOptions):
-    self.device.synchronize()
-    self.device._gpu_free(opaque)
+    self.dev.synchronize()
+    self.dev._gpu_free(opaque)
 
-  def map(self, buf:HCQBuffer): self.device._gpu_map(buf._base if hasattr(buf, '_base') else buf)
+  def map(self, buf:HCQBuffer): self.dev._gpu_map(buf._base if hasattr(buf, '_base') else buf)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 

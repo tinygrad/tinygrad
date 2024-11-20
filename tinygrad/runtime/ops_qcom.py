@@ -303,7 +303,7 @@ class QCOMAllocator(HCQAllocator):
       pitch = round_up((real_stride:=imgw * 4 * options.image.itemsize), 1 << pitchalign) + pitch_add
 
       if options.external_ptr: texture = QCOMBuffer(options.external_ptr, size)
-      else: texture = self.device._gpu_alloc(pitch * imgh, kgsl.KGSL_MEMTYPE_TEXTURE)
+      else: texture = self.dev._gpu_alloc(pitch * imgh, kgsl.KGSL_MEMTYPE_TEXTURE)
 
       texture.pitch, texture.real_stride = pitch, real_stride
 
@@ -316,7 +316,7 @@ class QCOMAllocator(HCQAllocator):
 
       return texture
 
-    return QCOMBuffer(options.external_ptr, size) if options.external_ptr else self.device._gpu_alloc(size)
+    return QCOMBuffer(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
 
   def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, dest_off=0, src_off=0):
     while src_off < src_size:
@@ -328,17 +328,17 @@ class QCOMAllocator(HCQAllocator):
     else: ctypes.memmove(dest.va_addr, mv_address(src), src.nbytes)
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
-    self.device.synchronize()
+    self.dev.synchronize()
     if (qs:=cast(QCOMBuffer, src)).pitch is not None: self._do_copy(qs.va_addr, mv_address(dest), qs.size, qs.real_stride, qs.pitch, qs.real_stride)
     else: ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
 
   def _as_buffer(self, src:HCQBuffer) -> memoryview:
-    self.device.synchronize()
+    self.dev.synchronize()
     return to_mv(src.va_addr, src.size)
 
   def _free(self, opaque, options:BufferOptions):
-    self.device.synchronize()
-    self.device._gpu_free(opaque)
+    self.dev.synchronize()
+    self.dev._gpu_free(opaque)
 
 class QCOMDevice(HCQCompiled):
   signals_page: Any = None

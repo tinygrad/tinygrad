@@ -291,14 +291,14 @@ class NVProgram(HCQProgram):
 
 class NVAllocator(HCQAllocator):
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
-    if options.host: return self.device._gpu_host_alloc(size, tag="user host memory")
-    return self.device._gpu_alloc(size, map_to_cpu=options.cpu_access, huge_page=(size > (16 << 20)), tag=f"user memory ({options})")
+    if options.host: return self.dev._gpu_host_alloc(size, tag="user host memory")
+    return self.dev._gpu_alloc(size, map_to_cpu=options.cpu_access, huge_page=(size > (16 << 20)), tag=f"user memory ({options})")
 
   def _free(self, opaque, options:BufferOptions):
-    self.device.synchronize()
-    self.device._gpu_free(opaque)
+    self.dev.synchronize()
+    self.dev._gpu_free(opaque)
 
-  def map(self, buf:HCQBuffer): self.device._gpu_map(buf._base if hasattr(buf, '_base') else buf)
+  def map(self, buf:HCQBuffer): self.dev._gpu_map(buf._base if hasattr(buf, '_base') else buf)
 
 @dataclass
 class GPFifo:

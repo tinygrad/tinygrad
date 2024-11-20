@@ -44,17 +44,17 @@ class HIPProgram:
 
 class HIPAllocator(LRUAllocator):
   def __init__(self, device:HIPDevice):
-    self.device = device
+    self.dev = device
     super().__init__()
   def _alloc(self, size:int, options:BufferOptions):
-    check(hip.hipSetDevice(self.device.device_id))
+    check(hip.hipSetDevice(self.dev.device_id))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
   def _free(self, opaque, options:BufferOptions): check(hip.hipFree(opaque))
   def _copyin(self, dest, src: memoryview):
-    check(hip.hipSetDevice(self.device.device_id))
+    check(hip.hipSetDevice(self.dev.device_id))
     check(hip.hipMemcpy(dest, from_mv(src), len(src), hip.hipMemcpyHostToDevice))
   def _copyout(self, dest:memoryview, src):
-    self.device.synchronize()
+    self.dev.synchronize()
     check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
 
 class HIPDevice(Compiled):

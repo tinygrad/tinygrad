@@ -131,11 +131,11 @@ class MetalBuffer:
 
 class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice):
-    self.device:MetalDevice = device
+    self.dev:MetalDevice = device
     super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
     # Buffer is explicitly released in _free() rather than garbage collected via reference count
-    ret = msg(self.device.device, "newBufferWithLength:options:", size, MTLResourceOptions.MTLResourceStorageModeShared, restype=objc_id)
+    ret = msg(self.dev.device, "newBufferWithLength:options:", size, MTLResourceOptions.MTLResourceStorageModeShared, restype=objc_id)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): msg(opaque.buf, "release")
@@ -156,7 +156,7 @@ class MetalAllocator(LRUAllocator):
     msg(src_command_buffer, "commit")
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
-    self.device.synchronize()
+    self.dev.synchronize()
     ptr = msg(src.buf, "contents", restype=objc_id) # Shared memory, do not release here
     array = (ctypes.c_char * (src.offset + src.size)).from_address(ptr.value)
     return memoryview(array).cast("B")[src.offset:]
