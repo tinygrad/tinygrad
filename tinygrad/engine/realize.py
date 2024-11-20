@@ -68,7 +68,7 @@ class Runner:
     self.first_run, self.display_name, self.dname, self.op_estimate, self.mem_estimate, self.lds_estimate = \
       True, display_name, dname, op_estimate, mem_estimate, mem_estimate if lds_estimate is None else lds_estimate
   @property
-  def device(self): return Device[self.dname]
+  def dev(self): return Device[self.dname]
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     return self(rawbufs, {} if var_vals is None else var_vals)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False) -> Optional[float]:
@@ -78,10 +78,10 @@ class CompiledRunner(Runner):
   def __init__(self, p:Program, precompiled:Optional[bytes]=None):
     if DEBUG >= 4: print(p.src)
     self.p:Program = p
-    self.lib:bytes = precompiled if precompiled is not None else Device[p.dname].compiler.compile_cached(p.src)
-    if DEBUG >= 6: Device[p.dname].compiler.disassemble(self.lib)
-    self.clprg = Device[p.dname].runtime(p.function_name, self.lib)
-    super().__init__(p.name, p.dname, p.op_estimate, p.mem_estimate, p.lds_estimate)
+    self.lib:bytes = precompiled if precompiled is not None else Device[p.device].compiler.compile_cached(p.src)
+    if DEBUG >= 6: Device[p.device].compiler.disassemble(self.lib)
+    self.clprg = Device[p.device].runtime(p.function_name, self.lib)
+    super().__init__(p.name, p.device, p.op_estimate, p.mem_estimate, p.lds_estimate)
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)
 
@@ -141,18 +141,18 @@ class BufferXfer(BufferCopy):
 # **************** method cache ****************
 
 method_cache: Dict[Tuple[str, bytes, int, int, bool], CompiledRunner] = {}
-def get_runner(dname:str, ast:UOp) -> CompiledRunner:
-  ckey = (dname, ast.key, BEAM.value, NOOPT.value, False)
+def get_runner(device:str, ast:UOp) -> CompiledRunner:
+  ckey = (device, ast.key, BEAM.value, NOOPT.value, False)
   if cret:=method_cache.get(ckey): return cret
-  bkey = (dname.split(":")[0], ast.key, BEAM.value, NOOPT.value, True)
+  bkey = (device.split(":")[0], ast.key, BEAM.value, NOOPT.value, True)
   if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, dname=dname), bret.lib)
+    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
-    prg: Program = get_kernel(Device[dname].renderer, ast).to_program()
+    prg: Program = get_kernel(Device[device].renderer, ast).to_program()
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
-      return UOpsFuzzerRunner(replace(prg, dname=dname))
-    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=dname))
+      return UOpsFuzzerRunner(replace(prg, device=device))
+    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
 # **************** lowering functions ****************
