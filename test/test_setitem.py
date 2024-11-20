@@ -93,7 +93,7 @@ class TestSetitem(unittest.TestCase):
     t = Tensor([1,2,3,4])
     t[[1,1]] = Tensor([1,0])
     np.testing.assert_allclose(t.numpy(), [1,0,3,4])
-  
+
   def test_setitem_with_1_in_shape(self):
     t = Tensor([[1],[2],[3]])
     t[[0,0]] = Tensor([[1],[2]])
