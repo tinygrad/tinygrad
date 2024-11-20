@@ -1,88 +1,46 @@
-from typing import Dict, List
+import math
+from typing import Optional, Tuple
 import unittest
-
 import numpy as np
-
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor
 
-# BLAKE3 algorithm
-# - call hasher.update() with bytes
-# - check against the current chunk state
-# - want = number of bytes to complete a full chunk
-# - take = min(want, len(input_bytes))
-# - if chunk_state.num_bytes === 1024 call compress()
-# - call add_chunk_chaining_value()
-# - create the state matrix 4x4 32 bit words
-# [ chaining_value[0], chaining_value[1], chaining_value[2], chaining_value[3] ]
-# [ chaining_value[4], chaining_value[5], chaining_value[6], chaining_value[7] ]
-# [       IV[0],             IV[1],             IV[2],          IV[3]         ]
-# [     counter[0],       counter[1],     block_len,            flags         ]
-# - first 8 words are from the 8 word chaining value
-# - if this is the first chunk then the chaining value is taken from IV
-# - pass this through 7 round keyed permutation steps to mix up the state matrix
-# - return the state matrix
-# - update the chaining value
-# - purpose of the chaining value is to make each chunk dependent on prior chunks
-# - changing one chunk propogates changes through the entire hash (so-called "avalanche" effect)
-# - if a subtree can be formed, create a parent chaining value
-
-# params
 MD_LEN = 32
 HEIGHT, WIDTH = 4, 4
 KEY_LEN = 32
-BLOCK_LEN = 64
-CHUNK_LEN = 1024
+BLOCK_BYTES = 64
+CHUNK_BYTES = 1024
 # flags
 CHUNK_START = 1 << 0
 CHUNK_END = 1 << 1
 PARENT = 1 << 2
 ROOT = 1 << 3
-KEYED_HASH = 1 << 4
-# input chaining values
-IV = Tensor([
-    0x6A09E667,
-    0xBB67AE85,
-    0x3C6EF372,
-    0xA54FF53A,
-    0x510E527F,
-    0x9B05688C,
-    0x1F83D9AB,
-    0x5BE0CD19,
-], dtype=dtypes.uint32)
+IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
 MSG_PERMUTATION = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]
 
 
-def mask32(x: int) -> int:
-  return x & 0xFFFFFFFF
+def rotr(x: int, n: int) -> int:
+  return (x << (32 - n)) | (x >> n)
 
 
-def add32(x: int, y: int) -> int:
-  return mask32(x + y)
-
-
-def rightrotate32(x: int, n: int) -> int:
-  return mask32(x << (32 - n)) | (x >> n)
-
-
-def mix(states: Tensor, a: int, b: int, c: int, d: int, mx: int, my: int) -> Tensor:
-  states[:, a] = add32(states[:, a], add32(states[:, b], mx))
-  states[:, d] = rightrotate32(states[:, d] ^ states[:, a], 16)
-  states[:, c] = add32(states[:, c], states[:, d])
-  states[:, b] = rightrotate32(states[:, b] ^ states[:, c], 12)
-  states[:, a] = add32(states[:, a], add32(states[:, b], my))
-  states[:, d] = rightrotate32(states[:, d] ^ states[:, a], 8)
-  states[:, c] = add32(states[:, c], states[:, d])
-  states[:, b] = rightrotate32(states[:, b] ^ states[:, c], 7)
+def mix(states: Tensor, a: int, b: int, c: int, d: int, mx: Tensor, my: Tensor) -> Tensor:
+  states[:, a] = states[:, a] + (states[:, b] + mx)
+  states[:, d] = rotr(states[:, d] ^ states[:, a], 16)
+  states[:, c] = states[:, c] + states[:, d]
+  states[:, b] = rotr(states[:, b] ^ states[:, c], 12)
+  states[:, a] = states[:, a] + (states[:, b] + my)
+  states[:, d] = rotr(states[:, d] ^ states[:, a], 8)
+  states[:, c] = states[:, c] + states[:, d]
+  states[:, b] = rotr(states[:, b] ^ states[:, c], 7)
 
 
 def round(states: Tensor, chunks: Tensor) -> Tensor:
-  # Mix the columns.
+  # mix columns
   mix(states, 0, 4, 8, 12, chunks[:, 0], chunks[:, 1])
   mix(states, 1, 5, 9, 13, chunks[:, 2], chunks[:, 3])
   mix(states, 2, 6, 10, 14, chunks[:, 4], chunks[:, 5])
   mix(states, 3, 7, 11, 15, chunks[:, 6], chunks[:, 7])
-  # Mix the diagonals.
+  # mix diagonals
   mix(states, 0, 5, 10, 15, chunks[:, 8], chunks[:, 9])
   mix(states, 1, 6, 11, 12, chunks[:, 10], chunks[:, 11])
   mix(states, 2, 7, 8, 13, chunks[:, 12], chunks[:, 13])
@@ -96,180 +54,205 @@ def permute(chunks: Tensor) -> Tensor:
   return chunks
 
 
-def create_state(chain: Tensor, iv: Tensor, counts: Tensor, block_len: Tensor, flags: Tensor):
-  states = chain.cat(iv, counts, block_len, flags, dim=-1)
-  return states
+def round_and_permute(states: Tensor, chunks: Tensor):
+  for _ in range(6):
+    round(states, chunks)
+    permute(chunks)
+  round(states, chunks)
 
+def compress_chunks(states: Tensor, chunks: Tensor, chain_vals: Tensor, n_end_blocks: Optional[int]):
+  """
+  Chunk compression can be done in parallel because each chunk is independent.
+  Block compression is sequential because each chunk depends on the chaining value of the previous block.
+  states: [n_chunks, n_blocks, state_size]
+  chunks: [n_chunks, n_blocks, n_words]
+  chain_vals: [n_chunks, n_blocks, 8]
+  returns: [n_chunks, 8] chunk chaining values
+  """
+  for i in range(states.shape[1]):
+    compressed_states = compress_block(states[:, i].contiguous(), chunks[:, i].contiguous(), chain_vals[:, i].contiguous())
+    compressed_chaining_vals = compressed_states[:, :8]
+    if i < states.shape[1] - 1:
+      chain_vals[:, i + 1] = compressed_chaining_vals
+      states[:, i + 1, :8] = compressed_chaining_vals
+  # each chunk's chaining value is the chaining value of its final block
+  end_idx = n_end_blocks if n_end_blocks is not None else -1
+  return chain_vals[:-1, -1].cat(chain_vals[-1:, end_idx])
 
-def round_permute(states: Tensor, chunks: Tensor):
-  round(states, chunks)  # round 1
-  permute(chunks)
-  round(states, chunks)  # round 2
-  permute(chunks)
-  round(states, chunks)  # round 3
-  permute(chunks)
-  round(states, chunks)  # round 4
-  permute(chunks)
-  round(states, chunks)  # round 5
-  permute(chunks)
-  round(states, chunks)  # round 6
-  permute(chunks)
-  round(states, chunks)  # round 7
-
-
-def compress(
+def compress_block(
+    states: Tensor,
     chunks: Tensor,
     chain_vals: Tensor,
-    iv: Tensor,
-    counts: Tensor,
-    block_len: Tensor,
-    flags: Tensor,
 ) -> Tensor:
-  states = create_state(chain_vals, iv, counts, block_len, flags)
-  round_permute(states, chunks)
+  """
+  states: [n_chunks, state_size]
+  chunks: [n_chunks, n_words]
+  chain_vals: [n_chunks, 8]
+  """
+  round_and_permute(states, chunks)
   for i in range(8):
     states[:, i] = states[:, i] ^ states[:, i + 8]
     states[:, i + 8] = states[:, i + 8] ^ chain_vals[:, i]
   return states
 
 
-def chunk_bytes(text_bytes: bytes) -> Tensor:
+def bytes_to_blocks(text_bytes: bytes) -> Tuple[Tensor, int, int]:
+  """
+  Each chunk is 1024 bytes made up of 16 blocks.
+  Each block contains 16 32-bit words.
+  returns: ([n_chunks, n_blocks, n_words], n_end_blocks, end_block_len)
+  """
   n_bytes = len(text_bytes)
-  n_chunks = max((n_bytes + CHUNK_LEN - 1) // CHUNK_LEN, 1)
-  chunks = Tensor.zeros(n_chunks, CHUNK_LEN, dtype=dtypes.uint8).contiguous()
-  for i in range(0, max(len(text_bytes), 1), CHUNK_LEN):
-    chunk = text_bytes[i:i + CHUNK_LEN].ljust(CHUNK_LEN, b"\0")
-    chunks[i // CHUNK_LEN] = Tensor(chunk, dtype=dtypes.uint8)
-  return chunks
+  n_chunks = max((n_bytes + CHUNK_BYTES - 1) // CHUNK_BYTES, 1)
+  chunks = Tensor.zeros(n_chunks, 16, 16, dtype=dtypes.uint32).contiguous()
+  unpadded_len = 0
+  for i in range(0, max(len(text_bytes), 1), CHUNK_BYTES):
+    chunk = text_bytes[i:i + CHUNK_BYTES]
+    unpadded_len = len(chunk)
+    chunk = chunk.ljust(CHUNK_BYTES, b"\0")
+    for j in range(16):
+      block_start = j * BLOCK_BYTES
+      b = chunk[block_start:block_start + BLOCK_BYTES]
+      block_words = [int.from_bytes(b[i: i + 4], "little") for i in range(0, len(b), 4)]
+      chunks[i // CHUNK_BYTES, j] = Tensor(block_words, dtype=dtypes.uint32)
+  n_end_blocks = max(1, (unpadded_len // BLOCK_BYTES) + (1 if unpadded_len % BLOCK_BYTES else 0))
+  end_block_len = BLOCK_BYTES if unpadded_len % BLOCK_BYTES == 0 and unpadded_len else unpadded_len % BLOCK_BYTES
+  return chunks, n_end_blocks, end_block_len
 
 
 def pair_chaining_values(chain_vals: Tensor) -> Tensor:
   """
-  Pairs the chaining values and concatenates them.
+  Pairwise concatenate chaining values to create inputs for the parent level of the hash tree.
   """
   n_chunks = chain_vals.shape[0]
   assert chain_vals.shape == (n_chunks, 8)
   return chain_vals.reshape(-1 // 2, 2, 4).flatten(1)
 
 
-def tinygrad_blake3(text: str) -> str:
+def create_state(chain_vals: Tensor, iv: Tensor, counter: int, last_len: Optional[int], n_end_blocks: Optional[int], flags: Tensor) -> Tensor:
   """
-  Uses a recursive divide and conquer approach to compress the input text in parallel.
+  returns: [n_chunks, n_blocks, state_size]
   """
+  n_chunks, n_blocks, _ = chain_vals.shape
+  counts = Tensor.arange(counter, counter + n_chunks, dtype=dtypes.uint32)
+  counts = counts.cat(Tensor.zeros_like(counts, dtype=dtypes.uint32))
+  counts = counts.expand(n_chunks, n_blocks, -1)
+  lengths = Tensor.full((n_chunks, n_blocks, 1), fill_value=BLOCK_BYTES, dtype=dtypes.uint32).contiguous()
+  if last_len is not None:
+    lengths[:, n_end_blocks - 1] = last_len
+    lengths[:, n_end_blocks:] = 0
+  states = chain_vals.cat(iv[:, :, :4], counts, lengths, flags, dim=-1)
+  return states
+
+def create_flags(n_chunks: int, n_blocks: int, n_end_blocks: Optional[int], parents: bool, root: bool) -> Tensor:
+  flags = Tensor.zeros((n_chunks, n_blocks, 1), dtype=dtypes.uint32).contiguous()
+  flags[:, 0] = flags[:, 0] + CHUNK_START
+  end_idx = n_end_blocks - 1 if n_end_blocks is not None else -1
+  flags[:, end_idx] = flags[:, end_idx] + CHUNK_END
+  if parents:
+    flags = flags + PARENT
+  if root:
+    flags[:, end_idx] = flags[:, end_idx] + ROOT
+  return flags
+
+
+def tiny_blake3(text: str) -> str:
   text_bytes = text.encode("utf-8") if text else b""
-  chunks = chunk_bytes(text_bytes)
-  last_len = len(text_bytes) % CHUNK_LEN
-  n_chunks = chunks.shape[0]
-  iv = IV.expand(n_chunks, -1)
-  chain = iv
-  cnt = 0
-  counts = Tensor.arange(cnt, n_chunks, 1, dtype=dtypes.uint32).reshape(-1, 1)
-  counts = counts.cat(Tensor.zeros_like(counts, dtype=dtypes.uint32), dim=-1)
-  lens = Tensor([[BLOCK_LEN] * (n_chunks - 1) +
-                [last_len]], dtype=dtypes.uint32)
-  flags = Tensor.zeros(n_chunks, 1, dtype=dtypes.uint32).contiguous()
-  flags[0] = flags[0] + CHUNK_START
-  flags[-1] = flags[-1] + CHUNK_END
-  compressed = compress(chunks, chain, iv[:, :4], counts, lens, flags)
-  cnt += n_chunks
-  chain = compressed[:, :8]
-  flags[0] = flags[0] + ROOT
-  # extra permutes to return to the original chunk state
-  permute(chunks)
-  permute(chunks)
-  compressed = compress(chunks, iv, iv[:, :4], counts, lens, flags)
-  return compressed[0].flatten().numpy().tobytes()[:MD_LEN].hex()
+  chunks, n_end_blocks, end_block_len = bytes_to_blocks(text_bytes)
+  iv = IV.expand(chunks.shape[0], chunks.shape[1], -1).contiguous()
+  counter = 0
+  # tree hash
+  tree_levels = math.ceil(math.log2(max(chunks.shape[0], 1)))
+  for i in range(tree_levels):
+    chain_vals = iv if i == 0 else None
+    flags = create_flags(chunks.shape[0], chunks.shape[1], n_end_blocks, i > 0)
+    states = create_state(chain_vals, iv, counter, end_block_len, n_end_blocks, flags)
+    states = compress_chunks(states, chunks, chain_vals, n_end_blocks)
+    counter += chunks.shape[0]
+  # root hash
+  flags = create_flags(chunks.shape[0], chunks.shape[1], n_end_blocks, counter != 0, True)
+  states = create_state(iv, iv, counter, end_block_len, n_end_blocks, flags)
+  chain_vals = compress_chunks(states, chunks, iv, n_end_blocks)
+  hash = chain_vals[0].flatten().numpy().tobytes()[:MD_LEN].hex()
+  return hash
 
 
 class TestBLAKE3(unittest.TestCase):
-  def test_text_to_chunks(self):
-    """Test converting input text to chunks"""
+  def test_bytes_to_blocks(self):
+    # empty
     text = b""
-    expected = Tensor([b"\0" * CHUNK_LEN], dtype=dtypes.uint8)
-    actual = chunk_bytes(text)
-    np.testing.assert_equal(actual.numpy(), expected.numpy())
-    text = b"a" * (CHUNK_LEN - 1)
-    expected = Tensor([b"a" * (CHUNK_LEN - 1) + b"\0"], dtype=dtypes.uint8)
-    actual = chunk_bytes(text)
-    np.testing.assert_equal(actual.numpy(), expected.numpy())
-    text = b"a" * CHUNK_LEN + b"b" * CHUNK_LEN
-    expected = Tensor([b"a" * CHUNK_LEN, b"b" * CHUNK_LEN], dtype=dtypes.uint8)
-    actual = chunk_bytes(text)
-    np.testing.assert_equal(actual.numpy(), expected.numpy())
-
-  def _setup_test_inputs(self, text: str) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
-    text_bytes = text.encode("utf-8") if text else b""
-    final_len = len(text_bytes) % CHUNK_LEN
-    chunks = chunk_bytes(text_bytes)
-    n_chunks = chunks.shape[0]
-    chaining_values = IV.expand(1, -1)
-    iv = chaining_values[:, :4]
-    counts = Tensor.arange(0, n_chunks, 1, dtype=dtypes.uint32).reshape(-1, 1)
-    counts = counts.cat(counts >> 32, dim=-1)
-    flags = Tensor.zeros(n_chunks, 1, dtype=dtypes.uint32).contiguous()
-    flags[0, 0] = flags[0, 0] + CHUNK_START
-    flags[-1, 0] = flags[-1, 0] + CHUNK_END
-    block_len = Tensor([final_len], dtype=dtypes.uint32).expand(n_chunks, -1)
-    return chunks, n_chunks, chaining_values, iv, counts, block_len, flags
-
-  def test_create_state(self):
-    _, _, chaining_values, iv, counts, block_len, flags = self._setup_test_inputs(
-        "a")
-    states = create_state(chaining_values, iv, counts, block_len, flags)
-    expected = Tensor([[1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924,
-                      528734635, 1541459225, 1779033703, 3144134277, 1013904242, 2773480762, 0, 0, 1, 3]], dtype=dtypes.uint32)
-    np.testing.assert_equal(states.numpy(), expected.numpy())
-
-  def test_round(self):
-    """Test the round function with known input and output values"""
-    state = Tensor([1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225, 1779033703, 3144134277, 1013904242, 2773480762, 0, 0, 1, 3],  # fourth row
-                   dtype=dtypes.uint32).unsqueeze(0)
-    chunks = Tensor([97, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                    dtype=dtypes.uint32).unsqueeze(0)
-    expected = Tensor([1197540149, 369699509, 4114839138, 3226644656, 2715381399, 1053419351, 925057643, 3011426483, 2698030395, 591305675, 1733393876, 3237318155, 3541682352, 3711187737, 2111353108, 4049535030],
-                      dtype=dtypes.uint32)
-    round(state, chunks)
-    np.testing.assert_equal(state[0].numpy(), expected.numpy())
-
-  def test_permute(self):
-    """Test the permute function with known input and output values"""
-    chunks = Tensor([1684234849, 6776421, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                    dtype=dtypes.uint32).unsqueeze(0)
-    expected = Tensor([0, 0, 0, 0, 0, 1684234849, 0, 0, 6776421, 0, 0, 0, 0, 0, 0, 0],
-                      dtype=dtypes.uint32)
-    permute(chunks)
-    np.testing.assert_equal(chunks[0].numpy(), expected.numpy())
-
-  def test_round_permute(self):
-    """Test the round_permute function with known input and output values"""
-    state = Tensor([1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225, 1779033703, 3144134277, 1013904242, 2773480762, 0, 0, 7, 3],
-                   dtype=dtypes.uint32).unsqueeze(0)
-    chunks = Tensor([1684234849, 6776421, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                    dtype=dtypes.uint32).unsqueeze(0)
-    round_permute(state, chunks)
-    expected_state = Tensor([1505703587, 3043897677, 297679660, 1360396464, 4153763876, 3213303786, 2247926175, 698554836, 2797293838, 1713178191, 2926895767, 2158408814, 615604690, 1510005954, 4016387937, 3875951467],
-                            dtype=dtypes.uint32)
-    np.testing.assert_equal(state[0].numpy(), expected_state.numpy())
+    actual, n_end_blocks, end_block_len = bytes_to_blocks(text)
+    self.assertEqual(actual.shape, (1, 16, 16))
+    self.assertEqual(n_end_blocks, 1)
+    self.assertEqual(end_block_len, 0)
+    np.testing.assert_equal(actual.numpy(), np.zeros((1, 16, 16)))
+    # single byte
+    text = b"a"
+    actual, n_end_blocks, end_block_len = bytes_to_blocks(text)
+    self.assertEqual(n_end_blocks, 1)
+    self.assertEqual(end_block_len, 1)
+    np.testing.assert_equal(actual[0, 0, 0].numpy(), 97)
+    # seven bytes
+    text = b"abcdefg"
+    actual, n_end_blocks, end_block_len = bytes_to_blocks(text)
+    self.assertEqual(n_end_blocks, 1)
+    self.assertEqual(end_block_len, 7)
+    expected = [1684234849, 6776421, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    np.testing.assert_equal(actual[0, 0].numpy(), expected)
+    # two chunks
+    text = (b"a" * CHUNK_BYTES) + (b"b" * CHUNK_BYTES)
+    actual, n_end_blocks, end_block_len = bytes_to_blocks(text)
+    self.assertEqual(n_end_blocks, 16)
+    self.assertEqual(end_block_len, 64)
+    self.assertEqual(actual.shape, (2, 16, 16))
+    np.testing.assert_equal(actual[0, 0, 0].numpy(), 1633771873)
+    np.testing.assert_equal(actual[1, 0, 0].numpy(), 1650614882)
+    # unicode
+    text = "🤖 你好"
+    actual, n_end_blocks, end_block_len = bytes_to_blocks(text.encode("utf-8"))
+    self.assertEqual(n_end_blocks, 1)
+    self.assertEqual(end_block_len, 11)
+    self.assertEqual(actual.shape, (1, 16, 16))
+    expected = [2527371248, 2696799264, 12428773, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    np.testing.assert_equal(actual[0, 0].numpy(), expected)
 
   def test_empty(self):
-    actual = tinygrad_blake3("")
+    actual = tiny_blake3("")
     expected = "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
     self.assertEqual(actual, expected)
 
   def test_single_char(self):
-    actual = tinygrad_blake3("a")
+    actual = tiny_blake3("a")
     expected = "17762fddd969a453925d65717ac3eea21320b66b54342fde15128d6caf21215f"
     self.assertEqual(actual, expected)
 
-  def test_single_block(self):
-    text = "abcd" * (CHUNK_LEN // 4)
-    self.assertEqual(len(text), CHUNK_LEN)
-    actual = tinygrad_blake3(text)
-    expected = '1913be5b8328ba32db70a3f5435e3103b5816b06491a36b948f1f7d29191b177'
+  def test_short(self):
+    actual = tiny_blake3("abcdefg")
+    expected = "e2d18d70db12705e1845faf500de1198a5ba1483729d97936f1d2b760968312e"
+    self.assertEqual(actual, expected)
+
+  def test_block(self):
+    text = "abcd" * (64 // 4)
+    actual = tiny_blake3(text)
+    expected = '0ef2431cde7c3268b417ea0e8c692dafa8211df7d59f09fdb23df4d73a3bd43d'
+    self.assertEqual(actual, expected)
+
+  def test_block_plus_one(self):
+    text = "a" * (BLOCK_BYTES + 1)
+    actual = tiny_blake3(text)
+    expected = 'f345679d9055e53939e92c04ff4f6c9d824b849810d4b598f54baa23336cde99'
+    self.assertEqual(actual, expected)
+
+  def test_multiple_blocks(self):
+    text = ("a" * BLOCK_BYTES) + ("b" * BLOCK_BYTES)
+    actual = tiny_blake3(text)
+    expected = 'f27ee0ad41ba8d44a592347ad98c260260d36a59aae97b8e8abc51a3f087bff7'
+    self.assertEqual(actual, expected)
+    text = ("a" * BLOCK_BYTES) + ("b" * BLOCK_BYTES) + ("c" * BLOCK_BYTES) + ("d" * BLOCK_BYTES)
+    actual = tiny_blake3(text)
+    expected = 'a9089941f4dc9da1f32e5b037cfe53b2b07feb7ab2ef562444af540333a9e605'
     self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":
   unittest.main()
-  hash = tinygrad_blake3("a")
-  print(hash)
