@@ -1246,6 +1246,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     Scatters `src` values along an axis specified by `dim`.
     Apply `add` or `multiply` reduction operation with `reduce`.
+
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[1, 2], [3, 4]])
     print(t.numpy())
@@ -1259,7 +1260,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     index, dim  = index.to(self.device), self._resolve_dim(dim)
     if not isinstance(src, Tensor): src = Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
-    assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=}, {index.ndim=}, {src.ndim=}"
+    assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
     assert all((se >= ind if d != dim else True) and sr >= ind for d,(se,ind,sr) in enumerate(zip(self.shape, index.shape, src.shape))), \
       f"Expected {index.shape=} to be <= {self.shape=} apart from dimension {dim} and to be <= {src.shape=}"
     mask = (index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)).transpose(-1, dim)

@@ -384,7 +384,12 @@ def Gather(x: Tensor, indices: Tensor, axis=0):
     return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
   # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
   return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
+def Scatter(*args, **kwargs): return ScatterElements(*args, **kwargs) # deprecated
 
+def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Optional[str]=None):
+  if reduction in {"min", "max"}: raise NotImplementedError("min and max reduction not supported")
+  indices = (indices < 0).where(x.shape[axis], 0) + indices
+  return x.scatter(axis, indices, updates, reduction)
 def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
   return x.gather(axis, indices)
