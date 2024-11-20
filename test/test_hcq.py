@@ -18,7 +18,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
 
-    TestHCQ.runner = get_runner(TestHCQ.d0.dname, si.ast)
+    TestHCQ.runner = get_runner(TestHCQ.d0.device, si.ast)
     TestHCQ.b.lazydata.buffer.allocate()
 
     TestHCQ.kernargs_ba_ptr = TestHCQ.runner.clprg.fill_kernargs([TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf])
@@ -426,7 +426,7 @@ class TestHCQ(unittest.TestCase):
   def test_memory_barrier(self):
     a = Tensor([0, 1], device=Device.DEFAULT, dtype=dtypes.int8).realize()
     b = a + 1
-    runner = get_runner(TestHCQ.d0.dname, create_schedule([b.lazydata])[-1].ast)
+    runner = get_runner(TestHCQ.d0.device, create_schedule([b.lazydata])[-1].ast)
 
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferOptions(nolru=True)).ensure_allocated()
     buf2 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferOptions(cpu_access=True, nolru=True)).ensure_allocated()

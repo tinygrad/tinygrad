@@ -22,7 +22,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
     TestHCQ.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
-    TestHCQ.runner = get_runner(TestHCQ.d0.dname, si.ast)
+    TestHCQ.runner = get_runner(TestHCQ.d0.device, si.ast)
     TestHCQ.b.lazydata.buffer.allocate()
     # wow that's a lot of abstraction layers
     TestHCQ.addr = struct.pack("QQ", TestHCQ.b.lazydata.buffer._buf.va_addr, TestHCQ.a.lazydata.buffer._buf.va_addr)

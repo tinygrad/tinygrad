@@ -21,8 +21,8 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
   return pra, fds, attrs, (ins, outs)
 
 class DSPProgram:
-  def __init__(self, device:DSPDevice, name:str, lib:bytes):
-    self.device, self.lib = device, lib
+  def __init__(self, dev:DSPDevice, name:str, lib:bytes):
+    self.dev, self.lib = dev, lib
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
@@ -31,7 +31,7 @@ class DSPProgram:
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     var_vals_mv.cast('i')[:] = array.array('i', tuple(b.size for b in bufs) + vals)
     off_mv.cast('I')[:] = array.array('I', tuple(b.offset for b in bufs))
-    self.device.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
+    self.dev.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
     return timer[0] / 1e6
 
 class DSPBuffer:
@@ -39,20 +39,20 @@ class DSPBuffer:
     self.va_addr, self.size, self.share_info, self.offset = va_addr, size, share_info, offset
 
 class DSPAllocator(Allocator):
-  def __init__(self, device:DSPDevice):
-    self.device = device
+  def __init__(self, dev:DSPDevice):
+    self.dev = dev
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):
-    b = qcom_dsp.ION_IOC_ALLOC(self.device.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
-    share_info = qcom_dsp.ION_IOC_SHARE(self.device.ion_fd, handle=b.handle)
+    b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
+    share_info = qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)
     va_addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, share_info.fd, 0)
     return DSPBuffer(va_addr, size, share_info, offset=0)
 
   def _free(self, opaque:DSPBuffer, options:BufferOptions):
     libc.munmap(opaque.va_addr, opaque.size)
     os.close(opaque.share_info.fd)
-    qcom_dsp.ION_IOC_FREE(self.device.ion_fd, handle=opaque.share_info.handle)
+    qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
 
   def _as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
   def _copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)

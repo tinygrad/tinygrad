@@ -80,7 +80,7 @@ class CloudSession:
 
 class CloudHandler(BaseHTTPRequestHandler):
   protocol_version = 'HTTP/1.1'
-  dname: str
+  device: str
   sessions: DefaultDict[str, CloudSession] = defaultdict(CloudSession)
 
   def setup(self):
@@ -99,18 +99,18 @@ class CloudHandler(BaseHTTPRequestHandler):
         match c:
           case BufferAlloc():
             assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already allocated"
-            session.buffers[c.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(c.size, c.options), c.size, c.options)
+            session.buffers[c.buffer_num] = (Device[CloudHandler.device].allocator.alloc(c.size, c.options), c.size, c.options)
           case BufferFree():
             buf,sz,buffer_options = session.buffers[c.buffer_num]
-            Device[CloudHandler.dname].allocator.free(buf,sz,buffer_options)
+            Device[CloudHandler.device].allocator.free(buf,sz,buffer_options)
             del session.buffers[c.buffer_num]
-          case CopyIn(): Device[CloudHandler.dname].allocator._copyin(session.buffers[c.buffer_num][0], memoryview(bytearray(req._h[c.datahash])))
+          case CopyIn(): Device[CloudHandler.device].allocator._copyin(session.buffers[c.buffer_num][0], memoryview(bytearray(req._h[c.datahash])))
           case CopyOut():
             buf,sz,_ = session.buffers[c.buffer_num]
-            Device[CloudHandler.dname].allocator._copyout(memoryview(ret:=bytearray(sz)), buf)
+            Device[CloudHandler.device].allocator._copyout(memoryview(ret:=bytearray(sz)), buf)
           case ProgramAlloc():
-            lib = Device[CloudHandler.dname].compiler.compile_cached(req._h[c.datahash].decode())
-            session.programs[(c.name, c.datahash)] = Device[CloudHandler.dname].runtime(c.name, lib)
+            lib = Device[CloudHandler.device].compiler.compile_cached(req._h[c.datahash].decode())
+            session.programs[(c.name, c.datahash)] = Device[CloudHandler.device].runtime(c.name, lib)
           case ProgramFree(): del session.programs[(c.name, c.datahash)]
           case ProgramExec():
             bufs = [session.buffers[x][0] for x in c.bufs]
@@ -118,7 +118,7 @@ class CloudHandler(BaseHTTPRequestHandler):
             r = session.programs[(c.name, c.datahash)](*bufs, vals=c.vals, wait=c.wait, **extra_args)
             if r is not None: ret = str(r).encode()
     elif self.path == "/renderer" and method == "GET":
-      cls, args = Device[CloudHandler.dname].renderer.__reduce__()
+      cls, args = Device[CloudHandler.device].renderer.__reduce__()
       ret = json.dumps((cls.__module__, cls.__name__, args)).encode()
     else: status_code = 404
     self.send_response(status_code)
@@ -131,16 +131,16 @@ class CloudHandler(BaseHTTPRequestHandler):
 
 def cloud_server(port:int):
   multiprocessing.current_process().name = "MainProcess"
-  CloudHandler.dname = getenv("CLOUDDEV", "METAL") if Device.DEFAULT == "CLOUD" else Device.DEFAULT
-  print(f"start cloud server on {port} with device {CloudHandler.dname}")
+  CloudHandler.device = getenv("CLOUDDEV", "METAL") if Device.DEFAULT == "CLOUD" else Device.DEFAULT
+  print(f"start cloud server on {port} with device {CloudHandler.device}")
   server = HTTPServer(('', port), CloudHandler)
   server.serve_forever()
 
 # ***** frontend *****
 
 class CloudAllocator(Allocator):
-  def __init__(self, device:CloudDevice):
-    self.device = device
+  def __init__(self, dev:CloudDevice):
+    self.device = dev
     super().__init__()
   # TODO: ideally we shouldn't have to deal with images here
   def _alloc(self, size:int, options:BufferOptions) -> int:
@@ -157,16 +157,16 @@ class CloudAllocator(Allocator):
     dest[:] = resp
 
 class CloudProgram:
-  def __init__(self, device:CloudDevice, name:str, lib:bytes):
-    self.device, self.name = device, name
-    self.datahash = self.device.req.h(lib)
-    self.device.req.q(ProgramAlloc(self.name, self.datahash))
+  def __init__(self, dev:CloudDevice, name:str, lib:bytes):
+    self.dev, self.name = dev, name
+    self.datahash = self.dev.req.h(lib)
+    self.dev.req.q(ProgramAlloc(self.name, self.datahash))
     super().__init__()
-  def __del__(self): self.device.req.q(ProgramFree(self.name, self.datahash))
+  def __del__(self): self.dev.req.q(ProgramFree(self.name, self.datahash))
 
   def __call__(self, *bufs, global_size=None, local_size=None, vals:Tuple[int, ...]=(), wait=False):
-    self.device.req.q(ProgramExec(self.name, self.datahash, bufs, vals, global_size, local_size, wait))
-    if wait: return float(self.device.batch_submit())
+    self.dev.req.q(ProgramExec(self.name, self.datahash, bufs, vals, global_size, local_size, wait))
+    if wait: return float(self.dev.batch_submit())
 
 class CloudDevice(Compiled):
   def __init__(self, device:str):
