@@ -6,9 +6,9 @@ from tinygrad.helpers import prod, flatten
 from extra.onnx import DTYPE_MAP, to_python_const
 import numpy as np
 
-tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
-                  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh", "Asin",
-                  "Acos", "Atan", "Elu", "Celu", "Xor", "Round", "Erf"}
+tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Asin", "Acos", "Atan","Relu",
+                  "Sigmoid", "MatMul", "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign",
+                  "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Xor", "Round", "Erf"}
 
 # **************** Free Ops ****************
 
