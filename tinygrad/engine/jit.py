@@ -152,10 +152,10 @@ class CapturedJit(Generic[ReturnType]):
 
   def _clear_buffers(self):
     # Clear both inputs and outputs to prevent buffer sharing between executions
-      for j in range(len(self._jit_cache)):
-          for i in range(len(self._jit_cache[j].bufs)):
-              if (j,i) in self._input_replace or self._jit_cache[j].bufs[i] is not None:
-                  self._jit_cache[j].bufs[i] = None
+    for j in range(len(self._jit_cache)):
+      for i in range(len(self._jit_cache[j].bufs)):
+        if (j,i) in self._input_replace or self._jit_cache[j].bufs[i] is not None:
+          self._jit_cache[j].bufs[i] = None
 
   # jit exec
   def __call__(self, input_buffers:List[Buffer], var_vals:Dict[Variable, int]) -> ReturnType:
