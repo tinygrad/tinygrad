@@ -199,6 +199,10 @@ class ClangRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class OpenCLRenderer(CStyleLanguage):
+  def __init__(self, *args, device_exts:str="", **kwargs):
+    super().__init__(*args, **kwargs)
+    self.device_exts = device_exts
+
   device = "GPU"
 
   # language options
@@ -224,7 +228,9 @@ class OpenCLRenderer(CStyleLanguage):
   ]) + base_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    if any(uop.dtype == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
+    if any(uop.dtype == dtypes.half for uop in uops):
+      if 'cl_khr_fp16' not in self.device_exts: raise RuntimeError("cl_khr_fp16 is not supported on this device. Unable to use half precision")
+      prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or [])
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class IntelRenderer(OpenCLRenderer):
