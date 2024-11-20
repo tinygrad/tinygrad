@@ -1993,20 +1993,6 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     assert len(self.shape) >= len(k_), f"can't pool {self.shape} with {k_}"
     s_, d_ = make_tuple(stride, len(k_)), make_tuple(dilation, len(k_))
     assert len(k_) == len(s_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
-    # noop_, i_ = [None] * len(self.shape[:-len(k_)]), self.shape[-len(k_):]
-    # assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_, d_, i_)), "effective kernel size cannot be greater than actual input size"
-    # o_ = [ceildiv(i - d * (k-1), s) for i,d,k,s in zip(i_, d_, k_, s_)]
-    # if any(resolve(k > s) for k,s in zip(k_, s_)) or any(d != 1 for d in d_):
-    #   # repeats such that we don't need padding
-    #   xup = self.repeat([1]*len(noop_) + [o+ceildiv((o*s),i) for o,i,s in zip(o_,i_,s_)])
-    #   # handle stride
-    #   xup = xup.shrink(tuple(noop_ + [(0, o*(i+s)) for o,i,s in zip(o_,i_,s_)])).reshape(noop_ + flatten((o,i+s) for o,i,s in zip(o_,i_,s_)))
-    #   # handle dilation
-    #   xup = xup.shrink(
-    #     tuple(noop_ + flatten(((0,o), (0,k*d)) for o,k,d in zip(o_,k_,d_)))).reshape(noop_ + flatten((o,k,d) for o,k,d in zip(o_,k_,d_)))
-    #   xup = xup.shrink(tuple(noop_ + flatten(((0,o), (0,k), (0,1)) for o,k in zip(o_,k_)))).reshape(noop_ + flatten((o,k) for o,k in zip(o_,k_)))
-    #   # permute to move reduce to the end
-    #   return xup.permute(*range(len(noop_)), *[len(noop_)+i*2 for i in range(len(i_))], *[len(noop_)+i*2+1 for i in range(len(i_))])
     noop, i_ = [None] * (self.ndim-len(k_)), self.shape[-len(k_):]
     assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_,d_,i_)), "kernel size cannot be greater than actual input size"
     o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
@@ -2033,12 +2019,11 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
                            p_:Union[Tuple[int, ...], int]) -> Sequence[int]:
     (d_,s_,p_), i_ = (make_tuple(x, len(k_)) for x in (d_,s_,p_)), self.shape[-len(k_):]
     # https://arxiv.org/pdf/1603.07285 section 5.1.
-    # effective kernel size described in guide as `k + (k − 1)(d − 1)` but can be simplified to `d*(k-1)+1`
-    o_ = [ceildiv(i+2*p - (d*(k-1)+1), s) + 1 for i,d,k,s,p in zip(i_,d_,k_,s_,p_)]
+    o_ = [ceildiv(i + 2*p - (d*(k-1) + 1), s) + 1 for i,d,k,s,p in zip(i_,d_,k_,s_,p_)]
     # we have to do additional padding before `_pool` so that `o_` in `_pool` is calculated correctly
     # we also remove padding in the case that a shifting window starts in the end padded region, thereby decreasing `o_` in `_pool`
     pads = list(self._padding2d(p_, len(k_)))
-    for j, (o,i,s,p,k,d) in enumerate(zip(o_, i_, s_, p_, k_, d_)): pads[-1-j*2] = pads[-1-j*2] + ((o-1)*s+d*(k-1)+1)-(i+2*p) - max(0, s*(o-1)+1-i-p)
+    for j, (o,i,s,p,k,d) in enumerate(zip(o_, i_, s_, p_, k_, d_)): pads[-1-j*2] = pads[-1-j*2] + ((o-1)*s+d*(k-1)+1)-(i+2*p) - smax(0, s*(o-1)+1-i-p)
     return pads
 
   # NOTE: these work for more than 2D
@@ -2058,7 +2043,6 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.avg_pool2d(padding=1).numpy())
     ```
     """
-<<<<<<< HEAD
     k_ = make_tuple(kernel_size, 2)
     real_pads, axis = self._padding2d(padding,len(k_)), tuple(range(-len(k_), 0))
     def pool(x:Tensor, padding_:Sequence[int]) -> Tensor: return x.pad2d(padding_)._pool(k_, stride if stride is not None else k_, dilation)
@@ -2067,11 +2051,6 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ceil_pads = self._ceil_mode_padding2d(k_, stride if stride is not None else k_, dilation, padding)
     return pool(self, ceil_pads).sum(axis) / pool(self.pad2d(real_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, real_pads))).sum(axis) \
            if count_include_pad else pool(self, ceil_pads).sum(axis=axis) / pool(self.ones_like(), ceil_pads).sum(axis=axis)
-=======
-    padding_, axis = self._padding2d(padding, len(k_ := make_tuple(kernel_size, 2))), tuple(range(-len(k_), 0))
-    def pool(x:Tensor) -> Tensor: return x.pad(padding_)._pool(k_, stride if stride is not None else k_, dilation)
-    return pool(self).mean(axis=axis) if count_include_pad else pool(self).sum(axis=axis) / pool(self.ones_like()).sum(axis=axis)
->>>>>>> master
 
   def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False):
     """
@@ -2089,14 +2068,9 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(t.max_pool2d(padding=1).numpy())
     ```
     """
-<<<<<<< HEAD
     k_ = make_tuple(kernel_size, 2)
     pads = self._ceil_mode_padding2d(k_, stride if stride is not None else k_, dilation, padding) if ceil_mode else self._padding2d(padding, len(k_))
     return self.pad2d(pads, value=float('-inf'))._pool(k_, stride if stride is not None else k_, dilation).max(axis=tuple(range(-len(k_), 0)))
-=======
-    padding_ = self._padding2d(padding, len(k_ := make_tuple(kernel_size, 2)))
-    return self.pad(padding_, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation).max(tuple(range(-len(k_), 0)))
->>>>>>> master
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding:int|Tuple[int, ...]=0,
              acc_dtype:Optional[DTypeLike]=None) -> Tensor:
