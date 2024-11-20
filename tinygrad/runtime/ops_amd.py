@@ -54,7 +54,7 @@ class AMDSignal(HCQSignal):
         kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(self._evt_array), num_events=1, wait_for_all=1, timeout=1000)
     raise RuntimeError(f"wait_signal: not set to {value}, but {self._signal[0]}, {timeout} ms TIMEOUT!")
 
-class AMDComputeQueue(HWComputeQueue[AMDSignal, 'AMDDevice']):
+class AMDComputeQueue(HWComputeQueue):
   def __init__(self):
     self.cmd_idx_to_local_offset, self.cmd_idx_to_global_offset, self.cmd_idx_to_dispatch_packet = {}, {}, {}
     super().__init__()
@@ -92,7 +92,7 @@ class AMDComputeQueue(HWComputeQueue[AMDSignal, 'AMDDevice']):
       nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_DONE), 0xffffffff, 0xffffffff, 0x20]
     self._acquire_mem()
 
-  def _exec(self, prg, args_state, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
+  def _exec(self, prg:AMDProgram, args_state:AMDArgsState, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
     self._acquire_mem(gli=0, gl2=0)
 
     cmd_idx = self._cur_cmd_idx()
@@ -269,7 +269,8 @@ class AMDArgsState(HCQArgsState):
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
-    self.dev, self.name, self.lib = dev, name, lib
+    self.dev: AMDDevice = dev
+    self.name, self.lib = name, lib
     image, sections, _ = elf_loader(self.lib)
     self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), BufferOptions(cpu_access=True, nolru=True))
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
@@ -287,14 +288,14 @@ class AMDProgram(HCQProgram):
     assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
 
     # Set rsrc1.priv=1 on gfx11 to workaround cwsr.
-    self.rsrc1 = code.compute_pgm_rsrc1 | ((1 << 20) if 110000 <= self.dev.target < 120000 else 0)
-    self.rsrc2 = code.compute_pgm_rsrc2 | (lds_size << 15)
-    self.prog_addr = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
+    self.rsrc1: int = code.compute_pgm_rsrc1 | ((1 << 20) if 110000 <= self.dev.target < 120000 else 0)
+    self.rsrc2: int = code.compute_pgm_rsrc2 | (lds_size << 15)
+    self.prog_addr: int = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
 
     # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution.
     # The packet is represented as a pointer and set up in SGPRs. Space for the packet is allocated as part of the kernel arguments.
-    self.enable_dispatch_ptr = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
-    self.enable_private_segment_sgpr = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
+    self.enable_dispatch_ptr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
+    self.enable_private_segment_sgpr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
     additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
 
     super().__init__(AMDArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)

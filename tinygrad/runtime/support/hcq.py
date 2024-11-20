@@ -27,6 +27,8 @@ def hcq_command(func):
 
 SignalType = TypeVar('SignalType', bound='HCQSignal')
 DeviceType = TypeVar('DeviceType', bound='HCQCompiled')
+ProgramType = TypeVar('ProgramType', bound='HCQProgram')
+ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 
 class HWCommandQueue(Generic[SignalType, DeviceType]):
   """
@@ -79,7 +81,7 @@ class HWCommandQueue(Generic[SignalType, DeviceType]):
     self._timestamp(signal)
   def _timestamp(self, signal): raise NotImplementedError("backend should overload this function")
 
-  def update_signal(self, cmd_idx:int, signal:Optional[Any]=None, value:Optional[int]=None):
+  def update_signal(self, cmd_idx:int, signal:Optional[SignalType]=None, value:Optional[int]=None):
     """
     Updates a previously queued signal command.
 
@@ -91,9 +93,10 @@ class HWCommandQueue(Generic[SignalType, DeviceType]):
     if self.cmds_meta[cmd_idx] != "signal": raise RuntimeError("called update_signal not on a signal command")
     self._update_signal(cmd_idx, signal, value)
     return self
-  def _update_signal(self, cmd_idx:int, signal:Optional[Any], value:Optional[int]): raise NotImplementedError("backend should overload this function")
+  def _update_signal(self, cmd_idx:int, signal:Optional[SignalType], value:Optional[int]):
+    raise NotImplementedError("backend should overload this function")
 
-  def update_wait(self, cmd_idx:int, signal:Optional[Any]=None, value:Optional[int]=None):
+  def update_wait(self, cmd_idx:int, signal:Optional[SignalType]=None, value:Optional[int]=None):
     """
     Updates a previously queued wait command.
 
@@ -105,7 +108,8 @@ class HWCommandQueue(Generic[SignalType, DeviceType]):
     if self.cmds_meta[cmd_idx] != "wait": raise RuntimeError("called update_wait not on a wait command")
     self._update_wait(cmd_idx, signal, value)
     return self
-  def _update_wait(self, cmd_idx:int, signal:Optional[Any], value:Optional[int]): raise NotImplementedError("backend should overload this function")
+  def _update_wait(self, cmd_idx:int, signal:Optional[SignalType], value:Optional[int]):
+    raise NotImplementedError("backend should overload this function")
 
   def bind(self, dev:DeviceType):
     """
@@ -132,7 +136,7 @@ class HWCommandQueue(Generic[SignalType, DeviceType]):
     return self
   def _submit(self, dev:DeviceType): raise NotImplementedError("backend should overload this function")
 
-class HWComputeQueue(HWCommandQueue[SignalType, DeviceType], Generic[SignalType, DeviceType]):
+class HWComputeQueue(HWCommandQueue[SignalType, DeviceType], Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   @hcq_command
   def memory_barrier(self):
     """
@@ -142,7 +146,7 @@ class HWComputeQueue(HWCommandQueue[SignalType, DeviceType], Generic[SignalType,
   def _memory_barrier(self): pass
 
   @hcq_command
-  def exec(self, prg:HCQProgram, args_state:HCQArgsState, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
+  def exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
     """
     Enqueues an execution command for a kernel program.
 
@@ -153,7 +157,8 @@ class HWComputeQueue(HWCommandQueue[SignalType, DeviceType], Generic[SignalType,
       local_size: The local work size
     """
     self._exec(prg, args_state, global_size, local_size)
-  def _exec(self, prg, args_state, global_size, local_size): raise NotImplementedError("backend should overload this function")
+  def _exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
+    raise NotImplementedError("backend should overload this function")
 
   def update_exec(self, cmd_idx:int, global_size:Optional[Tuple[int,int,int]]=None, local_size:Optional[Tuple[int,int,int]]=None):
     """
@@ -169,7 +174,7 @@ class HWComputeQueue(HWCommandQueue[SignalType, DeviceType], Generic[SignalType,
     return self
   def _update_exec(self, cmd_idx, global_size, local_size): raise NotImplementedError("backend should overload this function")
 
-class HWCopyQueue(HWCommandQueue):
+class HWCopyQueue(HWCommandQueue[SignalType, DeviceType], Generic[SignalType, DeviceType]):
   @hcq_command
   def copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int):
     """
@@ -195,7 +200,8 @@ class HWCopyQueue(HWCommandQueue):
     if self.cmds_meta[cmd_idx] != "copy": raise RuntimeError("called update_copy not on an copy command")
     self._update_copy(cmd_idx, dest, src)
     return self
-  def _update_copy(self, cmd_idx, dest, src): raise NotImplementedError("backend should overload this function")
+  def _update_copy(self, cmd_idx:int, dest:Optional[HCQBuffer], src:Optional[HCQBuffer]):
+    raise NotImplementedError("backend should overload this function")
 
 class HCQSignal:
   def __init__(self, value:int=0, is_timeline:bool=False): self._set_value(value)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal, sys
 assert sys.platform != 'win32'
-from typing import Tuple, List, Any, cast, Union, Dict, Type
+from typing import Tuple, List, Any, cast, Union, Dict, Type, Optional
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command
 from tinygrad.runtime.support.hcq import HCQArgsState, HCQProgram, HCQSignal
@@ -96,7 +96,7 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
     if local_mem: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *data64(local_mem)]
     if local_mem_tpc_bytes: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *data64(local_mem_tpc_bytes), 0xff]
 
-  def _wait(self, signal, value=0):
+  def _wait(self, signal:NVSignal, value=0):
     self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(signal.signal_addr), *data64_le(value),
                (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
 
@@ -106,7 +106,7 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
 
   def _timestamp(self, signal): return self._signal(signal, 0)
 
-  def bind(self, dev):
+  def bind(self, dev:NVDevice):
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True))
     hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
@@ -139,7 +139,7 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
 
   def _memory_barrier(self): self.q += [nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0)]
 
-  def _exec(self, prg, args_state, global_size, local_size):
+  def _exec(self, prg:NVProgram, args_state:NVArgsState, global_size, local_size):
     ctypes.memmove(qmd_addr:=(args_state.ptr + round_up(prg.constbufs[0][1], 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
     assert qmd_addr < (1 << 40), f"large qmd addr {qmd_addr:x}"
 
@@ -165,7 +165,7 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     if global_size is not None: self.cmd_idx_to_global_dims[cmd_idx][:] = array.array('I', global_size)
     if local_size is not None: self.cmd_idx_to_local_dims[cmd_idx][:] = array.array('H', local_size)
 
-  def _signal(self, signal, value=0):
+  def _signal(self, signal:NVSignal, value=0):
     if (prev_qmd:=self.cmd_idx_to_qmd.get(self._cur_cmd_idx() - 1)) is not None:
       for i in range(2):
         if getattr(prev_qmd, f'release{i}_enable') == 0:
@@ -180,7 +180,7 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
                (1 << 0) | (1 << 20) | (1 << 24) | (1 << 25)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
 
-  def _update_signal(self, cmd_idx, signal=None, value=None):
+  def _update_signal(self, cmd_idx, signal:Optional[NVSignal]=None, value=None):
     if (qmd:=self.cmd_idx_to_qmd.get(cmd_idx)) is None: return super()._update_wait(cmd_idx, signal, value) # reuse wait, same offsets to update.
     if signal is not None: setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_address', signal.signal_addr)
     if value is not None: setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_payload', value)
@@ -259,7 +259,8 @@ class NVProgram(HCQProgram):
     self.constbuffer_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
 
     smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
-    self.qmd = qmd_struct_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
+    self.qmd: ctypes.Structure = \
+               qmd_struct_t(qmd_group_id=0x3f, sm_global_caching_enable=1, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
                             invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1,
                             cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, qmd_major_version=3, constant_buffer_invalidate_0=1,
                             shared_memory_size=self.shmem_usage, min_sm_config_shared_mem_size=smem_cfg, target_sm_config_shared_mem_size=smem_cfg,
