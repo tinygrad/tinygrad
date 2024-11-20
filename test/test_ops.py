@@ -2266,7 +2266,8 @@ class TestOps(unittest.TestCase):
       lambda x,index,src: x.scatter(0, index, src),
       lambda x,index,src: x.scatter(0, index, src), forward_only=True,
       vals=[[1,2,3,4], [0,0], [1,0]])
-
+    helper_test_op([(10,10,10)], lambda x: x.scatter(dim=1, index=b, value=float("inf")),
+      lambda x: x.scatter(dim=1, index=a, src=float("inf")), forward_only=True)
 
   def test_scatter_add(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
@@ -2288,32 +2289,33 @@ class TestOps(unittest.TestCase):
       helper_test_op([(10,10,10), (10,10,10)], lambda x,src: x.scatter(dim=dim, index=b, src=src, reduce="multiply"),
       lambda x,src: x.scatter(dim=dim, index=a, src=src, reduce="multiply"), forward_only=True)
 
-    helper_test_op([(10,10,10)], lambda x: x.scatter(dim=1, index=b, value=float("inf"), reduce="multiply"),
-      lambda x: x.scatter(dim=1, index=a, src=float("inf"), reduce="multiply"), forward_only=True)
-
-    # target tensor with 0
-    x = Tensor.zeros([3,4,5]).float()
-    y = torch.zeros([3,4,5]).float()
-    helper_test_op([(10,10,10)], lambda src: y.scatter(dim=1, index=b, src=src, reduce="multiply"),
-      lambda src: x.scatter(dim=1, index=a, src=src, reduce="multiply"), forward_only=True)
-
     # overlapping 0's
     helper_test_op(None,
       lambda x,index,src: x.scatter(0, index, src, reduce="multiply"),
       lambda x,index,src: x.scatter(0, index, src, reduce="multiply"), forward_only=True,
       vals=[[1,2,3,4], [0,0], [0,1]])
 
+    helper_test_op([(10,10,10)], lambda x: x.scatter(dim=1, index=b, value=float("inf"), reduce="multiply"),
+      lambda x: x.scatter(dim=1, index=a, src=float("inf"), reduce="multiply"), forward_only=True)
+
+    helper_test_op([(3,4,5)],
+      lambda x: x.scatter(1, b, float("nan"), reduce="multiply"),
+      lambda x: x.scatter(1, a, float("nan"), reduce="multiply"), forward_only=True,)
+
+    x = Tensor.zeros([3,4,5]).float()
+    y = torch.zeros([3,4,5]).float()
+    helper_test_op([(10,10,10)], lambda src: y.scatter(dim=1, index=b, src=src, reduce="multiply"),
+      lambda src: x.scatter(dim=1, index=a, src=src, reduce="multiply"), forward_only=True)
+
   @unittest.expectedFailure
-  def test_scatter_inf_value_failure(self):
+  def test_scatter_add_inf_value_failure(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
-    helper_test_op([(10,10,10)], lambda x: x.scatter(dim=1, index=b, value=float("inf")),
-      lambda x: x.scatter(dim=1, index=a, src=float("inf")), forward_only=True)
     helper_test_op([(10,10,10)], lambda x: x.scatter(dim=1, index=b, value=float("inf"), reduce="add"),
       lambda x: x.scatter(dim=1, index=a, src=float("inf"), reduce="add"), forward_only=True)
 
   @unittest.expectedFailure
-  def test_scatter_nan_value_failure(self):
+  def test_scatter_add_nan_value_failure(self):
     b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
     a = Tensor(b.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     helper_test_op([(3,4,5)],
