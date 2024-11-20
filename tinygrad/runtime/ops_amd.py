@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, Any
+from typing import Tuple, List, Any, Optional
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib, decimal, sys
 assert sys.platform != 'win32'
 from dataclasses import dataclass
@@ -92,7 +92,7 @@ class AMDComputeQueue(HWComputeQueue):
       nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_DONE), 0xffffffff, 0xffffffff, 0x20]
     self._acquire_mem()
 
-  def _exec(self, prg, args_state, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
+  def _exec(self, prg:AMDProgram, args_state:AMDArgsState, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
     self._acquire_mem(gli=0, gl2=0)
 
     cmd_idx = self._cur_cmd_idx()
@@ -137,25 +137,26 @@ class AMDComputeQueue(HWComputeQueue):
       if global_size is not None:
         dp.grid_size_x,dp.grid_size_y,dp.grid_size_z = [g*l for g,l in zip(global_size,[dp.workgroup_size_x,dp.workgroup_size_y,dp.workgroup_size_z])]
 
-  def _wait(self, signal, value=0):
+  def _wait(self, signal:AMDSignal, value=0):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
       amd_gpu.WAIT_REG_MEM_MEM_SPACE(1) | amd_gpu.WAIT_REG_MEM_OPERATION(0) | amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.WAIT_REG_MEM_ENGINE(0), *data64_le(signal._value_addr), value, 0xffffffff, 4]
 
-  def _timestamp(self, signal): self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=signal._timestamp_addr)
+  def _timestamp(self, signal:AMDSignal):
+    self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=signal._timestamp_addr)
 
-  def _signal(self, signal, value=0):
+  def _signal(self, signal:AMDSignal, value=0):
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
     self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal._value_addr, value=value, cache_flush=True)
     if signal._event_mailbox_ptr != 0:
       self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal._event_mailbox_ptr,
                         value=signal._event.event_id, cst=signal._event.event_id, cache_flush=False)
 
-  def _update_wait(self, cmd_idx, signal=None, value=None):
+  def _update_wait(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
     if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(signal._value_addr))
     if value is not None: self._patch(cmd_idx, offset=4, data=[value])
 
-  def _update_signal(self, cmd_idx, signal=None, value=None):
+  def _update_signal(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
     if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(signal._value_addr))
     if value is not None: self._patch(cmd_idx, offset=5, data=data64_le(value))
 
@@ -163,7 +164,7 @@ class AMDComputeQueue(HWComputeQueue):
     if signal is not None and self.cmds_len[cmd_idx] > 8:
       self._patch(cmd_idx, offset=11, data=[*data64_le(signal._event_mailbox_ptr), *data64_le(signal._event.event_id), signal._event.event_id])
 
-  def bind(self, dev):
+  def bind(self, dev:AMDDevice):
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True, uncached=True))
     hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
@@ -173,7 +174,7 @@ class AMDComputeQueue(HWComputeQueue):
                          len(self.q) | amd_gpu.INDIRECT_BUFFER_VALID]
     self.q = hw_view # type: ignore
 
-  def _submit(self, dev):
+  def _submit(self, dev:AMDDevice):
     cmds = self.indirect_cmd if dev == self.binded_device else self.q
 
     for i, value in enumerate(cmds): dev.compute_queue.ring[(dev.compute_queue.put_value + i) % len(dev.compute_queue.ring)] = value
@@ -268,7 +269,8 @@ class AMDArgsState(HCQArgsState):
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
-    self.dev, self.name, self.lib = dev, name, lib
+    self.dev: AMDDevice = dev
+    self.name, self.lib = name, lib
     image, sections, _ = elf_loader(self.lib)
     self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), BufferOptions(cpu_access=True, nolru=True))
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
@@ -286,14 +288,14 @@ class AMDProgram(HCQProgram):
     assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
 
     # Set rsrc1.priv=1 on gfx11 to workaround cwsr.
-    self.rsrc1 = code.compute_pgm_rsrc1 | ((1 << 20) if 110000 <= self.dev.target < 120000 else 0)
-    self.rsrc2 = code.compute_pgm_rsrc2 | (lds_size << 15)
-    self.prog_addr = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
+    self.rsrc1: int = code.compute_pgm_rsrc1 | ((1 << 20) if 110000 <= self.dev.target < 120000 else 0)
+    self.rsrc2: int = code.compute_pgm_rsrc2 | (lds_size << 15)
+    self.prog_addr: int = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
 
     # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution.
     # The packet is represented as a pointer and set up in SGPRs. Space for the packet is allocated as part of the kernel arguments.
-    self.enable_dispatch_ptr = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
-    self.enable_private_segment_sgpr = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
+    self.enable_dispatch_ptr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
+    self.enable_private_segment_sgpr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
     additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
 
     super().__init__(AMDArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)

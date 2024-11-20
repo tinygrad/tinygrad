@@ -1,13 +1,13 @@
 from __future__ import annotations
-from typing import List, Optional, Dict, Tuple, Any, cast, Protocol, Type, Union
+from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Callable, Any
 import contextlib, decimal, statistics, random, json, atexit, time, array, ctypes
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv
 from tinygrad.renderer import Renderer
-from tinygrad.device import BufferOptions, Allocator, Compiler, Compiled, LRUAllocator
+from tinygrad.device import BufferOptions, Compiler, Compiled, LRUAllocator
 
 # **************** for HCQ Compatible Devices ****************
 
-def hcq_command(func):
+def hcq_command(func: Callable[..., None]) -> Callable[..., Any]:
   """
   Decorator for HWCommandQueue commands. Enables command indexing and stores metadata for command updates.
 
@@ -17,7 +17,7 @@ def hcq_command(func):
       def command_method(self, ...): ...
     ```
   """
-  def __wrapper(self, *args, **kwargs):
+  def __wrapper(self:HWCommandQueue, *args, **kwargs):
     self.cmds_offset.append(len(self.q))
     func(self, *args, **kwargs)
     self.cmds_len.append(len(self.q) - self.cmds_offset[-1])
@@ -25,7 +25,12 @@ def hcq_command(func):
     return self
   return __wrapper
 
-class HWCommandQueue:
+SignalType = TypeVar('SignalType', bound='HCQSignal')
+DeviceType = TypeVar('DeviceType', bound='HCQCompiled')
+ProgramType = TypeVar('ProgramType', bound='HCQProgram')
+ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
+
+class HWCommandQueue(Generic[SignalType, DeviceType]):
   """
   A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
   Both compute and copy queues should have the following commands implemented.
@@ -42,7 +47,7 @@ class HWCommandQueue:
     return len(self) - 1
 
   @hcq_command
-  def signal(self, signal:HCQSignal, value:int):
+  def signal(self, signal:SignalType, value:int):
     """
     Enqueues a signal command which sets the signal to the given value, ensuring all previous operations are completed.
 
@@ -51,10 +56,10 @@ class HWCommandQueue:
       value: The value to set the signal to
     """
     self._signal(signal, value)
-  def _signal(self, signal:HCQSignal, value:int): raise NotImplementedError("backend should overload this function")
+  def _signal(self, signal:SignalType, value:int): raise NotImplementedError("backend should overload this function")
 
   @hcq_command
-  def wait(self, signal:HCQSignal, value:int):
+  def wait(self, signal:SignalType, value:int):
     """
     Enqueues a wait command which halts execution until the signal is greater than or equal to a specific value.
 
@@ -66,7 +71,7 @@ class HWCommandQueue:
   def _wait(self, signal, value): raise NotImplementedError("backend should overload this function")
 
   @hcq_command
-  def timestamp(self, signal:HCQSignal):
+  def timestamp(self, signal:SignalType):
     """
     Enqueues a timestamp command which records the current time in a signal after all previously enqueued commands are completed.
 
@@ -76,7 +81,7 @@ class HWCommandQueue:
     self._timestamp(signal)
   def _timestamp(self, signal): raise NotImplementedError("backend should overload this function")
 
-  def update_signal(self, cmd_idx:int, signal:Optional[Any]=None, value:Optional[int]=None):
+  def update_signal(self, cmd_idx:int, signal:Optional[SignalType]=None, value:Optional[int]=None):
     """
     Updates a previously queued signal command.
 
@@ -88,9 +93,10 @@ class HWCommandQueue:
     if self.cmds_meta[cmd_idx] != "signal": raise RuntimeError("called update_signal not on a signal command")
     self._update_signal(cmd_idx, signal, value)
     return self
-  def _update_signal(self, cmd_idx:int, signal:Optional[Any], value:Optional[int]): raise NotImplementedError("backend should overload this function")
+  def _update_signal(self, cmd_idx:int, signal:Optional[SignalType], value:Optional[int]):
+    raise NotImplementedError("backend should overload this function")
 
-  def update_wait(self, cmd_idx:int, signal:Optional[Any]=None, value:Optional[int]=None):
+  def update_wait(self, cmd_idx:int, signal:Optional[SignalType]=None, value:Optional[int]=None):
     """
     Updates a previously queued wait command.
 
@@ -102,9 +108,10 @@ class HWCommandQueue:
     if self.cmds_meta[cmd_idx] != "wait": raise RuntimeError("called update_wait not on a wait command")
     self._update_wait(cmd_idx, signal, value)
     return self
-  def _update_wait(self, cmd_idx:int, signal:Optional[Any], value:Optional[int]): raise NotImplementedError("backend should overload this function")
+  def _update_wait(self, cmd_idx:int, signal:Optional[SignalType], value:Optional[int]):
+    raise NotImplementedError("backend should overload this function")
 
-  def bind(self, dev:HCQCompiled):
+  def bind(self, dev:DeviceType):
     """
     Associates the queue with a specific device for optimized execution.
 
@@ -118,7 +125,7 @@ class HWCommandQueue:
       Implementing this method is optional but recommended for performance gains.
     """
 
-  def submit(self, dev:HCQCompiled):
+  def submit(self, dev:DeviceType):
     """
     Submits the command queue to a specific device for execution.
 
@@ -127,9 +134,9 @@ class HWCommandQueue:
     """
     if self.q: self._submit(dev)
     return self
-  def _submit(self, dev:HCQCompiled): raise NotImplementedError("backend should overload this function")
+  def _submit(self, dev:DeviceType): raise NotImplementedError("backend should overload this function")
 
-class HWComputeQueue(HWCommandQueue):
+class HWComputeQueue(HWCommandQueue[SignalType, DeviceType], Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   @hcq_command
   def memory_barrier(self):
     """
@@ -139,7 +146,7 @@ class HWComputeQueue(HWCommandQueue):
   def _memory_barrier(self): pass
 
   @hcq_command
-  def exec(self, prg:HCQProgram, args_state:HCQArgsState, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
+  def exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
     """
     Enqueues an execution command for a kernel program.
 
@@ -150,7 +157,8 @@ class HWComputeQueue(HWCommandQueue):
       local_size: The local work size
     """
     self._exec(prg, args_state, global_size, local_size)
-  def _exec(self, prg, args_state, global_size, local_size): raise NotImplementedError("backend should overload this function")
+  def _exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
+    raise NotImplementedError("backend should overload this function")
 
   def update_exec(self, cmd_idx:int, global_size:Optional[Tuple[int,int,int]]=None, local_size:Optional[Tuple[int,int,int]]=None):
     """
@@ -166,7 +174,7 @@ class HWComputeQueue(HWCommandQueue):
     return self
   def _update_exec(self, cmd_idx, global_size, local_size): raise NotImplementedError("backend should overload this function")
 
-class HWCopyQueue(HWCommandQueue):
+class HWCopyQueue(HWCommandQueue[SignalType, DeviceType], Generic[SignalType, DeviceType]):
   @hcq_command
   def copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int):
     """
@@ -192,7 +200,8 @@ class HWCopyQueue(HWCommandQueue):
     if self.cmds_meta[cmd_idx] != "copy": raise RuntimeError("called update_copy not on an copy command")
     self._update_copy(cmd_idx, dest, src)
     return self
-  def _update_copy(self, cmd_idx, dest, src): raise NotImplementedError("backend should overload this function")
+  def _update_copy(self, cmd_idx:int, dest:Optional[HCQBuffer], src:Optional[HCQBuffer]):
+    raise NotImplementedError("backend should overload this function")
 
 class HCQSignal:
   def __init__(self, value:int=0, is_timeline:bool=False): self._set_value(value)
@@ -250,13 +259,13 @@ def hcq_profile(dev, enabled, desc, queue_type=None, queue=None):
 
     if enabled and PROFILE: dev.sig_prof_records.append((st, en, desc, queue_type is dev.hw_copy_queue_t))
 
-class HCQArgsState:
-  def __init__(self, ptr:int, prg:HCQProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): self.ptr, self.prg = ptr, prg
+class HCQArgsState(Generic[ProgramType]):
+  def __init__(self, ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): self.ptr, self.prg = ptr, prg
   def update_buffer(self, index:int, buf:HCQBuffer): raise NotImplementedError("need update_buffer")
   def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
 
-class HCQProgram:
-  def __init__(self, args_state_t:Type[HCQArgsState], dev:HCQCompiled, name:str, kernargs_alloc_size:int):
+class HCQProgram(Generic[DeviceType]):
+  def __init__(self, args_state_t:Type[HCQArgsState], dev:DeviceType, name:str, kernargs_alloc_size:int):
     self.args_state_t, self.dev, self.name, self.kernargs_alloc_size = args_state_t, dev, name, kernargs_alloc_size
 
   def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> HCQArgsState:
@@ -345,7 +354,7 @@ class HCQCompiled(Compiled):
   gpu2cpu_copy_time_diff: decimal.Decimal = decimal.Decimal('nan')
   gpu2cpu_compute_time_diff: decimal.Decimal = decimal.Decimal('nan')
 
-  def __init__(self, device:str, allocator:Allocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[HCQSignal],
+  def __init__(self, device:str, allocator:HCQAllocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[HCQSignal],
                comp_queue_t:Type[HWComputeQueue], copy_queue_t:Optional[Type[HWCopyQueue]]):
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
@@ -460,15 +469,15 @@ class HCQCompiled(Compiled):
 # Protocol for hcq compatible allocators for allocated buffers to contain VA address and it's size.
 class HCQBuffer(Protocol): va_addr:int; size:int # noqa: E702
 
-class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
+class HCQAllocator(LRUAllocator, Generic[DeviceType]): # pylint: disable=abstract-method
   """
   A base allocator class compatible with the HCQ (Hardware Command Queue) API.
 
   This class implements basic copy operations following the HCQ API, utilizing both `HWComputeQueue` and `HWCopyQueue`.
   """
 
-  def __init__(self, dev:HCQCompiled, batch_size:int=(2 << 20), batch_cnt:int=32):
-    self.dev:Any = dev
+  def __init__(self, dev:DeviceType, batch_size:int=(2 << 20), batch_cnt:int=32):
+    self.dev:DeviceType = dev
     self.b = [self._alloc(batch_size, BufferOptions(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
     super().__init__()
@@ -476,6 +485,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer: raise NotImplementedError("need hcq compat alloc")
 
   def _copyin(self, dest:HCQBuffer, src:memoryview):
+    assert self.dev.hw_copy_queue_t is not None
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"CPU -> {self.dev.dname}", enabled=PROFILE):
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
@@ -495,6 +505,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
         return (self.b[self.b_next].va_addr, self.b_next)
       return None
 
+    assert self.dev.hw_copy_queue_t is not None
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"DISK -> {self.dev.dname}", enabled=PROFILE):
       for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
@@ -506,6 +517,7 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
 
+    assert self.dev.hw_copy_queue_t is not None
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"{self.dev.dname} -> CPU", enabled=PROFILE):
       for i in range(0, dest.nbytes, self.b[0].size):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
@@ -516,9 +528,10 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
 
         ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
 
-  def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev, dest_dev):
-    src_dev.allocator.map(dest)
+  def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:DeviceType, dest_dev:DeviceType):
+    cast(HCQAllocator, src_dev.allocator).map(dest)
 
+    assert src_dev.hw_copy_queue_t is not None
     with hcq_profile(src_dev, queue_type=src_dev.hw_copy_queue_t, desc=f"{src_dev.dname} -> {dest_dev.dname}", enabled=PROFILE):
       src_dev.hw_copy_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
                                .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \

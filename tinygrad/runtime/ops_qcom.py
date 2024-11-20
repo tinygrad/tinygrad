@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, decimal, math, sys
 assert sys.platform != 'win32'
 from types import SimpleNamespace
-from typing import Tuple, List, Any, cast
+from typing import Tuple, List, Any, cast, Optional
 from tinygrad.device import BufferOptions
 from tinygrad.runtime.support.hcq import HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState
 from tinygrad.runtime.autogen import kgsl, adreno, libc
@@ -65,7 +65,7 @@ class QCOMComputeQueue(HWComputeQueue):
 
   def _memory_barrier(self): self._cache_flush(write_back=True, invalidate=True, sync=True, memsync=True)
 
-  def _signal(self, signal, value=0, ts=False):
+  def _signal(self, signal:QCOMSignal, value=0, ts=False):
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
     if QCOMDevice.gpu_id < 700:
       self.cmd(adreno.CP_EVENT_WRITE, qreg.cp_event_write_0(event=adreno.CACHE_FLUSH_TS, timestamp=ts),
@@ -75,40 +75,40 @@ class QCOMComputeQueue(HWComputeQueue):
       # TODO: support devices starting with 8 Gen 1. Also, 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP
       raise RuntimeError('CP_EVENT_WRITE7 is not supported')
 
-  def _timestamp(self, signal): return self._signal(signal, 0, ts=True)
+  def _timestamp(self, signal:QCOMSignal): return self._signal(signal, 0, ts=True)
 
-  def _wait(self, signal, value=0):
+  def _wait(self, signal:QCOMSignal, value=0):
     self.cmd(adreno.CP_WAIT_REG_MEM, qreg.cp_wait_reg_mem_0(function=adreno.WRITE_GE, poll=adreno.POLL_MEMORY),*data64_le(mv_address(signal._signal)),
              qreg.cp_wait_reg_mem_3(ref=value&0xFFFFFFFF), qreg.cp_wait_reg_mem_4(mask=0xFFFFFFFF), qreg.cp_wait_reg_mem_5(delay_loop_cycles=32))
 
-  def _update_signal(self, cmd_idx, signal, value):
+  def _update_signal(self, cmd_idx, signal:Optional[QCOMSignal], value):
     if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(mv_address(signal._signal)))
     if value is not None: self._patch(cmd_idx, offset=5, data=[value & 0xFFFFFFFF])
 
-  def _update_wait(self, cmd_idx, signal, value):
+  def _update_wait(self, cmd_idx, signal:Optional[QCOMSignal], value):
     if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(mv_address(signal._signal)))
     if value is not None: self._patch(cmd_idx, offset=4, data=[value & 0xFFFFFFFF])
 
-  def _build_gpu_command(self, device, hw_addr=None):
-    to_mv((hw_page_addr:=hw_addr or device._alloc_cmd_buf(len(self.q) * 4)), len(self.q) * 4).cast('I')[:] = array.array('I', self.q)
+  def _build_gpu_command(self, dev:QCOMDevice, hw_addr=None):
+    to_mv((hw_page_addr:=hw_addr or dev._alloc_cmd_buf(len(self.q) * 4)), len(self.q) * 4).cast('I')[:] = array.array('I', self.q)
     obj = kgsl.struct_kgsl_command_object(gpuaddr=hw_page_addr, size=len(self.q) * 4, flags=kgsl.KGSL_CMDLIST_IB)
-    submit_req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), numcmds=1, context_id=device.ctx,
+    submit_req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), numcmds=1, context_id=dev.ctx,
                                               cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
     return submit_req, obj
 
-  def bind(self, dev):
+  def bind(self, dev:QCOMDevice):
     self.binded_device = dev
     self.hw_page = dev.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True))
     self.submit_req, self.obj = self._build_gpu_command(self.binded_device, self.hw_page.va_addr)
     # From now on, the queue is on the device for faster submission.
     self.q = to_mv(self.obj.gpuaddr, len(self.q) * 4).cast("I") # type: ignore
 
-  def _submit(self, dev):
+  def _submit(self, dev:QCOMDevice):
     if self.binded_device == dev: submit_req = self.submit_req
     else: submit_req, _ = self._build_gpu_command(dev)
     dev.last_cmd = kgsl.IOCTL_KGSL_GPU_COMMAND(dev.fd, __payload=submit_req).timestamp
 
-  def _exec(self, prg, args_state, global_size, local_size):
+  def _exec(self, prg:QCOMProgram, args_state:QCOMArgsState, global_size, local_size):
     global_size_mp = [int(g*l) for g,l in zip(global_size, local_size)]
     self.cmd_idx_to_dims[self._cur_cmd_idx()] = [global_size, local_size]
 
@@ -209,16 +209,17 @@ class QCOMArgsState(HCQArgsState):
 
 class QCOMProgram(HCQProgram):
   def __init__(self, dev: QCOMDevice, name: str, lib: bytes):
-    self.dev, self.name, self.lib = dev, name, lib
+    self.dev: QCOMDevice = dev
+    self.name, self.lib = name, lib
     self._parse_lib()
 
-    self.lib_gpu = self.dev.allocator.alloc(self.image_size, options=BufferOptions(cpu_access=True, nolru=True))
+    self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, options=BufferOptions(cpu_access=True, nolru=True))
     to_mv(self.lib_gpu.va_addr, self.image_size)[:] = self.image
 
-    self.pvtmem_size_per_item = round_up(self.pvtmem, 512) >> 9
-    self.pvtmem_size_total = self.pvtmem_size_per_item * 128 * 2
-    self.hw_stack_offset = round_up(next_power2(round_up(self.pvtmem, 512)) * 128 * 16, 0x1000)
-    self.shared_size = max(1, (self.shmem - 1) // 1024)
+    self.pvtmem_size_per_item: int = round_up(self.pvtmem, 512) >> 9
+    self.pvtmem_size_total: int = self.pvtmem_size_per_item * 128 * 2
+    self.hw_stack_offset: int = round_up(next_power2(round_up(self.pvtmem, 512)) * 128 * 16, 0x1000)
+    self.shared_size: int = max(1, (self.shmem - 1) // 1024)
     self.max_threads = min(1024, ((384 * 32) // (max(1, (self.fregs + round_up(self.hregs, 2) // 2)) * 128)) * 128)
     dev._ensure_stack_size(self.hw_stack_offset * 4)
 
@@ -232,7 +233,7 @@ class QCOMProgram(HCQProgram):
     return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
 
   def _parse_lib(self):
-    def _read_lib(off): return struct.unpack("I", self.lib[off:off+4])[0]
+    def _read_lib(off) -> int: return struct.unpack("I", self.lib[off:off+4])[0]
 
     # Extract image binary
     self.image_size = _read_lib(0x100)
