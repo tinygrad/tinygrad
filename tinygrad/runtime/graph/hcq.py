@@ -16,7 +16,7 @@ class HCQGraph(MultiGraphRunner):
     kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
     for ji in self.jit_cache:
       if not isinstance(ji.prg, CompiledRunner): continue
-      kernargs_size[ji.prg.device] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
+      kernargs_size[ji.prg.dev] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
     self.kernargs_bufs: Dict[Compiled, HCQBuffer] = {dev:dev.allocator._alloc(sz, BufferOptions(cpu_access=True)) for dev,sz in kernargs_size.items()}
 
     # Fill initial arguments.
@@ -25,7 +25,7 @@ class HCQGraph(MultiGraphRunner):
     kargs_ptrs: Dict[Compiled, int] = {dev:buf.va_addr for dev,buf in self.kernargs_bufs.items()}
     for j,ji in enumerate(self.jit_cache):
       if not isinstance(ji.prg, CompiledRunner): continue
-      kargs_ptrs[ji.prg.device] = (kargs_ptr:=kargs_ptrs[ji.prg.device]) + round_up(ji.prg.clprg.kernargs_alloc_size, 16)
+      kargs_ptrs[ji.prg.dev] = (kargs_ptr:=kargs_ptrs[ji.prg.dev]) + round_up(ji.prg.clprg.kernargs_alloc_size, 16)
       self.ji_args[j] = ji.prg.clprg.fill_kernargs([cast(Buffer, b)._buf for b in ji.bufs], [var_vals[v] for v in ji.prg.p.vars], kargs_ptr)
 
     # Schedule Dependencies.
@@ -51,7 +51,7 @@ class HCQGraph(MultiGraphRunner):
     for dev, queue in self.comp_queues.items(): dev_access[queue].add(dev)
 
     for j,ji in enumerate(self.jit_cache):
-      enqueue_dev = ji.prg.device if (is_exec_prg:=isinstance(ji.prg, CompiledRunner)) else Device[ji.bufs[1].device] #type:ignore
+      enqueue_dev = ji.prg.dev if (is_exec_prg:=isinstance(ji.prg, CompiledRunner)) else Device[ji.bufs[1].device] #type:ignore
       enqueue_queue = self.comp_queues[enqueue_dev] if is_exec_prg else self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
       out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.signal_t(value=0))
 
@@ -76,7 +76,7 @@ class HCQGraph(MultiGraphRunner):
       # Remove self-dependency for compute and copy queues.
       # For compute, in case of NV, optimize when only 1 same-queue dependency exists, since NV chains 2+ executions in this case,
       # eliminating dependency need.
-      dname = enqueue_dev.dname.split(":", 1)[0]
+      dname = enqueue_dev.device.split(":", 1)[0]
       can_opt = dname in {"AMD", "QCOM"} or (dname == "NV" and len(sync_signals) == 0 and len(opt_deps) == 1 and id(opt_deps[0][0]) == id(out_signal))
       if can_opt or isinstance(ji.prg, BufferXfer): opt_deps = [x for x in opt_deps if id(x[0]) != id(out_signal)]
 

@@ -85,8 +85,8 @@ class Buffer:
       self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferOptions(external_ptr=external_ptr)
     if self._base is not None:
       self._base.ensure_allocated()
-      assert hasattr(self.allocator, "offset"), "offset function required for view"
-      self._buf: Any = self.allocator.offset(self.base._buf, self.nbytes, self.offset)
+      assert hasattr(self.allocator, "_offset"), "offset function required for view"
+      self._buf: Any = self.allocator._offset(self.base._buf, self.nbytes, self.offset)
     else:
       self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, self.options)
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
@@ -112,21 +112,21 @@ class Buffer:
            (f" offset:{self.offset}" if hasattr(self, "base") else "") + (f" {self.options=}" if self.options is not None else "") + ">"
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
-    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer') and (self.options is None or self.options.image is None):
-      return self.allocator.as_buffer(self._buf)
+    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, '_as_buffer') and (self.options is None or self.options.image is None):
+      return self.allocator._as_buffer(self._buf)
     assert not force_zero_copy, "force zero copy was passed, but copy is required"
     return self.copyout(memoryview(bytearray(self.nbytes)))
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
     assert self.is_allocated(), "can't copyin to unallocated buffer"
-    self.allocator.copyin(self._buf, mv)
+    self.allocator._copyin(self._buf, mv)
     return self
   def copyout(self, mv:memoryview) -> memoryview:
     mv = flat_mv(mv)
     assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
     assert self.is_allocated(), "can't copyout unallocated buffer"
-    self.allocator.copyout(mv, self._buf)
+    self.allocator._copyout(mv, self._buf)
     return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
@@ -141,8 +141,11 @@ class Allocator:
   def _alloc(self, size:int, options:BufferOptions): raise NotImplementedError("need alloc")
   def free(self, opaque, size:int, options:Optional[BufferOptions]=None): self._free(opaque, options if options is not None else BufferOptions())
   def _free(self, opaque, options:BufferOptions): pass  # if opaque is a Python object, you don't need a free
-  def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
-  def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
+  def _copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
+  def _copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
+  # def _as_buffer(self, src) -> memoryview:
+  # def _offset(self, buf, size:int, offset:int):
+  # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   """
@@ -167,10 +170,10 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferOptions):
     return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else (ctypes.c_uint8 * size)()
-  def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
-  def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
-  def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
-  def offset(self, buf, size:int, offset:int): return from_mv(self.as_buffer(buf)[offset:offset+size])
+  def _as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
+  def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
+  def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
+  def _offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
 
 MallocAllocator = _MallocAllocator()
 
@@ -191,7 +194,7 @@ class Compiler:
 
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
-    self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
+    self.device, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
     self.renderer = renderer or Renderer()
   def synchronize(self):
     """

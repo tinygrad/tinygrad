@@ -126,13 +126,13 @@ class HIPAllocator(LRUAllocator):
       copied_in += copy_size
       self.hb_polarity = (self.hb_polarity+1) % len(self.hb)
       minor_offset = 0 # only on the first
-  def copyin(self, dest:T, src: memoryview):
+  def _copyin(self, dest:T, src: memoryview):
     hip_set_device(self.device.device)
     host_mem = self._alloc_with_options(len(src), BufferOptions(host=True))
     self.device.pending_copyin.append(host_mem)
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(hip.hipMemcpyAsync(dest, host_mem, len(src), hip.hipMemcpyHostToDevice, None))
-  def copyout(self, dest:memoryview, src:T):
+  def _copyout(self, dest:memoryview, src:T):
     self.full_synchronize()
     hip_set_device(self.device.device)
     check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
@@ -142,22 +142,22 @@ class HIPAllocator(LRUAllocator):
 
 class HIPSyncEvent(Runner):
   def __init__(self, lb):
-    self.lb, self.device, self.dname = lb, cast(HIPDevice, Device[lb.device]), lb.device
+    self.lb, self.device, self.device = lb, cast(HIPDevice, Device[lb.device]), lb.device
     super().__init__()
   def __call__(self, rawbufs:List[Buffer], var_vals, wait=False, jit=False):
     to_mv(rawbufs[0]._buf, 4).cast("I")[0] = 0
     hip_set_device(self.device.device)
     check(hip.hipStreamWriteValue32(None, rawbufs[0]._buf, 1, 0))
-    update_stats(colored("sync", "red"), 0, 0, {}, None, 1, jit, device=self.dname)
+    update_stats(colored("sync", "red"), 0, 0, {}, None, 1, jit, device=self.device)
 
 class HIPWaitEvent(Runner):
   def __init__(self, device):
-    self.device, self.dname = cast(HIPDevice, Device[device]), device
+    self.device, self.device = cast(HIPDevice, Device[device]), device
     super().__init__()
   def __call__(self, rawbufs:List[Buffer], var_vals, wait=False, jit=False):
     hip_set_device(self.device.device)
     check(hip.hipStreamWaitValue32(None, rawbufs[0]._buf, 1, 1, 0xFFFFFFFF))
-    update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, jit, device=self.dname)
+    update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, jit, device=self.device)
 
 if getenv("HIPCPU"):
   rhip = ctypes.CDLL("/usr/local/lib/libremu.so")
