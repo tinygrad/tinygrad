@@ -2305,7 +2305,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
         x = x.gather(i, index)
     return x.cast(self.dtype)
 
-  def scatter(self, dim:int, index:Tensor, src:Union[Tensor, ConstType], reduce:Union[None, Literal['multiply'], Literal['add']] = None):
+  def scatter(self, dim:int, index:Tensor, src:Union[Tensor, ConstType], reduce:Union[None, Literal['multiply'], Literal['add']] = None) -> Tensor:
     """
     Scatters `src` values along an axis specified by `dim`.
     Apply `add` or `multiply` reduction operation with `reduce`.
