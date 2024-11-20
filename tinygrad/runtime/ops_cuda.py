@@ -31,17 +31,17 @@ def cu_time_execution(cb, enable=False) -> Optional[float]:
   return ret.value * 1e-3
 
 class CUDAProgram:
-  def __init__(self, device:CUDADevice, name:str, lib:bytes, smem:int=0):
-    self.dev, self.name, self.lib, self.smem = device, name, lib, smem
+  def __init__(self, dev:CUDADevice, name:str, lib:bytes, smem:int=0):
+    self.dev, self.name, self.lib, self.smem = dev, name, lib, smem
     if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
-    if DEBUG >= 6: cuda_disassemble(lib, device.arch)
+    if DEBUG >= 6: cuda_disassemble(lib, dev.arch)
 
     check(cuda.cuCtxSetCurrent(self.dev.context))
     self.module = cuda.CUmodule()
     status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
     if status != 0:
       del self.module
-      cuda_disassemble(lib, device.arch)
+      cuda_disassemble(lib, dev.arch)
       raise RuntimeError(f"module load failed with status code {status}: {cuda.cudaError_enum__enumvalues[status]}")
     check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
     self.prg = prg

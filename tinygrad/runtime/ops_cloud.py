@@ -139,8 +139,8 @@ def cloud_server(port:int):
 # ***** frontend *****
 
 class CloudAllocator(Allocator):
-  def __init__(self, device:CloudDevice):
-    self.device = device
+  def __init__(self, dev:CloudDevice):
+    self.device = dev
     super().__init__()
   # TODO: ideally we shouldn't have to deal with images here
   def _alloc(self, size:int, options:BufferOptions) -> int:
@@ -157,8 +157,8 @@ class CloudAllocator(Allocator):
     dest[:] = resp
 
 class CloudProgram:
-  def __init__(self, device:CloudDevice, name:str, lib:bytes):
-    self.dev, self.name = device, name
+  def __init__(self, dev:CloudDevice, name:str, lib:bytes):
+    self.dev, self.name = dev, name
     self.datahash = self.dev.req.h(lib)
     self.dev.req.q(ProgramAlloc(self.name, self.datahash))
     super().__init__()

@@ -7,8 +7,8 @@ from tinygrad.renderer.llvmir import LLVMRenderer
 import llvmlite.binding as llvm
 
 class LLVMCompiler(Compiler):
-  def __init__(self, device:LLVMDevice, opt:bool=False):
-    self.dev = device
+  def __init__(self, dev:LLVMDevice, opt:bool=False):
+    self.dev = dev
     self.optimizer: llvm.passmanagers.ModulePassManager = llvm.create_module_pass_manager()
     self.dev.target_machine.add_analysis_passes(self.optimizer)
     if opt:
@@ -26,10 +26,10 @@ class LLVMCompiler(Compiler):
   def disassemble(self, lib:bytes): cpu_objdump(lib)
 
 class LLVMProgram:
-  def __init__(self, device:LLVMDevice, name:str, lib:bytes):
+  def __init__(self, dev:LLVMDevice, name:str, lib:bytes):
     self.name, self.lib = name, lib
-    device.engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
-    self.fxn = device.engine.get_function_address(name)
+    dev.engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
+    self.fxn = dev.engine.get_function_address(name)
     assert self.fxn != 0, "LLVM failed to get function address"
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):

@@ -65,16 +65,16 @@ def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   return library
 
 class MetalCompiler(Compiler):
-  def __init__(self, device:Optional[MetalDevice]=None):
-    self.device = device
-    super().__init__("compile_metal_xcode" if self.device is None else "compile_metal")
+  def __init__(self, dev:Optional[MetalDevice]=None):
+    self.dev = dev
+    super().__init__("compile_metal_xcode" if self.dev is None else "compile_metal")
   def compile(self, src:str) -> bytes:
-    if self.device is None:
+    if self.dev is None:
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
       lib = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
     else:
-      library = metal_src_to_library(self.device, src)
+      library = metal_src_to_library(self.dev, src)
       library_contents = msg(library, "libraryDataContents", restype=objc_instance)
       lib = ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
     assert lib[:4] == b"MTLB", "Invalid Metal library. Using conda? Corrupt XCode?"
@@ -87,8 +87,8 @@ class MetalCompiler(Compiler):
       if ret: print("Disassembler Error: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
 class MetalProgram:
-  def __init__(self, device:MetalDevice, name:str, lib:bytes):
-    self.dev, self.name, self.lib = device, name, lib
+  def __init__(self, dev:MetalDevice, name:str, lib:bytes):
+    self.dev, self.name, self.lib = dev, name, lib
     if lib[:4] == b"MTLB":
       # binary metal library
       data = libdispatch.dispatch_data_create(lib, len(lib), None, None)

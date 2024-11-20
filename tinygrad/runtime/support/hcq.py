@@ -104,7 +104,7 @@ class HWCommandQueue:
     return self
   def _update_wait(self, cmd_idx:int, signal:Optional[Any], value:Optional[int]): raise NotImplementedError("backend should overload this function")
 
-  def bind(self, device:HCQCompiled):
+  def bind(self, dev:HCQCompiled):
     """
     Associates the queue with a specific device for optimized execution.
 
@@ -112,22 +112,22 @@ class HWCommandQueue:
     the need to copy queues into the device, thereby enhancing performance.
 
     Args:
-      device: The target device for queue optimization.
+      dev: The target device for queue optimization.
 
     Note:
       Implementing this method is optional but recommended for performance gains.
     """
 
-  def submit(self, device:HCQCompiled):
+  def submit(self, dev:HCQCompiled):
     """
     Submits the command queue to a specific device for execution.
 
     Args:
-      device: The device to submit the queue to
+      dev: The device to submit the queue to
     """
-    if self.q: self._submit(device)
+    if self.q: self._submit(dev)
     return self
-  def _submit(self, device:HCQCompiled): raise NotImplementedError("backend should overload this function")
+  def _submit(self, dev:HCQCompiled): raise NotImplementedError("backend should overload this function")
 
 class HWComputeQueue(HWCommandQueue):
   @hcq_command
@@ -256,8 +256,8 @@ class HCQArgsState:
   def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
 
 class HCQProgram:
-  def __init__(self, args_state_t:Type[HCQArgsState], device:HCQCompiled, name:str, kernargs_alloc_size:int):
-    self.args_state_t, self.dev, self.name, self.kernargs_alloc_size = args_state_t, device, name, kernargs_alloc_size
+  def __init__(self, args_state_t:Type[HCQArgsState], dev:HCQCompiled, name:str, kernargs_alloc_size:int):
+    self.args_state_t, self.dev, self.name, self.kernargs_alloc_size = args_state_t, dev, name, kernargs_alloc_size
 
   def fill_kernargs(self, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), kernargs_ptr:Optional[int]=None) -> HCQArgsState:
     """
@@ -467,8 +467,8 @@ class HCQAllocator(LRUAllocator): # pylint: disable=abstract-method
   This class implements basic copy operations following the HCQ API, utilizing both `HWComputeQueue` and `HWCopyQueue`.
   """
 
-  def __init__(self, device:HCQCompiled, batch_size:int=(2 << 20), batch_cnt:int=32):
-    self.dev:Any = device
+  def __init__(self, dev:HCQCompiled, batch_size:int=(2 << 20), batch_cnt:int=32):
+    self.dev:Any = dev
     self.b = [self._alloc(batch_size, BufferOptions(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
     super().__init__()

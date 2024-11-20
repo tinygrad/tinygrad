@@ -12,8 +12,8 @@ def check(status):
   if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
 
 class HIPProgram:
-  def __init__(self, device:HIPDevice, name:str, lib:bytes):
-    self.dev, self.name, self.lib = device, name, lib
+  def __init__(self, dev:HIPDevice, name:str, lib:bytes):
+    self.dev, self.name, self.lib = dev, name, lib
     check(hip.hipSetDevice(self.dev.device_id))
     self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
     self.prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
@@ -43,8 +43,8 @@ class HIPProgram:
       return ret.value * 1e-3
 
 class HIPAllocator(LRUAllocator):
-  def __init__(self, device:HIPDevice):
-    self.dev = device
+  def __init__(self, dev:HIPDevice):
+    self.dev = dev
     super().__init__()
   def _alloc(self, size:int, options:BufferOptions):
     check(hip.hipSetDevice(self.dev.device_id))

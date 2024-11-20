@@ -15,8 +15,8 @@ def check(status):
 def checked(ret, status): return (check(status.value), ret)[1]
 
 class CLCompiler(Compiler):
-  def __init__(self, device:CLDevice, compile_key:str):
-    self.dev = device
+  def __init__(self, dev:CLDevice, compile_key:str):
+    self.dev = dev
     super().__init__(f"compile_cl_{compile_key}")
   def compile(self, src:str) -> bytes:
     program = checked(cl.clCreateProgramWithSource(self.dev.context, 1, to_char_p_p([src.encode()]), None, status := ctypes.c_int32()), status)
@@ -59,8 +59,8 @@ class CLProgram:
     return None
 
 class CLAllocator(LRUAllocator):
-  def __init__(self, device:CLDevice):
-    self.dev = device
+  def __init__(self, dev:CLDevice):
+    self.dev = dev
     super().__init__()
   def _alloc(self, size:int, options:BufferOptions) -> Tuple[ctypes._CData, BufferOptions]:
     if options.image is not None:

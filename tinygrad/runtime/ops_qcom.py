@@ -96,17 +96,17 @@ class QCOMComputeQueue(HWComputeQueue):
                                               cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
     return submit_req, obj
 
-  def bind(self, device):
-    self.binded_device = device
-    self.hw_page = device.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True))
+  def bind(self, dev):
+    self.binded_device = dev
+    self.hw_page = dev.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True))
     self.submit_req, self.obj = self._build_gpu_command(self.binded_device, self.hw_page.va_addr)
     # From now on, the queue is on the device for faster submission.
     self.q = to_mv(self.obj.gpuaddr, len(self.q) * 4).cast("I") # type: ignore
 
-  def _submit(self, device):
-    if self.binded_device == device: submit_req = self.submit_req
-    else: submit_req, _ = self._build_gpu_command(device)
-    device.last_cmd = kgsl.IOCTL_KGSL_GPU_COMMAND(device.fd, __payload=submit_req).timestamp
+  def _submit(self, dev):
+    if self.binded_device == dev: submit_req = self.submit_req
+    else: submit_req, _ = self._build_gpu_command(dev)
+    dev.last_cmd = kgsl.IOCTL_KGSL_GPU_COMMAND(dev.fd, __payload=submit_req).timestamp
 
   def _exec(self, prg, args_state, global_size, local_size):
     global_size_mp = [int(g*l) for g,l in zip(global_size, local_size)]
@@ -131,7 +131,7 @@ class QCOMComputeQueue(HWComputeQueue):
     self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
              qreg.a6xx_sp_cs_ctrl_reg0(threadsize=adreno.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
              qreg.a6xx_sp_cs_unknown_a9b1(unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
-             qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.device._stack.va_addr),
+             qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.dev._stack.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
 
     self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
@@ -151,7 +151,7 @@ class QCOMComputeQueue(HWComputeQueue):
                                                                  state_block=adreno.SB6_CS_TEX, num_unit=args_state.prg.samp_cnt),
                *data64_le(args_state.ptr + args_state.prg.samp_off))
       self.reg(adreno.REG_A6XX_SP_CS_TEX_SAMP, *data64_le(args_state.ptr + args_state.prg.samp_off))
-      self.reg(adreno.REG_A6XX_SP_PS_TP_BORDER_COLOR_BASE_ADDR, *data64_le(prg.device._border_color_base()))
+      self.reg(adreno.REG_A6XX_SP_PS_TP_BORDER_COLOR_BASE_ADDR, *data64_le(prg.dev._border_color_base()))
 
     if args_state.prg.tex_cnt > 0:
       self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
@@ -208,8 +208,8 @@ class QCOMArgsState(HCQArgsState):
   def update_var(self, index:int, val:int): self.args_view[self.args_info[index].offset//8] = val
 
 class QCOMProgram(HCQProgram):
-  def __init__(self, device: QCOMDevice, name: str, lib: bytes):
-    self.dev, self.name, self.lib = device, name, lib
+  def __init__(self, dev: QCOMDevice, name: str, lib: bytes):
+    self.dev, self.name, self.lib = dev, name, lib
     self._parse_lib()
 
     self.lib_gpu = self.dev.allocator.alloc(self.image_size, options=BufferOptions(cpu_access=True, nolru=True))
@@ -220,7 +220,7 @@ class QCOMProgram(HCQProgram):
     self.hw_stack_offset = round_up(next_power2(round_up(self.pvtmem, 512)) * 128 * 16, 0x1000)
     self.shared_size = max(1, (self.shmem - 1) // 1024)
     self.max_threads = min(1024, ((384 * 32) // (max(1, (self.fregs + round_up(self.hregs, 2) // 2)) * 128)) * 128)
-    device._ensure_stack_size(self.hw_stack_offset * 4)
+    dev._ensure_stack_size(self.hw_stack_offset * 4)
 
     kernargs_alloc_size = round_up(2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + self.samp_cnt * 0x10, 0x100)
     super().__init__(QCOMArgsState, self.dev, self.name, kernargs_alloc_size=kernargs_alloc_size)

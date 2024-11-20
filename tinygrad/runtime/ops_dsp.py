@@ -21,8 +21,8 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
   return pra, fds, attrs, (ins, outs)
 
 class DSPProgram:
-  def __init__(self, device:DSPDevice, name:str, lib:bytes):
-    self.dev, self.lib = device, lib
+  def __init__(self, dev:DSPDevice, name:str, lib:bytes):
+    self.dev, self.lib = dev, lib
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
@@ -39,8 +39,8 @@ class DSPBuffer:
     self.va_addr, self.size, self.share_info, self.offset = va_addr, size, share_info, offset
 
 class DSPAllocator(Allocator):
-  def __init__(self, device:DSPDevice):
-    self.dev = device
+  def __init__(self, dev:DSPDevice):
+    self.dev = dev
     super().__init__()
 
   def _alloc(self, size:int, options:BufferOptions):

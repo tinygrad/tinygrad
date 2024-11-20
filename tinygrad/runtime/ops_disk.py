@@ -17,7 +17,7 @@ class DiskBuffer:
 
 MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
-  def __init__(self, device:DiskDevice): self.dev = device
+  def __init__(self, dev:DiskDevice): self.dev = dev
   def _alloc(self, size:int, options):
     self.dev._might_open(size)
     return DiskBuffer(self.dev, size)

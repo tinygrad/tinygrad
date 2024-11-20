@@ -106,9 +106,9 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
 
   def _timestamp(self, signal): return self._signal(signal, 0)
 
-  def bind(self, device):
-    self.binded_device = device
-    self.hw_page = device.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True))
+  def bind(self, dev):
+    self.binded_device = dev
+    self.hw_page = dev.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True))
     hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
     for i, value in enumerate(self.q): hw_view[i] = value
 
@@ -185,7 +185,7 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
     if signal is not None: setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_address', signal.signal_addr)
     if value is not None: setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_payload', value)
 
-  def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).compute_gpfifo)
+  def _submit(self, dev): self._submit_to_gpfifo(dev, cast(NVDevice, dev).compute_gpfifo)
 
 class NVCopyQueue(NVCommandQueue, HWCopyQueue):
   def _copy(self, dest, src, copy_size):
@@ -205,7 +205,7 @@ class NVCopyQueue(NVCommandQueue, HWCopyQueue):
     if signal is not None: self._patch(cmd_idx, offset=1, data=data64(signal.signal_addr))
     if value is not None: self._patch(cmd_idx, offset=3, data=[value])
 
-  def _submit(self, device): self._submit_to_gpfifo(device, cast(NVDevice, device).dma_gpfifo)
+  def _submit(self, dev): self._submit_to_gpfifo(dev, cast(NVDevice, dev).dma_gpfifo)
 
 class NVArgsState(HCQArgsState):
   def __init__(self, ptr:int, prg:NVProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
@@ -221,8 +221,8 @@ class NVArgsState(HCQArgsState):
   def update_var(self, index:int, val:int): self.vals[index] = val
 
 class NVProgram(HCQProgram):
-  def __init__(self, device:NVDevice, name:str, lib:bytes):
-    self.dev, self.name, self.lib = device, name, lib
+  def __init__(self, dev:NVDevice, name:str, lib:bytes):
+    self.dev, self.name, self.lib = dev, name, lib
 
     if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
     else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
