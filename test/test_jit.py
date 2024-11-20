@@ -431,6 +431,30 @@ class TestJit(unittest.TestCase):
     b = f(Tensor([2.0]))
     assert abs((a - b).item()) > 0.5
 
+def test_jit_buffer_reuse_bug(self):
+    """Test to verify buffer reuse bug in JIT execution"""
+    @TinyJit
+    def foo(x) -> Tensor:
+      return (x + 1).realize()  # Simple operation that should give different results each time
+
+    # First run
+    a = Tensor([1, 2])
+    result1 = foo(a)
+    
+    # Second run with different input
+    b = Tensor([3, 4]) 
+    result2 = foo(b)
+
+    # Without the fix, result2 would incorrectly reuse result1's buffer
+    # With the fix, we should get correct results
+    np.testing.assert_allclose(result1.numpy(), [2, 3], atol=1e-4, rtol=1e-5)
+    np.testing.assert_allclose(result2.numpy(), [4, 5], atol=1e-4, rtol=1e-5)
+
+    # Third run to verify consistent behavior
+    c = Tensor([5, 6])
+    result3 = foo(c)
+    np.testing.assert_allclose(result3.numpy(), [6, 7], atol=1e-4, rtol=1e-5)
+
 @unittest.skip("Pending multioutput implementation #3607")
 class TestMultioutputJit(unittest.TestCase):
   def _test(self, f):

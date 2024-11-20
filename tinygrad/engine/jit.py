@@ -148,10 +148,14 @@ class CapturedJit(Generic[ReturnType]):
     self._jit_cache: List[ExecItem] = self.jit_cache
     self._input_replace: Dict[Tuple[int, int], int] = self.input_replace
     self._graphed = False
-    self._clear_inputs()
+    self._clear_buffers()
 
-  def _clear_inputs(self):
-    for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
+  def _clear_buffers(self):
+    # Clear both inputs and outputs to prevent buffer sharing between executions
+      for j in range(len(self._jit_cache)):
+          for i in range(len(self._jit_cache[j].bufs)):
+              if (j,i) in self._input_replace or self._jit_cache[j].bufs[i] is not None:
+                  self._jit_cache[j].bufs[i] = None
 
   # jit exec
   def __call__(self, input_buffers:List[Buffer], var_vals:Dict[Variable, int]) -> ReturnType:
@@ -168,7 +172,7 @@ class CapturedJit(Generic[ReturnType]):
 
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
-    self._clear_inputs()
+    self._clear_buffers()
     return self.ret
 
 def _prepare_jit_inputs(args, kwargs):
