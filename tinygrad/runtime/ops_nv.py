@@ -316,9 +316,9 @@ class NVDevice(HCQCompiled[NVSignal]):
   gpus_info: Union[List, ctypes.Array] = []
   signals_page: Any = None
   signals_pool: List[Any] = []
-  low_uvm_vaddr: int = 0x8000000000 # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings
-  uvm_addr_start: int = 0x9000000000
-  uvm_vaddr: int = uvm_addr_start # 0x2000000000+
+  low_uvm_vaddr: int = 0x8000000000 if OSX else 0x1000000000  # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings
+  uvm_vaddr_start: int = low_uvm_vaddr + 0x1000000000
+  uvm_vaddr: int = uvm_vaddr_start # 0x2000000000+
   host_object_enumerator: int = 0x1000
 
   def _new_gpu_fd(self):
@@ -405,7 +405,7 @@ class NVDevice(HCQCompiled[NVSignal]):
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
     if force_low:
       NVDevice.low_uvm_vaddr = (res_va:=round_up(NVDevice.low_uvm_vaddr, alignment)) + size
-      assert NVDevice.low_uvm_vaddr < NVDevice.uvm_addr_start, "Exceed low vm addresses"
+      assert NVDevice.low_uvm_vaddr < NVDevice.uvm_vaddr_start, "Exceed low vm addresses"
     else: NVDevice.uvm_vaddr = (res_va:=round_up(NVDevice.uvm_vaddr, alignment)) + size
     return res_va
 
