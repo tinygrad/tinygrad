@@ -340,6 +340,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def is_contiguous_base(self): return self.op is Ops.CONTIGUOUS and not (self.src[0].base.op is Ops.VIEW and len(self.src[0].base.src) == 2)
 
+  # *** from LazyBuffer ***
+
+  @staticmethod
+  def const_with_shape(dtype:DType, val:ConstLike, shape:Tuple[sint,...]) -> UOp:
+    from tinygrad.shape.shapetracker import ShapeTracker
+    st = ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop()
+    return UOp(Ops.VALID, dtypes.bool, (st,)).where(UOp.const(dtype, val), 0)
+
   # *** uop movement ops ***
 
   @property

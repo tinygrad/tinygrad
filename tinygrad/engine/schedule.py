@@ -339,8 +339,10 @@ def group_realizes(ctx:ScheduleContext, realizes:Dict[UOp, UOp]) -> List[List[UO
 # **** Schedule creation and BFS toposort
 
 def lazy_view(base:UOp, view:UOp) -> Optional[UOp]:
-  if unwrap(base.st).size == 0 or ((new_st:=unwrap(view.st)).views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)):
+  new_st = unwrap(view.st)
+  if unwrap(base.st).size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)):
     return UOp.const_with_shape(base.dtype, 0, new_st.shape)
+  if new_st.contiguous and unwrap(base.st).shape == new_st.shape: return base
   return None
 
 init_big_graph = PatternMatcher([
@@ -379,7 +381,7 @@ do_realize = PatternMatcher([
 
 def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
-  return UOp(Ops.VALID, dtypes.bool, (unwrap(base.st).to_uop(),)).where(UOp.const(base.dtype, val), 0)
+  return UOp.const_with_shape(base.dtype, val, unwrap(base.st).shape)
 
 break_sched = PatternMatcher([
   # consts are always fused and generated
@@ -396,7 +398,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
   buffers: Dict[UOp, Buffer] = {}
-  big_graph = UOp.sink(*(to_uop(x, ctx, buffers, cache) for x in outs))
+  big_graph = graph_rewrite(UOp.sink(*(to_uop(x, ctx, buffers, cache) for x in outs)), init_big_graph)
   # get realizes
   graph_rewrite(big_graph, do_realize, ctx.realizes)
   store_groups = group_realizes(ctx, ctx.realizes)
