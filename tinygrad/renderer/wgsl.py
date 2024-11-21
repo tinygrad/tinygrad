@@ -5,6 +5,30 @@ from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, extra_pm
 from tinygrad.helpers import strip_parens
 import math
 
+# utility functions for handling packed load/store of < 4-byte data types: bool, char/uchar, short/ushort
+packed_types = {dtypes.bool: dtypes.int, dtypes.char: dtypes.int, dtypes.uchar: dtypes.uint32, dtypes.short: dtypes.int, dtypes.ushort: dtypes.uint32}
+
+def sign_extend(val:UOp, sext_am:int):
+  sign_bit = val >> (sext_am - 1)
+  return (UOp.where(sign_bit > 0, UOp.const(dtypes.uint32, 0xffffffff) << sext_am, UOp.const(dtypes.uint32, 0)) \
+        | val.bitcast(dtypes.uint32)).bitcast(dtypes.int)
+
+def packed_store(bidx:UOp, var:UOp):
+  shift_am = (bidx.src[1].cast(dtypes.uint32)%UOp.const(dtypes.uint32, 4//var.dtype.itemsize))*UOp.const(dtypes.uint32, 8*var.dtype.itemsize)
+  new_v = (var & (0xFF if var.dtype.itemsize == 1 else 0xFFFF)).cast(dtypes.uint32) << shift_am
+  return UOp(Ops.STORE, src=(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], bidx.src[1]//(4//var.dtype.itemsize))), new_v.cast(packed_types[var.dtype])))
+
+def packed_load(root:UOp, bidx:UOp, var:UOp=None):
+  dtype = root.dtype
+  div_idx = bidx.src[1]//(4//dtype.itemsize)
+  shift_am = (bidx.src[1].cast(dtypes.uint32)%UOp.const(dtypes.uint32, 4//dtype.itemsize))*UOp.const(dtypes.uint32, 8*dtype.itemsize)
+  if var is not None:
+    load = UOp(Ops.LOAD, src=(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], div_idx)), var, root.src[2]), arg=root.arg, dtype=packed_types[dtype])
+  else:
+    load = UOp(Ops.LOAD, src=(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], div_idx)), *root.src[1:]), arg=root.arg, dtype=packed_types[dtype])
+  val = ((load.cast(dtypes.uint32) >> shift_am) & (0xFF if dtype.itemsize == 1 else 0xFFFF))
+  return sign_extend(val, 8*dtype.itemsize).cast(dtype) if dtype in [dtypes.char, dtypes.short] else val.cast(dtype)
+
 wgsl_matcher = PatternMatcher([
   (UPat(Ops.CMPLT, src=(UPat(name="a", dtype=dtypes.bool), UPat(name="b")), name="c"),
     lambda a,b,c: UOp(c.op, c.dtype, (a.cast(dtypes.int), b.cast(dtypes.int)))),
@@ -12,36 +36,19 @@ wgsl_matcher = PatternMatcher([
     lambda a,b,c: UOp(c.op, dtypes.int, (a.cast(dtypes.int), b.cast(dtypes.int))).cast(dtypes.bool)),
   *[(UPat(a, src=(UPat(name="b", dtype=(dtypes.uint, dtypes.int, dtypes.bool))), name="a"),
      lambda a,b: UOp(a, dtypes.float, (b.cast(dtypes.float),)).cast(b.dtype)) for a in (Ops.EXP2, Ops.SIN, Ops.LOG2, Ops.SQRT)],
-  (UPat(Ops.MUL, name="m", src=(UPat(name="a"), UPat(Ops.WHERE, src=(UPat.var("g"), \
-    UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2"))))), \
-    lambda m,a,g,c1,c2: UOp(Ops.WHERE, dtype=m.dtype, src=(g, UOp.const(dtype=dtypes.float, b=float('nan')), a)) \
+  (UPat(Ops.LOAD, name="l", src=(UPat.var('b'),)), lambda l,b: packed_load(l,b) if l.dtype.itemsize < 4 else None),
+  (UPat(Ops.LOAD, name="l", src=(UPat.var('b'), UPat.var('c'), UPat())),
+   lambda l,b,c: packed_load(l,b,c.cast(packed_types[l.dtype])) if l.dtype.itemsize < 4 else None),
+  (UPat.store(UPat.var("bidx"), UPat.var("var")), lambda bidx,var: packed_store(bidx,var) if var.dtype.itemsize < 4 else None),
+  (UPat(Ops.MUL, name="m", src=(UPat(name="a"), UPat(Ops.WHERE, src=(UPat.var("g"),
+    UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2"))))),
+    lambda m,a,g,c1,c2: UOp(Ops.WHERE, dtype=m.dtype, src=(g, UOp.const(dtype=dtypes.float, b=float('nan')), a))
     if math.isnan(c1.arg) and c2.arg == 1.0 else None),
   ]) + extra_pm
 
 type_map = { dtypes.float: "f32", dtypes.uchar: "u32", dtypes.ushort: "u32", dtypes.short: "i32",
             dtypes.char: "i32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool" }
 buffer_map = { **type_map, dtypes.bool: "i32" }
-
-def sign_extend(val, sext_am): return f"bitcast<i32>(select(0u, 0xffffffffu << {sext_am}, (({val} >> {sext_am-1}) > 0)) | bitcast<u32>({val}))"
-def render_shift_am(idx, itemsize): return f"(((u32({idx}))%{4//itemsize}u)*{8*itemsize}u)"
-
-def render_load(r, bidx, dtype):
-  sbidx = strip_parens(r[bidx])
-  buf, idx = sbidx.split("+")[0], '+'.join(sbidx.split("+")[1:])
-  # packed load for bool, char, short
-  if dtype.itemsize < 4:
-    idx_by_itemsize = f"({idx})/{4//dtype.itemsize}"
-    val = f"(({buf}[{idx_by_itemsize}]) >> {render_shift_am(idx, dtype.itemsize)} & { '0xFF' if dtype.itemsize == 1 else '0xFFFF' })"
-    val = f"bool({val})" if dtype == dtypes.bool else val
-    return sign_extend(val, 8*dtype.itemsize) if dtype in [dtypes.char, dtypes.short] else val
-  return f"{buf}[{idx}]"
-
-def render_store(r, bidx, var, dtype):
-  sbidx = strip_parens(r[bidx])
-  buf, idx = sbidx.split("+")[0], '+'.join(sbidx.split("+")[1:])
-  arr = f"{buf}[u32({idx})/{4//dtype.itemsize}u]"
-  return f"atomicAdd(&{arr}, (({buffer_map[dtype]}({r[var]}) & { '0xFF' if dtype.itemsize == 1 else '0xFFFF' }) << \
-    {render_shift_am(idx, dtype.itemsize)}));" if dtype.itemsize < 4 else f"{arr} = {r[var]};"
 
 class WGSLRenderer(CStyleLanguage):
   device = "WEBGPU"
@@ -65,10 +72,12 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.BITCAST, dtype=(dtypes.char, dtypes.uchar), name="x"), lambda ctx,x: f"bitcast<{type_map[x.dtype]}>({ctx[x.src[0]]}&0xFF)"),
     (UPat(Ops.BITCAST, dtype=(dtypes.short, dtypes.ushort), name="x"), lambda ctx,x: f"bitcast<{type_map[x.dtype]}>({ctx[x.src[0]]}&0xFFFF)"),
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"bitcast<{type_map[x.dtype]}>({ctx[x.src[0]]})"),
-    (UPat(Ops.LOAD, name="l", src=(UPat.var("b"), UPat.var('v'), UPat.var("g"))),
-      lambda ctx,l,b,v,g: f"select({ctx[v]}, "f"{render_load(ctx, b, l.dtype)}, {ctx[g]})"),
-    (UPat(Ops.LOAD, name="l", src=(UPat.var('b'),), allow_any_len=True), lambda ctx,l, b: f"{render_load(ctx, b, l.dtype)}"),
-    (UPat(Ops.STORE, src=(UPat.var('b'), UPat.var("v")), allow_any_len=True),lambda ctx,b,v: f"{render_store(ctx, b, v, v.dtype)}"),
+    (UPat(Ops.LOAD, src=(UPat.var("b"), UPat.var('v'), UPat.var("g"))), lambda ctx,b,v,g: f"select({ctx[v]}, {ctx[b]}, {ctx[g]})"),
+    (UPat(Ops.LOAD, src=(UPat.var('b'),), allow_any_len=True), lambda ctx, b: ctx[b]),
+    (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx'))),
+    lambda ctx,buf,idx: f"{ctx[buf]}[{strip_parens(ctx[idx]) if idx.arg == Ops.ADD else ctx[idx]}]"),
+    (UPat(Ops.STORE, src=(UPat.var('b'), UPat.var("v")), allow_any_len=True),\
+     lambda ctx,b,v: f"atomicAdd(&{ctx[b]}, {ctx[v]});" if b.src[0].dtype.itemsize < 4 else f"{ctx[b]} = {ctx[v]};"),
     # fix nan check: 'a != a -> is_nan()'
     (UPat(Ops.CMPNE, src=(UPat.var("a"), UPat.var("b"))), lambda ctx,a,b: f"is_nan({ctx[a]})" if a == b else None),
   ]) + base_rewrite
