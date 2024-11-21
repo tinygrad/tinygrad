@@ -611,7 +611,7 @@ class Kernel:
     if not KERNEL_SPLIT: return None
     if op.op is Ops.SINK:
       store = op.src[0]
-      define_global, dest_view, reduce = store.src
+      define_global, _, reduce = store.src
       if reduce.op is Ops.REDUCE_AXIS:
         load = reduce.src[0]
         define_global2, src_view = load.src
