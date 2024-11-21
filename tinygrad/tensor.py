@@ -2469,7 +2469,10 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).asin().numpy())
     ```
     """
-    return (self / (1 - self * self).sqrt()).atan()
+    # https://personal.math.ubc.ca/~cbm/aands/page_81.htm 4.4.46
+    coefficients = [-0.0012624911, 0.0066700901, -0.0170881256, 0.0308918810, -0.0501743046, 0.0889789874, -0.2145988016, 1.5707963050]
+    x = math.pi / 2 - (1.0 - self.abs()).sqrt() * polyN(self.abs(), coefficients)
+    return self.sign() * x
 
   def acos(self):
     """

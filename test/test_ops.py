@@ -671,7 +671,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.asin(), low=300, high=303)
   def test_acos(self):
     # high grad atol
-    helper_test_op([(45,65)], lambda x: x.acos(), grad_atol=3e-6, low=-1, high=1)
+    helper_test_op([(45,65)], lambda x: x.acos(), low=-1, high=1)
     helper_test_op([(45,65)], lambda x: x.acos(), low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.acos(), low=300, high=303)
   def test_atan(self):
