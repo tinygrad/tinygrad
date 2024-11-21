@@ -3,7 +3,7 @@ from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, Typ
 import contextlib, decimal, statistics, random, json, atexit, time, array, ctypes, functools
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv
 from tinygrad.renderer import Renderer
-from tinygrad.device import BufferOptions, Compiler, Compiled, LRUAllocator
+from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator
 
 # **************** for HCQ Compatible Devices ****************
 
@@ -372,7 +372,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
-    self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferOptions(cpu_access=True))
+    self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferSpec(cpu_access=True))
     self.kernargs_ptr:int = self.kernargs_page.va_addr
     self.devices.append(self)
 
@@ -483,11 +483,11 @@ class HCQAllocator(LRUAllocator, Generic[DeviceType]): # pylint: disable=abstrac
 
   def __init__(self, dev:DeviceType, batch_size:int=(2 << 20), batch_cnt:int=32):
     self.dev:DeviceType = dev
-    self.b = [self._alloc(batch_size, BufferOptions(host=True)) for _ in range(batch_cnt)]
+    self.b = [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
     super().__init__()
 
-  def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer: raise NotImplementedError("need hcq compat alloc")
+  def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer: raise NotImplementedError("need hcq compat alloc")
 
   def _copyin(self, dest:HCQBuffer, src:memoryview):
     assert self.dev.hw_copy_queue_t is not None

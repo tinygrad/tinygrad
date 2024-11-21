@@ -9,7 +9,7 @@ from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import CompiledRunner
-from tinygrad.renderer import Program
+from tinygrad.renderer import ProgramSpec
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,5,7] for axis in range(6)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4,7] for axis in range(5)]
@@ -33,7 +33,7 @@ def _get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, factor
 
-def _time_program(p:Program, lib:bytes, var_vals:Dict[Variable, int], rawbufs:List[Buffer], early_stop:Optional[float]=None,
+def _time_program(p:ProgramSpec, lib:bytes, var_vals:Dict[Variable, int], rawbufs:List[Buffer], early_stop:Optional[float]=None,
                   max_global_size:Optional[int]=65536, clear_l2=False, cnt=3, name="test") -> List[float]:
   factor = 1
   if p.global_size is not None and max_global_size is not None:
@@ -55,7 +55,7 @@ def _time_program(p:Program, lib:bytes, var_vals:Dict[Variable, int], rawbufs:Li
 class TimeoutException(Exception): pass
 def timeout_handler(signum, frame): raise TimeoutException()
 
-def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tuple[int, Optional[Tuple[Program, bytes, float]]]:
+def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tuple[int, Optional[Tuple[ProgramSpec, bytes, float]]]:
   if hasattr(signal, "alarm"):
     signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
     # set timeout
