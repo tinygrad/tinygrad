@@ -1,13 +1,20 @@
 from __future__ import annotations
-from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Callable, Any
-import contextlib, decimal, statistics, random, json, atexit, time, array, ctypes
+from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Callable, ParamSpec, Concatenate
+import contextlib, decimal, statistics, random, json, atexit, time, array, ctypes, functools
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferOptions, Compiler, Compiled, LRUAllocator
 
 # **************** for HCQ Compatible Devices ****************
 
-def hcq_command(func: Callable[..., None]) -> Callable[..., Any]:
+SignalType = TypeVar('SignalType', bound='HCQSignal')
+DeviceType = TypeVar('DeviceType', bound='HCQCompiled')
+ProgramType = TypeVar('ProgramType', bound='HCQProgram')
+ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
+QueueType = TypeVar('QueueType', bound='HWQueue')
+
+P = ParamSpec('P')
+def hcq_command(func: Callable[Concatenate[QueueType, P], None]) -> Callable[Concatenate[QueueType, P], QueueType]:
   """
   Decorator for HWCommandQueue commands. Enables command indexing and stores metadata for command updates.
 
@@ -17,18 +24,14 @@ def hcq_command(func: Callable[..., None]) -> Callable[..., Any]:
       def command_method(self, ...): ...
     ```
   """
-  def __wrapper(self:HWQueue, *args, **kwargs):
+  @functools.wraps(func)
+  def __wrapper(self:QueueType, *args:P.args, **kwargs:P.kwargs) -> QueueType:
     self.cmds_offset.append(len(self.q))
     func(self, *args, **kwargs)
     self.cmds_len.append(len(self.q) - self.cmds_offset[-1])
     self.cmds_meta.append(func.__name__)
     return self
   return __wrapper
-
-SignalType = TypeVar('SignalType', bound='HCQSignal')
-DeviceType = TypeVar('DeviceType', bound='HCQCompiled')
-ProgramType = TypeVar('ProgramType', bound='HCQProgram')
-ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 
 class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   """
@@ -178,7 +181,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   # *** commands for copy queues ***
 
   @hcq_command
-  def copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int):
+  def copy(self, dest:int, src:int, copy_size:int):
     """
     Enqueues a copy command to transfer data. Only on copy queues.
 
@@ -188,9 +191,9 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       copy_size: The size of data to copy
     """
     self._copy(dest, src, copy_size)
-  def _copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int): raise NotImplementedError("backend should overload this function")
+  def _copy(self, dest:int, src:int, copy_size:int): raise NotImplementedError("backend should overload this function")
 
-  def update_copy(self, cmd_idx:int, dest:Optional[HCQBuffer]=None, src:Optional[HCQBuffer]=None):
+  def update_copy(self, cmd_idx:int, dest:Optional[int]=None, src:Optional[int]=None):
     """
     Updates a previously queued copy command. Only on copy queues.
 
@@ -202,7 +205,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     if self.cmds_meta[cmd_idx] != "copy": raise RuntimeError("called update_copy not on an copy command")
     self._update_copy(cmd_idx, dest, src)
     return self
-  def _update_copy(self, cmd_idx:int, dest:Optional[HCQBuffer], src:Optional[HCQBuffer]):
+  def _update_copy(self, cmd_idx:int, dest:Optional[int], src:Optional[int]):
     raise NotImplementedError("backend should overload this function")
 
 class HCQSignal:
@@ -494,8 +497,8 @@ class HCQAllocator(LRUAllocator, Generic[DeviceType]): # pylint: disable=abstrac
         self.dev.timeline_signal.wait(self.b_timeline[self.b_next])
         ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                                     .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
-                                     .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
+                                  .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
+                                  .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
         self.b_timeline[self.b_next] = self.dev.timeline_value
         self.dev.timeline_value += 1
 
@@ -511,8 +514,8 @@ class HCQAllocator(LRUAllocator, Generic[DeviceType]): # pylint: disable=abstrac
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"DISK -> {self.dev.device}", enabled=PROFILE):
       for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                                     .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
-                                     .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
+                                  .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
+                                  .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
         self.b_timeline[batch_info[1]] = self.dev.timeline_value
         self.dev.timeline_value += 1
 
@@ -523,8 +526,8 @@ class HCQAllocator(LRUAllocator, Generic[DeviceType]): # pylint: disable=abstrac
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"{self.dev.device} -> CPU", enabled=PROFILE):
       for i in range(0, dest.nbytes, self.b[0].size):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                                     .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i)) \
-                                     .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
+                                  .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(self.b[0].size, dest.nbytes-i)) \
+                                  .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
         self.dev.timeline_signal.wait(self.dev.timeline_value)
         self.dev.timeline_value += 1
 

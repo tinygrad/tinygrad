@@ -209,28 +209,30 @@ class AMDCopyQueue(HWQueue):   # pylint: disable=abstract-method
       if src is not None: self._patch(cmd_idx, offset=3+i*7, data=[*data64_le(src + SDMA_MAX_COPY_SIZE*i)])
       if dest is not None: self._patch(cmd_idx, offset=5+i*7, data=[*data64_le(dest + SDMA_MAX_COPY_SIZE*i)])
 
-  def _signal(self, signal, value=0):
+  def _signal(self, signal:AMDSignal, value=0):
     self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._value_addr), value])
 
     if signal._event_mailbox_ptr != 0:
       self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._event_mailbox_ptr), signal._event.event_id])
       self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(signal._event.event_id)])
 
-  def _wait(self, signal, value=0):
+  def _wait(self, signal:AMDSignal, value=0):
     self._q([amd_gpu.SDMA_OP_POLL_REGMEM | amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(signal._value_addr), value, 0xffffffff,
       amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)])
 
-  def _update_signal(self, cmd_idx, signal=None, value=None): return self._update_wait(cmd_idx, signal, value) # the same offsets and commands
-  def _update_wait(self, cmd_idx, signal=None, value=None):
+  def _update_signal(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
+    return self._update_wait(cmd_idx, signal, value) # the same offsets and commands
+
+  def _update_wait(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
     if signal is not None: self._patch(cmd_idx, offset=1, data=data64_le(signal._value_addr))
     if value is not None: self._patch(cmd_idx, offset=3, data=[value])
 
-  def _timestamp(self, signal):
+  def _timestamp(self, signal:AMDSignal):
     self._q([amd_gpu.SDMA_OP_TIMESTAMP | amd_gpu.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
              *data64_le(signal._timestamp_addr)])
 
-  def _submit(self, dev):
+  def _submit(self, dev:AMDDevice):
     if dev.sdma_queue.put_value - dev.sdma_queue.read_ptr[0] > dev.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
 
     tail_blit_dword = 0

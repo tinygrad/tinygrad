@@ -534,9 +534,9 @@ class NVDevice(HCQCompiled):
     NVComputeQueue().setup(compute_class=self.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
 
-    NVCopyQueue().wait(self.timeline_signal, self.timeline_value) \
-                 .setup(copy_class=nv_gpu.AMPERE_DMA_COPY_B) \
-                 .signal(self.timeline_signal, self.timeline_value + 1).submit(self)
+    cast(NVCopyQueue, NVCopyQueue().wait(self.timeline_signal, self.timeline_value)) \
+                                   .setup(copy_class=nv_gpu.AMPERE_DMA_COPY_B) \
+                                   .signal(self.timeline_signal, self.timeline_value + 1).submit(self)
 
     self.timeline_value += 2
 
@@ -555,9 +555,9 @@ class NVDevice(HCQCompiled):
       bytes_per_tpc = round_up(round_up(self.slm_per_thread * 32, 0x200) * self.max_warps_per_sm * self.num_sm_per_tpc, 0x8000)
       self.shader_local_mem = self.allocator.alloc(round_up(bytes_per_tpc * self.num_tpc_per_gpc * self.num_gpcs, 0x20000))
 
-    NVComputeQueue().wait(self.timeline_signal, self.timeline_value - 1) \
-                    .setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
-                    .signal(self.timeline_signal, self.timeline_value).submit(self)
+    cast(NVComputeQueue, NVComputeQueue().wait(self.timeline_signal, self.timeline_value - 1)) \
+                                         .setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
+                                         .signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
 
   def invalidate_caches(self):
