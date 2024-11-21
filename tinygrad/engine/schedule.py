@@ -362,13 +362,17 @@ do_realize = PatternMatcher([
   (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatSrc(), UPatSrc().view(name="view")),), name="root"),
    lambda ctx,root,view=None,**kwargs: root.replace(src=(realize(ctx,**kwargs) if view is None else realize(ctx,**kwargs).view(view.st),)),),
 ])
-def break_si(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> Optional[UOp]:
-  if to_store.op in {Ops.CONST, Ops.BIND}:
-    if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
-    return UOp(Ops.VALID, dtypes.bool, (unwrap(base.st).to_uop(),)).where(UOp.const(base.dtype, val), 0)
-  return realize(ctx.realizes, b, to_store, base) if b in ctx.realizes else None
 
-break_sched = PatternMatcher([(UPatSrc(), break_si),])
+def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
+  if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
+  return UOp(Ops.VALID, dtypes.bool, (unwrap(base.st).to_uop(),)).where(UOp.const(base.dtype, val), 0)
+
+break_sched = PatternMatcher([
+  # consts are always fused and generated
+  (UPatSrc({Ops.CONST, Ops.BIND}), generate_valid),
+  # everything else is a VIEW of BUFFER that either realizes or fuses
+  (UPatSrc(), lambda ctx,b,to_store,base: realize(ctx.realizes, b, to_store, base) if b in ctx.realizes else None),
+])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
