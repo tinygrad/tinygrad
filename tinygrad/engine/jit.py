@@ -28,6 +28,8 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
     try:
       if len(current_batch) <= 1 or current_device is None: raise GraphException("only one kernel doesn't graph")
       graph_runner = current_device.graph(current_batch, input_rawbuffers, var_vals)
+      # clear jit inputs to allow their memory to be freed/reused
+      for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
       graphed_jit_cache.append(ExecItem(graph_runner, cast(List[Optional[Buffer]], input_rawbuffers)))
       max_batch_size *= 2
       if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
@@ -69,6 +71,7 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
 
 class GraphRunner(Runner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+    self.jit_cache = jit_cache  # NOTE: this is not used, but you have to keep these objects alive for the Graph
     self.input_replace:Dict[Tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
     self.var_vals_replace:Dict[int, List[int]] = {}
     self.launch_dims_replace:Dict[int, Tuple[Optional[int], Optional[int]]] = {}
