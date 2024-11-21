@@ -37,10 +37,10 @@ jobs:
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
         pip install mypy
         mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-    - name: Run beautiful_mnist without numpy
+    - name: Run beautiful_mnist with tinygrad only
       run: |
-        mkdir $HOME/test_no_numpy_dir
-        cd $HOME/test_no_numpy_dir
+        mkdir $GITHUB_WORKSPACE/test_dir
+        cd $GITHUB_WORKSPACE/test_dir
         python -m venv venv
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE
@@ -229,7 +229,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
-      run: python -m mypy --strict-equality
+      run: python -m mypy --strict-equality --lineprecision-report . && cat lineprecision.txt
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests

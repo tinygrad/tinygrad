@@ -2,7 +2,7 @@ from __future__ import annotations
 import ctypes, ctypes.util, functools
 from typing import Tuple, Optional, List
 from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, init_c_struct_t
-from tinygrad.device import Compiled, BufferOptions, LRUAllocator
+from tinygrad.device import Compiled, BufferSpec, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
@@ -31,17 +31,17 @@ def cu_time_execution(cb, enable=False) -> Optional[float]:
   return ret.value * 1e-3
 
 class CUDAProgram:
-  def __init__(self, device:CUDADevice, name:str, lib:bytes, smem:int=0):
-    self.device, self.name, self.lib, self.smem = device, name, lib, smem
+  def __init__(self, dev:CUDADevice, name:str, lib:bytes, smem:int=0):
+    self.dev, self.name, self.lib, self.smem = dev, name, lib, smem
     if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
-    if DEBUG >= 6: cuda_disassemble(lib, device.arch)
+    if DEBUG >= 6: cuda_disassemble(lib, dev.arch)
 
-    check(cuda.cuCtxSetCurrent(self.device.context))
+    check(cuda.cuCtxSetCurrent(self.dev.context))
     self.module = cuda.CUmodule()
     status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
     if status != 0:
       del self.module
-      cuda_disassemble(lib, device.arch)
+      cuda_disassemble(lib, dev.arch)
       raise RuntimeError(f"module load failed with status code {status}: {cuda.cudaError_enum__enumvalues[status]}")
     check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
     self.prg = prg
@@ -51,7 +51,7 @@ class CUDAProgram:
     if hasattr(self, 'module'): check(cuda.cuModuleUnload(self.module))
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    check(cuda.cuCtxSetCurrent(self.device.context))
+    check(cuda.cuCtxSetCurrent(self.dev.context))
     if not hasattr(self, "vargs"):
       self.c_args, self.vargs = encode_args(args, vals)
     else:
@@ -63,31 +63,31 @@ class CUDAAllocator(LRUAllocator):
   def __init__(self, device:CUDADevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size, options:BufferOptions):
+  def _alloc(self, size, options:BufferSpec):
     check(cuda.cuCtxSetCurrent(self.device.context))
     if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0x01)))
     return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
-  def _free(self, opaque, options:BufferOptions):
+  def _free(self, opaque, options:BufferSpec):
     if options.host: check(cuda.cuMemFreeHost(opaque))
     else: check(cuda.cuMemFree_v2(opaque))
-  def copyin(self, dest, src:memoryview):
+  def _copyin(self, dest, src:memoryview):
     check(cuda.cuCtxSetCurrent(self.device.context))
-    host_mem = self.alloc(len(src), BufferOptions(host=True))
-    self.device.pending_copyin.append((host_mem, len(src), BufferOptions(host=True)))
+    host_mem = self.alloc(len(src), BufferSpec(host=True))
+    self.device.pending_copyin.append((host_mem, len(src), BufferSpec(host=True)))
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(cuda.cuMemcpyHtoDAsync_v2(dest, host_mem, len(src), None))
-  def copyout(self, dest:memoryview, src):
+  def _copyout(self, dest:memoryview, src):
     CUDADevice.synchronize_system()
     check(cuda.cuCtxSetCurrent(self.device.context))
     check(cuda.cuMemcpyDtoH_v2(from_mv(dest), src, len(dest)))
-  def transfer(self, dest, src, sz:int, src_dev, dest_dev):
+  def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
     check(cuda.cuCtxSetCurrent(src_dev.context))
     check(cuda.cuEventCreate(ctypes.byref(sync_event := cuda.CUevent()), 0))
     check(cuda.cuMemcpyDtoDAsync_v2(dest, src, sz, None))
     check(cuda.cuEventRecord(sync_event, None))
     check(cuda.cuCtxSetCurrent(dest_dev.context))
     check(cuda.cuStreamWaitEvent(None, sync_event, 0)) # sync the default stream on the dest dev
-  def offset(self, buf, size:int, offset:int): return cuda.CUdeviceptr_v2(buf.value + offset)
+  def _offset(self, buf, size:int, offset:int): return cuda.CUdeviceptr_v2(buf.value + offset)
 
 class CUDADevice(Compiled):
   devices: List[CUDADevice] = []
@@ -110,7 +110,7 @@ class CUDADevice(Compiled):
       CUDADevice.peer_access = True
 
     self.arch = f"sm_{major.value}{minor.value}"
-    self.pending_copyin: List[Tuple[int, int, Optional[BufferOptions]]] = []
+    self.pending_copyin: List[Tuple[int, int, Optional[BufferSpec]]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph

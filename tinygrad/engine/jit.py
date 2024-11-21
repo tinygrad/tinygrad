@@ -40,7 +40,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
   for ji in jit_cache:
     if ji.prg.__class__ in {EmptyOp, ViewOp}: continue
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
-    if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.device
+    if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.dev
     elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"CUDA", "NV", "AMD"}:
       ji_graph_dev = Device[ji.bufs[0].device]
 
@@ -67,7 +67,7 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
         input_replace[(j,i)] = input_rawbuffers.index(a)
   return input_replace
 
-class GraphRunner(Runner):  # pylint: disable=abstract-method
+class GraphRunner(Runner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache
     self.input_replace:Dict[Tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
@@ -99,7 +99,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     self.w_dependency_map: Dict[int, Any] = {}
     self.r_dependency_map: Dict[int, List[Any]] = collections.defaultdict(list)
 
-    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
+    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.device.split(":")[0],
                      ssimplify(op_estimate), ssimplify(mem_estimate), ssimplify(lds_estimate))
 
   def updated_vars(self, var_vals: Dict[Variable, int]):
@@ -126,7 +126,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     return list({id(x):x for x in wait_nodes}.values())
 
 # a marker for your graph supporting multiple devices of the same type
-class MultiGraphRunner(GraphRunner): pass # pylint: disable=abstract-method
+class MultiGraphRunner(GraphRunner): pass
 
 ReturnType = TypeVar('ReturnType')
 @dataclass

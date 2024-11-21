@@ -29,7 +29,7 @@ class CUDAGraph(MultiGraphRunner):
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
 
         c_args, vargs = encode_args([x._buf for x in ji.bufs], [var_vals[x] for x in ji.prg.p.vars])
-        kern_params = cuda.CUDA_KERNEL_NODE_PARAMS(ji.prg.clprg.prg, *global_size, *local_size, 0, None, vargs)
+        kern_params = cuda.CUDA_KERNEL_NODE_PARAMS(ji.prg._prg.prg, *global_size, *local_size, 0, None, vargs)
         check(cuda.cuGraphAddKernelNode(ctypes.byref(new_node), self.graph, c_deps, len(deps), ctypes.byref(kern_params)))
 
         if j in self.launch_dims_replace or j in self.var_vals_replace or j in self.jc_idx_with_updatable_rawbufs:

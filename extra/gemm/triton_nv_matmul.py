@@ -4,7 +4,7 @@ import triton.language as tl
 from triton.compiler import AttrsDescriptor, ASTSource, compile as triton_compile
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.engine.realize import CompiledRunner, ExecItem, Program
+from tinygrad.engine.realize import CompiledRunner, ExecItem, ProgramSpec
 from tinygrad.helpers import getenv
 np.set_printoptions(suppress=True)
 
@@ -85,7 +85,7 @@ if __name__ == "__main__":
   # remove debug sections
   src = src.split("\t.file")[0]
   assert '.extern .shared' not in src
-  prg = Program("matmul_kernel", src, dname=Device.DEFAULT,
+  prg = ProgramSpec("matmul_kernel", src, device=Device.DEFAULT,
                 global_size=[M//BLOCK_SIZE_M, N//BLOCK_SIZE_N, 1], local_size=[32*compiled.metadata.num_warps, 1, 1],
                 mem_estimate=A.nbytes() + B.nbytes() + C.nbytes())
   ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
