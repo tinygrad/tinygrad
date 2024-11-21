@@ -360,7 +360,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       case Ops.BUFFER: return self.arg[1][0]
       case _: return self.src[0].device
   @property
+  def size(self) -> int: return self.buf_uop.arg[1][1]
+  @property
   def buf_uop(self) -> UOp:
+    if self.op is Ops.BUFFER: return self
     assert self.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
     return self.src[0]
 

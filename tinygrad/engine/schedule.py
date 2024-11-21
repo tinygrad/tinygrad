@@ -397,7 +397,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   prescheduled: List[ScheduleItem] = []
   for store_uops in store_groups:
     ast, ast_ctx = full_ast_rewrite(UOp.sink(*(ctx.realizes[u] for u in store_uops)), ctx)
-    prescheduled.append(ScheduleItem(ast, tuple(b for u in ast_ctx.bufs if (b:=buffers[u]).size != 0),
+    prescheduled.append(ScheduleItem(ast, tuple(buffers[u] for u in ast_ctx.bufs if u.size != 0),
                                      tuple(ast_ctx.metadata), frozenset(x.buf_uop for x in ast_ctx.assign_preloads)))
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
