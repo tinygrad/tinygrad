@@ -334,7 +334,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
                                              UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=(idx, False))
-  def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
+  def r(self, op:Ops, axis:Tuple[int, ...]): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def contiguous(self): return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
   @property
@@ -343,11 +343,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop movement ops ***
 
   @property
-  def base(self): return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
-  def view(self, st:ShapeTracker):
+  def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
+  def view(self, st:ShapeTracker) -> UOp:
     assert self.op is not Ops.STORE, "VIEW of STORE is invalid, STORE is always base"
     return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
-  def reshape(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).reshape(arg))
+  def reshape(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).reshape(arg))
 
   # *** uop Buffer stuff ***
 
