@@ -79,8 +79,8 @@ class CompiledRunner(Runner):
     if DEBUG >= 4: print(p.src)
     self.p:Program = p
     self.lib:bytes = precompiled if precompiled is not None else Device[p.device].compiler.compile_cached(p.src)
-    if DEBUG >= 6: Device[p.device].compiler.disassemble(self.lib)
     self.clprg = Device[p.device].runtime(p.function_name, self.lib)
+    if DEBUG >= 6: Device[p.device].compiler.disassemble(self.lib)
     super().__init__(p.name, p.device, p.op_estimate, p.mem_estimate, p.lds_estimate)
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)

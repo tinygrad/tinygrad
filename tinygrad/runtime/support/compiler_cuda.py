@@ -30,7 +30,7 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
 
-def cuda_disassemble(lib, arch):
+def ptx_disassemble(lib, arch):
   try:
     fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
     with open(fn + ".ptx", "wb") as f: f.write(lib)
@@ -51,16 +51,17 @@ class CUDACompiler(Compiler):
     nvrtc_check(nvrtc.nvrtcDestroyProgram(ctypes.byref(prog)))
     return data
   def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetPTX, nvrtc.nvrtcGetPTXSize)
+  def disassemble(self, lib:bytes): ptx_disassemble(lib, self.arch)
+
+class NVCompiler(CUDACompiler):
+  def __init__(self, arch:str): super().__init__(arch, cache_key="nv")
+  def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize)
   def disassemble(self, lib:bytes):
     try:
       fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
       with open(fn + ".cubin", "wb") as f: f.write(lib)
       print(subprocess.check_output(["nvdisasm", fn+".cubin"]).decode('utf-8'))
     except Exception as e: print("Failed to disasm cubin:", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
-
-class NVCompiler(CUDACompiler):
-  def __init__(self, arch:str): super().__init__(arch, cache_key="nv")
-  def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize)
 
 class PTXCompiler(CUDACompiler):
   def __init__(self, arch:str, cache_key="ptx"): super().__init__(arch, cache_key=cache_key)
