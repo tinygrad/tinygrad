@@ -3,7 +3,7 @@ from typing import Tuple, List, Any, Optional
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib, decimal, sys
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, HCQArgsState, HCQSignal, HCQProgram
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram
 from tinygrad.device import BufferOptions
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
@@ -54,7 +54,7 @@ class AMDSignal(HCQSignal):
         kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(self._evt_array), num_events=1, wait_for_all=1, timeout=1000)
     raise RuntimeError(f"wait_signal: not set to {value}, but {self._signal[0]}, {timeout} ms TIMEOUT!")
 
-class AMDComputeQueue(HWComputeQueue):   # pylint: disable=abstract-method
+class AMDComputeQueue(HWQueue):   # pylint: disable=abstract-method
   def __init__(self):
     self.cmd_idx_to_local_offset, self.cmd_idx_to_global_offset, self.cmd_idx_to_dispatch_packet = {}, {}, {}
     super().__init__()
@@ -184,7 +184,7 @@ class AMDComputeQueue(HWComputeQueue):   # pylint: disable=abstract-method
     dev.compute_queue.doorbell[0] = dev.compute_queue.put_value
 
 SDMA_MAX_COPY_SIZE = 0x400000
-class AMDCopyQueue(HWCopyQueue):   # pylint: disable=abstract-method
+class AMDCopyQueue(HWQueue):   # pylint: disable=abstract-method
   def __init__(self):
     self.internal_cmd_sizes, self.copy_cmds_per_copy = [], {}
     super().__init__()

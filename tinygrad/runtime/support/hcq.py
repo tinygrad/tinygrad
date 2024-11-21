@@ -17,7 +17,7 @@ def hcq_command(func: Callable[..., None]) -> Callable[..., Any]:
       def command_method(self, ...): ...
     ```
   """
-  def __wrapper(self:HWCommandQueue, *args, **kwargs):
+  def __wrapper(self:HWQueue, *args, **kwargs):
     self.cmds_offset.append(len(self.q))
     func(self, *args, **kwargs)
     self.cmds_len.append(len(self.q) - self.cmds_offset[-1])
@@ -30,7 +30,7 @@ DeviceType = TypeVar('DeviceType', bound='HCQCompiled')
 ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 
-class HWCommandQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
+class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   """
   A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
   Both compute and copy queues should have the following commands implemented.
@@ -136,10 +136,12 @@ class HWCommandQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]
     return self
   def _submit(self, dev:DeviceType): raise NotImplementedError("backend should overload this function")
 
+  # *** commands for compute queues ***
+
   @hcq_command
   def memory_barrier(self):
     """
-    Enqueues a memory barrier command to ensure memory coherence between agents.
+    Enqueues a memory barrier command to ensure memory coherence between agents. Only on compute queues.
     """
     self._memory_barrier()
   def _memory_barrier(self): pass
@@ -147,7 +149,7 @@ class HWCommandQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]
   @hcq_command
   def exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
     """
-    Enqueues an execution command for a kernel program.
+    Enqueues an execution command for a kernel program. Only on compute queues.
 
     Args:
       prg: The program to execute
@@ -161,7 +163,7 @@ class HWCommandQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]
 
   def update_exec(self, cmd_idx:int, global_size:Optional[Tuple[int,int,int]]=None, local_size:Optional[Tuple[int,int,int]]=None):
     """
-    Updates a previously queued execution command.
+    Updates a previously queued execution command. Only on compute queues.
 
     Args:
       cmd_idx: Index of the execution command to update
@@ -173,10 +175,12 @@ class HWCommandQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]
     return self
   def _update_exec(self, cmd_idx, global_size, local_size): raise NotImplementedError("backend should overload this function")
 
+  # *** commands for copy queues ***
+
   @hcq_command
   def copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int):
     """
-    Enqueues a copy command to transfer data.
+    Enqueues a copy command to transfer data. Only on copy queues.
 
     Args:
       dest: The destination of the copy
@@ -188,7 +192,7 @@ class HWCommandQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]
 
   def update_copy(self, cmd_idx:int, dest:Optional[HCQBuffer]=None, src:Optional[HCQBuffer]=None):
     """
-    Updates a previously queued copy command.
+    Updates a previously queued copy command. Only on copy queues.
 
     Args:
       cmd_idx: Index of the copy command to update
@@ -200,9 +204,6 @@ class HWCommandQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]
     return self
   def _update_copy(self, cmd_idx:int, dest:Optional[HCQBuffer], src:Optional[HCQBuffer]):
     raise NotImplementedError("backend should overload this function")
-
-HWCopyQueue = HWCommandQueue
-HWComputeQueue = HWCommandQueue
 
 class HCQSignal:
   def __init__(self, value:int=0, is_timeline:bool=False): self._set_value(value)
@@ -356,7 +357,7 @@ class HCQCompiled(Compiled):
   gpu2cpu_compute_time_diff: decimal.Decimal = decimal.Decimal('nan')
 
   def __init__(self, device:str, allocator:HCQAllocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[HCQSignal],
-               comp_queue_t:Type[HWComputeQueue], copy_queue_t:Optional[Type[HWCopyQueue]]):
+               comp_queue_t:Type[HWQueue], copy_queue_t:Optional[Type[HWQueue]]):
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
     self.timeline_signal, self._shadow_timeline_signal = self.signal_t(0, is_timeline=True), self.signal_t(0, is_timeline=True)
@@ -394,7 +395,7 @@ class HCQCompiled(Compiled):
   def _ensure_shared_time_base(self):
     if not self.gpu2cpu_compute_time_diff.is_nan(): return
 
-    def _sync_cpu_queue(d:HCQCompiled, q_t:Type[HWCommandQueue]):
+    def _sync_cpu_queue(d:HCQCompiled, q_t:Type[HWQueue]):
       q_t().timestamp(d.timeline_signal).signal(d.timeline_signal, d.timeline_value).submit(d)
       d.timeline_value += 1
       st = time.perf_counter_ns()
@@ -412,7 +413,7 @@ class HCQCompiled(Compiled):
       if q == d.hw_compute_queue_t: d.gpu2cpu_compute_time_diff = statistics.median(l)
       if q == d.hw_copy_queue_t: d.gpu2cpu_copy_time_diff = statistics.median(l)
 
-    def _sync_gpu_to_gpu_queue(d1:HCQCompiled, d2:HCQCompiled, q1_t:Type[HWCommandQueue], q2_t:Type[HWCommandQueue]):
+    def _sync_gpu_to_gpu_queue(d1:HCQCompiled, d2:HCQCompiled, q1_t:Type[HWQueue], q2_t:Type[HWQueue]):
       q1_t().signal(d1.timeline_signal, d1.timeline_value).wait(d2.timeline_signal, d2.timeline_value) \
             .timestamp(d1.timeline_signal).signal(d1.timeline_signal, d1.timeline_value+1).submit(d1)
       q2_t().signal(d2.timeline_signal, d2.timeline_value).wait(d1.timeline_signal, d1.timeline_value) \
@@ -474,7 +475,7 @@ class HCQAllocator(LRUAllocator, Generic[DeviceType]): # pylint: disable=abstrac
   """
   A base allocator class compatible with the HCQ (Hardware Command Queue) API.
 
-  This class implements basic copy operations following the HCQ API, utilizing both `HWComputeQueue` and `HWCopyQueue`.
+  This class implements basic copy operations following the HCQ API, utilizing both types of `HWQueue`.
   """
 
   def __init__(self, dev:DeviceType, batch_size:int=(2 << 20), batch_cnt:int=32):
