@@ -160,12 +160,21 @@ def get_runner(dname:str, ast:UOp) -> CompiledRunner:
 def get_runners(dname:str, ast:UOp) -> Iterator[CompiledRunner]:
   kernel = get_kernel(Device[dname].renderer, ast)
   splitted = kernel.split_reduce(kernel.ast)
-  # if splitted:
-  #   for _ast in splitted:
-  #     kernel = get_kernel(Device[dname].renderer, _ast)
-  #     modified_asts = kernel.get_optimized_ast()
+  if splitted:
+    for _ast in splitted:
+      print(_ast)
+      kernel2 = get_kernel(Device[dname].renderer, _ast)
+      modified_ast = kernel2.get_optimized_ast()
+      print(modified_ast)
+      prg: Program = kernel2.to_program(modified_ast=modified_ast)
+      print(f"\033[31m{prg.src}\033[0m")
+      ret = CompiledRunner(replace(prg, dname=dname))
+
+  print(f"{ast=}")
   modified_ast = kernel.get_optimized_ast()
+  print(modified_ast)
   prg: Program = kernel.to_program(modified_ast=modified_ast)
+  print(f"{prg.src}")
   ret = CompiledRunner(replace(prg, dname=dname))
   yield (ret, None)
 # **************** lowering functions ****************

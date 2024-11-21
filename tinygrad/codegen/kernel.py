@@ -619,6 +619,7 @@ class Kernel:
     return name + colored(num, 'BLACK')
 
   def split_reduce(self, op:UOp) -> List[UOp]:
+    if not KERNEL_SPLIT: return None
     if op.op is Ops.SINK:
       store = op.src[0]
       define_global, dest_view, reduce = store.src
@@ -628,11 +629,11 @@ class Kernel:
         def new_kernel(shape1, shape2, axis):
           return UOp(Ops.SINK, op.dtype, arg=op.arg, src=(
             UOp(Ops.STORE, store.dtype, src=(
-              UOp(Ops.DEFINE_GLOBAL, dtype=define_global, arg=define_global.arg),
+              UOp(Ops.DEFINE_GLOBAL, dtype=define_global.dtype, arg=define_global.arg),
               UOp(Ops.VIEW, dtype=src_view.dtype, arg=ShapeTracker.from_shape(shape1)),
               UOp(Ops.REDUCE_AXIS, reduce.dtype, arg=(reduce.arg[0], axis), src=(
                UOp(Ops.LOAD, dtypes.float, src=(
-                  UOp(Ops.DEFINE_GLOBAL, define_global2.dtype, ),
+                  UOp(Ops.DEFINE_GLOBAL, define_global2.dtype, arg=define_global2.arg),
                   UOp(Ops.VIEW, dtype=src_view.dtype, arg=ShapeTracker.from_shape(shape2))
                 )), 
               ))
@@ -640,8 +641,6 @@ class Kernel:
           ))
         kernel1 = new_kernel((64, 1, 16), (64, 4, 16), (1,))
         kernel2 = new_kernel((64, 1, 1), (64, 1, 16), (2,))
-        print(f"{kernel1=}")
-        print(f"{kernel2=}")
         return kernel1, kernel2
   def get_optimized_ast(self) -> UOp:
     @functools.lru_cache(None)
