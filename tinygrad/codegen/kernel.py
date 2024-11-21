@@ -658,7 +658,6 @@ class Kernel:
       if op.op is Ops.SINK:
         return ret.replace(arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
       if op.op is Ops.REDUCE_AXIS:
-        self.reduceops = dedup([x for x in ordered_parents(op) if x.op is Ops.REDUCE_AXIS])
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
 
         def reduced_axes(start, stop):
@@ -719,18 +718,14 @@ class Kernel:
           local_buffer = UOp(Ops.DEFINE_LOCAL, op.dtype.ptr(local=True), (), (f"temp{self.reduceops.index(op)+1}", st_uop.arg.real_size()))
           local_load = UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, ret)))
           grouped_reduce = UOp(Ops.REDUCE_AXIS, op.dtype, (local_load,), arg=(op.arg[0], grouped_axes))
-          if op is self.reduceops[-1]:
-            return grouped_reduce
+          if op is self.reduceops[-1]: return grouped_reduce
           st_uop = ShapeTracker.from_shape(tuple([1 if i in grouped_axes else a for i,a in enumerate(local_shape)])).to_uop()
           return UOp(Ops.LOAD, op.dtype, (local_buffer, st_uop, UOp.store(local_buffer, st_uop, grouped_reduce)))
 
       return ret
-    
-    fixedup = fixup_ast(self.ast)
-    rewritten = graph_rewrite(fixedup, PatternMatcher([
-    (UPat({*GroupOp.ALU,Ops.CAST,Ops.BITCAST,Ops.ASSIGN}, name="e").view(name="v"), lambda e,v: e.replace(src=tuple(s.view(v.st) for s in e.src))),
-    (UPat(Ops.LOAD, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src)))]))
-    return rewritten
+    return graph_rewrite(fixup_ast(self.ast), PatternMatcher([
+      (UPat({*GroupOp.ALU,Ops.CAST,Ops.BITCAST,Ops.ASSIGN}, name="e").view(name="v"), lambda e,v: e.replace(src=tuple(s.view(v.st) for s in e.src))),
+      (UPat(Ops.LOAD, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((v.arg).to_uop() if s.op is Ops.VIEW else s for s in b.src)))])) 
 
   # **** this is the lowerer ****
 
