@@ -194,7 +194,7 @@ to_si = PatternMatcher([
 # ** fusion
 
 def fuse_src(ctx:ScheduleItemContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
-  if (metadata:=ctx.lazybufs[b].metadata) is not None: ctx.metadata.add(metadata)
+  if (lbuf:=ctx.lazybufs.get(b)) is not None and (metadata:=lbuf.metadata) is not None: ctx.metadata.add(metadata)
   return to_store
 
 lazy = PatternMatcher([
