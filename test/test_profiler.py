@@ -1,7 +1,7 @@
 import unittest, struct, contextlib, tempfile, pathlib, json, time, atexit, random
 from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import CI, getenv, Context
-from tinygrad.device import Buffer, BufferOptions
+from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import ProfileLogger, HCQCompiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_runner
@@ -94,7 +94,7 @@ class TestProfiler(unittest.TestCase):
     helper_validate_node(kernel_node, profile=profile, pid_name=Device.DEFAULT, tid_name="COMPUTE")
 
   def test_profile_copyin(self):
-    buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0) as profile:
       buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
@@ -104,7 +104,7 @@ class TestProfiler(unittest.TestCase):
 
   def test_profile_multiops(self):
     runner_name = TestProfiler.runner.clprg.name
-    buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0) as profile:
       buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
@@ -125,8 +125,8 @@ class TestProfiler(unittest.TestCase):
 
   def test_profile_multidev_copyin(self):
     d1 = Device[f"{Device.DEFAULT}:1"]
-    buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated()
-    buf2 = Buffer(f"{Device.DEFAULT}:1", 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated()
+    buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
+    buf2 = Buffer(f"{Device.DEFAULT}:1", 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
       buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
@@ -197,7 +197,7 @@ class TestProfiler(unittest.TestCase):
     expected_diff = 100000 # sleep in us
 
     devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(6)]
-    bufs = [Buffer(f"{Device.DEFAULT}:{i}", 2, dtypes.float, options=BufferOptions(nolru=True)).ensure_allocated() for i in range(6)]
+    bufs = [Buffer(f"{Device.DEFAULT}:{i}", 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated() for i in range(6)]
 
     # enqueue ops on different queues to check the timer sync
     cpu_time = []

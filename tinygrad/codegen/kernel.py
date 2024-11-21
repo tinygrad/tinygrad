@@ -8,7 +8,7 @@ from enum import Enum, auto
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, PatternMatcher, can_pad, print_uops, type_verify, resolve, Variable, sint, \
     graph_rewrite, track_rewrites, UPat
 from tinygrad.device import Device
-from tinygrad.renderer import Renderer, TensorCore, Program
+from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap
 from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
@@ -702,7 +702,7 @@ class Kernel:
     if DEBUG >= 5: print_uops(self.uops)
     return self
 
-  def to_program(self, name_override:Optional[str]=None) -> Program:
+  def to_program(self, name_override:Optional[str]=None) -> ProgramSpec:
     self.linearize()
     src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
 
@@ -715,7 +715,7 @@ class Kernel:
     mem_bytes = sum(max(x.src[0].dtype.itemsize * x.st_arg.real_size() for x in group)
       for _, group in itertools.groupby([x for x in self.ast.parents if x.op in GroupOp.Buffer and x.src[0].op is Ops.DEFINE_GLOBAL],
                         key=lambda x: (x.op, x.src[0].arg)))
-    return Program(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
+    return ProgramSpec(ansiname, src, self.opts.device, self.uops, mem_estimate=mem_bytes,
                    global_size=[1,1,1] if self.opts.has_local else None, local_size=[1,1,1] if self.opts.has_local else None)
 
 # the living definition of intermediate UOps

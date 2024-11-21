@@ -1,7 +1,7 @@
 import ctypes, collections, time, itertools
 from typing import List, Any, Dict, cast, Optional, Tuple
 from tinygrad.helpers import init_c_var, round_up
-from tinygrad.device import Buffer, BufferOptions
+from tinygrad.device import Buffer, BufferSpec
 from tinygrad.device import Compiled, Device
 from tinygrad.ops import Variable
 from tinygrad.runtime.ops_hsa import HSADevice, PROFILE, Profiler
@@ -44,7 +44,7 @@ class HSAGraph(MultiGraphRunner):
     kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
     for ji in self.jit_cache:
       if isinstance(ji.prg, CompiledRunner): kernargs_size[ji.prg.dev] += round_up(ctypes.sizeof(ji.prg.clprg.args_struct_t), 16)
-    kernargs_ptrs: Dict[Compiled, int] = {dev:dev.allocator._alloc(sz, BufferOptions()) for dev,sz in kernargs_size.items()}
+    kernargs_ptrs: Dict[Compiled, int] = {dev:dev.allocator._alloc(sz, BufferSpec()) for dev,sz in kernargs_size.items()}
 
     # Fill initial arguments.
     self.ji_kargs_structs: Dict[int, ctypes.Structure] = {}

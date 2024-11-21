@@ -3,7 +3,7 @@ import os, ctypes, functools, mmap, struct, array, decimal, math, sys
 assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Tuple, List, Any, cast, Optional
-from tinygrad.device import BufferOptions
+from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
@@ -50,7 +50,7 @@ class QCOMComputeQueue(HWQueue):   # pylint: disable=abstract-method
     super().__init__()
 
   def __del__(self):
-    if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferOptions(cpu_access=True, nolru=True))
+    if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True))
 
   def cmd(self, opcode: int, *vals: int): self.q += [pkt7_hdr(opcode, len(vals)), *vals]
 
@@ -98,7 +98,7 @@ class QCOMComputeQueue(HWQueue):   # pylint: disable=abstract-method
 
   def bind(self, dev:QCOMDevice):
     self.binded_device = dev
-    self.hw_page = dev.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True))
+    self.hw_page = dev.allocator.alloc(len(self.q) * 4, BufferSpec(cpu_access=True, nolru=True))
     self.submit_req, self.obj = self._build_gpu_command(self.binded_device, self.hw_page.va_addr)
     # From now on, the queue is on the device for faster submission.
     self.q = to_mv(self.obj.gpuaddr, len(self.q) * 4).cast("I") # type: ignore
@@ -213,7 +213,7 @@ class QCOMProgram(HCQProgram):
     self.name, self.lib = name, lib
     self._parse_lib()
 
-    self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, options=BufferOptions(cpu_access=True, nolru=True))
+    self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, options=BufferSpec(cpu_access=True, nolru=True))
     to_mv(self.lib_gpu.va_addr, self.image_size)[:] = self.image
 
     self.pvtmem_size_per_item: int = round_up(self.pvtmem, 512) >> 9
@@ -283,7 +283,7 @@ class QCOMProgram(HCQProgram):
     self.fregs, self.hregs = _read_lib(reg_desc_off + 0x14), _read_lib(reg_desc_off + 0x18)
 
   def __del__(self):
-    if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferOptions(cpu_access=True, nolru=True))
+    if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferSpec(cpu_access=True, nolru=True))
 
 class QCOMBuffer(HCQBuffer):
   def __init__(self, va_addr:int, size:int, info=None, mapped=False, desc=None, ibo=None, pitch=None, real_stride=None, **kwargs):
@@ -293,7 +293,7 @@ class QCOMBuffer(HCQBuffer):
     self.desc, self.ibo, self.pitch, self.real_stride = [0] * 16, [0] * 16, pitch, real_stride
 
 class QCOMAllocator(HCQAllocator):
-  def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
+  def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     if options.image is not None:
       imgw, imgh, itemsize_log = options.image.shape[1], options.image.shape[0], int(math.log2(options.image.itemsize))
       pitchalign = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6
@@ -337,7 +337,7 @@ class QCOMAllocator(HCQAllocator):
     self.dev.synchronize()
     return to_mv(src.va_addr, src.size)
 
-  def _free(self, opaque, options:BufferOptions):
+  def _free(self, opaque, options:BufferSpec):
     self.dev.synchronize()
     self.dev._gpu_free(opaque)
 
