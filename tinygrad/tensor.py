@@ -2486,7 +2486,6 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).acos().numpy())
     ```
     """
-    # https://personal.math.ubc.ca/~cbm/aands/page_79.htm 4.4.2
     return math.pi / 2 - self.asin()
 
   def atan(self):
