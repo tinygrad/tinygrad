@@ -345,8 +345,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def const_with_shape(dtype:DType, val:ConstLike, shape:Tuple[sint,...]) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
-    st = ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop()
-    return UOp(Ops.VALID, dtypes.bool, (st,)).where(UOp.const(dtype, val), 0)
+    return UOp(Ops.VALID, dtypes.bool, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)).where(UOp.const(dtype, val), 0)
 
   # *** uop movement ops ***
 
