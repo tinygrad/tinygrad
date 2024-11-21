@@ -229,8 +229,8 @@ class OpenCLRenderer(CStyleLanguage):
 
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_prefix = "GPU", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel "
-  tensor_cores = [TensorCore(dims=(8,8,16),threads=[(0,8)],dtype_in=di,dtype_out=do,reduce_axes=[(0,16)],upcast_axes=([(0,16)],[(0,16)],[(1,8)]),
-    st1_pattern=(((1,0),),((1,2),(1,1),(0,0))),expanded_shape=(8,2,8)) for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
+  tensor_cores = [TensorCore(dims=(8,8,16),threads=[(0,8)],dtype_in=di,dtype_out=do,reduce_axes=[(0,8),(1,2)],upcast_axes=([(1,16)],[(1,16)],[(2,8)]),
+    st1_pattern=(((1,0),),((1,2),(1,1),(0,0)))) for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
 
   string_rewrite = PatternMatcher([
     (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float))), lambda ctx,x: f"intel_convert_bfloat16_as_ushort({ctx[x[0]]})"),
