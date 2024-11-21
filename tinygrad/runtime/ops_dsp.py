@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Tuple, Any
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys
 assert sys.platform != 'win32'
-from tinygrad.device import BufferOptions, Compiled, Allocator
+from tinygrad.device import BufferSpec, Compiled, Allocator
 from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv
 from tinygrad.runtime.ops_clang import ClangCompiler
 from tinygrad.renderer.cstyle import DSPRenderer
@@ -43,13 +43,13 @@ class DSPAllocator(Allocator):
     self.dev = dev
     super().__init__()
 
-  def _alloc(self, size:int, options:BufferOptions):
+  def _alloc(self, size:int, options:BufferSpec):
     b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
     share_info = qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)
     va_addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, share_info.fd, 0)
     return DSPBuffer(va_addr, size, share_info, offset=0)
 
-  def _free(self, opaque:DSPBuffer, options:BufferOptions):
+  def _free(self, opaque:DSPBuffer, options:BufferSpec):
     libc.munmap(opaque.va_addr, opaque.size)
     os.close(opaque.share_info.fd)
     qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
@@ -75,7 +75,7 @@ class DSPDevice(Compiled):
                      ClangCompiler("compile_dsp", args=compiler_args, objdump_tool='llvm-objdump'), functools.partial(DSPProgram, self))
 
     fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
-    self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferOptions(nolru=True))
+    self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
     ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
 
     self.init_dsp()

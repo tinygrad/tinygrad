@@ -5,7 +5,7 @@ from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BE
 from tinygrad.ops import Ops, UOp, Variable, sym_infer, sint
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
-from tinygrad.renderer import Renderer, Program
+from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import ScheduleItem
 
@@ -75,12 +75,12 @@ class Runner:
     raise NotImplementedError("override this")
 
 class CompiledRunner(Runner):
-  def __init__(self, p:Program, precompiled:Optional[bytes]=None):
+  def __init__(self, p:ProgramSpec, precompiled:Optional[bytes]=None):
     if DEBUG >= 4: print(p.src)
-    self.p:Program = p
+    self.p:ProgramSpec = p
     self.lib:bytes = precompiled if precompiled is not None else Device[p.device].compiler.compile_cached(p.src)
     if DEBUG >= 6: Device[p.device].compiler.disassemble(self.lib)
-    self.clprg = Device[p.device].runtime(p.function_name, self.lib)
+    self._prg = Device[p.device].runtime(p.function_name, self.lib)
     super().__init__(p.name, p.device, p.op_estimate, p.mem_estimate, p.lds_estimate)
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)
@@ -90,7 +90,7 @@ class CompiledRunner(Runner):
     if global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
       from tinygrad.engine.search import optimize_local_size
-      local_size = optimize_local_size(self.clprg, global_size, rawbufs)
+      local_size = optimize_local_size(self._prg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
     lra = {}
@@ -100,7 +100,7 @@ class CompiledRunner(Runner):
     if local_size:
       lra['local_size'] = tuple(local_size)
       assert len(local_size) == 3, "local size must have len 3"
-    return self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
+    return self._prg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.p.vars), wait=wait)
 
 class EmptyOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"empty {buf.size:10d} {buf.dtype}", "yellow"), buf.device)
@@ -148,7 +148,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
-    prg: Program = get_kernel(Device[device].renderer, ast).to_program()
+    prg: ProgramSpec = get_kernel(Device[device].renderer, ast).to_program()
     if getenv("FUZZ_UOPS"):
       from test.external.fuzz_uops import UOpsFuzzerRunner
       return UOpsFuzzerRunner(replace(prg, device=device))

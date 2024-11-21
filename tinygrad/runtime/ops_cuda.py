@@ -2,7 +2,7 @@ from __future__ import annotations
 import ctypes, ctypes.util, functools
 from typing import Tuple, Optional, List
 from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, init_c_struct_t
-from tinygrad.device import Compiled, BufferOptions, LRUAllocator
+from tinygrad.device import Compiled, BufferSpec, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
@@ -63,17 +63,17 @@ class CUDAAllocator(LRUAllocator):
   def __init__(self, device:CUDADevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size, options:BufferOptions):
+  def _alloc(self, size, options:BufferSpec):
     check(cuda.cuCtxSetCurrent(self.device.context))
     if options.host: return init_c_var(ctypes.c_void_p(), lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0x01)))
     return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
-  def _free(self, opaque, options:BufferOptions):
+  def _free(self, opaque, options:BufferSpec):
     if options.host: check(cuda.cuMemFreeHost(opaque))
     else: check(cuda.cuMemFree_v2(opaque))
   def _copyin(self, dest, src:memoryview):
     check(cuda.cuCtxSetCurrent(self.device.context))
-    host_mem = self.alloc(len(src), BufferOptions(host=True))
-    self.device.pending_copyin.append((host_mem, len(src), BufferOptions(host=True)))
+    host_mem = self.alloc(len(src), BufferSpec(host=True))
+    self.device.pending_copyin.append((host_mem, len(src), BufferSpec(host=True)))
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(cuda.cuMemcpyHtoDAsync_v2(dest, host_mem, len(src), None))
   def _copyout(self, dest:memoryview, src):
@@ -110,7 +110,7 @@ class CUDADevice(Compiled):
       CUDADevice.peer_access = True
 
     self.arch = f"sm_{major.value}{minor.value}"
-    self.pending_copyin: List[Tuple[int, int, Optional[BufferOptions]]] = []
+    self.pending_copyin: List[Tuple[int, int, Optional[BufferSpec]]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph

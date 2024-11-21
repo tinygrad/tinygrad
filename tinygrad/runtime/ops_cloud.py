@@ -13,14 +13,14 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
-from tinygrad.device import Compiled, Allocator, Compiler, Device, BufferOptions
+from tinygrad.device import Compiled, Allocator, Compiler, Device, BufferSpec
 
 # ***** API *****
 
 class CloudRequest: pass
 
 @dataclass(frozen=True)
-class BufferAlloc(CloudRequest): buffer_num: int; size: int; options: BufferOptions # noqa: E702
+class BufferAlloc(CloudRequest): buffer_num: int; size: int; options: BufferSpec # noqa: E702
 
 @dataclass(frozen=True)
 class BufferFree(CloudRequest): buffer_num: int # noqa: E702
@@ -43,7 +43,7 @@ class ProgramExec(CloudRequest):
   global_size: Optional[Tuple[int, ...]]; local_size: Optional[Tuple[int, ...]]; wait: bool # noqa: E702
 
 # for safe deserialization
-whitelist = {x.__name__:x for x in [BufferAlloc, BufferFree, CopyIn, CopyOut, ProgramAlloc, ProgramFree, ProgramExec, BufferOptions]}
+whitelist = {x.__name__:x for x in [BufferAlloc, BufferFree, CopyIn, CopyOut, ProgramAlloc, ProgramFree, ProgramExec, BufferSpec]}
 eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
   ast.Call: lambda x: safe_eval(x.func)(*[safe_eval(arg) for arg in x.args], **{kwarg.arg: safe_eval(kwarg.value) for kwarg in x.keywords}),
   ast.Name: lambda x: whitelist[x.id], ast.Attribute: lambda x: {"imagef": dtypes.imagef, "imageh": dtypes.imageh}[x.attr]}
@@ -76,7 +76,7 @@ class BatchRequest:
 class CloudSession:
   programs: Dict[Tuple[str, str], Any] = field(default_factory=dict)
   # TODO: the buffer should track this internally
-  buffers: Dict[int, Tuple[Any, int, Optional[BufferOptions]]] = field(default_factory=dict)
+  buffers: Dict[int, Tuple[Any, int, Optional[BufferSpec]]] = field(default_factory=dict)
 
 class CloudHandler(BaseHTTPRequestHandler):
   protocol_version = 'HTTP/1.1'
@@ -143,7 +143,7 @@ class CloudAllocator(Allocator):
     self.device = dev
     super().__init__()
   # TODO: ideally we shouldn't have to deal with images here
-  def _alloc(self, size:int, options:BufferOptions) -> int:
+  def _alloc(self, size:int, options:BufferSpec) -> int:
     self.device.buffer_num += 1
     self.device.req.q(BufferAlloc(self.device.buffer_num, size, options))
     return self.device.buffer_num

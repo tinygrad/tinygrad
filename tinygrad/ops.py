@@ -72,7 +72,7 @@ class SimpleMathTrait:
   def __le__(self, x): return self.le(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
-class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
+class MathTrait(SimpleMathTrait):
   # TODO: move to Tensor when new backward is done
   def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
   def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)
@@ -334,28 +334,43 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
                                              UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=(idx, False))
-  def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
+  def r(self, op:Ops, axis:Tuple[int, ...]): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def contiguous(self): return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
   @property
   def is_contiguous_base(self): return self.op is Ops.CONTIGUOUS and not (self.src[0].base.op is Ops.VIEW and len(self.src[0].base.src) == 2)
 
+  # *** from LazyBuffer ***
+
+  @staticmethod
+  def const_with_shape(dtype:DType, val:ConstLike, shape:Tuple[sint,...]) -> UOp:
+    from tinygrad.shape.shapetracker import ShapeTracker
+    return UOp(Ops.VALID, dtypes.bool, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)).where(UOp.const(dtype, val), 0)
+
   # *** uop movement ops ***
 
   @property
-  def base(self): return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
-  def view(self, st:ShapeTracker):
+  def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
+  def view(self, st:ShapeTracker) -> UOp:
     assert self.op is not Ops.STORE, "VIEW of STORE is invalid, STORE is always base"
     return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
-  def reshape(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).reshape(arg))
+  def reshape(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).reshape(arg))
 
   # *** uop Buffer stuff ***
 
   @staticmethod
   def new_buffer(device:str, size:int, dtype:DType, num=-1): return  UOp(Ops.BUFFER, dtype.ptr(), (), (num, (device, size, dtype)))
-
+  @functools.cached_property
+  def device(self) -> str:
+    match self.op:
+      case Ops.COPY: return self.arg
+      case Ops.BUFFER: return self.arg[1][0]
+      case _: return self.src[0].device
+  @property
+  def size(self) -> int: return self.buf_uop.arg[1][1]
   @property
   def buf_uop(self) -> UOp:
+    if self.op is Ops.BUFFER: return self
     assert self.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
     return self.src[0]
 

@@ -1,7 +1,7 @@
 import ctypes, collections, time, itertools
 from typing import List, Any, Dict, cast, Optional, Tuple
 from tinygrad.helpers import init_c_var, round_up
-from tinygrad.device import Buffer, BufferOptions
+from tinygrad.device import Buffer, BufferSpec
 from tinygrad.device import Compiled, Device
 from tinygrad.ops import Variable
 from tinygrad.runtime.ops_hsa import HSADevice, PROFILE, Profiler
@@ -43,15 +43,15 @@ class HSAGraph(MultiGraphRunner):
     # Allocate kernel args.
     kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
     for ji in self.jit_cache:
-      if isinstance(ji.prg, CompiledRunner): kernargs_size[ji.prg.dev] += round_up(ctypes.sizeof(ji.prg.clprg.args_struct_t), 16)
-    kernargs_ptrs: Dict[Compiled, int] = {dev:dev.allocator._alloc(sz, BufferOptions()) for dev,sz in kernargs_size.items()}
+      if isinstance(ji.prg, CompiledRunner): kernargs_size[ji.prg.dev] += round_up(ctypes.sizeof(ji.prg._prg.args_struct_t), 16)
+    kernargs_ptrs: Dict[Compiled, int] = {dev:dev.allocator._alloc(sz, BufferSpec()) for dev,sz in kernargs_size.items()}
 
     # Fill initial arguments.
     self.ji_kargs_structs: Dict[int, ctypes.Structure] = {}
     for j,ji in enumerate(self.jit_cache):
       if not isinstance(ji.prg, CompiledRunner): continue
-      self.ji_kargs_structs[j] = ji.prg.clprg.args_struct_t.from_address(kernargs_ptrs[ji.prg.dev])
-      kernargs_ptrs[ji.prg.dev] += round_up(ctypes.sizeof(ji.prg.clprg.args_struct_t), 16)
+      self.ji_kargs_structs[j] = ji.prg._prg.args_struct_t.from_address(kernargs_ptrs[ji.prg.dev])
+      kernargs_ptrs[ji.prg.dev] += round_up(ctypes.sizeof(ji.prg._prg.args_struct_t), 16)
       for i in range(len(ji.bufs)): self.ji_kargs_structs[j].__setattr__(f'f{i}', cast(Buffer, ji.bufs[i])._buf)
       for i in range(len(ji.prg.p.vars)): self.ji_kargs_structs[j].__setattr__(f'v{i}', var_vals[ji.prg.p.vars[i]])
 
@@ -76,9 +76,9 @@ class HSAGraph(MultiGraphRunner):
         self.packets[j] = hsa.hsa_kernel_dispatch_packet_t.from_address(self.virt_aql_queues[ji.prg.dev].write_addr)
 
         sync_signal = self.alloc_signal(reset_on_start=True) if PROFILE else None
-        self.virt_aql_queues[ji.prg.dev].submit_kernel(ji.prg.clprg, *ji.prg.p.launch_dims(var_vals), #type:ignore
+        self.virt_aql_queues[ji.prg.dev].submit_kernel(ji.prg._prg, *ji.prg.p.launch_dims(var_vals), #type:ignore
                                                           ctypes.addressof(self.ji_kargs_structs[j]), completion_signal=sync_signal)
-        if PROFILE: self.profile_info[ji.prg.dev].append((sync_signal, ji.prg.clprg.name, False))
+        if PROFILE: self.profile_info[ji.prg.dev].append((sync_signal, ji.prg._prg.name, False))
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         dest_dev, src_dev = cast(HSADevice, Device[dest.device]), cast(HSADevice, Device[src.device])

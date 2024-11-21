@@ -1,6 +1,6 @@
 from typing import Tuple, Dict, List
 from tinygrad.dtype import DType
-from tinygrad.renderer import Program
+from tinygrad.renderer import ProgramSpec
 from tinygrad.tensor import Device, Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
@@ -24,7 +24,7 @@ web_utils = {
 def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
   for ji in run.jit_cache:
-    fxn: Program = ji.prg.p
+    fxn: ProgramSpec = ji.prg.p
     functions[fxn.function_name] = fxn.src   # NOTE: this assumes all with the same name are the same
     cargs = []
     for i,arg in enumerate(ji.bufs):

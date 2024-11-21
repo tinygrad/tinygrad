@@ -2,7 +2,7 @@ from __future__ import annotations
 import ctypes, functools
 from typing import Tuple
 from tinygrad.helpers import init_c_var, from_mv, init_c_struct_t, getenv
-from tinygrad.device import Compiled, LRUAllocator, BufferOptions
+from tinygrad.device import Compiled, LRUAllocator, BufferSpec
 from tinygrad.runtime.autogen import hip
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.renderer.cstyle import HIPRenderer
@@ -46,10 +46,10 @@ class HIPAllocator(LRUAllocator):
   def __init__(self, dev:HIPDevice):
     self.dev = dev
     super().__init__()
-  def _alloc(self, size:int, options:BufferOptions):
+  def _alloc(self, size:int, options:BufferSpec):
     check(hip.hipSetDevice(self.dev.device_id))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
-  def _free(self, opaque, options:BufferOptions): check(hip.hipFree(opaque))
+  def _free(self, opaque, options:BufferSpec): check(hip.hipFree(opaque))
   def _copyin(self, dest, src: memoryview):
     check(hip.hipSetDevice(self.dev.device_id))
     check(hip.hipMemcpy(dest, from_mv(src), len(src), hip.hipMemcpyHostToDevice))

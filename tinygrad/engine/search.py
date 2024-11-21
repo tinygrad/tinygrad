@@ -9,7 +9,7 @@ from tinygrad.dtype import ImageDType, PtrDType
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import CompiledRunner
-from tinygrad.renderer import Program
+from tinygrad.renderer import ProgramSpec
 
 actions = [Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,5,7] for axis in range(6)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4,7] for axis in range(5)]
@@ -33,7 +33,7 @@ def _get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, factor
 
-def _time_program(p:Program, lib:bytes, var_vals:Dict[Variable, int], rawbufs:List[Buffer], early_stop:Optional[float]=None,
+def _time_program(p:ProgramSpec, lib:bytes, var_vals:Dict[Variable, int], rawbufs:List[Buffer], early_stop:Optional[float]=None,
                   max_global_size:Optional[int]=65536, clear_l2=False, cnt=3, name="test") -> List[float]:
   factor = 1
   if p.global_size is not None and max_global_size is not None:
@@ -55,7 +55,7 @@ def _time_program(p:Program, lib:bytes, var_vals:Dict[Variable, int], rawbufs:Li
 class TimeoutException(Exception): pass
 def timeout_handler(signum, frame): raise TimeoutException()
 
-def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tuple[int, Optional[Tuple[Program, bytes, float]]]:
+def _try_compile_linearized_w_idx(x:Tuple[int,Kernel], compiler:Compiler) -> Tuple[int, Optional[Tuple[ProgramSpec, bytes, float]]]:
   if hasattr(signal, "alarm"):
     signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
     # set timeout
@@ -180,13 +180,13 @@ def beam_search(lin:Kernel, rawbufs:List[Buffer], amt:int, allow_test_size=True,
   if BEAM_DEBUG: print(f"BEAM_SEARCH: final tm={beam[0][1]*1e6:0.2f} us, applied_opts={beam[0][0].applied_opts}")
   return beam[0][0]
 
-def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[Buffer]) -> List[int]:
+def optimize_local_size(_prg:Callable, global_size:List[int], rawbufs:List[Buffer]) -> List[int]:
   test_rawbuffers = [Buffer(rawbufs[0].device, rawbufs[0].size, rawbufs[0].dtype).allocate(), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
   MAX_WORKGROUP = 1024
   local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
   local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
   def try_exec(local_size):
-    try: return clprg(*[x._buf for x in test_rawbuffers], global_size=[g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)], local_size=local_size, wait=True)  # noqa: E501
+    try: return _prg(*[x._buf for x in test_rawbuffers], global_size=[g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)], local_size=local_size, wait=True)  # noqa: E501
     except Exception: return float('inf')
   ret = min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])
   assert not math.isinf(ret[0]), "all optimize_local_size exec failed"
