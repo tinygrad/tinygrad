@@ -1,7 +1,7 @@
 import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, builtins, atexit
 from extra.mockgpu.nv.nvdriver import NVDriver
 from extra.mockgpu.amd.amddriver import AMDDriver
-from tinygrad.helpers import from_mv, to_mv, OSX
+from tinygrad.helpers import from_mv, to_mv
 start = time.perf_counter()
 
 # *** ioctl lib ***
@@ -212,7 +212,7 @@ from tinygrad.runtime.support.hcq import HCQFile
 class MockHCQFile(HCQFile):
   def __init__(self, path:str, flags):
     self.fd = _open(path.encode(), flags, 0o777)
-    print("open", path, hex(self.fd))
+    #print("open", path, hex(self.fd))
   def __del__(self): _close(self.fd)
   def ioctl(self, request, arg):
     ret = _ioctl(self.fd, request, ctypes.addressof(arg))
@@ -220,5 +220,5 @@ class MockHCQFile(HCQFile):
     return ret
   def mmap(self, start, sz, prot, flags, offset):
     ret = _mmap(start, sz, prot, flags, self.fd, offset)
-    print("mmap", hex(self.fd), hex(start) if start is not None else None, hex(sz), prot, hex(flags), hex(ret))
+    #print("mmap", hex(self.fd), hex(start) if start is not None else None, hex(sz), prot, hex(flags), hex(ret))
     return ret
