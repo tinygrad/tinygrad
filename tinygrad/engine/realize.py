@@ -194,16 +194,16 @@ class ExecItem:
 def lower_schedule_item(si:ScheduleItem) -> Union[ExecItem, List[ExecItem]]:
   assert len(set(x.device for x in si.bufs)) == 1 or si.ast.op is Ops.COPY
   if si.ast.op is Ops.SINK:
-    output_buf = si.bufs[0]
-    input_bufs = si.bufs[1:]
     runners = get_runners(si.outputs[0].device, si.ast)
     if isinstance(runners, tuple):
+      output_buf = si.bufs[0]
+      input_bufs = si.bufs[1:]
       runner1, interim_buf, runner2 = runners
       exec1 = ExecItem(runner1, [interim_buf, *input_bufs])
       exec2 = ExecItem(runner2, [output_buf, interim_buf])
       return [exec1, exec2]
     runner = runners 
-    return ExecItem(runner, [output_buf, *input_bufs], si.metadata)
+    return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
   out, arg = si.outputs[0], si.ast.arg
   if si.ast.op is Ops.COPY:
     kernel_type = BufferCopy
