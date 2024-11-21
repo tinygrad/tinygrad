@@ -14,7 +14,7 @@ class HCQGraph(MultiGraphRunner):
 
     # Allocate kernel args.
     kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
-    for ji in self.jit_cache:
+    for ji in jit_cache:
       if not isinstance(ji.prg, CompiledRunner): continue
       kernargs_size[ji.prg.dev] += round_up(ji.prg._prg.kernargs_alloc_size, 16)
     self.kernargs_bufs: Dict[Compiled, HCQBuffer] = {dev:dev.allocator._alloc(sz, BufferSpec(cpu_access=True)) for dev,sz in kernargs_size.items()}
@@ -23,7 +23,7 @@ class HCQGraph(MultiGraphRunner):
     self.ji_args: Dict[int, HCQArgsState] = {}
 
     kargs_ptrs: Dict[Compiled, int] = {dev:buf.va_addr for dev,buf in self.kernargs_bufs.items()}
-    for j,ji in enumerate(self.jit_cache):
+    for j,ji in enumerate(jit_cache):
       if not isinstance(ji.prg, CompiledRunner): continue
       kargs_ptrs[ji.prg.dev] = (kargs_ptr:=kargs_ptrs[ji.prg.dev]) + round_up(ji.prg._prg.kernargs_alloc_size, 16)
       self.ji_args[j] = ji.prg._prg.fill_kernargs([cast(Buffer, b)._buf for b in ji.bufs], [var_vals[v] for v in ji.prg.p.vars], kargs_ptr)
@@ -41,7 +41,7 @@ class HCQGraph(MultiGraphRunner):
     self.signals: Dict[Any, HCQSignal] = {**{dev: dev.signal_t(value=0) for dev in self.devices}, **{"CPU": self.devices[0].signal_t(value=0)}}
     self.kickoff_value: int = 0
 
-    self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(self.jit_cache) * 2)] if PROFILE else []
+    self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(jit_cache) * 2)] if PROFILE else []
     self.prof_records: List[Tuple[Tuple[int, bool], Tuple[int, bool], HCQCompiled, str, bool, List[int], Optional[Dict]]] = []
 
     last_j: Dict[HWQueue, Optional[int]] = collections.defaultdict(lambda: None)
@@ -50,7 +50,7 @@ class HCQGraph(MultiGraphRunner):
 
     for dev, queue in self.comp_queues.items(): dev_access[queue].add(dev)
 
-    for j,ji in enumerate(self.jit_cache):
+    for j,ji in enumerate(jit_cache):
       enqueue_dev = ji.prg.dev if (is_exec_prg:=isinstance(ji.prg, CompiledRunner)) else Device[ji.bufs[1].device] #type:ignore
       enqueue_queue = self.comp_queues[enqueue_dev] if is_exec_prg else self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
       out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.signal_t(value=0))
@@ -107,7 +107,7 @@ class HCQGraph(MultiGraphRunner):
       self.comp_queues[dev].memory_barrier().wait(dev.timeline_signal, dev.timeline_value - 1) \
                            .wait(self.signals['CPU'], self.kickoff_value).signal(self.signals[dev], self.kickoff_value)
 
-    for j,ji in enumerate(self.jit_cache):
+    for j,ji in enumerate(jit_cache):
       enqueue_dev, enqueue_queue, sync_signals, deps, signal, signal_val = self.ji_schedule[j]
 
       for i in range(len(sync_signals)): self.kickoff_wait_cmds[enqueue_queue].append(len(enqueue_queue) + i)
