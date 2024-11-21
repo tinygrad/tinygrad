@@ -13,24 +13,11 @@ from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap
 from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX, KERNEL_SPLIT
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import strides_for_shape, View
+from tinygrad.shape.view import strides_for_shape
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
 from tinygrad.device import Buffer
-
-@functools.lru_cache(None)
-def ordered_parents(op:UOp) -> List[UOp]: return dedup([item for x in op.src for item in ordered_parents(x)] + [op])
-
-def UPatSrc(*args, **kwargs): return UPat(Ops.VIEW, src=(UPat.var("b"), UPat(*args, **{**kwargs, "name":"to_store"})), name="base")
-
-def reduceop(ctx, base, g, dest_view, reduce, src_view):
-  ret = base.replace(src=(g, dest_view, reduce))
-  return ret
-
-rewrite_split = PatternMatcher([
-  (UPat(Ops.REDUCE_AXIS, src=(UPat(src=(UPat.var(), UPat(Ops.VIEW, name="view"))))), lambda ctx, view: view.replace(arg=view.arg.reshape((64, 4, 16))))
-])
 
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
@@ -77,7 +64,9 @@ class Kernel:
       print(self.ast)
       raise e
 
-    
+    @functools.lru_cache(None)
+    def ordered_parents(op:UOp) -> List[UOp]: return dedup([item for x in op.src for item in ordered_parents(x)] + [op])
+ 
     self.reduceops = dedup([x for x in ordered_parents(self.ast) if x.op is Ops.REDUCE_AXIS])
 
     self.vars: List[Variable] = self.ast.variables()
@@ -653,10 +642,8 @@ class Kernel:
       ret = op.replace(src=tuple(fixup_ast(x) for x in op.src))
       if op.op in GroupOp.Buffer and op in self.bufs:
         st_uop = self.sts[self.bufs.index(op)].to_uop()
-        ret = ret.replace(src=(st_uop,)) if op.op is Ops.VALID else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
-        return ret
-      if op.op is Ops.SINK:
-        return ret.replace(arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
+        return ret.replace(src=(st_uop,)) if op.op is Ops.VALID else ret.replace(src=(ret.src[0], st_uop, *ret.src[2:]))
+      if op.op is Ops.SINK: return ret.replace(arg = KernelInfo(self.local_dims, self.upcasted, self.dont_use_locals))
       if op.op is Ops.REDUCE_AXIS:
         reduce_idx = len(self.bufs) + self.reduceops.index(op) * 2
 
