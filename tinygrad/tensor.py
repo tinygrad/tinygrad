@@ -2471,7 +2471,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     """
     return (self / (1 - self * self).sqrt()).atan()
 
-  def acos(self: Tensor):
+  def acos(self):
     """
     Computes the inverse cosine (arccosine) of the tensor element-wise.
 
@@ -2480,9 +2480,9 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     x = (1.0 - self.abs()).sqrt() * polyN(self.abs(), [-0.0187293, 0.0742610, -0.2121144, 1.5707288])
-    return (self < 0) * math.pi + x * (1 - 2 * (self < 0))
+    return (self < 0).detach().where(math.pi - x, x)
 
-  def atan(self: Tensor):
+  def atan(self):
     """
     Computes the inverse tangent (arctan) of the tensor element-wise.
 
@@ -2491,9 +2491,9 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     ```
     """
     magnitude = self.abs()
-    x = (1 > magnitude).detach().where(magnitude, magnitude.reciprocal())
+    x = (magnitude < 1).detach().where(magnitude, magnitude.reciprocal())
     x = x * polyN(x*x, [-0.013480470, 0.057477314, -0.121239071, 0.195635925, -0.332994597, 0.999995630])
-    return self.sign() * (magnitude > 1).detach().where(1.570796327 - x, x)
+    return self.sign() * (magnitude < 1).detach().where(x, math.pi / 2 - x)
 
   # ***** math functions *****
 
