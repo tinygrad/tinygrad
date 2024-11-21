@@ -1,7 +1,6 @@
 import math
 from typing import Optional, Tuple
 import unittest
-import numpy as np
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor
 
@@ -15,9 +14,9 @@ ROOT = 1 << 3
 IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
 MSG_PERMUTATION = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]
 
+def rotr(x: Tensor, n: int): return (x << (32 - n)) | (x >> n)
+
 def mix(states: Tensor, a: int, b: int, c: int, d: int, mx: Tensor, my: Tensor) -> Tensor:
-  def rotr(x: int, n: int) -> int:
-    return (x << (32 - n)) | (x >> n)
   states[:, a] = states[:, a] + (states[:, b] + mx)
   states[:, d] = rotr(states[:, d] ^ states[:, a], 16)
   states[:, c] = states[:, c] + states[:, d]
@@ -37,38 +36,23 @@ def round(states: Tensor, chunks: Tensor) -> Tensor:
   mix(states, 2, 7, 8, 13, chunks[:, 12], chunks[:, 13])
   mix(states, 3, 4, 9, 14, chunks[:, 14], chunks[:, 15])
 
-def permute(chunks: Tensor) -> Tensor:
-  original = chunks.clone()
-  for i in range(16):
-    chunks[:, i] = original[:, MSG_PERMUTATION[i]]
-  return chunks
-
-def compress_chunks(states: Tensor, chunks: Tensor, chain_vals: Tensor, n_end_blocks: Optional[int]):
-  # chunk compression is parallel, block compression is sequential due to chaining values
-  for i in range(states.shape[1]):
-    compressed = compress_block(states[:, i].contiguous(), chunks[:, i].contiguous(), chain_vals[:, i].contiguous())
+def compress_chunks(states: Tensor, chunks: Tensor, chain_vals: Tensor, final_chunk_n_blocks: int):
+  for i in range(states.shape[1]): # parallel over chunks, sequential within blocks
+    compressed = compress_blocks(states[:, i].contiguous(), chunks[:, i].contiguous(), chain_vals[:, i].contiguous())
     next_chain_vals = compressed[:, :8]
     if i < states.shape[1] - 1:
       chain_vals[:, i + 1] = next_chain_vals
       states[:, i + 1, :8] = next_chain_vals
-  end_idx = n_end_blocks if n_end_blocks is not None else -1
-  # return the chaining value of the final chunk
-  if n_end_blocks == 16: return next_chain_vals
-  else: return chain_vals[:, end_idx]
+  if final_chunk_n_blocks == 16: return next_chain_vals
+  else: return chain_vals[:-1, -1].cat(chain_vals[-1, final_chunk_n_blocks], dim=0)
 
-# TODO: parallelize over parent chaining value compression
-# TODO: reuse for compressing single blocks
-def compress_blocks():
-  pass
-
-def compress_block(states: Tensor, chunks: Tensor, chain_vals: Tensor) -> Tensor:
-  for _ in range(6):
+def compress_blocks(states: Tensor, chunks: Tensor, chain_vals: Tensor) -> Tensor:
+  for i in range(6):
     round(states, chunks)
-    permute(chunks)
+    chunks.replace(chunks[:, MSG_PERMUTATION])
   round(states, chunks)
-  for i in range(8):
-    states[:, i] = states[:, i] ^ states[:, i + 8]
-    states[:, i + 8] = states[:, i + 8] ^ chain_vals[:, i]
+  states[:, :8] = states[:, :8] ^ states[:, 8:]
+  states[:, 8:] = chain_vals[:, :8] ^ states[:, 8:]
   return states
 
 def bytes_to_chunks(text_bytes: bytes) -> Tuple[Tensor, int, int]:
@@ -76,35 +60,34 @@ def bytes_to_chunks(text_bytes: bytes) -> Tuple[Tensor, int, int]:
   n_chunks = max((n_bytes + CHUNK_BYTES - 1) // CHUNK_BYTES, 1)
   chunks = Tensor.zeros(n_chunks, 16, 16, dtype=dtypes.uint32).contiguous()
   unpadded_len = 0
+  # chunks
   for i in range(0, max(len(text_bytes), 1), CHUNK_BYTES):
     chunk = text_bytes[i:i + CHUNK_BYTES]
     unpadded_len = len(chunk)
     chunk = chunk.ljust(CHUNK_BYTES, b"\0")
+    # blocks
     for j in range(16):
       block_start = j * BLOCK_BYTES
-      b = chunk[block_start:block_start + BLOCK_BYTES]
-      block_words = [int.from_bytes(b[i: i + 4], "little") for i in range(0, len(b), 4)]
+      bw_bytes = chunk[block_start:block_start + BLOCK_BYTES]
+      # words
+      block_words = [int.from_bytes(bw_bytes[i: i + 4], "little") for i in range(0, len(bw_bytes), 4)]
       chunks[i // CHUNK_BYTES, j] = Tensor(block_words, dtype=dtypes.uint32)
   n_end_blocks = max(1, (unpadded_len // BLOCK_BYTES) + (1 if unpadded_len % BLOCK_BYTES else 0))
   end_block_len = BLOCK_BYTES if unpadded_len % BLOCK_BYTES == 0 and unpadded_len else unpadded_len % BLOCK_BYTES
   return chunks, n_end_blocks, end_block_len
 
 def pairwise_concat(chain_vals: Tensor) -> Tensor:
-  n_chunks, words = chain_vals.shape
-  assert words == 8
-  if n_chunks % 2 != 0:
-    # TODO: handle odd number of chunks
-    pass
-  n_pairs = n_chunks // 2
-  chain_pairs = chain_vals.reshape(n_pairs, 2, 8)
-  concatenated = chain_pairs.reshape(n_pairs, 16)
-  return concatenated
+  if chain_vals.shape[0] % 2 != 0:
+    chain_vals = chain_vals.cat(Tensor.zeros(1, 8, dtype=dtypes.uint32), dim=0)
+  return chain_vals.reshape(math.ceil(chain_vals.shape[0] / 2), 16)
 
-def create_state(chain_vals: Tensor, iv: Tensor, counter: int, last_len: Optional[int], n_end_blocks: Optional[int], flags: Tensor) -> Tensor:
+def create_state(chain_vals: Tensor, iv: Tensor, counter: Optional[int], last_len: Optional[int], n_end_blocks: Optional[int], flags: Tensor) -> Tensor:
   n_chunks, n_blocks, _ = chain_vals.shape
-  counts = Tensor.arange(counter, counter + n_chunks, dtype=dtypes.uint32)
-  counts = counts.cat(Tensor.zeros_like(counts, dtype=dtypes.uint32))
-  counts = counts.expand(n_chunks, n_blocks, -1)
+  if counter is not None:
+    counts = Tensor.arange(counter, counter + n_chunks, dtype=dtypes.uint32).reshape(n_chunks, 1).expand(n_chunks, n_blocks).reshape(n_chunks, n_blocks, 1)
+    counts = Tensor.zeros(n_chunks, n_blocks, 1, dtype=dtypes.uint32).cat(counts, dim=-1)
+  else:
+    counts = Tensor.zeros(n_chunks, n_blocks, 2, dtype=dtypes.uint32)
   lengths = Tensor.full((n_chunks, n_blocks, 1), fill_value=BLOCK_BYTES, dtype=dtypes.uint32).contiguous()
   if last_len is not None: lengths[:, n_end_blocks - 1] = last_len
   states = chain_vals.cat(iv[:, :, :4], counts, lengths, flags, dim=-1)
@@ -115,30 +98,30 @@ def create_flags(n_chunks: int, n_blocks: int, n_end_blocks: Optional[int], pare
   flags[:, 0] = flags[:, 0] + CHUNK_START
   end_idx = n_end_blocks - 1 if n_end_blocks is not None else -1
   flags[:, end_idx] = flags[:, end_idx] + CHUNK_END
-  if parents: flags = flags + PARENT
+  if parents: flags[:, :, :] = PARENT
   if root: flags[:, end_idx] = flags[:, end_idx] + ROOT
   return flags
 
 def tiny_blake3(text: str) -> str:
   text_bytes = text.encode("utf-8") if text else b""
   chunks, n_end_blocks, end_block_len = bytes_to_chunks(text_bytes)
+  # intitial compression
   iv = IV.expand(chunks.shape[0], chunks.shape[1], -1).contiguous()
-  counter = 0
-  # tree hash
+  flags = create_flags(chunks.shape[0], chunks.shape[1], n_end_blocks, False, chunks.shape[0] == 1)
+  states = create_state(iv, iv, 0, end_block_len, n_end_blocks, flags)
+  print(f"states before compress_chunks()\n{states.numpy()}")
+  chain_vals = compress_chunks(states, chunks, iv, n_end_blocks)
   tree_levels = math.ceil(math.log2(max(chunks.shape[0], 1)))
+  # tree hash
   for i in range(tree_levels):
-    flags = create_flags(chunks.shape[0], chunks.shape[1], n_end_blocks, i > 0, False)
-    if i == 0:
-      states = create_state(iv, iv, counter, end_block_len, n_end_blocks, flags)
-      compressed = compress_chunks(states, chunks, iv, n_end_blocks)
-    else:
-      compressed = compress_blocks()
-    chunks = pairwise_concat(compressed)
-    counter += chunks.shape[0]
-  # root hash
-  flags = create_flags(chunks.shape[0], chunks.shape[1], n_end_blocks, counter != 0, True)
-  states = create_state(chain_vals, iv, counter, end_block_len, n_end_blocks, flags)
-  chain_vals = compress_chunks(states, chunks, chain_vals, n_end_blocks)
+    chunks = pairwise_concat(chain_vals)
+    iv = IV.expand(chunks.shape[0], chunks.shape[1], -1).contiguous()
+    flags = create_flags(chunks.shape[0], chunks.shape[1], n_end_blocks, True, i == tree_levels - 1)
+    states = create_state(iv, iv, None, end_block_len, n_end_blocks, flags)[:, 0]
+    print(f"state before compress()\n{states.numpy()}")
+    print(f"blocks before compress()\n{chunks.numpy()}")
+    chain_vals = compress_blocks(states, chunks, iv[:, 0])
+    print(f"state after compress()\n{chain_vals.numpy()}")
   hash = chain_vals[0].flatten().numpy().tobytes()[:MD_LEN].hex()
   return hash
 
@@ -182,6 +165,7 @@ class TestBLAKE3(unittest.TestCase):
 
   def test_full_chunk(self):
     text = "abcd" * (CHUNK_BYTES // 4)
+    self.assertEqual(len(text), CHUNK_BYTES)
     actual = tiny_blake3(text)
     exp = '1913be5b8328ba32db70a3f5435e3103b5816b06491a36b948f1f7d29191b177'
     self.assertEqual(actual, exp)
@@ -194,8 +178,10 @@ class TestBLAKE3(unittest.TestCase):
 
   def test_odd_chunks(self):
     text = ("abcd" * (CHUNK_BYTES // 4)) * 9
-    pass
-  
+    actual = tiny_blake3(text)
+    exp = '25e5cebf882b2b65eb56e881d2ba69fd92dc6e58c1a8d94bdc3d04229e83b553'
+    self.assertEqual(actual, exp)
+
   def test_large(self):
     pass
 
