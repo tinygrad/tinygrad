@@ -2479,8 +2479,8 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     print(Tensor([-0.9, -0.6, -0.3, 0., 0.3, 0.6, 0.9]).acos().numpy())
     ```
     """
-    x = (1.0 - self.abs()).sqrt() * polyN(self.abs(), [-0.0187293, 0.0742610, -0.2121144, 1.5707288])
-    return (self < 0).detach().where(math.pi - x, x)
+    # https://personal.math.ubc.ca/~cbm/aands/page_79.htm 4.4.2
+    return math.pi / 2 - self.asin()
 
   def atan(self):
     """
