@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, hcq_command
 from tinygrad.runtime.support.hcq import HCQArgsState, HCQProgram, HCQSignal, HCQFile, MOCKGPU
 from tinygrad.device import BufferSpec
-from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod
+from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod, OSX
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
@@ -308,7 +308,7 @@ class GPFifo:
   token: int
   put_value: int = 0
 
-MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
+MAP_FIXED, MAP_NORESERVE = 0 if OSX else 0x10, 0x400
 class NVDevice(HCQCompiled[NVSignal]):
   root = None
   fd_ctl: HCQFile
@@ -364,7 +364,8 @@ class NVDevice(HCQCompiled[NVSignal]):
   def _gpu_host_alloc(self, size, tag=""):
     va_base = self._alloc_gpu_vaddr(aligned_sz:=round_up(size, 4 << 10))
     mapped_addr = libc.mmap(va_base, aligned_sz, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
-    assert mapped_addr == va_base, f"Not mmaped at correct address {va_base=} != {mapped_addr=}"
+    #assert mapped_addr == va_base, f"Not mmaped at correct address {va_base=:X} != {mapped_addr=:X}"
+    va_base = mapped_addr
 
     NVDevice.host_object_enumerator += 1
     flags = ((nv_gpu.NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS << 4) | (nv_gpu.NVOS02_FLAGS_COHERENCY_CACHED << 12) |
