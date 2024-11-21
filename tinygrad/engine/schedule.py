@@ -46,6 +46,7 @@ class ScheduleContext:
   ubuf_metadata: Dict[UOp, Metadata] = field(default_factory=dict)   # this maps BUFFER uops to Metadata
   var_vals: Dict[Variable, int] = field(default_factory=dict)        # this maps a BIND's DEFINE_VAR to its value
   assigns: Set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
+  realizes: Dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
   allbufs: Dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
   children: DefaultDict[UOp, Dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
@@ -338,6 +339,7 @@ def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> UOp:
   return UOp(Ops.LOAD, base.dtype, (b, st.to_uop()))
 
 def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, to_store:UOp, b:UOp) -> Optional[UOp]:
+  if to_store.op in {Ops.CONST, Ops.BIND}: return None
   base_shape = unwrap(base.st).shape
   st = unwrap(view.st)
   # fold simple pads
@@ -360,7 +362,13 @@ do_realize = PatternMatcher([
   (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatSrc(), UPatSrc().view(name="view")),), name="root"),
    lambda ctx,root,view=None,**kwargs: root.replace(src=(realize(ctx,**kwargs) if view is None else realize(ctx,**kwargs).view(view.st),)),),
 ])
-break_sched = PatternMatcher([(UPatSrc(), lambda ctx,b,to_store,base: realize(ctx, b, to_store, base) if b in ctx else None),])
+def break_si(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> Optional[UOp]:
+  if to_store.op in {Ops.CONST, Ops.BIND}:
+    if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
+    return UOp(Ops.VALID, dtypes.bool, (unwrap(base.st).to_uop(),)).where(UOp.const(base.dtype, val), 0)
+  return realize(ctx.realizes, b, to_store, base) if b in ctx.realizes else None
+
+break_sched = PatternMatcher([(UPatSrc(), break_si),])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
@@ -373,15 +381,14 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   lazybufs: Dict[Buffer, LazyBuffer] = {}
   big_graph = UOp.sink(*(to_uop(x, ctx, buffers, lazybufs, cache) for x in outs))
   # get realizes
-  realizes: Dict[UOp, UOp] = {}
-  graph_rewrite(big_graph, do_realize, realizes)
-  store_groups = group_realizes(ctx, realizes)
+  graph_rewrite(big_graph, do_realize, ctx.realizes)
+  store_groups = group_realizes(ctx, ctx.realizes)
   # split realizes into small graphs
-  graph_rewrite(big_graph, break_sched, realizes)
+  graph_rewrite(big_graph, break_sched, ctx)
   # preschedule all realizes
   prescheduled: List[ScheduleItem] = []
   for store_uops in store_groups:
-    ast, ast_ctx = full_ast_rewrite(UOp.sink(*(realizes[u] for u in store_uops)), ctx)
+    ast, ast_ctx = full_ast_rewrite(UOp.sink(*(ctx.realizes[u] for u in store_uops)), ctx)
     prescheduled.append(ScheduleItem(ast, tuple(b for u in ast_ctx.bufs if (b:=buffers[u]).size != 0),
                                      tuple(ast_ctx.metadata), frozenset(x.buf_uop for x in ast_ctx.assign_preloads)))
   # do BFS
