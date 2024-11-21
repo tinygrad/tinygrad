@@ -369,7 +369,7 @@ do_realize = PatternMatcher([
 
 def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
-  return UOp(Ops.VALID, dtypes.bool, (unwrap(base.st).to_uop(),)).where(UOp.const(base.dtype, val), 0)
+  return UOp.const_with_shape(base.dtype, val, unwrap(base.st).shape)
 
 break_sched = PatternMatcher([
   # consts are always fused and generated
