@@ -4,7 +4,7 @@ from typing import Tuple, TypeVar, List, Any, cast, Set
 import tinygrad.runtime.autogen.hip as hip
 from tinygrad.helpers import DEBUG, getenv, init_c_var
 from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t
-from tinygrad.device import Compiled, LRUAllocator, BufferOptions, Runner, Device, Buffer, MallocAllocator, update_stats, Compiler, CompilerOptions
+from tinygrad.device import Compiled, LRUAllocator, BufferSpec, Runner, Device, Buffer, MallocAllocator, update_stats, Compiler, CompilerOptions
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.support.hip_comgr import compile_hip
 from tinygrad.renderer.rdna import uops_to_rdna
@@ -93,7 +93,7 @@ class HIPAllocator(LRUAllocator):
   def _alloc(self, size:int):
     hip_set_device(self.device.device)
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
-  def _alloc_with_options(self, size:int, options:BufferOptions):
+  def _alloc_with_options(self, size:int, options:BufferSpec):
     hip_set_device(self.device.device)
     if options.uncached:
       return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipExtMallocWithFlags(ctypes.byref(x), size, 3)))  # hipDeviceMallocUncached = 3
@@ -105,7 +105,7 @@ class HIPAllocator(LRUAllocator):
   def copy_from_fd(self, dest, fd, offset, size):
     hip_set_device(self.device.device)
     if not hasattr(self, 'hb'):
-      self.hb = [self._alloc_with_options(CHUNK_SIZE, BufferOptions(host=True)) for _ in range(2)]
+      self.hb = [self._alloc_with_options(CHUNK_SIZE, BufferSpec(host=True)) for _ in range(2)]
       self.hb_events = [None, None]
       self.hb_polarity = 0
     fo = io.FileIO(fd, "a+b", closefd=False)
@@ -128,7 +128,7 @@ class HIPAllocator(LRUAllocator):
       minor_offset = 0 # only on the first
   def _copyin(self, dest:T, src: memoryview):
     hip_set_device(self.device.device)
-    host_mem = self._alloc_with_options(len(src), BufferOptions(host=True))
+    host_mem = self._alloc_with_options(len(src), BufferSpec(host=True))
     self.device.pending_copyin.append(host_mem)
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(hip.hipMemcpyAsync(dest, host_mem, len(src), hip.hipMemcpyHostToDevice, None))
@@ -142,22 +142,22 @@ class HIPAllocator(LRUAllocator):
 
 class HIPSyncEvent(Runner):
   def __init__(self, lb):
-    self.lb, self.device, self.dname = lb, cast(HIPDevice, Device[lb.device]), lb.device
+    self.lb, self.device, self.device = lb, cast(HIPDevice, Device[lb.device]), lb.device
     super().__init__()
   def __call__(self, rawbufs:List[Buffer], var_vals, wait=False, jit=False):
     to_mv(rawbufs[0]._buf, 4).cast("I")[0] = 0
     hip_set_device(self.device.device)
     check(hip.hipStreamWriteValue32(None, rawbufs[0]._buf, 1, 0))
-    update_stats(colored("sync", "red"), 0, 0, {}, None, 1, jit, device=self.dname)
+    update_stats(colored("sync", "red"), 0, 0, {}, None, 1, jit, device=self.device)
 
 class HIPWaitEvent(Runner):
   def __init__(self, device):
-    self.device, self.dname = cast(HIPDevice, Device[device]), device
+    self.device, self.device = cast(HIPDevice, Device[device]), device
     super().__init__()
   def __call__(self, rawbufs:List[Buffer], var_vals, wait=False, jit=False):
     hip_set_device(self.device.device)
     check(hip.hipStreamWaitValue32(None, rawbufs[0]._buf, 1, 1, 0xFFFFFFFF))
-    update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, jit, device=self.dname)
+    update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, jit, device=self.device)
 
 if getenv("HIPCPU"):
   rhip = ctypes.CDLL("/usr/local/lib/libremu.so")

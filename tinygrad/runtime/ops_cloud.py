@@ -13,14 +13,14 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, Timing
-from tinygrad.device import Compiled, Allocator, Compiler, Device, BufferOptions
+from tinygrad.device import Compiled, Allocator, Compiler, Device, BufferSpec
 
 # ***** API *****
 
 class CloudRequest: pass
 
 @dataclass(frozen=True)
-class BufferAlloc(CloudRequest): buffer_num: int; size: int; options: BufferOptions # noqa: E702
+class BufferAlloc(CloudRequest): buffer_num: int; size: int; options: BufferSpec # noqa: E702
 
 @dataclass(frozen=True)
 class BufferFree(CloudRequest): buffer_num: int # noqa: E702
@@ -43,7 +43,7 @@ class ProgramExec(CloudRequest):
   global_size: Optional[Tuple[int, ...]]; local_size: Optional[Tuple[int, ...]]; wait: bool # noqa: E702
 
 # for safe deserialization
-whitelist = {x.__name__:x for x in [BufferAlloc, BufferFree, CopyIn, CopyOut, ProgramAlloc, ProgramFree, ProgramExec, BufferOptions]}
+whitelist = {x.__name__:x for x in [BufferAlloc, BufferFree, CopyIn, CopyOut, ProgramAlloc, ProgramFree, ProgramExec, BufferSpec]}
 eval_fxns = {ast.Constant: lambda x: x.value, ast.Tuple: lambda x: tuple(map(safe_eval, x.elts)), ast.List: lambda x: list(map(safe_eval, x.elts)),
   ast.Call: lambda x: safe_eval(x.func)(*[safe_eval(arg) for arg in x.args], **{kwarg.arg: safe_eval(kwarg.value) for kwarg in x.keywords}),
   ast.Name: lambda x: whitelist[x.id], ast.Attribute: lambda x: {"imagef": dtypes.imagef, "imageh": dtypes.imageh}[x.attr]}
@@ -76,11 +76,11 @@ class BatchRequest:
 class CloudSession:
   programs: Dict[Tuple[str, str], Any] = field(default_factory=dict)
   # TODO: the buffer should track this internally
-  buffers: Dict[int, Tuple[Any, int, Optional[BufferOptions]]] = field(default_factory=dict)
+  buffers: Dict[int, Tuple[Any, int, Optional[BufferSpec]]] = field(default_factory=dict)
 
 class CloudHandler(BaseHTTPRequestHandler):
   protocol_version = 'HTTP/1.1'
-  dname: str
+  device: str
   sessions: DefaultDict[str, CloudSession] = defaultdict(CloudSession)
 
   def setup(self):
@@ -99,18 +99,18 @@ class CloudHandler(BaseHTTPRequestHandler):
         match c:
           case BufferAlloc():
             assert c.buffer_num not in session.buffers, f"buffer {c.buffer_num} already allocated"
-            session.buffers[c.buffer_num] = (Device[CloudHandler.dname].allocator.alloc(c.size, c.options), c.size, c.options)
+            session.buffers[c.buffer_num] = (Device[CloudHandler.device].allocator.alloc(c.size, c.options), c.size, c.options)
           case BufferFree():
             buf,sz,buffer_options = session.buffers[c.buffer_num]
-            Device[CloudHandler.dname].allocator.free(buf,sz,buffer_options)
+            Device[CloudHandler.device].allocator.free(buf,sz,buffer_options)
             del session.buffers[c.buffer_num]
-          case CopyIn(): Device[CloudHandler.dname].allocator._copyin(session.buffers[c.buffer_num][0], memoryview(bytearray(req._h[c.datahash])))
+          case CopyIn(): Device[CloudHandler.device].allocator._copyin(session.buffers[c.buffer_num][0], memoryview(bytearray(req._h[c.datahash])))
           case CopyOut():
             buf,sz,_ = session.buffers[c.buffer_num]
-            Device[CloudHandler.dname].allocator._copyout(memoryview(ret:=bytearray(sz)), buf)
+            Device[CloudHandler.device].allocator._copyout(memoryview(ret:=bytearray(sz)), buf)
           case ProgramAlloc():
-            lib = Device[CloudHandler.dname].compiler.compile_cached(req._h[c.datahash].decode())
-            session.programs[(c.name, c.datahash)] = Device[CloudHandler.dname].runtime(c.name, lib)
+            lib = Device[CloudHandler.device].compiler.compile_cached(req._h[c.datahash].decode())
+            session.programs[(c.name, c.datahash)] = Device[CloudHandler.device].runtime(c.name, lib)
           case ProgramFree(): del session.programs[(c.name, c.datahash)]
           case ProgramExec():
             bufs = [session.buffers[x][0] for x in c.bufs]
@@ -118,7 +118,7 @@ class CloudHandler(BaseHTTPRequestHandler):
             r = session.programs[(c.name, c.datahash)](*bufs, vals=c.vals, wait=c.wait, **extra_args)
             if r is not None: ret = str(r).encode()
     elif self.path == "/renderer" and method == "GET":
-      cls, args = Device[CloudHandler.dname].renderer.__reduce__()
+      cls, args = Device[CloudHandler.device].renderer.__reduce__()
       ret = json.dumps((cls.__module__, cls.__name__, args)).encode()
     else: status_code = 404
     self.send_response(status_code)
@@ -131,8 +131,8 @@ class CloudHandler(BaseHTTPRequestHandler):
 
 def cloud_server(port:int):
   multiprocessing.current_process().name = "MainProcess"
-  CloudHandler.dname = getenv("CLOUDDEV", "METAL") if Device.DEFAULT == "CLOUD" else Device.DEFAULT
-  print(f"start cloud server on {port} with device {CloudHandler.dname}")
+  CloudHandler.device = getenv("CLOUDDEV", "METAL") if Device.DEFAULT == "CLOUD" else Device.DEFAULT
+  print(f"start cloud server on {port} with device {CloudHandler.device}")
   server = HTTPServer(('', port), CloudHandler)
   server.serve_forever()
 
@@ -143,7 +143,7 @@ class CloudAllocator(Allocator):
     self.device = dev
     super().__init__()
   # TODO: ideally we shouldn't have to deal with images here
-  def _alloc(self, size:int, options:BufferOptions) -> int:
+  def _alloc(self, size:int, options:BufferSpec) -> int:
     self.device.buffer_num += 1
     self.device.req.q(BufferAlloc(self.device.buffer_num, size, options))
     return self.device.buffer_num

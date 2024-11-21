@@ -32,8 +32,8 @@ class ClangGraph(GraphRunner):
     if DEBUG >= 4: print("\n".join(code))
     compiler = Device["CLANG"].compiler
     assert compiler is not None
-    self.clprg = ClangProgram("batched", compiler.compile(prgs+"\n"+"\n".join(code))) # no point in caching the pointers
+    self._prg = ClangProgram("batched", compiler.compile(prgs+"\n"+"\n".join(code))) # no point in caching the pointers
 
   def __call__(self, rawbufs: List[Buffer], var_vals: Dict[Variable, int], wait=False):
     return cpu_time_execution(
-    lambda: self.clprg(*[x._buf for x in rawbufs], *[x[1] for x in sorted(var_vals.items(), key=lambda x: x[0].expr)]), enable=wait)
+    lambda: self._prg(*[x._buf for x in rawbufs], *[x[1] for x in sorted(var_vals.items(), key=lambda x: x[0].expr)]), enable=wait)
