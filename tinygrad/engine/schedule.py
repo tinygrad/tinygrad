@@ -50,7 +50,7 @@ class ScheduleContext:
   allbufs: Dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
   children: DefaultDict[UOp, Dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
-def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], lazybufs:Dict[Buffer, LazyBuffer], cache:Dict[LazyBuffer, UOp]) -> UOp:
+def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], lazybufs:Dict[UOp, LazyBuffer], cache:Dict[LazyBuffer, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, buffers, lazybufs, cache).view(buf.st)
@@ -77,9 +77,8 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], lazyb
              None if buf.op in {Ops.CAST, Ops.BITCAST} else buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
   if op is not None:
-    lazybufs[buf.buffer] = buf
+    lazybufs[ubuf] = buf
     ctx.allbufs[ubuf] = ret
-    if buf.metadata is not None: ctx.ubuf_metadata[ubuf] = buf.metadata
     for x in op.src:
       if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[ubuf] = None
   return ret
@@ -386,7 +385,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
   buffers: Dict[UOp, Buffer] = {}
-  lazybufs: Dict[Buffer, LazyBuffer] = {}
+  lazybufs: Dict[UOp, LazyBuffer] = {}
   big_graph = UOp.sink(*(to_uop(x, ctx, buffers, lazybufs, cache) for x in outs))
   # get realizes
   graph_rewrite(big_graph, do_realize, ctx.realizes)
@@ -399,6 +398,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
     ast, ast_ctx = full_ast_rewrite(UOp.sink(*(ctx.realizes[u] for u in store_uops)), ctx)
     prescheduled.append(ScheduleItem(ast, tuple(buffers[u] for u in ast_ctx.bufs if u.size != 0),
                                      tuple(ast_ctx.metadata), frozenset(x.buf_uop for x in ast_ctx.assign_preloads)))
+    for u in ast_ctx.sinked: del lazybufs[u].srcs  # can only schedule once
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
@@ -418,7 +418,6 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   schedule: List[ScheduleItem] = []
   while queue:
     schedule.append(si:=queue.popleft())
-    for b in si.outputs: del lazybufs[b].srcs  # can only schedule once
     for x in graph[si]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queue.append(x)
