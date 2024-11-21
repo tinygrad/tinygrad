@@ -114,6 +114,15 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(3,3) * 2
     check_schedule(a, 2, filter_sink=False)
 
+  def tests_constants_are_folded(self):
+    a = Tensor(2)
+    check_schedule(a, 0)
+
+  def test_constants_can_store(self):
+    a = Tensor(2).contiguous()
+    run_schedule(check_schedule(a, 1))
+    np.testing.assert_equal(a.numpy(), 2)
+
   def test_binop_elu_fusion(self):
     a = Tensor.empty(10)
     b = a.elu()
