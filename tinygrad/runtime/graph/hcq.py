@@ -1,7 +1,7 @@
 import collections, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
 from tinygrad.helpers import round_up, PROFILE, memsize_to_str
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, HCQArgsState
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState
 from tinygrad.device import Buffer, BufferOptions, Compiled, Device
 from tinygrad.ops import Variable
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
@@ -33,10 +33,10 @@ class HCQGraph(MultiGraphRunner):
     # graph-related tasks. This synchronization uses a global timeline signal per device. Within the graph, the compute queue coordinates with
     # global operations and sets a kickoff signal. Any queue accessing a buffer from another device waits for this signal from the device’s
     # compute queue to ensure exclusive access. The compute queue signals the completion of the graph, synchronizing with the device's copy queue.
-    self.ji_schedule: Dict[int, Tuple[HCQCompiled, HWCommandQueue, List, List, HCQSignal, Optional[int]]] = {}
+    self.ji_schedule: Dict[int, Tuple[HCQCompiled, HWQueue, List, List, HCQSignal, Optional[int]]] = {}
 
-    self.comp_queues: Dict[HCQCompiled, HWComputeQueue] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
-    self.copy_queues: Dict[HCQCompiled, HWCopyQueue] = {} # lazy allocation
+    self.comp_queues: Dict[HCQCompiled, HWQueue] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
+    self.copy_queues: Dict[HCQCompiled, HWQueue] = {} # lazy allocation
 
     self.signals: Dict[Any, HCQSignal] = {**{dev: dev.signal_t(value=0) for dev in self.devices}, **{"CPU": self.devices[0].signal_t(value=0)}}
     self.kickoff_value: int = 0
@@ -44,9 +44,9 @@ class HCQGraph(MultiGraphRunner):
     self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(self.jit_cache) * 2)] if PROFILE else []
     self.prof_records: List[Tuple[Tuple[int, bool], Tuple[int, bool], HCQCompiled, str, bool, List[int], Optional[Dict]]] = []
 
-    last_j: Dict[HWCommandQueue, Optional[int]] = collections.defaultdict(lambda: None)
-    queue_access: Dict[HWCommandQueue, Dict[HWCommandQueue, Optional[int]]] = collections.defaultdict(lambda: collections.defaultdict(lambda: None))
-    dev_access: Dict[HWCommandQueue, Set[HCQCompiled]] = collections.defaultdict(set)
+    last_j: Dict[HWQueue, Optional[int]] = collections.defaultdict(lambda: None)
+    queue_access: Dict[HWQueue, Dict[HWQueue, Optional[int]]] = collections.defaultdict(lambda: collections.defaultdict(lambda: None))
+    dev_access: Dict[HWQueue, Set[HCQCompiled]] = collections.defaultdict(set)
 
     for dev, queue in self.comp_queues.items(): dev_access[queue].add(dev)
 
@@ -101,7 +101,7 @@ class HCQGraph(MultiGraphRunner):
     # Build hardware queues.
     self.op_cmd_idx: Dict[int, Tuple[Any, int]] = {}
     self.copy_to_devs: Dict[HCQCompiled, Set[HCQCompiled]] = {dev: set() for dev in self.devices}
-    self.kickoff_wait_cmds: Dict[HWCommandQueue, List] = {q: list() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
+    self.kickoff_wait_cmds: Dict[HWQueue, List] = {q: list() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
 
     for dev in self.devices:
       self.comp_queues[dev].memory_barrier().wait(dev.timeline_signal, dev.timeline_value - 1) \
@@ -118,11 +118,11 @@ class HCQGraph(MultiGraphRunner):
 
       # Encode main commands based on ji type.
       if isinstance(ji.prg, CompiledRunner):
-        cast(HWComputeQueue, enqueue_queue).exec(ji.prg.clprg, self.ji_args[j], *ji.prg.p.launch_dims(var_vals))
+        enqueue_queue.exec(ji.prg.clprg, self.ji_args[j], *ji.prg.p.launch_dims(var_vals))
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         cast(HCQAllocator, Device[src.device].allocator).map(dest._buf)
-        cast(HWCopyQueue, enqueue_queue).copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes)
+        enqueue_queue.copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes)
         self.copy_to_devs[cast(HCQCompiled, Device[dest.device])].add(cast(HCQCompiled, Device[src.device]))
       self.op_cmd_idx[j] = (enqueue_queue, len(enqueue_queue) - 1)
 

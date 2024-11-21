@@ -3,7 +3,7 @@ import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decima
 assert sys.platform != 'win32'
 from typing import Tuple, List, Any, cast, Union, Dict, Type, Optional
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWCommandQueue, HWComputeQueue, HWCopyQueue, hcq_command
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, hcq_command
 from tinygrad.runtime.support.hcq import HCQArgsState, HCQProgram, HCQSignal
 from tinygrad.device import BufferOptions
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod
@@ -83,7 +83,7 @@ class NVSignal(HCQSignal):
   def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(1000)
   def _set_value(self, new_value:int): self._signal[0] = new_value
 
-class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
+class NVCommandQueue(HWQueue): # pylint: disable=abstract-method
   def __del__(self):
     if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferOptions(cpu_access=True, nolru=True))
 
@@ -132,7 +132,7 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
     dev.gpu_mmio[0x90 // 4] = gpfifo.token
     gpfifo.put_value += 1
 
-class NVComputeQueue(NVCommandQueue, HWComputeQueue):
+class NVComputeQueue(NVCommandQueue, HWQueue):   # pylint: disable=abstract-method
   def __init__(self):
     self.cmd_idx_to_qmd, self.cmd_idx_to_signal_id, self.cmd_idx_to_global_dims, self.cmd_idx_to_local_dims = {}, {}, {}, {}
     super().__init__()
@@ -187,7 +187,7 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
 
   def _submit(self, dev): self._submit_to_gpfifo(dev, cast(NVDevice, dev).compute_gpfifo)
 
-class NVCopyQueue(NVCommandQueue, HWCopyQueue):
+class NVCopyQueue(NVCommandQueue, HWQueue):   # pylint: disable=abstract-method
   def _copy(self, dest, src, copy_size):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, 4), *data64(src), *data64(dest)]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 1), copy_size]

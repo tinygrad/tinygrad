@@ -33,16 +33,16 @@ class TestHCQ(unittest.TestCase):
     ctypes.memmove(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size+TestHCQ.kernargs_off, TestHCQ.addr2, len(TestHCQ.addr2))
 
     if Device.DEFAULT == "AMD":
-      from tinygrad.runtime.ops_amd import HWCopyQueue, HWPM4Queue
+      from tinygrad.runtime.ops_amd import HWQueue, HWPM4Queue
       TestHCQ.compute_queue = HWPM4Queue
-      TestHCQ.copy_queue = HWCopyQueue
+      TestHCQ.copy_queue = HWQueue
     elif Device.DEFAULT == "NV":
-      from tinygrad.runtime.ops_nv import HWCopyQueue, HWComputeQueue
+      from tinygrad.runtime.ops_nv import HWQueue, HWQueue
       # nv need to copy constbuffer there as well
       to_mv(TestHCQ.d0.kernargs_ptr, 0x160).cast('I')[:] = array.array('I', TestHCQ.runner.clprg.constbuffer_0)
       to_mv(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, 0x160).cast('I')[:] = array.array('I', TestHCQ.runner.clprg.constbuffer_0)
-      TestHCQ.compute_queue = HWComputeQueue
-      TestHCQ.copy_queue = HWCopyQueue
+      TestHCQ.compute_queue = HWQueue
+      TestHCQ.copy_queue = HWQueue
 
   def setUp(self):
     TestHCQ.d0.synchronize()

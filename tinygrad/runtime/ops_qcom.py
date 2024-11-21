@@ -4,7 +4,7 @@ assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Tuple, List, Any, cast, Optional
 from tinygrad.device import BufferOptions
-from tinygrad.runtime.support.hcq import HCQBuffer, HWComputeQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState
+from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
@@ -44,7 +44,7 @@ class QCOMSignal(HCQSignal):
   def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(19.2) # based on the 19.2MHz always-on timer
   def _set_value(self, new_value:int): self._signal[0] = new_value
 
-class QCOMComputeQueue(HWComputeQueue):
+class QCOMComputeQueue(HWQueue):   # pylint: disable=abstract-method
   def __init__(self):
     self.cmd_idx_to_dims = {}
     super().__init__()
