@@ -731,7 +731,7 @@ class Kernel:
     if DEBUG >= 5: print_uops(self.uops)
     return self
 
-  def to_program(self,  name_override:Optional[str]=None, modified_ast: Optional[UOp]=None) -> Program:
+  def to_program(self, name_override:Optional[str]=None) -> Program:
     self.linearize()
     src = self.opts.render(name:=to_function_name(ansiname:=(name_override if name_override is not None else self.name)), self.uops)
 

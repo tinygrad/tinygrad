@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, cast, Generator, Tuple, Union, Iterator
+from typing import List, Dict, Optional, cast, Generator, Tuple, Union
 import time, pprint
 from dataclasses import dataclass, replace
 from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA
