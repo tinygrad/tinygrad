@@ -157,7 +157,7 @@ def get_runner(dname:str, ast:UOp) -> CompiledRunner:
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, dname=dname))
   return ret
 
-def get_runners(dname:str, ast:UOp) -> Iterator[CompiledRunner]:
+def get_runners(dname:str, ast:UOp) -> Union[Tuple[CompiledRunner, Buffer, CompiledRunner], CompiledRunner]:
   kernel = get_kernel(Device[dname].renderer, ast)
   splitted = kernel.split_reduce(kernel.ast)
   if splitted:
