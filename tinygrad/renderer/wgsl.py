@@ -9,24 +9,22 @@ import math
 packed_types = {dtypes.bool: dtypes.int, dtypes.char: dtypes.int, dtypes.uchar: dtypes.uint32, dtypes.short: dtypes.int, dtypes.ushort: dtypes.uint32}
 
 def sign_extend(val:UOp, sext_am:int):
-  sign_bit = val >> (sext_am - 1)
-  return (UOp.where(sign_bit > 0, UOp.const(dtypes.uint32, 0xffffffff) << sext_am, UOp.const(dtypes.uint32, 0)) \
+  return (UOp.where((val >> (sext_am - 1)) > 0, UOp.const(dtypes.uint32, 0xffffffff) << sext_am, UOp.const(dtypes.uint32, 0)) \
         | val.bitcast(dtypes.uint32)).bitcast(dtypes.int)
 
+# store for char: buf[idx/4] <- (var << (idx%4)*8))
 def packed_store(bidx:UOp, var:UOp):
   shift_am = (bidx.src[1].cast(dtypes.uint32)%UOp.const(dtypes.uint32, 4//var.dtype.itemsize))*UOp.const(dtypes.uint32, 8*var.dtype.itemsize)
   new_v = (var & (0xFF if var.dtype.itemsize == 1 else 0xFFFF)).cast(dtypes.uint32) << shift_am
-  return UOp(Ops.STORE, src=(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], bidx.src[1]//(4//var.dtype.itemsize))), new_v.cast(packed_types[var.dtype])))
+  return UOp.store(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], bidx.src[1]//(4//var.dtype.itemsize))), new_v.cast(packed_types[var.dtype]))
 
-def packed_load(root:UOp, bidx:UOp, var:UOp=None):
-  dtype = root.dtype
+# load for char: sign_extend(buf[idx/4] >> ((idx%4)*8))
+def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp=None):
   div_idx = bidx.src[1]//(4//dtype.itemsize)
   shift_am = (bidx.src[1].cast(dtypes.uint32)%UOp.const(dtypes.uint32, 4//dtype.itemsize))*UOp.const(dtypes.uint32, 8*dtype.itemsize)
-  if var is not None:
-    load = UOp(Ops.LOAD, src=(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], div_idx)), var, root.src[2]), arg=root.arg, dtype=packed_types[dtype])
-  else:
-    load = UOp(Ops.LOAD, src=(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], div_idx)), *root.src[1:]), arg=root.arg, dtype=packed_types[dtype])
-  val = ((load.cast(dtypes.uint32) >> shift_am) & (0xFF if dtype.itemsize == 1 else 0xFFFF))
+  if var is not None: load = UOp.load(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], div_idx)), var, root.src[2], dtype=packed_types[dtype], arg=root.arg)
+  else: load = UOp.load(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], div_idx)), *root.src[1:], dtype=packed_types[dtype], arg=root.arg)
+  val = (load.cast(dtypes.uint32) >> shift_am) & (0xFF if dtype.itemsize == 1 else 0xFFFF)
   return sign_extend(val, 8*dtype.itemsize).cast(dtype) if dtype in [dtypes.char, dtypes.short] else val.cast(dtype)
 
 wgsl_matcher = PatternMatcher([
@@ -36,9 +34,9 @@ wgsl_matcher = PatternMatcher([
     lambda a,b,c: UOp(c.op, dtypes.int, (a.cast(dtypes.int), b.cast(dtypes.int))).cast(dtypes.bool)),
   *[(UPat(a, src=(UPat(name="b", dtype=(dtypes.uint, dtypes.int, dtypes.bool))), name="a"),
      lambda a,b: UOp(a, dtypes.float, (b.cast(dtypes.float),)).cast(b.dtype)) for a in (Ops.EXP2, Ops.SIN, Ops.LOG2, Ops.SQRT)],
-  (UPat(Ops.LOAD, name="l", src=(UPat.var('b'),)), lambda l,b: packed_load(l,b) if l.dtype.itemsize < 4 else None),
+  (UPat(Ops.LOAD, name="l", src=(UPat.var('b'),)), lambda l,b: packed_load(l,b,l.dtype) if l.dtype.itemsize < 4 else None),
   (UPat(Ops.LOAD, name="l", src=(UPat.var('b'), UPat.var('c'), UPat())),
-   lambda l,b,c: packed_load(l,b,c.cast(packed_types[l.dtype])) if l.dtype.itemsize < 4 else None),
+   lambda l,b,c: packed_load(l,b,l.dtype,c.cast(packed_types[l.dtype])) if l.dtype.itemsize < 4 else None),
   (UPat.store(UPat.var("bidx"), UPat.var("var")), lambda bidx,var: packed_store(bidx,var) if var.dtype.itemsize < 4 else None),
   (UPat(Ops.MUL, name="m", src=(UPat(name="a"), UPat(Ops.WHERE, src=(UPat.var("g"),
     UPat(op=Ops.CONST, name="c1"), UPat(op=Ops.CONST, name="c2"))))),
