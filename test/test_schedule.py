@@ -1872,6 +1872,7 @@ class TestView(unittest.TestCase):
     # all masked out, degrades to const 0
     b = a.pad(((0, 10), None))[10:]
     sched = check_schedule(b.contiguous(), 1)
+    # TODO: this VALID can clean up, where do we need st?
     self.assertIs(store_val(sched[-1]), UOp(Ops.VALID, dtypes.bool, (b.lazydata.st.to_uop(),)).where(x:=UOp.const(b.dtype, 0), x))
     run_schedule(sched)
     np.testing.assert_equal(b.numpy(), 0)
