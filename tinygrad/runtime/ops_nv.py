@@ -83,7 +83,7 @@ class NVSignal(HCQSignal):
   def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(1000)
   def _set_value(self, new_value:int): self._signal[0] = new_value
 
-class NVCommandQueue(HWQueue): # pylint: disable=abstract-method
+class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']): # pylint: disable=abstract-method
   def __del__(self):
     if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferOptions(cpu_access=True, nolru=True))
 
@@ -132,7 +132,7 @@ class NVCommandQueue(HWQueue): # pylint: disable=abstract-method
     dev.gpu_mmio[0x90 // 4] = gpfifo.token
     gpfifo.put_value += 1
 
-class NVComputeQueue(NVCommandQueue, HWQueue):   # pylint: disable=abstract-method
+class NVComputeQueue(NVCommandQueue):   # pylint: disable=abstract-method
   def __init__(self):
     self.cmd_idx_to_qmd, self.cmd_idx_to_signal_id, self.cmd_idx_to_global_dims, self.cmd_idx_to_local_dims = {}, {}, {}, {}
     super().__init__()
@@ -187,7 +187,7 @@ class NVComputeQueue(NVCommandQueue, HWQueue):   # pylint: disable=abstract-meth
 
   def _submit(self, dev): self._submit_to_gpfifo(dev, cast(NVDevice, dev).compute_gpfifo)
 
-class NVCopyQueue(NVCommandQueue, HWQueue):   # pylint: disable=abstract-method
+class NVCopyQueue(NVCommandQueue):   # pylint: disable=abstract-method
   def _copy(self, dest, src, copy_size):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, 4), *data64(src), *data64(dest)]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 1), copy_size]
@@ -290,7 +290,7 @@ class NVProgram(HCQProgram):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
     return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
 
-class NVAllocator(HCQAllocator):
+class NVAllocator(HCQAllocator['NVDevice']):
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
     if options.host: return self.dev._gpu_host_alloc(size, tag="user host memory")
     return self.dev._gpu_alloc(size, map_to_cpu=options.cpu_access, huge_page=(size > (16 << 20)), tag=f"user memory ({options})")
@@ -310,7 +310,7 @@ class GPFifo:
   put_value: int = 0
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
-class NVDevice(HCQCompiled):
+class NVDevice(HCQCompiled[NVSignal]):
   root = None
   fd_ctl: int = -1
   fd_uvm: int = -1
@@ -534,9 +534,9 @@ class NVDevice(HCQCompiled):
     NVComputeQueue().setup(compute_class=self.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
                     .signal(self.timeline_signal, self.timeline_value).submit(self)
 
-    NVCopyQueue().wait(self.timeline_signal, self.timeline_value) \
-                 .setup(copy_class=nv_gpu.AMPERE_DMA_COPY_B) \
-                 .signal(self.timeline_signal, self.timeline_value + 1).submit(self)
+    cast(NVCopyQueue, NVCopyQueue().wait(self.timeline_signal, self.timeline_value)) \
+                                   .setup(copy_class=nv_gpu.AMPERE_DMA_COPY_B) \
+                                   .signal(self.timeline_signal, self.timeline_value + 1).submit(self)
 
     self.timeline_value += 2
 
@@ -555,9 +555,9 @@ class NVDevice(HCQCompiled):
       bytes_per_tpc = round_up(round_up(self.slm_per_thread * 32, 0x200) * self.max_warps_per_sm * self.num_sm_per_tpc, 0x8000)
       self.shader_local_mem = self.allocator.alloc(round_up(bytes_per_tpc * self.num_tpc_per_gpc * self.num_gpcs, 0x20000))
 
-    NVComputeQueue().wait(self.timeline_signal, self.timeline_value - 1) \
-                    .setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
-                    .signal(self.timeline_signal, self.timeline_value).submit(self)
+    cast(NVComputeQueue, NVComputeQueue().wait(self.timeline_signal, self.timeline_value - 1)) \
+                                         .setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
+                                         .signal(self.timeline_signal, self.timeline_value).submit(self)
     self.timeline_value += 1
 
   def invalidate_caches(self):
