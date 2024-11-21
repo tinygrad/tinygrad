@@ -151,7 +151,7 @@ class Allocator:
   # def _offset(self, buf, size:int, offset:int):
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
 
-class LRUAllocator(Allocator):  # pylint: disable=abstract-method
+class LRUAllocator(Allocator):
   """
   The LRU Allocator is responsible for caching buffers.
   It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.

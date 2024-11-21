@@ -69,7 +69,7 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
         input_replace[(j,i)] = input_rawbuffers.index(a)
   return input_replace
 
-class GraphRunner(Runner):  # pylint: disable=abstract-method
+class GraphRunner(Runner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache
     self.input_replace:Dict[Tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
@@ -128,7 +128,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     return list({id(x):x for x in wait_nodes}.values())
 
 # a marker for your graph supporting multiple devices of the same type
-class MultiGraphRunner(GraphRunner): pass # pylint: disable=abstract-method
+class MultiGraphRunner(GraphRunner): pass
 
 ReturnType = TypeVar('ReturnType')
 @dataclass
