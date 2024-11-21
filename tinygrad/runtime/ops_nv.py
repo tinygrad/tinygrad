@@ -132,7 +132,7 @@ class NVCommandQueue(HWQueue): # pylint: disable=abstract-method
     dev.gpu_mmio[0x90 // 4] = gpfifo.token
     gpfifo.put_value += 1
 
-class NVComputeQueue(NVCommandQueue, HWQueue):   # pylint: disable=abstract-method
+class NVComputeQueue(NVCommandQueue):   # pylint: disable=abstract-method
   def __init__(self):
     self.cmd_idx_to_qmd, self.cmd_idx_to_signal_id, self.cmd_idx_to_global_dims, self.cmd_idx_to_local_dims = {}, {}, {}, {}
     super().__init__()
@@ -187,7 +187,7 @@ class NVComputeQueue(NVCommandQueue, HWQueue):   # pylint: disable=abstract-meth
 
   def _submit(self, dev): self._submit_to_gpfifo(dev, cast(NVDevice, dev).compute_gpfifo)
 
-class NVCopyQueue(NVCommandQueue, HWQueue):   # pylint: disable=abstract-method
+class NVCopyQueue(NVCommandQueue):   # pylint: disable=abstract-method
   def _copy(self, dest, src, copy_size):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, 4), *data64(src), *data64(dest)]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 1), copy_size]
@@ -290,7 +290,7 @@ class NVProgram(HCQProgram):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
     return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
 
-class NVAllocator(HCQAllocator):
+class NVAllocator(HCQAllocator['NVDevice']):
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
     if options.host: return self.dev._gpu_host_alloc(size, tag="user host memory")
     return self.dev._gpu_alloc(size, map_to_cpu=options.cpu_access, huge_page=(size > (16 << 20)), tag=f"user memory ({options})")
