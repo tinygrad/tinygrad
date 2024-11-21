@@ -202,7 +202,7 @@ def lower_schedule_item(si:ScheduleItem) -> Union[ExecItem, List[ExecItem]]:
       exec1 = ExecItem(runner1, [interim_buf, *input_bufs])
       exec2 = ExecItem(runner2, [output_buf, interim_buf])
       return [exec1, exec2]
-    runner = runners 
+    runner = runners
     return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
   out, arg = si.outputs[0], si.ast.arg
   if si.ast.op is Ops.COPY:

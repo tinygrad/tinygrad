@@ -624,7 +624,7 @@ class Kernel:
                UOp(Ops.LOAD, dtypes.float, src=(
                   UOp(Ops.DEFINE_GLOBAL, define_global2.dtype, arg=define_global2.arg),
                   UOp(Ops.VIEW, dtype=src_view.dtype, arg=st2)
-                )), 
+                )),
               ))
             )),
           ))
