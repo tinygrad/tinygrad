@@ -338,6 +338,16 @@ def group_realizes(ctx:ScheduleContext, realizes:Dict[UOp, UOp]) -> List[List[UO
 
 # **** Schedule creation and BFS toposort
 
+def lazy_view(base:UOp, view:UOp) -> Optional[UOp]:
+  if unwrap(base.st).size == 0 or ((new_st:=unwrap(view.st)).views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)):
+    return UOp.const_with_shape(base.dtype, 0, new_st.shape)
+  return None
+
+init_big_graph = PatternMatcher([
+  (UPat.any(UPat(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER),),), UPat(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER), UPat()),)).view(name="view"),
+   lazy_view),
+])
+
 def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> UOp:
   ctx[b] = UOp.store(b, ShapeTracker.from_shape((st:=unwrap(base.st)).shape).to_uop(), to_store)
   return UOp(Ops.LOAD, base.dtype, (b, st.to_uop()))

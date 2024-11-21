@@ -214,11 +214,7 @@ class LazyBuffer(MathTrait):
 
   # *** movement ops ***
 
-  def _view(self, new_st:ShapeTracker) -> LazyBuffer:
-    if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)):
-      return self.const_with_shape(0, new_st.shape)
-    if new_st.contiguous and self.base.shape == new_st.shape: return self.base
-    return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
+  def _view(self, new_st:ShapeTracker) -> LazyBuffer: return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 
   def reshape(self, arg:Tuple[sint, ...]): return self._view(self.st.reshape(arg))
   def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.pad(arg))
