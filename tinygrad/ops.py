@@ -72,7 +72,7 @@ class SimpleMathTrait:
   def __le__(self, x): return self.le(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
-class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
+class MathTrait(SimpleMathTrait):
   # TODO: move to Tensor when new backward is done
   def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
   def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)

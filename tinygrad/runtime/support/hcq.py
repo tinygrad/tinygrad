@@ -474,7 +474,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 # Protocol for hcq compatible allocators for allocated buffers to contain VA address and it's size.
 class HCQBuffer(Protocol): va_addr:int; size:int # noqa: E702
 
-class HCQAllocator(LRUAllocator, Generic[DeviceType]): # pylint: disable=abstract-method
+class HCQAllocator(LRUAllocator, Generic[DeviceType]):
   """
   A base allocator class compatible with the HCQ (Hardware Command Queue) API.
 
