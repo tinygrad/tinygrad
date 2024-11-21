@@ -13,10 +13,11 @@ from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, round_up, all_int, to_function_name, diskcache_put, unwrap
 from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX, KERNEL_SPLIT
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import strides_for_shape
+from tinygrad.shape.view import strides_for_shape, View
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
+from tinygrad.device import Buffer
 
 @functools.lru_cache(None)
 def ordered_parents(op:UOp) -> List[UOp]: return dedup([item for x in op.src for item in ordered_parents(x)] + [op])
@@ -626,22 +627,26 @@ class Kernel:
       if reduce.op is Ops.REDUCE_AXIS:
         load = reduce.src[0]
         define_global2, src_view = load.src
-        def new_kernel(shape1, shape2, axis):
+        def new_kernel(st1, st2, axis):
           return UOp(Ops.SINK, op.dtype, arg=op.arg, src=(
             UOp(Ops.STORE, store.dtype, src=(
               UOp(Ops.DEFINE_GLOBAL, dtype=define_global.dtype, arg=define_global.arg),
-              UOp(Ops.VIEW, dtype=src_view.dtype, arg=ShapeTracker.from_shape(shape1)),
+              UOp(Ops.VIEW, dtype=src_view.dtype, arg=st1),
               UOp(Ops.REDUCE_AXIS, reduce.dtype, arg=(reduce.arg[0], axis), src=(
                UOp(Ops.LOAD, dtypes.float, src=(
                   UOp(Ops.DEFINE_GLOBAL, define_global2.dtype, arg=define_global2.arg),
-                  UOp(Ops.VIEW, dtype=src_view.dtype, arg=ShapeTracker.from_shape(shape2))
+                  UOp(Ops.VIEW, dtype=src_view.dtype, arg=st2)
                 )), 
               ))
             )),
           ))
-        kernel1 = new_kernel((64, 1, 16), (64, 4, 16), (1,))
-        kernel2 = new_kernel((64, 1, 1), (64, 1, 16), (2,))
-        return kernel1, kernel2
+        src_st = src_view.arg
+        reshaped = src_st.reshape((64, 16, 4)).permute((0, 2, 1))
+        interim_st = ShapeTracker.from_shape((64, 1, 16))
+        kernel1 = new_kernel(interim_st, reshaped, (1,))
+        kernel2 = new_kernel(ShapeTracker.from_shape((64, 1, 1)), interim_st, (2,))
+        buf = Buffer(Device.DEFAULT, 1024, dtypes.float)
+        return kernel1, buf, kernel2
   def get_optimized_ast(self) -> UOp:
     @functools.lru_cache(None)
     def fixup_ast(op:UOp) -> UOp:

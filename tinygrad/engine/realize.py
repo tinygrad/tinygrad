@@ -161,22 +161,12 @@ def get_runners(dname:str, ast:UOp) -> Iterator[CompiledRunner]:
   kernel = get_kernel(Device[dname].renderer, ast)
   splitted = kernel.split_reduce(kernel.ast)
   if splitted:
-    for _ast in splitted:
-      print(_ast)
-      kernel2 = get_kernel(Device[dname].renderer, _ast)
-      modified_ast = kernel2.get_optimized_ast()
-      print(modified_ast)
-      prg: Program = kernel2.to_program(modified_ast=modified_ast)
-      print(f"\033[31m{prg.src}\033[0m")
-      ret = CompiledRunner(replace(prg, dname=dname))
-
-  print(f"{ast=}")
-  modified_ast = kernel.get_optimized_ast()
-  print(modified_ast)
-  prg: Program = kernel.to_program(modified_ast=modified_ast)
-  print(f"{prg.src}")
-  ret = CompiledRunner(replace(prg, dname=dname))
-  yield (ret, None)
+    kernel1, buf, kernel2 = splitted
+    runner1 = get_runner(dname, kernel1)
+    runner2 = get_runner(dname, kernel2)
+    return runner1, buf, runner2
+  ret = get_runner(dname, ast)
+  return ret
 # **************** lowering functions ****************
 
 @dataclass(frozen=True)
@@ -208,11 +198,14 @@ def lower_schedule_item(si:ScheduleItem) -> Union[ExecItem, List[ExecItem]]:
   if si.ast.op is Ops.SINK:
     output_buf = si.bufs[0]
     input_bufs = si.bufs[1:]
-    runners_bufs = get_runners(si.outputs[0].device, si.ast)
-    eis: List[ExecItem] = []
-    for runner, interim_buf in runners_bufs:
-      eis.append(ExecItem(runner, [output_buf, *input_bufs], si.metadata))
-    return eis
+    runners = get_runners(si.outputs[0].device, si.ast)
+    if isinstance(runners, tuple):
+      runner1, interim_buf, runner2 = runners
+      exec1 = ExecItem(runner1, [interim_buf, *input_bufs])
+      exec2 = ExecItem(runner2, [output_buf, interim_buf])
+      return [exec1, exec2]
+    runner = runners 
+    return ExecItem(runner, [output_buf, *input_bufs], si.metadata)
   out, arg = si.outputs[0], si.ast.arg
   if si.ast.op is Ops.COPY:
     kernel_type = BufferCopy
