@@ -629,11 +629,11 @@ class Kernel:
 
             assert st.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
             assert st.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
-            if tc.expanded_shape: new_shape = st.shape[:tcd] + tc.expanded_shape + st.shape[tcd+len(tcd_dims):]
-            else: new_shape = st.shape
+            if tc.expanded_shape: new_shape, expanded_shape = st.shape[:tcd] + tc.expanded_shape + st.shape[tcd+len(tcd_dims):], tc.expanded_shape
+            else: new_shape, expanded_shape = st.shape, tcd_dims
 
             permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in wd_pattern]  + list(range(wd+len(warp_dims),tcd)) + \
-                                         [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd+len(tc.expanded_shape),len(new_shape)))
+                                         [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd+len(expanded_shape),len(new_shape)))
             return st.reshape(new_shape).permute(tuple(permaxis)).reshape(st.shape).simplify()
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
