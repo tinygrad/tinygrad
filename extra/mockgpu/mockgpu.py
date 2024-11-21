@@ -14,15 +14,15 @@ libc.fdopendir.argtypes = [ctypes.c_int]
 libc.fdopendir.restype = ctypes.c_void_p
 
 # platform.processor calls `uname -p` which can return `unknown` on some systems
-processor = os.getenv("IOCTL_PROCESSOR") or (("darwin_" if OSX else "") + platform.processor())
-OPEN_SYSCALL = {"aarch64": None, "x86_64": 2, "darwin_arm": 5}[processor]
-CLOSE_SYSCALL = {"aarch64": 57, "x86_64": 3, "darwin_arm": 6}[processor]
-READ_SYSCALL = {"aarch64": 63, "x86_64": 0, "darwin_arm": 3}[processor]
-IOCTL_SYSCALL = {"aarch64": 29, "x86_64": 16, "darwin_arm": 54}[processor]
-MMAP_SYSCALL = {"aarch64": 222, "x86_64": 9, "darwin_arm": 197}[processor]
-LSEEK_SYSCALL = {"aarch64": 62, "x86_64": 8, "darwin_arm": 199}[processor]
-NEWFSTATAT_SYSCALL = {"aarch64": 79, "x86_64": 262, "darwin_arm": None}[processor]
-GETDENTS64_SYSCALL = {"aarch64": 61, "x86_64": 217, "darwin_arm": None}[processor]
+processor = os.getenv("IOCTL_PROCESSOR") or platform.processor()
+OPEN_SYSCALL = {"aarch64": None, "x86_64": 2}.get(processor, None)
+CLOSE_SYSCALL = {"aarch64": 57, "x86_64": 3}.get(processor, None)
+READ_SYSCALL = {"aarch64": 63, "x86_64": 0}.get(processor, None)
+IOCTL_SYSCALL = {"aarch64": 29, "x86_64": 16}.get(processor, None)
+MMAP_SYSCALL = {"aarch64": 222, "x86_64": 9}.get(processor, None)
+LSEEK_SYSCALL = {"aarch64": 62, "x86_64": 8}.get(processor, None)
+NEWFSTATAT_SYSCALL = {"aarch64": 79, "x86_64": 262}.get(processor, None)
+GETDENTS64_SYSCALL = {"aarch64": 61, "x86_64": 217}.get(processor, None)
 
 def install_hook(c_function, python_function):
   python_function_addr = ctypes.cast(ctypes.byref(python_function), ctypes.POINTER(ctypes.c_ulong)).contents.value
@@ -35,13 +35,6 @@ def install_hook(c_function, python_function):
     # pop r9
     # ret
     tramp = b"\x41\x51\x41\x51\x49\xB9" + struct.pack("Q", python_function_addr) + b"\x4C\x89\x4C\x24\x08\x41\x59\xC3"
-  elif processor == "darwin_arm":
-    # AARCH64 trampoline to ioctl
-    # 0x0000000000000000:  70 00 00 10    adr x16, #0xc
-    # 0x0000000000000004:  10 02 40 F9    ldr x16, [x16]
-    # 0x0000000000000008:  00 02 1F D6    br  x16
-    tramp = b"\x70\x00\x00\x10\x10\x02\x40\xf9\x00\x02\x1f\xd6"
-    tramp += struct.pack("Q", python_function_addr)
   else:
     raise Exception(f"processor {processor} not supported")
 
@@ -211,7 +204,8 @@ def hook_syscalls():
   autogen_libc.mmap = _mmap # type: ignore
   autogen_libc.munmap = _munmap # type: ignore
 
-class MockHCQFile:
+from tinygrad.runtime.support.hcq import HCQFile
+class MockHCQFile(HCQFile):
   def __init__(self, path:str, flags):
     print("open", path)
     self.fd = _open(path.encode(), flags, 0o777)
