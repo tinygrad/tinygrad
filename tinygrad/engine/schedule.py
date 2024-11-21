@@ -43,7 +43,7 @@ def is_scheduled(u:UOp): return u.op is Ops.VIEW and len(u.src) == 2
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  lazybufs: Dict[UOp, LazyBuffer] = field(default_factory=dict)   # this maps BUFFER uops to Metadata
+  lazybufs: Dict[UOp, LazyBuffer] = field(default_factory=dict)      # this maps BUFFER uops to Metadata
   var_vals: Dict[Variable, int] = field(default_factory=dict)        # this maps a BIND's DEFINE_VAR to its value
   assigns: Set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: Dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
