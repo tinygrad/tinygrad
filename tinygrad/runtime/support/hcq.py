@@ -1,9 +1,15 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Callable, ParamSpec, Concatenate
-import contextlib, decimal, statistics, random, json, atexit, time, array, ctypes, functools
+import contextlib, decimal, statistics, random, json, atexit, time, array, ctypes, functools, os, fcntl
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator
+
+# all HCQ interaction with the system happens through this
+class HCQFile:
+  def __init__(self, path, flags): self.fd = os.open(path, flags)
+  def __del__(self): os.close(self.fd)
+  def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
 
 # **************** for HCQ Compatible Devices ****************
 

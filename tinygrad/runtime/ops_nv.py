@@ -4,7 +4,7 @@ assert sys.platform != 'win32'
 from typing import Tuple, List, Any, cast, Union, Dict, Type, Optional
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, hcq_command
-from tinygrad.runtime.support.hcq import HCQArgsState, HCQProgram, HCQSignal
+from tinygrad.runtime.support.hcq import HCQArgsState, HCQProgram, HCQSignal, HCQFile
 from tinygrad.device import BufferSpec
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod
 from tinygrad.renderer.ptx import PTXRenderer
@@ -20,8 +20,8 @@ def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status
 NV_PFAULT_FAULT_TYPE = {dt:name for name,dt in nv_gpu.__dict__.items() if name.startswith("NV_PFAULT_FAULT_TYPE_")}
 NV_PFAULT_ACCESS_TYPE = {dt:name.split("_")[-1] for name,dt in nv_gpu.__dict__.items() if name.startswith("NV_PFAULT_ACCESS_TYPE_")}
 
-def nv_iowr(fd, nr, args):
-  ret = fcntl.ioctl(fd, (3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord('F') & 0xFF) << 8 | (nr & 0xFF), args)
+def nv_iowr(fd:HCQFile, nr, args):
+  ret = fd.ioctl((3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord('F') & 0xFF) << 8 | (nr & 0xFF), args)
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
 
 def rm_alloc(fd, clss, root, parant, params):
@@ -312,8 +312,8 @@ class GPFifo:
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 class NVDevice(HCQCompiled[NVSignal]):
   root = None
-  fd_ctl: int = -1
-  fd_uvm: int = -1
+  fd_ctl: HCQFile
+  fd_uvm: HCQFile
   gpus_info: Union[List, ctypes.Array] = []
   signals_page: Any = None
   signals_pool: List[Any] = []
@@ -322,12 +322,12 @@ class NVDevice(HCQCompiled[NVSignal]):
   host_object_enumerator: int = 0x1000
 
   def _new_gpu_fd(self):
-    fd_dev = os.open(f"/dev/nvidia{NVDevice.gpus_info[self.device_id].minor_number}", os.O_RDWR | os.O_CLOEXEC)
-    nv_iowr(fd_dev, nv_gpu.NV_ESC_REGISTER_FD, nv_gpu.nv_ioctl_register_fd_t(ctl_fd=self.fd_ctl))
+    fd_dev = HCQFile(f"/dev/nvidia{NVDevice.gpus_info[self.device_id].minor_number}", os.O_RDWR | os.O_CLOEXEC)
+    nv_iowr(fd_dev, nv_gpu.NV_ESC_REGISTER_FD, nv_gpu.nv_ioctl_register_fd_t(ctl_fd=self.fd_ctl.fd))
     return fd_dev
 
   def _gpu_map_to_cpu(self, memory_handle, size, target=None, flags=0, system=False):
-    fd_dev = self._new_gpu_fd() if not system else os.open("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
+    fd_dev = self._new_gpu_fd() if not system else HCQFile("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
     made = nv_gpu.nv_ioctl_nvos33_parameters_with_fd(fd=fd_dev,
       params=nv_gpu.NVOS33_PARAMETERS(hClient=self.root, hDevice=self.nvdevice, hMemory=memory_handle, length=size, flags=flags))
     nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_MAP_MEMORY, made)
@@ -418,9 +418,9 @@ class NVDevice(HCQCompiled[NVSignal]):
 
   def __init__(self, device:str=""):
     if NVDevice.root is None:
-      NVDevice.fd_ctl = os.open("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
-      NVDevice.fd_uvm = os.open("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
-      fd_uvm_2 = os.open("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
+      NVDevice.fd_ctl = HCQFile("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
+      NVDevice.fd_uvm = HCQFile("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
+      fd_uvm_2 = HCQFile("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
       NVDevice.root = rm_alloc(self.fd_ctl, nv_gpu.NV01_ROOT_CLIENT, 0, 0, None).hObjectNew
       uvm.initialize(self.fd_uvm)
       with contextlib.suppress(RuntimeError): uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm) # this error is okay, CUDA hits it too
