@@ -64,7 +64,7 @@ class MetalGraph(GraphRunner):
     all_resources = dedup(self.all_resources + [x._buf.buf for x in input_rawbuffers])
 
     for (j,i),input_idx in self.input_replace.items():
-      computeCommand = msg(self.icb, "indirectComputeCommandAtIndex:", j, restype=objc_id)
+      computeCommand = msg(self.icb, "indirectComputeCommandAtIndex:", j)
       msg(computeCommand, "setKernelBuffer:offset:atIndex:", input_rawbuffers[input_idx]._buf.buf,
                                                                                  input_rawbuffers[input_idx]._buf.offset, i)
 
