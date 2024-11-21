@@ -54,7 +54,7 @@ class AMDSignal(HCQSignal):
         kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(self._evt_array), num_events=1, wait_for_all=1, timeout=1000)
     raise RuntimeError(f"wait_signal: not set to {value}, but {self._signal[0]}, {timeout} ms TIMEOUT!")
 
-class AMDComputeQueue(HWComputeQueue):
+class AMDComputeQueue(HWComputeQueue):   # pylint: disable=abstract-method
   def __init__(self):
     self.cmd_idx_to_local_offset, self.cmd_idx_to_global_offset, self.cmd_idx_to_dispatch_packet = {}, {}, {}
     super().__init__()
@@ -184,7 +184,7 @@ class AMDComputeQueue(HWComputeQueue):
     dev.compute_queue.doorbell[0] = dev.compute_queue.put_value
 
 SDMA_MAX_COPY_SIZE = 0x400000
-class AMDCopyQueue(HWCopyQueue):
+class AMDCopyQueue(HWCopyQueue):   # pylint: disable=abstract-method
   def __init__(self):
     self.internal_cmd_sizes, self.copy_cmds_per_copy = [], {}
     super().__init__()

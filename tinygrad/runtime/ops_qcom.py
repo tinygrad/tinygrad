@@ -44,7 +44,7 @@ class QCOMSignal(HCQSignal):
   def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(19.2) # based on the 19.2MHz always-on timer
   def _set_value(self, new_value:int): self._signal[0] = new_value
 
-class QCOMComputeQueue(HWComputeQueue):
+class QCOMComputeQueue(HWComputeQueue):   # pylint: disable=abstract-method
   def __init__(self):
     self.cmd_idx_to_dims = {}
     super().__init__()

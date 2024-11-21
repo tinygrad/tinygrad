@@ -132,7 +132,7 @@ class NVCommandQueue(HWCommandQueue): # pylint: disable=abstract-method
     dev.gpu_mmio[0x90 // 4] = gpfifo.token
     gpfifo.put_value += 1
 
-class NVComputeQueue(NVCommandQueue, HWComputeQueue):
+class NVComputeQueue(NVCommandQueue, HWComputeQueue):   # pylint: disable=abstract-method
   def __init__(self):
     self.cmd_idx_to_qmd, self.cmd_idx_to_signal_id, self.cmd_idx_to_global_dims, self.cmd_idx_to_local_dims = {}, {}, {}, {}
     super().__init__()
@@ -187,7 +187,7 @@ class NVComputeQueue(NVCommandQueue, HWComputeQueue):
 
   def _submit(self, dev): self._submit_to_gpfifo(dev, cast(NVDevice, dev).compute_gpfifo)
 
-class NVCopyQueue(NVCommandQueue, HWCopyQueue):
+class NVCopyQueue(NVCommandQueue, HWCopyQueue):   # pylint: disable=abstract-method
   def _copy(self, dest, src, copy_size):
     self.q += [nvmethod(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, 4), *data64(src), *data64(dest)]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 1), copy_size]

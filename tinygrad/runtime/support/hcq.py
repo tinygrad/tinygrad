@@ -30,7 +30,7 @@ DeviceType = TypeVar('DeviceType', bound='HCQCompiled')
 ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 
-class HWCommandQueue(Generic[SignalType, DeviceType]):
+class HWCommandQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   """
   A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
   Both compute and copy queues should have the following commands implemented.
@@ -136,7 +136,6 @@ class HWCommandQueue(Generic[SignalType, DeviceType]):
     return self
   def _submit(self, dev:DeviceType): raise NotImplementedError("backend should overload this function")
 
-class HWComputeQueue(HWCommandQueue[SignalType, DeviceType], Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   @hcq_command
   def memory_barrier(self):
     """
@@ -174,7 +173,6 @@ class HWComputeQueue(HWCommandQueue[SignalType, DeviceType], Generic[SignalType,
     return self
   def _update_exec(self, cmd_idx, global_size, local_size): raise NotImplementedError("backend should overload this function")
 
-class HWCopyQueue(HWCommandQueue[SignalType, DeviceType], Generic[SignalType, DeviceType]):
   @hcq_command
   def copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int):
     """
@@ -202,6 +200,9 @@ class HWCopyQueue(HWCommandQueue[SignalType, DeviceType], Generic[SignalType, De
     return self
   def _update_copy(self, cmd_idx:int, dest:Optional[HCQBuffer], src:Optional[HCQBuffer]):
     raise NotImplementedError("backend should overload this function")
+
+HWCopyQueue = HWCommandQueue
+HWComputeQueue = HWCommandQueue
 
 class HCQSignal:
   def __init__(self, value:int=0, is_timeline:bool=False): self._set_value(value)
