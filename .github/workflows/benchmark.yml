@@ -60,10 +60,12 @@ jobs:
       run: BIG=2 MPS=1 python3.11 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Test tensor cores
       run: METAL=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
-    - name: Run Tensor Core GEMM
-      run: |
-        DEBUG=2 python3.11 extra/gemm/simple_matmul.py | tee matmul.txt
-        DEBUG=2 HALF=1 python3.11 extra/gemm/simple_matmul.py | tee matmul_half.txt
+    - name: Run Tensor Core GEMM (float)
+      run: DEBUG=2 python3.11 extra/gemm/simple_matmul.py | tee matmul.txt
+    - name: Run Tensor Core GEMM (half)
+      run: DEBUG=2 HALF=1 python3.11 extra/gemm/simple_matmul.py | tee matmul_half.txt
+    - name: Run Tensor Core GEMM (bfloat16)
+      run: DEBUG=2 BFLOAT16=1 python3.11 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
     - name: Fuzz Padded Tensor Core GEMM
       run: METAL=1 M_START=6 M_STOP=10 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=6 K_STOP=24 K_STEP=1 TC_OPT=2 DEBUG=2 python3.11 ./extra/gemm/fuzz_matmul.py
     - name: Run LLaMA
@@ -114,6 +116,7 @@ jobs:
           gpt2_half_beam.txt
           matmul.txt
           matmul_half.txt
+          matmul_bfloat16.txt
           sd.txt
           sd_fp16.txt
           sdxl.txt
