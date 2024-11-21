@@ -63,11 +63,6 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], lazyb
     assert not buf.is_realized, "can't fixup allocated buffer"
     buf.buffer.options = None
   dtype = buf.dtype if buf.op in GroupOp.Meta else buf.dtype.base
-  # consts are always fused and generated
-  if buf.op is Ops.CONST:
-    if isinstance(val:=buf.arg, UOp): ctx.var_vals.update([val.unbind()])
-    return UOp(Ops.VALID, dtypes.bool, (buf.st.to_uop(),)).where(UOp.const(dtype, val), 0)
-  # everything else is a VIEW of BUFFER (with an optional op)
   if buf.is_realized:
     buffers[ubuf:=UOp.new_buffer((b:=buf.buffer).device, b.size, b.dtype, num=len(buffers))] = buf.buffer
     op = None
