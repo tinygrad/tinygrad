@@ -343,7 +343,7 @@ def train_resnet():
 def train_retinanet():
   from examples.mlperf.dataloader import batch_load_retinanet
   from examples.mlperf.initializers import FrozenBatchNorm2d
-  from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset
+  from extra.datasets.openimages import MLPERF_CLASSES, BASEDIR, download_dataset, normalize
   from extra.models.retinanet import RetinaNet
   from extra.models import resnet
   from extra.lr_scheduler import LambdaLR
@@ -354,6 +354,9 @@ def train_retinanet():
 
   NUM_CLASSES = len(MLPERF_CLASSES)
   BASE_DIR = getenv("BASE_DIR", BASEDIR)
+  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+
+  for x in GPUS: Device[x]
 
   def _freeze_backbone_layers(backbone, trainable_layers, loaded_keys):
     model_layers = ["layer4", "layer3", "layer2", "layer1", "conv1"][:trainable_layers]
@@ -365,7 +368,7 @@ def train_retinanet():
 
   def _data_get(it):
     x, y_boxes, y_labels, cookie = next(it)
-    return x, y_boxes, y_labels, cookie
+    return x.shard(GPUS, axis=0).realize(), y_boxes, y_labels, cookie
   
   def _create_lr_scheduler(optim, start_iter, warmup_iters, warmup_factor):
     # TODO: refactor this a bit more so we don't have to recreate it, unlike what MLPerf script is doing
@@ -376,11 +379,10 @@ def train_retinanet():
       return warmup_factor * (1 - alpha) + alpha
     return LambdaLR(optim, _lr_lambda)
 
-  def _train_step(model, optim, lr_scheduler):
+  def _train_step(model, optim, lr_scheduler, x):
     optim.zero_grad()
 
-    optim.step()
-    lr_scheduler.step()
+    y_hat = model(normalize(x, GPUS))
 
   # ** hyperparameters **
   # using https://github.com/mlcommons/logging/blob/96d0acee011ba97702532dcc39e6eeaa99ebef24/mlperf_logging/rcp_checker/training_4.1.0/rcps_ssd.json#L3
@@ -400,9 +402,11 @@ def train_retinanet():
   _freeze_backbone_layers(backbone, 3, loaded_keys)
 
   model = RetinaNet(backbone, num_classes=NUM_CLASSES)
+  params = get_parameters(model)
+
+  for p in params: p.realize().to_(GPUS)
 
   # ** optimizer **
-  params = get_parameters(model)
   optim = Adam(params, lr=LR)
 
   # ** dataset **
@@ -428,7 +432,8 @@ def train_retinanet():
     st = time.perf_counter()
 
     while proc is not None:
-      # _train_step(model, optim, lr_scheduler) # TODO: enable once full model has been integrated
+      x, y_boxes, y_labels, proc = proc
+      _train_step(model, optim, lr_scheduler, x) # TODO: enable once full model has been integrated
 
       if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:
