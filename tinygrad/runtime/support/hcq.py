@@ -351,7 +351,7 @@ class ProfileLogger:
       with open(PROFILEPATH.value, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
       print(f"Saved profile to {PROFILEPATH.value}. Use https://ui.perfetto.dev/ to open it.")
 
-class HCQCompiled(Compiled):
+class HCQCompiled(Compiled, Generic[SignalType]):
   """
   A base class for devices compatible with the HCQ (Hardware Command Queue) API.
   """
@@ -359,7 +359,7 @@ class HCQCompiled(Compiled):
   gpu2cpu_copy_time_diff: decimal.Decimal = decimal.Decimal('nan')
   gpu2cpu_compute_time_diff: decimal.Decimal = decimal.Decimal('nan')
 
-  def __init__(self, device:str, allocator:HCQAllocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[HCQSignal],
+  def __init__(self, device:str, allocator:HCQAllocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
                comp_queue_t:Type[HWQueue], copy_queue_t:Optional[Type[HWQueue]]):
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1

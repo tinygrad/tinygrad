@@ -83,7 +83,7 @@ class NVSignal(HCQSignal):
   def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(1000)
   def _set_value(self, new_value:int): self._signal[0] = new_value
 
-class NVCommandQueue(HWQueue): # pylint: disable=abstract-method
+class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']): # pylint: disable=abstract-method
   def __del__(self):
     if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferOptions(cpu_access=True, nolru=True))
 
@@ -310,7 +310,7 @@ class GPFifo:
   put_value: int = 0
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
-class NVDevice(HCQCompiled):
+class NVDevice(HCQCompiled[NVSignal]):
   root = None
   fd_ctl: int = -1
   fd_uvm: int = -1
