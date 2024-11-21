@@ -512,7 +512,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     assert ws_token_params.workSubmitToken != -1
 
     channel_base = self._alloc_gpu_vaddr(0x4000000, force_low=True)
-    uvm.register_channel(self.fd_uvm, gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl, hClient=self.root,
+    uvm.register_channel(self.fd_uvm, gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl.fd, hClient=self.root,
                          hChannel=gpfifo, base=channel_base, length=0x4000000)
 
     return GPFifo(ring=to_mv(gpfifo_area.va_addr + offset, entries * 8).cast("Q"), entries_count=entries, token=ws_token_params.workSubmitToken,

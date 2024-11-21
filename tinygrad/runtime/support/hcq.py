@@ -4,12 +4,14 @@ import contextlib, decimal, statistics, random, json, atexit, time, array, ctype
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator
+from tinygrad.runtime.autogen import libc
 
 # all HCQ interaction with the system happens through this
 class HCQFile:
   def __init__(self, path, flags): self.fd = os.open(path, flags)
   def __del__(self): os.close(self.fd)
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
+  def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, self.fd, offset)
 
 if MOCKGPU:=getenv("MOCKGPU"):
   if MOCKGPU == 2:

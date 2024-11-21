@@ -207,12 +207,14 @@ def hook_syscalls():
 from tinygrad.runtime.support.hcq import HCQFile
 class MockHCQFile(HCQFile):
   def __init__(self, path:str, flags):
-    print("open", path)
     self.fd = _open(path.encode(), flags, 0o777)
+    print("open", path, hex(self.fd))
   def __del__(self): _close(self.fd)
   def ioctl(self, request, arg):
-    print("ioctl")
-    return _ioctl(self.fd, request, ctypes.addressof(arg))
+    ret = _ioctl(self.fd, request, ctypes.addressof(arg))
+    print("ioctl", hex(self.fd), ret)
+    return ret
   def mmap(self, start, sz, prot, flags, offset):
-    print("mmap")
-    return _mmap(start, sz, prot, flags, self.fd, offset)
+    ret = _mmap(start, sz, prot, flags, self.fd, offset)
+    print("mmap", hex(self.fd), hex(start) if start is not None else None, hex(sz), prot, hex(ret))
+    return ret
