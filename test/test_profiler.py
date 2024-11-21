@@ -82,11 +82,11 @@ class TestProfiler(unittest.TestCase):
     TestProfiler.runner = get_runner(TestProfiler.d0.device, si.ast)
     TestProfiler.b.lazydata.buffer.allocate()
 
-    TestProfiler.kernargs_ba_ptr = TestProfiler.runner.clprg.fill_kernargs([TestProfiler.b.lazydata.buffer._buf, TestProfiler.a.lazydata.buffer._buf])
-    TestProfiler.kernargs_ab_ptr = TestProfiler.runner.clprg.fill_kernargs([TestProfiler.a.lazydata.buffer._buf, TestProfiler.b.lazydata.buffer._buf])
+    TestProfiler.kernargs_ba_ptr = TestProfiler.runner._prg.fill_kernargs([TestProfiler.b.lazydata.buffer._buf, TestProfiler.a.lazydata.buffer._buf])
+    TestProfiler.kernargs_ab_ptr = TestProfiler.runner._prg.fill_kernargs([TestProfiler.a.lazydata.buffer._buf, TestProfiler.b.lazydata.buffer._buf])
 
   def test_profile_kernel_run(self):
-    runner_name = TestProfiler.runner.clprg.name
+    runner_name = TestProfiler.runner._prg.name
     with helper_collect_profile(TestProfiler.d0) as profile:
       TestProfiler.runner([TestProfiler.b.lazydata.buffer, TestProfiler.a.lazydata.buffer], var_vals={})
 
@@ -103,7 +103,7 @@ class TestProfiler(unittest.TestCase):
     helper_validate_node(copyin_node, profile=profile, pid_name=Device.DEFAULT, tid_name="DMA")
 
   def test_profile_multiops(self):
-    runner_name = TestProfiler.runner.clprg.name
+    runner_name = TestProfiler.runner._prg.name
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0) as profile:

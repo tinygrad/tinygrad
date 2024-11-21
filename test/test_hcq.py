@@ -21,8 +21,8 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.runner = get_runner(TestHCQ.d0.device, si.ast)
     TestHCQ.b.lazydata.buffer.allocate()
 
-    TestHCQ.kernargs_ba_ptr = TestHCQ.runner.clprg.fill_kernargs([TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf])
-    TestHCQ.kernargs_ab_ptr = TestHCQ.runner.clprg.fill_kernargs([TestHCQ.a.lazydata.buffer._buf, TestHCQ.b.lazydata.buffer._buf])
+    TestHCQ.kernargs_ba_ptr = TestHCQ.runner._prg.fill_kernargs([TestHCQ.b.lazydata.buffer._buf, TestHCQ.a.lazydata.buffer._buf])
+    TestHCQ.kernargs_ab_ptr = TestHCQ.runner._prg.fill_kernargs([TestHCQ.a.lazydata.buffer._buf, TestHCQ.b.lazydata.buffer._buf])
 
   def setUp(self):
     TestHCQ.d0.synchronize()
@@ -102,7 +102,7 @@ class TestHCQ(unittest.TestCase):
 
   # Test exec
   def test_exec_one_kernel(self):
-    TestHCQ.d0.hw_compute_queue_t().exec(TestHCQ.runner.clprg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
+    TestHCQ.d0.hw_compute_queue_t().exec(TestHCQ.runner._prg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
                                    .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
@@ -114,8 +114,8 @@ class TestHCQ(unittest.TestCase):
   def test_exec_2_kernels_100_times(self):
     q = TestHCQ.d0.hw_compute_queue_t()
     q.wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-     .exec(TestHCQ.runner.clprg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
-     .exec(TestHCQ.runner.clprg, TestHCQ.kernargs_ab_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
+     .exec(TestHCQ.runner._prg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
+     .exec(TestHCQ.runner._prg, TestHCQ.kernargs_ab_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
      .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
     for _ in range(100):
@@ -127,7 +127,7 @@ class TestHCQ(unittest.TestCase):
 
   def test_exec_update(self):
     q = TestHCQ.d0.hw_compute_queue_t()
-    q.exec(TestHCQ.runner.clprg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
+    q.exec(TestHCQ.runner._prg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
      .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
     q.update_exec(0, (1,1,1), (1,1,1))
@@ -152,11 +152,11 @@ class TestHCQ(unittest.TestCase):
     zb = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
     zt = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
     ctypes.memset(zb._buf.va_addr, 0, zb.nbytes)
-    kernargs = runner.clprg.fill_kernargs([zt._buf, zb._buf])
+    kernargs = runner._prg.fill_kernargs([zt._buf, zb._buf])
 
     q = TestHCQ.d0.hw_compute_queue_t()
     q.memory_barrier() \
-     .exec(runner.clprg, kernargs, (1,1,1), (1,1,1)) \
+     .exec(runner._prg, kernargs, (1,1,1), (1,1,1)) \
      .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
     for x in range(1, 4):
@@ -282,7 +282,7 @@ class TestHCQ(unittest.TestCase):
 
     sig_st, sig_en = TestHCQ.d0.signal_t(), TestHCQ.d0.signal_t()
     TestHCQ.d0.hw_compute_queue_t().timestamp(sig_st) \
-                                   .exec(TestHCQ.runner.clprg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
+                                   .exec(TestHCQ.runner._prg, TestHCQ.kernargs_ba_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size) \
                                    .timestamp(sig_en) \
                                    .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
@@ -431,7 +431,7 @@ class TestHCQ(unittest.TestCase):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
     buf2 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
 
-    kernargs_ptr = runner.clprg.fill_kernargs([buf1._buf, buf2._buf])
+    kernargs_ptr = runner._prg.fill_kernargs([buf1._buf, buf2._buf])
 
     for i in range(255):
       ctypes.memset(buf2._buf.va_addr, i, 2)
@@ -439,7 +439,7 @@ class TestHCQ(unittest.TestCase):
       # Need memory_barrier after direct write to vram
       TestHCQ.d0.hw_compute_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
                                      .memory_barrier() \
-                                     .exec(runner.clprg, kernargs_ptr, runner.p.global_size, runner.p.local_size) \
+                                     .exec(runner._prg, kernargs_ptr, runner.p.global_size, runner.p.local_size) \
                                      .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1

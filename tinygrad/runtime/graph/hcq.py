@@ -16,7 +16,7 @@ class HCQGraph(MultiGraphRunner):
     kernargs_size: Dict[Compiled, int] = collections.defaultdict(int)
     for ji in self.jit_cache:
       if not isinstance(ji.prg, CompiledRunner): continue
-      kernargs_size[ji.prg.dev] += round_up(ji.prg.clprg.kernargs_alloc_size, 16)
+      kernargs_size[ji.prg.dev] += round_up(ji.prg._prg.kernargs_alloc_size, 16)
     self.kernargs_bufs: Dict[Compiled, HCQBuffer] = {dev:dev.allocator._alloc(sz, BufferSpec(cpu_access=True)) for dev,sz in kernargs_size.items()}
 
     # Fill initial arguments.
@@ -25,8 +25,8 @@ class HCQGraph(MultiGraphRunner):
     kargs_ptrs: Dict[Compiled, int] = {dev:buf.va_addr for dev,buf in self.kernargs_bufs.items()}
     for j,ji in enumerate(self.jit_cache):
       if not isinstance(ji.prg, CompiledRunner): continue
-      kargs_ptrs[ji.prg.dev] = (kargs_ptr:=kargs_ptrs[ji.prg.dev]) + round_up(ji.prg.clprg.kernargs_alloc_size, 16)
-      self.ji_args[j] = ji.prg.clprg.fill_kernargs([cast(Buffer, b)._buf for b in ji.bufs], [var_vals[v] for v in ji.prg.p.vars], kargs_ptr)
+      kargs_ptrs[ji.prg.dev] = (kargs_ptr:=kargs_ptrs[ji.prg.dev]) + round_up(ji.prg._prg.kernargs_alloc_size, 16)
+      self.ji_args[j] = ji.prg._prg.fill_kernargs([cast(Buffer, b)._buf for b in ji.bufs], [var_vals[v] for v in ji.prg.p.vars], kargs_ptr)
 
     # Schedule Dependencies.
     # There are two types of queues on each device: copy and compute. Both must synchronize with all external operations before launching any
@@ -86,7 +86,7 @@ class HCQGraph(MultiGraphRunner):
 
       # Collect profile information if profiling is enabled.
       if PROFILE:
-        prof_ji_desc = ji.prg.clprg.name if is_exec_prg else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" # type: ignore
+        prof_ji_desc = ji.prg._prg.name if is_exec_prg else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" # type: ignore
 
         sig_st, sig_en = (j * 2, True), (j * 2 + 1, True)
         if len(opt_deps) == 0 and (prev_ji:=last_j[enqueue_queue]) is not None: sig_st = (prev_ji * 2 + 1, False)
@@ -99,7 +99,7 @@ class HCQGraph(MultiGraphRunner):
       last_j[enqueue_queue] = j
 
     # Build hardware queues.
-    self.op_cmd_idx: Dict[int, Tuple[Any, int]] = {}
+    self.op_cmd_idx: Dict[int, Tuple[HWQueue, int]] = {}
     self.copy_to_devs: Dict[HCQCompiled, Set[HCQCompiled]] = {dev: set() for dev in self.devices}
     self.kickoff_wait_cmds: Dict[HWQueue, List] = {q: list() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
 
@@ -118,7 +118,7 @@ class HCQGraph(MultiGraphRunner):
 
       # Encode main commands based on ji type.
       if isinstance(ji.prg, CompiledRunner):
-        enqueue_queue.exec(ji.prg.clprg, self.ji_args[j], *ji.prg.p.launch_dims(var_vals))
+        enqueue_queue.exec(ji.prg._prg, self.ji_args[j], *ji.prg.p.launch_dims(var_vals))
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         cast(HCQAllocator, Device[src.device].allocator).map(dest._buf)

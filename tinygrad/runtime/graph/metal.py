@@ -40,8 +40,8 @@ class MetalGraph(GraphRunner):
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
       icb_command = msg(self.icb, "indirectComputeCommandAtIndex:", j, restype=objc_instance)
-      all_pipelines.append(prg.clprg.pipeline_state)
-      msg(icb_command, "setComputePipelineState:", prg.clprg.pipeline_state)
+      all_pipelines.append(prg._prg.pipeline_state)
+      msg(icb_command, "setComputePipelineState:", prg._prg.pipeline_state)
       for i,b in enumerate(ji.bufs):
         if b is not None and b not in input_rawbuffers:
           msg(icb_command, "setKernelBuffer:offset:atIndex:", b._buf.buf, b._buf.offset, i)
