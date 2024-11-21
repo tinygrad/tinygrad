@@ -316,8 +316,9 @@ class NVDevice(HCQCompiled[NVSignal]):
   gpus_info: Union[List, ctypes.Array] = []
   signals_page: Any = None
   signals_pool: List[Any] = []
-  low_uvm_vaddr: int = 0x1000000000 # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings
-  uvm_vaddr: int = 0x2000000000 # 0x2000000000+
+  low_uvm_vaddr: int = 0x8000000000 # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings
+  uvm_addr_start: int = 0x9000000000
+  uvm_vaddr: int = uvm_addr_start # 0x2000000000+
   host_object_enumerator: int = 0x1000
 
   def _new_gpu_fd(self):
@@ -334,7 +335,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     return fd_dev.mmap(target, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if target is not None else 0), 0)
 
   def _gpu_alloc(self, size:int, contig=False, huge_page=False, va_addr=None, map_to_cpu=False, map_flags=0, tag=""):
-    size = round_up(size, align:=((2 << 20) if huge_page else (4 << 10)))
+    size = round_up(size, align:=((2 << 20) if huge_page else (4 << (12 if OSX else 10))))
     alloc_params = nv_gpu.NV_MEMORY_ALLOCATION_PARAMS(owner=self.root, alignment=align, offset=0, limit=size-1, format=6, size=size,
       attr=(((nv_gpu.NVOS32_ATTR_PAGE_SIZE_HUGE << 23) if huge_page else 0) |
             ((nv_gpu.NVOS32_ATTR_PHYSICALITY_CONTIGUOUS if contig else nv_gpu.NVOS32_ATTR_PHYSICALITY_ALLOW_NONCONTIGUOUS) << 27)),
@@ -404,7 +405,7 @@ class NVDevice(HCQCompiled[NVSignal]):
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
     if force_low:
       NVDevice.low_uvm_vaddr = (res_va:=round_up(NVDevice.low_uvm_vaddr, alignment)) + size
-      assert NVDevice.low_uvm_vaddr < 0x2000000000, "Exceed low vm addresses"
+      assert NVDevice.low_uvm_vaddr < NVDevice.uvm_addr_start, "Exceed low vm addresses"
     else: NVDevice.uvm_vaddr = (res_va:=round_up(NVDevice.uvm_vaddr, alignment)) + size
     return res_va
 

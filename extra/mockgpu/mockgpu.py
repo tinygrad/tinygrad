@@ -186,6 +186,11 @@ def _memoryview(cls, mem):
         if st <= addr <= en: return TrackedMemoryView(mem, rcb, wcb)
   return orignal_memoryview(mem)
 
+builtins.memoryview = type("memoryview", (), {'__new__': _memoryview}) # type: ignore
+
+import faulthandler
+faulthandler.enable()
+
 def hook_syscalls():
   install_hook(libc.open, _open)
   install_hook(libc.opendir, _opendir)
@@ -197,7 +202,6 @@ def hook_syscalls():
   install_hook(libc.stat64, _stat64)
   install_hook(libc.fstat64, _fstat64)
   install_hook(libc.getdents64, _getdents64)
-  builtins.memoryview = type("memoryview", (), {'__new__': _memoryview}) # type: ignore
 
   # rewrite autogen's libc mmaps functions.
   import tinygrad.runtime.autogen.libc as autogen_libc
@@ -212,9 +216,9 @@ class MockHCQFile(HCQFile):
   def __del__(self): _close(self.fd)
   def ioctl(self, request, arg):
     ret = _ioctl(self.fd, request, ctypes.addressof(arg))
-    print("ioctl", hex(self.fd), ret)
+    #print("ioctl", hex(self.fd), ret)
     return ret
   def mmap(self, start, sz, prot, flags, offset):
     ret = _mmap(start, sz, prot, flags, self.fd, offset)
-    print("mmap", hex(self.fd), hex(start) if start is not None else None, hex(sz), prot, hex(ret))
+    print("mmap", hex(self.fd), hex(start) if start is not None else None, hex(sz), prot, hex(flags), hex(ret))
     return ret
