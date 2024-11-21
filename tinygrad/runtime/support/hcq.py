@@ -11,6 +11,13 @@ class HCQFile:
   def __del__(self): os.close(self.fd)
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
 
+if MOCKGPU:=getenv("MOCKGPU"):
+  if MOCKGPU == 2:
+    from extra.mockgpu.mockgpu import hook_syscalls
+    hook_syscalls()
+  else:
+    from extra.mockgpu.mockgpu import MockHCQFile as HCQFile  # noqa: F401 # pylint: disable=unused-import
+
 # **************** for HCQ Compatible Devices ****************
 
 SignalType = TypeVar('SignalType', bound='HCQSignal')

@@ -1,7 +1,7 @@
 import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, builtins, atexit
 from extra.mockgpu.nv.nvdriver import NVDriver
 from extra.mockgpu.amd.amddriver import AMDDriver
-from tinygrad.helpers import from_mv, to_mv
+from tinygrad.helpers import from_mv, to_mv, OSX
 start = time.perf_counter()
 
 # *** ioctl lib ***
@@ -14,15 +14,15 @@ libc.fdopendir.argtypes = [ctypes.c_int]
 libc.fdopendir.restype = ctypes.c_void_p
 
 # platform.processor calls `uname -p` which can return `unknown` on some systems
-processor = os.getenv("IOCTL_PROCESSOR") or platform.processor()
-OPEN_SYSCALL = {"aarch64": None, "x86_64": 2}[processor]
-CLOSE_SYSCALL = {"aarch64": 57, "x86_64": 3}[processor]
-READ_SYSCALL = {"aarch64": 63, "x86_64": 0}[processor]
-IOCTL_SYSCALL = {"aarch64": 29, "x86_64": 16}[processor]
-MMAP_SYSCALL = {"aarch64": 222, "x86_64": 9}[processor]
-LSEEK_SYSCALL = {"aarch64": 62, "x86_64": 8}[processor]
-NEWFSTATAT_SYSCALL = {"aarch64": 79, "x86_64": 262}[processor]
-GETDENTS64_SYSCALL = {"aarch64": 61, "x86_64": 217}[processor]
+processor = os.getenv("IOCTL_PROCESSOR") or (("darwin_" if OSX else "") + platform.processor())
+OPEN_SYSCALL = {"aarch64": None, "x86_64": 2, "darwin_arm": 5}[processor]
+CLOSE_SYSCALL = {"aarch64": 57, "x86_64": 3, "darwin_arm": 6}[processor]
+READ_SYSCALL = {"aarch64": 63, "x86_64": 0, "darwin_arm": 3}[processor]
+IOCTL_SYSCALL = {"aarch64": 29, "x86_64": 16, "darwin_arm": 54}[processor]
+MMAP_SYSCALL = {"aarch64": 222, "x86_64": 9, "darwin_arm": 197}[processor]
+LSEEK_SYSCALL = {"aarch64": 62, "x86_64": 8, "darwin_arm": 199}[processor]
+NEWFSTATAT_SYSCALL = {"aarch64": 79, "x86_64": 262, "darwin_arm": None}[processor]
+GETDENTS64_SYSCALL = {"aarch64": 61, "x86_64": 217, "darwin_arm": None}[processor]
 
 def install_hook(c_function, python_function):
   python_function_addr = ctypes.cast(ctypes.byref(python_function), ctypes.POINTER(ctypes.c_ulong)).contents.value
@@ -35,6 +35,13 @@ def install_hook(c_function, python_function):
     # pop r9
     # ret
     tramp = b"\x41\x51\x41\x51\x49\xB9" + struct.pack("Q", python_function_addr) + b"\x4C\x89\x4C\x24\x08\x41\x59\xC3"
+  elif processor == "darwin_arm":
+    # AARCH64 trampoline to ioctl
+    # 0x0000000000000000:  70 00 00 10    adr x16, #0xc
+    # 0x0000000000000004:  10 02 40 F9    ldr x16, [x16]
+    # 0x0000000000000008:  00 02 1F D6    br  x16
+    tramp = b"\x70\x00\x00\x10\x10\x02\x40\xf9\x00\x02\x1f\xd6"
+    tramp += struct.pack("Q", python_function_addr)
   else:
     raise Exception(f"processor {processor} not supported")
 
@@ -186,19 +193,32 @@ def _memoryview(cls, mem):
         if st <= addr <= en: return TrackedMemoryView(mem, rcb, wcb)
   return orignal_memoryview(mem)
 
-install_hook(libc.open, _open)
-install_hook(libc.opendir, _opendir)
-install_hook(libc.close, _close)
-install_hook(libc.closedir, _closedir)
-install_hook(libc.ioctl, _ioctl)
-install_hook(libc.read, _read)
-install_hook(libc.lseek64, _lseek64)
-install_hook(libc.stat64, _stat64)
-install_hook(libc.fstat64, _fstat64)
-install_hook(libc.getdents64, _getdents64)
-builtins.memoryview = type("memoryview", (), {'__new__': _memoryview}) # type: ignore
+def hook_syscalls():
+  install_hook(libc.open, _open)
+  install_hook(libc.opendir, _opendir)
+  install_hook(libc.close, _close)
+  install_hook(libc.closedir, _closedir)
+  install_hook(libc.ioctl, _ioctl)
+  install_hook(libc.read, _read)
+  install_hook(libc.lseek64, _lseek64)
+  install_hook(libc.stat64, _stat64)
+  install_hook(libc.fstat64, _fstat64)
+  install_hook(libc.getdents64, _getdents64)
+  builtins.memoryview = type("memoryview", (), {'__new__': _memoryview}) # type: ignore
 
-# rewrite autogen's libc mmaps functions.
-import tinygrad.runtime.autogen.libc as autogen_libc
-autogen_libc.mmap = _mmap # type: ignore
-autogen_libc.munmap = _munmap # type: ignore
+  # rewrite autogen's libc mmaps functions.
+  import tinygrad.runtime.autogen.libc as autogen_libc
+  autogen_libc.mmap = _mmap # type: ignore
+  autogen_libc.munmap = _munmap # type: ignore
+
+class MockHCQFile:
+  def __init__(self, path:str, flags):
+    print("open", path)
+    self.fd = _open(path.encode(), flags, 0o777)
+  def __del__(self): _close(self.fd)
+  def ioctl(self, request, arg):
+    print("ioctl")
+    return _ioctl(self.fd, request, ctypes.addressof(arg))
+  def mmap(self, start, sz, prot, flags, offset):
+    print("mmap")
+    return _mmap(start, sz, prot, flags, self.fd, offset)
