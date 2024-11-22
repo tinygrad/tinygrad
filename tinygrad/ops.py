@@ -185,7 +185,9 @@ class GroupOp:
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType): return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
-def can_pad(u:UOp) -> bool: return not any(x.op in GroupOp.UnsafePad for x in u.sparents)
+def can_pad(u:UOp, edges:Dict[UOp, UOp]) -> bool:
+  if len(u.src) > 1 and u.src[0].op is Ops.BUFFER and u.src[0] in edges: return True
+  return u.op not in GroupOp.UnsafePad and all(can_pad(x.base, edges) for x in u.src)
 
 END_FOR_UOP = {Ops.IF:(Ops.STORE, Ops.ENDIF), Ops.RANGE:(Ops.ASSIGN, Ops.ENDRANGE)}
 
