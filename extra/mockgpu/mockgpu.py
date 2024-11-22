@@ -208,8 +208,8 @@ def hook_syscalls():
   autogen_libc.mmap = _mmap # type: ignore
   autogen_libc.munmap = _munmap # type: ignore
 
-from tinygrad.runtime.support.hcq import HCQFile
-class MockHCQFile(HCQFile):
+from tinygrad.runtime.support.hcq import HAL
+class MockHAL(HAL):
   def __init__(self, path:str, flags):
     self.fd = _open(path.encode(), flags, 0o777)
     #print("open", path, hex(self.fd))

@@ -4,13 +4,13 @@ assert sys.platform != 'win32'
 from typing import Tuple, List, Any, cast, Union, Dict, Type, Optional
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, hcq_command
-from tinygrad.runtime.support.hcq import HCQArgsState, HCQProgram, HCQSignal, HCQFile, MOCKGPU
+from tinygrad.runtime.support.hcq import HCQArgsState, HCQProgram, HCQSignal, HAL, MOCKGPU
 from tinygrad.device import BufferSpec
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod, OSX
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, PTX, NVPTXCompiler, NVCompiler
-from tinygrad.runtime.autogen import nv_gpu, libc
+from tinygrad.runtime.autogen import nv_gpu
 from tinygrad.runtime.support.elf import elf_loader
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
@@ -19,7 +19,7 @@ def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status
 NV_PFAULT_FAULT_TYPE = {dt:name for name,dt in nv_gpu.__dict__.items() if name.startswith("NV_PFAULT_FAULT_TYPE_")}
 NV_PFAULT_ACCESS_TYPE = {dt:name.split("_")[-1] for name,dt in nv_gpu.__dict__.items() if name.startswith("NV_PFAULT_ACCESS_TYPE_")}
 
-def nv_iowr(fd:HCQFile, nr, args):
+def nv_iowr(fd:HAL, nr, args):
   ret = fd.ioctl((3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord('F') & 0xFF) << 8 | (nr & 0xFF), args)
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
 
@@ -45,7 +45,7 @@ def make_rmctrl_type():
       getattr(nv_gpu, name+"_PARAMS", getattr(nv_gpu, name.replace("_CTRL_CMD_", "_CTRL_DEBUG_")+"_PARAMETERS", None))))})
 rmctrl = make_rmctrl_type()
 
-def uvm_ioctl(cmd, sttyp, fd:HCQFile, **kwargs):
+def uvm_ioctl(cmd, sttyp, fd:HAL, **kwargs):
   ret = fd.ioctl(cmd, made:=sttyp(**kwargs))
   if ret != 0: raise RuntimeError(f"ioctl(uvm) returned {ret}")
   if made.rmStatus != 0: raise RuntimeError(f"uvm_ioctl returned {get_error_str(made.rmStatus)}")
@@ -311,8 +311,8 @@ class GPFifo:
 MAP_FIXED, MAP_NORESERVE = 0 if OSX else 0x10, 0x400
 class NVDevice(HCQCompiled[NVSignal]):
   root = None
-  fd_ctl: HCQFile
-  fd_uvm: HCQFile
+  fd_ctl: HAL
+  fd_uvm: HAL
   gpus_info: Union[List, ctypes.Array] = []
   signals_page: Any = None
   signals_pool: List[Any] = []
@@ -322,12 +322,12 @@ class NVDevice(HCQCompiled[NVSignal]):
   host_object_enumerator: int = 0x1000
 
   def _new_gpu_fd(self):
-    fd_dev = HCQFile(f"/dev/nvidia{NVDevice.gpus_info[self.device_id].minor_number}", os.O_RDWR | os.O_CLOEXEC)
+    fd_dev = HAL(f"/dev/nvidia{NVDevice.gpus_info[self.device_id].minor_number}", os.O_RDWR | os.O_CLOEXEC)
     nv_iowr(fd_dev, nv_gpu.NV_ESC_REGISTER_FD, nv_gpu.nv_ioctl_register_fd_t(ctl_fd=self.fd_ctl.fd))
     return fd_dev
 
   def _gpu_map_to_cpu(self, memory_handle, size, target=None, flags=0, system=False):
-    fd_dev = self._new_gpu_fd() if not system else HCQFile("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
+    fd_dev = self._new_gpu_fd() if not system else HAL("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
     made = nv_gpu.nv_ioctl_nvos33_parameters_with_fd(fd=fd_dev.fd,
       params=nv_gpu.NVOS33_PARAMETERS(hClient=self.root, hDevice=self.nvdevice, hMemory=memory_handle, length=size, flags=flags))
     nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_MAP_MEMORY, made)
@@ -364,7 +364,7 @@ class NVDevice(HCQCompiled[NVSignal]):
 
   def _gpu_host_alloc(self, size, tag=""):
     va_base = self._alloc_gpu_vaddr(aligned_sz:=round_up(size, 4 << 10))
-    mapped_addr = libc.mmap(va_base, aligned_sz, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
+    mapped_addr = HAL.anon_mmap(va_base, aligned_sz, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, 0)
     #assert mapped_addr == va_base, f"Not mmaped at correct address {va_base=:X} != {mapped_addr=:X}"
     va_base = mapped_addr
 
@@ -386,7 +386,7 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     self._debug_mappings.pop((mem.va_addr, mem.size))
     uvm.free(self.fd_uvm, base=mem.va_addr, length=mem.size)
-    if mem.has_cpu_mapping: libc.munmap(mem.va_addr, mem.size)
+    if mem.has_cpu_mapping: HAL.munmap(mem.va_addr, mem.size)
 
   def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True, has_cpu_mapping=False, tag="") -> nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS:
     if create_range: uvm.create_external_range(self.fd_uvm, base=va_base, length=size)
@@ -417,9 +417,9 @@ class NVDevice(HCQCompiled[NVSignal]):
 
   def __init__(self, device:str=""):
     if NVDevice.root is None:
-      NVDevice.fd_ctl = HCQFile("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
-      NVDevice.fd_uvm = HCQFile("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
-      fd_uvm_2 = HCQFile("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
+      NVDevice.fd_ctl = HAL("/dev/nvidiactl", os.O_RDWR | os.O_CLOEXEC)
+      NVDevice.fd_uvm = HAL("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
+      fd_uvm_2 = HAL("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
       NVDevice.root = rm_alloc(self.fd_ctl, nv_gpu.NV01_ROOT_CLIENT, 0, 0, None).hObjectNew
       uvm.initialize(self.fd_uvm)
       with contextlib.suppress(RuntimeError): uvm.mm_initialize(fd_uvm_2, uvmFd=self.fd_uvm.fd) # this error is okay, CUDA hits it too

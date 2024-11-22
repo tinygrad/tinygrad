@@ -6,19 +6,23 @@ from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator
 from tinygrad.runtime.autogen import libc
 
-# all HCQ interaction with the system happens through this
-class HCQFile:
+# all HCQ interaction with the system happens through this Hardware Abstraction Layer. the devices should not make syscalls
+class HAL:
   def __init__(self, path, flags): self.fd = os.open(path, flags)
   def __del__(self): os.close(self.fd)
   def ioctl(self, request, arg): return fcntl.ioctl(self.fd, request, arg)
   def mmap(self, start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, self.fd, offset)
+  @staticmethod
+  def anon_mmap(start, sz, prot, flags, offset): return libc.mmap(start, sz, prot, flags, -1, offset)
+  @staticmethod
+  def munmap(addr, sz): return libc.munmap(addr, sz)
 
 if MOCKGPU:=getenv("MOCKGPU"):
   if MOCKGPU == 2:
     from extra.mockgpu.mockgpu import hook_syscalls
     hook_syscalls()
   else:
-    from extra.mockgpu.mockgpu import MockHCQFile as HCQFile  # noqa: F401 # pylint: disable=unused-import
+    from extra.mockgpu.mockgpu import MockHAL as HAL  # noqa: F401 # pylint: disable=unused-import
 
 # **************** for HCQ Compatible Devices ****************
 
