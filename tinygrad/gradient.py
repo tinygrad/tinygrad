@@ -1,3 +1,4 @@
+from typing import cast
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops
 import math
 
@@ -31,7 +32,7 @@ def gradient(root:UOp, targets:list[UOp]) -> list[UOp]:
   if not all(x in root.sparents for x in targets): raise RuntimeError("some gradient targets not found in parents")
   grads = {root: root.const_like(1.0)}
   for t0 in reversed(_deepwalk(root, targets)):
-    lgrads = pm_gradient.rewrite(t0, ctx=grads[t0])
+    lgrads: tuple[UOp, ...]|None = cast(tuple[UOp, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
     if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}")
     assert len(lgrads) == len(t0.src)
     for k,v in zip(t0.src, lgrads):
