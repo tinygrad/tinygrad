@@ -131,17 +131,26 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
       else: v.replace(state_dict[k].to(v.device)).realize()
       if consume: del state_dict[k]
 
-def tar_extract(fn:os.PathLike) -> Dict[str, Tensor]:
+def tar_extract(fn_or_data: Union[os.PathLike, Tensor]) -> Dict[str, Tensor]:
   """
   Extracts files from a tar archive and returns them as dictionary of names (keys) and tensors (values).
 
   ```python
   tensors = nn.state.tar_extract("archive.tar")
+  # or
+  tensors = nn.state.tar_extract(Tensor(pathlib.Path("archive.tar")))
   ```
   """
-  t = Tensor(pathlib.Path(fn))
-  with tarfile.open(fn, "r") as tar:
-    return {member.name:t[member.offset_data:member.offset_data+member.size] for member in tar if member.type == tarfile.REGTYPE}
+
+  t = fn_or_data if isinstance(fn_or_data, Tensor) else Tensor(pathlib.Path(fn_or_data))
+  pos, tensor_size, result = 0, prod(t.shape), {}
+  if tensor_size < 512*2: raise tarfile.ReadError("Invalid tar file!") # tar files end with at least 2 empty sections
+  while pos + 512 < tensor_size:
+    header, pos = t[pos:pos + 512].data(), pos + 512
+    file_size = int(bytes(header[124:136]).decode("ascii").rstrip('\x00') or "0", 8)
+    if header[156] == 48: result[bytes(header[:100]).decode("ascii").rstrip('\x00')] = t[pos:pos + file_size]
+    pos += file_size if file_size % 512 == 0 else file_size + (512 - file_size % 512)
+  return { k: v for k, v in result.items() if k != "" }
 
 # torch support!
 
