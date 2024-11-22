@@ -339,21 +339,21 @@ def group_realizes(ctx:ScheduleContext, realizes:Dict[UOp, UOp]) -> List[List[UO
 
 # **** Schedule creation and BFS toposort
 
-def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> UOp:
-  ctx[b] = UOp.store(b, ShapeTracker.from_shape((st:=unwrap(base.st)).shape).to_uop(), to_store)
-  return UOp(Ops.LOAD, base.dtype, (b, st.to_uop()))
+def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> None:
+  ctx[b] = to_store
+  return None
 
-def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, to_store:UOp, b:UOp) -> Optional[UOp]:
+def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, to_store:UOp, b:UOp) -> None:
   if to_store.op in {Ops.CONST, Ops.BIND}: return None
   base_shape = unwrap(base.st).shape
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(base_shape) and resolve(prod(base_shape) >= prod([y-x for x,y in m])):
-    return None if can_pad(base) else realize(ctx, b, to_store, base).view(st)
+    return None if can_pad(base) else realize(ctx, b, to_store, base)
   # early realize before expand
-  if resolve(prod(base_shape) < prod(st.shape)): return realize(ctx, b, to_store, base).view(st)
+  if resolve(prod(base_shape) < prod(st.shape)): return realize(ctx, b, to_store, base)
   # otherwise safety check pads
-  return None if (all(v.mask is None for v in st.views) or can_pad(base)) else realize(ctx, b, to_store, base).view(st)
+  return None if (all(v.mask is None for v in st.views) or can_pad(base)) else realize(ctx, b, to_store, base)
 
 do_realize = PatternMatcher([
   # always realize meta ops
@@ -364,19 +364,22 @@ do_realize = PatternMatcher([
   # realize before expand or unsafe pad ops
   (UPatSrc().view(name="view"), realize_view),
   # realize before COPY or BUFFER_VIEW
-  (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatSrc(), UPatSrc().view(name="view")),), name="root"),
-   lambda ctx,root,view=None,**kwargs: root.replace(src=(realize(ctx,**kwargs) if view is None else realize(ctx,**kwargs).view(view.st),)),),
+  (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatSrc(), UPatSrc().view()),)), lambda ctx,b,to_store,base: realize(ctx, b, to_store, base)),
 ])
 
 def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
   return UOp.const_with_shape(base.dtype, val, unwrap(base.st).shape)
 
+def append_kernel(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
+  ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape((st:=unwrap(base.st)).shape).to_uop(), to_store)
+  return UOp(Ops.LOAD, base.dtype, (b, st.to_uop()))
+
 break_sched = PatternMatcher([
   # consts are always fused and generated
   (UPatSrc({Ops.CONST, Ops.BIND}), generate_valid),
   # everything else is a VIEW of BUFFER that either realizes or fuses
-  (UPatSrc(), lambda ctx,b,to_store,base: realize(ctx.realizes, b, to_store, base) if b in ctx.realizes else None),
+  (UPatSrc(), lambda ctx,b,to_store,base: append_kernel(ctx, b, to_store, base) if b in ctx.realizes else None),
 ])
 
 @track_rewrites(named=True)
