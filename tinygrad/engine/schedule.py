@@ -180,9 +180,10 @@ def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
   return UOp(Ops.DEFINE_GLOBAL, x.dtype, (), len(ctx.bufs)-1)
 append_bufs = PatternMatcher([(UPat(Ops.BUFFER, name="x"), _append_buf)])
 
-def _append_preload(ctx:ScheduleItemContext, x:UOp, b:UOp) -> UOp:
-  if b in ctx.assigned: ctx.assign_preloads.append(x)
+def _check_preload(ctx:ScheduleItemContext, x:UOp) -> UOp:
+  if x.buf_uop in ctx.assigned: ctx.assign_preloads.append(x)
   return x.replace(op=Ops.LOAD)
+check_preload = PatternMatcher([(UPat(Ops.PRELOAD, name="x"), _check_preload)])
 
 to_si = PatternMatcher([
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
@@ -197,7 +198,7 @@ def fuse_src(ctx:ScheduleItemContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
 
 lazy = PatternMatcher([
   (UPatSrc(), fuse_src),
-  (UPat(Ops.BUFFER, name="b").view(name="view"), lambda ctx,b,view: UOp(Ops.LOAD, view.dtype, (b, view.st.to_uop()))),
+  (UPat(Ops.BUFFER, name="b").view(name="v"), lambda ctx,b,v: UOp(Ops.PRELOAD if b in ctx.assigned else Ops.LOAD, v.dtype, (b, v.st.to_uop()))),
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
 ])
 
@@ -211,7 +212,7 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemCon
   # do movementops
   sink = graph_rewrite(graph_rewrite(sink, view_left), view_right)
   # convert to AST
-  sink = graph_rewrite(graph_rewrite(sink, to_si, si_ctx), append_bufs, si_ctx)
+  sink = graph_rewrite(graph_rewrite(sink, to_si+check_preload if len(ctx.assigns) != 0 else to_si, si_ctx), append_bufs, si_ctx)
   # assert buffer count limit
   if (limit:=BUF_LIMIT.get(device:=si_ctx.bufs[0].device)) is not None and len(si_ctx.bufs) >= limit:
     if DEBUG >= 3: print(sink)
