@@ -3,7 +3,7 @@ import unittest
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
-from hypothesis import given, strategies as strat, settings, Verbosity
+from hypothesis import given, strategies as strat, settings
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.schedule import create_schedule
@@ -180,7 +180,6 @@ class TestDTypeALU(unittest.TestCase):
     float_strat = float_strat.filter(lambda x: 0 < x < dtypes.max(unsigned_dtype))
     universal_test_cast(a.draw(float_strat), float_dtype, unsigned_dtype)
 
-  @settings(verbosity=Verbosity.verbose)
   @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)))
   def test_float_cast_to_unsigned_overflow_underflow(self, a, float_dtype, unsigned_dtype):
     if not is_dtype_supported(float_dtype, Device.DEFAULT): float_dtype = dtypes.float32
@@ -189,8 +188,8 @@ class TestDTypeALU(unittest.TestCase):
     overflow_strat = float_strat.filter(lambda x: x > dtypes.max(unsigned_dtype))
     if Device.DEFAULT in {"PYTHON", "LLVM"}:
       # casting inf to int in python hits OverflowError
-      underflow_strat.filter(lambda x: x != float('-inf'))
-      overflow_strat.filter(lambda x: x != float('inf'))
+      underflow_strat = underflow_strat.filter(lambda x: x != float('-inf'))
+      overflow_strat = overflow_strat.filter(lambda x: x != float('inf'))
     universal_test_cast(a.draw(underflow_strat), float_dtype, unsigned_dtype)
     universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
 
