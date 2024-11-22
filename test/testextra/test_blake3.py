@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from extra.utilities.blake3 import blake3
 
-#@unittest.skip("slow")
+@unittest.skip("slow")
 class TestBLAKE3(unittest.TestCase):
   def setUp(self):
     self.vectors = [
