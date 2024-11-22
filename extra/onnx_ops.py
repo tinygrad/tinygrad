@@ -6,9 +6,9 @@ from tinygrad.helpers import prod, flatten
 from extra.onnx import DTYPE_MAP, to_python_const
 import numpy as np
 
-tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
-                  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-                  "Elu", "Celu", "Xor", "Round"}
+tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Asin", "Acos", "Atan","Relu",
+                  "Sigmoid", "MatMul", "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign",
+                  "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Xor", "Round", "Erf"}
 
 # **************** Free Ops ****************
 
@@ -43,7 +43,7 @@ def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, v
   if value_string is not None or value_strings is not None: raise NotImplementedError('value_string or value_strings not implemented for Constant op')
 
 def HardSigmoid(x: Tensor, alpha=0.2, beta=0.5): return (alpha*x + beta).clip(0, 1)
-def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + Erf(x/math.sqrt(2)))
+def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
 def Selu(X: Tensor, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
 def PRelu(X:Tensor, slope:Tensor):
   slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope # HACK OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
@@ -87,22 +87,6 @@ def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > 
 def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
 def Not(x:Tensor): return x.logical_not()
-
-def Asin(x): return Atan(x / (1 - x * x).sqrt())
-def Acos(x: Tensor):
-  negate = (x < 0)
-  x = x.abs()
-  ret = ((((-0.0187293 * x) + 0.0742610)*x - 0.2121144) * x + 1.5707288) * (1.0 - x).sqrt()
-  ret = ret - 2 * negate * ret
-  return negate * math.pi + ret
-def Atan(y: Tensor):
-  t1 = y.abs()
-  t3 = (1 > t1).where(t1, t1.reciprocal())
-  t4 = t3 * t3
-  t0 = ((((-0.013480470 * t4 + 0.057477314) * t4 - 0.121239071) * t4 + 0.195635925) * t4 - 0.332994597) * t4 + 0.999995630
-  t3 = t0 * t3
-  t3 = (t1 > 1).where(1.570796327 - t3, t3)
-  return y.sign() * t3
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
   k = to_python_const(k) if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
@@ -282,7 +266,7 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
   if outshape is not None and (outshape := to_python_const(outshape)) != ret.shape:
     diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
     pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
-    ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
+    ret = ret.pad((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
   return ret
 
 def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
@@ -334,7 +318,7 @@ def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
 
 def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
   bs, c, iy, ix = x.shape
-  return x / x.mul(x).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
+  return x / x.mul(x).reshape(bs,1,c,iy*ix).pad((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
 
 def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)):
   mean = x.mean(axis, keepdim=True)
@@ -505,17 +489,6 @@ def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
   cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
   return cond.where(values[1], values[0])
 
-def Erf(x: Tensor):
-  t = 1.0 / (1.0 + 0.3275911 * x.abs())
-  term1 = 0.254829592 * t
-  term2 = -0.284496736 * t ** 2
-  term3 = 1.421413741 * t ** 3
-  term4 = -1.453152027 * t ** 4
-  term5 = 1.061405429 * t ** 5
-  y = (term1 + term2 + term3 + term4 + term5)
-  z = 1.0 - y * (-x * x).exp()
-  return (x > 0).where(z, -z)
-
 def Compress(inp: Tensor, condition: Tensor, axis=None):
   if axis is None:
     inp = inp.flatten()
@@ -574,29 +547,13 @@ def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
   raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
 def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
-  _, _, *data_sz = to_python_const(size)
-  size_zeros, original_grid = Tensor.zeros(data_sz), Tensor.ones(data_sz)
-  stackable = [original_grid]
-  for dim, dim_sz in enumerate(data_sz):
-    a = Tensor.arange(-1, 1.0001, 2/(dim_sz-1)) if align_corners == 1 else Tensor.arange(-1+1/dim_sz, 1, 2/dim_sz)
-    if dim == 0: stackable = [a.reshape(dim_sz, *[1]*(len(data_sz)-1)) + size_zeros, *stackable]
-    elif dim == 1: stackable = [a.reshape(1, dim_sz, *[1]*(len(data_sz)-2)) + size_zeros, *stackable]
-    else: stackable = [a.reshape(1, dim_sz) + size_zeros, *stackable]
-  original_grid = Tensor.stack(*stackable, dim=len(data_sz))
-  if original_grid.ndim == 3:
-    N, dim_2d, dim_homo = theta.shape
-    assert dim_2d == 2 and dim_homo == 3
-    H, W, dim_homo = original_grid.shape
-    assert dim_homo == 3
-    original_grid = original_grid.reshape(H*W, dim_homo).transpose()
-    return theta.matmul(original_grid).permute(0,2,1).reshape(N, H, W, dim_2d)
-  assert original_grid.ndim == 4
-  N, dim_3d, dim_homo = theta.shape
-  assert dim_3d == 3 and dim_homo == 4
-  D, H, W, dim_homo = original_grid.shape
-  assert dim_homo == 4
-  original_grid = original_grid.reshape(D*H*W, dim_homo).transpose()
-  return theta.matmul(original_grid).permute(0,2,1).reshape(N, D, H, W, dim_3d)
+  N, _, *spatial_dims = to_python_const(size)
+  def generate_grid(steps):
+    return Tensor.linspace(-1, 1, steps, device=theta.device) if align_corners else Tensor.linspace(-1+1/steps, 1-1/steps, steps, device=theta.device)
+  grids = Tensor.meshgrid(*(generate_grid(d) for d in spatial_dims))
+  base_grid = Tensor.stack(*reversed(grids), Tensor.ones_like(grids[0], device=theta.device), dim=-1)
+  base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
+  return (base_grid @ theta.transpose(1, 2)).reshape(N, *spatial_dims, -1)
 
 # **************** com.microsoft Ops ****************
 
@@ -606,7 +563,7 @@ def SkipLayerNormalization(x:Tensor, skip:Tensor, gamma, beta:Optional[Tensor]=N
   return x.layernorm(eps=epsilon) * gamma + beta, None, None, x
 
 def FastGelu(x:Tensor, bias:Optional[Tensor]=None):
-  # this is tanh approamixated
+  # this is tanh approximated
   return (x + bias).gelu()
 
 def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None, word_embedding:Tensor=None, position_embedding:Tensor=None, segment_embedding:Optional[Tensor]=None, gamma=None, beta=None, mask:Optional[Tensor]=None, position_ids:Optional[Tensor]=None, epsilon=None, mask_index_type=None):
@@ -645,7 +602,7 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
   if unidirectional:  # gpt-style
     assert hidden_size == v_hidden_size
     xqkv = x.linear(weights, bias)
-    xq, xk, xv = [xqkv._slice([None, None, (i*hidden_size, (i+1)*hidden_size)]) for i in range(3)]
+    xq, xk, xv = [xqkv.shrink([None, None, (i*hidden_size, (i+1)*hidden_size)]) for i in range(3)]
   else:  # bert-style
     wq, wk, wv = weights[:,:hidden_size], weights[:,hidden_size:hidden_size+v_hidden_size], weights[:,hidden_size+v_hidden_size:]
     bq, bk, bv = (bias[:hidden_size], bias[hidden_size:hidden_size+v_hidden_size], bias[hidden_size+v_hidden_size]) if bias is not None else None

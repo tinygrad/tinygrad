@@ -26,7 +26,7 @@ class TestExample(unittest.TestCase):
   def test_convert_to_clang(self, device):
     a = Tensor([[1,2],[3,4]], device=device)
     assert a.numpy().shape == (2,2)
-    b = a.clang()
+    b = a.to("CLANG")
     assert b.numpy().shape == (2,2)
 
   @multidevice_test

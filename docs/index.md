@@ -10,7 +10,9 @@ cd tinygrad
 python3 -m pip install -e .
 ```
 
-After you have installed tinygrad, try the [MNIST tutorial](mnist.md)
+After you have installed tinygrad, try the [MNIST tutorial](mnist.md).
+
+If you are new to tensor libraries, learn how to use them by solving puzzles from [tinygrad-tensor-puzzles](https://github.com/obadakhalili/tinygrad-tensor-puzzles).
 
 We also have [developer docs](developer/developer.md), and Di Zhu has created a [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-notes/) to help understand how tinygrad works.
 
@@ -25,6 +27,10 @@ The main class you will interact with is [Tensor](tensor/index.md). It functions
 To understand what training looks like in tinygrad, you should read `beautiful_mnist.py`
 
 We have a [quickstart guide](quickstart.md) and a [showcase](showcase.md)
+
+## tinygrad Stack
+
+<img src="./tinygrad_vs_others.png" alt="Tinygrad vs others" style="max-width: 1000px; height: auto;" />
 
 ## Differences from PyTorch
 

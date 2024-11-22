@@ -1,17 +1,17 @@
 import unittest, time, gc
 import numpy as np
+from tinygrad.device import is_dtype_supported
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.jit import TinyJit
-from tinygrad import Tensor, Device, GlobalCounters, dtypes
+from tinygrad import Tensor, Device, GlobalCounters, dtypes, Variable
 from tinygrad.helpers import CI, Context
-from tinygrad.shape.symbolic import Variable
 from extra.lr_scheduler import OneCycleLR
-from test.helpers import derandomize_model, is_dtype_supported
+from test.helpers import derandomize_model
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet, hyp
-from examples.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
+from examples.llama import Transformer as LLaMaTransformer
 from examples.stable_diffusion import UNetModel, unet_params
 from extra.models.unet import ResBlock
 
@@ -51,16 +51,15 @@ class TestRealWorld(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_stable_diffusion(self):
     params = unet_params
-    if CI:
-      params["model_ch"] = 16
-      params["ctx_dim"] = 16
-      params["num_res_blocks"] = 1
-      params["n_heads"] = 2
+    params["model_ch"] = 16
+    params["ctx_dim"] = 16
+    params["num_res_blocks"] = 1
+    params["n_heads"] = 2
     model = UNetModel(**params)
     derandomize_model(model)
     @TinyJit
     def test(t, t2): return model(t, Tensor([801]), t2).realize()
-    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, params["ctx_dim"])), test, 18.0, 513 if CI else 839)
+    helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, params["ctx_dim"])), test, 18.0, 513)
 
   def test_unet_resblock(self):
     model = [ResBlock(16, 24, 16) for _ in range(4)]
@@ -76,12 +75,12 @@ class TestRealWorld(unittest.TestCase):
     dtypes.default_float = dtypes.float16
 
     args_tiny = {"dim": 1024, "hidden_dim": 2048, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
-    model = LLaMaTransformer(**(args_tiny if CI else LLAMA_MODEL_PARAMS["1"]["7B"]["args"]))
+    model = LLaMaTransformer(**args_tiny)
     derandomize_model(model)
     @TinyJit
     def test(t): return model(t, 0).realize()
     # TODO: test first token vs rest properly
-    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.27 if CI else 14.9, 192 if CI else 719, all_jitted=True)
+    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.27, 192, all_jitted=True)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_gpt2(self):
@@ -118,8 +117,7 @@ class TestRealWorld(unittest.TestCase):
     with Tensor.train():
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))
       optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=0.8, nesterov=True, weight_decay=0.15)
-
-      BS = 32 if CI else 512
+      BS = 32
 
       @TinyJit
       def train(X):

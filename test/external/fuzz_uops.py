@@ -7,7 +7,7 @@ from tinygrad.ops import END_FOR_UOP, UOp, print_uops
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import DEBUG, colored
-from tinygrad.shape.symbolic import Variable
+from tinygrad.ops import Variable
 from tinygrad.tensor import _to_np_dtype
 from test.external.fuzz_schedule import FUZZ_SCHEDULE_MAX_PATHS, find_all_toposorts
 
@@ -50,10 +50,10 @@ class UOpsFuzzerRunner(CompiledRunner):
       # setup prg
       uops = list(path)
       if DEBUG >= 5: print_uops(uops)
-      self.p = replace(self.p, name=(name:=f"{init_name}fuzz{i}"), src=Device[self.p.dname].renderer.render(name, uops), uops=uops)
+      self.p = replace(self.p, name=(name:=f"{init_name}fuzz{i}"), src=Device[self.p.device].renderer.render(name, uops), uops=uops)
       if DEBUG >= 4: print(self.p.src)
-      self.lib = Device[self.p.dname].compiler.compile_cached(self.p.src)
-      self.clprg = Device[self.p.dname].runtime(name, self.lib)
+      self.lib = Device[self.p.device].compiler.compile_cached(self.p.src)
+      self.clprg = Device[self.p.device].runtime(name, self.lib)
       for x in (rawbufs:=[init_globals[i] for i in self.p.globals]): x.copyin(init_rawbufs[x])
       # verify
       super().__call__(rawbufs, var_vals, wait)

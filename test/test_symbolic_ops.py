@@ -1,5 +1,5 @@
 import unittest
-from tinygrad.shape.symbolic import Variable
+from tinygrad import Variable
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
 from examples.gpt2 import Attention

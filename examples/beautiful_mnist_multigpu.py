@@ -4,7 +4,7 @@ from tinygrad import Tensor, TinyJit, nn, GlobalCounters, Device
 from tinygrad.helpers import getenv, colored, trange
 from tinygrad.nn.datasets import mnist
 
-GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 2))]
+GPUS = tuple(f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 2)))
 
 class Model:
   def __init__(self):

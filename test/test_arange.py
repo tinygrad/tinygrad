@@ -23,16 +23,21 @@ class TestArange(unittest.TestCase):
     np.testing.assert_equal(tt.numpy(), np.arange(N))
     return p.op_estimate
 
-  def test_complexity(self, opts=None):
+  def test_complexity(self, opts=None, limit=None):
     # add 1 to avoid divide by 0. arange is 0 flops now!
     f1 = self._get_flops(256, opts) + 1
     f2 = self._get_flops(2560, opts) + 1
     print(f"{f1=}, {f2=}")
     assert (f1 < 5000 and f2 < 5000) or (f2 / f1 < 15), f"bad complexity, flops {f2/f1:.1f}X while inputs 10X"
+    if limit is not None and not getenv("PTX"):
+      # PTX counts index ALU in flops
+      assert f1 <= limit, f"{f1=}, {limit=}"
 
-  def test_complexity_w_upcast(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4)])
-  def test_complexity_w_unroll(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 4)])
-  def test_complexity_w_upcast_and_unroll(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)])
+  def test_complexity_w_upcast(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4)], limit=1)
+  def test_complexity_w_unroll2(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 2)], limit=1)
+  def test_complexity_w_unroll4(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 4)], limit=1)
+  def test_complexity_w_unroll8(self): return self.test_complexity([Opt(OptOps.UNROLL, 0, 8)], limit=1)
+  def test_complexity_w_upcast_and_unroll(self): return self.test_complexity([Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)], limit=1)
 
   @unittest.skip("doesn't work yet")
   def test_complexity_w_local_and_padto(self): return self.test_complexity([Opt(OptOps.LOCAL, 0, 16), Opt(op=OptOps.PADTO, axis=1, amt=32)])
@@ -137,8 +142,8 @@ class TestIndexing(unittest.TestCase):
     from tinygrad.nn.datasets import mnist
     X_train, Y_train, _, _ = mnist()
     with Context(NOOPT=noopt, FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
+      samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0]).realize()
       GlobalCounters.reset()
-      samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0])
       x = X_train[samples].numpy()
       y = Y_train[samples].numpy()
       assert GlobalCounters.global_ops < op_limit, f"too many ops {GlobalCounters.global_ops} != {op_limit}"

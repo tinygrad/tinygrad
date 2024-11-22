@@ -7,6 +7,7 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import getenv, DEBUG, CI, OSX
 from tinygrad.dtype import ConstType, DType
+from tinygrad.device import is_dtype_supported
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
@@ -28,14 +29,6 @@ def to_python_const(t, tobytes=False) -> Union[List[ConstType], List[bytes], Uni
     print(f"Cache miss for {t}, {tobytes=}")
     cache_misses = info.misses
   return ret
-
-# copied from helpers.py
-def is_dtype_supported(dtype, device: str = Device.DEFAULT):
-  if dtype == dtypes.bfloat16: return False
-  if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
-  if dtype == dtypes.half: return not (CI and device in {"GPU", "LLVM", "CUDA"})
-  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
-  return True
 
 # src: onnx/mapping.py  https://onnx.ai/onnx/api/mapping.html#l-mod-onnx-mapping
 # not supported: STRING = 8 COMPLEX64 = 14, COMPLEX128 = 15, UINT4 = 21, INT4 = 22
@@ -81,7 +74,7 @@ def get_run_onnx(onnx_model: ModelProto):
       return Tensor(dat, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims))
     if len(inp.raw_data) > 0:
       data = np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).astype(_to_np_dtype(dtype)).copy()
-      return Tensor(data, requires_grad=False).reshape(tuple(inp.dims))
+      return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
     return Tensor(None, requires_grad=False)
 
   def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:

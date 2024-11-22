@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.helpers import prod, DEBUG
+from tinygrad.dtype import dtypes
+from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
-from tinygrad.shape.symbolic import Variable, NumNode
+from tinygrad import Variable
+from tinygrad.ops import UOp, Ops, graph_rewrite
+from tinygrad.codegen.uopgraph import sym
 from itertools import product
 
-def shapetracker_getitem(st, val):
-  _locals = {"idx0": val, "valid": 1}
-  idx, valid = st.reshape((st.size,)).expr_idxs()
-  exec(f"valid={valid.render()};idx0={idx.render()}", None, _locals)
-  return _locals["idx0"] if _locals["valid"] else -1
+def shapetracker_getitem(st:ShapeTracker, val:int):
+  idx, valid = st.reshape((st.size,)).to_indexed_uops([UOp.const(dtypes.int, val)])
+  idx, valid = graph_rewrite(idx, sym), graph_rewrite(valid, sym)
+  assert idx.op is Ops.CONST and valid.op is Ops.CONST
+  return idx.arg, valid.arg
 
 class CheckingShapeTracker:
   def __init__(self, shape):
@@ -70,10 +73,8 @@ class CheckingShapeTracker:
   def contiguous(self): return self.st.contiguous
 
   def assert_same(self):
-    x = [shapetracker_getitem(self.st, i) for i in range(prod(self.st.shape))]
+    x = [(v[0] if (v:=shapetracker_getitem(self.st, i))[1] else -1) for i in range(prod(self.st.shape))]
     y = [self[i] for i in range(prod(self.shape))]
-    idx, valid = self.st.expr_idxs()
-    if DEBUG >= 1: print(x, y, self.st.shape, self.shape, idx.render(), valid.render(), self.st)
     assert self.st.shape == self.shape
     assert x == y, f"mismatch shapetracker:{x} real:{y}"
 
@@ -118,12 +119,47 @@ class TestRealDoesntSimplify(unittest.TestCase):
 
 class TestRealStrides(unittest.TestCase):
   def test_1(self):
-    self.st = ShapeTracker((
+    st = ShapeTracker((
       View.create((2048,), (1,), 0, ((0, 512),)),
-      View.create((16, 32, 4), (128, 4, 1), 0, None)))
-    st = self.st.real_strides()
-    print(self.st, st)
-    assert st == (None, 4, 1)
+      View.create((16, 32, 4), (128, 4, 1), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (None, 4, 1))
+
+  def test_2(self):
+    # test/test_ops.py::TestOps::test_simple_padding_conv1d
+    st = ShapeTracker((
+      View.create((6, 2, 5, 14), (90, 45, 1, 5), 0, ((0, 6), (0, 2), (0, 5), (0, 9))),
+      View.create((6, 2, 78), (140, 70, 1), 0, ((0, 6), (0, 2), (0, 70))),
+      View.create((6, 2, 13, 6), (156, 78, 1, 13), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (90, 45, None, None))
+
+  def test_3(self):
+    # test/test_ops.py::TestOps::test_simple_cumsum
+    st = ShapeTracker((
+      View.create((4, 256, 512), (256, 0, 1), 0, ((0, 4), (0, 256), (0, 256))),
+      View.create((4, 131327), (131072, 1), 0, ((0, 4), (0, 131072))),
+      View.create((4, 511, 257), (131327, 1, 511), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (256, None, None))
+
+  def test_4(self):
+    # test/test_nn.py::TestNN::test_conv_transpose1d
+    st = ShapeTracker((
+      View.create((4, 16, 56, 2), (896, 56, 1, 0), 0, ((0, 4), (0, 16), (0, 56), (0, 1))),
+      View.create((1, 4, 1, 16, 8, 121), (0, 1792, 0, 112, 0, 1), -5, ((0, 1), (0, 4), (0, 1), (0, 16), (0, 8), (5, 116))),
+      View.create((4, 64, 115, 16, 7), (15488, 0, 1, 968, 122), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (896, 0, None, 56, None))
+
+  def test_5(self):
+    # test/test_ops.py::TestOps::test_conv2d
+    st = ShapeTracker((
+      View.create((1, 3, 1, 12, 2, 8), (0, 132, 0, 12, 1, 2), 0, ((0, 1), (0, 3), (0, 1), (0, 11), (0, 2), (0, 6))),
+      View.create((1, 3, 22, 21), (0, 192, 16, 1), 0, ((0, 1), (0, 3), (0, 12), (0, 16))),
+      View.create((3, 11, 7, 2, 3), (462, 21, 1, 231, 7), 0, None),
+    ))
+    self.assertEqual(st.real_strides(), (132, None, None, None, None))
 
 class TestRealSimplifies(unittest.TestCase):
   def tearDown(self):
@@ -150,20 +186,18 @@ class TestViewMinify(unittest.TestCase):
     assert len(View.create((10,10,10,10)).permute((1,0,2,3)).minify().shape) == 3
 
 class TestIndexExpressions2d(unittest.TestCase):
-
   def setUp(self):
     shapes = [(30, 5), (15, 10), (15, 1), (5, 10), (5, 1)] # Make sure dim0 is a multiple of 5, one of the tests divides this dimension by 5
     offsets = [0, 1, 15, 28, 10000]
     self.sts = [ShapeTracker.from_shape((prod(base_shape)+offset,)).shrink(((offset, offset+prod(base_shape)),)).\
                 reshape(base_shape) for base_shape in shapes for offset in offsets]
-    self.offset = [NumNode(offset) for base_shape in shapes for offset in offsets]
+    self.offset = [offset for base_shape in shapes for offset in offsets]
     self.shapes = [shape for shape in shapes for offset in offsets]
     self.idxs_exprs = []
 
   def tearDown(self):
     for st, offset, shape, idxs_expr in zip(self.sts, self.offset, self.shapes, self.idxs_exprs):
       numel = prod(shape)
-      assert idxs_expr(self.default_idxs(st.shape)) == st.expr_idxs(None)[0]
       self.check_bounds(idxs_expr(self.default_idxs(st.shape)), offset, numel)
       idx0s = [(0,0), (0, min(1, st.shape[0]-1)), (0, st.shape[0]-1), (min(3, st.shape[0]-1), min(6, st.shape[0]-1)), (st.shape[0]-1, st.shape[0]-1)]
       idx1s = [(0,0), (0, min(1, st.shape[1]-1)), (0, st.shape[1]-1), (min(3, st.shape[1]-1), min(6, st.shape[1]-1)), (st.shape[1]-1, st.shape[1]-1)]
@@ -171,7 +205,6 @@ class TestIndexExpressions2d(unittest.TestCase):
                (st.shape[2]-1, st.shape[2]-1)] if len(st.shape) == 3 else [None for _ in idx0s]
       for idx0, idx1, idx2 in product(idx0s, idx1s, idx2s):
         idxs = [Variable(f"idx{i}", idx[0], idx[1]) for i, idx in enumerate((idx0, idx1, idx2)) if idx is not None]
-        assert idxs_expr(idxs) == st.expr_idxs(idxs)[0]
         self.check_bounds(idxs_expr(idxs), offset, numel)
 
   def default_idx(self, shape):
@@ -181,8 +214,8 @@ class TestIndexExpressions2d(unittest.TestCase):
     return [Variable(f"idx{i}", 0, d-1) for i,d in enumerate(shape)]
 
   def check_bounds(self, expr, offset, numel):
-    assert expr.min >= offset
-    assert expr.max <= offset + numel - 1
+    assert expr.vmin >= offset
+    assert expr.vmax <= offset + numel - 1
 
   def test_noop(self):
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
@@ -273,8 +306,8 @@ class TestIndexExpressions2d(unittest.TestCase):
   def test_reshape_combining_4(self):
     # interestingly this one is quite slow
     self.st = CheckingShapeTracker((1,1,5,5,1,1,5))
-    self.st.pad(((3,6), (0,0), (0,5), (0,0), (3,6), (0,0), (0,5)))
-    self.st.reshape((100,5,100))
+    self.st.pad(((2,1), (0,0), (0,2), (0,0), (2,1), (0,0), (0,2)))
+    self.st.reshape((28,5,28))
     assert len(self.st.views) == 1
     self.st.assert_same()
 
@@ -489,6 +522,14 @@ class TestComplexShapeTracker(unittest.TestCase):
     self.st.reshape((64, 1024, 4))
     print(self.st.views)
     assert self.st.contiguous
+
+class TestShapeTrackerEquality(unittest.TestCase):
+  def test_simple_equals(self):
+    self.assertEqual(ShapeTracker.from_shape((10,10)), ShapeTracker.from_shape((10,10)))
+  def test_other_equals(self):
+    st1 = ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True)))
+    st2 = ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True)))
+    self.assertEqual(st1, st2)
 
 class TestSingleShapeTracker(unittest.TestCase):
   def setUp(self):
@@ -781,18 +822,10 @@ class TestShapeTrackerSize(unittest.TestCase):
     self.assertEqual(st.real_size(), 9950)    # careful here
 
   def test_size_variable(self):
-    st = ShapeTracker(views=(View(shape=(1, 1, 1, (NumNode(1)+Variable('start_pos', 0, 8192)), 1, 8, 4, 128), strides=(0, 0, 0, 1024, 0, 128, 0, 1),
-                                  offset=0, mask=None, contiguous=False), View(shape=(1, 32, 1, (NumNode(1)+Variable('start_pos', 0, 8192)), 128),
+    st = ShapeTracker(views=(View(shape=(1, 1, 1, (Variable('start_pos', 0, 8192)+1), 1, 8, 4, 128), strides=(0, 0, 0, 1024, 0, 128, 0, 1),
+                                  offset=0, mask=None, contiguous=False), View(shape=(1, 32, 1, (Variable('start_pos', 0, 8192)+1), 128),
                                                                                strides=(0, 128, 0, 4096, 1), offset=0, mask=None, contiguous=False)))
     self.assertEqual(st.real_size(), 8389632)
-
-class TestIdxs(unittest.TestCase):
-  def test_check_idx_range(self):
-    # generated from: (Tensor.rand(4096,599*64) @ Tensor.rand(599*64,1024)).realize()
-    # TODO: use int64
-    st = ShapeTracker(views=(View(shape=(4096, 1024, 599, 1), strides=(613376, 599, 1, 0), offset=0, mask=None, contiguous=True),))
-    with self.assertRaises(AssertionError):
-      st.expr_idxs()
 
 class TestConsecutive(unittest.TestCase):
   @classmethod
@@ -826,6 +859,18 @@ class TestConsecutive(unittest.TestCase):
     assert not self.ones[0, :].lazydata.st.consecutive
     # consecutive if sliced into size 1
     assert self.ones[0, 0].lazydata.st.consecutive
+
+class TestRender(unittest.TestCase):
+  def test_render(self):
+    st = ShapeTracker.from_shape((2, 3))
+    idx, valid = st.to_indexed_uops()
+    self.assertEqual(idx.render(), "((ridx0*3)+ridx1)")
+    self.assertEqual(valid.render(), "True")
+
+    st = st.pad(((0, 1), (0, 0)))
+    idx, valid = st.to_indexed_uops()
+    self.assertEqual(idx.render(), "((ridx0*3)+ridx1)")
+    self.assertEqual(valid.render(), "(ridx0<2)")
 
 if __name__ == '__main__':
   unittest.main()

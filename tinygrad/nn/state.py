@@ -1,5 +1,5 @@
-import os, json, pathlib, zipfile, pickle, tarfile, struct
-from typing import Dict, Union, List, Optional, Any, Tuple
+import os, json, pathlib, zipfile, pickle, tarfile, struct, functools
+from typing import Dict, Union, List, Optional, Any, Tuple, Callable
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm
@@ -16,7 +16,7 @@ def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
   """
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
   json_len = t[0:8].bitcast(dtypes.int64).item()
-  return t, json_len, json.loads(t[8:8+json_len].numpy().tobytes())
+  return t, json_len, json.loads(t[8:8+json_len].data().tobytes())
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   """
@@ -114,7 +114,7 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
   ```
   """
   start_mem_used = GlobalCounters.mem_used
-  with Timing("loaded weights in ", lambda et_ns: f", {(GlobalCounters.mem_used-start_mem_used)/1e9:.2f} GB loaded at {(GlobalCounters.mem_used-start_mem_used)/et_ns:.2f} GB/s"):  # noqa: E501
+  with Timing("loaded weights in ", lambda et_ns: f", {(B:=(GlobalCounters.mem_used-start_mem_used))/1e9:.2f} GB loaded at {B/et_ns:.2f} GB/s"):
     model_state_dict = get_state_dict(model)
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
@@ -123,6 +123,8 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
       if k not in state_dict and not strict:
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
+      if v.shape != state_dict[k].shape:
+        raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.shape}, but found {state_dict[k].shape} in state dict.')
       if isinstance((mlb:=v.lazydata), MultiLazyBuffer):
         if isinstance(state_dict[k].lazydata, MultiLazyBuffer): v.replace(state_dict[k]).realize()
         else: v.replace(state_dict[k].shard(mlb.device, mlb.axis)).realize()
@@ -171,7 +173,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       if DEBUG >= 3: print(f"WARNING: this torch load is slow. CLANG to permute {intermediate_shape} with {permute_indexes}")
       assert storage[1] != dtypes.bfloat16, "can't CLANG permute BF16"
       # TODO: find a nice way to support all shapetracker on disktensors
-      ret = ret.clang().reshape(intermediate_shape).permute(permute_indexes)
+      ret = ret.to(None).reshape(intermediate_shape).permute(permute_indexes)
 
     return ret.reshape(size)
 
@@ -226,3 +228,76 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
         base_offset += 8 + lens[i]
       f.seek(rwd)
       return TorchPickle(f).load()
+
+def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
+  """
+  Converts ggml tensor data to a tinygrad tensor.
+
+  Supported native types: float32 (id: 0), float16 (id: 1), int8 (id: 16), int16 (id: 17), int32 (id: 18)
+  Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q8_0 (id: 8), Q6_K (id: 14)
+  """
+  # https://github.com/ggerganov/ggml/blob/6dccc647264f5429df2624f36138f601e7ce23e5/include/ggml.h#L356
+
+  # native types
+  if (dtype := { 0: dtypes.float32, 1: dtypes.float16, 16: dtypes.int8, 17: dtypes.int16, 18: dtypes.int32 }.get(ggml_type)) is not None:
+    return t[:dtype.itemsize * n].bitcast(dtype)
+
+  def q_to_uint8(t: Tensor, b: int) -> Tensor:
+    # TODO: rewrite with arange?
+    shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
+    return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
+
+  # map to (number of elements, number of bytes)
+  if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 14: (256, 210), 8: (32, 34) }.get(ggml_type)) is not None:
+    blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1]))
+    if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
+    if ggml_type == 3:
+      d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
+      return q_to_uint8(blocks[:,4:], 4).bitcast(dtypes.int8) * d + m
+    if ggml_type == 8: return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].bitcast(dtypes.int8)
+    if ggml_type == 14:
+      xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
+      scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((-1, 16, 16)).reshape((-1, 256))
+      d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
+      return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
+  raise ValueError(f"GGML type '{ggml_type}' is not supported!")
+
+def gguf_load(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
+  """
+  Loads a gguf file from a tensor.
+
+  ```python
+  fn = "Meta-Llama-3-8B-Instruct.Q4_0.gguf"
+  gguf_tensor = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}").to(Device.DEFAULT)
+  kv_data, state_dict = gguf_load(gguf_tensor)
+  ```
+  """
+  if tensor.dtype != dtypes.uint8 or len(tensor.shape) != 1: raise ValueError("GGUF tensor must be 1d and of dtype uint8!")
+  pos, read_buffer, rb_start, kv_data, state_dict = 0, memoryview(bytes()), 0, {}, {}
+  def read_bytes(n: int):
+    nonlocal pos, read_buffer, rb_start
+    if rb_start + len(read_buffer) < pos + n: rb_start, read_buffer = pos, tensor[pos:(pos+max(n, 1000_000))].data()
+    return read_buffer[pos-rb_start:(pos:=pos+n)-rb_start]
+  def read_unpack(fmt: str, n: int): return struct.unpack(fmt, read_bytes(n))[0]
+  def read_str(): return str(read_bytes(read_uint64()), "utf-8")
+  def read_arr():
+    reader, n = readers[read_int32()], read_uint64()
+    return [ reader() for _ in range(n) ]
+
+  readers: Dict[int, Callable[[], Any]] = { 8: read_str, 9: read_arr, **{ t: functools.partial(read_unpack, "<"+f, nb) for t, f, nb in [ (0,"c",1),
+    (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
+  read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
+
+  magic, version, n_tensors, n_kv = read_bytes(4), read_int32(), read_int64(), read_int64()
+  if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
+  for _ in range(n_kv):
+    k, typ = read_str(), read_int32()
+    kv_data[k] = readers[typ]()
+
+  t_infos = [ (read_str(), tuple(read_uint64() for _ in range(read_uint32())), read_int32(), read_uint64()) for _ in range(n_tensors) ]
+  alignment = kv_data.get("general.alignment", 32)
+  data_start = pos = pos + (alignment - pos % alignment if pos % alignment != 0 else 0)
+
+  for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
+
+  return kv_data, state_dict

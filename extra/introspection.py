@@ -1,7 +1,6 @@
-# TODO: move the GRAPH and DEBUG stuff to here
 import gc
 from tinygrad.helpers import prod
-from tinygrad.lazy import LazyBuffer
+from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.device import Buffer
 from tinygrad import Tensor, GlobalCounters
 

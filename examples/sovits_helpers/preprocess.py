@@ -137,7 +137,7 @@ class Resample:
     waveform = waveform.reshape(-1, shape[-1])  # pack batch
     num_wavs, length = waveform.shape
     target_length = int(math.ceil(new_freq * length / orig_freq))
-    waveform = waveform.pad2d((self.width, self.width + orig_freq))
+    waveform = waveform.pad((self.width, self.width + orig_freq))
     resampled = waveform[:, None].conv2d(self.kernel, stride=orig_freq)
     resampled = resampled.transpose(1, 2).reshape(num_wavs, -1)
     resampled = resampled[..., :target_length]

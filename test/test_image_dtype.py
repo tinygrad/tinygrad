@@ -3,8 +3,35 @@ import numpy as np
 from tinygrad import Device, dtypes, Tensor, Context
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.realize import lower_schedule
+from tinygrad.helpers import prod, unwrap
 
-@unittest.skipIf(Device.DEFAULT != "GPU", "only images on GPU")
+@unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
+class TestImageCopy(unittest.TestCase):
+  def test_image_copyout_1x1(self):
+    it = Tensor.arange(4).cast(dtypes.imagef((1,1,4))).realize()
+    buf = it.lazydata.buffer
+    out = buf.as_buffer()
+    np.testing.assert_equal(out.cast('f').tolist(), np.arange(4))
+
+  def test_image_copyout_2x3(self):
+    it = Tensor.arange(2*3*4).cast(dtypes.imagef((2,3,4))).realize()
+    buf = it.lazydata.buffer
+    out = buf.as_buffer()
+    np.testing.assert_equal(out.cast('f').tolist(), np.arange(2*3*4))
+
+  def test_image_roundtrip(self):
+    sz = (4,2,4)
+    it = Tensor.rand(prod(sz)).cast(dtypes.imagef(sz)).realize()
+    buf = it.lazydata.buffer
+    out = buf.as_buffer()
+
+    it2 = Tensor.rand(prod(sz)).cast(dtypes.imagef(sz)).realize()
+    buf2 = it2.lazydata.buffer
+    buf2.copyin(out)
+
+    assert (it == it2).sum().item() == prod(sz)
+
+@unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
 class TestImageDType(unittest.TestCase):
   def test_image_and_back(self):
     data = Tensor.randn(9*27*4).realize()
@@ -77,10 +104,11 @@ class TestImageDType(unittest.TestCase):
       w2 = Tensor.zeros(8, 2)
       loss = x.image_dot(w1).image_dot(w2).float().max()
       loss.backward()
-      sched = w1.grad.schedule()
+      sched = unwrap(w1.grad).schedule()
+      self.assertEqual(len(sched), 10)
       for s,ei in zip(sched, lower_schedule(sched[:])):
         ei.run()
-        if s.outputs[0].dtype is dtypes.float:
+        if s.outputs[0].dtype == dtypes.float:
           lst = s.outputs[0].as_buffer().cast("f").tolist()
           print(lst)
           assert not np.any(np.isnan(lst))

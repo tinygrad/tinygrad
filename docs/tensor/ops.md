@@ -13,6 +13,7 @@
 ::: tinygrad.Tensor.softmax
 ::: tinygrad.Tensor.log_softmax
 ::: tinygrad.Tensor.logsumexp
+::: tinygrad.Tensor.logcumsumexp
 ::: tinygrad.Tensor.argmax
 ::: tinygrad.Tensor.argmin
 
@@ -43,3 +44,4 @@
 ::: tinygrad.Tensor.binary_crossentropy_logits
 ::: tinygrad.Tensor.sparse_categorical_crossentropy
 ::: tinygrad.Tensor.cross_entropy
+::: tinygrad.Tensor.nll_loss

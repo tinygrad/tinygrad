@@ -11,7 +11,7 @@ There is a good [bunch of tutorials](https://mesozoic-egg.github.io/tinygrad-not
 
 Everything in [Tensor](../tensor/index.md) is syntactic sugar around [function.py](function.md), where the forwards and backwards passes are implemented for the different functions. There's about 25 of them, implemented using about 20 basic ops. Those basic ops go on to construct a graph of:
 
-::: tinygrad.lazy.LazyBuffer
+::: tinygrad.engine.lazy.LazyBuffer
     options:
         show_source: false
 

@@ -3,7 +3,8 @@ from typing import List
 from tinygrad.helpers import prod
 from tinygrad.shape.view import View
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, sym_infer
+from tinygrad import Variable
+from test.unit.test_shapetracker import shapetracker_getitem
 
 class MultiShapeTracker:
   def __init__(self, sts:List[ShapeTracker]): self.sts = sts
@@ -19,14 +20,9 @@ class MultiShapeTracker:
 def st_equal(st1:ShapeTracker, st2:ShapeTracker) -> bool:
   if st1.shape != st2.shape: return False
   if st1 == st2: return True
-  idx = Variable("idx", 0, prod(st1.shape)-1)
-  st1_idx, st1_valid = st1.reshape((st1.size,)).expr_idxs([idx])
-  st2_idx, st2_valid = st2.reshape((st2.size,)).expr_idxs([idx])
-  for i in range(idx.min, idx.max + 1):
-    st1_off = sym_infer(st1_idx, {idx: i})
-    st2_off = sym_infer(st2_idx, {idx: i})
-    st1_v = sym_infer(st1_valid, {idx: i})
-    st2_v = sym_infer(st2_valid, {idx: i})
+  for i in range(0, prod(st1.shape)):
+    st1_off, st1_v = shapetracker_getitem(st1, i)
+    st2_off, st2_v = shapetracker_getitem(st2, i)
     if st1_v != st2_v or (st1_off != st2_off and st1_v):
       print(f"ST MISMATCH @ {i}, {st1_v=} != {st2_v=}, {st1_off=} != {st2_off=}")
       print(st1)
@@ -113,7 +109,6 @@ class TestShapeTrackerAddVariable(unittest.TestCase):
     vm2 = View(shape=(var_i, var_j, 3), strides=(var_j*3, 3, 1), offset=0, mask=None, contiguous=True)
     ShapeTracker((vm1,)) + ShapeTracker((vm2,))
 
-  @unittest.skip("two vars not supported")
   def test_merge_symbolic_views_2(self):
     var_i = Variable('i', 1, 10)
     var_j = Variable('j', 1, 10)

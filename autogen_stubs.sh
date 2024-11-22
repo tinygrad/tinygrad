@@ -117,11 +117,13 @@ generate_nv() {
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl83de.h \
     $NVKERN_SRC/src/nvidia/generated/g_allclasses.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc6c0.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/clc6b5.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_ioctl.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_linux_ioctl.h \
+    $NVKERN_SRC/kernel-open/nvidia-uvm/hwref/ampere/ga100/dev_fault.h \
     $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv_escape.h \
     $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl.h \
     $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl-numbers.h \
@@ -209,9 +211,38 @@ generate_libc() {
 
   sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/libc.py
   sed -i "s\FIXME_STUB\libc\g" $BASE/libc.py
-  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(ctypes.util.find_library('c'))\g" $BASE/libc.py
+  sed -i "s\FunctionFactoryStub()\None if (libc_path := ctypes.util.find_library('c')) is None else ctypes.CDLL(libc_path)\g" $BASE/libc.py
 
   fixup $BASE/libc.py
+}
+
+generate_kgsl() {
+  clang2py extra/qcom_gpu_driver/msm_kgsl.h -o $BASE/kgsl.py -k cdefstum
+  fixup $BASE/kgsl.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/kgsl.py
+  sed -nE 's/#define ([A-Za-z0-9_]+)_SHIFT\s*[^\S\r\n]*[0-9]*$/def \1(val): return (val << \1_SHIFT) \& \1_MASK/p' extra/qcom_gpu_driver/msm_kgsl.h >> $BASE/kgsl.py
+  python3 -c "import tinygrad.runtime.autogen.kgsl"
+}
+
+generate_adreno() {
+  clang2py extra/qcom_gpu_driver/a6xx.xml.h -o $BASE/adreno.py -k cestum
+  sed -nE 's/#define ([A-Za-z0-9_]+)__SHIFT\s*[^\S\r\n]*[0-9]*$/def \1(val): return (val << \1__SHIFT) \& \1__MASK/p' extra/qcom_gpu_driver/a6xx.xml.h >> $BASE/adreno.py
+  fixup $BASE/adreno.py
+  sed -i "s\import ctypes\import ctypes, os\g" $BASE/adreno.py
+  python3 -c "import tinygrad.runtime.autogen.adreno"
+}
+
+generate_qcom() {
+  clang2py -k cdefstum \
+    extra/dsp/include/ion.h \
+    extra/dsp/include/msm_ion.h \
+    extra/dsp/include/adsprpc_shared.h \
+    extra/dsp/include/remote_default.h \
+    extra/dsp/include/apps_std.h \
+    -o $BASE/qcom_dsp.py
+
+  fixup $BASE/qcom_dsp.py
+  python3 -c "import tinygrad.runtime.autogen.qcom_dsp"
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
@@ -223,8 +254,11 @@ elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
+elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc
+elif [ "$1" == "kgsl" ]; then generate_kgsl
+elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc
 else echo "usage: $0 <type>"
 fi

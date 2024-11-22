@@ -1,6 +1,5 @@
 import csv, pathlib, time, numpy as np
 from os import getenv
-from tinygrad.device import CompileError
 import torch
 torch.set_num_threads(1)
 import onnx
@@ -73,10 +72,12 @@ def benchmark_model(m, devices, validate_outs=False):
       for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
       benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}) # noqa: F821
       del inputs, tinygrad_model, tinygrad_jitted_model
-    except CompileError as e:
-      # METAL fails with buffer count limit
-      if m == "dm" and device == "METAL": return
-      raise e
+    except RuntimeError as e:
+      # TODO: we don't run the dm model on METAL for now
+      if Device.DEFAULT == "METAL":
+        assert "buffer count limit" in str(e)
+        return
+      else: raise e
 
   # convert model to torch
   try:

@@ -2,7 +2,7 @@ from typing import Dict, List, Final, Callable, DefaultDict
 from collections import defaultdict
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
 from tinygrad.helpers import DType, PtrDType, dtypes, ImageDType, DEBUG, getenv
-from tinygrad.codegen.kernel import  UOp, UOps
+from tinygrad.codegen.kernel import  UOp, Ops
 from triton.compiler import compile as triton_compile
 import linecache
 import math
@@ -75,32 +75,32 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   def int_div(x,y): return f"({x}//{y})" if y != '0' else f"{x}*tl.where({x}==0, float('nan'), float('inf'))"
   for u in uops:
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
-    if uop == UOps.LOOP:
+    if uop == Ops.LOOP:
       kk(f"for {ssa(u, 'ridx')} in range({vin[0].arg}, {r[vin[1]]}):")
       depth += 1
-    elif uop == UOps.END: depth -= 1
-    elif uop == UOps.ALU:
+    elif uop == Ops.END: depth -= 1
+    elif uop == Ops.ALU:
       assert dtype is not None
       val = code_for_op[args](*[r[x] for x in vin])
       if child_count[u] <=1 or dtypes.is_int(dtype): r[u] = int_div(*[r[x] for x in vin]) if args == BinaryOps.DIV and dtypes.is_int(dtype) else val
       else: kk(f"{ssa(u, 'alu')} = ({val})")
-    elif uop == UOps.LOAD:
+    elif uop == Ops.LOAD:
       assert dtype is not None
       if len(vin) == 2: kk(f"{ssa(u, 'val')} = {render_cast(f'tl.load({r[vin[0]]} + { fill_dims_for_idx(r[vin[1]], dims)}, mask = {render_valid(valid)})', dtype)}")
       else: kk(f"{ssa(u, 'val')} = {render_cast(f'tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0)', dtype)}")
-    elif uop == UOps.DEFINE_ACC: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, dtype, args).replace('//', '/')}")
-    elif uop == UOps.CONST: r[u] = define_scalar([], dtype, args)
-    elif uop == UOps.PHI:
+    elif uop == Ops.DEFINE_ACC: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, dtype, args).replace('//', '/')}")
+    elif uop == Ops.CONST: r[u] = define_scalar([], dtype, args)
+    elif uop == Ops.ASSIGN:
       kk(f"{r[vin[0]]} = {r[vin[1]].replace('//', '/')}")
       r[u] = r[vin[0]]
-    elif uop == UOps.STORE:
+    elif uop == Ops.STORE:
       assert not isinstance(dtype, ImageDType), "unimplemented: image store"
       kk(f"{'if '+r[vin[3]]+': ' if len(vin)>3 else ''}tl.store({r[vin[0]]} + {r[vin[1]]}, {r[vin[2]].replace('//', '/')}, mask = {render_valid(valid)}) ")
-    elif uop == UOps.DEFINE_GLOBAL:
+    elif uop == Ops.DEFINE_GLOBAL:
       bufs.append(args)
       signatures.append("*" if isinstance(dtype, PtrDType) else "" +  signature_dtypes[dtype])
       r[u] = args
-    elif uop == UOps.SPECIAL:
+    elif uop == Ops.SPECIAL:
       dims.append(args[1])
       valid.append(f"{args[1]}<{get_max(args[2])}")
       if args[1].startswith("g"): kk(f"{args[1]} = tl.program_id({args[0]}) # {args[2]}")
@@ -108,7 +108,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
         kk(f"{args[1]} = tl.arange({0}, {next_power_of_2(args[2])})")
         local_size.append(args[2])
       r[u] = args[1]
-    elif uop == UOps.CAST and dtype is not None: r[u] = render_cast(r[vin[0]], dtype, isinstance(args, tuple) and args[1])
+    elif uop == Ops.CAST and dtype is not None: r[u] = render_cast(r[vin[0]], dtype, isinstance(args, tuple) and args[1])
     else: raise NotImplementedError(f"unimplemented: {uop}")
 
   prg = f"import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n@triton.jit\ndef {function_name}("+','.join(bufs)+"):\n"

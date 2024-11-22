@@ -1,13 +1,13 @@
 # stuff needed to unpack a kernel
 from typing import Tuple
-from extra.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer, MetaOps
+from tinygrad import Variable
 from tinygrad.codegen.kernel import Opt, OptOps
-from tinygrad.ops import UOp, UOps
+from tinygrad.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.shape.symbolic import Variable, NumNode
 inf, nan = float('inf'), float('nan')
+UOps = Ops
 
 # kernel unpacker
 from tinygrad.codegen.kernel import Kernel
@@ -24,13 +24,16 @@ def kern_str_to_lin(kern_str:str, opts=None):
 import gzip
 from pathlib import Path
 import random
-from tinygrad.helpers import dedup
+from tinygrad.helpers import dedup, DEBUG
 def load_worlds(filter_reduce=True, filter_noimage=True, filter_novariable=True):
   fn = Path(__file__).parent.parent / "datasets/sops.gz"
   ast_strs = dedup(gzip.open(fn).read().decode('utf-8').strip().split("\n"))
+  assert len(ast_strs) > 5000, f"dataset size = {len(ast_strs)} is too small"
+  if DEBUG >= 1: print(f"loaded {len(ast_strs)=} before filters")
   if filter_reduce: ast_strs = [x for x in ast_strs if "REDUCE_AXIS" in x]
   if filter_noimage: ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
-  if filter_novariable: ast_strs = [x for x in ast_strs if "Variable" not in x]
+  if filter_novariable: ast_strs = [x for x in ast_strs if "DEFINE_VAR" not in x]
+  if DEBUG >= 1: print(f"loaded {len(ast_strs)=} after filters {filter_reduce=}, {filter_noimage=}, {filter_novariable=}")
   random.seed(1337)
   random.shuffle(ast_strs)
   return ast_strs
@@ -41,7 +44,6 @@ def assert_same_lin(l1, l2):
 
 # get features
 import math
-from tinygrad.shape.symbolic import Node
 
 MAX_DIMS = 16
 MAX_BUFS = 9
@@ -58,7 +60,7 @@ def lin_to_feats(lin:Kernel, use_sts=True):
 
   # first, the full shape, including the colors
   for s,os,c in zip(lin.full_shape,lin.output_shape,lc):
-    if isinstance(s, Node):
+    if isinstance(s, UOp):
       ret.append(False)
       ret += [0]*9
     else:

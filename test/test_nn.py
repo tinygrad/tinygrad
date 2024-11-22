@@ -2,30 +2,41 @@
 import unittest
 import numpy as np
 import torch
-from tinygrad import Tensor, Device, TinyJit
-from tinygrad.ops import UOps
+from tinygrad import Tensor, Device, TinyJit, dtypes
+from tinygrad.ops import Ops
 from tinygrad.helpers import CI, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
+from tinygrad.device import is_dtype_supported
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestNN(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "no int64 on WebGPU")
   def test_sparse_cat_cross_entropy(self):
     # create in tinygrad
-    input_tensor = Tensor.randn(5, 5)
-    target = Tensor([0, 0, 0, 1, 2])  # torch doesn't support target=-1
+    input_tensor = Tensor.randn(6, 5) # not square to test that mean scaling uses the correct dimension
+    target = Tensor([0, 0, 0, 1, 2, 3])  # torch doesn't support target=-1
     torch_input = torch.tensor(input_tensor.numpy())
     torch_target = torch.tensor(target.numpy(), dtype=torch.long)
 
     for smoothing in [0.0, 0.1, 0.5, 1.0]:
       for ignore_index in [-1, 0, 2]:
-        loss = input_tensor.sparse_categorical_crossentropy(target, label_smoothing=smoothing, ignore_index=ignore_index)
-        torch_loss = torch.nn.CrossEntropyLoss(reduction='mean', label_smoothing=smoothing, ignore_index=ignore_index)(torch_input, torch_target)
-        np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
+        for reduction in ["none", "sum", "mean"]:
+          loss = input_tensor.sparse_categorical_crossentropy(target, label_smoothing=smoothing, ignore_index=ignore_index, reduction=reduction)
+          torch_loss = torch.nn.CrossEntropyLoss(reduction=reduction, label_smoothing=smoothing, ignore_index=ignore_index)(torch_input, torch_target)
+          np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
+
+          # also test with a batch dimension (of size 1)
+          loss = input_tensor.unsqueeze(0).sparse_categorical_crossentropy(
+            target.unsqueeze(0), label_smoothing=smoothing, ignore_index=ignore_index, reduction=reduction
+          )
+          torch_loss = torch.nn.CrossEntropyLoss(reduction=reduction, label_smoothing=smoothing, ignore_index=ignore_index)(
+            torch_input.unsqueeze(0).permute(0,2,1), torch_target.unsqueeze(0)
+          )
+          np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
 
   def test_batchnorm2d(self, training=False, threed=False, track_running_stats=True):
     with Tensor.train(training):
@@ -161,6 +172,66 @@ class TestNN(unittest.TestCase):
     torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+
+  def test_conv1d_same_padding(self):
+    BS, C1, W = 8, 3, 32
+    C2, K, S, P = 16, 3, 1, 'same'
+
+    # create in tinygrad
+    layer = Conv1d(C1, C2, kernel_size=K, stride=S, padding=P)
+
+    # create in torch
+    with torch.no_grad():
+      torch_layer = torch.nn.Conv1d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
+      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
+      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
+
+    # test
+    x = Tensor.uniform(BS, C1, W)
+    z = layer(x)
+    torch_x = torch.tensor(x.numpy())
+    torch_z = torch_layer(torch_x)
+    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+
+  def _run_conv2d_same_padding_test(self, BS, C1, C2, H, W, K, S, padding='same', D=1):
+    # create in tinygrad
+    layer = Conv2d(C1, C2, kernel_size=K, stride=S, padding=padding, dilation=D)
+
+    # create in torch
+    with torch.no_grad():
+      torch_layer = torch.nn.Conv2d(C1, C2, kernel_size=K, stride=S, padding=padding, dilation=D).eval()
+      torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
+      torch_layer.bias[:] = torch.tensor(layer.bias.numpy(), dtype=torch.float32)
+
+    # test
+    x = Tensor.uniform(BS, C1, H, W)
+    z = layer(x)
+    torch_x = torch.tensor(x.numpy())
+    torch_z = torch_layer(torch_x)
+    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+
+  def test_conv2d_same_padding_odd_input(self):
+    BS, C1, H, W = 16, 16, 29, 31
+    C2, K, S, P = 32, 5, 1, 'same'
+    self._run_conv2d_same_padding_test(BS, C1, C2, H, W, K, S, P)
+
+  def test_conv2d_same_padding_large_kernel(self):
+    BS, C1, H, W = 16, 16, 28, 33
+    C2, K, S, P = 32, 9, 1, 'same'
+    self._run_conv2d_same_padding_test(BS, C1, C2, H, W, K, S, P)
+
+  def test_conv2d_same_padding_with_dilation(self):
+    BS, C1, H, W = 16, 3, 28, 28
+    C2, K, S, P, D = 32, 3, 1, 'same', 3
+    self._run_conv2d_same_padding_test(BS, C1, C2, H, W, K, S, P, D)
+
+  def test_conv2d_same_padding_invalid_stride(self):
+    C1, C2, K, S, P = 16, 32, 2, 2, 'same'
+    self.assertRaises(ValueError, Conv2d, C1, C2, kernel_size=K, stride=S, padding=P)
+
+  def test_conv2d_same_padding_invalid_padding_str(self):
+    C1, C2, K, S, P = 16, 32, 2, 1, 'not_same'
+    self.assertRaises(ValueError, Conv2d, C1, C2, kernel_size=K, stride=S, padding=P)
 
   @unittest.skip("Takes too long to compile for Compiled backends")
   def test_conv2d_winograd(self):
@@ -404,6 +475,7 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=2e-3, rtol=1e-3)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), f"no long on {Device.DEFAULT}")
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
 
@@ -442,11 +514,12 @@ class TestNN(unittest.TestCase):
 
   def test_embedding_one_kernel(self):
     layer = Embedding(20, 30)
+    layer.weight = Tensor.zeros_like(layer.weight).contiguous()
     a = Tensor([[1, 5, 9, 11],
                 [12, 19, 8, 1]])
     result = layer(a)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(3, len([item for item in schedule if item.ast.op is UOps.SINK]), "first run realizes arange, weight, and embedding")
+    self.assertEqual(3, len([item for item in schedule if item.ast.op is Ops.SINK]), "first run realizes arange, weight, and embedding")
     run_schedule(schedule)
 
     b = Tensor([[1, 2, 3],
@@ -454,8 +527,17 @@ class TestNN(unittest.TestCase):
                 [7, 8, 9]])
     result = layer(b)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(1, len([item for item in schedule if item.ast.op is UOps.SINK]), "second run realizes embedding only")
+    self.assertEqual(1, len([item for item in schedule if item.ast.op is Ops.SINK]), "second run realizes embedding only")
     run_schedule(schedule)
+
+  def test_embedding_shape(self):
+    vocab_size, embed_size = 10, 16
+    layer = Embedding(vocab_size, embed_size)
+    for rank in range(5):
+      shp = (1,) * rank
+      a = Tensor([3]).reshape(shp)
+      result = layer(a)
+      self.assertEqual(result.shape, shp + (embed_size,))
 
   def test_load_state_dict(self):
     layer = Conv2d(3, 5, kernel_size=3)
@@ -470,22 +552,93 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
-  def test_load_state_dict_sharded(self):
+  def test_load_state_dict_sharded_model(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
 
     layer = Conv2d(3, 5, kernel_size=3)
-    layer.weight.shard_(devices, -1)
+    layer.weight.shard_(devices, 3)
     layer.bias.shard_(devices, None)
     state_dict = {
-      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, -1),
+      'weight': Tensor.randn(5, 3, 3, 3),
+      'bias': Tensor.randn(5),
+    }
+    load_state_dict(layer, state_dict)
+
+    # sharded model shards the state_dict
+    self.assertEqual(layer.weight.device, devices)
+    self.assertEqual(layer.weight.lazydata.axis, 3)
+    self.assertEqual(layer.bias.device, devices)
+    self.assertEqual(layer.bias.lazydata.axis, None)
+    np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
+    np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  def test_load_state_dict_sharded_dict(self):
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+
+    layer = Conv2d(3, 5, kernel_size=3)
+    state_dict = {
+      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, 3),
+      'bias': Tensor.randn(5).shard(devices, None),
+    }
+    load_state_dict(layer, state_dict)
+
+    # NOTE: model is not sharded, still not sharded after load_state_dict
+    self.assertEqual(layer.weight.device, Device.DEFAULT)
+    self.assertEqual(layer.bias.device, Device.DEFAULT)
+    np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
+    np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  def test_load_state_dict_sharded_model_dict_same_axis(self):
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+
+    layer = Conv2d(3, 5, kernel_size=3)
+    layer.weight.shard_(devices, 3)
+    layer.bias.shard_(devices, None)
+
+    state_dict = {
+      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, 3),
       'bias': Tensor.randn(5).shard(devices, None),
     }
     load_state_dict(layer, state_dict)
 
     self.assertEqual(layer.weight.device, devices)
+    self.assertEqual(layer.weight.lazydata.axis, 3)
     self.assertEqual(layer.bias.device, devices)
+    self.assertEqual(layer.bias.lazydata.axis, None)
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  def test_load_state_dict_sharded_model_dict_different_axis(self):
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+
+    layer = Conv2d(3, 5, kernel_size=3)
+    layer.weight.shard_(devices, 3)
+    layer.bias.shard_(devices, None)
+
+    # different shard axis
+    state_dict = {
+      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, None),
+      'bias': Tensor.randn(5).shard(devices, 0),
+    }
+    load_state_dict(layer, state_dict)
+
+    # NOTE: model and state_dict shard differently, use the state_dict sharding  # TODO: revisit this?
+    self.assertEqual(layer.weight.device, devices)
+    self.assertEqual(layer.weight.lazydata.axis, None)
+    self.assertEqual(layer.bias.device, devices)
+    self.assertEqual(layer.bias.lazydata.axis, 0)
+    np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
+    np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  def test_load_state_dict_shape_mismatch(self):
+    d1, d2 = 2, 4
+    layer = Linear(d1, d1, bias=False)
+    state_dict = {'weight': Tensor.randn(d2, d2)}
+    with self.assertRaisesRegex(ValueError, r'Shape mismatch in layer `weight`: Expected shape \(2, 2\), but found \(4, 4\) in state dict.'):
+      load_state_dict(layer, state_dict)
 
   def test_lstm_cell(self):
     layer = LSTMCell(32, 16)
