@@ -266,11 +266,12 @@ class HCQSignal:
     raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
 
 @contextlib.contextmanager
-def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type=None, queue=None):
+def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Optional[Type[HWQueue]]=None, queue:Optional[HWQueue]=None):
   st, en = (dev.signal_t(), dev.signal_t()) if enabled else (None, None)
 
   if enabled and queue is not None: queue.timestamp(st)
   elif enabled:
+    assert queue_type is not None
     queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(st).signal(dev.timeline_signal, dev.timeline_value).submit(dev)
     dev.timeline_value += 1
 
@@ -278,6 +279,7 @@ def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type=None, queue=None):
   finally:
     if enabled and queue is not None: queue.timestamp(en)
     elif enabled:
+      assert queue_type is not None
       queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(en).signal(dev.timeline_signal, dev.timeline_value).submit(dev)
       dev.timeline_value += 1
 
@@ -382,7 +384,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
                comp_queue_t:Type[HWQueue], copy_queue_t:Optional[Type[HWQueue]]):
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
-    self.timeline_signal, self._shadow_timeline_signal = self.signal_t(0, is_timeline=True), self.signal_t(0, is_timeline=True)
+    self.timeline_signal:SignalType = self.signal_t(0, is_timeline=True)
+    self._shadow_timeline_signal:SignalType = self.signal_t(0, is_timeline=True)
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
     self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool, Optional[Dict]]] = []
     self.dep_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []
