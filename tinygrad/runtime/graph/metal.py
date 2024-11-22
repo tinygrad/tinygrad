@@ -69,7 +69,7 @@ class MetalGraph(GraphRunner):
                                                                                  input_rawbuffers[input_idx]._buf.offset, i)
 
     for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
-      computeCommand = msg(self.icb, "indirectComputeCommandAtIndex:", j)
+      computeCommand = msg(self.icb, "indirectComputeCommandAtIndex:", j, restype=objc_id)
       msg(computeCommand, "concurrentDispatchThreadgroups:threadsPerThreadgroup:", to_struct(*global_dims), to_struct(*local_dims))
     for j, var in enumerate(self.vars): self.int_buf_view[j] = var_vals[var]
 

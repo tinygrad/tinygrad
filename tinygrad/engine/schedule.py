@@ -106,8 +106,7 @@ def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
                     v.offset*prshape, v.mask+tuple((0,s) for s in rshape) if v.mask is not None else None) for v in st.views]
   # update input_st and axis
   new_input_st = tmp + ShapeTracker(tuple(nv))
-  _, new_rshape = permute_reduce(new_input_st, r.axis_arg)
-  new_axis = tuple(range(len(new_input_st.shape)-len(new_rshape), len(new_input_st.shape)))
+  new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
   return apply_swizzle(src, new_input_st).r(r.arg[0], new_axis).view(ShapeTracker.from_shape(st.shape))
 
 def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp, src:UOp) -> UOp:
