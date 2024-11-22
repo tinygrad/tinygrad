@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, dtypes, Device
 import numpy as np
 
-Device.DEFAULT = "X86"
+@unittest.skipIf(Device.DEFAULT != "X86", "test X86 backend")
 class TestX86(unittest.TestCase):
   def test_add(self):
     a = Tensor([1,2,3])
