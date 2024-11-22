@@ -355,17 +355,18 @@ def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, to_store:UOp, b:UOp) ->
   # otherwise safety check pads
   return None if (all(v.mask is None for v in st.views) or can_pad(base, ctx)) else realize(ctx, b, to_store, base)
 
-def fold_img_cast(ctx, xb:UOp, view:UOp, **kwargs) -> Optional[UOp]:
-  if not isinstance(xb.dtype, ImageDType) or (r:=ctx.get(xb)) is None or r.op is not Ops.STORE or (to_cast:=r.src[2]).op in GroupOp.Meta: return None
+def fold_img_cast(ctx, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> Optional[UOp]:
+  if not isinstance(xb.dtype, ImageDType) or b not in ctx or xb not in ctx or uval(to_cast).op in GroupOp.Meta: return None
+  del ctx[b]
   return to_cast.view(unwrap(view.st))
 
 do_realize = PatternMatcher([
   # always realize meta ops
   (UPatSrc({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
-  # don't realize image to image casts
-  (UPatSrc(Ops.CAST, src=(UPat(Ops.LOAD, src=(UPat.var("xb"), UPat())),), dtype=dtypes.float).view(name="view"), fold_img_cast),
   # realize before expand or unsafe pad ops
   (UPatSrc().view(name="view"), realize_view),
+  # don't realize image to image casts
+  (UPatSrc(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
   # realize before COPY or BUFFER_VIEW
   (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatSrc(), UPatSrc().view()),)), realize),
 ])
