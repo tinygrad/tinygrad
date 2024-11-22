@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast
 from tinygrad.dtype import dtypes
 from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin
-from tinygrad.helpers import prod, all_int, argsort, flatten
+from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
 
 @functools.lru_cache(maxsize=None)
 def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:
@@ -292,9 +292,9 @@ class View:
     # except for the negative case, you can build this from the others. invertible in the negative case
     assert all(isinstance(x, int) and x != 0 for x in mul), f"invalid stride {mul} for {self.shape}"
     strides = tuple([z*m for z,m in zip(self.strides, mul)])
-    new_shape = tuple([(s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul)])
+    new_shape = tuple([ceildiv(s, abs(m)) for s,m in zip(self.shape, mul)])
     offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])
-    mask = tuple([(((mx if m > 0 else s-my)+(abs(m)-1))//abs(m), ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) \
+    mask = tuple([(ceildiv(mx if m > 0 else s-my, abs(m)), ceildiv(my if m > 0 else s-mx, abs(m))) \
                   for (mx,my),s,m in zip(self.mask, self.shape, mul)]) if self.mask is not None else None
     return View.create(new_shape, strides, self.offset + offset, mask)
 
