@@ -582,12 +582,11 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3))
     np.testing.assert_allclose(out.numpy(), a.numpy().sum(axis=1)[:16] + b.numpy().sum(axis=1)[:16] + c.numpy(), atol=1e-4, rtol=1e-4)
 
-  # broken due to const folding and two contiguous are different kernels
   def test_const_no_recompute(self):
     x = Tensor(2) + Tensor(2)
     y = Tensor(2) + Tensor(2)
     out = x.contiguous() + y.contiguous()
-    with self.assertRaises(KernelCountException): check_schedule(out, 2, filter_sink=False)
+    check_schedule(out, 2, filter_sink=False)
 
   # multireduce spec
   def test_reduce_same_size(self):
