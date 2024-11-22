@@ -11,7 +11,7 @@ CHUNK_START = 1 << 0
 CHUNK_END = 1 << 1
 PARENT = 1 << 2
 ROOT = 1 << 3
-IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
+IV = [0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19]
 MSG_PERMUTATION = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]
 
 def rotr(x: Tensor, n: int) -> Tensor: return ((x << (32 - n)) | (x >> n))
@@ -123,7 +123,7 @@ def init_compress(input: Union[str, bytes], counter = 0, not_root: bool = False)
   input_bytes = input.encode("utf-8") if isinstance(input, str) else input if isinstance(input, bytes) else b""
   chunks, n_end_blocks, end_block_len = bytes_to_chunks(input_bytes)
   n_chunks, n_blocks, _ = chunks.shape
-  initial_chain_vals = IV.expand(n_chunks, n_blocks, -1).contiguous()
+  initial_chain_vals = Tensor(IV, dtype=dtypes.uint32).expand(n_chunks, n_blocks, -1).contiguous()
   flags = create_flags(chunks, n_end_blocks, is_root=n_chunks == 1 and not not_root)
   states = create_state(initial_chain_vals, counter, end_block_len, n_end_blocks, flags)
   return compress_chunks(states, chunks, initial_chain_vals, n_end_blocks)
@@ -153,7 +153,7 @@ def blake3(text: Optional[Union[str, bytes]] = None, file: Optional[str] = None,
   for i in range(tree_levels):
     chain_vals, leftover_chain_val = pairwise_concat(chain_vals)
     n_chain_vals, n_blocks = chain_vals.shape[0], chain_vals.shape[1]
-    init_chain_vals = IV.expand(n_chain_vals, n_blocks, -1).contiguous()
+    init_chain_vals = Tensor(IV, dtype=dtypes.uint32).expand(n_chain_vals, n_blocks, -1).contiguous()
     flags = create_flags(chain_vals, None, are_parents=True, is_root=i == tree_levels - 1)
     states = create_state(init_chain_vals, None, None, None, flags)[:, -1].contiguous()
     chain_vals = compress_blocks(states, chain_vals, init_chain_vals[:, 0])[:, :8]
