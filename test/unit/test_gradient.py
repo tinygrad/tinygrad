@@ -7,7 +7,7 @@ from tinygrad.ops import UOp
 from tinygrad.gradient import gradient
 
 class TestGradient(unittest.TestCase):
-  def _test_one_input_function(self, f:Callable, jf:Callable|None):
+  def _test_one_input_function(self, f:Callable, jf:Callable|None=None):
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
     gx = gradient(f(x), [x])[0]
     gf = jax.grad(f if jf is None else jf)
@@ -17,11 +17,11 @@ class TestGradient(unittest.TestCase):
       if math.isnan(tg_out) and math.isnan(jax_out): continue
       self.assertAlmostEqual(tg_out, jax_out, places=5)
 
-  def _test_two_input_function(self, f: Callable):
+  def _test_two_input_function(self, f:Callable, jf:Callable|None=None):
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
     y = UOp.variable('y', -math.inf, math.inf, dtype=dtypes.float)
     gx, gy = gradient(f(x, y), [x, y])
-    gf = jax.grad(f, argnums=(0, 1))
+    gf = jax.grad(f if jf is None else jf, argnums=(0, 1))
 
     for valx in [-5., -2.0, 0.0, 2.0, 5.]:
       for valy in [-5., -2.0, 0.0, 2.0, 5.]:
@@ -34,6 +34,7 @@ class TestGradient(unittest.TestCase):
         self.assertAlmostEqual(tg_out_x, jax_out_x, places=5)
         self.assertAlmostEqual(tg_out_y, jax_out_y, places=5)
 
+  def test_recip(self): self._test_one_input_function(lambda x: 1.0/x)
   def test_sin(self): self._test_one_input_function(lambda x: x.sin(), lambda x: jnp.sin(x))
   def test_sqrt(self): self._test_one_input_function(lambda x: x.sqrt(), lambda x: jnp.sqrt(x))
   def test_log2(self): self._test_one_input_function(lambda x: x.log2(), lambda x: jnp.log2(x))
@@ -41,10 +42,11 @@ class TestGradient(unittest.TestCase):
 
   def test_chain(self): self._test_one_input_function(lambda x: x.sin().sqrt(), lambda x: jnp.sqrt(jnp.sin(x)))
 
-  def test_add(self): self._test_two_input_function(lambda x, y: x+y)
-  def test_mul(self): self._test_two_input_function(lambda x, y: x*y)
+  def test_add(self): self._test_two_input_function(lambda x,y: x+y)
+  def test_mul(self): self._test_two_input_function(lambda x,y: x*y)
 
-  def test_chain_binop(self): self._test_two_input_function(lambda x, y: (x*y)+x*y)
+  def test_chain_binop(self): self._test_two_input_function(lambda x,y: (x*y)+x*y)
+  def test_add_sin(self): self._test_two_input_function(lambda x,y: x.sin()+y, lambda x,y: jnp.sin(x)+y)
 
 if __name__ == '__main__':
   unittest.main()
