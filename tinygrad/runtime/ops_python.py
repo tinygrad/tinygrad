@@ -67,10 +67,10 @@ class PythonProgram:
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
         if uop is Ops.DEFINE_GLOBAL:
-          assert (dtype.fmt is not None)
+          assert dtype.fmt is not None
           ul[i] = [pbufs.pop(0).cast(cast(LegacyFmtStrType, dtype.fmt))] * warp_size  # TODO typeshed missing stub for cast
         elif uop is Ops.DEFINE_LOCAL:
-          assert (dtype.fmt is not None)
+          assert dtype.fmt is not None
           lbuf = memoryview(bytearray(arg[1]*dtype.itemsize))
           ul[i] = [lbuf.cast(cast(LegacyFmtStrType, dtype.fmt))] * warp_size  # TODO typeshed missing stub for cast
         elif uop is Ops.DEFINE_VAR:
