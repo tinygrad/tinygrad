@@ -4,9 +4,8 @@ import functools, itertools, operator
 from dataclasses import dataclass
 from typing import List, Tuple, cast, Optional
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import sint_to_uop
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element
+from tinygrad.ops import KernelInfo, UOp, Ops, graph_rewrite, PatternMatcher, UPat, sint, identity_element, sint_to_uop
 from tinygrad.renderer import Renderer
 from tinygrad.helpers import all_int, prod, partition, flatten
 

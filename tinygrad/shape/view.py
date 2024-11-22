@@ -3,7 +3,7 @@ import functools, operator, itertools, math
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast
 from tinygrad.dtype import dtypes
-from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin
+from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
 
 @functools.lru_cache(maxsize=None)
@@ -80,8 +80,6 @@ def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
     result.append(here)
     offs -= here * stride
   return result
-
-def sint_to_uop(x:sint) -> UOp: return UOp.const(dtypes.int, x) if isinstance(x, int) else x
 
 @dataclass(frozen=True)
 class View:

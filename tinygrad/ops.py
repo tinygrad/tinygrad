@@ -1036,6 +1036,8 @@ def max_var_const(x:UOp, c1:UOp, c2:UOp):
   if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
 
+def sint_to_uop(x:sint) -> UOp: return UOp.const(dtypes.int, x) if isinstance(x, int) else x
+
 symbolic_simple = PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
