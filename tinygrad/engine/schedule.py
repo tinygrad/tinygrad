@@ -390,13 +390,11 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
   buffers: Dict[UOp, Buffer] = {}
-  big_graph = UOp.sink(*(to_uop(x, ctx, buffers, cache) for x in outs))
-  # get realizes
-  graph_rewrite(big_graph, do_realize, ctx.realizes)
+  big_graph = graph_rewrite(UOp.sink(*(to_uop(x, ctx, buffers, cache) for x in outs)), do_realize, ctx.realizes)
+  # group realizes into kernels
   store_groups = group_realizes(ctx, ctx.realizes)
-  # split realizes into small graphs
   graph_rewrite(big_graph, break_sched, ctx)
-  # preschedule all realizes
+  # preschedule realize groups
   prescheduled: List[ScheduleItem] = []
   for store_uops in store_groups:
     ast, ast_ctx = full_ast_rewrite(UOp.sink(*(ctx.realizes[u] for u in store_uops)), ctx)
