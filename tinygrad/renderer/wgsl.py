@@ -81,6 +81,7 @@ class WGSLRenderer(CStyleLanguage):
 
   def render_cast(self, dt:DType, val: str) -> str: return f"{self.type_map[dt]}({val})"
   def render_dtype(self, dt:DType, mutable=True) -> str: return "var"
+  def render_buf(self, dt:DType, rw:bool) -> str: return f"{f'atomic<{buffer_map[dt]}>' if rw and (dt.itemsize < 4) else buffer_map[dt.base]}"
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
     local_size = [num for _, num in sorted([u.arg for u in uops if u.op is Ops.SPECIAL and u.arg[0][0] == 'l'], key=lambda x: x[0])]
     if not local_size: local_size = [1]
@@ -91,9 +92,8 @@ class WGSLRenderer(CStyleLanguage):
     # trick to obfuscate compiler so that nan is detected properly
     prg += "fn is_nan(v:f32) -> bool { return min(v, 1.0) == 1.0 && max(v, -1.0) == -1.0; }\n"
     prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
-    prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)+1})\
-      {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}:\
-      {f'array<{f'atomic<{buffer_map[dtype.base]}>' if rw and (dtype.itemsize < 4) else buffer_map[dtype.base]}>'\
-      if isinstance(dtype, PtrDType) else buffer_map[dtype]};" for name,(dtype,rw) in bufs])
+    prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)+1})" +
+      f"{'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'}" +
+      f"{name}:{f'array<{self.render_buf(dtype.base,rw)}>' if isinstance(dtype, PtrDType) else buffer_map[dtype]};" for name,(dtype,rw) in bufs])
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>,"
     return prg + "@builtin(local_invocation_id) lindex: vec3<u32>) {\n" + "\n".join(kernel) + "\n}"
