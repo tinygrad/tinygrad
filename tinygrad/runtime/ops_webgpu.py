@@ -44,7 +44,7 @@ class WebGPUProgram:
 
 # WebGPU buffers have to be 4-byte aligned
 class WebGpuAllocator(Allocator):
-  def __init__(self, dev): self.dev:WebGpuDevice = dev
+  def __init__(self, dev): self.dev = dev
   def _alloc(self, size: int, options):
     aligned_size = (size + 3) & ~3
     return self.dev.create_buffer(size=aligned_size, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)

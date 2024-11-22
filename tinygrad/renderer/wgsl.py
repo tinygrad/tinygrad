@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, extra_pm
@@ -19,7 +19,7 @@ def packed_store(bidx:UOp, var:UOp):
   return UOp.store(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], bidx.src[1]//(4//var.dtype.itemsize))), new_v.cast(packed_types[var.dtype]))
 
 # load for char: sign_extend(buf[idx/4] >> ((idx%4)*8))
-def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp=None):
+def packed_load(root:UOp, bidx:UOp, dtype:DType, var:Optional[UOp]=None):
   div_idx = bidx.src[1]//(4//dtype.itemsize)
   shift_am = (bidx.src[1].cast(dtypes.uint32)%UOp.const(dtypes.uint32, 4//dtype.itemsize))*UOp.const(dtypes.uint32, 8*dtype.itemsize)
   if var is not None: load = UOp.load(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], div_idx)), var, root.src[2], dtype=packed_types[dtype], arg=root.arg)
