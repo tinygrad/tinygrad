@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib
 from contextlib import ContextDecorator
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Literal
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, DefaultDict, cast, get_args, Literal, Any
 from collections import defaultdict
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
@@ -262,7 +262,7 @@ class Tensor(SimpleMathTrait):
     if self.device != "CLANG": buf.options = BufferSpec(nolru=True)
     return buf.as_buffer(allow_zero_copy=True if self.device != "CLANG" else False)
 
-  def data(self) -> memoryview:
+  def data(self) -> memoryview[Any]:
     """
     Returns the data of this tensor as a memoryview.
 
@@ -272,6 +272,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
+    assert (self.dtype.fmt != 'e') and (self.dtype.fmt != '@e')
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return self._data().cast(self.dtype.fmt, self.shape)
 
@@ -285,6 +286,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
+    assert (self.dtype.fmt != 'e') and (self.dtype.fmt != '@e')
     assert self.numel() == 1, "must have one element for item"
     return self._data().cast(self.dtype.fmt)[0]
 

@@ -1,10 +1,13 @@
 from __future__ import annotations
-from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable
+from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
+
+FmtStrType = Literal['e', '@e', 'f', '@f', 'd', '@d', '?', 'b', 'B', '@b', '@B', 'h', 'H',
+                       '@h', '@H', 'i', 'I', '@i', '@I', 'l', 'L', '@l', '@L', 'q', 'Q', '@q', '@Q', 'P', '@P']
 
 # all DTypes should only be created once
 class DTypeMetaClass(type):
@@ -19,11 +22,11 @@ class DType(metaclass=DTypeMetaClass):
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
-  fmt: Optional[str]
+  fmt: Optional[FmtStrType]
   count: int
   _scalar: Optional[DType]
   @staticmethod
-  def new(priority:int, itemsize:int, name:str, fmt:Optional[str]): return DType(priority, itemsize, name, fmt, 1, None)
+  def new(priority:int, itemsize:int, name:str, fmt:Optional[FmtStrType]): return DType(priority, itemsize, name, fmt, 1, None)
   def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
   def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
@@ -50,7 +53,7 @@ class PtrDType(DType):
   def vec(self, sz:int) -> DType:
     assert self.v == 1, f"can't vectorize ptr {self} with size {sz}"
     if sz == 1: return self  # sz=1 is a scalar
-    return type(self)(*tuple(sz if f.name == 'v' else (self if f.name == '_scalar' else getattr(self, f.name)) for f in fields(self)))
+    return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz)
   def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
   @property
   def vcount(self): return self.v
