@@ -38,14 +38,17 @@ def mix_round(states: Tensor, chunks: Tensor) -> Tensor:
 
 def compress_chunks(states: Tensor, chunks: Tensor, chain_vals: Tensor, final_chunk_n_blocks: int):
   n_blocks = chunks.shape[1]
-  for i in range(n_blocks): # parallel over chunks, sequential over blocks
+  # parallel over chunks, sequential over blocks
+  for i in range(n_blocks):
     compressed = compress_blocks(states[:, i].contiguous(), chunks[:, i].contiguous(), chain_vals[:, i].contiguous())
     next_chain_vals = compressed[:, :8]
+    # add chain value dependency to the next block
     if i < n_blocks - 1:
-      states[:, i + 1, :8] = next_chain_vals # add chain value dependency to the next block
+      states[:, i + 1, :8] = next_chain_vals
   if final_chunk_n_blocks == 16:
     return next_chain_vals
   else:
+    # handle partial final chunk
     cvs_for_full_chunks = next_chain_vals[:-1]
     partial_chunk_end_idx = final_chunk_n_blocks - 1 if chunks.shape[0] == 1 else final_chunk_n_blocks
     cv_for_partial_chunk = states[-1:, partial_chunk_end_idx, :8]
@@ -64,7 +67,7 @@ def bytes_to_chunks(text_bytes: bytes) -> Tuple[Tensor, int, int]:
   n_bytes = len(text_bytes)
   n_chunks = max((n_bytes + CHUNK_BYTES - 1) // CHUNK_BYTES, 1)
   n_blocks = CHUNK_BYTES // BLOCK_BYTES
-  n_words = BLOCK_BYTES // 4
+  n_words = BLOCK_BYTES // 4 # 32-bit words
   chunks = Tensor.zeros(n_chunks, n_blocks, n_words, dtype=dtypes.uint32).contiguous()
   unpadded_len = 0
   # chunks
@@ -100,7 +103,8 @@ def create_state(iv: Tensor, count: Optional[int], end_block_len: Optional[int],
   else:
     counts = Tensor.zeros(n_chunks, n_blocks, 2, dtype=dtypes.uint32)
   lengths = Tensor.full((n_chunks, n_blocks, 1), fill_value=BLOCK_BYTES, dtype=dtypes.uint32).contiguous()
-  if end_block_len is not None: lengths[-1, n_end_blocks - 1] = end_block_len
+  if end_block_len is not None:
+    lengths[-1, n_end_blocks - 1] = end_block_len
   states = iv.cat(iv[:, :, :4], counts, lengths, flags, dim=-1)
   return states
 
@@ -119,10 +123,10 @@ def init_compress(input: Union[str, bytes], counter = 0, not_root: bool = False)
   input_bytes = input.encode("utf-8") if isinstance(input, str) else input if isinstance(input, bytes) else b""
   chunks, n_end_blocks, end_block_len = bytes_to_chunks(input_bytes)
   n_chunks, n_blocks, _ = chunks.shape
-  init_chain_vals = IV.expand(n_chunks, n_blocks, -1).contiguous()
+  initial_chain_vals = IV.expand(n_chunks, n_blocks, -1).contiguous()
   flags = create_flags(chunks, n_end_blocks, is_root=n_chunks == 1 and not not_root)
-  states = create_state(init_chain_vals, counter, end_block_len, n_end_blocks, flags)
-  return compress_chunks(states, chunks, init_chain_vals, n_end_blocks)
+  states = create_state(initial_chain_vals, counter, end_block_len, n_end_blocks, flags)
+  return compress_chunks(states, chunks, initial_chain_vals, n_end_blocks)
 
 def init_compress_file(file: str, bufsize: int) -> Tensor:
   chain_vals = Tensor.zeros(0, 8, dtype=dtypes.uint32)
@@ -130,12 +134,14 @@ def init_compress_file(file: str, bufsize: int) -> Tensor:
   with open(file, "rb") as f:
     while chunk_bytes := f.read(bufsize):
       counter = chain_vals.shape[0]
-      chain_vals = chain_vals.cat(init_compress(chunk_bytes, counter, not_root=file_size > CHUNK_BYTES))
+      # don't set the root flag if the file is larger than one chunk, more data is coming
+      not_root = file_size > CHUNK_BYTES
+      chain_vals = chain_vals.cat(init_compress(chunk_bytes, counter, not_root=not_root))
   return chain_vals
 
 def blake3(text: Optional[Union[str, bytes]] = None, file: Optional[str] = None, bufsize: int = 8 * 1024 * 1024) -> str:
   """
-  Hash an input string, bytes, or file-like object in parallel using the BLAKE3 hashing algorithm.
+  Hash an input string, bytes, or file in parallel using the BLAKE3 hashing algorithm.
   When hashing a file, the file is read in chunks of `bufsize` bytes.
   """
   assert text is not None or file is not None, "Either text or a file must be provided"
@@ -143,7 +149,7 @@ def blake3(text: Optional[Union[str, bytes]] = None, file: Optional[str] = None,
   # compress input chunks into an initial set of chain values
   chain_vals = init_compress(text) if isinstance(text, (str, bytes)) else init_compress_file(file, bufsize)
   tree_levels = math.ceil(math.log2(max(chain_vals.shape[0], 1)))
-  # tree hash pairs of chain values until only one remains
+  # tree-hash pairs of chain values, ~halving the number of them in each step until one remains
   for i in range(tree_levels):
     chain_vals, leftover_chain_val = pairwise_concat(chain_vals)
     n_chain_vals, n_blocks = chain_vals.shape[0], chain_vals.shape[1]
