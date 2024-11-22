@@ -1,4 +1,4 @@
-import os, pathlib, tempfile, unittest, tarfile
+import os, pathlib, tempfile, unittest, tarfile, io
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
@@ -333,21 +333,37 @@ class TestDiskTensor(unittest.TestCase):
       on_dev = t.to(Device.DEFAULT).realize()
       np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
-class TestTarExtract(unittest.TestCase):
+class TestTarExtractPAX(unittest.TestCase):
+  tar_format = tarfile.PAX_FORMAT
+  max_link_len = 1000_000
+
   def setUp(self):
     self.test_dir = tempfile.mkdtemp()
-    self.test_files = {
-      'file1.txt': b'Hello, World!',
-      'file2.bin': b'\x00\x01\x02\x03\x04',
-      'empty_file.txt': b''
-    }
     self.tar_path = os.path.join(self.test_dir, 'test.tar')
-    with tarfile.open(self.tar_path, 'w') as tar:
+    self.test_files = {
+      'a/file1.txt': b'Hello, World!',
+      'a/b/file2.bin': b'\x00\x01\x02\x03\x04',
+      'empty_file.txt': b'',
+      'very'*15 + "/" + "very"*15 + '_long_filename.txt': b'Hello, World!'
+    }
+    self.test_dirs = ["a","a/b"]
+
+    with tarfile.open(self.tar_path, 'w', format=self.tar_format) as tar:
+      for dirname in self.test_dirs:
+        dir_info = tarfile.TarInfo(name=dirname)
+        dir_info.type = tarfile.DIRTYPE
+        tar.addfile(dir_info)
+
       for filename, content in self.test_files.items():
-        file_path = os.path.join(self.test_dir, filename)
-        with open(file_path, 'wb') as f:
-          f.write(content)
-        tar.add(file_path, arcname=filename)
+        file_info = tarfile.TarInfo(name=filename)
+        file_info.size = len(content)
+        tar.addfile(file_info, io.BytesIO(content))
+
+        if len(filename) < self.max_link_len:
+          link_info = tarfile.TarInfo(name=filename + ".lnk")
+          link_info.type = tarfile.SYMTYPE
+          link_info.linkname = filename
+          tar.addfile(link_info)
 
     # Create invalid tar file
     self.invalid_tar_path = os.path.join(self.test_dir, 'invalid.tar')
@@ -355,8 +371,6 @@ class TestTarExtract(unittest.TestCase):
       f.write(b'This is not a valid tar file')
 
   def tearDown(self):
-    for filename in self.test_files:
-      os.remove(os.path.join(self.test_dir, filename))
     os.remove(self.tar_path)
     os.remove(self.invalid_tar_path)
     os.rmdir(self.test_dir)
@@ -390,6 +404,13 @@ class TestTarExtract(unittest.TestCase):
   def test_tar_extract_invalid_file(self):
     with self.assertRaises(tarfile.ReadError):
       tar_extract(self.invalid_tar_path)
+
+class TestTarExtractUSTAR(TestTarExtractPAX):
+  tar_format = tarfile.USTAR_FORMAT
+  max_link_len = 100
+
+class TestTarExtractGNU(TestTarExtractPAX):
+  tar_format = tarfile.GNU_FORMAT
 
 class TestPathTensor(unittest.TestCase):
   def setUp(self):

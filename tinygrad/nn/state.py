@@ -143,13 +143,28 @@ def tar_extract(fn_or_data: Union[os.PathLike, Tensor]) -> Dict[str, Tensor]:
   """
 
   t = fn_or_data if isinstance(fn_or_data, Tensor) else Tensor(pathlib.Path(fn_or_data))
-  pos, tensor_size, result = 0, prod(t.shape), {}
+  pos, tensor_size, result, fn_ow, fsz_ow = 0, prod(t.shape), {}, None, None
   if tensor_size < 512*2: raise tarfile.ReadError("Invalid tar file!") # tar files end with at least 2 empty sections
   while pos + 512 < tensor_size:
     header, pos = t[pos:pos + 512].data(), pos + 512
-    file_size = int(bytes(header[124:136]).decode("ascii").rstrip('\x00') or "0", 8)
-    if header[156] == 48: result[bytes(header[:100]).decode("ascii").rstrip('\x00')] = t[pos:pos + file_size]
-    pos += file_size if file_size % 512 == 0 else file_size + (512 - file_size % 512)
+    if header[124] & 0x80: fsz_ow = int.from_bytes(header[125:136])
+    fsz, fn = fsz_ow or int(bytes(header[124:136]).decode().rstrip('\x00') or "0", 8), fn_ow or bytes(header[:100]).decode().rstrip('\x00')
+    if header[257:263] == b"ustar\x00": fn = "/".join(p for p in [bytes(header[345:500]).decode().rstrip('\x00'), fn] if p)
+    if header[156] == 48: result[fn] = t[pos:pos + fsz]
+    # handle GNU @LongLink
+    if header[156] == 76: fn_ow = bytes(t[pos:pos + fsz].data()).decode().rstrip('\x00')
+    # handle @PaxHeader
+    if header[156] == 120:
+      pax_data = bytes(t[pos:pos + fsz].data()).decode().rstrip('\x00')
+      while len(pax_data) > 0:
+        len_end, entry_len = pax_data.index(" "), int(pax_data[:pax_data.index(" ")])
+        k, v = pax_data[len_end + 1:entry_len - 1].split("=", 1)
+        if k == "path": fn_ow = v
+        if k == "size": fsz_ow = int(v)
+        pax_data = pax_data[entry_len:].lstrip()
+    # clear multi entry metadata when node is reached (see https://en.wikipedia.org/wiki/Tar_(computing)#Header)
+    if header[156] >= 48 and header[156] <= 55: fn_ow, fsz_ow = None, None
+    pos += fsz if fsz % 512 == 0 else fsz + (512 - fsz % 512)
   return { k: v for k, v in result.items() if k != "" }
 
 # torch support!
