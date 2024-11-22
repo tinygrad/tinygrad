@@ -150,11 +150,11 @@ class TestBLAKE3(unittest.TestCase):
   def test_official_vectors(self):
     """Test against the official test vectors from: https://github.com/BLAKE3-team/BLAKE"""
     for vector in self.vectors:
-        input_len = vector["input_len"]
-        expected = vector["hash"]
-        input = self.generate_input(input_len)
-        actual = blake3(input)
-        self.assertEqual(actual, expected)
+      input_len = vector["input_len"]
+      expected = vector["hash"]
+      input = self.generate_input(input_len)
+      actual = blake3(input)
+      self.assertEqual(actual, expected)
 
   def test_file_input(self):
     with tempfile.NamedTemporaryFile(delete=True) as file:

@@ -27,12 +27,10 @@ def mix(states: Tensor, a: int, b: int, c: int, d: int, mx: Tensor, my: Tensor) 
   states[:, b] = rotr(states[:, b] ^ states[:, c], 7)
 
 def mix_round(states: Tensor, chunks: Tensor) -> Tensor:
-  # mix columns
   mix(states, 0, 4, 8, 12, chunks[:, 0], chunks[:, 1])
   mix(states, 1, 5, 9, 13, chunks[:, 2], chunks[:, 3])
   mix(states, 2, 6, 10, 14, chunks[:, 4], chunks[:, 5])
   mix(states, 3, 7, 11, 15, chunks[:, 6], chunks[:, 7])
-  # mix diagonals
   mix(states, 0, 5, 10, 15, chunks[:, 8], chunks[:, 9])
   mix(states, 1, 6, 11, 12, chunks[:, 10], chunks[:, 11])
   mix(states, 2, 7, 8, 13, chunks[:, 12], chunks[:, 13])
@@ -40,17 +38,14 @@ def mix_round(states: Tensor, chunks: Tensor) -> Tensor:
 
 def compress_chunks(states: Tensor, chunks: Tensor, chain_vals: Tensor, final_chunk_n_blocks: int):
   n_blocks = chunks.shape[1]
-  for i in range(n_blocks):
-    # parallel over chunks, sequential over blocks - there are chain value dependencies between blocks
+  for i in range(n_blocks): # parallel over chunks, sequential over blocks
     compressed = compress_blocks(states[:, i].contiguous(), chunks[:, i].contiguous(), chain_vals[:, i].contiguous())
     next_chain_vals = compressed[:, :8]
     if i < n_blocks - 1:
-      # add chain value dependencies to the next block
-      states[:, i + 1, :8] = next_chain_vals
+      states[:, i + 1, :8] = next_chain_vals # add chain value dependency to the next block
   if final_chunk_n_blocks == 16:
     return next_chain_vals
   else:
-    # handle partial final chunk by returning latest chain values except for the last partial chunk
     cvs_for_full_chunks = next_chain_vals[:-1]
     partial_chunk_end_idx = final_chunk_n_blocks - 1 if chunks.shape[0] == 1 else final_chunk_n_blocks
     cv_for_partial_chunk = states[-1:, partial_chunk_end_idx, :8]
