@@ -147,7 +147,7 @@ def tar_extract(fn_or_data: Union[os.PathLike, Tensor]) -> Dict[str, Tensor]:
   if tensor_size < 512*2: raise tarfile.ReadError("Invalid tar file!") # tar files end with at least 2 empty sections
   while pos + 512 < tensor_size:
     header, pos = t[pos:pos + 512].data(), pos + 512
-    if header[124] & 0x80: fsz_ow = int.from_bytes(header[125:136])
+    if header[124] & 0x80: fsz_ow = int.from_bytes(header[125:136], "big")
     fsz, fn = fsz_ow or int(bytes(header[124:136]).decode().rstrip('\x00') or "0", 8), fn_ow or bytes(header[:100]).decode().rstrip('\x00')
     if header[257:263] == b"ustar\x00": fn = "/".join(p for p in [bytes(header[345:500]).decode().rstrip('\x00'), fn] if p)
     if header[156] == 48: result[fn] = t[pos:pos + fsz]
