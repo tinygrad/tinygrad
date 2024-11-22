@@ -52,7 +52,7 @@ class HCQGraph(MultiGraphRunner):
 
     for j,ji in enumerate(jit_cache):
       enqueue_dev = ji.prg.dev if (is_exec_prg:=isinstance(ji.prg, CompiledRunner)) else Device[ji.bufs[1].device] #type:ignore
-      assert isinstance(enqueue_dev, HCQCompiled) and enqueue_dev.hw_copy_queue_t is not None
+      assert isinstance(enqueue_dev, HCQCompiled) and (isinstance(enqueue_dev.hw_copy_queue_t, type) and enqueue_dev.hw_copy_queue_t is HWQueue)
       enqueue_queue = self.comp_queues[enqueue_dev] if is_exec_prg else self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
       out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.signal_t(value=0))
 
