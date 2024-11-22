@@ -6,8 +6,9 @@ from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
 
-FmtStrType = Literal['e', '@e', 'f', '@f', 'd', '@d', '?', 'b', 'B', '@b', '@B', 'h', 'H',
-                       '@h', '@H', 'i', 'I', '@i', '@I', 'l', 'L', '@l', '@L', 'q', 'Q', '@q', '@Q', 'P', '@P']
+LegacyFmtStrType = Literal['f', '@f', 'd', '@d', '?', 'b', 'B', '@b', '@B', 'h', 'H',
+                           '@h', '@H', 'i', 'I', '@i', '@I', 'l', 'L', '@l', '@L', 'q', 'Q', '@q', '@Q', 'P', '@P']  # sys.verion_info < 3.12
+FmtStrType = Literal[LegacyFmtStrType, Literal['e', '@e']]
 
 # all DTypes should only be created once
 class DTypeMetaClass(type):
