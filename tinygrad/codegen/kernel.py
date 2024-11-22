@@ -635,7 +635,7 @@ class Kernel:
             permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in wd_pattern]  + list(range(wd+len(warp_dims),tcd)) + \
                                          [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd+len(expanded_shape),len(new_shape)))
             # return st.reshape(new_shape).permute(tuple(permaxis)).reshape(st.shape).simplify()
-            return st.permute(tuple(permaxis)).reshape(st.shape).simplify()
+            return st.permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):

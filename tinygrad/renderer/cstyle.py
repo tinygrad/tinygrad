@@ -248,8 +248,8 @@ class IntelRenderer(OpenCLRenderer):
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
-  tensor_cores = [TensorCore(dims=(8,8,8),threads=[(0,2),(1,4),(0,2),(1,2)],upcast_axes=([(3,2)],[(3,2)],[(3,2)]),reduce_axes=[(0,2),(1,2),(2,2)],
-    st1_pattern=(((1,1),(0,1),(1,0),(0,3)),((0,0),(0,2),(1,3),(1,2))),st2_pattern=(((0,0),(1,1),(1,2),(0,2),(1,0)),((0,1),(0,3),(1,3))),
+  tensor_cores = [TensorCore(dims=(8,8,8),threads=[(0,2),(1,2),(1,2),(0,2),(1,2)],upcast_axes=([(3,2)],[(3,2)],[(3,2)]),reduce_axes=[(0,2),(1,2),(2,2)], # noqa:E501
+    st1_pattern=(((1,1),(0,1),(0,2),(1,2),(0,4)),((0,0),(0,3),(1,3),(1,0))), st2_pattern=(((0,0),(1,0),(1,1),(0,3),(1,2)),((0,1),(0,2),(0,4),(1,3))),
     dtype_in=di,dtype_out=do) for di,do in [(dtypes.float,dtypes.float),(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),
                                             (dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
   def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
