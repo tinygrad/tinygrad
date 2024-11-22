@@ -152,8 +152,8 @@ class TestBLAKE3(unittest.TestCase):
     for vector in self.vectors:
       input_len = vector["input_len"]
       expected = vector["hash"]
-      input = self.generate_input(input_len)
-      actual = blake3(input)
+      text = self.generate_input(input_len)
+      actual = blake3(text)
       self.assertEqual(actual, expected)
 
   def test_file_input(self):
