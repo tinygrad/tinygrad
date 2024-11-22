@@ -186,7 +186,6 @@ def _append_preload(ctx:ScheduleItemContext, x:UOp, b:UOp) -> UOp:
 
 to_si = PatternMatcher([
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
-  (UPat(Ops.PRELOAD, src=(UPat.var("b"), UPat()), name="x"), _append_preload),
   (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,b,x: x.replace(src=(b, *x.src))),
 ])
 
@@ -198,7 +197,7 @@ def fuse_src(ctx:ScheduleItemContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
 
 lazy = PatternMatcher([
   (UPatSrc(), fuse_src),
-  (UPat(Ops.BUFFER, name="b").view(name="view"), lambda ctx,b,view: UOp(Ops.PRELOAD, view.dtype, (b, view.st.to_uop()))),
+  (UPat(Ops.BUFFER, name="b").view(name="view"), lambda ctx,b,view: UOp(Ops.LOAD, view.dtype, (b, view.st.to_uop()))),
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
 ])
 
@@ -209,10 +208,6 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemCon
                                metadata={l.metadata for x in pre.src if (l:=ctx.lazybufs.get(x.buf_uop)) is not None and l.metadata is not None})
   # fuse and fold store -> loads
   sink = graph_rewrite(pre, lazy+multioutput if len(pre.src) > 1 else lazy, si_ctx)
-  # assert cyclic dependency
-  for b,ops in itertools.groupby((x for x in sink.sparents if x.op in {Ops.PRELOAD,Ops.LOAD} and x.buf_uop in ctx.assigns), key=lambda x:x.buf_uop):
-    if not all_same([x.op for x in ops]):
-      raise RuntimeError(f"cycle detected in kernel.\nhelp: use .contiguous() to break the part loading pre-assign {b} into a different kernel.")
   # do movementops
   sink = graph_rewrite(graph_rewrite(sink, view_left), view_right)
   # convert to AST
