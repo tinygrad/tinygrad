@@ -6,9 +6,11 @@ from tinygrad.helpers import getenv
 
 ConstType = Union[float, int, bool]
 
+# TODO need LegacyFmtStrType since typeshed stub is missing the stub for float16 cast (format: Literal['e', '@e']).
+# src: https://github.com/python/mypy/blob/v1.13.0/mypy/typeshed/stdlib/builtins.pyi#L769
 LegacyFmtStrType = Literal['f', '@f', 'd', '@d', '?', 'b', 'B', '@b', '@B', 'h', 'H',
                            '@h', '@H', 'i', 'I', '@i', '@I', 'l', 'L', '@l', '@L', 'q', 'Q', '@q', '@Q', 'P', '@P']
-FmtStrType = Literal[LegacyFmtStrType, Literal['e', '@e']]  # TODO typeshed missing stub for cast
+FmtStrType = Literal[LegacyFmtStrType, Literal['e', '@e']]
 
 # all DTypes should only be created once
 class DTypeMetaClass(type):
