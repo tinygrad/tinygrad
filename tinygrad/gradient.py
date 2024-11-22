@@ -17,7 +17,7 @@ pm_gradient = PatternMatcher([
   # TODO: reduce/movement ops once we have the new lazy stuff
 ])
 
-# copied from tensor.py, get relevant topospot of gradients
+# copied from tensor.py, get relevant toposort of gradients
 def _deepwalk(root:UOp, targets:list[UOp]):
   def _walk(node:UOp, visited:set[UOp]):
     visited.add(node)
@@ -36,7 +36,7 @@ def gradient(root:UOp, targets:list[UOp]) -> list[UOp]:
     if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}")
     assert len(lgrads) == len(t0.src)
     for k,v in zip(t0.src, lgrads):
-      if k in grads: grads[k] += v
+      if k in grads: grads[k] = grads[k] + v
       else: grads[k] = v
   return [grads[x] for x in targets]
 
