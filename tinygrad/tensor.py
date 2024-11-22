@@ -273,7 +273,7 @@ class Tensor(SimpleMathTrait):
     """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self._data().cast(cast(LegacyFmtStrType, self.dtype.fmt), self.shape)
+    return self._data().cast(cast(LegacyFmtStrType, self.dtype.fmt), self.shape)  # TODO typeshed missing stub for cast
 
   def item(self) -> ConstType:
     """
@@ -286,7 +286,7 @@ class Tensor(SimpleMathTrait):
     """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert self.numel() == 1, "must have one element for item"
-    return self._data().cast(cast(LegacyFmtStrType, self.dtype.fmt))[0]
+    return self._data().cast(cast(LegacyFmtStrType, self.dtype.fmt))[0]  # TODO typeshed missing stub for cast
 
   # TODO: should be Tensor.tolist() -> Union[List[ConstType], ConstType]. The List is Sequence because mypy expects memoryview.tolist() -> list[int]
   # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803
