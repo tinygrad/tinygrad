@@ -3542,9 +3542,11 @@ class Tensor(SimpleMathTrait):
     print(t.dtype, t.numpy())
     ```
     """
+    def _cast(x, d): return F.Cast.apply(x, dtype=d)
+    # NOTE: underflow or overflow values for float to uint8 or uint16 wraps around and clamps to min/max for uint32 and uint64
     if dtypes.is_unsigned(dt:=to_dtype(dtype)) and dtypes.is_float(self.dtype):
-      return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int64), dtype=dt)
-    return self if self.dtype == dt else F.Cast.apply(self, dtype=dt)
+      return _cast(_cast(self, dtypes.int32), dt) if dt in {dtypes.uint8, dtypes.uint16} else _cast(self.clamp(0, dtypes.max(dt)), dt)
+    return self if self.dtype == dt else _cast(self, dt)
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
