@@ -2,7 +2,6 @@ import tempfile
 import unittest
 from extra.utilities.blake3 import blake3
 
-@unittest.skip("slow")
 class TestBLAKE3(unittest.TestCase):
   def setUp(self):
     self.vectors = [
@@ -147,6 +146,7 @@ class TestBLAKE3(unittest.TestCase):
   def generate_input(self, length: int) -> bytes:
     return bytes(i % 251 for i in range(length))
 
+  @unittest.skip("slow")
   def test_official_vectors(self):
     """Test against the official test vectors from: https://github.com/BLAKE3-team/BLAKE"""
     for vector in self.vectors:
@@ -156,6 +156,7 @@ class TestBLAKE3(unittest.TestCase):
       actual = blake3(text)
       self.assertEqual(actual, expected)
 
+  @unittest.skip("slow")
   def test_file_input(self):
     with tempfile.NamedTemporaryFile(delete=True) as file:
       file.write(self.generate_input(102400))
