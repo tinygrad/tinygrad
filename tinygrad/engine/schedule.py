@@ -228,14 +228,14 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemCon
         and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in ops):
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  if getenv("RUN_PROCESS_REPLAY"): PROCESS_REPLAY_CAPTURE.append((pre, sink))
+  if getenv("RUN_PROCESS_REPLAY"): PROCESS_REPLAY_CAPTURE.append(((pre, ctx.assigns), sink))
   return sink, si_ctx
 
-PROCESS_REPLAY_CAPTURE: List[Tuple[UOp, UOp]] = []
+PROCESS_REPLAY_CAPTURE: List[Tuple[Tuple[UOp, Set[UOp]], UOp]] = []
 if getenv("RUN_PROCESS_REPLAY"):
   @atexit.register
   def save_process_replay() -> None:
-    for x,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(x.key), (x, {}, ret))
+    for x,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(x[0].key), (*x, {}, ret))
 
 # **** Schedule grouping
 
@@ -393,7 +393,7 @@ break_sched = PatternMatcher([
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  if len(outs:=dedup(x.base for x in outs if x.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
+  if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
   for out in outs: out.forced_realize = True
   # create the big graph
   ctx = ScheduleContext()
