@@ -43,7 +43,7 @@ class Firmware:
     imu_i_off, imu_i_sz, imu_d_sz = hdr.header.ucode_array_offset_bytes, hdr.imu_iram_ucode_size_bytes, hdr.imu_dram_ucode_size_bytes
     self.descs += [psp_desc(amdgpu_psp_gfx_if.GFX_FW_TYPE_IMU_I, blob, imu_i_off, imu_i_sz)]
     self.descs += [psp_desc(amdgpu_psp_gfx_if.GFX_FW_TYPE_IMU_D, blob, imu_i_off + imu_i_sz, imu_d_sz)]
-    
+
     # RLC firmware
     blob, hdr0, hdr1, hdr2, hdr3 = load_fw(self.RLC_PATH, amdgpu_2.struct_rlc_firmware_header_v2_0, amdgpu_2.struct_rlc_firmware_header_v2_1,
       amdgpu_2.struct_rlc_firmware_header_v2_2, amdgpu_2.struct_rlc_firmware_header_v2_3)

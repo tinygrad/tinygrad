@@ -50,7 +50,7 @@ class GMC_IP:
     getattr(self.adev, f"reg{block}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR_LO32").write(self.dummy_page_pm.paddr >> 12)
     getattr(self.adev, f"reg{block}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32").write(self.dummy_page_pm.paddr >> 44)
 
-    getattr(self.adev, f"reg{block}VM_L2_PROTECTION_FAULT_CNTL2").write(0x000E0000) # TODO: write up!
+    getattr(self.adev, f"reg{block}VM_L2_PROTECTION_FAULT_CNTL2").write(0x000E0000 if block == "MM" else 0x60000) # TODO: write up!
 
   def init_tlb_regs(self, block:Union["MM", "GC"]):
     getattr(self.adev, f"reg{block}MC_VM_MX_L1_TLB_CNTL").write(0x00001859) # TODO: write up!
@@ -97,31 +97,30 @@ class GMC_IP:
   def init_gfxhub(self):
     print("GFXHUB init")
     self.init_hub("GC")
-    # self.init_page_table_regs("GC", vmid=8)
-    # self.enable_vm("GC", vmid=8)
+    self.init_page_table_regs("GC", vmid=8)
+    self.enable_vm("GC", vmid=8)
     self.gfx_enabled = True
 
   def flush_hdp(self): self.adev.wreg(0x1fc00, 0x0) # TODO: write up!
-  def flush_tlb_gfxhub(self, vmid, vmhub, flush_type):
-    assert vmid == 0 and vmhub == 0 and flush_type == 0
+  def flush_tlb_gfxhub(self, vmid, flush_type=0):
+    assert flush_type == 0
 
     self.flush_hdp()
 
-    self.adev.wreg(0x291c, 0xf80001)
-    while self.adev.rreg(0x292e) != 1: pass
+    self.adev.regGCVM_INVALIDATE_ENG17_REQ.write(0xf80000 | (1 << vmid))
+    self.adev.wait_reg(self.adev.regGCVM_INVALIDATE_ENG17_ACK, mask=(1 << vmid), value=(1 << vmid))
 
-  def flush_tlb_mmhub(self, vmid, vmhub, flush_type):
-    assert vmid == 0 and vmhub == 0 and flush_type == 0
+  def flush_tlb_mmhub(self, vmid, flush_type=0):
+    assert flush_type == 0
 
     self.flush_hdp()
 
-    self.adev.wreg(0x1a774, 0xf80001)
-    while self.adev.rreg(0x1a786) != 1: pass
-
-    self.adev.wreg(0x1a762, 0x0)
-    while self.adev.rreg(0x1a786) != 1: pass
-
-    self.adev.wreg(0x1a71b, 0x12104010)
+    x = self.adev.wait_reg(self.adev.regMMVM_INVALIDATE_ENG17_SEM, mask=0x1, value=0x1)
+    self.adev.regMMVM_INVALIDATE_ENG17_REQ.write(0xf80000 | (1 << vmid))
+    self.adev.wait_reg(self.adev.regMMVM_INVALIDATE_ENG17_ACK, mask=(1 << vmid), value=(1 << vmid))
+    self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0)
+    self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.read()
+    self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.write(0x12104010)
 
   def collect_pfs(self):
     gfx = self.adev.regGCVM_L2_PROTECTION_FAULT_STATUS.read()
@@ -159,4 +158,4 @@ class GMC_IP:
       raise RuntimeError(f"GFX FAULT: {client_mappings[cid]} {addr=:X}: {more_faults=}, {rw=}, {vmid=}, {mapping_error=} {permission_faults=}")
 
     mmhub = self.adev.regMMVM_L2_PROTECTION_FAULT_STATUS.read()
-    return gfx, mmhub
+    if mmhub: raise RuntimeError(f"MMHUB FAULT: {mmhub=}")

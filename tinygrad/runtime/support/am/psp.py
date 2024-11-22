@@ -38,7 +38,7 @@ class PSP_IP:
     self.tmr_init()
 
     self.load_ip_fw_cmd(self.adev.fw.smu_psp_desc)
-    self.tmr_cmd()
+    self.tmr_load_cmd()
 
     for psp_desc in self.adev.fw.descs: self.load_ip_fw_cmd(psp_desc)
     self.rlc_autoload_cmd()
@@ -48,6 +48,7 @@ class PSP_IP:
   def prep_msg1(self, data):
     ctypes.memset(self.msg1_pm.cpu_addr(), 0, self.msg1_pm.size)
     self.msg1_pm.cpu_view()[:len(data)] = data
+    self.adev.gmc.flush_hdp()
 
   def bootloader_load_component(self, fw, compid):
     if fw not in self.adev.fw.sos_fw: return 0
@@ -92,7 +93,7 @@ class PSP_IP:
 
     self.ring_set_wptr(prev_wptr + ctypes.sizeof(amdgpu_psp_gfx_if.struct_psp_gfx_rb_frame) // 4)
 
-    while self.fence_pm.cpu_view().cast('I')[0] != prev_wptr: self.adev.wreg(self.adev.reg_off("HDP", 0, 0x00d1, 0x0), 1)
+    while self.fence_pm.cpu_view().cast('I')[0] != prev_wptr: pass #self.adev.wreg(self.adev.reg_off("HDP", 0, 0x00d1, 0x0), 1)
     time.sleep(0.05)
 
     resp = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.cmd_pm.cpu_addr())
@@ -113,7 +114,7 @@ class PSP_IP:
     cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
     return self.ring_submit()
 
-  def tmr_cmd(self):
+  def tmr_load_cmd(self):
     ctypes.memset(self.cmd_pm.cpu_addr(), 0, 0x1000)
     cmd = amdgpu_psp_gfx_if.struct_psp_gfx_cmd_resp.from_address(self.cmd_pm.cpu_addr())
     cmd.cmd_id = amdgpu_psp_gfx_if.GFX_CMD_ID_SETUP_TMR

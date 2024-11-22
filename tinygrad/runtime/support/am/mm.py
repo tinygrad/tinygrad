@@ -36,14 +36,15 @@ class PTE:
     flags = amdgpu_2.AMDGPU_PTE_VALID | amdgpu_2.AMDGPU_PTE_WRITEABLE | amdgpu_2.AMDGPU_PTE_READABLE | amdgpu_2.AMDGPU_PTE_EXECUTABLE | amdgpu_2.AMDGPU_PTE_FRAG(frag)
     if self.lv > 0: flags |= amdgpu_2.AMDGPU_PDE_PTE
     if uncached: flags |= amdgpu_2.AMDGPU_PTE_MTYPE_NV10(0, 3) # 3 = MTYPE_UC
-    else: flags |= amdgpu_2.AMDGPU_PTE_MTYPE_NV10(0, 0)
+    # else: flags |= amdgpu_2.AMDGPU_PTE_MTYPE_NV10(0, 0)
     self.view[entry_id] = (paddr & 0x0000FFFFFFFFF000) | flags
   def get_entry(self, entry_id): return self.view[entry_id]
 
 class VirtualMapping(PhysicalMemory):
   def __init__(self, adev, ptable_vaddr, paddr, size):
-    self.vaddr, ptable_vaddr = ptable_vaddr + adev.gmc.vm_base, ptable_vaddr
+    self.vaddr, self.ptable_vaddr = ptable_vaddr + adev.gmc.vm_base, ptable_vaddr
     super().__init__(adev, paddr, size)
+  def offset(self, byts): return VirtualMapping(self.adev, self.ptable_vaddr + byts, self.paddr + byts, self.size - byts)
 
 class MM:
   def __init__(self, adev, vram_size):
@@ -81,6 +82,7 @@ class MM:
           if getenv("TRACE_MM"):
             add = j * pte_covers
             print(f"\tMapping page: pde:0x{pde.pm.paddr:X} {entry_idx + j}: {hex(cur_vaddr+add)} -> {hex(cur_paddr+add)}, cons={max_alignment} ptes={max_alignment // i_pte_covers} {uncached=} {frags=}")
+        # print(f"\tnptes=0x{max_alignment // i_pte_covers:x} incr=0x{pte_covers:x} upd_flags=0x0 frags=0x{frags:x}")
 
         entry_idx += (max_alignment // i_pte_covers) - 1 # TODO: looks bad
         i_pte_covers = max_alignment
@@ -104,20 +106,25 @@ class MM:
       entry_idx += 1
 
     if pde == self.root_pt:
-      if self.adev.gmc.gfx_enabled: self.adev.gmc.flush_tlb_gfxhub(0, 0, 0)
-      if self.adev.gmc.mmhub_enabled: self.adev.gmc.flush_tlb_mmhub(0, 0, 0)
+      if self.adev.gmc.gfx_enabled: self.adev.gmc.flush_tlb_gfxhub(vmid=0)
+      if self.adev.gmc.mmhub_enabled: self.adev.gmc.flush_tlb_mmhub(vmid=0)
     return VirtualMapping(self.adev, vaddr, paddr, size)
 
   def unmap_range(self, virtual_mapping:VirtualMapping): pass # TODO
 
-  def valloc(self, size:int, align=0x1000, uncached=False) -> VirtualMapping:
+  def valloc(self, size:int, align=2 << 20, uncached=False) -> VirtualMapping:
     # print("valloc", size, uncached)
 
     size = round_up(size, 0x1000)
-    addr = round_up(self.next_vaddr, max(align, size))
+
+    if size % (2 << 20) == 0: align = max(align, size)
+    # elif size >= 256 << 10: align = 2 << 20
+
+    addr = round_up(self.next_vaddr, align)
+
     self.next_vaddr = addr + size
     assert self.next_vaddr <= self.adev.gmc.vm_end
-    return self.map_range(self.root_pt, addr, self.palloc(size, align).paddr, size, uncached=uncached)
+    return self.map_range(self.root_pt, addr, self.palloc(size).paddr, size, uncached=uncached)
   def vfree(self, vm:VirtualMapping): pass
 
   def palloc(self, size, align=0x1000, zero=False) -> PhysicalMemory:

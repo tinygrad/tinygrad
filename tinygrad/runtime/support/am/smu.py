@@ -66,12 +66,16 @@ class SMU_IP:
     self.smu_system_features_control(True)
 
   def smu_set_power_profile(self, enabled):
-    self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetWorkloadMask, 0x24 if enabled else 0x1, poll=True)
+    self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetWorkloadMask, 0x20 if enabled else 0x1, poll=True)
 
-    for clck in [0x000009B2, 0x000204E1, 0x000105DC, 0x00050B76, 0x00070B76, 0x00040898, 0x00060898, 0x000308FD]:
-      self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetSoftMaxByFreq, clck, poll=True)
-      self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetSoftMinByFreq, clck, poll=True)
+    # low = [0x000001F4, 0x00020060, 0x000101F4, 0x00050201, 0x00070201, 0x00040201, 0x00060201, 0x00030259]
+    # hi = [0x00000C94, 0x000204E1, 0x000105DC, 0x00050B76, 0x00070B76, 0x00040898, 0x00060898, 0x000308FD]
+    # hi = [0x000009B2, 0x000204E1, 0x000105DC, 0x00050B76, 0x00070B76, 0x00040898, 0x00060898, 0x000308FD]
+    for clck in [0x00000C94, 0x000204E1, 0x000105DC, 0x00050B76, 0x00070B76, 0x00040898, 0x00060898, 0x000308FD]:
+      self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetSoftMinByFreq, clck, poll=False)
+      self.smu_cmn_send_smc_msg_with_param(amdgpu_smu_v13_0_0.PPSMC_MSG_SetSoftMaxByFreq, clck, poll=False)
 
   def init(self):
     # print("SMU init")
     self.smu_smc_hw_setup()
+    self.smu_set_power_profile(enabled=True)
