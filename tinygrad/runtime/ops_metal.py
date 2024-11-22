@@ -1,7 +1,7 @@
 from __future__ import annotations
-import os, subprocess, pathlib, ctypes, tempfile, functools
-from typing import List, Any, Tuple, Optional, cast
-from tinygrad.helpers import prod, getenv, T
+import os, subprocess, pathlib, struct, ctypes, tempfile, functools
+from typing import List, Any, Tuple, cast
+from tinygrad.helpers import prod, to_mv, getenv, _cache_dir, T
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -24,12 +24,15 @@ class MTLPipelineOption:
 
 libobjc = ctypes.CDLL("/usr/lib/libobjc.dylib")
 libmetal = ctypes.CDLL("/System/Library/Frameworks/Metal.framework/Metal")
+compiler = ctypes.CDLL("/System/Library/PrivateFrameworks/MTLCompiler.framework/MTLCompiler")
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
 ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
 libdispatch = ctypes.CDLL("/usr/lib/libSystem.dylib") # libdispatch is part of libSystem on mac
 libobjc.objc_getClass.restype = objc_id
 libobjc.sel_registerName.restype = objc_id
 libmetal.MTLCreateSystemDefaultDevice.restype = objc_instance
+compiler.MTLCodeGenServiceCreate.restype = ctypes.c_void_p
+compiler.MTLCodeGenServiceBuildRequest.restype = ctypes.c_void_p
 libdispatch.dispatch_data_create.restype = objc_instance
 
 # Ignore mypy error reporting incompatible default, because typevar default only works on python 3.12
@@ -65,19 +68,28 @@ def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   return library
 
 class MetalCompiler(Compiler):
-  def __init__(self, dev:Optional[MetalDevice]=None):
-    self.dev = dev
-    super().__init__("compile_metal_xcode" if self.dev is None else "compile_metal")
+  def __init__(self):
+    if not getenv("METAL_XCODE", 0): self.cgs = compiler.MTLCodeGenServiceCreate(b"tinygrad")
+    super().__init__("compile_metal_xcode" if getenv("METAL_XCODE", 0) else "compile_metal")
+  def __reduce__(self): return (MetalCompiler,()) # to create new instance for each multiprocessing fork
   def compile(self, src:str) -> bytes:
-    if self.dev is None:
+    if self.cgs is None:
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
       lib = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
     else:
-      library = metal_src_to_library(self.dev, src)
-      library_contents = msg(library, "libraryDataContents", restype=objc_instance)
-      lib = ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
-    assert lib[:4] == b"MTLB", "Invalid Metal library. Using conda? Corrupt XCode?"
+      lib, err = None, CompileError("MTLCodeGenServiceBuildRequest returned without calling the callback")
+      @ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p)
+      def callback(blockptr, error, dataPtr, dataLen, errorMessage):
+        nonlocal lib, err
+        if error == 0: lib = (reply:=bytes(to_mv(dataPtr, dataLen)))[sum(struct.unpack('<LL', reply[8:16])):]
+        else: err = CompileError(errorMessage.decode())
+      params = f'-fno-fast-math -std=metal3.1 --driver-mode=metal -x metal -fmodules-cache-path=\"{os.path.join(_cache_dir, "tinygrad")}\"'
+      e1, e2 = (x:=src.encode()) + b'\x00' * (4-(len(x)%4)), params.encode()+b'\x00'
+      data = struct.pack('<Q', len(e1)) + struct.pack('<Q', len(e2)) + e1 + e2
+      compiler.MTLCodeGenServiceBuildRequest(ctypes.c_void_p(self.cgs), None, 13, data, len(data), ctypes.byref(callback, -0x10))
+      if lib is None: raise err
+    assert lib is not None and lib[:4] == b"MTLB", "Invalid Metal library. Using conda? Corrupt XCode?"
     return lib
   def disassemble(self, lib:bytes):
     with tempfile.NamedTemporaryFile(delete=True) as shader:
@@ -175,8 +187,8 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_XCODE") else Compiler(),
-                     functools.partial(MetalProgram, self), MetalGraph)
+    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if (getenv("METAL_DIRECT", 1) or getenv("METAL_XCODE", 0)) \
+                     else Compiler(), functools.partial(MetalProgram, self), MetalGraph)
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
     self.mv_in_metal.clear()
