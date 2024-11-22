@@ -74,15 +74,14 @@ def _reshape_mask(_mask:Optional[Tuple[Tuple[sint, sint], ...]], old_shape:Tuple
   return tuple(reversed(new_mask))
 
 def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
-  strides = strides_for_shape(shape)
   result = []
-  for stride in strides:
+  for stride in strides_for_shape(shape):
     here = offs // stride if stride != 0 else 0
     result.append(here)
     offs -= here * stride
   return result
 
-def variable_to_uop(x, ctx=None) -> UOp: return UOp.const(dtypes.int, x) if isinstance(x, int) else x
+def sint_to_uop(x:sint) -> UOp: return UOp.const(dtypes.int, x) if isinstance(x, int) else x
 
 @dataclass(frozen=True)
 class View:
@@ -100,7 +99,7 @@ class View:
 
   def to_indexed_uops(self:View, _idxs:Optional[List[UOp]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> Tuple[UOp, UOp]:
     idxs = [UOp.range(dtypes.int, 0, s, i) for i,s in enumerate(self.shape)] if _idxs is None else _idxs
-    iexpr = variable_to_uop(self.offset)
+    iexpr = sint_to_uop(self.offset)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else [None]*len(self.shape)):
       if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
       if m is not None:
