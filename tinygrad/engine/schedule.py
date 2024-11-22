@@ -363,7 +363,7 @@ do_realize = PatternMatcher([
   # always realize meta ops
   (UPatSrc({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
   # don't realize image to image casts
-  (UPatSrc(Ops.CAST, src=(UPat.load(UPat.var("xb"), UPat()),), dtype=dtypes.float).view(name="view"), fold_img_cast),
+  (UPatSrc(Ops.CAST, src=(UPat(Ops.LOAD, src=(UPat.var("xb"), UPat())),), dtype=dtypes.float).view(name="view"), fold_img_cast),
   # realize before expand or unsafe pad ops
   (UPatSrc().view(name="view"), realize_view),
   # realize before COPY or BUFFER_VIEW
