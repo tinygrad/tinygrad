@@ -1,4 +1,4 @@
-import sys, atexit, functools, itertools
+import sys, atexit, functools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict, cast
@@ -166,7 +166,7 @@ class ScheduleItemContext:
   sts: Set[ShapeTracker] = field(default_factory=set)
   bufs: List[UOp] = field(default_factory=list)
   metadata: Set[Metadata] = field(default_factory=set)
-  assign_preloads: List[UOp] = field(default_factory=list)
+  assign_adjacents: Dict[UOp, List[UOp]] = field(default_factory=dict)
 
 def _append_st_vars(ctx:ScheduleItemContext, x:UOp) -> Optional[UOp]:
   if (st:=unwrap(x.st)) in ctx.sts: return None
@@ -181,7 +181,9 @@ def _append_buf(ctx:ScheduleItemContext, x:UOp) -> UOp:
 append_bufs = PatternMatcher([(UPat(Ops.BUFFER, name="x"), _append_buf)])
 
 def _check_preload(ctx:ScheduleItemContext, x:UOp) -> UOp:
-  if x.buf_uop in ctx.assigned: ctx.assign_preloads.append(x)
+  if (b:=x.buf_uop) in ctx.assigned:
+    (adj_loads:=ctx.assign_adjacents.setdefault(b, [])).append(x)
+    if not all_same([x.op for x in adj_loads]): raise RuntimeError(f"Detected cycle when fusing {adj_loads}. Can only fuse PRELOAD or LOAD of {b}")
   return x.replace(op=Ops.LOAD)
 check_preload = PatternMatcher([(UPat(Ops.PRELOAD, name="x"), _check_preload)])
 
@@ -218,10 +220,11 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemCon
     if DEBUG >= 3: print(sink)
     raise RuntimeError(f"Kernel for {si_ctx.metadata} exceeded the {limit} buffer count limit for {device} with {len(si_ctx.bufs)} buffers.")
   # we also allow masked views. if it has a single view and it's equal when you shrink a contig, it's fine
-  if not all((s:=x.st_arg).contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \
-      and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in si_ctx.assign_preloads if si_ctx.sinked.get(x.buf_uop) is not None):
-    raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
-                       +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
+  for ubuf,ops in si_ctx.assign_adjacents.items():
+    if si_ctx.sinked.get(ubuf) is not None and not all((s:=x.st_arg).contiguous or (len(s.views) == 1 and (m:=s.views[0].mask) is not None \
+        and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in ops):
+      raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
+                         +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
   if getenv("RUN_PROCESS_REPLAY"): PROCESS_REPLAY_CAPTURE.append((pre, sink))
   return sink, si_ctx
 
@@ -392,7 +395,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   for store_uops in store_groups:
     ast, ast_ctx = full_ast_rewrite(UOp.sink(*(ctx.realizes[u] for u in store_uops)), ctx)
     prescheduled.append(ScheduleItem(ast, tuple(buffers[u] for u in ast_ctx.bufs if u.size != 0),
-                                     tuple(ast_ctx.metadata), frozenset(x.buf_uop for x in ast_ctx.assign_preloads)))
+                                     tuple(ast_ctx.metadata), frozenset(x.buf_uop for x in ast_ctx.assign_adjacents)))
     for u in ast_ctx.sinked: del ast_ctx.lazybufs[u].srcs  # can only schedule once
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
