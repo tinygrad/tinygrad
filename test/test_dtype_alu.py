@@ -3,7 +3,7 @@ import unittest
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
-from hypothesis import given, strategies as strat, settings, HealthCheck
+from hypothesis import given, strategies as strat, settings
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.schedule import create_schedule
@@ -162,7 +162,6 @@ class TestDTypeALU(unittest.TestCase):
   @given(strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          ht.int32, strat.sampled_from(binary_operations), strat.sampled_from(integer_binary_operations))
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "TODO: fix cast inf to int32 in PYTHON")
   def test_float_midcast_int32(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.float32, dtypes.int32)
 
   @unittest.skip("broken. TODO: fix it")
@@ -180,15 +179,21 @@ class TestDTypeALU(unittest.TestCase):
     float_strat = float_strat.filter(lambda x: 0 < x < dtypes.max(unsigned_dtype))
     universal_test_cast(a.draw(float_strat), float_dtype, unsigned_dtype)
 
-  @settings(suppress_health_check=[HealthCheck.filter_too_much])
-  @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)))
-  def test_float_cast_to_unsigned_overflow_underflow(self, a, float_dtype, unsigned_dtype):
+  @given(strat.sampled_from(dtypes_float))
+  def test_float_cast_to_unsigned_overflow(self, float_dtype):
     if not is_dtype_supported(float_dtype, Device.DEFAULT): float_dtype = dtypes.float32
-    float_strat = {dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype]
-    underflow_strat = float_strat.filter(lambda x: x < 0)
-    overflow_strat = float_strat.filter(lambda x: x > dtypes.max(unsigned_dtype))
-    universal_test_cast(a.draw(underflow_strat), float_dtype, unsigned_dtype)
-    universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
+    for dt in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64):
+      universal_test_cast(dtypes.max(dt)+1, float_dtype, dt)
+      universal_test_cast(dtypes.max(dt)+2, float_dtype, dt)
+      universal_test_cast(dtypes.max(dt)*2+2, float_dtype, dt)
+
+  @given(strat.sampled_from(dtypes_float))
+  def test_float_cast_to_unsigned_underflow(self, float_dtype):
+    if not is_dtype_supported(float_dtype, Device.DEFAULT): float_dtype = dtypes.float32
+    for dt in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64):
+      universal_test_cast(dtypes.min(dt)-1, float_dtype, dt)
+      universal_test_cast(dtypes.min(dt)-2, float_dtype, dt)
+      universal_test_cast(dtypes.min(dt)*2-2, float_dtype, dt)
 
 if __name__ == '__main__':
   unittest.main()
