@@ -3543,10 +3543,8 @@ class Tensor(SimpleMathTrait):
     ```
     """
     def _cast(x, d): return F.Cast.apply(x, dtype=d)
-    # NOTE: underflow or overflow values when casting from float to uints will wrap around
+    # NOTE: underflow or overflow values when casting from float to uints will follow numpy behavior
     if dtypes.is_unsigned(dt:=to_dtype(dtype)) and dtypes.is_float(self.dtype):
-      # return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int64), dtype=dtypes.int64)
-      # (self < dtypes.max(dtypes.int32))
       trunc = (self > dtypes.min(dtypes.int32)).where((self < dtypes.max(dtypes.int32)).where(self, dtypes.max(dt)), dtypes.min(dt))
       return _cast(self.clamp(0, dtypes.max(dt)), dt) if dt in {dtypes.uint32, dtypes.uint64} else \
              _cast(_cast(trunc, dtypes.int32), dt)

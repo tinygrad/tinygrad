@@ -3,7 +3,7 @@ import unittest
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
-from hypothesis import given, strategies as strat, settings, HealthCheck, reproduce_failure
+from hypothesis import given, strategies as strat, settings, HealthCheck
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.schedule import create_schedule
@@ -185,27 +185,10 @@ class TestDTypeALU(unittest.TestCase):
   def test_float_cast_to_unsigned_overflow_underflow(self, a, float_dtype, unsigned_dtype):
     if not is_dtype_supported(float_dtype, Device.DEFAULT): float_dtype = dtypes.float32
     float_strat = {dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype]
-    # casting inf to int in python hits OverflowError
     underflow_strat = float_strat.filter(lambda x: x < 0)
     overflow_strat = float_strat.filter(lambda x: x > dtypes.max(unsigned_dtype))
-
-    # numpy hits two RuntimeWarnings when drawn number is outside of float expressable range
-    # first overflow makes it inf or -inf and second clamps it, to treat this we'll have to dtype min/max float expressable
-    # max_float_value = {dtypes.float16: 6.5504e4, dtypes.float32: 3.4028235e38}.get(float_dtype)
-    # if max_float_value is not None:
-    #   underflow_strat = underflow_strat.filter(lambda x: x > -max_float_value)
-    #   overflow_strat = overflow_strat.filter(lambda x: x < max_float_value)
-
     universal_test_cast(a.draw(underflow_strat), float_dtype, unsigned_dtype)
     universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
-
-  # @unittest.expectedFailure
-  # def test_non_float_expressable_cast_to_unsigned_overflow_underflow(self):
-  #   # fails for both uint8 and uint16
-  #   universal_test_cast(65505, dtypes.half, dtypes.uint8)
-  #   universal_test_cast(65505, dtypes.half, dtypes.uint16)
-  #   ...
-
 
 if __name__ == '__main__':
   unittest.main()
