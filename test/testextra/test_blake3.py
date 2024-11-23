@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 
 class TestBLAKE3(unittest.TestCase):
   def setUp(self):
-    self.vectors = [
+    self.data = [
       {
         "input_len": 0,
         "hash": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
@@ -143,15 +143,13 @@ class TestBLAKE3(unittest.TestCase):
       }
     ]
 
-  def test_official_vectors(self):
-    """Test against the official test vectors from: https://github.com/BLAKE3-team/BLAKE"""
-    for vector in self.vectors:
-      input_len = vector["input_len"]
+  def test_blake3(self):
+    """Tests from: https://github.com/BLAKE3-team/BLAKE"""
+    for vector in self.data:
       expected = vector["hash"]
-      data = Tensor(bytes(i % 251 for i in range(input_len)))
-      actual = blake3(data)
+      actual = blake3(Tensor(bytes(i % 251 for i in range(vector["input_len"]))))
       self.assertEqual(actual, expected)
-      print(f"passed {input_len} bytes")
+      print(f"passed {vector['input_len']} bytes")
 
 if __name__ == "__main__":
   unittest.main()
