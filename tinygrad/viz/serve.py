@@ -101,6 +101,12 @@ class Handler(BaseHTTPRequestHandler):
 
     if (url:=urlparse(self.path)).path == "/":
       with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
+    elif self.path.startswith("/assets/") and '/..' not in self.path:
+      try:
+        with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
+        if url.path.endswith(".js"): content_type = "application/javascript"
+        if url.path.endswith(".css"): content_type = "text/css"
+      except FileNotFoundError: status_code = 404
     elif url.path == "/kernels":
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
@@ -108,12 +114,6 @@ class Handler(BaseHTTPRequestHandler):
         jret: Any = {**asdict(g), "graphs": [uop_to_json(x) for x in g.graphs], "uops": [pcall(str,x) for x in g.graphs]}
       else: jret = [list(map(lambda x:asdict(x[2]), v)) for v in kernels]
       ret, content_type = json.dumps(jret).encode(), "application/json"
-    elif self.path.startswith("/assets/") and '/..' not in self.path:
-      try:
-        with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
-        if url.path.endswith(".js"): content_type = "application/javascript"
-        if url.path.endswith(".css"): content_type = "text/css"
-      except FileNotFoundError: status_code = 404
     else: status_code = 404
 
     # send response
