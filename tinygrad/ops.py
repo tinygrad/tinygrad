@@ -186,7 +186,7 @@ class GroupOp:
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
 def can_pad(u:UOp, edges:Dict[UOp, UOp], visisted:Set[UOp]) -> bool:
-  if u.op not in GroupOp.UnsafePad: return False
+  if u.op in GroupOp.UnsafePad: return False
   if (len(u.src) == 2 and u.src[0] in edges) or u in visisted: return True
   visisted.add(u)
   return all(can_pad(x.base, edges, visisted) for x in u.src)
