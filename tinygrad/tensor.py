@@ -1037,12 +1037,19 @@ class Tensor(SimpleMathTrait):
     pX = ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2])) if flat else padding
     if len(pX) != self.ndim: raise ValueError(f"padding length is improper, {padding=} {self.ndim=}")
     X, pX = self, cast(Tuple[Tuple[sint, sint]], tuple((0,0) if p is None else p for p in pX))
-    pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX)
+    pads, shrinks = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX), tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, X.shape))
     if mode == "constant":
       def _constant(x,px,v): return F.Pad.apply(x, arg=px) if v == 0 else F.Pad.apply(x, arg=px) + F.Pad.apply(Tensor.ones_like(x), arg=px).where(0,v)
       return _constant(X, pX, value) if all(resolve(p >= 0) for p in flatten(pX)) else \
-             _constant(X.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, X.shape))), pads, value)
+             _constant(X.shrink(shrinks), pads, value)
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+    if mode == "circular":
+      if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, X.shape)): raise ValueError('Padding value causes wrapping around more than once.')
+      X = X.shrink(shrinks)
+      if X.numel() == 0: return X.pad(tuple((max(pB-csh, 0), max(pA-csh, 0)) for (pB,pA),csh in zip(pads,X.shape)))
+      cropped, X = X.shape, X.repeat(tuple(bool(pB) + ceildiv(pA,csh) + 1 for (pB,pA),csh in zip(pads, X.shape)))
+      X = X.shrink(tuple((max(csh-pB, 0) if pB>0 else 0, xsh - (csh-pA%csh) if pA%csh!=0 else xsh) for (pB,pA),csh,xsh in zip(pads,cropped, X.shape)))
+      return X.pad(tuple((max(pB-csh, 0), 0) for (pB,_),csh in zip(pads, cropped)))
     for d,(pB,pA) in enumerate(pads):
       if mode == "reflect":
         if pB >= (s:=X.shape[d]) or pA>=s: raise ValueError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
