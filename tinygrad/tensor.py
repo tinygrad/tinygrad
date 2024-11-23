@@ -3542,7 +3542,7 @@ class Tensor(SimpleMathTrait):
     print(t.dtype, t.numpy())
     ```
     """
-    # NOTE: casting from float to uchar and ushort with underflow or overflow values will cause value to wrap around
+    # NOTE: casting from float to uchar and ushort with underflow or overflow values will cause values to wrap around if it's within int32 range
     if (dt:=to_dtype(dtype)) in {dtypes.uint8, dtypes.uint16} and dtypes.is_float(self.dtype):
       return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int32), dtype=dt)
     return self if self.dtype == dt else F.Cast.apply(self, dtype=dt)
