@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip
 import urllib.request, subprocess, shutil, math, contextvars, types, copyreg, inspect, importlib
 from dataclasses import dataclass
-from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard
+from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Literal, cast
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -279,6 +279,12 @@ def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
   return CStruct
 def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
+
+# TODO typeshed stub is missing the stub for memoryview float16 cast (format: Literal['e', '@e']). Remove once support is added.
+# src: https://github.com/python/mypy/blob/v1.13.0/mypy/typeshed/stdlib/builtins.pyi#L769
+def to_legacy_fmt(fmt:str):
+  return cast(Literal['f', '@f', 'd', '@d', '?', 'b', 'B', '@b', '@B', 'h', 'H',
+                      '@h', '@H', 'i', 'I', '@i', '@I', 'l', 'L', '@l', '@L', 'q', 'Q', '@q', '@Q', 'P', '@P'], fmt)
 
 # *** tqdm
 

@@ -7,7 +7,7 @@ from collections import defaultdict
 
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN
+from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, to_legacy_fmt
 from tinygrad.multi import MultiLazyBuffer
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
 from tinygrad.device import Device, Buffer, BufferSpec
@@ -273,7 +273,7 @@ class Tensor(SimpleMathTrait):
     """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self._data().cast(self.dtype.fmt, self.shape)
+    return self._data().cast(to_legacy_fmt(self.dtype.fmt), self.shape)  # TODO legacy: typeshed missing stub for cast
 
   def item(self) -> ConstType:
     """
@@ -286,7 +286,7 @@ class Tensor(SimpleMathTrait):
     """
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert self.numel() == 1, "must have one element for item"
-    return self._data().cast(self.dtype.fmt)[0]
+    return self._data().cast(to_legacy_fmt(self.dtype.fmt))[0]  # TODO legacy: typeshed missing stub for cast
 
   # TODO: should be Tensor.tolist() -> Union[List[ConstType], ConstType]. The List is Sequence because mypy expects memoryview.tolist() -> list[int]
   # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803
