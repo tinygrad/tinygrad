@@ -1,0 +1,63 @@
+@font-face {
+  font-family: 'Noto Sans HK';
+  font-style: normal;
+  font-weight: 100;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/notosanshk/v32/nKKF-GM_FYFRJvXzVXaAPe97P1KHynJFP716qHB_-oU.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans HK';
+  font-style: normal;
+  font-weight: 200;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/notosanshk/v32/nKKF-GM_FYFRJvXzVXaAPe97P1KHynJFP716qPB--oU.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans HK';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/notosanshk/v32/nKKF-GM_FYFRJvXzVXaAPe97P1KHynJFP716qC5--oU.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans HK';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/notosanshk/v32/nKKF-GM_FYFRJvXzVXaAPe97P1KHynJFP716qHB--oU.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans HK';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/notosanshk/v32/nKKF-GM_FYFRJvXzVXaAPe97P1KHynJFP716qEJ--oU.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans HK';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/notosanshk/v32/nKKF-GM_FYFRJvXzVXaAPe97P1KHynJFP716qK55-oU.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans HK';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/notosanshk/v32/nKKF-GM_FYFRJvXzVXaAPe97P1KHynJFP716qJd5-oU.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans HK';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/notosanshk/v32/nKKF-GM_FYFRJvXzVXaAPe97P1KHynJFP716qPB5-oU.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans HK';
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/notosanshk/v32/nKKF-GM_FYFRJvXzVXaAPe97P1KHynJFP716qNl5-oU.ttf) format('truetype');
+}
