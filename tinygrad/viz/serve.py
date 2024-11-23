@@ -111,6 +111,8 @@ class Handler(BaseHTTPRequestHandler):
     elif self.path.startswith("/assets/") and '/..' not in self.path:
       try:
         with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
+        if url.path.endswith(".js"): content_type = "application/javascript"
+        if url.path.endswith(".css") or url.path.endswith("/css2"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     else: status_code = 404
 
