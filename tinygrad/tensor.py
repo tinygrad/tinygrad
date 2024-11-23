@@ -2343,17 +2343,17 @@ class Tensor(SimpleMathTrait):
     ```
     """
     index, dim  = index.to(self.device), self._resolve_dim(dim)
-    if not isinstance(src, Tensor): src = Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
+    src = src.cast(self.dtype) if isinstance(src, Tensor) else Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
     assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
-    assert all((se >= ind if d != dim else True) and sr >= ind for d,(se,ind,sr) in enumerate(zip(self.shape, index.shape, src.shape))), \
-      f"Expected {index.shape=} to be <= {self.shape=} apart from dimension {dim} and to be <= {src.shape=}"
+    assert all((True if d == dim else se >= ind) and sr >= ind for d,(se,ind,sr) in enumerate(zip(self.shape, index.shape, src.shape))), \
+      f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
     mask = (index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)).transpose(-1, dim)
     src = src.unsqueeze(-1).expand((None,)*src.ndim + (self.shape[dim],)).transpose(-1, dim).shrink(tuple((0,s) for s in mask.shape))
     src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
     if reduce == "add": return (mask*src).sum(-1, acc_dtype=self.dtype) + self
     if reduce == "multiply": return mask.where(mask*src, 1).prod(-1, acc_dtype=self.dtype) * self
     mask, masked_src = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, -1), (mask*src).split(1, -1)))
-    return (mask.squeeze(-1).where(masked_src.squeeze(-1), self)).cast(self.dtype)
+    return mask.squeeze(-1).where(masked_src.squeeze(-1), self)
 
   # ***** unary ops *****
 
