@@ -764,10 +764,12 @@ class RewriteContext:
     self.replace[n] = ret = n if new_n is None else self.rewrite(new_n)
     return ret
   def single_pass_rewrite(self, n:UOp) -> UOp:
+    if (rn := self.replace.get(n)) is not None: return rn
     new_n = self.pm.rewrite(n, self.ctx)
     if new_n is None: new_n = n
     new_src = tuple(map(self.single_pass_rewrite, new_n.src))
-    return new_n if new_src == new_n.src else UOp(new_n.op, new_n.dtype, new_src, new_n.arg)
+    self.replace[n] = ret = new_n if new_src == new_n.src else UOp(new_n.op, new_n.dtype, new_src, new_n.arg)
+    return ret
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, single_pass=False) -> UOp:
   if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0:
