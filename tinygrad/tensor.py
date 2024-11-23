@@ -3542,15 +3542,11 @@ class Tensor(SimpleMathTrait):
     print(t.dtype, t.numpy())
     ```
     """
-    def _cast(x, d): return F.Cast.apply(x, dtype=d)
-    # NOTE: casting from float to unsigned ints with underflow or overflow values will cause the value to wrap around
+    # NOTE: casting from float to unsigned ints with underflow or overflow values will follow numpy behavior
     if dtypes.is_unsigned(dt:=to_dtype(dtype)) and dtypes.is_float(self.dtype):
-      return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int64), dtype=dt)
-      # (self < dtypes.max(dtypes.int32))
-      # trunc = (self > dtypes.min(dtypes.int32)).where((self < dtypes.max(dtypes.int32)).where(self, dtypes.max(dt)), dtypes.min(dt))
-      # return _cast(self.clamp(0, dtypes.max(dt)), dt) if dt in {dtypes.uint32, dtypes.uint64} else \
-             # _cast(_cast(trunc, dtypes.int32), dt)
-    return self if self.dtype == dt else _cast(self, dt)
+      return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int32), dtype=dt) if dt in {dtypes.uint8, dtypes.uint16} else \
+             F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int64).clamp(dtypes.min(dt), dtypes.max(dt)), dtype=dt)
+    return self if self.dtype == dt else F.Cast.apply(self, dtype=dt)
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
