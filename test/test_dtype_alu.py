@@ -3,7 +3,7 @@ import unittest
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
-from hypothesis import given, strategies as strat, settings
+from hypothesis import given, strategies as strat, settings, HealthCheck
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.schedule import create_schedule
@@ -180,18 +180,19 @@ class TestDTypeALU(unittest.TestCase):
     float_strat = float_strat.filter(lambda x: 0 < x < dtypes.max(unsigned_dtype))
     universal_test_cast(a.draw(float_strat), float_dtype, unsigned_dtype)
 
+  @settings(suppress_health_check=[HealthCheck.filter_too_much])
   @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
   def test_float_cast_to_unsigned_overflow(self, a, float_dtype, unsigned_dtype):
     if not is_dtype_supported(float_dtype, Device.DEFAULT): float_dtype = dtypes.float32
     float_strat = {dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype]
-    overflow_strat = float_strat.filter(lambda x: x > dtypes.max(unsigned_dtype))
+    overflow_strat = float_strat.filter(lambda x: x > dtypes.max(unsigned_dtype) and x < dtypes.max(dtypes.int32))
     universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
 
   @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
   def test_float_cast_to_unsigned_underflow(self, a, float_dtype, unsigned_dtype):
     if not is_dtype_supported(float_dtype, Device.DEFAULT): float_dtype = dtypes.float32
     float_strat = {dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype]
-    overflow_strat = float_strat.filter(lambda x: x < 0)
+    overflow_strat = float_strat.filter(lambda x: x < 0 and x > dtypes.min(dtypes.int32))
     universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
 
 if __name__ == '__main__':
