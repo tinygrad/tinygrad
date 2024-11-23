@@ -1,11 +1,12 @@
 from __future__ import annotations
 import ctypes, ctypes.util, functools
 from typing import Tuple, Optional, List
-from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, init_c_struct_t
+from tinygrad.helpers import CI, DEBUG, getenv, from_mv, init_c_var, init_c_struct_t
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
+from tinygrad.dtype import DType, dtypes
 from tinygrad.runtime.support.compiler_cuda import cuda_disassemble, pretty_ptx, CUDACompiler, PTXCompiler, PTX
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
 
@@ -122,6 +123,14 @@ class CUDADevice(Compiled):
     check(cuda.cuCtxSynchronize())
     for opaque,sz,options in self.pending_copyin: self.allocator.free(opaque, sz, options)
     self.pending_copyin.clear()
+
+  def is_dtype_supported(self, dtype: DType) -> bool:
+    conditions = {
+        dtypes.bfloat16: not CI and not getenv("PTX"),
+        dtypes.half: not CI,
+        dtypes.float64: True,
+    }
+    return conditions.get(dtype, True)
 
   @staticmethod
   def synchronize_system():
