@@ -203,7 +203,17 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
 
 
 import inspect
-from tinygrad.ops import graph_rewrite, _substitute, track_rewrites
+from tinygrad.ops import graph_rewrite, _substitute, track_rewrites, symbolic_simple
+
+class TestSinglePassRewrite(unittest.TestCase):
+  def test_const_folding(self):
+    a = UOp.const(dtypes.int, 5)
+    ret = (a*3) + (a*7)
+    gt = graph_rewrite(ret, symbolic_simple)
+    # NOTE: takes two passes to get this
+    ret = graph_rewrite(ret, symbolic_simple, single_pass=True)
+    ret = graph_rewrite(ret, symbolic_simple, single_pass=True)
+    self.assertIs(gt, ret)
 
 # normally .substitute would be fine, but it's not tracked
 @track_rewrites()
