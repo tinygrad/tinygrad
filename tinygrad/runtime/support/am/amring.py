@@ -1,11 +1,31 @@
 import os, ctypes
+from typing import Tuple, Dict, List, Any, cast
 from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_gc_11_0_0
 from tinygrad.helpers import to_mv, mv_address
 
 class AMRegister:
-  def __init__(self, adev, regoff): self.adev, self.regoff = adev, regoff
-  def write(self, value, inst=0): return self.adev.wreg(self.regoff, value)
-  def read(self, inst=0): return self.adev.rreg(self.regoff)
+  def __init__(self, adev, reg_off:int, reg_fields:Dict[str, Tuple[int, int]]):
+    self.adev, self.reg_off, self.reg_fields = adev, reg_off, reg_fields
+
+  def _parse_kwargs(self, **kwargs):
+    mask, values = 0xffffffff, 0
+    for k, v in kwargs.items():
+      if k not in self.reg_fields: raise ValueError(f"Unknown register field: {k} {self.reg_fields.keys()}")
+      m, s = self.reg_fields[k]
+      if v & (m>>s) != v: raise ValueError(f"Value {v} for {k} is out of range {m=} {s=}")
+      mask &= ~m
+      values |= v << s
+    return mask, values
+
+  def update(self, **kwargs):
+    mask, values = self._parse_kwargs(**kwargs)
+    self.write((self.read() & mask) | values)
+
+  def write(self, value=0, **kwargs):
+    mask, values = self._parse_kwargs(**kwargs)
+    self.adev.wreg(self.reg_off, (value & mask) | values)
+
+  def read(self, inst=0): return self.adev.rreg(self.reg_off)
 
 class AMRing:
   def __init__(self, adev, size, pipe, queue, me, vmid, doorbell_index):
@@ -34,12 +54,12 @@ class AMRing:
     self.mqd.header = 0xC0310800
     self.mqd.cp_mqd_base_addr_lo = self.mqd_vm.vaddr & 0xfffffffc
     self.mqd.cp_mqd_base_addr_hi = (self.mqd_vm.vaddr >> 32) & 0xffffffff
-    self.mqd.cp_hqd_active = 0
+    # self.mqd.cp_hqd_active = 0
     self.mqd.vmid = self.vmid
     self.mqd.cp_hqd_persistent_state = 0x5501
     self.mqd.cp_hqd_pipe_priority = 0x2
     self.mqd.cp_hqd_queue_priority = 0xf
-    self.mqd.cp_hqd_quantum = 0x0
+    self.mqd.cp_hqd_quantum = 0x111
     self.mqd.cp_hqd_pq_base_lo = (self.ring_vm.vaddr >> 8) & 0xffffffff
     self.mqd.cp_hqd_pq_base_hi = (self.ring_vm.vaddr >> 40) & 0xffffffff
     self.mqd.cp_hqd_pq_rptr_report_addr_lo = self.rptr_vm.vaddr & 0xfffffffc

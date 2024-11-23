@@ -252,54 +252,51 @@ generate_pciaccess() {
     -o $BASE/libpciaccess.py
 }
 
-generate_amdgpu_2() {
-  # clang2py -k cdefstum \
-  #   extra/amdpci/amdgpu_ucode.h \
-  #   extra/amdpci/amdgpu_ring.h \
-  #   extra/amdpci/v11_structs.h \
-  #   extra/amdpci/amdgpu_vm.h \
-  #   -o $BASE/amdgpu_2.py
+generate_am() {
+  clang2py -k cdefstum \
+    extra/amdpci/headers/v11_structs.h \
+    extra/amdpci/headers/amdgpu_vm.h \
+    extra/amdpci/headers/discovery.h \
+    extra/amdpci/headers/amdgpu_ucode.h \
+    extra/amdpci/headers/soc21_enum.h \
+    extra/amdpci/headers/psp_gfx_if.h \
+    -o $BASE/am/am.py
 
-  # clang2py -k cdefstum \
-  #   extra/amdpci/headers/navi10_ip_offset.h \
-  #   -o $BASE/amdgpu_ip_offset.py
+  clang2py -k cdefstum \
+    extra/amdpci/headers/mp_13_0_0_offset.h \
+    extra/amdpci/headers/mp_13_0_0_sh_mask.h \
+    -o $BASE/am/mp_13_0_0.py
 
-  # clang2py -k cdefstum \
-  #   extra/amdpci/mp_13_0_0_offset.h \
-  #   -o $BASE/amdgpu_mp_13_0_0.py
+  clang2py -k cdefstum \
+    extra/amdpci/headers/mp_11_0_offset.h \
+    extra/amdpci/headers/mp_11_0_sh_mask.h \
+    -o $BASE/am/mp_11_0.py
 
-  # clang2py -k cdefstum \
-  #   extra/amdpci/psp_gfx_if.h \
-  #   -o $BASE/amdgpu_psp_gfx_if.py
+  clang2py -k cdefstum \
+    extra/amdpci/headers/gc_11_0_0_offset.h \
+    extra/amdpci/headers/gc_11_0_0_sh_mask.h \
+    -o $BASE/am/gc_11_0_0.py
 
-  # clang2py -k cdefstum \
-  #   extra/amdpci/gc_11_0_0_offset.h \
-  #   -o $BASE/amdgpu_gc_11_0_0.py
+  clang2py -k cdefstum \
+    extra/amdpci/headers/mmhub_3_0_0_offset.h \
+    extra/amdpci/headers/mmhub_3_0_0_sh_mask.h \
+    -o $BASE/am/mmhub_3_0_0.py
 
-  # clang2py -k cdefstum \
-  #   extra/amdpci/headers/mmhub_3_0_0_offset.h \
-  #   extra/amdpci/headers/mmhub_3_0_0_sh_mask.h \
-  #   -o $BASE/amdgpu_mmhub_3_0_0.py
+  clang2py -k cdefstum \
+    extra/amdpci/headers/nbio_4_3_0_offset.h \
+    extra/amdpci/headers/nbio_4_3_0_sh_mask.h \
+    -o $BASE/am/nbio_4_3_0.py
 
-  # clang2py -k cdefstum \
-  #   extra/amdpci/headers/nbio_4_3_0_offset.h \
-  #   extra/amdpci/headers/nbio_4_3_0_sh_mask.h \
-  #   -o $BASE/amdgpu_nbio_4_3_0.py
-
-  # clang2py -k cdefstum \
-  #   extra/amdpci/headers/osssys_6_0_0_offset.h \
-  #   extra/amdpci/headers/osssys_6_0_0_sh_mask.h \
-  #   -o $BASE/amdgpu_osssys_6_0_0.py
+  clang2py -k cdefstum \
+    extra/amdpci/headers/osssys_6_0_0_offset.h \
+    extra/amdpci/headers/osssys_6_0_0_sh_mask.h \
+    -o $BASE/am/osssys_6_0_0.py
 
   clang2py -k cdefstum \
     extra/amdpci/headers/smu_v13_0_0_ppsmc.h \
     extra/amdpci/headers/smu13_driver_if_v13_0_0.h \
     extra/amdpci/headers/amdgpu_smu.h \
-    -o $BASE/amdgpu_smu_v13_0_0.py
-
-  # clang2py -k cdefstum \
-  #   extra/amdpci/headers/discovery.h \
-  #   -o $BASE/amdgpu_discovery.py
+    -o $BASE/am/smu_v13_0_0.py
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
@@ -311,7 +308,7 @@ elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
-elif [ "$1" == "amdgpu_2" ]; then generate_amdgpu_2
+elif [ "$1" == "am" ]; then generate_am
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "libc" ]; then generate_libc

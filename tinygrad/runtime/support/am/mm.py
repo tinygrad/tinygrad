@@ -36,7 +36,6 @@ class PTE:
     flags = amdgpu_2.AMDGPU_PTE_VALID | amdgpu_2.AMDGPU_PTE_WRITEABLE | amdgpu_2.AMDGPU_PTE_READABLE | amdgpu_2.AMDGPU_PTE_EXECUTABLE | amdgpu_2.AMDGPU_PTE_FRAG(frag)
     if self.lv > 0: flags |= amdgpu_2.AMDGPU_PDE_PTE
     if uncached: flags |= amdgpu_2.AMDGPU_PTE_MTYPE_NV10(0, 3) # 3 = MTYPE_UC
-    # else: flags |= amdgpu_2.AMDGPU_PTE_MTYPE_NV10(0, 0)
     self.view[entry_id] = (paddr & 0x0000FFFFFFFFF000) | flags
   def get_entry(self, entry_id): return self.view[entry_id]
 
@@ -82,7 +81,7 @@ class MM:
           if getenv("TRACE_MM"):
             add = j * pte_covers
             print(f"\tMapping page: pde:0x{pde.pm.paddr:X} {entry_idx + j}: {hex(cur_vaddr+add)} -> {hex(cur_paddr+add)}, cons={max_alignment} ptes={max_alignment // i_pte_covers} {uncached=} {frags=}")
-        # print(f"\tnptes=0x{max_alignment // i_pte_covers:x} incr=0x{pte_covers:x} upd_flags=0x0 frags=0x{frags:x}")
+        print(f"\tnptes=0x{max_alignment // i_pte_covers:x} incr=0x{pte_covers:x} upd_flags=0x0 frags=0x{frags:x}")
 
         entry_idx += (max_alignment // i_pte_covers) - 1 # TODO: looks bad
         i_pte_covers = max_alignment
@@ -112,13 +111,17 @@ class MM:
 
   def unmap_range(self, virtual_mapping:VirtualMapping): pass # TODO
 
-  def valloc(self, size:int, align=2 << 20, uncached=False) -> VirtualMapping:
+  def valloc(self, size:int, align=0x1000, uncached=False) -> VirtualMapping:
     # print("valloc", size, uncached)
 
     size = round_up(size, 0x1000)
 
-    if size % (2 << 20) == 0: align = max(align, size)
+    # align = max(align, size)
+    for i in range(31):
+      if (1 << i) <= size: align = (1 << i)
+    # if size % (2 << 20) == 0: align = max(align, size)
     # elif size >= 256 << 10: align = 2 << 20
+    print("valloc", size, align)
 
     addr = round_up(self.next_vaddr, align)
 
