@@ -166,7 +166,8 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
 
   with Context(BEAM=0):
     # quantize
-    if quantize is not None:
+    if quantize == "float16": weights = {k:v.cast(quantize).contiguous() for k,v in weights.items()}
+    elif quantize is not None:
       weights = linear.quantize(weights, device)
       for _,v in weights.items(): v.realize()
 
@@ -221,7 +222,7 @@ if __name__ == "__main__":
   parser.add_argument("--model", type=Path, help="Model path")
   parser.add_argument("--size", choices=["1B", "8B", "70B"], default="8B", help="Model size")
   parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
-  parser.add_argument("--quantize", choices=["int8", "nf4"], help="Quantization method")
+  parser.add_argument("--quantize", choices=["int8", "nf4", "float16"], help="Quantization method")
   parser.add_argument("--no_api", action="store_true", help="Disable the api and run a cli test interface")
   parser.add_argument("--host", type=str, default="0.0.0.0", help="Web server bind address")
   parser.add_argument("--port", type=int, default=7776, help="Web server port")
