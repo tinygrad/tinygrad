@@ -1,8 +1,7 @@
-import tempfile
 import unittest
 from extra.utilities.blake3 import blake3
+from tinygrad.tensor import Tensor
 
-@unittest.skip("slow")
 class TestBLAKE3(unittest.TestCase):
   def setUp(self):
     self.vectors = [
@@ -144,29 +143,15 @@ class TestBLAKE3(unittest.TestCase):
       }
     ]
 
-  def generate_input(self, length: int) -> bytes:
-    return bytes(i % 251 for i in range(length))
-
   def test_official_vectors(self):
     """Test against the official test vectors from: https://github.com/BLAKE3-team/BLAKE"""
     for vector in self.vectors:
       input_len = vector["input_len"]
       expected = vector["hash"]
-      text = self.generate_input(input_len)
-      actual = blake3(text)
+      data = Tensor(bytes(i % 251 for i in range(input_len)))
+      actual = blake3(data)
       self.assertEqual(actual, expected)
-
-  def test_file_input(self):
-    with tempfile.NamedTemporaryFile(delete=True) as file:
-      file.write(self.generate_input(102400))
-      file.flush()
-      actual = blake3(file=file.name, bufsize=1024 * 50) # expect 2 reads
-      self.assertEqual(actual, "bc3e3d41a1146b069abffad3c0d44860cf664390afce4d9661f7902e7943e085")
-    with tempfile.NamedTemporaryFile(delete=True) as file:
-      file.write(self.generate_input(4097))
-      file.flush()
-      actual = blake3(file=file.name, bufsize=1024) # expect 5 reads
-      self.assertEqual(actual, "9b4052b38f1c5fc8b1f9ff7ac7b27cd242487b3d890d15c96a1c25b8aa0fb995")
+      print(f"passed {input_len} bytes")
 
 if __name__ == "__main__":
   unittest.main()
