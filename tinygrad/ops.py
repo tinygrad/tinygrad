@@ -72,7 +72,7 @@ class SimpleMathTrait:
   def __le__(self, x): return self.le(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
-class MathTrait(SimpleMathTrait):  # pylint: disable=abstract-method
+class MathTrait(SimpleMathTrait):
   # TODO: move to Tensor when new backward is done
   def lshift(self, x, reverse=False): return self._binop(Ops.SHL, x, reverse)
   def rshift(self, x, reverse=False): return self._binop(Ops.SHR, x, reverse)
@@ -183,9 +183,13 @@ class GroupOp:
   UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV}
 
 # https://en.wikipedia.org/wiki/Identity_element
-def identity_element(op:Ops, dt:DType): return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
+def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
-def can_pad(u:UOp) -> bool: return not any(x.op in GroupOp.UnsafePad for x in u.sparents)
+def can_pad(u:UOp, edges:Dict[UOp, UOp], visisted:Set[UOp]) -> bool:
+  if u.op in GroupOp.UnsafePad: return False
+  if (len(u.src) == 2 and u.src[0] in edges) or u in visisted: return True
+  visisted.add(u)
+  return all(can_pad(x.base, edges, visisted) for x in u.src)
 
 END_FOR_UOP = {Ops.IF:(Ops.STORE, Ops.ENDIF), Ops.RANGE:(Ops.ASSIGN, Ops.ENDRANGE)}
 
@@ -334,28 +338,43 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
                                              UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=(idx, False))
-  def r(self, op, axis): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
+  def r(self, op:Ops, axis:Tuple[int, ...]): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def contiguous(self): return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
   @property
   def is_contiguous_base(self): return self.op is Ops.CONTIGUOUS and not (self.src[0].base.op is Ops.VIEW and len(self.src[0].base.src) == 2)
 
+  # *** from LazyBuffer ***
+
+  @staticmethod
+  def const_with_shape(dtype:DType, val:ConstLike, shape:Tuple[sint,...]) -> UOp:
+    from tinygrad.shape.shapetracker import ShapeTracker
+    return UOp(Ops.VALID, dtypes.bool, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)).where(UOp.const(dtype, val), 0)
+
   # *** uop movement ops ***
 
   @property
-  def base(self): return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
-  def view(self, st:ShapeTracker):
+  def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
+  def view(self, st:ShapeTracker) -> UOp:
     assert self.op is not Ops.STORE, "VIEW of STORE is invalid, STORE is always base"
     return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
-  def reshape(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).reshape(arg))
+  def reshape(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).reshape(arg))
 
   # *** uop Buffer stuff ***
 
   @staticmethod
   def new_buffer(device:str, size:int, dtype:DType, num=-1): return  UOp(Ops.BUFFER, dtype.ptr(), (), (num, (device, size, dtype)))
-
+  @functools.cached_property
+  def device(self) -> str:
+    match self.op:
+      case Ops.COPY: return self.arg
+      case Ops.BUFFER: return self.arg[1][0]
+      case _: return self.src[0].device
+  @property
+  def size(self) -> int: return self.buf_uop.arg[1][1]
   @property
   def buf_uop(self) -> UOp:
+    if self.op is Ops.BUFFER: return self
     assert self.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
     return self.src[0]
 
@@ -1020,6 +1039,8 @@ def simplify_valid(valid:UOp) -> Optional[UOp]:
 def max_var_const(x:UOp, c1:UOp, c2:UOp):
   if x.vmin >= 0: return x*c1 if c1.arg >= c2.arg else x*c2
   if x.vmax <= 0: return x*c2 if c1.arg >= c2.arg else x*c1
+
+def sint_to_uop(x:sint) -> UOp: return UOp.const(dtypes.int, x) if isinstance(x, int) else x
 
 symbolic_simple = PatternMatcher([
   # ** self folding **

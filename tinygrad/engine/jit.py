@@ -42,7 +42,7 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
   for ji in jit_cache:
     if ji.prg.__class__ in {EmptyOp, ViewOp}: continue
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
-    if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.device
+    if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.dev
     elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"CUDA", "NV", "AMD"}:
       ji_graph_dev = Device[ji.bufs[0].device]
 
@@ -69,12 +69,13 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
         input_replace[(j,i)] = input_rawbuffers.index(a)
   return input_replace
 
-class GraphRunner(Runner):  # pylint: disable=abstract-method
+class GraphRunner(Runner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
-    self.jit_cache = jit_cache
+    self.jit_cache = jit_cache  # NOTE: this is not used, but you have to keep these objects alive for the Graph
     self.input_replace:Dict[Tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
     self.var_vals_replace:Dict[int, List[int]] = {}
     self.launch_dims_replace:Dict[int, Tuple[Optional[int], Optional[int]]] = {}
+    self.launch_dims_base:Dict[int, Tuple[Tuple[int, ...], Tuple[int, ...]]] = {}
 
     op_estimate: sint = 0
     mem_estimate: sint = 0
@@ -95,13 +96,16 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
         if ji.prg.p.vars: self.var_vals_replace[j] = [self.vars.index(v) for v in ji.prg.p.vars]
 
         global_dim_idx, local_dim_idx = find_symbolic_dim(ji.prg.p.global_size), find_symbolic_dim(ji.prg.p.local_size)
-        if global_dim_idx is not None or local_dim_idx is not None: self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
+        if global_dim_idx is not None or local_dim_idx is not None:
+          self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
+          assert ji.prg.p.global_size is not None and ji.prg.p.local_size is not None
+          self.launch_dims_base[j] = (tuple(ji.prg.p.global_size), tuple(ji.prg.p.local_size))
 
     # used in MultiGraphRunner. the ints are id() of _bufs
     self.w_dependency_map: Dict[int, Any] = {}
     self.r_dependency_map: Dict[int, List[Any]] = collections.defaultdict(list)
 
-    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
+    super().__init__(colored(f"<batched {len(jit_cache)}>", "cyan"), jit_cache[0].prg.device.split(":")[0],
                      ssimplify(op_estimate), ssimplify(mem_estimate), ssimplify(lds_estimate))
 
   def updated_vars(self, var_vals: Dict[Variable, int]):
@@ -111,7 +115,8 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
 
   def updated_launch_dims(self, var_vals: Dict[Variable, int]):
     dims = [tuple(sym_infer(s, var_vals) for s in dim) for dim in self.symbolic_dims]
-    for j, (gl, lc) in self.launch_dims_replace.items(): yield j, (dims[gl] if gl is not None else None), (dims[lc] if lc is not None else None)
+    for j, (gl, lc) in self.launch_dims_replace.items():
+      yield j, (dims[gl] if gl is not None else self.launch_dims_base[j][0]), (dims[lc] if lc is not None else self.launch_dims_base[j][1])
 
   def _access_resources(self, rawbufs:List[Buffer], write:List[int], new_dependency:Any):
     # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
@@ -128,7 +133,7 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
     return list({id(x):x for x in wait_nodes}.values())
 
 # a marker for your graph supporting multiple devices of the same type
-class MultiGraphRunner(GraphRunner): pass # pylint: disable=abstract-method
+class MultiGraphRunner(GraphRunner): pass
 
 ReturnType = TypeVar('ReturnType')
 @dataclass
