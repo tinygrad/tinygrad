@@ -207,7 +207,7 @@ from tinygrad.ops import graph_rewrite, _substitute, track_rewrites
 
 # normally .substitute would be fine, but it's not tracked
 @track_rewrites()
-def named_substitute(name:str, uop:UOp, rel:dict[UOp, UOp]): return graph_rewrite(uop, _substitute, rel)
+def named_substitute(name:str, uop:UOp, rel:dict[UOp, UOp]): return graph_rewrite(uop, _substitute, rel, single_pass=True)
 def substitute(uop:UOp, rel:dict[UOp, UOp]): return named_substitute(inspect.stack()[1].function, uop, rel)
 
 class TestSubstitute(unittest.TestCase):
@@ -258,7 +258,6 @@ class TestSubstitute(unittest.TestCase):
     ret = substitute(ret, {a.sin():a.sqrt()})
     self.assertIs(ret, a.sqrt().sin())
 
-  @unittest.expectedFailure
   def test_double_sin_to_sqrt(self):
     a = UOp.variable('a', 0, 10)
     n1 = a.sin()

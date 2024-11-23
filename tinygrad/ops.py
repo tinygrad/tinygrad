@@ -288,7 +288,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __float__(self): return self._eval(dtypes.floats, float)
   def substitute(self, dvars:Dict[UOp, UOp]):
     with Context(TRACK_MATCH_STATS=0):
-      return graph_rewrite(self, _substitute, dvars)
+      return graph_rewrite(self, _substitute, dvars, single_pass=True)
 
   # *** uop syntactic sugar ***
 
@@ -763,11 +763,16 @@ class RewriteContext:
     new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
     self.replace[n] = ret = n if new_n is None else self.rewrite(new_n)
     return ret
+  def single_pass_rewrite(self, n:UOp) -> UOp:
+    new_n = self.pm.rewrite(n, self.ctx)
+    if new_n is None: new_n = n
+    new_src = tuple(map(self.single_pass_rewrite, new_n.src))
+    return new_n if new_src == new_n.src else UOp(new_n.op, new_n.dtype, new_src, new_n.arg)
 
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, single_pass=False) -> UOp:
   if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0:
     rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
-  return RewriteContext(pm, ctx).rewrite(sink)
+  return RewriteContext(pm, ctx).single_pass_rewrite(sink) if single_pass else RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
 
