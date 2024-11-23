@@ -897,7 +897,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
       something_changed = True
     else: remainder.append(u)
   if not something_changed: return None
-  return functools.reduce(operator.add, remainder)%c if remainder else x.const_like(0)
+  return functools.reduce(operator.add, remainder)%c
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
