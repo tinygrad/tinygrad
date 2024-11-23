@@ -88,8 +88,8 @@ class dtypes:
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
     # truncate inf/-inf values
-    if dtypes.is_int(dtype): val = {float("inf"): dtypes.max(dtype), float("-inf"): dtypes.min(dtype)}.get(val, val)
-    return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
+    if dtypes.is_int(dtype): return int(val) if not math.isinf(val) else dtypes.max(dtype) if val == float('inf') else dtypes.min(dtype)
+    return float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   @functools.lru_cache(None)
   def min(dtype:DType):
