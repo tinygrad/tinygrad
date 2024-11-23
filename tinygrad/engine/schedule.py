@@ -355,9 +355,8 @@ def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, to_store:UOp, b:UOp) ->
   # otherwise safety check pads
   return None if (all(v.mask is None for v in st.views) or can_pad(base, ctx)) else realize(ctx, b, to_store, base)
 
-def fold_img_cast(ctx, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> Optional[UOp]:
-  if not isinstance(xb.dtype, ImageDType) or b not in ctx or xb not in ctx or uval(to_cast).op in GroupOp.Meta: return None
-  del ctx[b]
+def fold_img_cast(ctx, xb:UOp, view:UOp, **kwargs) -> Optional[UOp]:
+  if not isinstance(xb.dtype, ImageDType) or (r:=ctx.get(xb)) is None or r.op is not Ops.STORE or (to_cast:=r.src[2]).op in GroupOp.Meta: return None
   return to_cast.view(unwrap(view.st))
 
 do_realize = PatternMatcher([
