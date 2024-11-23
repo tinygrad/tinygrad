@@ -5,7 +5,6 @@ fetch() {
   rmdir assets/$1
   curl -o assets/$1 https://$1
 }
-fetch "fonts.googleapis.com/css2?family=Noto+Sans+HK:wght@100..900&display=swap"
 fetch "d3js.org/d3.v5.min.js"
 fetch "dagrejs.github.io/project/dagre-d3/latest/dagre-d3.min.js"
 fetch "cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/default.min.css"
