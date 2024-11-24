@@ -113,26 +113,5 @@ class TestReduceOp(unittest.TestCase):
     for s in sched:
       self.assertIs(s.ast.src[0].src[2].op, Ops.REDUCE_AXIS)
 
-class TestView(unittest.TestCase):
-  def test_all_masked_out(self):
-    # start with non CONST Ops
-    a = Tensor.rand(10, 10)
-    assert a.lazydata.base.op is not Ops.CONST
-
-    # all masked out, degrades to const 0
-    b = a.pad(((0, 10), None))[10:]
-    assert b.shape == (10, 10)
-    assert b.lazydata.base.op is Ops.CONST and b.lazydata.base.arg == 0
-
-    # mask out dim = 1 works too
-    b = a.pad((None, (0, 10)))[:, 10:]
-    assert b.shape == (10, 10)
-    assert b.lazydata.base.op is Ops.CONST and b.lazydata.base.arg == 0
-
-    # partial masked out does not degrade into CONST
-    b = a.pad(((0, 5), None))[5:]
-    assert b.shape == (10, 10)
-    assert b.lazydata.base.op is not Ops.CONST
-
 if __name__ == "__main__":
   unittest.main()

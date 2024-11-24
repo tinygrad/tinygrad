@@ -96,13 +96,17 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
 # ** HTTP server
 
 class Handler(BaseHTTPRequestHandler):
-  protocol_version = 'HTTP/1.1'
-
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
 
     if (url:=urlparse(self.path)).path == "/":
       with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
+    elif self.path.startswith("/assets/") and '/..' not in self.path:
+      try:
+        with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
+        if url.path.endswith(".js"): content_type = "application/javascript"
+        if url.path.endswith(".css"): content_type = "text/css"
+      except FileNotFoundError: status_code = 404
     elif url.path == "/kernels":
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
