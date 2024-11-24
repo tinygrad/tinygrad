@@ -132,19 +132,16 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
       else: v.replace(state_dict[k].to(v.device)).realize()
       if consume: del state_dict[k]
 
-def tar_extract(fn_or_data: Union[os.PathLike, Tensor]) -> Dict[str, Tensor]:
+def tar_extract(t: Tensor) -> Dict[str, Tensor]:
   """
   Extracts files from a tar archive and returns them as dictionary of names (keys) and tensors (values).
 
   ```python
-  tensors = nn.state.tar_extract("archive.tar")
-  # or
   tensors = nn.state.tar_extract(Tensor(pathlib.Path("archive.tar")))
   ```
   """
   # https://en.wikipedia.org/wiki/Tar_(computing)
 
-  t = fn_or_data if isinstance(fn_or_data, Tensor) else Tensor(pathlib.Path(fn_or_data))
   pos, result, next_ow = 0, {}, cast(Dict[str, str], {})
   if len(t.shape) != 1 or len(t) < 2*512 or t.dtype != dtypes.uint8: raise tarfile.ReadError("Invalid tar file!")
 

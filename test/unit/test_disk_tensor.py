@@ -339,7 +339,7 @@ class TestTarExtractPAX(unittest.TestCase):
 
   def setUp(self):
     self.test_dir = tempfile.mkdtemp()
-    self.tar_path = os.path.join(self.test_dir, 'test.tar')
+    self.tar_path = pathlib.Path(os.path.join(self.test_dir, 'test.tar'))
     self.test_files = {
       'a/file1.txt': b'Hello, World!',
       'a/b/file2.bin': b'\x00\x01\x02\x03\x04',
@@ -366,7 +366,7 @@ class TestTarExtractPAX(unittest.TestCase):
           tar.addfile(link_info)
 
     # Create invalid tar file
-    self.invalid_tar_path = os.path.join(self.test_dir, 'invalid.tar')
+    self.invalid_tar_path = pathlib.Path(os.path.join(self.test_dir, 'invalid.tar'))
     with open(self.invalid_tar_path, 'wb') as f:
       f.write(b'This is not a valid tar file')
 
@@ -376,34 +376,34 @@ class TestTarExtractPAX(unittest.TestCase):
     os.rmdir(self.test_dir)
 
   def test_tar_extract_returns_dict(self):
-    result = tar_extract(self.tar_path)
+    result = tar_extract(Tensor(self.tar_path))
     self.assertIsInstance(result, dict)
 
   def test_tar_extract_correct_keys(self):
-    result = tar_extract(self.tar_path)
+    result = tar_extract(Tensor(self.tar_path))
     self.assertEqual(set(result.keys()), set(self.test_files.keys()))
 
   def test_tar_extract_content_size(self):
-    result = tar_extract(self.tar_path)
+    result = tar_extract(Tensor(self.tar_path))
     for filename, content in self.test_files.items():
       self.assertEqual(len(result[filename]), len(content))
 
   def test_tar_extract_content_values(self):
-    result = tar_extract(self.tar_path)
+    result = tar_extract(Tensor(self.tar_path))
     for filename, content in self.test_files.items():
       np.testing.assert_array_equal(result[filename].numpy(), np.frombuffer(content, dtype=np.uint8))
 
   def test_tar_extract_empty_file(self):
-    result = tar_extract(self.tar_path)
+    result = tar_extract(Tensor(self.tar_path))
     self.assertEqual(len(result['empty_file.txt']), 0)
 
   def test_tar_extract_non_existent_file(self):
     with self.assertRaises(FileNotFoundError):
-      tar_extract('non_existent_file.tar')
+      tar_extract(Tensor(pathlib.Path('non_existent_file.tar')))
 
   def test_tar_extract_invalid_file(self):
     with self.assertRaises(tarfile.ReadError):
-      tar_extract(self.invalid_tar_path)
+      tar_extract(Tensor(self.invalid_tar_path))
 
 class TestTarExtractUSTAR(TestTarExtractPAX):
   tar_format = tarfile.USTAR_FORMAT
