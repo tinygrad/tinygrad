@@ -77,7 +77,7 @@ string_rewrite = PatternMatcher([
   (UPat.cvar("x", dtypes.bool), lambda ctx, x: f"setp.ne.s16 {ctx.r[x]}, {render_val(x.arg, x.dtype)}, 0;"),
   (UPat.cvar("x"), lambda ctx, x: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.arg, x.dtype)};"),
   (UPat(Ops.STORE, name="x", src=(UPat.var('bidx'), UPat.var("var"), UPat.var("pred")), allow_any_len=True), lambda ctx, x, bidx, var, pred=None:
-    f"{f"@{ctx.r[pred]} " if pred is not None and pred.op is not Ops.IF else ""}st.{mem_type(bidx)}" + \
+    f"{f'@{ctx.r[pred]} ' if pred is not None and pred.op is not Ops.IF else ''}st.{mem_type(bidx)}" + \
     f"{f'.v{cnt}' if ((cnt:=var.dtype.count)>1) else ''}.{ctx.mem_types[var.dtype.scalar()]} " + \
     f"[{ctx.r[bidx]}+0], {('{' + ', '.join(ctx.r[var]) + '}') if var.dtype.count > 1 else ctx.r[var]};"
   ),
