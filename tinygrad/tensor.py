@@ -2192,11 +2192,11 @@ class Tensor(SimpleMathTrait):
     return x.dot(self, acc_dtype=acc_dtype) if reverse else self.dot(x, acc_dtype=acc_dtype)
 
   def _cumalu(self, axis:int, op:Ops, _include_initial=False) -> Tensor:
-    op_to_tensor_op = {Ops.ADD: lambda x: x.sum, Ops.MAX: lambda x: x.max, Ops.MUL: lambda x: x.prod}
+    op_to_tensor_op: Dict[Ops, Callable[[Tensor, Optional[int]], Tensor]] = {Ops.ADD: Tensor.sum, Ops.MAX: Tensor.max, Ops.MUL: Tensor.prod}
     assert self.shape[axis] != 0 and op in op_to_tensor_op
     pl_sz = self.shape[axis] - int(not _include_initial)
     pooled = self.transpose(axis,-1).pad((pl_sz, -int(_include_initial)), value=identity_element(op, self.dtype))._pool((self.shape[axis],))
-    return op_to_tensor_op[op](pooled)(-1).transpose(axis,-1)
+    return op_to_tensor_op[op](pooled, -1).transpose(axis,-1)
 
   def _split_cumalu(self, axis:int, op:Ops) -> Tensor:
     axis = self._resolve_dim(axis)
@@ -2209,7 +2209,7 @@ class Tensor(SimpleMathTrait):
     base = ret[..., -1]._cumalu(-1, op, _include_initial=True)
     base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
     def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    op_to_tensor_op: Dict[op: Tensor] = {Ops.ADD: Tensor.add, Ops.MAX: Tensor.maximum, Ops.MUL: Tensor.mul}
+    op_to_tensor_op: Dict[Ops, Callable[[Tensor, Tensor], Tensor]] = {Ops.ADD: Tensor.add, Ops.MAX: Tensor.maximum, Ops.MUL: Tensor.mul}
     return op_to_tensor_op[op](fix(ret), fix(base))
 
   def cumsum(self, axis:int=0) -> Tensor:
