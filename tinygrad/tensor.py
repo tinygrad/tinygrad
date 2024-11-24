@@ -2210,6 +2210,26 @@ class Tensor(SimpleMathTrait):
     def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
     return fix(ret) + fix(base) if op is Ops.ADD else fix(ret).maximum(fix(base))
 
+  def _cumalu(self, op:Ops, axis:int=0, _first_zero=False) -> Tensor:
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape: return self
+    SPLIT, tensor_op, id_val = 256, identity_element(op), {Ops.Add: Tensor.add, Ops.MUL: Tensor.mul, Ops.Max: Tensor.max}[op]
+    def _cumop(self, op:Ops, axis:int=0, _first_zero=False) -> Tensor:
+      assert self.shape[axis] != 0
+      pl_sz = self.shape[axis] - int(not _first_zero)
+      return tensor_op(self.transpose(axis,-1).pad((pl_sz,-int(_first_zero)),  value=id_val)._pool((self.shape[axis],)), -1).transpose(axis,-1)
+    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumop(axis)
+    ret = self.transpose(axis,-1).pad((round_up(s, SPLIT)-s, 0), value=id_val).unflatten(-1, (-1, SPLIT))._cumop(-1)
+    base = ret[..., -1]._cumop(-1, _first_zero=True)
+    base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
+    def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
+    return fix(ret) + fix(base)
+
+  def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:
+    assert self.shape[axis] != 0
+    pl_sz = self.shape[axis] - int(not _first_zero)
+    return self.transpose(axis,-1).pad((pl_sz,-int(_first_zero)))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
+
   def cumsum(self, axis:int=0) -> Tensor:
     """
     Computes the cumulative sum of the tensor along the specified `axis`.
@@ -2237,6 +2257,36 @@ class Tensor(SimpleMathTrait):
     ```
     """
     return self._split_cumalu(axis, Ops.MAX)
+
+  def cumprod(self, axis:int=0) -> Tensor:
+    """
+    Computes the cumulative product of the tensor along the specified axis.
+
+    You can pass in the `axis` keyword argument to control the axis along which the cumulative sum is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.ones(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.cumsum(1).numpy())
+    ```
+    """
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape: return self
+    # TODO: someday the optimizer will find this on it's own
+    # for now this is a two stage cumsum
+    SPLIT = 4
+    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2:
+      print('hi')
+      return self._cumprod(axis)
+
+    self_reshape = self.transpose(axis,-1).pad((round_up(s, SPLIT)-s, 0), value=1).unflatten(-1, (-1, SPLIT))
+    ret = self_reshape._cumprod(-1)
+    base = ret[..., -1]._cumprod(-1, _first_zero=True)
+    base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
+    def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
+    return fix(ret) * fix(base)
 
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, **kwargs) -> Tensor:

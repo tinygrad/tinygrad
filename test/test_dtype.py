@@ -8,9 +8,12 @@ from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
 from hypothesis import given, settings, strategies as strat
-from test.helpers import rand_for_dtype
+# from test.helpers import rand_for_dtype
 import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
+
+def rand_for_dtype(x, y):
+  pass
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -709,6 +712,21 @@ class TestAutoCastType(unittest.TestCase):
     #assert (Tensor([0, 1], dtype=dtypes.bfloat16)).cumsum(0).dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).cumsum(0).dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
+
+  def test_cumprod(self):
+    assert (Tensor([0, 1], dtype=dtypes.bool)).cumprod(0).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int8)).cumprod(0).dtype == dtypes.int8
+    assert (Tensor([0, 1], dtype=dtypes.int16)).cumprod(0).dtype == dtypes.int16
+    assert (Tensor([0, 1], dtype=dtypes.int32)).cumprod(0).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int64)).cumprod(0).dtype == dtypes.int64
+    assert (Tensor([0, 1], dtype=dtypes.uint8)).cumprod(0).dtype == dtypes.uint8
+    assert (Tensor([0, 1], dtype=dtypes.uint16)).cumprod(0).dtype == dtypes.uint16
+    assert (Tensor([0, 1], dtype=dtypes.uint32)).cumprod(0).dtype == dtypes.uint32
+    assert (Tensor([0, 1], dtype=dtypes.uint64)).cumprod(0).dtype == dtypes.uint64
+    assert (Tensor([0, 1], dtype=dtypes.float16)).cumprod(0).dtype == dtypes.float16
+    assert (Tensor([0, 1], dtype=dtypes.bfloat16)).cumprod(0).dtype == dtypes.bfloat16
+    assert (Tensor([0, 1], dtype=dtypes.float32)).cumprod(0).dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.float64)).cumprod(0).dtype == dtypes.float64
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_matmul(self, dt1, dt2, acc_dt):
