@@ -3564,7 +3564,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if (dt:=to_dtype(dtype)) in {dtypes.uint8, dtypes.uint16} and dtypes.is_float(self.dtype):
-      # NOTE: values within int32 range range will wrap around, while values outside this range will result in 0
+      # NOTE: values within the int32 range and outside the unsigned dtype range will cause values to wrap around
       return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int32), dtype=dt)
     return self if self.dtype == dt else F.Cast.apply(self, dtype=dt)
 
