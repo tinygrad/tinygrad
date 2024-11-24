@@ -12,8 +12,6 @@ from test.helpers import rand_for_dtype
 import pytest
 pytestmark = pytest.mark.filterwarnings("ignore")
 
-# def rand_for_dtype(x, y): pass
-
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
@@ -713,7 +711,7 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
 
   def test_cumprod(self):
-    # assert (Tensor([0, 1], dtype=dtypes.bool)).cumprod(0).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.bool)).cumprod(0).dtype == dtypes.int32
     assert (Tensor([0, 1], dtype=dtypes.int8)).cumprod(0).dtype == dtypes.int8
     assert (Tensor([0, 1], dtype=dtypes.int16)).cumprod(0).dtype == dtypes.int16
     assert (Tensor([0, 1], dtype=dtypes.int32)).cumprod(0).dtype == dtypes.int32
