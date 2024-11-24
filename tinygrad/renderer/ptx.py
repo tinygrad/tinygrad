@@ -60,7 +60,8 @@ def render_store(ctx: "PTXRenderer", x: UOp, bidx: UOp, var: UOp, pred: Optional
   gate = f"@{ctx.r[pred]} " if pred is not None and pred.op is not Ops.IF else ""
   ret1 = f"{gate}st.{mem_type(bidx)}" + (f".v{cnt}" if ((cnt:=var.dtype.count) > 1) else "") + f".{ctx.mem_types[var.dtype.scalar()]} " + \
   f"[{ctx.r[bidx]}+0], " + (("{" + ', '.join(ctx.r[var]) + "}") if var.dtype.count > 1 else ctx.r[var]) + ";"
-  print(f"{ret1=}")
+  ret1 = f"{gate}st.{mem_type(bidx)}{f'.v{cnt}' if ((cnt:=var.dtype.count)>1) else ''}.{ctx.mem_types[var.dtype.scalar()]} " +\
+    f"[{ctx.r[bidx]}+0], {('{' + ', '.join(ctx.r[var]) + '}') if var.dtype.count > 1 else ctx.r[var]};"
   ret2 =  [f"{gate}st.{mem_type(bidx)}.v{var.dtype.count}.{ctx.mem_types[var.dtype.scalar()]} [{ctx.r[bidx]}+0], {{{', '.join(ctx.r[var])}}};"] \
     if var.dtype.count > 1 else [f"{gate}st.{mem_type(bidx)}.{ctx.mem_types[var.dtype]} [{ctx.r[bidx]}+0], {ctx.r[var]};"]
   if ret1 != ret2[0]:
