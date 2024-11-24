@@ -56,20 +56,6 @@ ptx_matcher = PatternMatcher([
 
 def mem_type(x: UOp): return 'shared' if x.src[0].op is Ops.DEFINE_LOCAL or any(_x.op is Ops.DEFINE_LOCAL for _x in x.src[0].parents) else 'global'
 
-def render_store(ctx: "PTXRenderer", x: UOp, bidx: UOp, var: UOp, pred: Optional[UOp]=None):
-  gate = f"@{ctx.r[pred]} " if pred is not None and pred.op is not Ops.IF else ""
-  ret1 = f"{gate}st.{mem_type(bidx)}" + (f".v{cnt}" if ((cnt:=var.dtype.count) > 1) else "") + f".{ctx.mem_types[var.dtype.scalar()]} " + \
-  f"[{ctx.r[bidx]}+0], " + (("{" + ', '.join(ctx.r[var]) + "}") if var.dtype.count > 1 else ctx.r[var]) + ";"
-  ret1 = f"{gate}st.{mem_type(bidx)}{f'.v{cnt}' if ((cnt:=var.dtype.count)>1) else ''}.{ctx.mem_types[var.dtype.scalar()]} " +\
-    f"[{ctx.r[bidx]}+0], {('{' + ', '.join(ctx.r[var]) + '}') if var.dtype.count > 1 else ctx.r[var]};"
-  ret2 =  [f"{gate}st.{mem_type(bidx)}.v{var.dtype.count}.{ctx.mem_types[var.dtype.scalar()]} [{ctx.r[bidx]}+0], {{{', '.join(ctx.r[var])}}};"] \
-    if var.dtype.count > 1 else [f"{gate}st.{mem_type(bidx)}.{ctx.mem_types[var.dtype]} [{ctx.r[bidx]}+0], {ctx.r[var]};"]
-  if ret1 != ret2[0]:
-    print(ret1)
-    print(ret2)
-    raise RuntimeError('')
-  return ret2
-
 def render_wmma(ctx: "PTXRenderer", x: UOp):
   assert ctx.wmma_r, "registry values for wmma must be populated"
   _, (N, M, K), dtype_in, _, _, _, upcast_axes, _ = x.arg
@@ -90,7 +76,11 @@ def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.i
 string_rewrite = PatternMatcher([
   (UPat.cvar("x", dtypes.bool), lambda ctx, x: f"setp.ne.s16 {ctx.r[x]}, {render_val(x.arg, x.dtype)}, 0;"),
   (UPat.cvar("x"), lambda ctx, x: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.arg, x.dtype)};"),
-  (UPat(Ops.STORE, name="x", src=(UPat.var('bidx'), UPat.var("var"), UPat.var("pred")), allow_any_len=True), render_store),
+  (UPat(Ops.STORE, name="x", src=(UPat.var('bidx'), UPat.var("var"), UPat.var("pred")), allow_any_len=True), lambda ctx, x, bidx, var, pred=None:
+    f"{f"@{ctx.r[pred]} " if pred is not None and pred.op is not Ops.IF else ""}st.{mem_type(bidx)}" + \
+    f"{f'.v{cnt}' if ((cnt:=var.dtype.count)>1) else ''}.{ctx.mem_types[var.dtype.scalar()]} " + \
+    f"[{ctx.r[bidx]}+0], {('{' + ', '.join(ctx.r[var]) + '}') if var.dtype.count > 1 else ctx.r[var]};"
+  ),
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"mov.u32 %{x.arg[0]}, %{'ctaid' if x.arg[0][0] == 'g' else 'tid'}.{chr(120+int(x.arg[0][-1]))};"),
   (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx, x: f"ld.param.{ctx.types[dtypes.ulong]} {ctx.r[x]}, [data{x.arg}+0];"),
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
