@@ -106,62 +106,62 @@ class MM:
     self.adev.gmc.flush_tlb(ip="MM", vmid=0)
     return VirtualMapping(self.adev, vaddr, paddr, size)
 
-  def map_range(self, pde, vaddr, paddr, size, uncached=False) -> VirtualMapping:
-    if getenv("TRACE_MM"): print(f"map_range: pde:0x{pde.pm.paddr:X} {hex(vaddr)} -> {hex(paddr)} ({size}), level={pde.lv}")
-    # pde.lv # 2, 1, 0
-    assert size != 0 and paddr & 0xFFF == 0 and vaddr & 0xFFF == 0 and size % 0x1000 == 0, "must be page aligned"
-    pte_covers = 1 << ((9 * pde.lv) + 12)
-    lvaddr = vaddr % (1 << ((9 * (pde.lv + 1)) + 12))
-    entry_idx = (lvaddr // pte_covers)
-    assert (512 - entry_idx) * pte_covers >= size, "must fit"
+  # def map_range(self, pde, vaddr, paddr, size, uncached=False) -> VirtualMapping:
+  #   if getenv("TRACE_MM"): print(f"map_range: pde:0x{pde.pm.paddr:X} {hex(vaddr)} -> {hex(paddr)} ({size}), level={pde.lv}")
+  #   # pde.lv # 2, 1, 0
+  #   assert size != 0 and paddr & 0xFFF == 0 and vaddr & 0xFFF == 0 and size % 0x1000 == 0, "must be page aligned"
+  #   pte_covers = 1 << ((9 * pde.lv) + 12)
+  #   lvaddr = vaddr % (1 << ((9 * (pde.lv + 1)) + 12))
+  #   entry_idx = (lvaddr // pte_covers)
+  #   assert (512 - entry_idx) * pte_covers >= size, "must fit"
 
-    cur_vaddr, cur_paddr, cur_size = vaddr, paddr, size
-    while cur_size > 0:
-      i_pte_covers = min(cur_size, pte_covers - cur_vaddr % pte_covers)
-      assert i_pte_covers > 0
+  #   cur_vaddr, cur_paddr, cur_size = vaddr, paddr, size
+  #   while cur_size > 0:
+  #     i_pte_covers = min(cur_size, pte_covers - cur_vaddr % pte_covers)
+  #     assert i_pte_covers > 0
 
-      if cur_vaddr % pte_covers == 0 and cur_size >= pte_covers:
-        max_alignment, frags = i_pte_covers, 0
-        for i in range(31):
-          if (cur_vaddr % (1 << i)) == 0 and (1 << i) <= cur_size: max_alignment, frags = (1 << i), i - 12
+  #     if cur_vaddr % pte_covers == 0 and cur_size >= pte_covers:
+  #       max_alignment, frags = i_pte_covers, 0
+  #       for i in range(31):
+  #         if (cur_vaddr % (1 << i)) == 0 and (1 << i) <= cur_size: max_alignment, frags = (1 << i), i - 12
 
-        assert frags >= 0 and max_alignment % i_pte_covers == 0, "Must be aligned"
+  #       assert frags >= 0 and max_alignment % i_pte_covers == 0, "Must be aligned"
 
-        # full cover, set as huge page
-        for j in range(max_alignment // i_pte_covers):
-          # print(pde.get_entry(entry_idx + j))
-          assert pde.get_entry(entry_idx + j) & amdgpu_2.AMDGPU_PTE_VALID == 0, f"Entry already set pde:0x{pde.pm.paddr:X} {entry_idx + j} {hex(cur_vaddr+j*pte_covers)}"
-          pde.set_page(entry_idx + j, cur_paddr + j * pte_covers, uncached=uncached, frag=frags)
-          if getenv("TRACE_MM"):
-            add = j * pte_covers
-            print(f"\tMapping page: pde:0x{pde.pm.paddr:X} {entry_idx + j}: {hex(cur_vaddr+add)} -> {hex(cur_paddr+add)}, cons={max_alignment} ptes={max_alignment // i_pte_covers} {uncached=} {frags=}")
-        print(f"\tnptes=0x{max_alignment // i_pte_covers:x} incr=0x{pte_covers:x} upd_flags=0x0 frags=0x{frags:x}")
+  #       # full cover, set as huge page
+  #       for j in range(max_alignment // i_pte_covers):
+  #         # print(pde.get_entry(entry_idx + j))
+  #         assert pde.get_entry(entry_idx + j) & amdgpu_2.AMDGPU_PTE_VALID == 0, f"Entry already set pde:0x{pde.pm.paddr:X} {entry_idx + j} {hex(cur_vaddr+j*pte_covers)}"
+  #         pde.set_page(entry_idx + j, cur_paddr + j * pte_covers, uncached=uncached, frag=frags)
+  #         if getenv("TRACE_MM"):
+  #           add = j * pte_covers
+  #           print(f"\tMapping page: pde:0x{pde.pm.paddr:X} {entry_idx + j}: {hex(cur_vaddr+add)} -> {hex(cur_paddr+add)}, cons={max_alignment} ptes={max_alignment // i_pte_covers} {uncached=} {frags=}")
+  #       print(f"\tnptes=0x{max_alignment // i_pte_covers:x} incr=0x{pte_covers:x} upd_flags=0x0 frags=0x{frags:x}")
 
-        entry_idx += (max_alignment // i_pte_covers) - 1 # TODO: looks bad
-        i_pte_covers = max_alignment
-      else:
-        # set up table and recurse
-        entry = pde.get_entry(entry_idx)
-        if (entry & amdgpu_2.AMDGPU_PTE_VALID) == 0:
-          pte = PTE(self.adev, self.palloc(0x1000, zero=True), lv=pde.lv - 1)
-          # for j in range(512): assert pte.get_entry(j) == 0, "Must be zero"
-          pde.set_table(entry_idx, pte)
-          entry = pde.get_entry(entry_idx)
-          # print("go alloc")
+  #       entry_idx += (max_alignment // i_pte_covers) - 1 # TODO: looks bad
+  #       i_pte_covers = max_alignment
+  #     else:
+  #       # set up table and recurse
+  #       entry = pde.get_entry(entry_idx)
+  #       if (entry & amdgpu_2.AMDGPU_PTE_VALID) == 0:
+  #         pte = PTE(self.adev, self.palloc(0x1000, zero=True), lv=pde.lv - 1)
+  #         # for j in range(512): assert pte.get_entry(j) == 0, "Must be zero"
+  #         pde.set_table(entry_idx, pte)
+  #         entry = pde.get_entry(entry_idx)
+  #         # print("go alloc")
 
-        assert (entry & amdgpu_2.AMDGPU_PDE_PTE) == 0, f"Must be table pde:{pde.pm.paddr:X} {entry_idx + j} {hex(cur_vaddr+j*pte_covers)}"
-        # print("go pass", hex(entry & 0x0000FFFFFFFFF000))
-        pte_addr = PhysicalMemory(self.adev, entry & 0x0000FFFFFFFFF000, 0x1000)
+  #       assert (entry & amdgpu_2.AMDGPU_PDE_PTE) == 0, f"Must be table pde:{pde.pm.paddr:X} {entry_idx + j} {hex(cur_vaddr+j*pte_covers)}"
+  #       # print("go pass", hex(entry & 0x0000FFFFFFFFF000))
+  #       pte_addr = PhysicalMemory(self.adev, entry & 0x0000FFFFFFFFF000, 0x1000)
 
-        self.map_range(PTE(self.adev, pte_addr, lv=pde.lv - 1), cur_vaddr, cur_paddr, i_pte_covers, uncached=uncached)
+  #       self.map_range(PTE(self.adev, pte_addr, lv=pde.lv - 1), cur_vaddr, cur_paddr, i_pte_covers, uncached=uncached)
 
-      cur_vaddr, cur_paddr, cur_size = cur_vaddr + i_pte_covers, cur_paddr + i_pte_covers, cur_size - i_pte_covers
-      entry_idx += 1
+  #     cur_vaddr, cur_paddr, cur_size = cur_vaddr + i_pte_covers, cur_paddr + i_pte_covers, cur_size - i_pte_covers
+  #     entry_idx += 1
 
-    if pde == self.root_pt:
-      self.adev.gmc.flush_tlb(ip="GC", vmid=0)
-      self.adev.gmc.flush_tlb(ip="MM", vmid=0)
-    return VirtualMapping(self.adev, vaddr, paddr, size)
+  #   if pde == self.root_pt:
+  #     self.adev.gmc.flush_tlb(ip="GC", vmid=0)
+  #     self.adev.gmc.flush_tlb(ip="MM", vmid=0)
+  #   return VirtualMapping(self.adev, vaddr, paddr, size)
 
   def unmap_range(self, virtual_mapping:VirtualMapping): pass # TODO
 
