@@ -2209,7 +2209,7 @@ class Tensor(SimpleMathTrait):
     base = ret[..., -1]._cumalu(-1, op, _include_initial=True)
     base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
     def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    op_to_tensor_op = {Ops.ADD: Tensor.add, Ops.MAX: Tensor.maximum, Ops.MUL: Tensor.prod}
+    op_to_tensor_op: Dict[op: Tensor] = {Ops.ADD: Tensor.add, Ops.MAX: Tensor.maximum, Ops.MUL: Tensor.mul}
     return op_to_tensor_op[op](fix(ret), fix(base))
 
   def cumsum(self, axis:int=0) -> Tensor:
