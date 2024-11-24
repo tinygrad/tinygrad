@@ -1,13 +1,39 @@
 import os, ctypes, collections, time
+from typing import Tuple, Dict, Set
 from tinygrad.runtime.autogen import libpciaccess
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
 from tinygrad.helpers import to_mv, mv_address, getenv
 from tinygrad.runtime.support.am.mm import MM, PhysicalMemory
 from tinygrad.runtime.support.am.firmware import Firmware
-from tinygrad.runtime.support.am.amring import AMRegister
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_PSP, AM_SMU, AM_GFX
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
+
+class AMRegister:
+  def __init__(self, adev, reg_off:int, reg_fields:Dict[str, Tuple[int, int]]):
+    self.adev, self.reg_off, self.reg_fields = adev, reg_off, reg_fields
+
+  def _parse_kwargs(self, **kwargs):
+    mask, values = 0xffffffff, 0
+    for k, v in kwargs.items():
+      if k not in self.reg_fields: raise ValueError(f"Unknown register field: {k} {self.reg_fields.keys()}")
+      m, s = self.reg_fields[k]
+      if v & (m>>s) != v: raise ValueError(f"Value {v} for {k} is out of range {m=} {s=}")
+      mask &= ~m
+      values |= v << s
+    return mask, values
+
+  def build(self, **kwargs) -> int: return self._parse_kwargs(**kwargs)[1]
+
+  def update(self, **kwargs):
+    mask, values = self._parse_kwargs(**kwargs)
+    self.write((self.read() & mask) | values)
+
+  def write(self, value=0, **kwargs):
+    mask, values = self._parse_kwargs(**kwargs)
+    self.adev.wreg(self.reg_off, (value & mask) | values)
+
+  def read(self, inst=0): return self.adev.rreg(self.reg_off)
 
 class AMDev:
   def __init__(self, pcidev):
@@ -88,7 +114,7 @@ class AMDev:
     #       The table is located at the end of VRAM - 64KB and is 10KB in size.
     mmRCC_CONFIG_MEMSIZE = 0xde3
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
-    self.discovery_pm = PhysicalMemory(self, self.vram_size - 64 << 10, 10 << 10)
+    self.discovery_pm = PhysicalMemory(self, self.vram_size - (64 << 10), 10 << 10)
 
     bhdr = am.struct_binary_header.from_address(self.discovery_pm.cpu_addr())
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(bhdr) + bhdr.table_list[am.IP_DISCOVERY].offset)

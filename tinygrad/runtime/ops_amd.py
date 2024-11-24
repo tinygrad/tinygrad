@@ -5,9 +5,10 @@ assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, HCQArgsState, HCQSignal, HCQProgram
 from tinygrad.device import BufferOptions, LRUAllocator
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, from_mv
+from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, from_mv, lo32, hi32
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess
+from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev
@@ -413,7 +414,7 @@ class AMDDevice(HCQCompiled):
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
       AMDDevice.gpus = [gpus[x] for x in visible_devices] if visible_devices else gpus
 
-    if self.device_id >= len(AMDDevice.gpus): raise RuntimeError(f"No device found for {device}. Requesting more devices than the system has?")
+    if self.device_id >= len(AMDDevice.gpus): raise RuntimeError(f"No device found for {self.device_id}. Requesting more devices than the system has?")
 
     with open(f"{AMDDevice.gpus[self.device_id]}/gpu_id", "r") as f: self.gpu_id = int(f.read())
     with open(f"{AMDDevice.gpus[self.device_id]}/properties", "r") as f: self.properties = {line.split()[0]: int(line.split()[1]) for line in f}
@@ -505,11 +506,34 @@ class AMDDevice(HCQCompiled):
 
   def _pci_gpu_free(self, mem): pass
 
-  def _pci_alloc_queue(self, queue_type, ring_size, ctx_save_restore_size=None, eop_buffer_size=None, ctl_stack_size=0) -> AMDQueueDesc:
-    assert queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, "Only compute queues"
-    return AMDQueueDesc(ring=self.adev.gfx.kcq_ring.ring_vm.cpu_view().cast("I"),
-                        read_ptr=self.adev.gfx.kcq_ring.rptr, write_ptr=self.adev.gfx.kcq_ring.wptr,
-                        doorbell=to_mv(self.adev.doorbell_cpu_addr + self.adev.gfx.kcq_ring.doorbell_index * 4, 8).cast("Q"))
+  def _pci_alloc_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0) -> AMDQueueDesc:
+    doorbell_index = 3
+    mqd = self._gpu_alloc(0x1000, uncached=True)
+    gart = self._gpu_alloc(0x1000, uncached=True)
+    ring = self._gpu_alloc(ring_size, uncached=True)
+    eop_buffer = self._gpu_alloc(eop_buffer_size) if eop_buffer_size else None
+
+    mqd_struct = am.struct_v11_compute_mqd(header=0xC0310800, cp_mqd_base_addr_lo=lo32(mqd.va_addr), cp_mqd_base_addr_hi=hi32(mqd.va_addr),
+      cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.build(preload_size=0x55, preload_req=1),
+      cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
+      cp_hqd_pq_base_lo=lo32(ring.va_addr>>8), cp_hqd_pq_base_hi=hi32(ring.va_addr>>8),
+      cp_hqd_pq_rptr_report_addr_lo=lo32(gart.va_addr+8), cp_hqd_pq_rptr_report_addr_hi=hi32(gart.va_addr+8),
+      cp_hqd_pq_wptr_poll_addr_lo=lo32(gart.va_addr), cp_hqd_pq_wptr_poll_addr_hi=hi32(gart.va_addr),
+      cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.build(doorbell_offset=doorbell_index*2, doorbell_en=1),
+      cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.build(rptr_block_size=5, unord_dispatch=1, queue_size=(ring_size//4).bit_length()-2),
+      cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.build(min_ib_avail_size=0x3), cp_hqd_hq_status0=0x20004000,
+      cp_mqd_control=self.adev.regCP_MQD_CONTROL.build(priv_state=1),
+      cp_hqd_eop_base_addr_lo=lo32(eop_buffer.va_addr>>8), cp_hqd_eop_base_addr_hi=hi32(eop_buffer.va_addr>>8),
+      cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.build(eop_size=(eop_buffer_size//4).bit_length()-2))
+
+    # Copy mqd into memory
+    ctypes.memmove(mqd.cpu_addr, ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct))
+    self.adev.gmc.flush_hdp()
+    self.adev.gfx.load_mqd(mqd_struct, pipe=0, queue=0)
+
+    return AMDQueueDesc(ring=to_mv(ring.cpu_addr, ring_size).cast("I"),
+                        read_ptr=to_mv(gart.cpu_addr+8, 8).cast("Q"), write_ptr=to_mv(gart.cpu_addr, 8).cast("Q"),
+                        doorbell=to_mv(self.adev.doorbell_cpu_addr + doorbell_index * 8, 8).cast("Q"))
 
   def invalidate_caches(self):
     AMDComputeQueue().memory_barrier().signal(self.timeline_signal, self.timeline_value).submit(self)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, time
 from tinygrad.runtime.autogen.am import am, gc_11_0_0, smu_v13_0_0
-from tinygrad.runtime.support.am.amring import AMRing
+from tinygrad.helpers import to_mv, lo32, hi32
 
 class AM_IP:
   def __init__(self, adev): self.adev = adev
@@ -34,7 +34,7 @@ class AM_GMC(AM_IP):
   def flush_tlb(self, ip:Union["MM", "GC"], vmid, flush_type=0):
     self.flush_hdp()
 
-    # Check if the hub is initialized
+    # Can't issue TLB invalidation if the hub isn't initialized.
     if not self.hub_initted[ip]: return
 
     if ip == "MM": x = self.adev.wait_reg(self.adev.regMMVM_INVALIDATE_ENG17_SEM, mask=0x1, value=0x1)
@@ -151,20 +151,14 @@ class AM_GFX(AM_IP):
                                          mec_pipe0_active=1, mec_pipe1_active=1, mec_pipe2_active=1, mec_pipe3_active=1, mec_halt=0)
 
     # NOTE: Wait for MEC to be ready. The kernel does udelay as well.
-    time.sleep(0.005)
+    time.sleep(0.5)
 
-    # TODO: better to move out this.
-    self.kcq_ring = AMRing(self.adev, size=0x100000, me=1, pipe=0, queue=1, vmid=0, doorbell_index=(0x3 << 1))
-    self.load_ring(self.kcq_ring)
-    time.sleep(2)
+  def load_mqd(self, mqd:am.struct_v11_compute_mqd, pipe:int, queue:int):
+    self._grbm_select(me=1, pipe=pipe, queue=queue)
 
-  def load_ring(self, ring:AMRing):
-    self._grbm_select(me=1, pipe=ring.pipe, queue=ring.queue)
-
+    mqd_mv = to_mv(ctypes.addressof(mqd), ctypes.sizeof(mqd)).cast('I')
     for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.reg_off, self.adev.regCP_HQD_PQ_WPTR_HI.reg_off + 1)):
-      self.adev.wreg(reg, ring.mqd_mv.cast('I')[0x80 + i])
-
-    self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.write(ring.mqd.cp_hqd_pq_doorbell_control)
+      self.adev.wreg(reg, mqd_mv[0x80 + i])
     self.adev.regCP_HQD_ACTIVE.write(0x1)
 
     self._grbm_select()
@@ -277,10 +271,10 @@ class AM_PSP(AM_IP):
 
     ctypes.memset(ring_entry_addr, 0, ctypes.sizeof(am.struct_psp_gfx_rb_frame))
     write_loc = am.struct_psp_gfx_rb_frame.from_address(ring_entry_addr)
-    write_loc.cmd_buf_addr_hi = self.cmd_pm.mc_addr() >> 32
-    write_loc.cmd_buf_addr_lo = self.cmd_pm.mc_addr() & 0xffffffff
-    write_loc.fence_addr_hi = self.fence_pm.mc_addr() >> 32
-    write_loc.fence_addr_lo = self.fence_pm.mc_addr() & 0xffffffff
+    write_loc.cmd_buf_addr_hi = hi32(self.cmd_pm.mc_addr())
+    write_loc.cmd_buf_addr_lo = lo32(self.cmd_pm.mc_addr())
+    write_loc.fence_addr_hi = hi32(self.fence_pm.mc_addr())
+    write_loc.fence_addr_lo = lo32(self.fence_pm.mc_addr())
     write_loc.fence_value = prev_wptr
 
     # Move the wptr
@@ -305,26 +299,26 @@ class AM_PSP(AM_IP):
 
     self._prep_msg1(fw_bytes)
     cmd = self._prep_ring_cmd(am.GFX_CMD_ID_LOAD_IP_FW)
-    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = self.msg1_pm.mc_addr() & 0xffffffff
-    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi = self.msg1_pm.mc_addr() >> 32
+    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = lo32(self.msg1_pm.mc_addr())
+    cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi = hi32(self.msg1_pm.mc_addr())
     cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)
     cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
     return self._ring_submit()
 
   def _tmr_load_cmd(self):
     cmd = self._prep_ring_cmd(am.GFX_CMD_ID_SETUP_TMR)
-    cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = self.tmr_pm.mc_addr() & 0xffffffff
-    cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi = self.tmr_pm.mc_addr() >> 32
-    cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = self.tmr_pm.paddr & 0xffffffff
-    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi = self.tmr_pm.paddr >> 32
+    cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = lo32(self.tmr_pm.mc_addr())
+    cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi = hi32(self.tmr_pm.mc_addr())
+    cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = lo32(self.tmr_pm.paddr)
+    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi = hi32(self.tmr_pm.paddr)
     cmd.cmd.cmd_setup_tmr.bitfield.virt_phy_addr = 1
     cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_pm.size
     return self._ring_submit()
 
   def _load_toc_cmd(self, toc_size):
     cmd = self._prep_ring_cmd(am.GFX_CMD_ID_LOAD_TOC)
-    cmd.cmd.cmd_load_toc.toc_phy_addr_lo = self.msg1_pm.mc_addr() & 0xffffffff
-    cmd.cmd.cmd_load_toc.toc_phy_addr_hi = self.msg1_pm.mc_addr() >> 32
+    cmd.cmd.cmd_load_toc.toc_phy_addr_lo = lo32(self.msg1_pm.mc_addr())
+    cmd.cmd.cmd_load_toc.toc_phy_addr_hi = hi32(self.msg1_pm.mc_addr())
     cmd.cmd.cmd_load_toc.toc_size = toc_size
     return self._ring_submit()
 

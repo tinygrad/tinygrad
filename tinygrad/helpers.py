@@ -46,6 +46,8 @@ def ceildiv(num, amt):
   ret = -(num//-amt)
   return ret if not isinstance(ret, float) else int(ret)
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
+def lo32(x:int) -> int: return x & 0xFFFFFFFF
+def hi32(x:int) -> int: return x >> 32
 def data64(data: int) -> Tuple[int, int]: return (data >> 32, data & 0xFFFFFFFF)
 def data64_le(data: int) -> Tuple[int, int]: return (data & 0xFFFFFFFF, data >> 32)
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
