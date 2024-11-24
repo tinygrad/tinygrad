@@ -3,7 +3,7 @@ import unittest
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
-from hypothesis import given, strategies as strat, settings
+from hypothesis import given, strategies as strat, settings, HealthCheck
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.schedule import create_schedule
@@ -172,6 +172,13 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skip("broken. TODO: fix it")
   @given(ht.int32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
   def test_int32_cast(self, a, dtype): universal_test_cast(a, dtypes.int32, dtype)
+
+  @unittest.expectedFailure
+  def test_float_cast_to_int_failure(self):
+    val = float(dtypes.max(dtypes.int32) - 1)
+    t1 = Tensor([val], dtype=dtypes.float32).cast(dtypes.int32)
+    t2 = Tensor(val, dtype=dtypes.float32).cast(dtypes.int32)
+    np.testing.assert_equal(t1.item(), t2.item())
 
 if __name__ == '__main__':
   unittest.main()
