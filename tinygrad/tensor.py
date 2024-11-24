@@ -2249,7 +2249,7 @@ class Tensor(SimpleMathTrait):
     print(t.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.cumprod(1).numpy())
+    print(t.cumprod(0).numpy())
     ```
     """
     return self._split_cumalu(axis, Ops.MUL)
