@@ -665,6 +665,20 @@ class TestOps(unittest.TestCase):
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
 
+  def test_asin(self):
+    helper_test_op([(45,65)], lambda x: x.asin(), low=-1, high=1)
+    helper_test_op([(45,65)], lambda x: x.asin(), low=-300, high=-297)
+    helper_test_op([(45,65)], lambda x: x.asin(), low=300, high=303)
+  def test_acos(self):
+    # high grad atol
+    helper_test_op([(45,65)], lambda x: x.acos(), low=-1, high=1)
+    helper_test_op([(45,65)], lambda x: x.acos(), low=-300, high=-297)
+    helper_test_op([(45,65)], lambda x: x.acos(), low=300, high=303)
+  def test_atan(self):
+    helper_test_op([(45,65)], lambda x: x.atan())
+    helper_test_op([(45,65)], lambda x: x.atan(), low=-300, high=-297)
+    helper_test_op([(45,65)], lambda x: x.atan(), low=300, high=303)
+
   def test_relu(self):
     helper_test_op([(64,64)], lambda x: x.relu())
     helper_test_op([()], lambda x: x.relu())
@@ -786,6 +800,27 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,0,4)], lambda x: torch.cumsum(x, dim=1), lambda x: Tensor.cumsum(x, axis=1))
     helper_test_op([(0,3)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
     helper_test_op([(2,3,0)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2))
+
+  def test_small_cummax(self):
+    helper_test_op([(10)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
+  def test_simple_cummax(self):
+    helper_test_op([(512)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
+    helper_test_op([(1022)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
+  def test_cummax(self):
+    helper_test_op([()], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
+    # TODO: torch allows this?
+    # self.helper_test_exception([()], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1), expected=IndexError)
+    helper_test_op([(20,)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
+    self.helper_test_exception([(20,)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1), expected=IndexError)
+    self.helper_test_exception([(20,)], lambda x: torch.cummax(x, dim=-2).values, lambda x: Tensor.cummax(x, axis=-2), expected=IndexError)
+    helper_test_op([(20,30)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
+    helper_test_op([(20,30)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1))
+    helper_test_op([(20,30,40)], lambda x: torch.cummax(x, dim=2).values, lambda x: Tensor.cummax(x, axis=2))
+    helper_test_op([(20,30,40)], lambda x: torch.cummax(x, dim=-1).values, lambda x: Tensor.cummax(x, axis=-1))
+  def test_cummax_zero_axis(self):
+    helper_test_op([(2,0,4)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1))
+    helper_test_op([(0,3)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
+    helper_test_op([(2,3,0)], lambda x: torch.cummax(x, dim=2).values, lambda x: Tensor.cummax(x, axis=2))
 
   def test_argmax(self):
     # check if it returns the first index for multiple occurences
@@ -1413,6 +1448,18 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([(1,1,5,5)],
                                 lambda x: torch.nn.functional.pad(x, (3,5,0,0),mode="reflect"), lambda x: x.pad((3,5,0,0),mode="reflect"),
                                 expected=(RuntimeError, ValueError))
+
+  def test_pad_replicate_mode(self):
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (0,2,3,2), mode="replicate"), lambda x: x.pad((0,2,3,2), mode="replicate"))
+    helper_test_op([(5,5,5)], lambda x: torch.nn.functional.pad(x, (0,2), mode="replicate"), lambda x: x.pad((0,2), mode="replicate"))
+    helper_test_op([(1,1,5,5,5)], lambda x: torch.nn.functional.pad(x, (1,2,3,4,1,2),mode="replicate"),lambda x:x.pad((1,2,3,4,1,2),mode="replicate"))
+    helper_test_op([(3,3,3,3)], lambda x: torch.nn.functional.pad(x, (-1,2,2,-1), mode="replicate"), lambda x: x.pad((-1,2,2,-1), mode="replicate"))
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,-3,0,-3), mode="replicate"), lambda x: x.pad((3,-3,0,-3), mode="replicate"))
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,-5,1,-5), mode="replicate"), lambda x: x.pad((3,-5,1,-5), mode="replicate"))
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (0,0,0,-5), mode="replicate"), lambda x: x.pad((0,0,0,-5), mode="replicate"))
+
+    # no max pad sizes for replicate
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (3,11,0,30), mode="replicate"), lambda x: x.pad((3,11,0,30), mode="replicate"))
 
   def test_pad_reshape(self):
     helper_test_op([(1, 2)],

@@ -15,8 +15,8 @@ a = MallocAllocator.alloc(4)
 b = MallocAllocator.alloc(4)
 
 # load in some values (little endian)
-MallocAllocator.copyin(a, memoryview(bytearray([2,0,0,0])))
-MallocAllocator.copyin(b, memoryview(bytearray([3,0,0,0])))
+MallocAllocator._copyin(a, memoryview(bytearray([2,0,0,0])))
+MallocAllocator._copyin(b, memoryview(bytearray([3,0,0,0])))
 
 # compile a program to a binary
 lib = ClangCompiler().compile("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
@@ -28,7 +28,7 @@ fxn = ClangProgram("add", lib)
 fxn(out, a, b)
 
 # check the data out
-print(val := MallocAllocator.as_buffer(out).cast("I").tolist()[0])
+print(val := MallocAllocator._as_buffer(out).cast("I").tolist()[0])
 assert val == 5
 
 

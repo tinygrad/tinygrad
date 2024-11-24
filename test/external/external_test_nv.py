@@ -2,7 +2,7 @@ import unittest, struct, array, ctypes
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import to_mv
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.runtime.ops_nv import NVDevice, HWComputeQueue
+from tinygrad.runtime.ops_nv import NVDevice, HWQueue
 from tinygrad.engine.search import Opt, OptOps
 from test.test_linearizer_failures import helper_test_lin
 from tinygrad.engine.realize import get_runner, CompiledRunner
@@ -21,7 +21,7 @@ class TestNV(unittest.TestCase):
     TestNV.a = Tensor([0.,1.], device="NV").realize()
     TestNV.b = self.a + 1
     si = create_schedule([self.b.lazydata])[-1]
-    TestNV.d0_runner = get_runner(TestNV.d0.dname, si.ast)
+    TestNV.d0_runner = get_runner(TestNV.d0.device, si.ast)
     TestNV.b.lazydata.buffer.allocate()
     TestNV.addr = struct.pack("QQ", TestNV.b.lazydata.buffer._buf.va_addr, TestNV.a.lazydata.buffer._buf.va_addr)
 
@@ -44,19 +44,19 @@ class TestNV(unittest.TestCase):
   def test_buf4_usage(self):
     TestNV.along = Tensor([105615], device="NV").realize()
     ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=Ops.SIN, src=(LazyOp(op=Ops.CAST, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.ulong, st=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)))),), arg=dtypes.float),), arg=None),), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(3,), strides=(1,), offset=0, mask=None, contiguous=True),)))) # noqa: E501
-    temp_runner = get_runner(TestNV.d0.dname, (ast,))
+    temp_runner = get_runner(TestNV.d0.device, (ast,))
     temp_runner([TestNV.b.lazydata.buffer, TestNV.along.lazydata.buffer], var_vals={})
     val = TestNV.b.lazydata.buffer.as_buffer().cast("f")[0]
     assert abs(val - 0.80647) < 0.001, f"got val {val}"
 
   def test_kernargs_no_oob_access(self):
     kernargs_start = TestNV.d0._gpu_alloc((2 << 20), map_to_cpu=True).va_addr
-    kernargs = kernargs_start + ((2 << 20) - TestNV.d0_runner.clprg.kernargs_alloc_size)
-    to_mv(kernargs, 0x160).cast('I')[:] = array.array('I', TestNV.d0_runner.clprg.constbuffer_0)
-    ctypes.memmove(kernargs + TestNV.d0_runner.clprg.kernargs_offset, TestNV.addr, len(TestNV.addr))
+    kernargs = kernargs_start + ((2 << 20) - TestNV.d0_runner._prg.kernargs_alloc_size)
+    to_mv(kernargs, 0x160).cast('I')[:] = array.array('I', TestNV.d0_runner._prg.constbuffer_0)
+    ctypes.memmove(kernargs + TestNV.d0_runner._prg.kernargs_offset, TestNV.addr, len(TestNV.addr))
 
-    q = HWComputeQueue()
-    q.exec(TestNV.d0_runner.clprg, kernargs, TestNV.d0_runner.global_size, TestNV.d0_runner.local_size)
+    q = HWQueue()
+    q.exec(TestNV.d0_runner._prg, kernargs, TestNV.d0_runner.global_size, TestNV.d0_runner.local_size)
     q.signal(TestNV.d0.timeline_signal, TestNV.d0.timeline_value).submit(TestNV.d0)
     TestNV.d0._wait_signal(TestNV.d0.timeline_signal, TestNV.d0.timeline_value)
     TestNV.d0.timeline_value += 1

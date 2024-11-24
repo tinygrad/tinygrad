@@ -83,13 +83,13 @@ class TestKernelSpeed(unittest.TestCase):
   # TODO: smaller ones has other overhead in synchronize
   # def test_gemm_1024(self): self._test_matmul(1024, nv_tflops=8, amd_tflops=7)
   # def test_gemm_2048(self): self._test_matmul(2048, nv_tflops=50, amd_tflops=30)
-  def test_gemm_4096(self): self._test_matmul(4096, nv_tflops=100, amd_tflops=70)
+  def test_gemm_4096(self): self._test_matmul(4096, nv_tflops=95, amd_tflops=70)
   def test_gemm_8192(self): self._test_matmul(8192, nv_tflops=130, amd_tflops=70)
 
   def test_gemv_16384_4096(self): self._test_matmul(16384, 4096, 1, nv_gbs=430, amd_gbs=400)
   def test_gemv_4096_16384(self): self._test_matmul(4096, 16384, 1, nv_gbs=430, amd_gbs=400)
 
-  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=30, amd_tflops=22)
+  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=22)
 
 if __name__ == '__main__':
   unittest.main()

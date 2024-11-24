@@ -166,7 +166,8 @@ def build_transformer(model_path: Path, model_size="8B", quantize=None, device=N
 
   with Context(BEAM=0):
     # quantize
-    if quantize is not None:
+    if quantize == "float16": weights = {k:v.cast(quantize).contiguous() for k,v in weights.items()}
+    elif quantize is not None:
       weights = linear.quantize(weights, device)
       for _,v in weights.items(): v.realize()
 
@@ -221,7 +222,7 @@ if __name__ == "__main__":
   parser.add_argument("--model", type=Path, help="Model path")
   parser.add_argument("--size", choices=["1B", "8B", "70B"], default="8B", help="Model size")
   parser.add_argument("--shard", type=int, default=1, help="Shard the model across multiple devices")
-  parser.add_argument("--quantize", choices=["int8", "nf4"], help="Quantization method")
+  parser.add_argument("--quantize", choices=["int8", "nf4", "float16"], help="Quantization method")
   parser.add_argument("--no_api", action="store_true", help="Disable the api and run a cli test interface")
   parser.add_argument("--host", type=str, default="0.0.0.0", help="Web server bind address")
   parser.add_argument("--port", type=int, default=7776, help="Web server port")
@@ -245,6 +246,12 @@ if __name__ == "__main__":
       fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00003-of-00004.safetensors", "model-00003-of-00004.safetensors", subdir="llama3-8b-sfr")
       fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00004-of-00004.safetensors", "model-00004-of-00004.safetensors", subdir="llama3-8b-sfr")
       args.model = fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/raw/main/model.safetensors.index.json", "model.safetensors.index.json", subdir="llama3-8b-sfr")
+    elif args.size == "70B":
+      subdir = "Llama-3.1-Nemotron-70B-Instruct-HF"
+      args.model = fetch("https://huggingface.co/nvidia/Llama-3.1-Nemotron-70B-Instruct-HF/resolve/main/model.safetensors.index.json?download=true", "model.safetensors.index.json", subdir=subdir)
+      fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir=subdir)
+      for i in range(30):
+        fetch(f"https://huggingface.co/nvidia/Llama-3.1-Nemotron-70B-Instruct-HF/resolve/main/model-{i+1:05d}-of-00030.safetensors?download=true", f"model-{i+1:05d}-of-00030.safetensors", subdir=subdir)
 
   assert args.model is not None, "please provide --model option"
 
@@ -281,8 +288,9 @@ if __name__ == "__main__":
       for key, value in cors_headers.items(): response.set_header(key, value)
 
     @app.route("/<filename>")
-    def server_static(filename):
-      return static_file(filename, root=(Path(__file__).parent / "tinychat").as_posix())
+    def server_static(filename): return static_file(filename, root=(Path(__file__).parent / "tinychat").as_posix())
+    @app.route("/assets/<filename:path>")
+    def server_assets(filename): return static_file(filename, root=(Path(__file__).parent / "tinychat" / "assets").as_posix())
     @app.route("/")
     def index():
       return static_file("index.html", root=(Path(__file__).parent / "tinychat").as_posix())
