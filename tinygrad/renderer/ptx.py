@@ -153,15 +153,10 @@ class PTXRenderer(Renderer):
   mem_types.update({dtypes.int8: "s8", dtypes.uint8: "u8", dtypes.bool: "u8", dtypes.float16: "b16"})
 
   def render_kernel(self, kernel, function_name, bufs, regs) -> str:
-    for op in kernel:
-      for line in op.splitlines():
-        print(line)
     kernel = [f".reg .{reg.split('_')[-2]} %{reg}<{cnt}>;" for reg,cnt in regs] + kernel + ["ret;"]
-    def fmt(line): return line if line[0]=="$" else "\t" + line.replace(" ", "\t" if len(line.split(" ")[0]) > 7 else "\t\t", 1)
     return (f"{self.kernel_prefix} {function_name}(\n\t" +
-            ',\n\t'.join([f".param .{'u64' if dtype.__class__ == PtrDType else self.types[dtype]} {name}" for name,dtype in bufs]) + "\n)\n{\n" +
-            '\n'.join([fmt(line) for op in kernel for line in op.splitlines()]) +
-            "\n}")
+            ',\n\t'.join([f".param .{'u64' if dtype.__class__ == PtrDType else self.types[dtype]} {name}" for name,dtype in bufs]) +
+            "\n)\n{\n" + '\n'.join([f"\t{k}" for k in kernel]) + "\n}")
 
   def render(self, name:str, uops:List[UOp]) -> str:
     kernel:List[str] = []
