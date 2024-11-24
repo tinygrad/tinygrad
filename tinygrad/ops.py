@@ -359,7 +359,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.st is None: return self
     assert self.op is not Ops.STORE, "VIEW of STORE is invalid, STORE is always base"
     if st.contiguous and self.base.st == st: return self.base
-    return UOp(Ops.VIEW, self.dtype, (self.base,), st)
+    return UOp(Ops.VIEW, self.dtype, (self,), st)
   def reshape(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).reshape(arg))
 
   # *** uop Buffer stuff ***
