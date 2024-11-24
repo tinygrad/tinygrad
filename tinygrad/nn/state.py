@@ -1,5 +1,5 @@
-import os, json, pathlib, zipfile, pickle, tarfile, struct, functools
-from typing import Dict, Union, List, Optional, Any, Tuple, Callable
+import os, json, pathlib, zipfile, pickle, tarfile, struct, functools, contextlib
+from typing import Dict, Union, List, Optional, Any, Tuple, Callable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm
@@ -142,31 +142,35 @@ def tar_extract(fn_or_data: Union[os.PathLike, Tensor]) -> Dict[str, Tensor]:
   tensors = nn.state.tar_extract(Tensor(pathlib.Path("archive.tar")))
   ```
   """
+  # https://en.wikipedia.org/wiki/Tar_(computing)
 
   t = fn_or_data if isinstance(fn_or_data, Tensor) else Tensor(pathlib.Path(fn_or_data))
-  pos, tensor_size, result, fn_ow, fsz_ow = 0, prod(t.shape), {}, None, None
-  if tensor_size < 512*2: raise tarfile.ReadError("Invalid tar file!") # tar files end with at least 2 empty sections
-  while pos + 512 < tensor_size:
-    header, pos = t[pos:pos + 512].data(), pos + 512
-    if header[124] & 0x80: fsz_ow = int.from_bytes(header[125:136], "big")
-    fsz, fn = fsz_ow or int(bytes(header[124:136]).decode().rstrip('\x00') or "0", 8), fn_ow or bytes(header[:100]).decode().rstrip('\x00')
-    if header[257:263] == b"ustar\x00": fn = "/".join(p for p in [bytes(header[345:500]).decode().rstrip('\x00'), fn] if p)
-    if header[156] == 48: result[fn] = t[pos:pos + fsz]
-    # handle GNU @LongLink
-    if header[156] == 76: fn_ow = bytes(t[pos:pos + fsz].data()).decode().rstrip('\x00')
-    # handle @PaxHeader
-    if header[156] == 120:
-      pax_data = bytes(t[pos:pos + fsz].data()).decode().rstrip('\x00')
-      while len(pax_data) > 0:
-        len_end, entry_len = pax_data.index(" "), int(pax_data[:pax_data.index(" ")])
-        k, v = pax_data[len_end + 1:entry_len - 1].split("=", 1)
-        if k == "path": fn_ow = v
-        if k == "size": fsz_ow = int(v)
-        pax_data = pax_data[entry_len:].lstrip()
-    # clear multi entry metadata when node is reached (see https://en.wikipedia.org/wiki/Tar_(computing)#Header)
-    if header[156] >= 48 and header[156] <= 55: fn_ow, fsz_ow = None, None
-    pos += fsz if fsz % 512 == 0 else fsz + (512 - fsz % 512)
-  return { k: v for k, v in result.items() if k != "" }
+  pos, result, next_ow = 0, {}, cast(Dict[str, str], {})
+  if len(t.shape) != 1 or len(t) < 2*512 or t.dtype != dtypes.uint8: raise tarfile.ReadError("Invalid tar file!")
+
+  with contextlib.suppress(tarfile.HeaderError):
+    while pos + 512 < len(t):
+      info, pos = tarfile.TarInfo.frombuf(bytes(t[pos:pos+512].data()), "ascii", "strict"), pos+512
+      for k, v in [ (n, cfn(next_ow[n])) for n, cfn in [("path", str), ("size", int)] if n in next_ow ]: setattr(info, k, v)
+
+      if info.type == tarfile.REGTYPE: result[info.name] = t[pos:pos + info.size]
+
+      # handle GNU @LongLink
+      if info.type == b"L": next_ow = { "path": bytes(t[pos:pos+info.size].data()).decode().rstrip('\x00') }
+
+      # handle @PaxHeader
+      if info.type == b"x":
+        pax_text, entry_len = bytes(t[pos:pos+info.size].data()).decode().rstrip('\x00'), 0
+        while len(pax_text:=pax_text[entry_len:].lstrip()) > 0:
+          entry_len = int(pax_text[:(len_end:=pax_text.index(" "))])
+          next_ow.update(dict([ pax_text[len_end+1:entry_len-1].split("=", 1) ]))
+
+      # clear multi entry metadata when node is reached
+      if info.type in b"01234567": next_ow = {}
+
+      pos += info.size if info.size % 512 == 0 else info.size + (512 - info.size % 512)
+
+  return result
 
 # torch support!
 
