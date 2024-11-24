@@ -3,13 +3,14 @@ install()
 
 from tinygrad import Tensor, dtypes
 
-# t = Tensor([2, 0.5]*9)
-# ic(t.numpy())
+t = Tensor([2, 0.5]*9)
+t = Tensor([1, 2, 3, 4, 5])
+ic(t.numpy())
 
-# ic(t.cumprod().numpy())
+ic(t.cumprod().numpy())
 
-x = (Tensor([0, 1], dtype=dtypes.int16)).cumprod(0).dtype
-ic(x)
+# x = (Tensor([0, 1], dtype=dtypes.int16)).cumprod(0).dtype
+# ic(x)
 # (Tensor([0, 1], dtype=dtypes.bool)).cumprod(0).dtype == dtypes.bool
 # (Tensor([0, 1], dtype=dtypes.int8)).cumprod(0).dtype == dtypes.int8
 # (Tensor([0, 1], dtype=dtypes.int16)).cumprod(0).dtype == dtypes.int32

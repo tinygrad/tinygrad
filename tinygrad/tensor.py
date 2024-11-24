@@ -2192,10 +2192,11 @@ class Tensor(SimpleMathTrait):
     return x.dot(self, acc_dtype=acc_dtype) if reverse else self.dot(x, acc_dtype=acc_dtype)
 
   def _cumalu(self, axis:int, op:Ops, _include_initial=False) -> Tensor:
-    assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX)
+    op_to_tensor_op = {Ops.ADD: lambda x: x.sum, Ops.MAX: lambda x: x.max, Ops.MUL: lambda x: x.prod}
+    assert self.shape[axis] != 0 and op in op_to_tensor_op
     pl_sz = self.shape[axis] - int(not _include_initial)
     pooled = self.transpose(axis,-1).pad((pl_sz, -int(_include_initial)), value=identity_element(op, self.dtype))._pool((self.shape[axis],))
-    return (pooled.sum(-1) if op is Ops.ADD else pooled.max(-1)).transpose(axis,-1)
+    return op_to_tensor_op[op](pooled)(-1).transpose(axis,-1)
 
   def _split_cumalu(self, axis:int, op:Ops) -> Tensor:
     axis = self._resolve_dim(axis)
@@ -2208,27 +2209,8 @@ class Tensor(SimpleMathTrait):
     base = ret[..., -1]._cumalu(-1, op, _include_initial=True)
     base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
     def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    return fix(ret) + fix(base) if op is Ops.ADD else fix(ret).maximum(fix(base))
-
-  def _cumalu(self, op:Ops, axis:int=0, _first_zero=False) -> Tensor:
-    axis = self._resolve_dim(axis)
-    if self.ndim == 0 or 0 in self.shape: return self
-    SPLIT, tensor_op, id_val = 256, identity_element(op), {Ops.Add: Tensor.add, Ops.MUL: Tensor.mul, Ops.Max: Tensor.max}[op]
-    def _cumop(self, op:Ops, axis:int=0, _first_zero=False) -> Tensor:
-      assert self.shape[axis] != 0
-      pl_sz = self.shape[axis] - int(not _first_zero)
-      return tensor_op(self.transpose(axis,-1).pad((pl_sz,-int(_first_zero)),  value=id_val)._pool((self.shape[axis],)), -1).transpose(axis,-1)
-    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumop(axis)
-    ret = self.transpose(axis,-1).pad((round_up(s, SPLIT)-s, 0), value=id_val).unflatten(-1, (-1, SPLIT))._cumop(-1)
-    base = ret[..., -1]._cumop(-1, _first_zero=True)
-    base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
-    def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    return fix(ret) + fix(base)
-
-  def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:
-    assert self.shape[axis] != 0
-    pl_sz = self.shape[axis] - int(not _first_zero)
-    return self.transpose(axis,-1).pad((pl_sz,-int(_first_zero)))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
+    op_to_tensor_op = {Ops.ADD: Tensor.add, Ops.MAX: Tensor.maximum, Ops.MUL: Tensor.prod}
+    return op_to_tensor_op[op](fix(ret), fix(base))
 
   def cumsum(self, axis:int=0) -> Tensor:
     """
@@ -2272,21 +2254,7 @@ class Tensor(SimpleMathTrait):
     print(t.cumsum(1).numpy())
     ```
     """
-    axis = self._resolve_dim(axis)
-    if self.ndim == 0 or 0 in self.shape: return self
-    # TODO: someday the optimizer will find this on it's own
-    # for now this is a two stage cumsum
-    SPLIT = 4
-    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2:
-      print('hi')
-      return self._cumprod(axis)
-
-    self_reshape = self.transpose(axis,-1).pad((round_up(s, SPLIT)-s, 0), value=1).unflatten(-1, (-1, SPLIT))
-    ret = self_reshape._cumprod(-1)
-    base = ret[..., -1]._cumprod(-1, _first_zero=True)
-    base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
-    def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    return fix(ret) * fix(base)
+    return self._split_cumalu(axis, Ops.MUL)
 
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, **kwargs) -> Tensor:
