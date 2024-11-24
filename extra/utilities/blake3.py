@@ -78,7 +78,6 @@ def blake3(data: Tensor) -> str:
   tree_compressor = lambda states, data, iv, _: compress_blocks(states[:, -1].contiguous(), data, iv[:, 0])
   for i in range(tree_levels): # tree-hash chain value pairs ~halving them in each step
     chain_vals, leftover_chain_val = pairwise_concatenate(chain_vals)
-    tree_compressor = lambda states, data, iv, _: compress_blocks(states[:, -1].contiguous(), data, iv[:, 0])
     chain_vals = compress(chain_vals, tree_compressor, None, None, None, i == tree_levels - 1, True)
     if leftover_chain_val is not None: chain_vals = chain_vals.cat(leftover_chain_val, dim=0)
   return chain_vals[0].flatten().numpy().tobytes()[:32].hex()
