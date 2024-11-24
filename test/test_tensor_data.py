@@ -31,6 +31,13 @@ class TestTensorData(unittest.TestCase):
     assert list(dat) == []
     assert dat.shape == (0,)
 
+  def test_data_empty_multi_dim(self):
+    a = Tensor([], dtype=dtypes.int32).reshape(0, 2)
+    dat = a.data()
+    assert dat.itemsize == 4
+    assert list(dat) == []
+    assert dat.shape == (0,)
+
   def test_data_uint8(self):
     a = Tensor([1,2,3,4], dtype=dtypes.uint8)
     dat = a.data()
