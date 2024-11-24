@@ -1,4 +1,4 @@
-import os, json, pathlib, zipfile, pickle, tarfile, struct, functools, contextlib
+import os, json, pathlib, zipfile, pickle, tarfile, struct, functools
 from typing import Dict, Union, List, Optional, Any, Tuple, Callable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
@@ -145,27 +145,26 @@ def tar_extract(t: Tensor) -> Dict[str, Tensor]:
   pos, result, next_ow = 0, {}, cast(Dict[str, str], {})
   if len(t.shape) != 1 or len(t) < 2*512 or t.dtype != dtypes.uint8: raise tarfile.ReadError("Invalid tar file!")
 
-  with contextlib.suppress(tarfile.HeaderError):
-    while pos + 512 < len(t):
-      info, pos = tarfile.TarInfo.frombuf(bytes(t[pos:pos+512].data()), "ascii", "strict"), pos+512
-      for k, v in [ (n, cfn(next_ow[n])) for n, cfn in [("path", str), ("size", int)] if n in next_ow ]: setattr(info, k, v)
+  while pos + 512 < len(t) and (header:=bytes(t[pos:pos+512].data())).count(b"\x00") != 512:
+    info, pos = tarfile.TarInfo.frombuf(header, "ascii", "strict"), pos+512
+    for k, v in [ (n, cfn(next_ow[n])) for n, cfn in [("path", str), ("size", int)] if n in next_ow ]: setattr(info, k, v)
 
-      if info.type == tarfile.REGTYPE: result[info.name] = t[pos:pos + info.size]
+    if info.type == tarfile.REGTYPE: result[info.name] = t[pos:pos + info.size]
 
-      # handle GNU @LongLink
-      if info.type == b"L": next_ow = { "path": bytes(t[pos:pos+info.size].data()).decode().rstrip('\x00') }
+    # handle GNU @LongLink
+    if info.type == b"L": next_ow = { "path": bytes(t[pos:pos+info.size].data()).decode().rstrip('\x00') }
 
-      # handle @PaxHeader
-      if info.type == b"x":
-        pax_text, entry_len = bytes(t[pos:pos+info.size].data()).decode().rstrip('\x00'), 0
-        while len(pax_text:=pax_text[entry_len:].lstrip()) > 0:
-          entry_len = int(pax_text[:(len_end:=pax_text.index(" "))])
-          next_ow.update(dict([ pax_text[len_end+1:entry_len-1].split("=", 1) ]))
+    # handle @PaxHeader
+    if info.type == b"x":
+      pax_text, entry_len = bytes(t[pos:pos+info.size].data()).decode().rstrip('\x00'), 0
+      while len(pax_text:=pax_text[entry_len:].lstrip()) > 0:
+        entry_len = int(pax_text[:(len_end:=pax_text.index(" "))])
+        next_ow.update(dict([ pax_text[len_end+1:entry_len-1].split("=", 1) ]))
 
-      # clear multi entry metadata when node is reached
-      if info.type in b"01234567": next_ow = {}
+    # clear multi entry metadata when node is reached
+    if info.type in b"01234567": next_ow = {}
 
-      pos += info.size if info.size % 512 == 0 else info.size + (512 - info.size % 512)
+    pos += info.size if info.size % 512 == 0 else info.size + (512 - info.size % 512)
 
   return result
 
