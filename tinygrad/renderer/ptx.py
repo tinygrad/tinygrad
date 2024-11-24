@@ -149,9 +149,9 @@ class PTXRenderer(Renderer):
 
   def render_kernel(self, kernel, function_name, bufs, regs) -> str:
     def fmt(line): return line if line[0]=="$" else "\t" + line.replace(" ", "\t" if len(line.split(" ")[0]) > 7 else "\t\t", 1)
-    kernel = map(fmt, [f".reg .{reg.split('_')[-2]} %{reg}<{cnt}>;" for reg,cnt in regs] + kernel + ["ret;"])
-    params = [f".param .{'u64' if dtype.__class__ == PtrDType else self.types[dtype]} {name}" for name,dtype in bufs]
-    return f"{self.kernel_prefix} {function_name}(\n\t {',\n\t'.join(params)}\n)\n{{\n{'\n'.join(kernel)}\n}}"
+    kernel = '\n'.join(map(fmt, [f".reg .{reg.split('_')[-2]} %{reg}<{cnt}>;" for reg,cnt in regs] + kernel + ["ret;"]))
+    params = ',\n\t'.join([f".param .{'u64' if dtype.__class__ == PtrDType else self.types[dtype]} {name}" for name,dtype in bufs])
+    return f"{self.kernel_prefix} {function_name}({params}) {{\n{kernel}\n}}"
 
   def render(self, name:str, uops:List[UOp]) -> str:
     kernel:List[str] = []
