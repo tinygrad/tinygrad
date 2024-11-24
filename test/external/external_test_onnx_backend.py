@@ -55,6 +55,7 @@ if not is_dtype_supported(dtypes.float64):
   backend_test.exclude('test_operator_add*')
   backend_test.exclude('test_einsum_*')
   backend_test.exclude('test_cumsum_*')
+  backend_test.exclude('test_cumprod_*')
 
 if not is_dtype_supported(dtypes.float16):
   backend_test.exclude('float16')
