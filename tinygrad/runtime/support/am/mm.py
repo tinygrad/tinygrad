@@ -1,6 +1,7 @@
 from __future__ import annotations
 import ctypes
 from tinygrad.runtime.autogen import libpciaccess, amdgpu_2, amdgpu_gc_11_0_0, amdgpu_mmhub_3_0_0
+from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import to_mv, mv_address, round_up, getenv
 
 class PhysicalMemory:
@@ -51,6 +52,59 @@ class MM:
     self.phys_allocator = PhysicalAllocator(adev, vram_size)
     self.next_vaddr = 0
     self.root_pt = PTE(self.adev, self.palloc(0x1000, zero=True), lv=2) # 3rd level (2,1,0), 1gb pages
+
+  def page_table_walker(self, page_table, vaddr, size, offset=0) -> Generator[Tuple[int, int, int, int], None, None]:
+    pte_covers = 1 << ((9 * page_table.lv) + 12)
+
+    def _move_cursor(sz):
+      nonlocal vaddr, offset, size
+      vaddr += sz
+      offset += sz
+      size -= sz
+
+    def _level_down(va, sz):
+      entry = page_table.get_entry(entry_idx:=(va // pte_covers) % 512)
+      if entry & am.AMDGPU_PTE_VALID:
+        assert (entry & amdgpu_2.AMDGPU_PDE_PTE) == 0, "Must be table"
+        child_page_table = PTE(self.adev, PhysicalMemory(self.adev, entry & 0x0000FFFFFFFFF000, 0x1000), lv=page_table.lv - 1)
+      else:
+        child_page_table = PTE(self.adev, self.palloc(0x1000, zero=True), lv=page_table.lv - 1)
+        page_table.set_table(entry_idx, child_page_table)
+      yield from self.page_table_walker(child_page_table, va, sz, offset=offset)
+      # TODO: Free the child_page_table after flags changed there.
+
+    # First pte is not full covered
+    if vaddr % pte_covers != 0:
+      yield from _level_down(vaddr, min(pte_covers - (vaddr % pte_covers), size))
+      _move_cursor(min(pte_covers - (vaddr % pte_covers), size))
+
+    n_ptes = size // pte_covers
+    if n_ptes > 0: yield (vaddr, offset, (vaddr // pte_covers) % 512, n_ptes, pte_covers, page_table)
+    _move_cursor(n_ptes * pte_covers)
+
+    # Last pte is not full covered
+    if size > 0: yield from _level_down(vaddr, size)
+
+  def map_range_2(self, vaddr, paddr, size, uncached=False) -> VirtualMapping:
+    for va, off, pte_st_idx, n_ptes, pte_covers, page_table in self.page_table_walker(self.root_pt, vaddr, size):
+      # To optimize TLB entries count, need to map pages as contigous entries. Determine size of each chunks.
+      while n_ptes > 0:
+        frags_cnt = min((va.bit_length() - 1 if va != 0 else 31), (n_ptes * pte_covers).bit_length() - 1) - 12
+        assert frags_cnt >= 0
+
+        update_ptes = (1 << (frags_cnt + 12)) // pte_covers
+        for pte_idx in range(update_ptes):
+          assert page_table.get_entry(pte_st_idx + pte_idx) & amdgpu_2.AMDGPU_PTE_VALID == 0, "Entry already set"
+          page_table.set_page(pte_st_idx + pte_idx, paddr + off, uncached=uncached, frag=frags_cnt)
+          # print(f"Mapping page: {hex(vaddr + off)} -> {hex(paddr + off)} (0x{size:x}), nptes={update_ptes} incr=0x{pte_covers:x} {uncached=} {frags_cnt=}")
+          off += pte_covers
+
+        pte_st_idx += update_ptes
+        n_ptes -= update_ptes
+
+    self.adev.gmc.flush_tlb(ip="GC", vmid=0)
+    self.adev.gmc.flush_tlb(ip="MM", vmid=0)
+    return VirtualMapping(self.adev, vaddr, paddr, size)
 
   def map_range(self, pde, vaddr, paddr, size, uncached=False) -> VirtualMapping:
     if getenv("TRACE_MM"): print(f"map_range: pde:0x{pde.pm.paddr:X} {hex(vaddr)} -> {hex(paddr)} ({size}), level={pde.lv}")
@@ -127,7 +181,7 @@ class MM:
 
     self.next_vaddr = addr + size
     assert self.next_vaddr <= self.adev.gmc.vm_end
-    return self.map_range(self.root_pt, addr, self.palloc(size).paddr, size, uncached=uncached)
+    return self.map_range_2(addr, self.palloc(size).paddr, size, uncached=uncached)
   def vfree(self, vm:VirtualMapping): pass
 
   def palloc(self, size, align=0x1000, zero=False) -> PhysicalMemory:

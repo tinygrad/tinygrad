@@ -4,7 +4,7 @@ import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, co
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram
-from tinygrad.device import BufferSpec
+from tinygrad.device import LRUAllocator, BufferSpec
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, from_mv, lo32, hi32
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess
@@ -330,11 +330,11 @@ class AMDPciAllocator(LRUAllocator):
     super().__init__()
   def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer: return self.device._gpu_alloc(size, uncached=options.uncached)
   def _free(self, opaque, options:BufferOptions): self.device._gpu_free(opaque)
-  def copyin(self, dest:HCQBuffer, src:memoryview): ctypes.memmove(dest.cpu_addr, mv_address(src), src.nbytes)
-  def copyout(self, dest:memoryview, src:HCQBuffer):
+  def _copyin(self, dest:HCQBuffer, src:memoryview): ctypes.memmove(dest.cpu_addr, mv_address(src), src.nbytes)
+  def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.device.synchronize()
     ctypes.memmove(from_mv(dest), src.cpu_addr, dest.nbytes)
-  def offset(self, buf:AMDPciBuffer, size:int, offset:int): return AMDPciBuffer(buf.va_addr+offset, size, buf.cpu_addr+offset)
+  def _offset(self, buf:AMDPciBuffer, size:int, offset:int): return AMDPciBuffer(buf.va_addr+offset, size, buf.cpu_addr+offset)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 
