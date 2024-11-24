@@ -135,7 +135,7 @@ def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
 
     # approximate top p
     # because we are already limited to top k elements we can do top p "without sorting"
-    output_cumsum = output[::-1]._cumsum()[::-1] + t.sum()
+    output_cumsum = output[::-1].cumsum()[::-1] + t.sum()
     output = (output_cumsum >= (1 - p)) * output
     output_indices = (output_cumsum >= (1 - p)) * output_indices
 
