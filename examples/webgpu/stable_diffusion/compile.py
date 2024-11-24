@@ -163,7 +163,7 @@ if __name__ == "__main__":
 
     if step.name == "diffusor":
       if args.remoteweights:
-        base_url = "https://huggingface.co/wpmed/tinygrad-sd-f16/resolve/main"
+        base_url = "https://huggingface.co/wpmed/stable-diffusion-f16-new/resolve/main"
       else:
         state = get_state_dict(model)
         safe_save(state, os.path.join(os.path.dirname(__file__), "net.safetensors"))
