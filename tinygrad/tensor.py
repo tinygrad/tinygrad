@@ -2242,16 +2242,14 @@ class Tensor(SimpleMathTrait):
 
   def cumprod(self, axis:int=0) -> Tensor:
     """
-    Computes the cumulative product of the tensor along the specified axis.
-
-    You can pass in the `axis` keyword argument to control the axis along which the cumulative sum is computed.
+    Computes the cumulative product of the tensor along the specified `axis`.
 
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.ones(2, 3)
+    t = Tensor([2, -0.5, 2, -0.25])
     print(t.numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
-    print(t.cumsum(1).numpy())
+    print(t.cumprod(1).numpy())
     ```
     """
     return self._split_cumalu(axis, Ops.MUL)
