@@ -259,7 +259,7 @@ def get_isolated_children(r:UOp, reduce_for_op:Dict[UOp, UOp], children:DefaultD
   for tr in group: recursive_group(tr, unwrap(allbufs[tr].st), tr, children, allbufs, realizes, reduce_for_op, descendants, cache={})
   return merge_dicts([group, {} if any(tr in group for tr in descendants) else descendants])
 
-def group_realizes(ctx:ScheduleContext, realizes:Dict[UOp, UOp]) -> List[List[UOp]]:
+def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
   """search the big graph for all the reduceops that need to realize, sometimes group/fuse the reduceop"""
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[UOp, UOp] = {}
@@ -268,22 +268,22 @@ def group_realizes(ctx:ScheduleContext, realizes:Dict[UOp, UOp]) -> List[List[UO
   for r, r_uop in ctx.allbufs.items():
     if (r_uop:=uval(r_uop)).op is not Ops.REDUCE_AXIS: continue
     if FUSE_CONV_BW and uval((x:=r_uop.src[0]).base).op is r_uop.op and x.base is not x: double_reduces.append(r)
-    if r in realizes: continue
+    if r in ctx.realizes: continue
     group: Dict[UOp, None] = {}
-    recursive_group(r, unwrap(r_uop.st), r, ctx.children, ctx.allbufs, realizes, reduce_for_op, group, cache={})
+    recursive_group(r, unwrap(r_uop.st), r, ctx.children, ctx.allbufs, ctx.realizes, reduce_for_op, group, cache={})
     # max one reduceop per kernel
     can_chase = all(tr not in reduce_for_op for tr in group)
     # TODO: forced_realize exists because the scheduler is incapable of checking for self-contained DAGs
     forced_realize = r in group
     if not forced_realize and len(group) > 1:
-      group = get_isolated_children(r, reduce_for_op, ctx.children, ctx.allbufs, realizes, group)
+      group = get_isolated_children(r, reduce_for_op, ctx.children, ctx.allbufs, ctx.realizes, group)
     # can only fuse assign if no other assign_target is used in the kernel
     if not forced_realize and any(x in ctx.assigns for x in group):
       parents = deque((r, *group))
       while parents and not forced_realize:
         if (p_uop:=ctx.allbufs.get(p:=parents.pop())) is None: continue
         if (p_uop:=uval(p_uop)).op is Ops.ASSIGN and p not in group: forced_realize, can_chase = True, False
-        if p in realizes: continue
+        if p in ctx.realizes: continue
         parents.extend([x.base.src[0] for x in p_uop.src if x.base.op is Ops.VIEW and len(x.base.src) != 0])
     if forced_realize or not group:
       tr = r
@@ -302,23 +302,23 @@ def group_realizes(ctx:ScheduleContext, realizes:Dict[UOp, UOp]) -> List[List[UO
         if (tr_uop:=uval(ctx.allbufs[tr])).op is Ops.CAST and tr_uop.dtype.base.itemsize > tr_uop.src[0].dtype.base.itemsize:
           tr = tr_uop.src[0].base.buf_uop
       group = {tr: None}
-      realizes[tr] = tr
+      ctx.realizes[tr] = tr
     reduce_for_op.update((tr, r) for tr in group)
     if FUSE_ARANGE and r_uop.arg[0] is Ops.ADD and uval(r_uop.src[0].base).op is Ops.CONST: reduce_of_const.append(r)
   # fuse double reduces with no other child
   for reduceop in double_reduces:
     top_reduce = uval(ctx.allbufs[reduceop]).src[0].base.buf_uop
-    if len(ctx.children[top_reduce]) == 1: del realizes[top_reduce]
+    if len(ctx.children[top_reduce]) == 1: del ctx.realizes[top_reduce]
   # maybe fuse arange with its children
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
     if any(ctx.allbufs[tr].src[1].is_contiguous_base for tr in group): continue
     kernel_children = {c for tr in group for c in ctx.children[tr] if uval(ctx.allbufs[c]).op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
-    for tr in group: del realizes[tr]
+    for tr in group: del ctx.realizes[tr]
   # group BUFFER uops into kernels
   output_groups: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-  for ubuf in realizes: output_groups[reduce_for_op.get(ubuf, ubuf)].append(ubuf)
+  for ubuf in ctx.realizes: output_groups[reduce_for_op.get(ubuf, ubuf)].append(ubuf)
   return list(output_groups.values())
 
 # **** Schedule creation and BFS toposort
@@ -379,7 +379,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   buffers: Dict[UOp, Buffer] = {}
   big_graph = graph_rewrite(UOp.sink(*(to_uop(x, ctx, buffers, cache) for x in outs)), do_realize, ctx.realizes)
   # group realizes into kernels
-  store_groups = group_realizes(ctx, ctx.realizes)
+  store_groups = group_realizes(ctx)
   graph_rewrite(big_graph, break_sched, ctx)
   # preschedule realize groups
   prescheduled: List[ScheduleItem] = []
