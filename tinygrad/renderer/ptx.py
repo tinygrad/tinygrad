@@ -104,7 +104,7 @@ string_rewrite = PatternMatcher([
 
   (UPat(Ops.LOAD, name="x", src=(UPat.var('loc'),), allow_any_len=True), lambda ctx, x, loc:
    f"ld.{mem_type(x)}{f'.v{cnt}' if (cnt:=x.dtype.count) > 1 else ''}.{ctx.mem_types[x.dtype.scalar()]} " + \
-   f"{{{_x if (isinstance(_x:=ctx.r[x], str)) else ', '.join(_x)}}}, [{ctx.r[loc]}+0];"), 
+   f"{{{_x if (isinstance(_x:=ctx.r[x], str)) else ', '.join(_x)}}}, [{ctx.r[loc]}+0];"),
 
   (UPat(Ops.DEFINE_ACC, name="x", src=(UPat.cvar("pred", dtype=dtypes.bool),), allow_any_len=True), lambda ctx, x, pred: [
     f"setp.ne.s16 {ctx.r[pred]}, {render_val(pred.arg, pred.dtype)}, 0;", f"mov.pred {ctx.r[x]}, {ctx.r[pred]};"]),
