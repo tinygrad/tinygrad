@@ -300,7 +300,7 @@
 
     window.addEventListener('load', async function() {
         if (!navigator.gpu) {
-            document.getElementById("wgpuError").style.display = "";
+            document.getElementById("wgpuError").style.display = "block";
             document.getElementById("sdTitle").style.display = "none";
             return;
         }
