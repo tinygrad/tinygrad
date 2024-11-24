@@ -185,7 +185,11 @@ class GroupOp:
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
-def can_pad(u:UOp) -> bool: return not any(x.op in GroupOp.UnsafePad for x in u.sparents)
+def can_pad(u:UOp, edges:Dict[UOp, UOp], visisted:Set[UOp]) -> bool:
+  if u.op in GroupOp.UnsafePad: return False
+  if (len(u.src) == 2 and u.src[0] in edges) or u in visisted: return True
+  visisted.add(u)
+  return all(can_pad(x.base, edges, visisted) for x in u.src)
 
 END_FOR_UOP = {Ops.IF:(Ops.STORE, Ops.ENDIF), Ops.RANGE:(Ops.ASSIGN, Ops.ENDRANGE)}
 
@@ -284,7 +288,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __float__(self): return self._eval(dtypes.floats, float)
   def substitute(self, dvars:Dict[UOp, UOp]):
     with Context(TRACK_MATCH_STATS=0):
-      return graph_rewrite(self, _substitute, dvars)
+      return graph_rewrite(self, _substitute, dvars, bottom_up=True)
 
   # *** uop syntactic sugar ***
 
@@ -350,10 +354,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop movement ops ***
 
   @property
-  def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
+  def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
   def view(self, st:ShapeTracker) -> UOp:
+    if self.st is None: return self
     assert self.op is not Ops.STORE, "VIEW of STORE is invalid, STORE is always base"
-    return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
+    if st.contiguous and self.base.st == st: return self.base
+    return UOp(Ops.VIEW, self.dtype, (self,), st)
   def reshape(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).reshape(arg))
 
   # *** uop Buffer stuff ***
@@ -759,11 +765,18 @@ class RewriteContext:
     new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
     self.replace[n] = ret = n if new_n is None else self.rewrite(new_n)
     return ret
+  def bottom_up_rewrite(self, n:UOp) -> UOp:
+    if (rn := self.replace.get(n)) is not None: return rn
+    new_n: UOp|None = n
+    while new_n is not None: last_n, new_n = new_n, self.pm.rewrite(new_n, self.ctx)
+    new_src = tuple(map(self.bottom_up_rewrite, last_n.src))
+    self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
+    return ret
 
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
   if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0:
     rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
-  return RewriteContext(pm, ctx).rewrite(sink)
+  return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
 
@@ -1167,3 +1180,15 @@ sint = Union[int, UOp]
 Variable = UOp
 
 ConstLike = Union[ConstType, Variable, Tuple[ConstType, ...]]
+
+# *** uop swizzling ***
+
+merge_views = PatternMatcher([(UPat(Ops.VIEW, name="s0").view(name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st))])
+
+# push VIEW to loads
+view_left = merge_views+PatternMatcher([
+  # VIEW before elementwise ops
+  (UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN}, name="e").view(name="v"), lambda e,v: e.replace(src=tuple(s.view(v.st) for s in e.src))),
+  # early merge VIEW buffer ops
+  (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((s.st+v.st).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
+])

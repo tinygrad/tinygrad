@@ -259,7 +259,8 @@ class LayerNorm:
   def __init__(self, normalized_shape:Union[int, Tuple[int, ...]], eps=1e-5, elementwise_affine=True):
     self.normalized_shape: Tuple[int, ...] = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
     self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(self.normalized_shape))), eps, elementwise_affine
-    self.weight, self.bias = (Tensor.ones(*self.normalized_shape), Tensor.zeros(*self.normalized_shape)) if elementwise_affine else (None, None)
+    self.weight: Optional[Tensor] = Tensor.ones(*self.normalized_shape) if elementwise_affine else None
+    self.bias: Optional[Tensor] = Tensor.zeros(*self.normalized_shape) if elementwise_affine else None
 
   def __call__(self, x:Tensor) -> Tensor:
     assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"last dimensions of {x.shape} must match {self.normalized_shape}"
@@ -322,10 +323,9 @@ class Embedding:
     self.vocab_sz, self.embed_sz, self.weight = vocab_size, embed_size, Tensor.glorot_uniform(vocab_size, embed_size)
 
   def __call__(self, idx:Tensor) -> Tensor:
-    if idx.numel() == 0: return Tensor.empty(idx.shape+(self.embed_sz,), device=self.weight.device)
-    arange_shp, weight_shp, big_shp = (self.vocab_sz, 1), (self.vocab_sz, self.embed_sz), idx.shape+(self.vocab_sz, self.embed_sz,)
-    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).reshape(arange_shp)
-    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1,)).expand(big_shp), self.weight.reshape(weight_shp).expand(big_shp)
+    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).unsqueeze(-1)
+    big_shp = idx.shape+(self.vocab_sz, self.embed_sz)
+    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), self.weight.expand(big_shp)
     return (arange == idx).mul(vals).sum(-2, acc_dtype=vals.dtype)
 
 class LSTMCell:
@@ -341,7 +341,8 @@ class LSTMCell:
     stdv = 1.0 / math.sqrt(hidden_size)
     self.weight_ih = Tensor.uniform(hidden_size*4, input_size, low=-stdv, high=stdv)
     self.weight_hh = Tensor.uniform(hidden_size*4, hidden_size, low=-stdv, high=stdv)
-    self.bias_ih, self.bias_hh = (Tensor.zeros(hidden_size*4), Tensor.zeros(hidden_size*4)) if bias else (None, None)
+    self.bias_ih: Optional[Tensor] = Tensor.zeros(hidden_size*4) if bias else None
+    self.bias_hh: Optional[Tensor] = Tensor.zeros(hidden_size*4) if bias else None
 
   def __call__(self, x:Tensor, hc:Optional[Tuple[Tensor, Tensor]]=None) -> Tuple[Tensor, Tensor]:
     if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, device=x.device),)*2
