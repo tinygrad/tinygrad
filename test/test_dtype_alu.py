@@ -173,5 +173,12 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
   def test_int32_cast(self, a, dtype): universal_test_cast(a, dtypes.int32, dtype)
 
+  @unittest.expectedFailure
+  def test_unsafe_cast_float_to_int_failure(self):
+    val = float(dtypes.max(dtypes.int32) - 1)
+    t1 = Tensor([val], dtype=dtypes.float32).cast(dtypes.int32)
+    t2 = Tensor(val, dtype=dtypes.float32).cast(dtypes.int32)
+    np.testing.assert_equal(t1.item(), t2.item())
+
 if __name__ == '__main__':
   unittest.main()
