@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import Tuple, List, Any
+from typing import Tuple, List, Any, Optional
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib, decimal, sys
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWComputeQueue, HWCopyQueue, HCQArgsState, HCQSignal, HCQProgram
-from tinygrad.device import BufferOptions
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram
+from tinygrad.device import BufferSpec
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc
@@ -54,14 +54,14 @@ class AMDSignal(HCQSignal):
         kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(self._evt_array), num_events=1, wait_for_all=1, timeout=1000)
     raise RuntimeError(f"wait_signal: not set to {value}, but {self._signal[0]}, {timeout} ms TIMEOUT!")
 
-class AMDComputeQueue(HWComputeQueue):
+class AMDComputeQueue(HWQueue):
   def __init__(self):
     self.cmd_idx_to_local_offset, self.cmd_idx_to_global_offset, self.cmd_idx_to_dispatch_packet = {}, {}, {}
     super().__init__()
 
   def __del__(self):
     if self.binded_device is not None:
-      self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferOptions(cpu_access=True, nolru=True, uncached=True))
+      self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True, uncached=True))
 
   def _acquire_mem(self, addr=0x0, sz=(1 << 64)-1, gli=1, glm=1, glk=1, glv=1, gl1=1, gl2=1):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_ACQUIRE_MEM, 6), 0, *data64_le(sz), *data64_le(addr), 0,
@@ -92,11 +92,11 @@ class AMDComputeQueue(HWComputeQueue):
       nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_DONE), 0xffffffff, 0xffffffff, 0x20]
     self._acquire_mem()
 
-  def _exec(self, prg, args_state, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
+  def _exec(self, prg:AMDProgram, args_state:AMDArgsState, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
     self._acquire_mem(gli=0, gl2=0)
 
     cmd_idx = self._cur_cmd_idx()
-    user_regs = [*data64_le(prg.device.scratch.va_addr), 0xffffffff, 0xc00000] if prg.enable_private_segment_sgpr else []
+    user_regs = [*data64_le(prg.dev.scratch.va_addr), 0xffffffff, 0xc00000] if prg.enable_private_segment_sgpr else []
     if prg.enable_dispatch_ptr:
       dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=args_state.ptr + prg.kernargs_segment_size)
       dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
@@ -109,11 +109,11 @@ class AMDComputeQueue(HWComputeQueue):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8)]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC1), prg.rsrc1, prg.rsrc2]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC3), 0]
-    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_TMPRING_SIZE), prg.device.tmpring_size]
-    if prg.device.has_scratch_base_registers:
+    self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.regCOMPUTE_TMPRING_SIZE), prg.dev.tmpring_size]
+    if prg.dev.has_scratch_base_registers:
       self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2),
-                 gfxreg(amd_gpu.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO), *data64_le(prg.device.scratch.va_addr >> 8)]
-    if prg.device.target < 110000: self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.mmCP_COHER_START_DELAY), 0x20]
+                 gfxreg(amd_gpu.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO), *data64_le(prg.dev.scratch.va_addr >> 8)]
+    if prg.dev.target < 110000: self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 1), gfxreg(amd_gpu.mmCP_COHER_START_DELAY), 0x20]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 4), gfxreg(amd_gpu.regCOMPUTE_RESTART_X), 0, 0, 0, 0]
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE0)] + [0xFFFFFFFF] * 2
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_SET_SH_REG, 2), gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE2)] + [0xFFFFFFFF] * 2
@@ -137,25 +137,26 @@ class AMDComputeQueue(HWComputeQueue):
       if global_size is not None:
         dp.grid_size_x,dp.grid_size_y,dp.grid_size_z = [g*l for g,l in zip(global_size,[dp.workgroup_size_x,dp.workgroup_size_y,dp.workgroup_size_z])]
 
-  def _wait(self, signal, value=0):
+  def _wait(self, signal:AMDSignal, value=0):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
       amd_gpu.WAIT_REG_MEM_MEM_SPACE(1) | amd_gpu.WAIT_REG_MEM_OPERATION(0) | amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.WAIT_REG_MEM_ENGINE(0), *data64_le(signal._value_addr), value, 0xffffffff, 4]
 
-  def _timestamp(self, signal): self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=signal._timestamp_addr)
+  def _timestamp(self, signal:AMDSignal):
+    self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=signal._timestamp_addr)
 
-  def _signal(self, signal, value=0):
+  def _signal(self, signal:AMDSignal, value=0):
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
     self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal._value_addr, value=value, cache_flush=True)
     if signal._event_mailbox_ptr != 0:
       self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal._event_mailbox_ptr,
                         value=signal._event.event_id, cst=signal._event.event_id, cache_flush=False)
 
-  def _update_wait(self, cmd_idx, signal=None, value=None):
+  def _update_wait(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
     if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(signal._value_addr))
     if value is not None: self._patch(cmd_idx, offset=4, data=[value])
 
-  def _update_signal(self, cmd_idx, signal=None, value=None):
+  def _update_signal(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
     if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(signal._value_addr))
     if value is not None: self._patch(cmd_idx, offset=5, data=data64_le(value))
 
@@ -163,9 +164,9 @@ class AMDComputeQueue(HWComputeQueue):
     if signal is not None and self.cmds_len[cmd_idx] > 8:
       self._patch(cmd_idx, offset=11, data=[*data64_le(signal._event_mailbox_ptr), *data64_le(signal._event.event_id), signal._event.event_id])
 
-  def bind(self, device):
-    self.binded_device = device
-    self.hw_page = device.allocator.alloc(len(self.q) * 4, BufferOptions(cpu_access=True, nolru=True, uncached=True))
+  def bind(self, dev:AMDDevice):
+    self.binded_device = dev
+    self.hw_page = dev.allocator.alloc(len(self.q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
     hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
     for i, value in enumerate(self.q): hw_view[i] = value
 
@@ -173,17 +174,17 @@ class AMDComputeQueue(HWComputeQueue):
                          len(self.q) | amd_gpu.INDIRECT_BUFFER_VALID]
     self.q = hw_view # type: ignore
 
-  def _submit(self, device):
-    cmds = self.indirect_cmd if device == self.binded_device else self.q
+  def _submit(self, dev:AMDDevice):
+    cmds = self.indirect_cmd if dev == self.binded_device else self.q
 
-    for i, value in enumerate(cmds): device.compute_queue.ring[(device.compute_queue.put_value + i) % len(device.compute_queue.ring)] = value
+    for i, value in enumerate(cmds): dev.compute_queue.ring[(dev.compute_queue.put_value + i) % len(dev.compute_queue.ring)] = value
 
-    device.compute_queue.put_value += len(cmds)
-    device.compute_queue.write_ptr[0] = device.compute_queue.put_value
-    device.compute_queue.doorbell[0] = device.compute_queue.put_value
+    dev.compute_queue.put_value += len(cmds)
+    dev.compute_queue.write_ptr[0] = dev.compute_queue.put_value
+    dev.compute_queue.doorbell[0] = dev.compute_queue.put_value
 
 SDMA_MAX_COPY_SIZE = 0x400000
-class AMDCopyQueue(HWCopyQueue):
+class AMDCopyQueue(HWQueue):
   def __init__(self):
     self.internal_cmd_sizes, self.copy_cmds_per_copy = [], {}
     super().__init__()
@@ -208,49 +209,51 @@ class AMDCopyQueue(HWCopyQueue):
       if src is not None: self._patch(cmd_idx, offset=3+i*7, data=[*data64_le(src + SDMA_MAX_COPY_SIZE*i)])
       if dest is not None: self._patch(cmd_idx, offset=5+i*7, data=[*data64_le(dest + SDMA_MAX_COPY_SIZE*i)])
 
-  def _signal(self, signal, value=0):
+  def _signal(self, signal:AMDSignal, value=0):
     self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._value_addr), value])
 
     if signal._event_mailbox_ptr != 0:
       self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._event_mailbox_ptr), signal._event.event_id])
       self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(signal._event.event_id)])
 
-  def _wait(self, signal, value=0):
+  def _wait(self, signal:AMDSignal, value=0):
     self._q([amd_gpu.SDMA_OP_POLL_REGMEM | amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(signal._value_addr), value, 0xffffffff,
       amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)])
 
-  def _update_signal(self, cmd_idx, signal=None, value=None): return self._update_wait(cmd_idx, signal, value) # the same offsets and commands
-  def _update_wait(self, cmd_idx, signal=None, value=None):
+  def _update_signal(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
+    return self._update_wait(cmd_idx, signal, value) # the same offsets and commands
+
+  def _update_wait(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
     if signal is not None: self._patch(cmd_idx, offset=1, data=data64_le(signal._value_addr))
     if value is not None: self._patch(cmd_idx, offset=3, data=[value])
 
-  def _timestamp(self, signal):
+  def _timestamp(self, signal:AMDSignal):
     self._q([amd_gpu.SDMA_OP_TIMESTAMP | amd_gpu.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
              *data64_le(signal._timestamp_addr)])
 
-  def _submit(self, device):
-    if device.sdma_queue.put_value - device.sdma_queue.read_ptr[0] > device.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
+  def _submit(self, dev:AMDDevice):
+    if dev.sdma_queue.put_value - dev.sdma_queue.read_ptr[0] > dev.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
 
     tail_blit_dword = 0
     for cmdsz in self.internal_cmd_sizes:
-      if (tail_blit_dword + cmdsz) * 4 >= device.sdma_queue.ring.nbytes - device.sdma_queue.put_value % device.sdma_queue.ring.nbytes: break
+      if (tail_blit_dword + cmdsz) * 4 >= dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes: break
       tail_blit_dword += cmdsz
 
-    start_idx = (device.sdma_queue.put_value % device.sdma_queue.ring.nbytes) // 4
-    device.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', self.q[:tail_blit_dword])
-    device.sdma_queue.put_value += tail_blit_dword * 4
+    start_idx = (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes) // 4
+    dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', self.q[:tail_blit_dword])
+    dev.sdma_queue.put_value += tail_blit_dword * 4
 
     if (rem_packet_cnt := len(self.q) - tail_blit_dword) > 0:
-      zero_fill = device.sdma_queue.ring.nbytes - device.sdma_queue.put_value % device.sdma_queue.ring.nbytes
-      ctypes.memset(mv_address(device.sdma_queue.ring) + (device.sdma_queue.put_value % device.sdma_queue.ring.nbytes), 0, zero_fill)
-      device.sdma_queue.put_value += zero_fill
+      zero_fill = dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes
+      ctypes.memset(mv_address(dev.sdma_queue.ring) + (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes), 0, zero_fill)
+      dev.sdma_queue.put_value += zero_fill
 
-      device.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', self.q[tail_blit_dword:])
-      device.sdma_queue.put_value += rem_packet_cnt * 4
+      dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', self.q[tail_blit_dword:])
+      dev.sdma_queue.put_value += rem_packet_cnt * 4
 
-    device.sdma_queue.write_ptr[0] = device.sdma_queue.put_value
-    device.sdma_queue.doorbell[0] = device.sdma_queue.put_value
+    dev.sdma_queue.write_ptr[0] = dev.sdma_queue.put_value
+    dev.sdma_queue.doorbell[0] = dev.sdma_queue.put_value
 
 class AMDArgsState(HCQArgsState):
   def __init__(self, ptr:int, prg:AMDProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
@@ -266,11 +269,12 @@ class AMDArgsState(HCQArgsState):
   def update_var(self, index:int, val:int): self.vals[index] = val
 
 class AMDProgram(HCQProgram):
-  def __init__(self, device:AMDDevice, name:str, lib:bytes):
+  def __init__(self, dev:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
-    self.device, self.name, self.lib = device, name, lib
+    self.dev: AMDDevice = dev
+    self.name, self.lib = name, lib
     image, sections, _ = elf_loader(self.lib)
-    self.lib_gpu = self.device.allocator.alloc(round_up(image.nbytes, 0x1000), BufferOptions(cpu_access=True, nolru=True))
+    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), BufferSpec(cpu_access=True, nolru=True))
     ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
 
     entry_point = min(sh.header.sh_addr for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS and sh.header.sh_flags & libc.SHF_ALLOC)
@@ -279,41 +283,41 @@ class AMDProgram(HCQProgram):
     self.kernargs_segment_size = image[entry_point+8:entry_point+12].cast("I")[0]
 
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
-    if lds_size > (self.device.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
-    if self.private_segment_size > self.device.max_private_segment_size: raise RuntimeError("Too many resources requsted: private_segment_size")
+    if lds_size > (self.dev.properties['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requsted: group_segment_size")
+    if self.private_segment_size > self.dev.max_private_segment_size: raise RuntimeError("Too many resources requsted: private_segment_size")
 
     code = hsa.amd_kernel_code_t.from_address(self.lib_gpu.va_addr + entry_point) # NOTE: this is wrong, it's not this object
     assert code.kernel_code_properties & 0x400 == 0x400 # ENABLE_WAVEFRONT_SIZE32
 
     # Set rsrc1.priv=1 on gfx11 to workaround cwsr.
-    self.rsrc1 = code.compute_pgm_rsrc1 | ((1 << 20) if 110000 <= self.device.target < 120000 else 0)
-    self.rsrc2 = code.compute_pgm_rsrc2 | (lds_size << 15)
-    self.prog_addr = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
+    self.rsrc1: int = code.compute_pgm_rsrc1 | ((1 << 20) if 110000 <= self.dev.target < 120000 else 0)
+    self.rsrc2: int = code.compute_pgm_rsrc2 | (lds_size << 15)
+    self.prog_addr: int = self.lib_gpu.va_addr + entry_point + code.kernel_code_entry_byte_offset
 
     # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution.
     # The packet is represented as a pointer and set up in SGPRs. Space for the packet is allocated as part of the kernel arguments.
-    self.enable_dispatch_ptr = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
-    self.enable_private_segment_sgpr = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
+    self.enable_dispatch_ptr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
+    self.enable_private_segment_sgpr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
     additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
 
-    super().__init__(AMDArgsState, self.device, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
+    super().__init__(AMDArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
 
   def __del__(self):
-    if hasattr(self, 'lib_gpu'): self.device.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferOptions(cpu_access=True, nolru=True))
+    if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))
 
-class AMDAllocator(HCQAllocator):
-  def __init__(self, device:AMDDevice): super().__init__(device, batch_size=SDMA_MAX_COPY_SIZE)
+class AMDAllocator(HCQAllocator['AMDDevice']):
+  def __init__(self, dev:AMDDevice): super().__init__(dev, batch_size=SDMA_MAX_COPY_SIZE)
 
-  def _alloc(self, size:int, options:BufferOptions) -> HCQBuffer:
-    if options.host: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
-    if options.cpu_access and options.uncached: return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    return self.device._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
+  def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
+    if options.host: return self.dev._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR, public=True)
+    if options.cpu_access and options.uncached: return self.dev._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
+    return self.dev._gpu_alloc(size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM, public=options.cpu_access)
 
-  def _free(self, opaque, options:BufferOptions):
-    self.device.synchronize()
-    self.device._gpu_free(opaque)
+  def _free(self, opaque, options:BufferSpec):
+    self.dev.synchronize()
+    self.dev._gpu_free(opaque)
 
-  def map(self, buf:HCQBuffer): self.device._gpu_map(buf._base if hasattr(buf, '_base') else buf)
+  def map(self, buf:HCQBuffer): self.dev._gpu_map(buf._base if hasattr(buf, '_base') else buf)
 
 MAP_FIXED, MAP_NORESERVE = 0x10, 0x400
 
@@ -417,6 +421,7 @@ class AMDDevice(HCQCompiled):
     vgpr_size_per_cu = 0x60000 if self.target in {110000, 110001, 120000, 120001} else 0x40000
     wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * (max_cu_id + 1), mmap.PAGESIZE)
     ctl_stack_size = round_up(12 * (max_cu_id + 1) * (max_wave_id + 1) + 8 + 40, mmap.PAGESIZE)
+    self.debug_memory_size = round_up((max_cu_id + 1) * (max_wave_id + 1) * 32, 64)
 
     self.compute_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x100000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size)
@@ -431,12 +436,13 @@ class AMDDevice(HCQCompiled):
   def _alloc_queue(self, queue_type, ring_size, ctx_save_restore_size=None, eop_buffer_size=None, ctl_stack_size=0) -> AMDQueueDesc:
     gart = self._gpu_alloc(0x1000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
     ring = self._gpu_alloc(ring_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-    cwsr_ctx = self._gpu_alloc(ctx_save_restore_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) if ctx_save_restore_size else None
+    cwsr_ctx = self._gpu_alloc(round_up(ctx_save_restore_size + self.debug_memory_size, mmap.PAGESIZE),
+                               kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) if ctx_save_restore_size else None
     eop_buffer = self._gpu_alloc(eop_buffer_size, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM) if eop_buffer_size else None
     queue = kfd.AMDKFD_IOC_CREATE_QUEUE(AMDDevice.kfd, ring_base_address=ring.va_addr, ring_size=ring.size, gpu_id=self.gpu_id,
       queue_type=queue_type, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE, queue_priority=kfd.KFD_MAX_QUEUE_PRIORITY,
       eop_buffer_address=eop_buffer.va_addr if eop_buffer else 0, eop_buffer_size=eop_buffer.size if eop_buffer else 0, ctl_stack_size=ctl_stack_size,
-      ctx_save_restore_address=cwsr_ctx.va_addr if cwsr_ctx else 0, ctx_save_restore_size=cwsr_ctx.size if cwsr_ctx else 0,
+      ctx_save_restore_address=cwsr_ctx.va_addr if cwsr_ctx else 0, ctx_save_restore_size=ctx_save_restore_size if cwsr_ctx else 0,
       write_pointer_address=gart.va_addr, read_pointer_address=gart.va_addr + 8)
 
     if not hasattr(self, 'doorbells'):

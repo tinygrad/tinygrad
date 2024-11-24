@@ -23,10 +23,10 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
 
 @dataclass
-class Program:
+class ProgramSpec:
   name:str
   src:str
-  dname:str
+  device:str
   uops:Optional[List[UOp]]=None
   mem_estimate:sint=0  # TODO: get this from the load/store uops once min/max are good
 

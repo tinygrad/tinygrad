@@ -62,8 +62,10 @@ class NVCompiler(CUDACompiler):
   def __init__(self, arch:str): super().__init__(arch, cache_key="nv")
   def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize)
 
-class PTXCompiler(CUDACompiler):
-  def __init__(self, arch:str, cache_key="ptx"): super().__init__(arch, cache_key=cache_key)
+class PTXCompiler(Compiler):
+  def __init__(self, arch:str, cache_key="ptx"):
+    self.arch = arch
+    super().__init__(f"compile_{cache_key}_{self.arch}")
   def compile(self, src:str) -> bytes: return src.replace("TARGET", self.arch).replace("VERSION", "7.8" if self.arch >= "sm_89" else "7.5").encode()
 
 class NVPTXCompiler(PTXCompiler):

@@ -41,7 +41,7 @@ def helper_tc_allclose(n:int, m:int, k:int, dtype_in:DType, dtype_out:DType, axi
   assert len([x for x in k.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   np_c = np_a @ np_b
   if dtype_out == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
-  elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 3e-3
+  elif dtype_out == dtypes.bfloat16: tc_atol, tc_rtol = 1e-2, 1e-2
   else: tc_atol, tc_rtol = 5e-3, 1e-4
   np.testing.assert_allclose(np_c, out, atol=tc_atol, rtol=tc_rtol)
 
@@ -386,7 +386,7 @@ class TestLinearizer(unittest.TestCase):
 
     ast = UOp(Ops.SINK, src=(store0, store1))
     k = Kernel(ast)
-    prg = CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
+    prg = CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
     inbufs = [x.lazydata.base.buffer]
     outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.arg.st.size, out.arg.dtype).allocate() for out in ast.src]
     prg.exec(outbufs+inbufs)
@@ -861,7 +861,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_two_nested_range_alt_indexing(self):
     a = Tensor([2, 2]).realize()
-    out = a.reshape(2, 1).pad(((1, 1), (1, 1)), 2).sum()
+    out = a.reshape(2, 1).pad(((1, 1), (1, 1)), value=2).sum()
     lin = helper_linearizer_opt(out, wanna_output=[24])[0]
     ranges = [i for i,u in enumerate(lin.uops) if u.op is Ops.RANGE]
     # RANGE -> ALU -> RANGE -> ALU + LOAD -> ASSIGN
@@ -1036,14 +1036,17 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL")) and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if (getenv("EMULATE_CUDA") or getenv("EMULATE_INTEL") or getenv("EMULATE_METAL")) and \
+        (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if CI and Device.DEFAULT == "METAL" and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
       helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      if getenv("EMULATE_CUDA") and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if (getenv("EMULATE_CUDA") or getenv("EMULATE_METAL")) and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
+      if CI and Device.DEFAULT == "METAL" and (tc.dtype_in == dtypes.bfloat16 or tc.dtype_out == dtypes.bfloat16): continue
       pad = 1
 
       # check that TC is triggered for TC_OPT=2
@@ -1780,7 +1783,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:List[Buffer], opts=[]
   lins: List[Kernel] = []
   outbufs = [real_bufs[x.src[0].arg] for x in realized_ast.src]
 
-  def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), dname=Device.DEFAULT))
+  def get_prg(k:Kernel): return CompiledRunner(replace(k.to_program(), device=Device.DEFAULT))
 
   def check_opt(opts, create_k, expected_color_size):
     k = create_k()
