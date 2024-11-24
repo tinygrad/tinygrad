@@ -333,7 +333,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const(dtype:DType, b:ConstLike):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
-    return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
+    return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
   @staticmethod
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
@@ -354,10 +354,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop movement ops ***
 
   @property
-  def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
+  def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
   def view(self, st:ShapeTracker) -> UOp:
+    if self.st is None: return self
     assert self.op is not Ops.STORE, "VIEW of STORE is invalid, STORE is always base"
-    return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
+    if st.contiguous and self.base.st == st: return self.base
+    return UOp(Ops.VIEW, self.dtype, (self,), st)
   def reshape(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).reshape(arg))
 
   # *** uop Buffer stuff ***
