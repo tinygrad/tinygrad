@@ -338,8 +338,7 @@ class TestTarExtractPAX(unittest.TestCase):
   max_link_len = 1000_000
 
   def setUp(self):
-    self.test_dir = tempfile.mkdtemp()
-    self.tar_path = pathlib.Path(os.path.join(self.test_dir, 'test.tar'))
+    self.tar_path = pathlib.Path(tempfile.mktemp(".tar"))
     self.test_files = {
       'a/file1.txt': b'Hello, World!',
       'a/b/file2.bin': b'\x00\x01\x02\x03\x04',
@@ -365,15 +364,7 @@ class TestTarExtractPAX(unittest.TestCase):
           link_info.linkname = filename
           tar.addfile(link_info)
 
-    # Create invalid tar file
-    self.invalid_tar_path = pathlib.Path(os.path.join(self.test_dir, 'invalid.tar'))
-    with open(self.invalid_tar_path, 'wb') as f:
-      f.write(b'This is not a valid tar file')
-
-  def tearDown(self):
-    os.remove(self.tar_path)
-    os.remove(self.invalid_tar_path)
-    os.rmdir(self.test_dir)
+  def tearDown(self): os.remove(self.tar_path)
 
   def test_tar_extract_returns_dict(self):
     result = tar_extract(Tensor(self.tar_path))
@@ -403,7 +394,11 @@ class TestTarExtractPAX(unittest.TestCase):
 
   def test_tar_extract_invalid_file(self):
     with self.assertRaises(tarfile.ReadError):
-      tar_extract(Tensor(self.invalid_tar_path))
+      tar_extract(Tensor(b'This is not a valid tar file'))
+
+  def test_tar_extract_invalid_file_long(self):
+    with self.assertRaises(tarfile.HeaderError):
+      tar_extract(Tensor(b'This is not a valid tar file'*100))
 
 class TestTarExtractUSTAR(TestTarExtractPAX):
   tar_format = tarfile.USTAR_FORMAT
