@@ -901,13 +901,13 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
     case [(f, e)] if e.vmax-e.vmin == 1: return (new_f:=(offset+f)%c - offset%c)*e - new_f*e.vmin + offset%c
 
   # cases like (3+3x[0-3])%4 -> 3-x[0-3]
-  lbound = ubound = offset % c
+  lbound = ubound = offset = offset % c
   for (f, e) in terms:
     if f > c//2:
       if (lbound := lbound + (f-c)*(e.vmax-e.vmin)) < 0: break
     elif (ubound := ubound + f*(e.vmax-e.vmin)) >= c: break
   else: # we have found factors such that vmin/vmax of the final expression is between 0 and c, we can remove the mod
-    return functools.reduce(lambda r, t: r + min(t[0], t[0]-c, key=abs)*t[1], terms, x.const_like(rem_const))
+    return functools.reduce(lambda r, t: r + min(t[0], t[0]-c, key=abs)*(t[1]-t[1].vmin), terms, x.const_like(offset))
 
   if not something_changed: return None
   return functools.reduce(lambda r, t: r + t[0]*t[1], terms, x.const_like(rem_const)) % c
