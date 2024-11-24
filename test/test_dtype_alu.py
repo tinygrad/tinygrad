@@ -174,7 +174,7 @@ class TestDTypeALU(unittest.TestCase):
   def test_int32_cast(self, a, dtype): universal_test_cast(a, dtypes.int32, dtype)
 
   @unittest.expectedFailure
-  def test_float_cast_to_int_failure(self):
+  def test_unsafe_cast_float_to_int_failure(self):
     val = float(dtypes.max(dtypes.int32) - 1)
     t1 = Tensor([val], dtype=dtypes.float32).cast(dtypes.int32)
     t2 = Tensor(val, dtype=dtypes.float32).cast(dtypes.int32)
