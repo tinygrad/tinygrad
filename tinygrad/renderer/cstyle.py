@@ -300,6 +300,12 @@ class CUDARenderer(CStyleLanguage):
     st1_pattern=(((1,1),(1,0),(0,2),(0,3),(0,4)),((1,3),(1,5),(1,2),(0,0),(0,1),(1,4))),
     st2_pattern=(((1,1),(1,0),(1,4),(0,0),(0,1)),((0,4),(0,2),(1,5),(0,3),(1,3),(1,2))), reduce_axes=[(0,8),(1,2)],
     upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
+  
+  tensor_cores += [
+    TensorCore(dims=(8,16,32), threads=[(0,4),(0,4),(1,4),(1,4)], dtype_in=di, dtype_out=do, expanded_shape=(4,4,4,4),
+    st1_pattern=(((1,1),(1,0),(0,2),(0,3)),((1,3),(1,2),(0,0),(0,1))),
+    st2_pattern=(((1,1),(1,0),(0,0),(0,1)),((0,2),(1,3),(0,3),(1,2))), reduce_axes=[(0,32)],
+    upcast_axes=([(0,32)],[(1,32)],[(1,32)])) for di, do in ([(dtypes.fp8_e4m3,dtypes.float), (dtypes.fp8_e5m2,dtypes.float)])]
   def __init__(self, arch:str): self.tensor_cores, self.arch = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else [], arch
   def __reduce__(self): return self.__class__, (self.arch,)
 
@@ -320,7 +326,7 @@ class CUDARenderer(CStyleLanguage):
   type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.fp8_e4m3: "__nv_fp8_e4m3", dtypes.fp8_e5m2: "__nv_fp8_e5m2"}
 
   extra_matcher = PatternMatcher([
-    # upcast comparisons to float32. They don't support fp8
+    # upcast comparisons to float32. fp8 not supported
     (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.var("x", dtype=(dtypes.fp8_e4m3, dtypes.fp8_e5m2)), 
                                       UPat.var("y", dtype=(dtypes.fp8_e4m3, dtypes.fp8_e5m2))), name="cmp"),
       lambda cmp,x,y: UOp(cmp.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), cmp.arg)),
