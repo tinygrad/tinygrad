@@ -58,8 +58,16 @@ def mem_type(x: UOp): return 'shared' if x.src[0].op is Ops.DEFINE_LOCAL or any(
 
 def render_store(ctx: "PTXRenderer", x: UOp, bidx: UOp, var: UOp, pred: Optional[UOp]=None):
   gate = f"@{ctx.r[pred]} " if pred is not None and pred.op is not Ops.IF else ""
-  return [f"{gate}st.{mem_type(bidx)}.v{var.dtype.count}.{ctx.mem_types[var.dtype.scalar()]} [{ctx.r[bidx]}+0], {{{', '.join(ctx.r[var])}}};"] \
+  ret1 = f"{gate}st.{mem_type(bidx)}" + (f".v{cnt}" if ((cnt:=var.dtype.count) > 1) else "") + f".{ctx.mem_types[var.dtype.scalar()]} " + \
+  f"[{ctx.r[bidx]}+0], " + (("{" + ', '.join(ctx.r[var]) + "}") if var.dtype.count > 1 else ctx.r[var]) + ";"
+  print(f"{ret1=}")
+  ret2 =  [f"{gate}st.{mem_type(bidx)}.v{var.dtype.count}.{ctx.mem_types[var.dtype.scalar()]} [{ctx.r[bidx]}+0], {{{', '.join(ctx.r[var])}}};"] \
     if var.dtype.count > 1 else [f"{gate}st.{mem_type(bidx)}.{ctx.mem_types[var.dtype]} [{ctx.r[bidx]}+0], {ctx.r[var]};"]
+  if ret1 != ret2[0]:
+    print(ret1)
+    print(ret2)
+    raise RuntimeError('')
+  return ret2
 
 def render_wmma(ctx: "PTXRenderer", x: UOp):
   assert ctx.wmma_r, "registry values for wmma must be populated"
