@@ -288,8 +288,9 @@ if __name__ == "__main__":
       for key, value in cors_headers.items(): response.set_header(key, value)
 
     @app.route("/<filename>")
-    def server_static(filename):
-      return static_file(filename, root=(Path(__file__).parent / "tinychat").as_posix())
+    def server_static(filename): return static_file(filename, root=(Path(__file__).parent / "tinychat").as_posix())
+    @app.route("/assets/<filename:path>")
+    def server_assets(filename): return static_file(filename, root=(Path(__file__).parent / "tinychat" / "assets").as_posix())
     @app.route("/")
     def index():
       return static_file("index.html", root=(Path(__file__).parent / "tinychat").as_posix())
