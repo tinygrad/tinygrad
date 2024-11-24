@@ -898,7 +898,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
     else: terms.append((new_factor, e))
 
   match terms:  # cases like (x[4-5] + 3) % 4 -> -3*x[4-5]+15
-    case [(f, e)] if e.vmax-e.vmin == 1: return (new_f:=(offset+f)%c - offset%c)*e - new_f*e.vmin + offset%c
+    case [(f, e)] if e.vmax-e.vmin == 1: return ((offset+f)%c - offset%c)*(e - e.vmin) + offset%c
 
   # cases like (3+3x[0-3])%4 -> 3-x[0-3]
   lbound = ubound = offset = offset % c
