@@ -16,19 +16,81 @@ class AM_GMC(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
 
-    # Memory controller aperture base and end
+    # Memory controller aperture
     self.mc_base = self.adev.regMMMC_VM_FB_LOCATION_BASE.read() << 24
     self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
 
-    # VM aperture base and end
+    # VM aperture
     self.vm_base = 0x7F0000000000
     self.vm_end = self.vm_base + (512 * (1 << 30)) - 1
 
     self.memscratch_pm = self.adev.mm.palloc(0x1000)
     self.dummy_page_pm = self.adev.mm.palloc(0x1000)
-    self.gfxhub_enabled, self.mmhub_enabled = False, False
+    self.hub_initted = {"MM": False, "GC": False}
 
-  def init(self): pass
+  def init(self): self.init_hub("MM")
+
+  def flush_hdp(self): self.adev.wreg(0x1fc00, 0x0) # TODO: write up!
+  def flush_tlb(self, ip:Union["MM", "GC"], vmid, flush_type=0):
+    self.flush_hdp()
+
+    # Check if the hub is initialized
+    if not self.hub_initted[ip]: return
+
+    if ip == "MM": x = self.adev.wait_reg(self.adev.regMMVM_INVALIDATE_ENG17_SEM, mask=0x1, value=0x1)
+
+    self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid), invalidate_l2_ptes=1,
+      invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1, clear_protection_fault_status_addr=0)
+
+    self.adev.wait_reg(self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK"), mask=(1 << vmid), value=(1 << vmid))
+
+    if ip == "MM":
+      self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0)
+      self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.update(reserved_cache_private_invalidation=1)
+
+      # Read back the register to ensure the invalidation is complete
+      self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.read()
+
+  def enable_vm_addressing(self, page_table, ip:Union["MM", "GC"], vmid):
+    self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_BASE_ADDR", "_LO32", "_HI32", page_table.pm.paddr | 1)
+    self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(0x1fffe00, enable_context=1, page_table_depth=2)
+
+  def init_hub(self, ip:Union["MM", "GC"]):
+    # Init system apertures
+    self.adev.wreg_pair(f"reg{ip}VM_CONTEXT0_PAGE_TABLE_START_ADDR", "_LO32", "_HI32", self.vm_base >> 12)
+    self.adev.wreg_pair(f"reg{ip}VM_CONTEXT0_PAGE_TABLE_END_ADDR", "_LO32", "_HI32", self.vm_end >> 12)
+
+    self.adev.reg(f"reg{ip}MC_VM_AGP_BASE").write(0)
+    self.adev.reg(f"reg{ip}MC_VM_AGP_BOT").write(0xffffffffffff >> 24) # disable AGP
+    self.adev.reg(f"reg{ip}MC_VM_AGP_TOP").write(0)
+
+    self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_LOW_ADDR").write(self.mc_base >> 18)
+    self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_HIGH_ADDR").write(self.mc_end >> 18)
+    self.adev.wreg_pair(f"reg{ip}MC_VM_SYSTEM_APERTURE_DEFAULT_ADDR", "_LSB", "_MSB", self.memscratch_pm.paddr >> 12)
+    self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.dummy_page_pm.paddr >> 12)
+
+    self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_CNTL2").update(active_page_migration_pte_read_retry=1)
+
+    # Init TLB and cache
+    self.adev.reg(f"reg{ip}MC_VM_MX_L1_TLB_CNTL").update(enable_l1_tlb=1, system_access_mode=3, enable_advanced_driver_model=1,
+                                                         system_aperture_unmapped_access=0, eco_bits=0, mtype=am.MTYPE_UC)
+
+    self.adev.reg(f"reg{ip}VM_L2_CNTL").update(enable_l2_cache=1, enable_l2_fragment_processing=0, enable_default_page_out_to_system_memory=1,
+      l2_pde0_cache_tag_generation_mode=0, pde_fault_classification=0, context1_identity_access_mode=1, identity_mode_fragment_size=0)
+    self.adev.reg(f"reg{ip}VM_L2_CNTL2").update(invalidate_all_l1_tlbs=1, invalidate_l2_cache=1)
+    self.adev.reg(f"reg{ip}VM_L2_CNTL3").write(bank_select=9, l2_cache_bigk_fragment_size=6,l2_cache_4k_associativity=1,l2_cache_bigk_associativity=1)
+    self.adev.reg(f"reg{ip}VM_L2_CNTL4").write(l2_cache_4k_partition_count=1)
+    self.adev.reg(f"reg{ip}VM_L2_CNTL5").write(walker_priority_client_id=0x1ff)
+
+    self.enable_vm_addressing(self.adev.mm.root_pt, ip, vmid=0)
+
+    # Disable identity aperture
+    self.adev.wreg_pair(f"reg{ip}VM_L2_CONTEXT1_IDENTITY_APERTURE_LOW_ADDR", "_LO32", "_HI32", 0xfffffffff)
+    self.adev.wreg_pair(f"reg{ip}VM_L2_CONTEXT1_IDENTITY_APERTURE_HIGH_ADDR", "_LO32", "_HI32", 0x0)
+    self.adev.wreg_pair(f"reg{ip}VM_L2_CONTEXT_IDENTITY_PHYSICAL_OFFSET", "_LO32", "_HI32", 0x0)
+
+    for eng_i in range(18): self.adev.wreg_pair(f"reg{ip}VM_INVALIDATE_ENG{eng_i}_ADDR_RANGE", "_LO32", "_HI32", 0x1fffffffff)
+    self.hub_initted[ip] = True
 
 class AM_SMU(AM_IP):
   def init(self):
@@ -59,7 +121,7 @@ class AM_GFX(AM_IP):
   def init(self):
     self._wait_for_rlc_autoload()
     self._config_gfx_rs64()
-    self.adev.gmc.init_gfxhub()
+    self.adev.gmc.init_hub("GC")
 
     # NOTE: Golden reg for gfx11. No values for this reg provided. The kernel just ors 0x20000000 to this reg.
     self.adev.regTCP_CNTL.write(self.adev.regTCP_CNTL.read() | 0x20000000)
@@ -117,21 +179,21 @@ class AM_GFX(AM_IP):
   def _config_gfx_rs64(self):
     for pipe in range(2):
       self._grbm_select(pipe=pipe)
-      self.adev.wreg64(self.adev.regCP_PFP_PRGRM_CNTR_START, self.adev.regCP_PFP_PRGRM_CNTR_START_HI, self.adev.fw.ucode_start['PFP'] >> 2)
+      self.adev.wreg_pair("regCP_PFP_PRGRM_CNTR_START", "", "_HI", self.adev.fw.ucode_start['PFP'] >> 2)
     self._grbm_select()
     self.adev.regCP_ME_CNTL.update(pfp_pipe0_reset=1, pfp_pipe1_reset=1)
     self.adev.regCP_ME_CNTL.update(pfp_pipe0_reset=0, pfp_pipe1_reset=0)
     
     for pipe in range(2):
       self._grbm_select(pipe=pipe)
-      self.adev.wreg64(self.adev.regCP_ME_PRGRM_CNTR_START, self.adev.regCP_ME_PRGRM_CNTR_START_HI, self.adev.fw.ucode_start['ME'] >> 2)
+      self.adev.wreg_pair("regCP_ME_PRGRM_CNTR_START", "", "_HI", self.adev.fw.ucode_start['ME'] >> 2)
     self._grbm_select()
     self.adev.regCP_ME_CNTL.update(me_pipe0_reset=1, me_pipe1_reset=1)
     self.adev.regCP_ME_CNTL.update(me_pipe0_reset=0, me_pipe1_reset=0)
 
     for pipe in range(4):
       self._grbm_select(me=1, pipe=pipe)
-      self.adev.wreg64(self.adev.regCP_MEC_RS64_PRGRM_CNTR_START, self.adev.regCP_MEC_RS64_PRGRM_CNTR_START_HI, self.adev.fw.ucode_start['MEC'] >> 2)
+      self.adev.wreg_pair("regCP_MEC_RS64_PRGRM_CNTR_START", "", "_HI", self.adev.fw.ucode_start['MEC'] >> 2)
     self._grbm_select()
     self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=1, mec_pipe1_reset=1, mec_pipe2_reset=1, mec_pipe3_reset=1)
     self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=0, mec_pipe1_reset=0, mec_pipe2_reset=0, mec_pipe3_reset=0)
@@ -200,7 +262,7 @@ class AM_PSP(AM_IP):
     # Wait until the sOS is ready
     self.adev.wait_reg(self.adev.regMP0_SMN_C2PMSG_64, mask=0x80000000, value=0x80000000)
 
-    self.adev.wreg64(self.adev.regMP0_SMN_C2PMSG_69, self.adev.regMP0_SMN_C2PMSG_70, self.ring_pm.mc_addr())
+    self.adev.wreg_pair("regMP0_SMN_C2PMSG", "_69", "_70", self.ring_pm.mc_addr())
     self.adev.regMP0_SMN_C2PMSG_71.write(self.ring_pm.size)
     self.adev.regMP0_SMN_C2PMSG_64.write(2 << 16) # PSP_RING_TYPE__KM = 2. Kernel mode ring
 

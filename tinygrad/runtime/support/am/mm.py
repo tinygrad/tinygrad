@@ -46,8 +46,8 @@ class VirtualMapping(PhysicalMemory):
   def offset(self, byts): return VirtualMapping(self.adev, self.ptable_vaddr + byts, self.paddr + byts, self.size - byts)
 
 class MM:
-  def __init__(self, adev, vram_size):
-    self.adev = adev
+  def __init__(self, adev, vram_size:int):
+    self.adev, self.vram_size = adev, vram_size
     self.phys_allocator = PhysicalAllocator(adev, vram_size)
     self.next_vaddr = 0
     self.root_pt = PTE(self.adev, self.palloc(0x1000, zero=True), lv=2) # 3rd level (2,1,0), 1gb pages
@@ -105,8 +105,8 @@ class MM:
       entry_idx += 1
 
     if pde == self.root_pt:
-      if self.adev.gmc.gfx_enabled: self.adev.gmc.flush_tlb_gfxhub(vmid=0)
-      if self.adev.gmc.mmhub_enabled: self.adev.gmc.flush_tlb_mmhub(vmid=0)
+      self.adev.gmc.flush_tlb(ip="GC", vmid=0)
+      self.adev.gmc.flush_tlb(ip="MM", vmid=0)
     return VirtualMapping(self.adev, vaddr, paddr, size)
 
   def unmap_range(self, virtual_mapping:VirtualMapping): pass # TODO
