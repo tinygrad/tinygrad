@@ -29,18 +29,15 @@ def compress_blocks(states: Tensor, chunks: Tensor, chain_vals: Tensor) -> Tenso
   states[:, 8:] = chain_vals[:, :8] ^ states[:, 8:]
   return states
 
-def bytes_to_chunks(text_bytes: bytes) -> Tuple[Tensor, int, int]:
-  chunks_list = []
-  for chunk_idx in range(0, max(len(text_bytes), 1), 1024):
-    chunk = text_bytes[chunk_idx: chunk_idx + 1024].ljust(1024, b"\x00")
-    for block_idx in range(16):
-      blocks = chunk[block_idx * 64: (block_idx * 64) + 64]
-      chunks_list.append([int.from_bytes(blocks[i: i + 4], "little") for i in range(0, len(blocks), 4)])
-  chunks = Tensor(chunks_list, dtype=dtypes.uint32).reshape(max((len(text_bytes) + 1024 - 1) // 1024, 1), 16, 16)
-  final_chunk_len = len(text_bytes) - ((chunks.shape[0] - 1) * 1024)
-  n_end_blocks = max(1, (final_chunk_len // 64) + (1 if final_chunk_len % 64 else 0))
-  end_block_len = 64 if len(text_bytes) % 64 == 0 and len(text_bytes) else len(text_bytes) % 64
-  return chunks.contiguous(), n_end_blocks, end_block_len  # chunks is [chunks, blocks, words]
+def tensor_to_blake_chunks(tensor: Tensor) -> Tuple[Tensor, int, int]:
+  data = tensor.bitcast(dtypes.uint8)
+  unpadded_len = data.shape[0]
+  data = data.pad(((0, 1024 if data.shape[0] == 0 else (1024 - (data.shape[0] % 1024)) % 1024),), value=0)
+  data = data.bitcast(dtypes.uint32).reshape(-1, 16, 16)
+  final_chunk_bytes = unpadded_len - (data.shape[0] - 1) * 1024
+  n_end_blocks = max(1, (final_chunk_bytes // 64) + (1 if final_chunk_bytes % 64 else 0))
+  end_block_len = 64 if unpadded_len % 64 == 0 and unpadded_len else unpadded_len % 64
+  return data, n_end_blocks, end_block_len # chunks is [chunks, blocks, words]
 
 def pairwise_concatenate(chain_vals: Tensor) -> Tuple[Tensor, Optional[Tensor]]:
   leftover_chunk = chain_vals[-1:] if chain_vals.shape[0] % 2 else None
@@ -74,9 +71,9 @@ def compress(data, compressor, count, end_block_len, n_end_blocks, root, parent)
   states = create_state(iv, count, end_block_len, n_end_blocks, create_flags(data, n_end_blocks, root, parent))
   return compressor(states, data, iv, n_end_blocks)[:, :8]
 
-def blake3(data: Tensor) -> str:
+def blake3(tensor: Tensor) -> str:
   """Hash a Tensor in parallel using the BLAKE3 hashing algorithm."""
-  chunks, n_end_blocks, end_block_len = bytes_to_chunks(data.flatten().numpy().tobytes())
+  chunks, n_end_blocks, end_block_len = tensor_to_blake_chunks(tensor)
   chain_vals = compress(chunks, compress_chunks, 0, end_block_len, n_end_blocks, chunks.shape[0] == 1, False)
   tree_levels = math.ceil(math.log2(max(chain_vals.shape[0], 1)))
   tree_compressor = lambda states, data, iv, _: compress_blocks(states[:, -1].contiguous(), data, iv[:, 0])
