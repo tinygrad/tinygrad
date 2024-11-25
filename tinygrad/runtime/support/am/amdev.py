@@ -77,12 +77,12 @@ class AMDev:
   
   def rreg(self, reg:int) -> int:
     val = self.indirect_rreg(reg * 4) if reg > len(self.mmio) else self.mmio[reg]
-    if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"Reading register 0x{reg:x} with 0x{val:x}")
+    if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"Reading register {reg:#x} with value {val:#x}")
     self._prev_rreg = (reg, val)
     return val
 
   def wreg(self, reg:int, val:int):
-    if AM_DEBUG >= 4: print(f"Writing register 0x{reg:x} with 0x{val:x}")
+    if AM_DEBUG >= 4: print(f"Writing register {reg:#x} with value {val:#x}")
     if reg > len(self.mmio): self.indirect_wreg(reg * 4, val)
     else: self.mmio[reg] = val
 

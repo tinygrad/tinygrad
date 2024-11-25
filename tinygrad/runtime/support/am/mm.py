@@ -3,6 +3,8 @@ import ctypes
 from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import to_mv, round_up, getenv
 
+AM_DEBUG = getenv("AM_DEBUG", 0)
+
 class PhysicalMemory:
   def __init__(self, adev, paddr, size): self.adev, self.paddr, self.size = adev, paddr, size
   def mc_addr(self): return self.adev.gmc.mc_base + self.paddr
@@ -90,6 +92,7 @@ class MM:
     if size > 0: yield from _level_down(vaddr, size)
 
   def map_range(self, vaddr, paddr, size, uncached=False) -> VirtualMapping:
+    if AM_DEBUG >= 3: print(f"Mapping {vaddr=:#x} -> {paddr=:#x} ({size=:#x})")
     for va, off, pte_st_idx, n_ptes, pte_covers, page_table in self.page_table_walker(self.root_page_table, vaddr, size):
       # To optimize TLB entries count, need to map pages as contigous entries. Determine size of each chunks.
       while n_ptes > 0:
@@ -100,8 +103,9 @@ class MM:
         for pte_idx in range(update_ptes):
           assert page_table.get_entry(pte_st_idx + pte_idx) & am.AMDGPU_PTE_VALID == 0, "Entry already set"
           page_table.set_page(pte_st_idx + pte_idx, paddr=paddr + off, uncached=uncached, frag=frags_cnt, valid=True)
-          # print(f"Mapping page: {hex(vaddr + off)} -> {hex(paddr + off)} (0x{size:x}), nptes={update_ptes} incr=0x{pte_covers:x} {uncached=} {frags_cnt=}")
           off += pte_covers
+
+        if AM_DEBUG >= 3: print(f"\tnptes={update_ptes:#x} incr={pte_covers:#x} upd_flags={page_table.get_entry(pte_st_idx):#x} frags={frags_cnt:#x}")
 
         pte_st_idx += update_ptes
         n_ptes -= update_ptes
