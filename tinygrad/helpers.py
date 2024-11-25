@@ -34,10 +34,9 @@ def make_tuple(x:Union[int, Sequence[int]], cnt:int) -> Tuple[int, ...]: return 
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fully_flatten(l):
   if hasattr(l, "__len__") and hasattr(l, "__getitem__") and not isinstance(l, str):
+    if hasattr(l, "shape") and l.shape == (): return [l[()]]
     flattened = []
-    if hasattr(l, "shape") and l.shape == (): flattened.append(l[()])
-    else:
-      for i in range(len(l)): flattened.extend(fully_flatten(l[i]))
+    for li in l: flattened.extend(fully_flatten(li))
     return flattened
   return [l]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
