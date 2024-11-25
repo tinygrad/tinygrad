@@ -175,8 +175,10 @@ jobs:
       run: NV=1 PTX=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_ptx.txt
     - name: Run Tensor Core GEMM (NV)
       run: NV=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_nv.txt
-    # - name: Run Tensor Core GEMM (NV) with BEAM
-    #   run: BEAM=4 NV=1 HALF=1 IGNORE_BEAM_CACHE=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
+    - name: Test NV=1
+      run: DEBUG=2 NV=1 python -m pytest -rA test/test_tiny.py
+    - name: Test CUDA=1
+      run: DEBUG=2 CUDA=1 python -m pytest -rA test/test_tiny.py
     - name: Run Stable Diffusion
       run: NV=1 python3 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd.txt
     - name: Run SDXL
@@ -350,10 +352,13 @@ jobs:
     - name: Test speed vs theoretical
       run: AMD=1 IGNORE_BEAM_CACHE=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Test tensor cores
-      run: |
-        AMD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
+      run: AMD=1 python3 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Run Tensor Core GEMM (AMD)
       run: AMD=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt
+    - name: Test AMD=1
+      run: DEBUG=2 AMD=1 python -m pytest -rA test/test_tiny.py
+    - name: Test HIP=1
+      run: DEBUG=2 HIP=1 python -m pytest -rA test/test_tiny.py
     # TODO: AMD compiler bug causes this to fail
     #- name: Fuzz Padded Tensor Core GEMM
     #  run: HSA=1 M_START=12 M_STOP=20 M_STEP=1 N_START=12 N_STOP=20 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 DEBUG=2 python3 ./extra/gemm/fuzz_matmul.py

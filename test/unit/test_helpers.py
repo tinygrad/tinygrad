@@ -197,6 +197,10 @@ class TestFullyFlatten(unittest.TestCase):
     self.assertEqual(fully_flatten([[1, "ab"], [True, None], [3.14, [5, "b"]]]), [1, "ab", True, None, 3.14, 5, "b"])
 
   def test_fully_flatten_numpy(self):
+    self.assertEqual(fully_flatten([np.array([])]), [])
+    self.assertEqual(fully_flatten([np.array(3)]), [3])
+    self.assertEqual(fully_flatten([np.array([3])]), [3])
+    self.assertEqual(fully_flatten([np.array([[3]])]), [3])
     self.assertEqual(fully_flatten([np.array([1, 3]), np.array([1, 2])]), [1, 3, 1, 2])
     self.assertEqual(fully_flatten((np.array([1, 3]), np.array([1, 2]))), [1, 3, 1, 2])
     self.assertEqual(fully_flatten([np.array([[1], [3]]), np.array([[1], [2]])]), [1, 3, 1, 2])

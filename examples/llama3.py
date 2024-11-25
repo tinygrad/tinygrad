@@ -246,6 +246,12 @@ if __name__ == "__main__":
       fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00003-of-00004.safetensors", "model-00003-of-00004.safetensors", subdir="llama3-8b-sfr")
       fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/resolve/main/model-00004-of-00004.safetensors", "model-00004-of-00004.safetensors", subdir="llama3-8b-sfr")
       args.model = fetch("https://huggingface.co/TriAiExperiments/SFR-Iterative-DPO-LLaMA-3-8B-R/raw/main/model.safetensors.index.json", "model.safetensors.index.json", subdir="llama3-8b-sfr")
+    elif args.size == "70B":
+      subdir = "Llama-3.1-Nemotron-70B-Instruct-HF"
+      args.model = fetch("https://huggingface.co/nvidia/Llama-3.1-Nemotron-70B-Instruct-HF/resolve/main/model.safetensors.index.json?download=true", "model.safetensors.index.json", subdir=subdir)
+      fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model", "tokenizer.model", subdir=subdir)
+      for i in range(30):
+        fetch(f"https://huggingface.co/nvidia/Llama-3.1-Nemotron-70B-Instruct-HF/resolve/main/model-{i+1:05d}-of-00030.safetensors?download=true", f"model-{i+1:05d}-of-00030.safetensors", subdir=subdir)
 
   assert args.model is not None, "please provide --model option"
 
@@ -282,8 +288,9 @@ if __name__ == "__main__":
       for key, value in cors_headers.items(): response.set_header(key, value)
 
     @app.route("/<filename>")
-    def server_static(filename):
-      return static_file(filename, root=(Path(__file__).parent / "tinychat").as_posix())
+    def server_static(filename): return static_file(filename, root=(Path(__file__).parent / "tinychat").as_posix())
+    @app.route("/assets/<filename:path>")
+    def server_assets(filename): return static_file(filename, root=(Path(__file__).parent / "tinychat" / "assets").as_posix())
     @app.route("/")
     def index():
       return static_file("index.html", root=(Path(__file__).parent / "tinychat").as_posix())

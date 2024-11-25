@@ -288,7 +288,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __float__(self): return self._eval(dtypes.floats, float)
   def substitute(self, dvars:Dict[UOp, UOp]):
     with Context(TRACK_MATCH_STATS=0):
-      return graph_rewrite(self, _substitute, dvars)
+      return graph_rewrite(self, _substitute, dvars, bottom_up=True)
 
   # *** uop syntactic sugar ***
 
@@ -333,7 +333,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const(dtype:DType, b:ConstLike):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
-    return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
+    return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
   @staticmethod
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
@@ -354,10 +354,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop movement ops ***
 
   @property
-  def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 else self
-  def view(self, st:ShapeTracker) -> UOp:
-    assert self.op is not Ops.STORE, "VIEW of STORE is invalid, STORE is always base"
-    return self if self.st is None or self.st == st else UOp(Ops.VIEW, self.dtype, (self,), st)
+  def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
+  def view(self, new_st:ShapeTracker) -> UOp:
+    assert self.op is not Ops.STORE, "STORE must stay base"
+    assert self.st is not None, f"must have shape {self}"
+    if new_st.contiguous and self.base.st == new_st: return self.base
+    return UOp(Ops.VIEW, self.dtype, (self,), new_st)
   def reshape(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).reshape(arg))
 
   # *** uop Buffer stuff ***
@@ -546,7 +548,7 @@ def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
   # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
   while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "uopgraph.py", "schedule.py",
-                                                                                        "lowerer.py", "cstyle.py"}:
+                                                                                        "lowerer.py", "cstyle.py", "linearize.py"}:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
@@ -686,6 +688,7 @@ match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 class TrackedRewriteContext:
   loc: Tuple[str, int]                                                                              # location that called graph_rewrite
   sink: UOp                                                                                         # the sink passed into the rewrite
+  bottom_up: bool
   matches: List[Tuple[UOp, Optional[UOp], Optional[UPat], float]] = field(default_factory=list)     # all matches of sparents
 
 rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
@@ -763,11 +766,18 @@ class RewriteContext:
     new_n = self.pm.rewrite(n, self.ctx) if new_src == n.src else UOp(n.op, n.dtype, new_src, n.arg)
     self.replace[n] = ret = n if new_n is None else self.rewrite(new_n)
     return ret
+  def bottom_up_rewrite(self, n:UOp) -> UOp:
+    if (rn := self.replace.get(n)) is not None: return rn
+    new_n: UOp|None = n
+    while new_n is not None: last_n, new_n = new_n, self.pm.rewrite(new_n, self.ctx)
+    new_src = tuple(map(self.bottom_up_rewrite, last_n.src))
+    self.replace[n] = ret = last_n if new_src == last_n.src else self.bottom_up_rewrite(UOp(last_n.op, last_n.dtype, new_src, last_n.arg))
+    return ret
 
-def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None) -> UOp:
+def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
   if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0:
-    rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
-  return RewriteContext(pm, ctx).rewrite(sink)
+    rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up))
+  return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
 
@@ -876,19 +886,32 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   # simple cancel mod case
   if 0 < c and 0 <= x.vmin and (quotient:=x.vmin//c) == x.vmax//c: return x-quotient*c
 
-  remainder, something_changed = [], False
+  terms, rem_const, something_changed, offset = [], 0, False, 0
   for u in split_uop(x, Ops.ADD):
-    if (factor:=u.const_factor())%c != factor:
-      divides = u.divides(factor)*(factor%c)
-      assert divides is not None
-      remainder.append(divides)
-      something_changed = True
+    factor = u.const_factor()
+    e: UOp = u.divides(factor)
+    if (new_factor:=factor%c) != factor: something_changed = True
     elif u.op is Ops.MOD and (s1:=u.src[1]).op is Ops.CONST and s1.arg%c == 0:
-      remainder.append(u.src[0])
+      e = u.src[0]
       something_changed = True
-    else: remainder.append(u)
+    offset += new_factor * e.vmin
+    if u.op is Ops.CONST: rem_const += new_factor
+    else: terms.append((new_factor, e))
+
+  match terms:  # cases like (x[4-5] + 3) % 4 -> -3*x[4-5]+15
+    case [(f, e)] if e.vmax-e.vmin == 1: return ((offset+f)%c - offset%c)*(e - e.vmin) + offset%c
+
+  # cases like (3+3x[0-3])%4 -> 3-x[0-3]
+  lbound = ubound = offset = offset % c
+  for (f, e) in terms:
+    if f > c//2:
+      if (lbound := lbound + (f-c)*(e.vmax-e.vmin)) < 0: break
+    elif (ubound := ubound + f*(e.vmax-e.vmin)) >= c: break
+  else: # we have found factors such that vmin/vmax of the final expression is between 0 and c, we can remove the mod
+    return functools.reduce(lambda r, t: r + min(t[0], t[0]-c, key=abs)*(t[1]-t[1].vmin), terms, x.const_like(offset))
+
   if not something_changed: return None
-  return functools.reduce(operator.add, remainder)%c if remainder else x.const_like(0)
+  return functools.reduce(lambda r, t: r + t[0]*t[1], terms, x.const_like(rem_const)) % c
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
@@ -1171,3 +1194,16 @@ sint = Union[int, UOp]
 Variable = UOp
 
 ConstLike = Union[ConstType, Variable, Tuple[ConstType, ...]]
+
+# *** uop swizzling ***
+
+merge_views = PatternMatcher([(UPat(Ops.VIEW, name="s0").view(name="s1"), lambda s0,s1: s0.replace(arg=s0.st+s1.st))])
+
+# push VIEW to loads
+view_left = merge_views+PatternMatcher([
+  # VIEW before elementwise ops
+  (UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN}, name="e").view(name="v"),
+   lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
+  # early merge VIEW buffer ops
+  (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((s.st+v.st).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
+])
