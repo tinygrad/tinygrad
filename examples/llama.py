@@ -498,14 +498,16 @@ After you are done speaking, output [EOS]. You are not Chad.
     if not chatbot: break
 
   # validate output!
-  if args.temperature == 0 and args.count == 10 and args.prompt == "Hello." and not args.quantize:
+  if args.temperature == 0 and args.count == 10 and args.prompt == "Hello.":
     text = llama.tokenizer.decode(toks)
-    key = (args.gen, args.size)
+    key = (args.gen, args.size, args.quantize)
     expected = {
-      ("1", "7B"): "Hello. I'm a 20 year old male",
-      ("2", "7B"): "Hello. I'm a 20 year old girl",
-      ("2", "70B"): "Hello. I am a 20 year old female.",
-      ("3", "8B"): "Hello. I am a 20 year old female. I",
+      ("1", "7B", None): "Hello. I'm a 20 year old male",
+      ("1", "7B", "int8"): "Hello. I'm a 20 year old male",
+      ("1", "7B", "nf4"): "Hello. I'm a 20 year old male",
+      ("2", "7B", None): "Hello. I'm a 20 year old girl",
+      ("2", "70B", None): "Hello. I am a 20 year old female.",
+      ("3", "8B", None): "Hello. I am a 20 year old female. I",
     }
     try:
       assert text == expected[key], f"invalid output: `{colored(text, 'red')}` != `{expected[key]}`"
