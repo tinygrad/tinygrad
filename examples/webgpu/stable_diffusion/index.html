@@ -205,6 +205,10 @@
             <progress id="progressBar" value="0" max="100" style="flex-grow: 1;"></progress>
             <span id="progressFraction"></span>
         </div>
+
+        <div id="divStepTime" style="display: none; align-items: center; width: 100%; gap: 10px;">
+            <span id="stepTimeValue">0 ms</span>
+        </div>
     </div>
 
     <canvas id="canvas" width="512" height="512"></canvas>
@@ -537,8 +541,10 @@
                 
                 for (let i = timesteps.length - 1; i >= 0; i--) {
                     let timestep = new Float32Array([timesteps[i]]);
-                    let x_prev = await timer(() => nets["diffusor"](unconditional_context, context, latent, timestep, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]]), new Float32Array([guidance])));
-                    latent = x_prev;
+                    let start = performance.now()
+                    let x_prev = await nets["diffusor"](unconditional_context, context, latent, timestep, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]]), new Float32Array([guidance]));
+                    document.getElementById("divStepTime").style.display = "block";
+                    document.getElementById("stepTimeValue").innerText = `${(performance.now() - start).toFixed(1)} ms / step`
 
                     if (showStep != null) {
                         showStep(await nets["decoder"](latent));
