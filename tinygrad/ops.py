@@ -333,7 +333,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const(dtype:DType, b:ConstLike):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
-    return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype) if dtype is not None else b)
+    return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
   @staticmethod
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
@@ -548,7 +548,7 @@ def get_location() -> Tuple[str, int]:
   frm = sys._getframe(1)
   # find the real frame in the file that has the UPat, TODO: is there a better way to do this?
   while frm.f_back is not None and pathlib.Path(frm.f_back.f_code.co_filename).name in {"ops.py", "uopgraph.py", "schedule.py",
-                                                                                        "lowerer.py", "cstyle.py"}:
+                                                                                        "lowerer.py", "cstyle.py", "linearize.py"}:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 @functools.lru_cache(None)
@@ -885,19 +885,32 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   # simple cancel mod case
   if 0 < c and 0 <= x.vmin and (quotient:=x.vmin//c) == x.vmax//c: return x-quotient*c
 
-  remainder, something_changed = [], False
+  terms, rem_const, something_changed, offset = [], 0, False, 0
   for u in split_uop(x, Ops.ADD):
-    if (factor:=u.const_factor())%c != factor:
-      divides = u.divides(factor)*(factor%c)
-      assert divides is not None
-      remainder.append(divides)
-      something_changed = True
+    factor = u.const_factor()
+    e: UOp = u.divides(factor)
+    if (new_factor:=factor%c) != factor: something_changed = True
     elif u.op is Ops.MOD and (s1:=u.src[1]).op is Ops.CONST and s1.arg%c == 0:
-      remainder.append(u.src[0])
+      e = u.src[0]
       something_changed = True
-    else: remainder.append(u)
+    offset += new_factor * e.vmin
+    if u.op is Ops.CONST: rem_const += new_factor
+    else: terms.append((new_factor, e))
+
+  match terms:  # cases like (x[4-5] + 3) % 4 -> -3*x[4-5]+15
+    case [(f, e)] if e.vmax-e.vmin == 1: return ((offset+f)%c - offset%c)*(e - e.vmin) + offset%c
+
+  # cases like (3+3x[0-3])%4 -> 3-x[0-3]
+  lbound = ubound = offset = offset % c
+  for (f, e) in terms:
+    if f > c//2:
+      if (lbound := lbound + (f-c)*(e.vmax-e.vmin)) < 0: break
+    elif (ubound := ubound + f*(e.vmax-e.vmin)) >= c: break
+  else: # we have found factors such that vmin/vmax of the final expression is between 0 and c, we can remove the mod
+    return functools.reduce(lambda r, t: r + min(t[0], t[0]-c, key=abs)*(t[1]-t[1].vmin), terms, x.const_like(offset))
+
   if not something_changed: return None
-  return functools.reduce(operator.add, remainder)%c if remainder else x.const_like(0)
+  return functools.reduce(lambda r, t: r + t[0]*t[1], terms, x.const_like(rem_const)) % c
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
