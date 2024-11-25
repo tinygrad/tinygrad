@@ -256,7 +256,7 @@ class AM_PSP(AM_IP):
 
     self.adev.wreg_pair("regMP0_SMN_C2PMSG", "_69", "_70", self.ring_pm.mc_addr())
     self.adev.regMP0_SMN_C2PMSG_71.write(self.ring_pm.size)
-    self.adev.regMP0_SMN_C2PMSG_64.write(2 << 16) # PSP_RING_TYPE__KM = 2. Kernel mode ring
+    self.adev.regMP0_SMN_C2PMSG_64.write(am.PSP_RING_TYPE__KM << 16)
 
     # There might be handshake issue with hardware which needs delay
     time.sleep(100 / 1000)

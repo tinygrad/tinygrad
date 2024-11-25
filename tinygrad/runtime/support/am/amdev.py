@@ -16,7 +16,7 @@ class AMRegister:
   def _parse_kwargs(self, **kwargs):
     mask, values = 0xffffffff, 0
     for k, v in kwargs.items():
-      if k not in self.reg_fields: raise ValueError(f"Unknown register field: {k} {self.reg_fields.keys()}")
+      if k not in self.reg_fields: raise ValueError(f"Unknown register field: {k}. {self.reg_fields.keys()}")
       m, s = self.reg_fields[k]
       if v & (m>>s) != v: raise ValueError(f"Value {v} for {k} is out of range {m=} {s=}")
       mask &= ~m
@@ -25,9 +25,7 @@ class AMRegister:
 
   def build(self, **kwargs) -> int: return self._parse_kwargs(**kwargs)[1]
 
-  def update(self, **kwargs):
-    mask, values = self._parse_kwargs(**kwargs)
-    self.write((self.read() & mask) | values)
+  def update(self, **kwargs): self.write(value=self.read(), **kwargs)
 
   def write(self, value=0, **kwargs):
     mask, values = self._parse_kwargs(**kwargs)
