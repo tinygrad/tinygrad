@@ -25,7 +25,7 @@ from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.engine.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG, Timing
-from tinygrad.ops import UnaryOps, UOp, Ops
+from tinygrad.ops import UOp, Ops
 from tinygrad.device import is_dtype_supported
 
 def on_linearizer_will_run(): pass
@@ -75,7 +75,7 @@ def get_fuzz_rawbufs(lin):
         data = np.random.uniform(-1, 1, size=rawbuf.size).astype(dtype=_to_np_dtype(rawbuf.dtype))
       else:
         data = np.random.uniform(-10, 10, size=rawbuf.size).astype(dtype=_to_np_dtype(rawbuf.dtype))
-      rawbuf.copyin(Tensor(data, device=lin.opts.device).realize().lazydata.realized.as_buffer())
+      rawbuf.copyin(Tensor(data, device=lin.opts.device).realize().lazydata.base.realized.as_buffer())
   return rawbufs
 
 def get_fuzz_rawbuf_like(old_rawbuf, zero=False, copy=False, size=None, force_device=None):
@@ -228,7 +228,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
           validate_lin = test_lin.copy()
           validate_lin.opts = validate_device.renderer
           if validate_rawbufs is None:
-            validate_rawbufs = [get_fuzz_rawbuf_like(x, copy=True, force_device=validate_device.dname) for x in rawbufs]
+            validate_rawbufs = [get_fuzz_rawbuf_like(x, copy=True, force_device=validate_device.device) for x in rawbufs]
           (_msg, _, _, _, state2) = compare_linearizer(validate_lin, validate_rawbufs, var_vals, ground_truth, rtol=rtol, atol=atol)
 
           if _msg != "PASS": failures[f"VALIDATE_DEV_{_msg}"].append((validate_lin.ast, validate_lin.applied_opts))
@@ -252,7 +252,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
 def _is_simple(lin: Kernel) -> bool:
   if len(lin.ast.src) > 1: return False
   ast:UOp = lin.ast.src[0]
-  if ast.src[0].op is UnaryOps.CAST and ast.src[0].src[0].op is Ops.LOAD: return True
+  if ast.src[0].op is Ops.CAST and ast.src[0].src[0].op is Ops.LOAD: return True
   return False
 
 if __name__ == "__main__":

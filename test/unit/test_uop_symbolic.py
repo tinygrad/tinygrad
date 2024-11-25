@@ -192,6 +192,22 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_to_sub(self):
     self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, "(a+-1)")
 
+  def test_mod_congruence(self):
+    self.helper_test_variable((3+3*Variable("a",0,3))%4, 0, 3, "((a*-1)+3)")
+    self.helper_test_variable((17+13*Variable("a",0,3))%18, 2, 17, "((a*-5)+17)")
+
+  def test_mod_congruence_mul_add(self):
+    self.helper_test_variable((6*(Variable("a", 0, 2)+1))%9, 0, 6, "((a*-3)+6)")
+
+  def test_mod_congruence_multiple_vars(self):
+    self.helper_test_variable((9+9*Variable("x",0,3)+9*Variable("y",0,3))%10, 3, 9, "(((x*-1)+(y*-1))+9)")
+    self.helper_test_variable((7+9*Variable("x",0,2)+9*Variable("y",0,2)+Variable("z",0,2))%10, 3, 9, "(((z+(x*-1))+(y*-1))+7)")
+    self.helper_test_variable((10+12*Variable("x",0,2)+Variable("y", 0, 4)%3)%13, 8, 12, "(((x*-1)+(y%3))+10)")
+
+  def test_mod_binary_expression(self):
+    self.helper_test_variable((3+Variable("a",0,1))%4, 0, 3, "((a*-3)+3)")
+    self.helper_test_variable((3+Variable("a",4,5))%4, 0, 3, "((a*-3)+15)")
+
   def test_sum_div_const(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 4, 0, 7, "a")
 
@@ -454,6 +470,13 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a*3+d*4).lt(1).ne(True), 0, 1, "((((a*3)+(d*4))<1)!=True)")  # var can be negative, should not be simplified
     self.helper_test_variable((a+b+c*2).lt(1).ne(True), 0, 1, ("((((a+b)+c)<1)!=True)", "(((c+(a+b))<1)!=True)"))
     self.helper_test_variable((a+b*2+c*4).lt(1).ne(True), 0, 1, ("((((a+b)+c)<1)!=True)", "(((c+(a+b))<1)!=True)"))
+
+  def test_where_removal(self):
+    cond = Variable("a", 0, 3).lt(2)
+    u1, u0 = cond.ufix(1), cond.ufix(0)
+    self.helper_test_variable(cond, 0, 1, "(a<2)")
+    self.helper_test_variable(cond.where(u1, u0), 0, 1, "(a<2)")
+    self.helper_test_variable(cond.where(u1, u0).where(u1, u0), 0, 1, "(a<2)")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):

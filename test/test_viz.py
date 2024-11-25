@@ -1,8 +1,7 @@
 from typing import Dict, List, Optional
 import unittest
 from tinygrad.dtype import dtypes
-from tinygrad.ops import TRACK_MATCH_STATS, BinaryOps, TrackedPatternMatcher as PatternMatcher, UOp, Ops, UPat, \
-    graph_rewrite, contexts, track_rewrites
+from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher as PatternMatcher, UOp, Ops, UPat, graph_rewrite, contexts, track_rewrites
 from tinygrad.viz.serve import get_details, get_metadata, uop_to_json
 
 @track_rewrites()
@@ -35,7 +34,7 @@ class TestViz(unittest.TestCase):
   def test_rewrite_twice(self):
     pm = PatternMatcher([
       (UPat.var("x")+UPat.var("x"), lambda x:x*2),
-      (UPat.var("x", dtypes.int)*2, lambda x:x.alu(BinaryOps.SHL, UOp.const(dtypes.int, 1))),
+      (UPat.var("x", dtypes.int)*2, lambda x:x.alu(Ops.SHL, UOp.const(dtypes.int, 1))),
     ])
     a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
     uops = helper_test_viz(a+a, pm)
