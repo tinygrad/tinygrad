@@ -1,7 +1,7 @@
 import sys, atexit, functools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict, cast
+from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
@@ -64,6 +64,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     buf.dtype = buf.buffer.dtype = buf.dtype.base
     assert not buf.is_realized, "can't fixup allocated buffer"
     buf.buffer.options = None
+  assert buf.op is not None, f"base must be base itself {buf}"
   dtype = buf.dtype if buf.op in GroupOp.Meta else buf.dtype.base
   if buf.is_realized:
     buffers[ubuf:=UOp.new_buffer((b:=buf.buffer).device, b.size, b.dtype, num=len(buffers))] = buf.buffer
@@ -74,7 +75,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     op = UOp(Ops.ASSIGN, dtype, (ubuf, new_val), buf.arg)
   else:
     buffers[ubuf:=UOp.new_buffer((b:=buf.buffer).device, b.size, b.dtype, num=len(buffers))] = buf.buffer
-    op = UOp(cast(Ops, buf.op), dtype, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
+    op = UOp(buf.op, dtype, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
   if op is not None:
     ctx.lazybufs[ubuf] = buf
