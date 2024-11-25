@@ -1,6 +1,7 @@
 import functools
 from tinygrad.device import  Compiled, Allocator, Compiler
 from tinygrad.renderer.wgsl import WGSLRenderer
+from tinygrad.helpers import round_up
 import wgpu
 import struct
 
@@ -8,7 +9,6 @@ def create_uniform(wgpu_device, val) -> wgpu.GPUBuffer:
   buf = wgpu_device.create_buffer(size=4, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
   if isinstance(val, int): wgpu_device.queue.write_buffer(buf, 0, val.to_bytes(4, "little"))
   else: wgpu_device.queue.write_buffer(buf, 0, struct.pack('<f', val))
-
   return buf
 
 class WebGPUProgram:
@@ -46,11 +46,10 @@ class WebGPUProgram:
 class WebGpuAllocator(Allocator):
   def __init__(self, dev): self.dev = dev
   def _alloc(self, size: int, options):
-    aligned_size = (size + 3) & ~3
-    return self.dev.create_buffer(size=aligned_size, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)
+    return self.dev.create_buffer(size=round_up(size, 4), usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)
   def _copyin(self, dest, src: memoryview):
     if src.nbytes % 4:
-      padded_src = bytearray((src.nbytes + 3) & ~3)
+      padded_src = bytearray(round_up(src.nbytes, 4))
       padded_src[:src.nbytes] = src
     self.dev.queue.write_buffer(dest, 0, padded_src if src.nbytes % 4 else src)
   def _copyout(self, dest: memoryview, src):
@@ -59,8 +58,8 @@ class WebGpuAllocator(Allocator):
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
-    adapter = wgpu.gpu.request_adapter(power_preference="high-performance")
+    adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
     timestamp_supported = wgpu.FeatureName.timestamp_query in adapter.features
-    wgpu_device = adapter.request_device(required_features=[wgpu.FeatureName.timestamp_query] if timestamp_supported else [])
+    wgpu_device = adapter.request_device_sync(required_features=[wgpu.FeatureName.timestamp_query] if timestamp_supported else [])
     super().__init__(device, WebGpuAllocator(wgpu_device), WGSLRenderer(), Compiler(),
                      functools.partial(WebGPUProgram, (wgpu_device, timestamp_supported)))

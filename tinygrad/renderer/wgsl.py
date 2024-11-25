@@ -76,7 +76,7 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.STORE, src=(UPat.var('b'), UPat.var("v")), allow_any_len=True),\
      lambda ctx,b,v: f"atomicAdd(&{ctx[b]}, {ctx[v]});" if b.src[0].dtype.itemsize < 4 else f"{ctx[b]} = {ctx[v]};"),
     # fix nan check: 'a != a -> is_nan()'
-    (UPat(Ops.CMPNE, src=(UPat.var("a"), UPat.var("b"))), lambda ctx,a,b: f"is_nan({ctx[a]})" if a == b else None),
+    (UPat.var("a") != UPat.var("a"), lambda ctx,a: f"is_nan({ctx[a]})"),
   ]) + base_rewrite
 
   def render_cast(self, dt:DType, val: str) -> str: return f"{self.type_map[dt]}({val})"
