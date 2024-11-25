@@ -181,7 +181,19 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     if not len(forks): break
     sink = sink.substitute(forks)
 
-  # TODO: combine matching BLOCKENDS
+  # combine matching BLOCKENDS
+  blockends = [x for x in sink.sparents if x.op is Ops.BLOCKEND]
+  blockends_to_arg = defaultdict(list)
+  for be in blockends: blockends_to_arg[be.arg.end].append(be)
+  new_forks = {}
+  for k,v in blockends_to_arg.items():
+    if len(v) > 1:
+      new_be = UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)), arg=BasicBlock(dedup(flatten([y.arg.ctx for y in v])), v[0].arg.lst, k))
+      out = UOp(Ops.BLOCKFORK, src=(new_be,), arg=len(v))
+      for u in v: new_forks[u] = out
+  sink = sink.substitute(new_forks)
+
+  # final rewrite to linearizer
   sink = graph_rewrite(sink, blockend, ctx=children)
 
   # there should just be one block left
@@ -195,75 +207,3 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
   # strip the SINK
   return _uops[:-1]
-
-  """
-  @functools.lru_cache(None)
-  def get_recursive_children(x:UOp, end:Ops, include_self=False) -> Set[UOp]:
-    if x.op is Ops.SINK: return set()
-    return set.union({x} if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
-
-  # scope children impact the toposort and END* insertion
-  scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
-  range_phi = {r:[p for p in scope_children[r] if p.op is Ops.ASSIGN] for r in scope_children if r.op is Ops.RANGE}
-
-  # assign priorities
-  def get_priority(u:UOp):
-    priority = 0
-    # prefer ranges that depend on the least number of independent ranges
-    if u.op is Ops.RANGE and u.arg[1]:
-      priority += u.arg[0]
-      for p in range_phi[u]:
-        priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
-    elif u.op is Ops.CONST:
-      # place consts first here, they don't do anything and it can cause issues with DEFINE_ACC
-      priority -= 100000000000
-    else:
-      # prefer uops that are loop children
-      priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is Ops.RANGE and u in ss])
-    if u.op is Ops.IF and len(u.src) == 1: priority += 10000000 # if penalty
-    return priority
-  priorities:Dict[UOp, int] = {u:get_priority(u) for u in children}
-
-  # prevent priority inversion
-  @functools.lru_cache(None)
-  def fix_priority(u:UOp, lowest_priority):
-    if u.op in {Ops.CAST, Ops.BITCAST, *GroupOp.ALU, Ops.VECTORIZE, Ops.GEP, Ops.SPECIAL, Ops.DEFINE_LOCAL, Ops.LOAD}:
-      priorities[u] = min(priorities[u], lowest_priority)
-      if u.op is Ops.LOAD: priorities[u] += 100 # load penalty (here)
-    for x in u.src: fix_priority(x, priorities[u])
-  fix_priority(sink, 0)
-
-  # NOTE: the compare should never make it all the way to u
-  queue:List[Tuple[int, Tuple, UOp]] = []
-  def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
-
-  for u in children:
-    if in_degree[u] == 0: push(u)
-
-  scope_end: Dict[UOp, UOp] = {}
-  _uops: List[UOp] = []
-  while queue:
-    p,_,x = heapq.heappop(queue)
-    if DEBUG >= 7: print(f"{p:5d}", x.op, x.dtype, x.arg)
-    if x in scope_children: scope_end[x] = x
-    if x.op is Ops.DEFINE_ACC:
-      idx = min([_uops.index(l) for l in x.src if l.op is Ops.RANGE])
-      _uops.insert(idx, x)
-    else: _uops.append(x)
-    for u, ss in scope_children.items():
-      if x in ss:
-        ss.remove(x)
-        if len(ss) == 0: scope_end[u] = x
-    for u in children[x]:
-      in_degree[u] -= 1
-      if in_degree[u] == 0: push(u)
-
-  # end scopes in toposort order
-  for u, x in scope_end.items(): _uops.insert(_uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], dtypes.void, (u,)))
-
-  # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-  if not skip_check: type_verify(_uops)
-
-  # strip the SINK
-  return _uops[:-1]
-  """
