@@ -274,7 +274,7 @@ class Tensor(SimpleMathTrait):
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     if TYPE_CHECKING or sys.version_info < (3, 12): assert self.dtype.fmt != "e"
-    return self._data().cast(self.dtype.fmt, self.shape)
+    return self._data().cast(self.dtype.fmt) if 0 in self.shape else self._data().cast(self.dtype.fmt, self.shape)
 
   def item(self) -> ConstType:
     """

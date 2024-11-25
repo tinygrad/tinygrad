@@ -271,7 +271,7 @@ p {
 
 /* fonts */
 .megrim-regular {
-  font-family: "Megrim", system-ui;
+  font-family: monospace;
   font-weight: 400;
   font-style: normal;
 }
