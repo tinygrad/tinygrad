@@ -184,7 +184,9 @@ class PTXRenderer(Renderer):
       # elif u.op is Ops.ENDRANGE: r[u] = ssa("pred", u, dtype="pred")
       # elif u.op is Ops.RANGE: r[u] = ssa("ridx", u)
       # elif u.op in GroupOp.ALU: r[u] = ssa("alu", u)
-      # elif u.op is Ops.DEFINE_ACC:
+      elif u.op is Ops.DEFINE_ACC:
+        if u.dtype.scalar() in [dtypes.half, dtypes.bool]:
+          r[u.src[0]] = ssa("const", u.src[0])
       #   r[u] = [ssa('acc', u, dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)] if u.dtype.count > 1 else ssa("acc", u)
       elif u.op is Ops.SPECIAL: r[u] = "%" + u.arg[0]
       elif u.op is Ops.DEFINE_VAR:
