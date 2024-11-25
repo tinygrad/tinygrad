@@ -4,6 +4,7 @@ import contextlib, decimal, statistics, random, json, atexit, time, array, ctype
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator
+from tinygrad.ops import sym_infer, sint
 
 # **************** for HCQ Compatible Devices ****************
 
@@ -32,6 +33,24 @@ def hcq_command(func: Callable[Concatenate[QueueType, P], None]) -> Callable[Con
     self.cmds_meta.append(func.__name__)
     return self
   return __wrapper
+
+class HWQueue2(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
+  def __init__(self): self._q, self.binded_device, self.sint_offsets = [], None, []
+  def q(self, *values):
+    for v in values: 
+      if isinstance(v, int): self._q.append(v)
+      else: 
+        self.sint_offsets.append((len(self._q), v))
+        self._q.append(0xbad0c0de)
+  def timestamp(self, signal:SignalType): pass
+  def signal(self, signal:SignalType, value:sint): pass
+  def memory_barrier(self): pass
+  def exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[sint,sint,sint], local_size:Tuple[sint,sint,sint]): pass
+  def _apply_var_vals(self, var_vals):
+    for off, sym in self.sint_offsets: self._q[off] = sym_infer(sym, var_vals)
+  def submit(self, device, var_vals=None):
+    if var_vals is not None: self._apply_var_vals(var_vals)
+    self._submit(device)
 
 class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   """

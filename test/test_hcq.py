@@ -6,6 +6,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import get_runner, CompiledRunner
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
+from tinygrad import Variable
 
 MOCKGPU = getenv("MOCKGPU")
 
@@ -29,6 +30,19 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.a.lazydata.buffer.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
     TestHCQ.b.lazydata.buffer.copyin(memoryview(bytearray(struct.pack("ff", 0, 0))))
     TestHCQ.d0.synchronize() # wait for copyins to complete
+
+  def test_singal_update_new(self):
+    q = TestHCQ.d0.hw_compute_queue_t()
+    v = Variable("v", 0, 0xffffffff)
+    q.signal(sig:=TestHCQ.d0.signal_t(), v)
+    q.submit(TestHCQ.d0, {v: 1})
+    sig.wait(1)
+
+    q.submit(TestHCQ.d0, {v: 4})
+    sig.wait(4)
+
+    q.submit(TestHCQ.d0, {v: 8})
+    sig.wait(8)
 
   # Test signals
   def test_signal(self):
