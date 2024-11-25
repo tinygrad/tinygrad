@@ -3,7 +3,7 @@ from collections import defaultdict
 import functools, heapq
 from tinygrad.ops import type_verify, END_FOR_UOP, UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import DEBUG, dedup, flatten
+from tinygrad.helpers import DEBUG, dedup, flatten, partition
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
   if u in children: return srcs[u]
@@ -18,11 +18,10 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
 
 def disp(y): return y.arg[0] if y.op is Ops.RANGE else f'IF{id(y)}'
 class BasicBlock:
-  def __init__(self, ctx, lst, ends=[]):
-    self.ctx, self.lst, self.ends = ctx, lst, ends
+  def __init__(self, ctx, lst, end=None):
+    self.ctx, self.lst, self.end = ctx, lst, end
   def __repr__(self):
-    return f"{[disp(y) for y in self.ctx]} {[disp(y) for y in self.ends] if len(self.ends) else ""} "+\
-           f"{len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
+    return f"{(str(disp(self.end))+' ') if self.end is not None else ''}{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
 @functools.lru_cache(None)
 def get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
@@ -38,8 +37,9 @@ def get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
       ret.append(get_block_ctx(u))
   return tuple(dedup(sorted(flatten(ret), key=lambda x: x.tuplize)))
 
+                       #Ops.DEFINE_ACC,
 DONT_PLACE_IN_BLOCK = {Ops.RANGE, Ops.ENDRANGE, Ops.CONST,
-                       Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.BLOCK, Ops.BLOCKEND}
+                       Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.BLOCK, Ops.BLOCKEND}
 def append_to_block(ctx, x:UOp):
   new_srcs = []
   to_append = []
@@ -47,7 +47,7 @@ def append_to_block(ctx, x:UOp):
   updated = False
   in_this_block = set(x.arg.lst)
   for u in x.src:
-    if u.op in DONT_PLACE_IN_BLOCK or len([x for x in ctx[u] if x not in in_this_block]) > 0: new_srcs.append(u)
+    if u.op in DONT_PLACE_IN_BLOCK or len([y for y in ctx[u] if y not in in_this_block]) > 0: new_srcs.append(u)
     elif (block_ctx:=get_block_ctx(u)) == x.arg.ctx:
       # if it's the same context, we place in this block and append the parents
       new_srcs += list(u.src)
@@ -63,19 +63,43 @@ def append_to_block(ctx, x:UOp):
     lrng = list(rng)
     for r in rng[::-1]:
       if r not in x.arg.ctx:
-        new_block = UOp(Ops.BLOCKEND, dtypes.void, (new_block,), BasicBlock(lrng, [UOp(Ops.ENDRANGE, dtypes.void, (r,))], [r]))
         lrng = lrng[:]
         lrng.remove(r)
+        new_block = UOp(Ops.BLOCKEND, dtypes.void, (new_block,), BasicBlock(lrng, [UOp(Ops.ENDRANGE, dtypes.void, (r,))], r))
     new_srcs.append(new_block)
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(x.arg.ctx, to_append+x.arg.lst))
 
 make_basic_blocks = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCKEND, src=(UOp(Ops.BLOCK, src=x.src, arg=BasicBlock([], [x])),), arg=BasicBlock([], [], []))),
+  #(UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCKEND, src=(UOp(Ops.BLOCK, src=x.src, arg=BasicBlock([], [x])),), arg=BasicBlock([], []))),
+  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock([], [x]))),
   (UPat(Ops.BLOCK, name="x"), append_to_block),
 ])
 
-def blockend_gobble(x:UOp):
-  pass
+def blockend_gobble(ctx, x:UOp):
+  # x is a blockend
+  new_srcs = []
+  to_append = []
+
+  # first, see if we are done with placement. if all the children of the range are in here
+  in_this_block = set(x.arg.lst)
+  if len([y for y in ctx[x.arg.end] if y not in in_this_block]) == 0:
+    def_acc, non_def_acc = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
+    return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(tuple(y for y in x.src if y is not x.arg.end)+x.arg.end.src)),
+               BasicBlock(x.arg.ctx, def_acc+[x.arg.end]+non_def_acc))
+
+  updated = False
+  new_ctx = x.arg.ctx[:]
+  for u in x.src:
+    #if len([y for y in ctx[u] if y not in in_this_block]) > 0: new_srcs.append(u)
+    if u.op is Ops.BLOCK and x.arg.end in u.arg.ctx:
+      new_ctx += u.arg.ctx
+      new_srcs += list(u.src)
+      to_append += u.arg.lst
+      updated = True
+    else:
+      new_srcs.append(u)
+  if not updated: return None
+  return UOp(Ops.BLOCKEND, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(dedup(new_ctx), to_append+x.arg.lst, x.arg.end))
 
 blockend = PatternMatcher([
   (UPat(Ops.BLOCKEND, name="x"), blockend_gobble),
@@ -92,8 +116,12 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
   sink = graph_rewrite(sink, make_basic_blocks, ctx=children)
   # TODO: combine matching BLOCKENDS
-  sink = graph_rewrite(sink, blockend)
 
+  #children: Dict[UOp, List[UOp]] = {}
+  #range_srcs: Dict[UOp, Dict[UOp, None]] = {}
+  #in_degree: Dict[UOp, int] = {}
+  #get_children_dfs(sink, children, range_srcs, in_degree)
+  sink = graph_rewrite(sink, blockend, ctx=children)
 
   @functools.lru_cache(None)
   def topoplace(u:UOp) -> List[UOp]: return flatten(topoplace(x) for x in u.src) + (u.arg.lst if u.op in {Ops.BLOCK, Ops.BLOCKEND} else [u])
