@@ -1,6 +1,6 @@
-from typing import List, Set, Dict, Tuple, DefaultDict
+from typing import List, Dict, Tuple, DefaultDict
 from collections import defaultdict
-import functools, heapq
+import functools
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, flatten, partition
@@ -21,7 +21,8 @@ class BasicBlock:
   def __init__(self, ctx, lst, end=None):
     self.ctx, self.lst, self.end = ctx, lst, end
   def __repr__(self):
-    return f"{(str(disp(self.end))+' ') if self.end is not None else ''}{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
+    return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+\
+           f"{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
 @functools.lru_cache(None)
 def get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
@@ -106,10 +107,8 @@ def blockend_gobble(ctx, x:UOp):
     elif u.op is Ops.BLOCKFORK:
       # block fork appears # of times in srcs
       seen_count = len([y for y in x.src if y is u])
-      print(seen_count, u.arg)
       if seen_count == u.arg:
         if u not in placed:
-          print("HERE")
           new_srcs += list(u.src)
           placed.add(u)
           updated = True
@@ -125,15 +124,28 @@ def block_merge(ctx, x:UOp):
   updated = False
   new_srcs = []
   to_append = []
+  placed = set()
   for u in x.src:
     if u.op is Ops.BLOCK and tuple(u.arg.ctx) == tuple(x.arg.ctx):
       new_srcs += list(u.src)
       to_append += u.arg.lst
       updated = True
+    # TODO: copied from above
+    elif u.op is Ops.BLOCKFORK:
+      # block fork appears # of times in srcs
+      seen_count = len([y for y in x.src if y is u])
+      if seen_count == u.arg:
+        if u not in placed:
+          new_srcs += list(u.src)
+          placed.add(u)
+          updated = True
+      else:
+        # keep it
+        new_srcs.append(u)
     else:
       new_srcs.append(u)
   if not updated: return None
-  return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(x.arg.ctx, to_append+x.arg.lst))
+  return UOp(Ops.BLOCK, dtypes.void, tuple(new_srcs), BasicBlock(x.arg.ctx, to_append+x.arg.lst))
 
 blockend = PatternMatcher([
   (UPat(Ops.BLOCKEND, name="x"), blockend_gobble),
@@ -155,8 +167,10 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
     # add BLOCKFORK
     block_parents = flatten([x.src for x in sink.sparents if x.op is Ops.BLOCK])
+    non_block_parents = flatten([x.src for x in sink.sparents if x.op is not Ops.BLOCK])
     forks = {}
     for u in block_parents:
+      if u in non_block_parents: continue
       child_count = len([x for x in block_parents if x is u])
       if child_count > 1 and u.op not in DONT_PLACE_IN_BLOCK:
         forks[u] = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(get_block_ctx(u), [u])),), arg=child_count)
@@ -170,10 +184,11 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   # TODO: combine matching BLOCKENDS
   sink = graph_rewrite(sink, blockend, ctx=children)
 
-  @functools.lru_cache(None)
-  def topoplace(u:UOp) -> List[UOp]: return flatten(topoplace(x) for x in u.src) + (u.arg.lst if u.op in {Ops.BLOCK, Ops.BLOCKEND} else [u])
-
-  _uops = topoplace(sink)
+  # there should just be one block left
+  assert sink.op is Ops.BLOCK
+  _uops = dedup(sink.src)
+  assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKIF, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
+  _uops += sink.arg.lst
 
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
   if not skip_check: type_verify(_uops)
