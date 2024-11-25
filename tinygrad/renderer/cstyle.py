@@ -362,9 +362,41 @@ class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
   # https://gpuopen.com/learn/wmma_on_rdna3/
-  tensor_cores = [TensorCore(dims=(16,16,16), threads=[(0,8),(1,2),(1,2)], dtype_in=di, dtype_out=do, reduce_axes=[(0,16)], opts_seq=("LC","UP"),
-    upcast_axes = ([(0,16)],[(0,16)],[(1,2),(2,4)]), st1_pattern=(((1,2),(0,2),(1,1),(0,1)),((1,0),(0,0))), expanded_shape=(16,2,4))
-    for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]]
+  tensor_cores = [
+    TensorCore(
+      dtype_in=di, dtype_out=do, opts_seq=("LC", "UP"), dims=(16, 16, 16),
+      threads=[(0, 8), (0, 2), (1, 2)],
+      expanded_shape=(16, 2, 4),
+      reduce_axes=[(0, 16)],
+      upcast_axes=([(0, 16)], [(0, 16)], [(1, 8)]),
+      st1_pattern=(((1, 2), (0, 2), (1, 1), (0, 1)), ((1, 0), (0, 0))),
+    )
+    for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]
+  ]
+
+  tensor_cores = [
+    TensorCore(
+      dtype_in=di, dtype_out=do, opts_seq=("LC", "UP"), dims=(16, 16, 16),
+      threads=[(0, 4), (0, 2), (0, 2), (1, 2)],
+      expanded_shape=(16, 2, 4),
+      reduce_axes=[(0, 16)],
+      upcast_axes=([(0, 16)], [(0, 16)], [(1, 8)]),
+      st1_pattern=(((1, 2), (0, 3), (1, 1), (0, 2)), ((1, 0), (0, 0), (0, 1))),
+    )
+    for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]
+  ]
+
+  tensor_cores = [
+    TensorCore(
+      dtype_in=di, dtype_out=do, opts_seq=("LC", "UP"), dims=(16, 16, 16),
+      threads=[(0, 8), (0, 2), (1, 2)],
+      expanded_shape=(2, 2, 2, 2, 2, 4),
+      reduce_axes=[(0, 2), (1, 2), (2, 2), (3, 2)],
+      upcast_axes=([(3, 16)], [(3, 16)], [(4, 8)]),
+      st1_pattern=(((1, 5), (0, 2), (1, 4), (0, 1)), ((1, 0), (1, 1), (1, 2), (1, 3), (0, 0))),
+    )
+    for (di, do) in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]
+  ]
 
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
