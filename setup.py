@@ -59,7 +59,7 @@ setup(name='tinygrad',
             "bottle",
             "ggml-python"
         ],
-        'webgpu': ["wgpu>=v0.18.0"],
+        'webgpu': ["wgpu>=v0.19.0"],
         'docs': [
             "mkdocs",
             "mkdocs-material",
