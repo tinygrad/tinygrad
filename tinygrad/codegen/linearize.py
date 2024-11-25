@@ -1,9 +1,9 @@
 from typing import List, Set, Dict, Tuple, DefaultDict
 from collections import defaultdict
 import functools, heapq
-from tinygrad.ops import type_verify, END_FOR_UOP, UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite
+from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import DEBUG, dedup, flatten, partition
+from tinygrad.helpers import dedup, flatten, partition
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
   if u in children: return srcs[u]
@@ -38,8 +38,8 @@ def get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
   return tuple(dedup(sorted(flatten(ret), key=lambda x: x.tuplize)))
 
                        #Ops.DEFINE_ACC,
-DONT_PLACE_IN_BLOCK = {Ops.RANGE, Ops.ENDRANGE, Ops.CONST,
-                       Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.BLOCK, Ops.BLOCKEND}
+DONT_PLACE_IN_BLOCK = {Ops.RANGE, Ops.ENDRANGE, Ops.CONST, Ops.IF,
+                       Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKIF}
 def append_to_block(ctx, x:UOp):
   new_srcs = []
   to_append = []
@@ -65,7 +65,8 @@ def append_to_block(ctx, x:UOp):
       if r not in x.arg.ctx:
         lrng = lrng[:]
         lrng.remove(r)
-        new_block = UOp(Ops.BLOCKEND, dtypes.void, (new_block,), BasicBlock(lrng, [UOp(Ops.ENDRANGE, dtypes.void, (r,))], r))
+        new_block = UOp(Ops.BLOCKEND, dtypes.void, (new_block,),
+                        BasicBlock(lrng, [UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, dtypes.void, (r,))], r))
     new_srcs.append(new_block)
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(x.arg.ctx, to_append+x.arg.lst))
 
@@ -83,9 +84,15 @@ def blockend_gobble(ctx, x:UOp):
   # first, see if we are done with placement. if all the children of the range are in here
   in_this_block = set(x.arg.lst)
   if len([y for y in ctx[x.arg.end] if y not in in_this_block]) == 0:
-    def_acc, non_def_acc = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
-    return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not x.arg.end)+x.arg.end.src,
-               BasicBlock([y for y in x.arg.ctx if y is not x.arg.end], def_acc+[x.arg.end]+non_def_acc))
+    if x.arg.end.op is Ops.RANGE:
+      def_acc, non_def_acc = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
+      return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not x.arg.end)+x.arg.end.src,
+                BasicBlock([y for y in x.arg.ctx if y is not x.arg.end], def_acc+[x.arg.end]+non_def_acc))
+    else:
+      block_if = [y for y in x.src if y.op is Ops.BLOCKIF and y.arg.lst[0] is x.arg.end]
+      if len(block_if) == 1:
+        return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not block_if[0])+block_if[0].src,
+                  BasicBlock([y for y in x.arg.ctx if y is not x.arg.end], block_if[0].arg.lst+x.arg.lst))
 
   updated = False
   new_ctx = x.arg.ctx[:]
@@ -114,8 +121,23 @@ def blockend_gobble(ctx, x:UOp):
   if not updated: return None
   return UOp(Ops.BLOCKEND, dtypes.void, tuple(new_srcs), BasicBlock(dedup(new_ctx), to_append+x.arg.lst, x.arg.end))
 
+def block_merge(ctx, x:UOp):
+  updated = False
+  new_srcs = []
+  to_append = []
+  for u in x.src:
+    if u.op is Ops.BLOCK and tuple(u.arg.ctx) == tuple(x.arg.ctx):
+      new_srcs += list(u.src)
+      to_append += u.arg.lst
+      updated = True
+    else:
+      new_srcs.append(u)
+  if not updated: return None
+  return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(x.arg.ctx, to_append+x.arg.lst))
+
 blockend = PatternMatcher([
   (UPat(Ops.BLOCKEND, name="x"), blockend_gobble),
+  (UPat(Ops.BLOCK, name="x"), block_merge),
 ])
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
@@ -127,23 +149,25 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   in_degree: Dict[UOp, int] = {}
   get_children_dfs(sink, children, range_srcs, in_degree)
 
-  sink = graph_rewrite(sink, make_basic_blocks, ctx=children)
+  # TODO: there's probably a clever way to remove this while loop
+  while 1:
+    sink = graph_rewrite(sink, make_basic_blocks, ctx=children)
 
-  # add BLOCKFORK (TODO: recursive)
-  block_parents = flatten([x.src for x in sink.sparents if x.op is Ops.BLOCK])
-  forks = {}
-  for u in block_parents:
-    child_count = len([x for x in block_parents if x is u])
-    if child_count > 1 and u.op not in DONT_PLACE_IN_BLOCK:
-      forks[u] = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(get_block_ctx(u), [u])),), arg=child_count)
-  sink = sink.substitute(forks)
+    # add BLOCKFORK
+    block_parents = flatten([x.src for x in sink.sparents if x.op is Ops.BLOCK])
+    forks = {}
+    for u in block_parents:
+      child_count = len([x for x in block_parents if x is u])
+      if child_count > 1 and u.op not in DONT_PLACE_IN_BLOCK:
+        forks[u] = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(get_block_ctx(u), [u])),), arg=child_count)
+      if u.op is Ops.IF:
+        block_srcs = [UOp(Ops.BLOCK, src=x.src, arg=BasicBlock(get_block_ctx(x), [x])) for x in u.src]
+        forks[u] = UOp(Ops.BLOCKIF, src=tuple(block_srcs), arg=BasicBlock(get_block_ctx(u), [u]))
+
+    if not len(forks): break
+    sink = sink.substitute(forks)
 
   # TODO: combine matching BLOCKENDS
-
-  #children: Dict[UOp, List[UOp]] = {}
-  #range_srcs: Dict[UOp, Dict[UOp, None]] = {}
-  #in_degree: Dict[UOp, int] = {}
-  #get_children_dfs(sink, children, range_srcs, in_degree)
   sink = graph_rewrite(sink, blockend, ctx=children)
 
   @functools.lru_cache(None)
@@ -151,11 +175,8 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
   _uops = topoplace(sink)
 
-  from tinygrad.ops import print_uops
-  print_uops(_uops)
-
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
-  #if not skip_check: type_verify(_uops)
+  if not skip_check: type_verify(_uops)
 
   # strip the SINK
   return _uops[:-1]
