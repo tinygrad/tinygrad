@@ -98,7 +98,7 @@ class TestViz(unittest.TestCase):
     self.assertEqual(len(ret), 2)
     self.assertIs(ret[0], a.sin().sqrt()) # first rewrite
     self.assertIs(ret[1], a.sqrt().sqrt()) # second one
-  
+
   def test_top_down_rewrite(self):
     a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
     n1 = a.sin()
