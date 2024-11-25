@@ -7,7 +7,7 @@ def mix(states: Tensor, chunks: Tensor) -> Tensor:
   def rotr(x: Tensor, n: int) -> Tensor: return ((x << (32 - n)) | (x >> n))
   for i, (a,b,c,d) in enumerate([(0,4,8,12), (1,5,9,13), (2,6,10,14), (3,7,11,15), (0,5,10,15), (1,6,11,12), (2,7,8,13), (3,4,9,14)]):
     mx, my = chunks[:, i * 2], chunks[:, i * 2 + 1]
-    for m in (mx, my):
+    for m in (mx, my): # NOTE: 99% of the execution time is spent here
       states[:, a] = states[:, a] + states[:, b] + m
       states[:, d] = rotr(states[:, d] ^ states[:, a], 16 if m is mx else 8)
       states[:, c] = states[:, c] + states[:, d]
@@ -30,14 +30,14 @@ def compress_blocks(states: Tensor, chunks: Tensor, chain_vals: Tensor) -> Tenso
   return states
 
 def tensor_to_blake_chunks(tensor: Tensor) -> Tuple[Tensor, int, int]:
-  data = tensor.bitcast(dtypes.uint8)
-  unpadded_len = data.shape[0]
+  data = tensor.flatten().bitcast(dtypes.uint8)
+  unpadded_len = data.numel()
   data = data.pad(((0, 1024 if data.shape[0] == 0 else (1024 - (data.shape[0] % 1024)) % 1024),), value=0)
   data = data.bitcast(dtypes.uint32).reshape(-1, 16, 16)
   final_chunk_bytes = unpadded_len - (data.shape[0] - 1) * 1024
   n_end_blocks = max(1, (final_chunk_bytes // 64) + (1 if final_chunk_bytes % 64 else 0))
   end_block_len = 64 if unpadded_len % 64 == 0 and unpadded_len else unpadded_len % 64
-  return data, n_end_blocks, end_block_len # chunks is [chunks, blocks, words]
+  return data, n_end_blocks, end_block_len # data is [chunks, blocks, words]
 
 def pairwise_concatenate(chain_vals: Tensor) -> Tuple[Tensor, Optional[Tensor]]:
   leftover_chunk = chain_vals[-1:] if chain_vals.shape[0] % 2 else None
@@ -46,8 +46,7 @@ def pairwise_concatenate(chain_vals: Tensor) -> Tuple[Tensor, Optional[Tensor]]:
 def create_state(iv: Tensor, count: Optional[int], end_block_len: Optional[int], n_end_blocks: Optional[int], flags: Tensor) -> Tensor:
   n_chunks, n_blocks = iv.shape[0], iv.shape[1]
   if count is not None:
-    counts = Tensor.arange(count, count + n_chunks, dtype=dtypes.uint32)
-    counts = counts.reshape(n_chunks, 1).expand(n_chunks, n_blocks).reshape(n_chunks, n_blocks, 1)
+    counts = Tensor.arange(count, count + n_chunks, dtype=dtypes.uint32).reshape(-1, 1).expand(-1, 16).reshape(-1, 16, 1)
     counts = counts.cat(Tensor.zeros(n_chunks, n_blocks, 1, dtype=dtypes.uint32), dim=-1)
   else:
     counts = Tensor.zeros(n_chunks, n_blocks, 2, dtype=dtypes.uint32)
@@ -60,8 +59,8 @@ def create_flags(chunks: Tensor, n_end_blocks: Optional[int], root: bool, parent
   flags = Tensor.zeros((chunks.shape[0], chunks.shape[1], 1), dtype=dtypes.uint32).contiguous()
   flags[:, 0] = flags[:, 0] + 1 # chunk start flag
   flags[:-1, -1] = flags[:-1, -1] + 2 # chunk end flag
-  flags[-1, end_idx:] = flags[-1, end_idx:] + 2 # chunk end flag
-  if parent: flags[:, :, :] = 4 # parent flag
+  flags[-1, end_idx:] = flags[-1, end_idx:] + 2 # chunk end flag for partial final chunk
+  if parent: flags[:] = 4 # parent flag
   if root: flags[0, end_idx] = flags[0, end_idx] + 8 # root flag
   return flags
 
@@ -77,8 +76,8 @@ def blake3(tensor: Tensor) -> str:
   chain_vals = compress(chunks, compress_chunks, 0, end_block_len, n_end_blocks, chunks.shape[0] == 1, False)
   tree_levels = math.ceil(math.log2(max(chain_vals.shape[0], 1)))
   tree_compressor = lambda states, data, iv, _: compress_blocks(states[:, -1].contiguous(), data, iv[:, 0])
-  for i in range(tree_levels): # tree-hash chain value pairs ~halving them in each step
+  for i in range(tree_levels): # tree-hash chain value pairs ~halving the number in each step
     chain_vals, leftover_chain_val = pairwise_concatenate(chain_vals)
     chain_vals = compress(chain_vals, tree_compressor, None, None, None, i == tree_levels - 1, True)
     if leftover_chain_val is not None: chain_vals = chain_vals.cat(leftover_chain_val, dim=0)
-  return chain_vals[0].flatten().numpy().tobytes()[:32].hex()
+  return chain_vals[0].flatten().bitcast(dtypes.uint8).data().tobytes()[:32].hex()
