@@ -5,10 +5,10 @@ from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher as PatternMatc
 from tinygrad.viz.serve import get_details, get_metadata, uop_to_json
 
 @track_rewrites()
-def rewrite(sink:UOp, pm:PatternMatcher, ctx=None): return graph_rewrite(sink, pm, ctx)
+def rewrite(sink:UOp, pm:PatternMatcher, **kwargs): return graph_rewrite(sink, pm, **kwargs)
 
-def helper_test_viz(sink:UOp, pm:PatternMatcher, ctx=None) -> List[UOp]:
-  rewrite(sink, pm, ctx)
+def helper_test_viz(sink:UOp, pm:PatternMatcher, **kwargs) -> List[UOp]:
+  rewrite(sink, pm, **kwargs)
   assert len(contexts) == 1
   assert len(contexts[0][1]) == 1
   k = get_metadata(contexts)[0][0]
@@ -52,7 +52,7 @@ class TestViz(unittest.TestCase):
     pm = PatternMatcher([
       (UPat(Ops.LOAD, name="x"), store_load),
     ])
-    uops = helper_test_viz(a+b, pm, {})
+    uops = helper_test_viz(a+b, pm, ctx={})
     self.assertEqual(len(uops), 2)
     self.assertEqual(uops[-1], graph_rewrite(a+b, pm, {}))
 
@@ -88,6 +88,15 @@ class TestViz(unittest.TestCase):
     graph = uop_to_json(a)
     assert not any(v[0].startswith("CONST") for v in graph.values())
     assert len([x for x in graph.values() if "CONST" in x[0]]) == 1
+
+  def test_bottom_up_rewrite(self):
+    a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
+    n1 = a.sin()
+    uop = n1.sin()
+    pm = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
+    ret = helper_test_viz(uop, pm, ctx={a.sin():a.sqrt(), n1.sin():n1.sqrt()}, bottom_up=True)
+    self.assertEqual(len(ret), 2)
+    self.assertIs(ret[-1], a.sqrt().sqrt())
 
 if __name__ == "__main__":
   unittest.main()
