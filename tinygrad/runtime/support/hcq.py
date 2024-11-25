@@ -14,85 +14,20 @@ ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
 
-P = ParamSpec('P')
-def hcq_command(func: Callable[Concatenate[QueueType, P], None]) -> Callable[Concatenate[QueueType, P], QueueType]:
-  """
-  Decorator for HWCommandQueue commands. Enables command indexing and stores metadata for command updates.
-
-  For example:
-    ```python
-      @hcq_command
-      def command_method(self, ...): ...
-    ```
-  """
-  @functools.wraps(func)
-  def __wrapper(self:QueueType, *args:P.args, **kwargs:P.kwargs) -> QueueType:
-    self.cmds_offset.append(len(self.q))
-    func(self, *args, **kwargs)
-    self.cmds_len.append(len(self.q) - self.cmds_offset[-1])
-    self.cmds_meta.append(func.__name__)
-    return self
-  return __wrapper
-
 class HWQueue2(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
-  def __init__(self): self._q, self.binded_device, self.sint_offsets = [], None, []
+  """
+  A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
+  Both compute and copy queues should have the following commands implemented.
+  """
+
+  def __init__(self): self._q, self.binded_device, self.sint_offsets, self.ext_sint_mv = [], None, [], []
   def q(self, *values):
     for v in values: 
       if isinstance(v, int): self._q.append(v)
       else: 
         self.sint_offsets.append((len(self._q), v))
         self._q.append(0xbad0c0de)
-  def timestamp(self, signal:SignalType): pass
-  def signal(self, signal:SignalType, value:sint): pass
-  def memory_barrier(self): pass
-  def exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[sint,sint,sint], local_size:Tuple[sint,sint,sint]): pass
-  def _apply_var_vals(self, var_vals):
-    for off, sym in self.sint_offsets: self._q[off] = sym_infer(sym, var_vals)
-  def submit(self, device, var_vals=None):
-    if var_vals is not None: self._apply_var_vals(var_vals)
-    self._submit(device)
 
-class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
-  """
-  A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
-  Both compute and copy queues should have the following commands implemented.
-  """
-
-  def __init__(self): self.q, self.binded_device, self.cmds_offset, self.cmds_len, self.cmds_meta = [], None, [], [], []
-  def __len__(self): return len(self.cmds_offset)
-  def _patch(self, cmd_idx, offset, data): self.q[(st:=self.cmds_offset[cmd_idx]+offset):st+len(data)] = array.array('I', data)
-  def _cur_cmd_idx(self) -> int:
-    """
-    Returns the index of the command currently being enqueued.
-    Should be called only within functions that enqueue commands and are decorated with `@hcq_command`.
-    """
-    return len(self) - 1
-
-  @hcq_command
-  def signal(self, signal:SignalType, value:int):
-    """
-    Enqueues a signal command which sets the signal to the given value, ensuring all previous operations are completed.
-
-    Args:
-      signal: The signal to set
-      value: The value to set the signal to
-    """
-    self._signal(signal, value)
-  def _signal(self, signal:SignalType, value:int): raise NotImplementedError("backend should overload this function")
-
-  @hcq_command
-  def wait(self, signal:SignalType, value:int):
-    """
-    Enqueues a wait command which halts execution until the signal is greater than or equal to a specific value.
-
-    Args:
-      signal: The signal to wait on
-      value: The value to wait for
-    """
-    self._wait(signal, value)
-  def _wait(self, signal, value): raise NotImplementedError("backend should overload this function")
-
-  @hcq_command
   def timestamp(self, signal:SignalType):
     """
     Enqueues a timestamp command which records the current time in a signal after all previously enqueued commands are completed.
@@ -100,38 +35,40 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     Args:
       signal: The signal to store the timestamp
     """
-    self._timestamp(signal)
-  def _timestamp(self, signal): raise NotImplementedError("backend should overload this function")
 
-  def update_signal(self, cmd_idx:int, signal:Optional[SignalType]=None, value:Optional[int]=None):
+  def signal(self, signal:SignalType, value:sint):
     """
-    Updates a previously queued signal command.
+    Enqueues a signal command which sets the signal to the given value, ensuring all previous operations are completed.
 
     Args:
-      cmd_idx: Index of the signal command to update
-      signal: New signal to set (if None, keeps the original)
-      value: New value to set (if None, keeps the original)
+      signal: The signal to set
+      value: The value to set the signal to
     """
-    if self.cmds_meta[cmd_idx] != "signal": raise RuntimeError("called update_signal not on a signal command")
-    self._update_signal(cmd_idx, signal, value)
-    return self
-  def _update_signal(self, cmd_idx:int, signal:Optional[SignalType], value:Optional[int]):
-    raise NotImplementedError("backend should overload this function")
 
-  def update_wait(self, cmd_idx:int, signal:Optional[SignalType]=None, value:Optional[int]=None):
+  def wait(self, signal:SignalType, value:sint):
     """
-    Updates a previously queued wait command.
+    Enqueues a wait command which halts execution until the signal is greater than or equal to a specific value.
 
     Args:
-      cmd_idx: Index of the wait command to update
-      signal: New signal to wait on (if None, keeps the original)
-      value: New value to wait for (if None, keeps the original)
+      signal: The signal to wait on
+      value: The value to wait for
     """
-    if self.cmds_meta[cmd_idx] != "wait": raise RuntimeError("called update_wait not on a wait command")
-    self._update_wait(cmd_idx, signal, value)
-    return self
-  def _update_wait(self, cmd_idx:int, signal:Optional[SignalType], value:Optional[int]):
-    raise NotImplementedError("backend should overload this function")
+
+  def memory_barrier(self):
+    """
+    Enqueues a memory barrier command to ensure memory coherence between agents. Only on compute queues.
+    """
+
+  def exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[sint,sint,sint], local_size:Tuple[sint,sint,sint]):
+    """
+    Enqueues an execution command for a kernel program. Only on compute queues.
+
+    Args:
+      prg: The program to execute
+      args_state: The args state to execute program with
+      global_size: The global work size
+      local_size: The local work size
+    """
 
   def bind(self, dev:DeviceType):
     """
@@ -147,85 +84,200 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       Implementing this method is optional but recommended for performance gains.
     """
 
-  def submit(self, dev:DeviceType):
+  def _ext_update(self, mv, *vals:sint): self.ext_sint_mv.append((mv, tuple(vals)))
+  def _apply_var_vals(self, var_vals):
+    for off, sym in self.sint_offsets: self._q[off] = sym_infer(sym, var_vals)
+    for mv, vals in self.ext_sint_mv:
+      for off, sym in enumerate(vals): mv[off] = sym_infer(sym, var_vals)
+
+  def submit(self, device, var_vals=None):
     """
     Submits the command queue to a specific device for execution.
 
     Args:
       dev: The device to submit the queue to
     """
-    if self.q: self._submit(dev)
+
+    if var_vals is not None: self._apply_var_vals(var_vals)
+    self._submit(device)
     return self
-  def _submit(self, dev:DeviceType): raise NotImplementedError("backend should overload this function")
 
-  # *** commands for compute queues ***
+HWQueue = HWQueue2
 
-  @hcq_command
-  def memory_barrier(self):
-    """
-    Enqueues a memory barrier command to ensure memory coherence between agents. Only on compute queues.
-    """
-    self._memory_barrier()
-  def _memory_barrier(self): pass
+# class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
+#   """
+#   A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
+#   Both compute and copy queues should have the following commands implemented.
+#   """
 
-  @hcq_command
-  def exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
-    """
-    Enqueues an execution command for a kernel program. Only on compute queues.
+#   def __init__(self): self.q, self.binded_device, self.cmds_offset, self.cmds_len, self.cmds_meta = [], None, [], [], []
+#   def __len__(self): return len(self.cmds_offset)
+#   def _patch(self, cmd_idx, offset, data): self.q[(st:=self.cmds_offset[cmd_idx]+offset):st+len(data)] = array.array('I', data)
+#   def _cur_cmd_idx(self) -> int:
+#     """
+#     Returns the index of the command currently being enqueued.
+#     Should be called only within functions that enqueue commands and are decorated with `@hcq_command`.
+#     """
+#     return len(self) - 1
 
-    Args:
-      prg: The program to execute
-      args_state: The args state to execute program with
-      global_size: The global work size
-      local_size: The local work size
-    """
-    self._exec(prg, args_state, global_size, local_size)
-  def _exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
-    raise NotImplementedError("backend should overload this function")
+#   @hcq_command
+#   def signal(self, signal:SignalType, value:int):
+#     """
+#     Enqueues a signal command which sets the signal to the given value, ensuring all previous operations are completed.
 
-  def update_exec(self, cmd_idx:int, global_size:Optional[Tuple[int,int,int]]=None, local_size:Optional[Tuple[int,int,int]]=None):
-    """
-    Updates a previously queued execution command. Only on compute queues.
+#     Args:
+#       signal: The signal to set
+#       value: The value to set the signal to
+#     """
+#     self._signal(signal, value)
+#   def _signal(self, signal:SignalType, value:int): raise NotImplementedError("backend should overload this function")
 
-    Args:
-      cmd_idx: Index of the execution command to update
-      global_size: New global work size (if None, keeps the original)
-      local_size: New local work size (if None, keeps the original)
-    """
-    if self.cmds_meta[cmd_idx] != "exec": raise RuntimeError("called update_exec not on an exec command")
-    self._update_exec(cmd_idx, global_size, local_size)
-    return self
-  def _update_exec(self, cmd_idx, global_size, local_size): raise NotImplementedError("backend should overload this function")
+#   @hcq_command
+#   def wait(self, signal:SignalType, value:int):
+#     """
+#     Enqueues a wait command which halts execution until the signal is greater than or equal to a specific value.
 
-  # *** commands for copy queues ***
+#     Args:
+#       signal: The signal to wait on
+#       value: The value to wait for
+#     """
+#     self._wait(signal, value)
+#   def _wait(self, signal, value): raise NotImplementedError("backend should overload this function")
 
-  @hcq_command
-  def copy(self, dest:int, src:int, copy_size:int):
-    """
-    Enqueues a copy command to transfer data. Only on copy queues.
+#   @hcq_command
+#   def timestamp(self, signal:SignalType):
+#     """
+#     Enqueues a timestamp command which records the current time in a signal after all previously enqueued commands are completed.
 
-    Args:
-      dest: The destination of the copy
-      src: The source of the copy
-      copy_size: The size of data to copy
-    """
-    self._copy(dest, src, copy_size)
-  def _copy(self, dest:int, src:int, copy_size:int): raise NotImplementedError("backend should overload this function")
+#     Args:
+#       signal: The signal to store the timestamp
+#     """
+#     self._timestamp(signal)
+#   def _timestamp(self, signal): raise NotImplementedError("backend should overload this function")
 
-  def update_copy(self, cmd_idx:int, dest:Optional[int]=None, src:Optional[int]=None):
-    """
-    Updates a previously queued copy command. Only on copy queues.
+#   def update_signal(self, cmd_idx:int, signal:Optional[SignalType]=None, value:Optional[int]=None):
+#     """
+#     Updates a previously queued signal command.
 
-    Args:
-      cmd_idx: Index of the copy command to update
-      dest: New destination of the copy (if None, keeps the original)
-      src: New source of the copy (if None, keeps the original)
-    """
-    if self.cmds_meta[cmd_idx] != "copy": raise RuntimeError("called update_copy not on an copy command")
-    self._update_copy(cmd_idx, dest, src)
-    return self
-  def _update_copy(self, cmd_idx:int, dest:Optional[int], src:Optional[int]):
-    raise NotImplementedError("backend should overload this function")
+#     Args:
+#       cmd_idx: Index of the signal command to update
+#       signal: New signal to set (if None, keeps the original)
+#       value: New value to set (if None, keeps the original)
+#     """
+#     if self.cmds_meta[cmd_idx] != "signal": raise RuntimeError("called update_signal not on a signal command")
+#     self._update_signal(cmd_idx, signal, value)
+#     return self
+#   def _update_signal(self, cmd_idx:int, signal:Optional[SignalType], value:Optional[int]):
+#     raise NotImplementedError("backend should overload this function")
+
+#   def update_wait(self, cmd_idx:int, signal:Optional[SignalType]=None, value:Optional[int]=None):
+#     """
+#     Updates a previously queued wait command.
+
+#     Args:
+#       cmd_idx: Index of the wait command to update
+#       signal: New signal to wait on (if None, keeps the original)
+#       value: New value to wait for (if None, keeps the original)
+#     """
+#     if self.cmds_meta[cmd_idx] != "wait": raise RuntimeError("called update_wait not on a wait command")
+#     self._update_wait(cmd_idx, signal, value)
+#     return self
+#   def _update_wait(self, cmd_idx:int, signal:Optional[SignalType], value:Optional[int]):
+#     raise NotImplementedError("backend should overload this function")
+
+#   def bind(self, dev:DeviceType):
+#     """
+#     Associates the queue with a specific device for optimized execution.
+
+#     This optional method allows backend implementations to tailor the queue for efficient use on the given device. When implemented, it can eliminate
+#     the need to copy queues into the device, thereby enhancing performance.
+
+#     Args:
+#       dev: The target device for queue optimization.
+
+#     Note:
+#       Implementing this method is optional but recommended for performance gains.
+#     """
+
+#   def submit(self, dev:DeviceType):
+#     """
+#     Submits the command queue to a specific device for execution.
+
+#     Args:
+#       dev: The device to submit the queue to
+#     """
+#     if self.q: self._submit(dev)
+#     return self
+#   def _submit(self, dev:DeviceType): raise NotImplementedError("backend should overload this function")
+
+#   # *** commands for compute queues ***
+
+#   @hcq_command
+#   def memory_barrier(self):
+#     """
+#     Enqueues a memory barrier command to ensure memory coherence between agents. Only on compute queues.
+#     """
+#     self._memory_barrier()
+#   def _memory_barrier(self): pass
+
+#   @hcq_command
+#   def exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
+#     """
+#     Enqueues an execution command for a kernel program. Only on compute queues.
+
+#     Args:
+#       prg: The program to execute
+#       args_state: The args state to execute program with
+#       global_size: The global work size
+#       local_size: The local work size
+#     """
+#     self._exec(prg, args_state, global_size, local_size)
+#   def _exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
+#     raise NotImplementedError("backend should overload this function")
+
+#   def update_exec(self, cmd_idx:int, global_size:Optional[Tuple[int,int,int]]=None, local_size:Optional[Tuple[int,int,int]]=None):
+#     """
+#     Updates a previously queued execution command. Only on compute queues.
+
+#     Args:
+#       cmd_idx: Index of the execution command to update
+#       global_size: New global work size (if None, keeps the original)
+#       local_size: New local work size (if None, keeps the original)
+#     """
+#     if self.cmds_meta[cmd_idx] != "exec": raise RuntimeError("called update_exec not on an exec command")
+#     self._update_exec(cmd_idx, global_size, local_size)
+#     return self
+#   def _update_exec(self, cmd_idx, global_size, local_size): raise NotImplementedError("backend should overload this function")
+
+#   # *** commands for copy queues ***
+
+#   @hcq_command
+#   def copy(self, dest:int, src:int, copy_size:int):
+#     """
+#     Enqueues a copy command to transfer data. Only on copy queues.
+
+#     Args:
+#       dest: The destination of the copy
+#       src: The source of the copy
+#       copy_size: The size of data to copy
+#     """
+#     self._copy(dest, src, copy_size)
+#   def _copy(self, dest:int, src:int, copy_size:int): raise NotImplementedError("backend should overload this function")
+
+#   def update_copy(self, cmd_idx:int, dest:Optional[int]=None, src:Optional[int]=None):
+#     """
+#     Updates a previously queued copy command. Only on copy queues.
+
+#     Args:
+#       cmd_idx: Index of the copy command to update
+#       dest: New destination of the copy (if None, keeps the original)
+#       src: New source of the copy (if None, keeps the original)
+#     """
+#     if self.cmds_meta[cmd_idx] != "copy": raise RuntimeError("called update_copy not on an copy command")
+#     self._update_copy(cmd_idx, dest, src)
+#     return self
+#   def _update_copy(self, cmd_idx:int, dest:Optional[int], src:Optional[int]):
+#     raise NotImplementedError("backend should overload this function")
 
 class HCQSignal:
   def __init__(self, value:int=0, is_timeline:bool=False): self._set_value(value)

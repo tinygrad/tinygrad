@@ -3,7 +3,7 @@ from typing import List, Any, Dict, cast, Optional, Tuple, Set
 from tinygrad.helpers import round_up, PROFILE, memsize_to_str
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device
-from tinygrad.ops import Variable
+from tinygrad import Variable, dtypes
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
 
@@ -40,6 +40,7 @@ class HCQGraph(MultiGraphRunner):
 
     self.signals: Dict[Any, HCQSignal] = {**{dev: dev.signal_t(value=0) for dev in self.devices}, **{"CPU": self.devices[0].signal_t(value=0)}}
     self.kickoff_value: int = 0
+    self.kickoff_var = Variable("kickoff_var", 0, 0xffffffff, dtype=dtypes.uint32)
 
     self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(jit_cache) * 2)] if PROFILE else []
     self.prof_records: List[Tuple[Tuple[int, bool], Tuple[int, bool], HCQCompiled, str, bool, List[int], Optional[Dict]]] = []
@@ -70,7 +71,7 @@ class HCQGraph(MultiGraphRunner):
 
       # Ensure device is ready for use in current context: the graph has initialized the device and it's safe to operate on it within this graph.
       for dep_queue, _ in opt_deps: dev_access[enqueue_queue].update(dev_access[dep_queue])
-      sync_signals = [(self.signals[d], self.kickoff_value) for b in ji.bufs if (d:=Device[cast(Buffer, b).device]) not in dev_access[enqueue_queue]]
+      sync_signals = [(self.signals[d], self.kickoff_var) for b in ji.bufs if (d:=Device[cast(Buffer, b).device]) not in dev_access[enqueue_queue]]
       dev_access[enqueue_queue].update(cast(HCQCompiled, Device[cast(Buffer, b).device]) for b in ji.bufs)
 
       # Remove self-dependency for compute and copy queues.
@@ -99,18 +100,19 @@ class HCQGraph(MultiGraphRunner):
       last_j[enqueue_queue] = j
 
     # Build hardware queues.
-    self.op_cmd_idx: Dict[int, Tuple[HWQueue, int]] = {}
+    # self.op_cmd_idx: Dict[int, Tuple[HWQueue, int]] = {}
     self.copy_to_devs: Dict[HCQCompiled, Set[HCQCompiled]] = {dev: set() for dev in self.devices}
-    self.kickoff_wait_cmds: Dict[HWQueue, List] = {q: list() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
+    # self.kickoff_wait_cmds: Dict[HWQueue, List] = {q: list() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
 
+    self.timeline_vars = {dev : Variable(f"timeline_var_{dev.device_id}", 0, 0xffffffff, dtype=dtypes.uint32) for dev in self.devices}
     for dev in self.devices:
-      self.comp_queues[dev].memory_barrier().wait(dev.timeline_signal, dev.timeline_value - 1) \
-                           .wait(self.signals['CPU'], self.kickoff_value).signal(self.signals[dev], self.kickoff_value)
+      self.comp_queues[dev].memory_barrier().wait(dev.timeline_signal, self.timeline_vars[dev]) \
+                           .wait(self.signals['CPU'], self.kickoff_var).signal(self.signals[dev], self.kickoff_var)
 
     for j,ji in enumerate(jit_cache):
       enqueue_dev, enqueue_queue, sync_signals, deps, signal, signal_val = self.ji_schedule[j]
 
-      for i in range(len(sync_signals)): self.kickoff_wait_cmds[enqueue_queue].append(len(enqueue_queue) + i)
+      # for i in range(len(sync_signals)): self.kickoff_wait_cmds[enqueue_queue].append(len(enqueue_queue) + i)
       for sig, val in sync_signals + deps: enqueue_queue.wait(sig, val)
 
       # Encode waits and start profile timestamp (if needed).
@@ -118,13 +120,12 @@ class HCQGraph(MultiGraphRunner):
 
       # Encode main commands based on ji type.
       if isinstance(ji.prg, CompiledRunner):
-        enqueue_queue.exec(ji.prg._prg, self.ji_args[j], *ji.prg.p.launch_dims(var_vals))
+        enqueue_queue.exec(ji.prg._prg, self.ji_args[j], ji.prg.p.global_size, ji.prg.p.local_size)
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         cast(HCQAllocator, Device[src.device].allocator).map(dest._buf)
         enqueue_queue.copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes)
         self.copy_to_devs[cast(HCQCompiled, Device[dest.device])].add(cast(HCQCompiled, Device[src.device]))
-      self.op_cmd_idx[j] = (enqueue_queue, len(enqueue_queue) - 1)
 
       # Encode finish profile timestamp (if needed).
       if PROFILE and self.prof_records[j][1][1]: enqueue_queue.timestamp(self.prof_signals[self.prof_records[j][1][0]])
@@ -135,7 +136,7 @@ class HCQGraph(MultiGraphRunner):
       for dep_dev in list(self.copy_to_devs[dev]) + [dev]:
         if dep_dev in self.copy_queues: self.comp_queues[dev].wait(self.signals[(copy_q:=self.copy_queues[dep_dev])], cast(int, last_j[copy_q]) + 1)
 
-      self.comp_queues[dev].signal(dev.timeline_signal, dev.timeline_value).bind(dev)
+      self.comp_queues[dev].signal(dev.timeline_signal, self.timeline_vars[dev] + 1).bind(dev)
       if dev in self.copy_queues: self.copy_queues[dev].bind(dev)
 
     self.last_timeline: Dict[HCQCompiled, Tuple[HCQSignal, int]] = {dev: (dev.timeline_signal, 0) for dev in self.devices}
@@ -159,19 +160,24 @@ class HCQGraph(MultiGraphRunner):
     for j, i, v in self.updated_vars(var_vals): self.ji_args[j].update_var(i, v)
 
     # Update launch dims
-    for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
-      queue, cmd_ptr = self.op_cmd_idx[j]
-      queue.update_exec(cmd_ptr, global_dims, local_dims)
+    # for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
+    #   queue, cmd_ptr = self.op_cmd_idx[j]
+    #   queue.update_exec(cmd_ptr, global_dims, local_dims)
 
+    # var_vals[self.kickoff_var] = self.kickoff_value
+    upd_dict = {**var_vals, self.kickoff_var: self.kickoff_value, **{var : dev.timeline_value - 1 for dev, var in self.timeline_vars.items()}}
     for dev in self.devices:
-      comp_queue, copy_queue, need_sig_upd = self.comp_queues[dev], self.copy_queues.get(dev, None), dev.timeline_signal != self.last_timeline[dev][0]
-      comp_queue.update_wait(1, dev.timeline_signal if need_sig_upd else None, dev.timeline_value - 1) \
-                .update_wait(2, value=self.kickoff_value).update_signal(3, value=self.kickoff_value) \
-                .update_signal(len(comp_queue)-1, dev.timeline_signal if need_sig_upd else None, dev.timeline_value).submit(dev)
+      # comp_queue, copy_queue, need_sig_upd = self.comp_queues[dev], self.copy_queues.get(dev, None), dev.timeline_signal != self.last_timeline[dev][0]
+      # comp_queue.update_wait(1, dev.timeline_signal if need_sig_upd else None, dev.timeline_value - 1) \
+      #           .update_wait(2, value=self.kickoff_value).update_signal(3, value=self.kickoff_value) \
+      #           .update_signal(len(comp_queue)-1, dev.timeline_signal if need_sig_upd else None, dev.timeline_value).submit(dev)
 
-      if copy_queue is not None:
-        for cmd_idx in self.kickoff_wait_cmds[copy_queue]: copy_queue.update_wait(cmd_idx, value=self.kickoff_value)
-        copy_queue.submit(dev)
+      # print(upd_dict)
+      self.comp_queues[dev].submit(dev, upd_dict)
+      if (copy_queue:=self.copy_queues.get(dev, None)) is not None: copy_queue.submit(dev, upd_dict)
+
+        # for cmd_idx in self.kickoff_wait_cmds[copy_queue]: copy_queue.update_wait(cmd_idx, value=self.kickoff_value)
+        # copy_queue.submit(dev)
 
       self.last_timeline[dev] = (dev.timeline_signal, dev.timeline_value)
       dev.timeline_value += 1
