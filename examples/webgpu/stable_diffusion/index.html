@@ -545,6 +545,7 @@
                     let x_prev = await nets["diffusor"](unconditional_context, context, latent, timestep, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]]), new Float32Array([guidance]));
                     document.getElementById("divStepTime").style.display = "block";
                     document.getElementById("stepTimeValue").innerText = `${(performance.now() - start).toFixed(1)} ms / step`
+                    latent = x_prev;
 
                     if (showStep != null) {
                         showStep(await nets["decoder"](latent));
