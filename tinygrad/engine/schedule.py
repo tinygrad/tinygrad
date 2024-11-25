@@ -366,7 +366,7 @@ break_sched = PatternMatcher([
   # consts are always fused and generated
   (UPatSrc({Ops.CONST, Ops.BIND}), generate_valid),
   # everything else is a VIEW of BUFFER that either realizes or fuses
-  (UPatSrc(), lambda ctx,b,to_store,base: append_kernel(ctx, b, to_store, base) if b in ctx.realizes else None),
+  (UPatSrc(), lambda ctx,b,to_store,base: append_kernel(ctx, b, to_store, base) if b in ctx.realizes else to_store),
 ])
 
 @track_rewrites(named=True)
