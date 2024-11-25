@@ -107,6 +107,9 @@ class Ops(FastEnum):
   EMPTY = auto()
   BUFFER_VIEW = auto()
 
+  BLOCK = auto()
+  BLOCKEND = auto()
+
   EXPAND = auto()
   CONTRACT = auto()
   VIEW = auto()

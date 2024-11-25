@@ -1,8 +1,9 @@
-from typing import List, Set, Dict, Tuple
+from typing import List, Set, Dict, Tuple, DefaultDict
+from collections import defaultdict
 import functools, heapq
-from tinygrad.ops import type_verify, END_FOR_UOP, UOp, Ops, GroupOp
+from tinygrad.ops import type_verify, END_FOR_UOP, UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, dedup, flatten
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
   if u in children: return srcs[u]
@@ -15,6 +16,71 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
   in_degree[u] = len(u.src)
   return srcs[u]
 
+def disp(y): return y.arg[0] if y.op is Ops.RANGE else f'IF{id(y)}'
+class BasicBlock:
+  def __init__(self, ctx, lst, ends=[]):
+    self.ctx, self.lst, self.ends = ctx, lst, ends
+  def __repr__(self):
+    return f"{[disp(y) for y in self.ctx]} {[disp(y) for y in self.ends] if len(self.ends) else ""} "+\
+           f"{len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
+
+@functools.lru_cache(None)
+def get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
+  ret: List[Tuple[UOp, ...]] = []
+  for u in x.src:
+    if u.op in {Ops.RANGE, Ops.IF}: ret.append((u,))
+    # don't flow through assign and store
+    if u.op is Ops.STORE: continue
+    if u.op is Ops.ASSIGN:
+      assert u.src[0].op is Ops.DEFINE_ACC
+      ret.append(tuple(x for x in get_block_ctx(u.src[1]) if x not in u.src[0].src[1:]))
+    else:
+      ret.append(get_block_ctx(u))
+  return tuple(dedup(sorted(flatten(ret), key=lambda x: x.tuplize)))
+
+DONT_PLACE_IN_BLOCK = {Ops.RANGE, Ops.ENDRANGE, Ops.CONST,
+                       Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.BLOCK, Ops.BLOCKEND}
+def append_to_block(ctx, x:UOp):
+  new_srcs = []
+  to_append = []
+  new_blocks: DefaultDict[Tuple[UOp, ...], List[UOp]] = defaultdict(list)
+  updated = False
+  in_this_block = set(x.arg.lst)
+  for u in x.src:
+    if u.op in DONT_PLACE_IN_BLOCK or len([x for x in ctx[u] if x not in in_this_block]) > 0: new_srcs.append(u)
+    elif (block_ctx:=get_block_ctx(u)) == x.arg.ctx:
+      # if it's the same context, we place in this block and append the parents
+      new_srcs += list(u.src)
+      to_append.append(u)
+      updated = True
+    else:
+      # otherwise, we create a new block with this
+      new_blocks[block_ctx].append(u)
+      updated = True
+  if not updated: return None
+  for rng,lst in new_blocks.items():
+    new_block = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, lst))
+    lrng = list(rng)
+    for r in rng[::-1]:
+      if r not in x.arg.ctx:
+        new_block = UOp(Ops.BLOCKEND, dtypes.void, (new_block,), BasicBlock(lrng, [UOp(Ops.ENDRANGE, dtypes.void, (r,))], [r]))
+        lrng = lrng[:]
+        lrng.remove(r)
+    new_srcs.append(new_block)
+  return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(x.arg.ctx, to_append+x.arg.lst))
+
+make_basic_blocks = PatternMatcher([
+  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCKEND, src=(UOp(Ops.BLOCK, src=x.src, arg=BasicBlock([], [x])),), arg=BasicBlock([], [], []))),
+  (UPat(Ops.BLOCK, name="x"), append_to_block),
+])
+
+def blockend_gobble(x:UOp):
+  pass
+
+blockend = PatternMatcher([
+  (UPat(Ops.BLOCKEND, name="x"), blockend_gobble),
+])
+
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
   # filter nodes that don't link to a sink
@@ -24,6 +90,26 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   in_degree: Dict[UOp, int] = {}
   get_children_dfs(sink, children, range_srcs, in_degree)
 
+  sink = graph_rewrite(sink, make_basic_blocks, ctx=children)
+  # TODO: combine matching BLOCKENDS
+  sink = graph_rewrite(sink, blockend)
+
+
+  @functools.lru_cache(None)
+  def topoplace(u:UOp) -> List[UOp]: return flatten(topoplace(x) for x in u.src) + (u.arg.lst if u.op in {Ops.BLOCK, Ops.BLOCKEND} else [u])
+
+  _uops = topoplace(sink)
+
+  from tinygrad.ops import print_uops
+  print_uops(_uops)
+
+  # sanity checks (NOTE: these can cause things to be skipped in BEAM)
+  #if not skip_check: type_verify(_uops)
+
+  # strip the SINK
+  return _uops[:-1]
+
+  """
   @functools.lru_cache(None)
   def get_recursive_children(x:UOp, end:Ops, include_self=False) -> Set[UOp]:
     if x.op is Ops.SINK: return set()
@@ -93,3 +179,4 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
   # strip the SINK
   return _uops[:-1]
+  """
