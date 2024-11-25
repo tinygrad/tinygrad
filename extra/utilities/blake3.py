@@ -48,8 +48,12 @@ def pairwise_concatenate(chain_vals: Tensor) -> Tuple[Tensor, Optional[Tensor]]:
 
 def create_state(iv: Tensor, count: Optional[int], end_block_len: Optional[int], n_end_blocks: Optional[int], flags: Tensor) -> Tensor:
   n_chunks, n_blocks = iv.shape[0], iv.shape[1]
-  counts = [[count + i if count is not None else 0, 0] for i in range(n_chunks) for _ in range(n_blocks)]
-  counts = Tensor(counts, dtype=dtypes.uint32).reshape(n_chunks, n_blocks, 2)
+  if count is not None:
+    counts = Tensor.arange(count, count + n_chunks, dtype=dtypes.uint32)
+    counts = counts.reshape(n_chunks, 1).expand(n_chunks, n_blocks).reshape(n_chunks, n_blocks, 1)
+    counts = counts.cat(Tensor.zeros(n_chunks, n_blocks, 1, dtype=dtypes.uint32), dim=-1)
+  else:
+    counts = Tensor.zeros(n_chunks, n_blocks, 2, dtype=dtypes.uint32)
   lengths = Tensor.full((n_chunks, n_blocks, 1), fill_value=64, dtype=dtypes.uint32).contiguous()
   if end_block_len is not None: lengths[-1, n_end_blocks - 1] = end_block_len
   return iv.cat(iv[:, :, :4], counts, lengths, flags, dim=-1).contiguous()
