@@ -108,6 +108,7 @@ class Ops(FastEnum):
   BUFFER_VIEW = auto()
 
   BLOCK = auto()
+  BLOCKFORK = auto()
   BLOCKEND = auto()
 
   EXPAND = auto()

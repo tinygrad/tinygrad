@@ -84,22 +84,35 @@ def blockend_gobble(ctx, x:UOp):
   in_this_block = set(x.arg.lst)
   if len([y for y in ctx[x.arg.end] if y not in in_this_block]) == 0:
     def_acc, non_def_acc = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
-    return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(tuple(y for y in x.src if y is not x.arg.end)+x.arg.end.src)),
-               BasicBlock(x.arg.ctx, def_acc+[x.arg.end]+non_def_acc))
+    return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not x.arg.end)+x.arg.end.src,
+               BasicBlock([y for y in x.arg.ctx if y is not x.arg.end], def_acc+[x.arg.end]+non_def_acc))
 
   updated = False
   new_ctx = x.arg.ctx[:]
+  placed = set()
   for u in x.src:
-    #if len([y for y in ctx[u] if y not in in_this_block]) > 0: new_srcs.append(u)
     if u.op is Ops.BLOCK and x.arg.end in u.arg.ctx:
       new_ctx += u.arg.ctx
       new_srcs += list(u.src)
       to_append += u.arg.lst
       updated = True
+    elif u.op is Ops.BLOCKFORK:
+      # block fork appears # of times in srcs
+      seen_count = len([y for y in x.src if y is u])
+      print(seen_count, u.arg)
+      if seen_count == u.arg:
+        if u not in placed:
+          print("HERE")
+          new_srcs += list(u.src)
+          placed.add(u)
+          updated = True
+      else:
+        # keep it
+        new_srcs.append(u)
     else:
       new_srcs.append(u)
   if not updated: return None
-  return UOp(Ops.BLOCKEND, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(dedup(new_ctx), to_append+x.arg.lst, x.arg.end))
+  return UOp(Ops.BLOCKEND, dtypes.void, tuple(new_srcs), BasicBlock(dedup(new_ctx), to_append+x.arg.lst, x.arg.end))
 
 blockend = PatternMatcher([
   (UPat(Ops.BLOCKEND, name="x"), blockend_gobble),
@@ -115,6 +128,16 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   get_children_dfs(sink, children, range_srcs, in_degree)
 
   sink = graph_rewrite(sink, make_basic_blocks, ctx=children)
+
+  # add BLOCKFORK (TODO: recursive)
+  block_parents = flatten([x.src for x in sink.sparents if x.op is Ops.BLOCK])
+  forks = {}
+  for u in block_parents:
+    child_count = len([x for x in block_parents if x is u])
+    if child_count > 1 and u.op not in DONT_PLACE_IN_BLOCK:
+      forks[u] = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(get_block_ctx(u), [u])),), arg=child_count)
+  sink = sink.substitute(forks)
+
   # TODO: combine matching BLOCKENDS
 
   #children: Dict[UOp, List[UOp]] = {}
