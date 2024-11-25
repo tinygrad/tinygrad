@@ -177,8 +177,8 @@ class PTXRenderer(Renderer):
         r[u] = r[u.src[0]][u.arg[0]]
         continue
       if u.op in {Ops.CAST, Ops.BITCAST} and (u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType)):
-          r[u] = r[u.src[0]]
-          continue
+        r[u] = r[u.src[0]]
+        continue
       elif u.op is Ops.DEFINE_ACC and u.dtype in [dtypes.half, dtypes.bool]: r[u.src[0]] = ssa("const", u.src[0])
       elif u.op is Ops.SPECIAL: r[u] = "%" + u.arg[0]
       elif u.op is Ops.DEFINE_VAR: bufs.append((u.arg[0], u.dtype))
