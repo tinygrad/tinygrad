@@ -53,7 +53,7 @@ class AM_GMC(AM_IP):
 
   def enable_vm_addressing(self, page_table, ip:Union["MM", "GC"], vmid):
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_BASE_ADDR", "_LO32", "_HI32", page_table.pm.paddr | 1)
-    self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(0x1fffe00, enable_context=1, page_table_depth=2)
+    self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(0x1fffe00, enable_context=1, page_table_depth=(3 - page_table.lv))
 
   def init_hub(self, ip:Union["MM", "GC"]):
     # Init system apertures
@@ -82,7 +82,7 @@ class AM_GMC(AM_IP):
     self.adev.reg(f"reg{ip}VM_L2_CNTL4").write(l2_cache_4k_partition_count=1)
     self.adev.reg(f"reg{ip}VM_L2_CNTL5").write(walker_priority_client_id=0x1ff)
 
-    self.enable_vm_addressing(self.adev.mm.root_pt, ip, vmid=0)
+    self.enable_vm_addressing(self.adev.mm.root_page_table, ip, vmid=0)
 
     # Disable identity aperture
     self.adev.wreg_pair(f"reg{ip}VM_L2_CONTEXT1_IDENTITY_APERTURE_LOW_ADDR", "_LO32", "_HI32", 0xfffffffff)
