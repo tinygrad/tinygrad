@@ -201,12 +201,12 @@ class PTXRenderer(Renderer):
       elif u.op is Ops.WMMA:
         self.wmma_r = [ssa("wmma", dtype="b32") for vv in u.src[:2] for i in range(0, len(r[vv]), 2)]
         r[u] = [ssa("wmma", dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)]
-      prefix, _dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.ENDRANGE: ("pred", "pred"), Ops.RANGE: ("ridx", None),
-                        Ops.DEFINE_ACC: ("acc", None), Ops.DEFINE_VAR: ("dat", None), Ops.CONST: ("const", None), Ops.DEFINE_LOCAL: ("local", "u64"),
+      prefix, *_dtype = {Ops.CAST: ("cast",), Ops.BITCAST: ("cast",), Ops.ENDRANGE: ("pred", "pred"), Ops.RANGE: ("ridx",),
+                        Ops.DEFINE_ACC: ("acc",), Ops.DEFINE_VAR: ("dat",), Ops.CONST: ("const",), Ops.DEFINE_LOCAL: ("local", "u64"),
                         Ops.DEFINE_GLOBAL: ("dat", lambda u: self.types[dtypes.ulong if u.dtype.__class__ == PtrDType else u.dtype])
-                        }.get(u.op, (None, None))
+                        }.get(u.op, (None,))
       if prefix is None: prefix = "alu" if u.op in GroupOp.ALU else None
-      if prefix: r[u] = ssa(prefix, u, _dtype(u) if callable(_dtype) else _dtype)
+      if prefix: r[u] = ssa(prefix, u, _dtype[0](u) if _dtype and callable(_dtype[0]) else _dtype if _dtype else None)
 
       if (l:=cast(Union[str, List[str]], string_rewrite.rewrite(u, ctx=self))) is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.u.src]}")
