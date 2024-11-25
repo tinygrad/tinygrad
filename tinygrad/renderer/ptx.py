@@ -206,7 +206,7 @@ class PTXRenderer(Renderer):
                         Ops.DEFINE_GLOBAL: ("dat", lambda u: self.types[dtypes.ulong if u.dtype.__class__ == PtrDType else u.dtype])
                         }.get(u.op, (None,))
       if prefix is None: prefix = "alu" if u.op in GroupOp.ALU else None
-      if prefix: r[u] = ssa(prefix, u, _dtype[0](u) if _dtype and callable(_dtype[0]) else _dtype if _dtype else None)
+      if prefix: r[u] = ssa(prefix, u, _dtype[0](u) if _dtype and callable(_dtype[0]) else _dtype[0] if _dtype else None)
 
       if (l:=cast(Union[str, List[str]], string_rewrite.rewrite(u, ctx=self))) is None:
         raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.u.src]}")
