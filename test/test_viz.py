@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.ops import TRACK_MATCH_STATS, TrackedPatternMatcher as PatternMatcher, UOp, Ops, UPat, graph_rewrite, contexts, track_rewrites
 from tinygrad.viz.serve import get_details, get_metadata, uop_to_json
 
-@track_rewrites()
+@track_rewrites(named=True)
 def rewrite(sink:UOp, pm:PatternMatcher, **kwargs): return graph_rewrite(sink, pm, **kwargs)
 
 def helper_test_viz(sink:UOp, pm:PatternMatcher, **kwargs) -> List[UOp]:
@@ -96,7 +96,18 @@ class TestViz(unittest.TestCase):
     pm = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
     ret = helper_test_viz(uop, pm, ctx={a.sin():a.sqrt(), n1.sin():n1.sqrt()}, bottom_up=True)
     self.assertEqual(len(ret), 2)
-    self.assertIs(ret[-1], a.sqrt().sqrt())
+    self.assertIs(ret[0], a.sin().sqrt()) # first rewrite
+    self.assertIs(ret[1], a.sqrt().sqrt()) # second one
+  
+  def test_top_down_rewrite(self):
+    a = UOp(Ops.LOAD, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)))
+    n1 = a.sin()
+    uop = n1.sin()
+    pm = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
+    # if it wasn't bottom_up, it's rewritten once
+    ret = helper_test_viz(uop, pm, ctx={a.sin():a.sqrt(), n1.sin():n1.sqrt()}, bottom_up=False)
+    self.assertEqual(len(ret), 1)
+    self.assertIs(ret[0], a.sqrt().sin()) # only rewrite
 
 if __name__ == "__main__":
   unittest.main()
