@@ -30,7 +30,7 @@ class AM_GMC(AM_IP):
 
   def init(self): self.init_hub("MM")
 
-  def flush_hdp(self): self.adev.wreg(0x1fc00, 0x0) # TODO: write up!
+  def flush_hdp(self): self.adev.regBIF_BX_PF0_GPU_HDP_FLUSH_REQ.write(0xffffffff)
   def flush_tlb(self, ip:Union["MM", "GC"], vmid, flush_type=0):
     self.flush_hdp()
 
@@ -138,11 +138,10 @@ class AM_GFX(AM_IP):
       self.adev.regSH_MEM_BASES.write(shared_base=0x1, private_base=0x2)
     self._grbm_select()
 
-    # Setup doorbels. TODO: write up
-    self.adev.regS2A_DOORBELL_ENTRY_0_CTRL.write(0x30000007)
-    self.adev.regS2A_DOORBELL_ENTRY_3_CTRL.write(0x3000000d)
-    self.adev.regCP_RB_DOORBELL_RANGE_LOWER.write(0x458)
-    self.adev.regCP_RB_DOORBELL_RANGE_UPPER.write(0x7f8)
+    self.adev.regS2A_DOORBELL_ENTRY_0_CTRL.write(s2a_doorbell_port0_awaddr_31_28_value=3, s2a_doorbell_port0_awid=3, s2a_doorbell_port0_enable=1)
+    self.adev.regS2A_DOORBELL_ENTRY_3_CTRL.write(s2a_doorbell_port3_awaddr_31_28_value=3, s2a_doorbell_port3_awid=6, s2a_doorbell_port3_enable=1)
+
+    # Configure MEC doorbell range
     self.adev.regCP_MEC_DOORBELL_RANGE_LOWER.write(0x0)
     self.adev.regCP_MEC_DOORBELL_RANGE_UPPER.write(0x450)
 
