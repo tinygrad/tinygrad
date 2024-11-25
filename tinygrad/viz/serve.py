@@ -68,7 +68,10 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   return graph
 def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
   if (found:=replaces.get(base)) is not None: return found
-  replaces[base] = ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
+  ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
+  if (final := replaces.get(ret)) is not None:
+      return final
+  replaces[base] = ret
   return ret
 @functools.lru_cache(None)
 def _prg(k:Optional[Kernel]) -> Optional[str]:
