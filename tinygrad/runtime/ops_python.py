@@ -2,10 +2,11 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Tuple, List, Optional, Any, Dict
+import sys
+from typing import Tuple, List, Optional, Any, Dict, TYPE_CHECKING
 import pickle, base64, itertools, time, struct
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate
-from tinygrad.helpers import all_same, getenv, flatten, to_legacy_fmt
+from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.ops import exec_alu, Ops, UOp, GroupOp
 from tinygrad.renderer import Renderer
@@ -68,11 +69,13 @@ class PythonProgram:
         dl[i] = dtype
         if uop is Ops.DEFINE_GLOBAL:
           assert dtype.fmt is not None
-          ul[i] = [pbufs.pop(0).cast(to_legacy_fmt(dtype.fmt))] * warp_size  # TODO legacy: typeshed missing stub for cast
+          if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
+          ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
         elif uop is Ops.DEFINE_LOCAL:
           assert dtype.fmt is not None
+          if TYPE_CHECKING or sys.version_info < (3, 12): assert dtype.fmt != "e"
           lbuf = memoryview(bytearray(arg[1]*dtype.itemsize))
-          ul[i] = [lbuf.cast(to_legacy_fmt(dtype.fmt))] * warp_size  # TODO legacy: typeshed missing stub for cast
+          ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           ul[i] = [pvals.pop(0)] * warp_size
         elif uop is Ops.SPECIAL:
