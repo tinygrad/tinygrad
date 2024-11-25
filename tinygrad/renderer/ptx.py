@@ -176,21 +176,16 @@ class PTXRenderer(Renderer):
         assert len(u.arg) == 1
         r[u] = r[u.src[0]][u.arg[0]]
         continue
-      if u.op in {Ops.CAST, Ops.BITCAST}:
-        if u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType):
+      if u.op in {Ops.CAST, Ops.BITCAST} and (u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType)):
           r[u] = r[u.src[0]]
           continue
-      elif u.op is Ops.DEFINE_ACC:
-        if u.dtype.scalar() in [dtypes.half, dtypes.bool]:
-          r[u.src[0]] = ssa("const", u.src[0])
+      elif u.op is Ops.DEFINE_ACC and u.dtype.scalar() in [dtypes.half, dtypes.bool]: r[u.src[0]] = ssa("const", u.src[0])
       elif u.op is Ops.SPECIAL: r[u] = "%" + u.arg[0]
-      elif u.op is Ops.DEFINE_VAR:
-        bufs.append((u.arg[0], u.dtype))
+      elif u.op is Ops.DEFINE_VAR: bufs.append((u.arg[0], u.dtype))
       elif u.op is Ops.LOAD:
         assert u.src[0].dtype == dtypes.int64, "load isn't int64"
         r[u] = [ssa('val', dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)] if u.dtype.count > 1 else ssa('val', u)
-      elif u.op is Ops.DEFINE_GLOBAL:
-        bufs.append((f"data{u.arg}", u.dtype))
+      elif u.op is Ops.DEFINE_GLOBAL: bufs.append((f"data{u.arg}", u.dtype))
       elif u.op is Ops.WMMA:
         self.wmma_r = [ssa("wmma", dtype="b32") for vv in u.src[:2] for i in range(0, len(r[vv]), 2)]
         r[u] = [ssa("wmma", dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)]
@@ -198,10 +193,10 @@ class PTXRenderer(Renderer):
         Ops.DEFINE_VAR: ("dat",), Ops.CONST: ("const",), Ops.DEFINE_LOCAL: ("local", "u64"),
         Ops.DEFINE_GLOBAL: ("dat", lambda u: self.types[dtypes.ulong if u.dtype.__class__ == PtrDType else u.dtype])}.get(u.op, (None,))
       if prefix is None: prefix = "alu" if u.op in GroupOp.ALU else None
-      if prefix: r[u] = ssa(prefix, u, cast(str, _dtype[0](u) if _dtype and callable(_dtype[0]) else _dtype[0] if _dtype else None))
+      if prefix: r[u] = ssa(cast(str, prefix), u, cast(str, _dtype[0](u) if _dtype and callable(_dtype[0]) else _dtype[0] if _dtype else None))
 
       if (l:=cast(Union[str, List[str]], string_rewrite.rewrite(u, ctx=self))) is None:
-        raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.u.src]}")
+        raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
       kernel.extend([l] if isinstance(l, str) else l)
 
       if u.op is Ops.ASSIGN: r[u] = r[u.src[0]]
