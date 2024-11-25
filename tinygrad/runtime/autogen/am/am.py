@@ -2070,6 +2070,9 @@ amd_hw_ip_block_type = ctypes.c_uint32 # enum
 #    return ((amdgpu_ip_version((adev),GC_HWIP,0)>=IP_VERSION(12,0,0))?(1<<63):(1<<54))  
 hw_id_map = [['GC_HWIP', '11'],['HDP_HWIP', '41'],['SDMA0_HWIP', '42'],['SDMA1_HWIP', '43'],['SDMA2_HWIP', '68'],['SDMA3_HWIP', '69'],['LSDMA_HWIP', '91'],['MMHUB_HWIP', '34'],['ATHUB_HWIP', '35'],['NBIO_HWIP', '108'],['MP0_HWIP', '255'],['MP1_HWIP', '1'],['UVD_HWIP', '12'],['VCE_HWIP', '32'],['DF_HWIP', '46'],['DCE_HWIP', '271'],['OSSSYS_HWIP', '40'],['SMUIO_HWIP', '4'],['PWR_HWIP', '10'],['NBIF_HWIP', '108'],['THM_HWIP', '3'],['CLK_HWIP', '6'],['UMC_HWIP', '150'],['XGMI_HWIP', '200'],['DCI_HWIP', '15'],['PCIE_HWIP', '70'],['VPE_HWIP', '21'],['ISP_HWIP', '44']] # Variable ctypes.c_int32 * 35
 __AMDGPU_UCODE_H__ = True # macro
+int32_t = True # macro
+int8_t = True # macro
+int16_t = True # macro
 AMDGPU_SDMA0_UCODE_LOADED = 0x00000001 # macro
 AMDGPU_SDMA1_UCODE_LOADED = 0x00000002 # macro
 AMDGPU_CPCE_UCODE_LOADED = 0x00000004 # macro
@@ -2559,79 +2562,6 @@ struct_gpu_info_firmware_v1_1._fields_ = [
     ('v1_0', struct_gpu_info_firmware_v1_0),
     ('num_sc_per_sh', ctypes.c_uint32),
     ('num_packer_per_sc', ctypes.c_uint32),
-]
-
-class struct_gpu_info_firmware_v1_2(Structure):
-    pass
-
-class struct_gpu_info_soc_bounding_box_v1_0(Structure):
-    pass
-
-class struct_gpu_info_voltage_scaling_v1_0(Structure):
-    pass
-
-struct_gpu_info_voltage_scaling_v1_0._pack_ = 1 # source:False
-struct_gpu_info_voltage_scaling_v1_0._fields_ = [
-    ('state', ctypes.c_uint32),
-    ('dscclk_mhz', ctypes.c_uint32),
-    ('dcfclk_mhz', ctypes.c_uint32),
-    ('socclk_mhz', ctypes.c_uint32),
-    ('dram_speed_mts', ctypes.c_uint32),
-    ('fabricclk_mhz', ctypes.c_uint32),
-    ('dispclk_mhz', ctypes.c_uint32),
-    ('phyclk_mhz', ctypes.c_uint32),
-    ('dppclk_mhz', ctypes.c_uint32),
-]
-
-struct_gpu_info_soc_bounding_box_v1_0._pack_ = 1 # source:False
-struct_gpu_info_soc_bounding_box_v1_0._fields_ = [
-    ('sr_exit_time_us', ctypes.c_uint32),
-    ('sr_enter_plus_exit_time_us', ctypes.c_uint32),
-    ('urgent_latency_us', ctypes.c_uint32),
-    ('urgent_latency_pixel_data_only_us', ctypes.c_uint32),
-    ('urgent_latency_pixel_mixed_with_vm_data_us', ctypes.c_uint32),
-    ('urgent_latency_vm_data_only_us', ctypes.c_uint32),
-    ('writeback_latency_us', ctypes.c_uint32),
-    ('ideal_dram_bw_after_urgent_percent', ctypes.c_uint32),
-    ('pct_ideal_dram_sdp_bw_after_urgent_pixel_only', ctypes.c_uint32),
-    ('pct_ideal_dram_sdp_bw_after_urgent_pixel_and_vm', ctypes.c_uint32),
-    ('pct_ideal_dram_sdp_bw_after_urgent_vm_only', ctypes.c_uint32),
-    ('max_avg_sdp_bw_use_normal_percent', ctypes.c_uint32),
-    ('max_avg_dram_bw_use_normal_percent', ctypes.c_uint32),
-    ('max_request_size_bytes', ctypes.c_uint32),
-    ('downspread_percent', ctypes.c_uint32),
-    ('dram_page_open_time_ns', ctypes.c_uint32),
-    ('dram_rw_turnaround_time_ns', ctypes.c_uint32),
-    ('dram_return_buffer_per_channel_bytes', ctypes.c_uint32),
-    ('dram_channel_width_bytes', ctypes.c_uint32),
-    ('fabric_datapath_to_dcn_data_return_bytes', ctypes.c_uint32),
-    ('dcn_downspread_percent', ctypes.c_uint32),
-    ('dispclk_dppclk_vco_speed_mhz', ctypes.c_uint32),
-    ('dfs_vco_period_ps', ctypes.c_uint32),
-    ('urgent_out_of_order_return_per_channel_pixel_only_bytes', ctypes.c_uint32),
-    ('urgent_out_of_order_return_per_channel_pixel_and_vm_bytes', ctypes.c_uint32),
-    ('urgent_out_of_order_return_per_channel_vm_only_bytes', ctypes.c_uint32),
-    ('round_trip_ping_latency_dcfclk_cycles', ctypes.c_uint32),
-    ('urgent_out_of_order_return_per_channel_bytes', ctypes.c_uint32),
-    ('channel_interleave_bytes', ctypes.c_uint32),
-    ('num_banks', ctypes.c_uint32),
-    ('num_chans', ctypes.c_uint32),
-    ('vmm_page_size_bytes', ctypes.c_uint32),
-    ('dram_clock_change_latency_us', ctypes.c_uint32),
-    ('writeback_dram_clock_change_latency_us', ctypes.c_uint32),
-    ('return_bus_width_bytes', ctypes.c_uint32),
-    ('voltage_override', ctypes.c_uint32),
-    ('xfc_bus_transport_time_us', ctypes.c_uint32),
-    ('xfc_xbuf_latency_tolerance_us', ctypes.c_uint32),
-    ('use_urgent_burst_bw', ctypes.c_uint32),
-    ('num_states', ctypes.c_uint32),
-    ('clock_limits', struct_gpu_info_voltage_scaling_v1_0 * 8),
-]
-
-struct_gpu_info_firmware_v1_2._pack_ = 1 # source:False
-struct_gpu_info_firmware_v1_2._fields_ = [
-    ('v1_1', struct_gpu_info_firmware_v1_1),
-    ('soc_bounding_box', struct_gpu_info_soc_bounding_box_v1_0),
 ]
 
 class struct_gpu_info_firmware_header_v1_0(Structure):
@@ -33947,6 +33877,198 @@ tee_error_code__enumvalues = {
 TEE_SUCCESS = 0
 TEE_ERROR_NOT_SUPPORTED = 4294901770
 tee_error_code = ctypes.c_uint32 # enum
+__AMDGPU_PSP_H__ = True # macro
+PSP_FENCE_BUFFER_SIZE = 0x1000 # macro
+PSP_CMD_BUFFER_SIZE = 0x1000 # macro
+PSP_1_MEG = 0x100000 # macro
+# def PSP_TMR_SIZE(adev):  # macro
+#    return ((adev)->asic_type==CHIP_ALDEBARAN?0x800000:0x400000)  
+PSP_TMR_ALIGNMENT = 0x100000 # macro
+PSP_FW_NAME_LEN = 0x24 # macro
+AMDGPU_XGMI_MAX_CONNECTED_NODES = 64 # macro
+MEM_TRAIN_SYSTEM_SIGNATURE = 0x54534942 # macro
+GDDR6_MEM_TRAINING_DATA_SIZE_IN_BYTES = 0x1000 # macro
+GDDR6_MEM_TRAINING_OFFSET = 0x8000 # macro
+BIST_MEM_TRAINING_ENCROACHED_SIZE = 0x2000000 # macro
+PSP_RUNTIME_DB_SIZE_IN_BYTES = 0x10000 # macro
+PSP_RUNTIME_DB_OFFSET = 0x100000 # macro
+PSP_RUNTIME_DB_COOKIE_ID = 0x0ed5 # macro
+PSP_RUNTIME_DB_VER_1 = 0x0100 # macro
+PSP_RUNTIME_DB_DIAG_ENTRY_MAX_COUNT = 0x40 # macro
+
+# values for enumeration 'psp_shared_mem_size'
+psp_shared_mem_size__enumvalues = {
+    0: 'PSP_ASD_SHARED_MEM_SIZE',
+    16384: 'PSP_XGMI_SHARED_MEM_SIZE',
+    16384: 'PSP_RAS_SHARED_MEM_SIZE',
+    16384: 'PSP_HDCP_SHARED_MEM_SIZE',
+    16384: 'PSP_DTM_SHARED_MEM_SIZE',
+    16384: 'PSP_RAP_SHARED_MEM_SIZE',
+    16384: 'PSP_SECUREDISPLAY_SHARED_MEM_SIZE',
+}
+PSP_ASD_SHARED_MEM_SIZE = 0
+PSP_XGMI_SHARED_MEM_SIZE = 16384
+PSP_RAS_SHARED_MEM_SIZE = 16384
+PSP_HDCP_SHARED_MEM_SIZE = 16384
+PSP_DTM_SHARED_MEM_SIZE = 16384
+PSP_RAP_SHARED_MEM_SIZE = 16384
+PSP_SECUREDISPLAY_SHARED_MEM_SIZE = 16384
+psp_shared_mem_size = ctypes.c_uint32 # enum
+
+# values for enumeration 'ta_type_id'
+ta_type_id__enumvalues = {
+    1: 'TA_TYPE_XGMI',
+    2: 'TA_TYPE_RAS',
+    3: 'TA_TYPE_HDCP',
+    4: 'TA_TYPE_DTM',
+    5: 'TA_TYPE_RAP',
+    6: 'TA_TYPE_SECUREDISPLAY',
+    7: 'TA_TYPE_MAX_INDEX',
+}
+TA_TYPE_XGMI = 1
+TA_TYPE_RAS = 2
+TA_TYPE_HDCP = 3
+TA_TYPE_DTM = 4
+TA_TYPE_RAP = 5
+TA_TYPE_SECUREDISPLAY = 6
+TA_TYPE_MAX_INDEX = 7
+ta_type_id = ctypes.c_uint32 # enum
+class struct_psp_context(Structure):
+    pass
+
+class struct_psp_xgmi_node_info(Structure):
+    pass
+
+class struct_psp_xgmi_topology_info(Structure):
+    pass
+
+class struct_psp_bin_desc(Structure):
+    pass
+
+
+# values for enumeration 'psp_bootloader_cmd'
+psp_bootloader_cmd__enumvalues = {
+    65536: 'PSP_BL__LOAD_SYSDRV',
+    131072: 'PSP_BL__LOAD_SOSDRV',
+    524288: 'PSP_BL__LOAD_KEY_DATABASE',
+    720896: 'PSP_BL__LOAD_SOCDRV',
+    786432: 'PSP_BL__LOAD_DBGDRV',
+    786432: 'PSP_BL__LOAD_HADDRV',
+    851968: 'PSP_BL__LOAD_INTFDRV',
+    917504: 'PSP_BL__LOAD_RASDRV',
+    983040: 'PSP_BL__LOAD_IPKEYMGRDRV',
+    1048576: 'PSP_BL__DRAM_LONG_TRAIN',
+    2097152: 'PSP_BL__DRAM_SHORT_TRAIN',
+    268435456: 'PSP_BL__LOAD_TOS_SPL_TABLE',
+}
+PSP_BL__LOAD_SYSDRV = 65536
+PSP_BL__LOAD_SOSDRV = 131072
+PSP_BL__LOAD_KEY_DATABASE = 524288
+PSP_BL__LOAD_SOCDRV = 720896
+PSP_BL__LOAD_DBGDRV = 786432
+PSP_BL__LOAD_HADDRV = 786432
+PSP_BL__LOAD_INTFDRV = 851968
+PSP_BL__LOAD_RASDRV = 917504
+PSP_BL__LOAD_IPKEYMGRDRV = 983040
+PSP_BL__DRAM_LONG_TRAIN = 1048576
+PSP_BL__DRAM_SHORT_TRAIN = 2097152
+PSP_BL__LOAD_TOS_SPL_TABLE = 268435456
+psp_bootloader_cmd = ctypes.c_uint32 # enum
+
+# values for enumeration 'psp_ring_type'
+psp_ring_type__enumvalues = {
+    0: 'PSP_RING_TYPE__INVALID',
+    1: 'PSP_RING_TYPE__UM',
+    2: 'PSP_RING_TYPE__KM',
+}
+PSP_RING_TYPE__INVALID = 0
+PSP_RING_TYPE__UM = 1
+PSP_RING_TYPE__KM = 2
+psp_ring_type = ctypes.c_uint32 # enum
+
+# values for enumeration 'psp_reg_prog_id'
+psp_reg_prog_id__enumvalues = {
+    0: 'PSP_REG_IH_RB_CNTL',
+    1: 'PSP_REG_IH_RB_CNTL_RING1',
+    2: 'PSP_REG_IH_RB_CNTL_RING2',
+    3: 'PSP_REG_LAST',
+}
+PSP_REG_IH_RB_CNTL = 0
+PSP_REG_IH_RB_CNTL_RING1 = 1
+PSP_REG_IH_RB_CNTL_RING2 = 2
+PSP_REG_LAST = 3
+psp_reg_prog_id = ctypes.c_uint32 # enum
+
+# values for enumeration 'psp_memory_training_init_flag'
+psp_memory_training_init_flag__enumvalues = {
+    0: 'PSP_MEM_TRAIN_NOT_SUPPORT',
+    1: 'PSP_MEM_TRAIN_SUPPORT',
+    2: 'PSP_MEM_TRAIN_INIT_FAILED',
+    4: 'PSP_MEM_TRAIN_RESERVE_SUCCESS',
+    8: 'PSP_MEM_TRAIN_INIT_SUCCESS',
+}
+PSP_MEM_TRAIN_NOT_SUPPORT = 0
+PSP_MEM_TRAIN_SUPPORT = 1
+PSP_MEM_TRAIN_INIT_FAILED = 2
+PSP_MEM_TRAIN_RESERVE_SUCCESS = 4
+PSP_MEM_TRAIN_INIT_SUCCESS = 8
+psp_memory_training_init_flag = ctypes.c_uint32 # enum
+
+# values for enumeration 'psp_memory_training_ops'
+psp_memory_training_ops__enumvalues = {
+    1: 'PSP_MEM_TRAIN_SEND_LONG_MSG',
+    2: 'PSP_MEM_TRAIN_SAVE',
+    4: 'PSP_MEM_TRAIN_RESTORE',
+    8: 'PSP_MEM_TRAIN_SEND_SHORT_MSG',
+    1: 'PSP_MEM_TRAIN_COLD_BOOT',
+    8: 'PSP_MEM_TRAIN_RESUME',
+}
+PSP_MEM_TRAIN_SEND_LONG_MSG = 1
+PSP_MEM_TRAIN_SAVE = 2
+PSP_MEM_TRAIN_RESTORE = 4
+PSP_MEM_TRAIN_SEND_SHORT_MSG = 8
+PSP_MEM_TRAIN_COLD_BOOT = 1
+PSP_MEM_TRAIN_RESUME = 8
+psp_memory_training_ops = ctypes.c_uint32 # enum
+
+# values for enumeration 'psp_runtime_entry_type'
+psp_runtime_entry_type__enumvalues = {
+    0: 'PSP_RUNTIME_ENTRY_TYPE_INVALID',
+    1: 'PSP_RUNTIME_ENTRY_TYPE_TEST',
+    2: 'PSP_RUNTIME_ENTRY_TYPE_MGPU_COMMON',
+    3: 'PSP_RUNTIME_ENTRY_TYPE_MGPU_WAFL',
+    4: 'PSP_RUNTIME_ENTRY_TYPE_MGPU_XGMI',
+    5: 'PSP_RUNTIME_ENTRY_TYPE_BOOT_CONFIG',
+    6: 'PSP_RUNTIME_ENTRY_TYPE_PPTABLE_ERR_STATUS',
+}
+PSP_RUNTIME_ENTRY_TYPE_INVALID = 0
+PSP_RUNTIME_ENTRY_TYPE_TEST = 1
+PSP_RUNTIME_ENTRY_TYPE_MGPU_COMMON = 2
+PSP_RUNTIME_ENTRY_TYPE_MGPU_WAFL = 3
+PSP_RUNTIME_ENTRY_TYPE_MGPU_XGMI = 4
+PSP_RUNTIME_ENTRY_TYPE_BOOT_CONFIG = 5
+PSP_RUNTIME_ENTRY_TYPE_PPTABLE_ERR_STATUS = 6
+psp_runtime_entry_type = ctypes.c_uint32 # enum
+
+# values for enumeration 'psp_runtime_boot_cfg_feature'
+psp_runtime_boot_cfg_feature__enumvalues = {
+    1: 'BOOT_CFG_FEATURE_GECC',
+    2: 'BOOT_CFG_FEATURE_TWO_STAGE_DRAM_TRAINING',
+}
+BOOT_CFG_FEATURE_GECC = 1
+BOOT_CFG_FEATURE_TWO_STAGE_DRAM_TRAINING = 2
+psp_runtime_boot_cfg_feature = ctypes.c_uint32 # enum
+
+# values for enumeration 'psp_runtime_scpm_authentication'
+psp_runtime_scpm_authentication__enumvalues = {
+    0: 'SCPM_DISABLE',
+    1: 'SCPM_ENABLE',
+    2: 'SCPM_ENABLE_WITH_SCPM_ERR',
+}
+SCPM_DISABLE = 0
+SCPM_ENABLE = 1
+SCPM_ENABLE_WITH_SCPM_ERR = 2
+psp_runtime_scpm_authentication = ctypes.c_uint32 # enum
 __all__ = \
     ['ACCEPT_UNSOLICITED_RESPONSE_ENABLE',
     'ACCEPT_UNSOLICITED_RESPONSE_NOT_ENABLE', 'ACP_HWID',
@@ -34074,23 +34196,23 @@ __all__ = \
     'AMDGPU_VM_NORETRY_FLAGS_TF', 'AMDGPU_VM_PDB0', 'AMDGPU_VM_PDB1',
     'AMDGPU_VM_PDB2', 'AMDGPU_VM_PTB', 'AMDGPU_VM_RESERVED_VRAM',
     'AMDGPU_VM_USE_CPU_FOR_COMPUTE', 'AMDGPU_VM_USE_CPU_FOR_GFX',
-    'APG_ACP_OVERRIDE', 'APG_ACP_SOURCE_NO_OVERRIDE',
-    'APG_ACP_TYPE_DVD_AUDIO', 'APG_ACP_TYPE_GENERIC_AUDIO',
-    'APG_ACP_TYPE_ICE60958_AUDIO', 'APG_ACP_TYPE_SUPER_AUDIO_CD',
-    'APG_AUDIO_CRC_CH0_SIG', 'APG_AUDIO_CRC_CH1_SIG',
-    'APG_AUDIO_CRC_CH2_SIG', 'APG_AUDIO_CRC_CH3_SIG',
-    'APG_AUDIO_CRC_CH4_SIG', 'APG_AUDIO_CRC_CH5_SIG',
-    'APG_AUDIO_CRC_CH6_SIG', 'APG_AUDIO_CRC_CH7_SIG',
-    'APG_AUDIO_CRC_CONTINUOUS', 'APG_AUDIO_CRC_CONTROL_CH_SEL',
-    'APG_AUDIO_CRC_CONTROL_CONT', 'APG_AUDIO_CRC_ONESHOT',
-    'APG_AUDIO_CRC_RESERVED_10', 'APG_AUDIO_CRC_RESERVED_11',
-    'APG_AUDIO_CRC_RESERVED_12', 'APG_AUDIO_CRC_RESERVED_13',
-    'APG_AUDIO_CRC_RESERVED_14', 'APG_AUDIO_CRC_RESERVED_15',
-    'APG_AUDIO_CRC_RESERVED_8', 'APG_AUDIO_CRC_RESERVED_9',
-    'APG_DBG_ACP_TYPE', 'APG_DBG_AUDIO_DTO_BASE',
-    'APG_DBG_AUDIO_DTO_DIV', 'APG_DBG_AUDIO_DTO_MULTI',
-    'APG_DBG_MUX_SEL', 'APG_DEBUG_AUDIO_MODE',
-    'APG_DP_ASP_CHANNEL_COUNT_FROM_AZ',
+    'AMDGPU_XGMI_MAX_CONNECTED_NODES', 'APG_ACP_OVERRIDE',
+    'APG_ACP_SOURCE_NO_OVERRIDE', 'APG_ACP_TYPE_DVD_AUDIO',
+    'APG_ACP_TYPE_GENERIC_AUDIO', 'APG_ACP_TYPE_ICE60958_AUDIO',
+    'APG_ACP_TYPE_SUPER_AUDIO_CD', 'APG_AUDIO_CRC_CH0_SIG',
+    'APG_AUDIO_CRC_CH1_SIG', 'APG_AUDIO_CRC_CH2_SIG',
+    'APG_AUDIO_CRC_CH3_SIG', 'APG_AUDIO_CRC_CH4_SIG',
+    'APG_AUDIO_CRC_CH5_SIG', 'APG_AUDIO_CRC_CH6_SIG',
+    'APG_AUDIO_CRC_CH7_SIG', 'APG_AUDIO_CRC_CONTINUOUS',
+    'APG_AUDIO_CRC_CONTROL_CH_SEL', 'APG_AUDIO_CRC_CONTROL_CONT',
+    'APG_AUDIO_CRC_ONESHOT', 'APG_AUDIO_CRC_RESERVED_10',
+    'APG_AUDIO_CRC_RESERVED_11', 'APG_AUDIO_CRC_RESERVED_12',
+    'APG_AUDIO_CRC_RESERVED_13', 'APG_AUDIO_CRC_RESERVED_14',
+    'APG_AUDIO_CRC_RESERVED_15', 'APG_AUDIO_CRC_RESERVED_8',
+    'APG_AUDIO_CRC_RESERVED_9', 'APG_DBG_ACP_TYPE',
+    'APG_DBG_AUDIO_DTO_BASE', 'APG_DBG_AUDIO_DTO_DIV',
+    'APG_DBG_AUDIO_DTO_MULTI', 'APG_DBG_MUX_SEL',
+    'APG_DEBUG_AUDIO_MODE', 'APG_DP_ASP_CHANNEL_COUNT_FROM_AZ',
     'APG_DP_ASP_CHANNEL_COUNT_OVERRIDE',
     'APG_DP_ASP_CHANNEL_COUNT_OVERRIDE_ENABLED',
     'APG_FUNCTIONAL_MODE', 'APG_INFOFRAME_SOURCE_FROM_APG_REGISTERS',
@@ -34569,10 +34691,11 @@ __all__ = \
     'BIN_MAP_MODE_POPS', 'BIN_MAP_MODE_RTA_INDEX',
     'BIN_SIZE_128_PIXELS', 'BIN_SIZE_256_PIXELS',
     'BIN_SIZE_32_PIXELS', 'BIN_SIZE_512_PIXELS', 'BIN_SIZE_64_PIXELS',
-    'BITS_31_0', 'BITS_32_1', 'BITS_33_2', 'BITS_34_3', 'BITS_35_4',
-    'BITS_36_5', 'BITS_37_6', 'BITS_38_7', 'BLEND_CONSTANT_ALPHA',
-    'BLEND_CONSTANT_COLOR', 'BLEND_DST_ALPHA', 'BLEND_DST_COLOR',
-    'BLEND_INV_SRC1_ALPHA', 'BLEND_INV_SRC1_COLOR', 'BLEND_ONE',
+    'BIST_MEM_TRAINING_ENCROACHED_SIZE', 'BITS_31_0', 'BITS_32_1',
+    'BITS_33_2', 'BITS_34_3', 'BITS_35_4', 'BITS_36_5', 'BITS_37_6',
+    'BITS_38_7', 'BLEND_CONSTANT_ALPHA', 'BLEND_CONSTANT_COLOR',
+    'BLEND_DST_ALPHA', 'BLEND_DST_COLOR', 'BLEND_INV_SRC1_ALPHA',
+    'BLEND_INV_SRC1_COLOR', 'BLEND_ONE',
     'BLEND_ONE_MINUS_CONSTANT_ALPHA',
     'BLEND_ONE_MINUS_CONSTANT_COLOR', 'BLEND_ONE_MINUS_DST_ALPHA',
     'BLEND_ONE_MINUS_DST_COLOR', 'BLEND_ONE_MINUS_SRC_ALPHA',
@@ -34587,7 +34710,9 @@ __all__ = \
     'BLEND_SRC1_COLOR', 'BLEND_SRC_ALPHA', 'BLEND_SRC_ALPHA_SATURATE',
     'BLEND_SRC_COLOR', 'BLEND_ZERO', 'BLOCK_CONTEXT_DONE', 'BLUE_LUT',
     'BOOTCFG_CMD_GET', 'BOOTCFG_CMD_INVALIDATE', 'BOOTCFG_CMD_SET',
-    'BOOT_CONFIG_GECC', 'BORROWBUFFER_MEM_POWER_STATE_ENUM',
+    'BOOT_CFG_FEATURE_GECC',
+    'BOOT_CFG_FEATURE_TWO_STAGE_DRAM_TRAINING', 'BOOT_CONFIG_GECC',
+    'BORROWBUFFER_MEM_POWER_STATE_ENUM',
     'BORROWBUFFER_MEM_POWER_STATE_ENUM_DS',
     'BORROWBUFFER_MEM_POWER_STATE_ENUM_LS',
     'BORROWBUFFER_MEM_POWER_STATE_ENUM_ON',
@@ -36928,11 +37053,13 @@ __all__ = \
     'GCR_PERF_SEL_UTCL2_OUT_OF_CREDIT_EVENT',
     'GCR_PERF_SEL_UTCL2_REQ', 'GCR_PERF_SEL_UTCL2_RET',
     'GCR_PERF_SEL_VIRT_REQ', 'GC_HWID', 'GC_HWIP', 'GC_TABLE_ID',
-    'GDS_PERFCOUNT_SELECT', 'GDS_PERF_SEL_GWS_BYPASS',
-    'GDS_PERF_SEL_GWS_RELEASED', 'GDS_PERF_SEL_SE0_2COMP_REQ',
-    'GDS_PERF_SEL_SE0_GDS_ATOM_OP', 'GDS_PERF_SEL_SE0_GDS_BYTE_OP',
-    'GDS_PERF_SEL_SE0_GDS_CMPXCH_OP', 'GDS_PERF_SEL_SE0_GDS_RD_OP',
-    'GDS_PERF_SEL_SE0_GDS_REL_OP', 'GDS_PERF_SEL_SE0_GDS_SHORT_OP',
+    'GDDR6_MEM_TRAINING_DATA_SIZE_IN_BYTES',
+    'GDDR6_MEM_TRAINING_OFFSET', 'GDS_PERFCOUNT_SELECT',
+    'GDS_PERF_SEL_GWS_BYPASS', 'GDS_PERF_SEL_GWS_RELEASED',
+    'GDS_PERF_SEL_SE0_2COMP_REQ', 'GDS_PERF_SEL_SE0_GDS_ATOM_OP',
+    'GDS_PERF_SEL_SE0_GDS_BYTE_OP', 'GDS_PERF_SEL_SE0_GDS_CMPXCH_OP',
+    'GDS_PERF_SEL_SE0_GDS_RD_OP', 'GDS_PERF_SEL_SE0_GDS_REL_OP',
+    'GDS_PERF_SEL_SE0_GDS_SHORT_OP',
     'GDS_PERF_SEL_SE0_GDS_STALL_BY_ORD', 'GDS_PERF_SEL_SE0_GDS_WR_OP',
     'GDS_PERF_SEL_SE0_NORET', 'GDS_PERF_SEL_SE0_ORD_CNT',
     'GDS_PERF_SEL_SE0_ORD_WAVE_VALID', 'GDS_PERF_SEL_SE0_RET',
@@ -38140,12 +38267,12 @@ __all__ = \
     'MEM_POWER_STATUS_SHUT_DOWN', 'MEM_PWR_DIS_CTRL',
     'MEM_PWR_DIS_MODE', 'MEM_PWR_FORCE_CTRL', 'MEM_PWR_FORCE_CTRL2',
     'MEM_PWR_FORCE_MODE', 'MEM_PWR_SEL_CTRL', 'MEM_PWR_SEL_CTRL2',
-    'MEM_PWR_STATUS', 'METADATA_HUBP_SEL', 'METADATA_HUBP_SEL_0',
-    'METADATA_HUBP_SEL_1', 'METADATA_HUBP_SEL_2',
-    'METADATA_HUBP_SEL_3', 'METADATA_HUBP_SEL_RESERVED',
-    'METADATA_STREAM_DP', 'METADATA_STREAM_DVE',
-    'METADATA_STREAM_TYPE_SEL', 'META_CHUNK_SIZE',
-    'META_CHUNK_SIZE_1KB', 'META_CHUNK_SIZE_2KB',
+    'MEM_PWR_STATUS', 'MEM_TRAIN_SYSTEM_SIGNATURE',
+    'METADATA_HUBP_SEL', 'METADATA_HUBP_SEL_0', 'METADATA_HUBP_SEL_1',
+    'METADATA_HUBP_SEL_2', 'METADATA_HUBP_SEL_3',
+    'METADATA_HUBP_SEL_RESERVED', 'METADATA_STREAM_DP',
+    'METADATA_STREAM_DVE', 'METADATA_STREAM_TYPE_SEL',
+    'META_CHUNK_SIZE', 'META_CHUNK_SIZE_1KB', 'META_CHUNK_SIZE_2KB',
     'META_CHUNK_SIZE_4KB', 'META_CHUNK_SIZE_8KB', 'META_LINEAR',
     'META_SURF_LINEAR', 'META_SURF_TILED', 'ME_ID0', 'ME_ID1',
     'ME_ID2', 'ME_ID3', 'MICROSECOND_TIME_BASE_CLOCK_IS_DCCGREFCLK',
@@ -40033,7 +40160,16 @@ __all__ = \
     'PRE_DEGAM_SELECT', 'PRE_DEGAM_SRGB', 'PROG_SEQ', 'PROTVIOL',
     'PRQ_MRQ_FLUSH_URGENT', 'PRQ_MRQ_FLUSH_URGENT_DISABLE',
     'PRQ_MRQ_FLUSH_URGENT_ENABLE', 'PS', 'PSLC_ASAP', 'PSLC_AUTO',
-    'PSLC_COUNTDOWN', 'PSLC_ON_HANG_ONLY', 'PSP_ERR_UNKNOWN_COMMAND',
+    'PSLC_COUNTDOWN', 'PSLC_ON_HANG_ONLY', 'PSP_1_MEG',
+    'PSP_ASD_SHARED_MEM_SIZE', 'PSP_BL__DRAM_LONG_TRAIN',
+    'PSP_BL__DRAM_SHORT_TRAIN', 'PSP_BL__LOAD_DBGDRV',
+    'PSP_BL__LOAD_HADDRV', 'PSP_BL__LOAD_INTFDRV',
+    'PSP_BL__LOAD_IPKEYMGRDRV', 'PSP_BL__LOAD_KEY_DATABASE',
+    'PSP_BL__LOAD_RASDRV', 'PSP_BL__LOAD_SOCDRV',
+    'PSP_BL__LOAD_SOSDRV', 'PSP_BL__LOAD_SYSDRV',
+    'PSP_BL__LOAD_TOS_SPL_TABLE', 'PSP_CMD_BUFFER_SIZE',
+    'PSP_DTM_SHARED_MEM_SIZE', 'PSP_ERR_UNKNOWN_COMMAND',
+    'PSP_FENCE_BUFFER_SIZE', 'PSP_FW_NAME_LEN',
     'PSP_FW_TYPE_MAX_INDEX', 'PSP_FW_TYPE_PSP_DBG_DRV',
     'PSP_FW_TYPE_PSP_INTF_DRV', 'PSP_FW_TYPE_PSP_IPKEYMGR_DRV',
     'PSP_FW_TYPE_PSP_KDB', 'PSP_FW_TYPE_PSP_RAS_DRV',
@@ -40041,7 +40177,28 @@ __all__ = \
     'PSP_FW_TYPE_PSP_SOS', 'PSP_FW_TYPE_PSP_SPL',
     'PSP_FW_TYPE_PSP_SYS_DRV', 'PSP_FW_TYPE_PSP_TOC',
     'PSP_FW_TYPE_UNKOWN', 'PSP_GFX_CMD_BUF_VERSION',
-    'PSP_HEADER_SIZE', 'PS_DONE', 'PS_PARTIAL_FLUSH',
+    'PSP_HDCP_SHARED_MEM_SIZE', 'PSP_HEADER_SIZE',
+    'PSP_MEM_TRAIN_COLD_BOOT', 'PSP_MEM_TRAIN_INIT_FAILED',
+    'PSP_MEM_TRAIN_INIT_SUCCESS', 'PSP_MEM_TRAIN_NOT_SUPPORT',
+    'PSP_MEM_TRAIN_RESERVE_SUCCESS', 'PSP_MEM_TRAIN_RESTORE',
+    'PSP_MEM_TRAIN_RESUME', 'PSP_MEM_TRAIN_SAVE',
+    'PSP_MEM_TRAIN_SEND_LONG_MSG', 'PSP_MEM_TRAIN_SEND_SHORT_MSG',
+    'PSP_MEM_TRAIN_SUPPORT', 'PSP_RAP_SHARED_MEM_SIZE',
+    'PSP_RAS_SHARED_MEM_SIZE', 'PSP_REG_IH_RB_CNTL',
+    'PSP_REG_IH_RB_CNTL_RING1', 'PSP_REG_IH_RB_CNTL_RING2',
+    'PSP_REG_LAST', 'PSP_RING_TYPE__INVALID', 'PSP_RING_TYPE__KM',
+    'PSP_RING_TYPE__UM', 'PSP_RUNTIME_DB_COOKIE_ID',
+    'PSP_RUNTIME_DB_DIAG_ENTRY_MAX_COUNT', 'PSP_RUNTIME_DB_OFFSET',
+    'PSP_RUNTIME_DB_SIZE_IN_BYTES', 'PSP_RUNTIME_DB_VER_1',
+    'PSP_RUNTIME_ENTRY_TYPE_BOOT_CONFIG',
+    'PSP_RUNTIME_ENTRY_TYPE_INVALID',
+    'PSP_RUNTIME_ENTRY_TYPE_MGPU_COMMON',
+    'PSP_RUNTIME_ENTRY_TYPE_MGPU_WAFL',
+    'PSP_RUNTIME_ENTRY_TYPE_MGPU_XGMI',
+    'PSP_RUNTIME_ENTRY_TYPE_PPTABLE_ERR_STATUS',
+    'PSP_RUNTIME_ENTRY_TYPE_TEST',
+    'PSP_SECUREDISPLAY_SHARED_MEM_SIZE', 'PSP_TMR_ALIGNMENT',
+    'PSP_XGMI_SHARED_MEM_SIZE', 'PS_DONE', 'PS_PARTIAL_FLUSH',
     'PTE_BUFFER_MODE', 'PTE_BUFFER_MODE_0', 'PTE_BUFFER_MODE_1',
     'PTE_ROW_HEIGHT_LINEAR', 'PTE_ROW_HEIGHT_LINEAR_1024L',
     'PTE_ROW_HEIGHT_LINEAR_128L', 'PTE_ROW_HEIGHT_LINEAR_16L',
@@ -40368,7 +40525,8 @@ __all__ = \
     'SCL_COEF_FILTER_TYPE_SEL', 'SCL_COEF_LUMA_HORZ_FILTER',
     'SCL_COEF_LUMA_VERT_FILTER', 'SCL_COEF_RAM_SEL',
     'SCL_COEF_RAM_SEL_0', 'SCL_COEF_RAM_SEL_1', 'SCL_SHARP_DISABLE',
-    'SCL_SHARP_EN', 'SCL_SHARP_ENABLE', 'SC_BACKEND_BUSY',
+    'SCL_SHARP_EN', 'SCL_SHARP_ENABLE', 'SCPM_DISABLE', 'SCPM_ENABLE',
+    'SCPM_ENABLE_WITH_SCPM_ERR', 'SC_BACKEND_BUSY',
     'SC_BACKEND_PRIM_FIFO_FULL', 'SC_BB_DISCARD',
     'SC_BCI_CREDIT_AT_MAX', 'SC_BCI_CREDIT_AT_MAX_NO_PENDING_SEND',
     'SC_BCI_CREDIT_AT_ZERO_WITH_PENDING_SEND', 'SC_BCI_SEND',
@@ -41966,7 +42124,9 @@ __all__ = \
     'TA_TC_REQ_MODES', 'TA_TC_REQ_MODE_BORDER', 'TA_TC_REQ_MODE_BYTE',
     'TA_TC_REQ_MODE_BYTE_NV', 'TA_TC_REQ_MODE_DWORD',
     'TA_TC_REQ_MODE_NORMAL', 'TA_TC_REQ_MODE_TEX0',
-    'TA_TC_REQ_MODE_TEX1', 'TA_TC_REQ_MODE_TEX2', 'TB_ACP_NOT_SEND',
+    'TA_TC_REQ_MODE_TEX1', 'TA_TC_REQ_MODE_TEX2', 'TA_TYPE_DTM',
+    'TA_TYPE_HDCP', 'TA_TYPE_MAX_INDEX', 'TA_TYPE_RAP', 'TA_TYPE_RAS',
+    'TA_TYPE_SECUREDISPLAY', 'TA_TYPE_XGMI', 'TB_ACP_NOT_SEND',
     'TB_ACP_PKT_SEND', 'TB_ACR_0_MULTIPLE_RESERVED',
     'TB_ACR_1_MULTIPLE', 'TB_ACR_2_MULTIPLE',
     'TB_ACR_3_MULTIPLE_RESERVED', 'TB_ACR_4_MULTIPLE',
@@ -42618,15 +42778,15 @@ __all__ = \
     'ZPASS_DISABLE', 'ZPASS_PIXELS', 'ZPASS_SAMPLES',
     'ZSamplePosition', 'Z_SAMPLE_CENTER', 'Z_SAMPLE_CENTROID',
     'ZpassControl', '_DISCOVERY_H_', '_PSP_TEE_GFX_IF_H_',
-    '__AMDGPU_UCODE_H__', '__AMDGPU_VM_H__', '_soc21_ENUM_HEADER',
-    'amd_hw_ip_block_type', 'amdgpu_firmware_load_type',
-    'amdgpu_vm_level', 'binary_header', 'bool', 'c__EA_table',
-    'die_header', 'die_info', 'ge1_assembler_busy',
-    'ge1_assembler_dma_starved', 'ge1_assembler_stalled',
-    'ge1_dma_busy', 'ge1_dma_lat_bin_0', 'ge1_dma_lat_bin_1',
-    'ge1_dma_lat_bin_2', 'ge1_dma_lat_bin_3', 'ge1_dma_lat_bin_4',
-    'ge1_dma_lat_bin_5', 'ge1_dma_lat_bin_6', 'ge1_dma_lat_bin_7',
-    'ge1_dma_return_cl0', 'ge1_dma_return_cl1',
+    '__AMDGPU_PSP_H__', '__AMDGPU_UCODE_H__', '__AMDGPU_VM_H__',
+    '_soc21_ENUM_HEADER', 'amd_hw_ip_block_type',
+    'amdgpu_firmware_load_type', 'amdgpu_vm_level', 'binary_header',
+    'bool', 'c__EA_table', 'die_header', 'die_info',
+    'ge1_assembler_busy', 'ge1_assembler_dma_starved',
+    'ge1_assembler_stalled', 'ge1_dma_busy', 'ge1_dma_lat_bin_0',
+    'ge1_dma_lat_bin_1', 'ge1_dma_lat_bin_2', 'ge1_dma_lat_bin_3',
+    'ge1_dma_lat_bin_4', 'ge1_dma_lat_bin_5', 'ge1_dma_lat_bin_6',
+    'ge1_dma_lat_bin_7', 'ge1_dma_return_cl0', 'ge1_dma_return_cl1',
     'ge1_dma_return_size_cl0', 'ge1_dma_return_size_cl1',
     'ge1_dma_utcl1_consecutive_retry_event',
     'ge1_dma_utcl1_request_event', 'ge1_dma_utcl1_retry_event',
@@ -42728,10 +42888,15 @@ __all__ = \
     'ge_te11_compactor_starved', 'ge_te11_con_stall',
     'ge_te11_stall_prim_funnel', 'ge_te11_stall_vert_funnel',
     'ge_tf_ret_data_stalling_hs_done', 'harvest_info',
-    'harvest_info_header', 'harvest_table', 'hw_id_map', 'ip',
-    'ip_discovery_header', 'ip_structure', 'ip_v3', 'ip_v4',
-    'psp_fw_type', 'psp_gfx_boot_config', 'psp_gfx_boot_config_cmd',
+    'harvest_info_header', 'harvest_table', 'hw_id_map', 'int16_t',
+    'int32_t', 'int8_t', 'ip', 'ip_discovery_header', 'ip_structure',
+    'ip_v3', 'ip_v4', 'psp_bootloader_cmd', 'psp_fw_type',
+    'psp_gfx_boot_config', 'psp_gfx_boot_config_cmd',
     'psp_gfx_cmd_id', 'psp_gfx_crtl_cmd_id', 'psp_gfx_fw_type',
+    'psp_memory_training_init_flag', 'psp_memory_training_ops',
+    'psp_reg_prog_id', 'psp_ring_type',
+    'psp_runtime_boot_cfg_feature', 'psp_runtime_entry_type',
+    'psp_runtime_scpm_authentication', 'psp_shared_mem_size',
     'struct__fuse_data_bits', 'struct_amdgpu_firmware_info',
     'struct_binary_header', 'struct_common_firmware_header',
     'struct_die', 'struct_die_header', 'struct_die_info',
@@ -42743,9 +42908,7 @@ __all__ = \
     'struct_gfx_firmware_header_v2_0',
     'struct_gpu_info_firmware_header_v1_0',
     'struct_gpu_info_firmware_v1_0', 'struct_gpu_info_firmware_v1_1',
-    'struct_gpu_info_firmware_v1_2', 'struct_gpu_info_header',
-    'struct_gpu_info_soc_bounding_box_v1_0',
-    'struct_gpu_info_voltage_scaling_v1_0', 'struct_harvest_info',
+    'struct_gpu_info_header', 'struct_harvest_info',
     'struct_harvest_info_header', 'struct_harvest_table',
     'struct_imu_firmware_header_v1_0', 'struct_ip',
     'struct_ip_discovery_header', 'struct_ip_discovery_header_0_0',
@@ -42754,6 +42917,7 @@ __all__ = \
     'struct_mall_info_v2_0', 'struct_mc_firmware_header_v1_0',
     'struct_mes_firmware_header_v1_0', 'struct_nps_info_header',
     'struct_nps_info_v1_0', 'struct_nps_instance_info_v1_0',
+    'struct_psp_bin_desc', 'struct_psp_context',
     'struct_psp_firmware_header_v1_0',
     'struct_psp_firmware_header_v1_1',
     'struct_psp_firmware_header_v1_2',
@@ -42773,7 +42937,8 @@ __all__ = \
     'struct_psp_gfx_rb_frame', 'struct_psp_gfx_resp',
     'struct_psp_gfx_uresp_bootcfg',
     'struct_psp_gfx_uresp_fwar_db_info',
-    'struct_psp_gfx_uresp_reserved',
+    'struct_psp_gfx_uresp_reserved', 'struct_psp_xgmi_node_info',
+    'struct_psp_xgmi_topology_info',
     'struct_rlc_firmware_header_v1_0',
     'struct_rlc_firmware_header_v2_0',
     'struct_rlc_firmware_header_v2_1',
@@ -42793,9 +42958,10 @@ __all__ = \
     'struct_v11_gfx_mqd', 'struct_v11_sdma_mqd',
     'struct_vcn_info_header', 'struct_vcn_info_v1_0',
     'struct_vcn_instance_info_v1_0',
-    'struct_vpe_firmware_header_v1_0', 'ta_fw_type', 'table',
-    'table__enumvalues', 'table_info', 'tee_error_code', 'u16', 'u32',
-    'u64', 'u8', 'uint16_t', 'uint32_t', 'uint64_t', 'uint8_t',
-    'union__fuse_data', 'union_amdgpu_firmware_header', 'union_die_0',
-    'union_ip_discovery_header_0', 'union_psp_gfx_cmd_setup_tmr_0',
-    'union_psp_gfx_commands', 'union_psp_gfx_uresp']
+    'struct_vpe_firmware_header_v1_0', 'ta_fw_type', 'ta_type_id',
+    'table', 'table__enumvalues', 'table_info', 'tee_error_code',
+    'u16', 'u32', 'u64', 'u8', 'uint16_t', 'uint32_t', 'uint64_t',
+    'uint8_t', 'union__fuse_data', 'union_amdgpu_firmware_header',
+    'union_die_0', 'union_ip_discovery_header_0',
+    'union_psp_gfx_cmd_setup_tmr_0', 'union_psp_gfx_commands',
+    'union_psp_gfx_uresp']

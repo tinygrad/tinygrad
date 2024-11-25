@@ -23,7 +23,16 @@
 #ifndef __AMDGPU_UCODE_H__
 #define __AMDGPU_UCODE_H__
 
-#include "amdgpu_socbb.h"
+// #include "amdgpu_socbb.h"
+#define int32_t int
+#define uint32_t unsigned int
+#define int8_t signed char
+#define uint8_t unsigned char
+#define uint16_t unsigned short
+#define int16_t short
+#define uint64_t unsigned long long
+#define bool _Bool
+#define u32 unsigned int
 
 struct common_firmware_header {
 	uint32_t size_bytes; /* size of the entire header+image(s) in bytes */
@@ -389,10 +398,10 @@ struct gpu_info_firmware_v1_1 {
 
 /* gpu info payload
  * version_major=1, version_minor=1 */
-struct gpu_info_firmware_v1_2 {
-	struct gpu_info_firmware_v1_1 v1_1;
-	struct gpu_info_soc_bounding_box_v1_0 soc_bounding_box;
-};
+// struct gpu_info_firmware_v1_2 {
+// 	struct gpu_info_firmware_v1_1 v1_1;
+// 	struct gpu_info_soc_bounding_box_v1_0 soc_bounding_box;
+// };
 
 /* version_major=1, version_minor=0 */
 struct gpu_info_firmware_header_v1_0 {

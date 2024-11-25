@@ -195,25 +195,24 @@ class AM_PSP(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
 
-    self.msg1_pm = self.adev.mm.palloc(0x100000, align=0x100000)
-    self.fence_pm = self.adev.mm.palloc(0x1000)
-    self.cmd_pm = self.adev.mm.palloc(0x1000)
+    self.msg1_pm = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG)
+    self.cmd_pm = self.adev.mm.palloc(am.PSP_CMD_BUFFER_SIZE)
+    self.fence_pm = self.adev.mm.palloc(am.PSP_FENCE_BUFFER_SIZE)
     self.ring_pm = self.adev.mm.palloc(0x10000)
 
   def is_sos_alive(self): return self.adev.regMP0_SMN_C2PMSG_81.read() != 0x0
   def init(self):
-    # Load sOS components. TODO: parse compid
-    components_load_order = [
-      (am.PSP_FW_TYPE_PSP_KDB, 0x80000),
-      (am.PSP_FW_TYPE_PSP_KDB, 0x10000000),
-      (am.PSP_FW_TYPE_PSP_SYS_DRV, 0x10000),
-      (am.PSP_FW_TYPE_PSP_SOC_DRV, 0xB0000),
-      (am.PSP_FW_TYPE_PSP_INTF_DRV, 0xD0000),
-      (am.PSP_FW_TYPE_PSP_DBG_DRV, 0xC0000),
-      (am.PSP_FW_TYPE_PSP_RAS_DRV, 0xE0000),
-      (am.PSP_FW_TYPE_PSP_SOS, 0x20000),
+    sos_components_load_order = [
+      (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_KEY_DATABASE),
+      (am.PSP_FW_TYPE_PSP_KDB, am.PSP_BL__LOAD_TOS_SPL_TABLE),
+      (am.PSP_FW_TYPE_PSP_SYS_DRV, am.PSP_BL__LOAD_SYSDRV),
+      (am.PSP_FW_TYPE_PSP_SOC_DRV, am.PSP_BL__LOAD_SOCDRV),
+      (am.PSP_FW_TYPE_PSP_INTF_DRV, am.PSP_BL__LOAD_INTFDRV),
+      (am.PSP_FW_TYPE_PSP_DBG_DRV, am.PSP_BL__LOAD_DBGDRV),
+      (am.PSP_FW_TYPE_PSP_RAS_DRV, am.PSP_BL__LOAD_RASDRV),
+      (am.PSP_FW_TYPE_PSP_SOS, am.PSP_BL__LOAD_SOSDRV),
     ]
-    for fw, compid in components_load_order: self._bootloader_load_component(fw, compid)
+    for fw, compid in sos_components_load_order: self._bootloader_load_component(fw, compid)
     while not self.is_sos_alive(): time.sleep(0.01)
 
     self._ring_create()
@@ -249,7 +248,7 @@ class AM_PSP(AM_IP):
     self._prep_msg1(fwm:=self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_TOC])
     resp = self._load_toc_cmd(len(fwm))
 
-    self.tmr_pm = self.adev.mm.palloc(resp.resp.tmr_size, align=0x100000)
+    self.tmr_pm = self.adev.mm.palloc(resp.resp.tmr_size, align=am.PSP_TMR_ALIGNMENT)
 
   def _ring_create(self):
     # Wait until the sOS is ready

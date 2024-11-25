@@ -260,43 +260,44 @@ generate_am() {
     extra/amdpci/headers/amdgpu_ucode.h \
     extra/amdpci/headers/soc21_enum.h \
     extra/amdpci/headers/psp_gfx_if.h \
+    extra/amdpci/headers/amdgpu_psp.h \
     -o $BASE/am/am.py
 
-  clang2py -k cdefstum \
-    extra/amdpci/headers/mp_13_0_0_offset.h \
-    extra/amdpci/headers/mp_13_0_0_sh_mask.h \
-    -o $BASE/am/mp_13_0_0.py
+  # clang2py -k cdefstum \
+  #   extra/amdpci/headers/mp_13_0_0_offset.h \
+  #   extra/amdpci/headers/mp_13_0_0_sh_mask.h \
+  #   -o $BASE/am/mp_13_0_0.py
 
-  clang2py -k cdefstum \
-    extra/amdpci/headers/mp_11_0_offset.h \
-    extra/amdpci/headers/mp_11_0_sh_mask.h \
-    -o $BASE/am/mp_11_0.py
+  # clang2py -k cdefstum \
+  #   extra/amdpci/headers/mp_11_0_offset.h \
+  #   extra/amdpci/headers/mp_11_0_sh_mask.h \
+  #   -o $BASE/am/mp_11_0.py
 
-  clang2py -k cdefstum \
-    extra/amdpci/headers/gc_11_0_0_offset.h \
-    extra/amdpci/headers/gc_11_0_0_sh_mask.h \
-    -o $BASE/am/gc_11_0_0.py
+  # clang2py -k cdefstum \
+  #   extra/amdpci/headers/gc_11_0_0_offset.h \
+  #   extra/amdpci/headers/gc_11_0_0_sh_mask.h \
+  #   -o $BASE/am/gc_11_0_0.py
 
-  clang2py -k cdefstum \
-    extra/amdpci/headers/mmhub_3_0_0_offset.h \
-    extra/amdpci/headers/mmhub_3_0_0_sh_mask.h \
-    -o $BASE/am/mmhub_3_0_0.py
+  # clang2py -k cdefstum \
+  #   extra/amdpci/headers/mmhub_3_0_0_offset.h \
+  #   extra/amdpci/headers/mmhub_3_0_0_sh_mask.h \
+  #   -o $BASE/am/mmhub_3_0_0.py
 
-  clang2py -k cdefstum \
-    extra/amdpci/headers/nbio_4_3_0_offset.h \
-    extra/amdpci/headers/nbio_4_3_0_sh_mask.h \
-    -o $BASE/am/nbio_4_3_0.py
+  # clang2py -k cdefstum \
+  #   extra/amdpci/headers/nbio_4_3_0_offset.h \
+  #   extra/amdpci/headers/nbio_4_3_0_sh_mask.h \
+  #   -o $BASE/am/nbio_4_3_0.py
 
-  clang2py -k cdefstum \
-    extra/amdpci/headers/osssys_6_0_0_offset.h \
-    extra/amdpci/headers/osssys_6_0_0_sh_mask.h \
-    -o $BASE/am/osssys_6_0_0.py
+  # clang2py -k cdefstum \
+  #   extra/amdpci/headers/osssys_6_0_0_offset.h \
+  #   extra/amdpci/headers/osssys_6_0_0_sh_mask.h \
+  #   -o $BASE/am/osssys_6_0_0.py
 
-  clang2py -k cdefstum \
-    extra/amdpci/headers/smu_v13_0_0_ppsmc.h \
-    extra/amdpci/headers/smu13_driver_if_v13_0_0.h \
-    extra/amdpci/headers/amdgpu_smu.h \
-    -o $BASE/am/smu_v13_0_0.py
+  # clang2py -k cdefstum \
+  #   extra/amdpci/headers/smu_v13_0_0_ppsmc.h \
+  #   extra/amdpci/headers/smu13_driver_if_v13_0_0.h \
+  #   extra/amdpci/headers/amdgpu_smu.h \
+  #   -o $BASE/am/smu_v13_0_0.py
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl
