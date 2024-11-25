@@ -191,7 +191,7 @@ class PTXRenderer(Renderer):
         r[u] = [ssa("wmma", dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)]
       prefix, dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.ENDRANGE: ("pred", "pred"), Ops.RANGE: ("ridx", None),
         Ops.DEFINE_ACC: ("acc", None), Ops.DEFINE_VAR: ("dat", None), Ops.CONST: ("const", None), Ops.DEFINE_LOCAL: ("local", "u64"),
-        Ops.DEFINE_GLOBAL: ("dat", self.types.get(dtypes.ulong if u.dtype.__class__ == PtrDType else u.dtype)),
+        Ops.DEFINE_GLOBAL: ("dat", self.types.get(dtypes.ulong if isinstance(u.dtype, PtrDType) else u.dtype)),
         **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
       if prefix: r[u] = ssa(prefix, u, dtype)
 
