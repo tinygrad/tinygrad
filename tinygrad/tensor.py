@@ -97,7 +97,7 @@ def _pad_left(*shapes:Tuple[sint, ...]) -> Tuple[Tuple[sint, ...], ...]:
 def _broadcast_shape(*shapes:Tuple[sint, ...]) -> Tuple[sint, ...]:
   return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_pad_left(*shapes)))
 
-def _masked_index_select(target:Tensor, vb:Tensor, mask:Tensor, axes:Tuple[int, ...]):
+def _masked_setitem(target:Tensor, vb:Tensor, mask:Tensor, axes:Tuple[int, ...]):
   # apply mask to vb (values broadcasted) and reduce such that if mask contains repeated indices the last one remains
   vb = vb * mask
   for dim in axes: mask, vb = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), vb.split(1, dim)))
@@ -1203,9 +1203,8 @@ class Tensor(SimpleMathTrait):
         vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(ret.shape, v.shape))
         # add back reduced dims from sum
         for dim in sum_axis: vb = vb.unsqueeze(dim)
-        # axis to be reduced to match self.shape
-        axis = tuple(range(first_dim, first_dim + len(big_shape)))
-        return _masked_index_select(self, vb, mask, axis)
+        # run masked_setitem on tuple of axis that is to be reduced to match self.shape
+        ret = _masked_setitem(self, vb, mask, tuple(range(first_dim, first_dim + len(big_shape))))
 
     return ret
 
@@ -2355,7 +2354,7 @@ class Tensor(SimpleMathTrait):
     src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
     if reduce == "add": return (mask*src).sum(-1, acc_dtype=self.dtype) + self
     if reduce == "multiply": return mask.where(mask*src, 1).prod(-1, acc_dtype=self.dtype) * self
-    return _masked_index_select(self, src, mask, (-1,))
+    return _masked_setitem(self, src, mask, (-1,))
 
   # ***** unary ops *****
 
