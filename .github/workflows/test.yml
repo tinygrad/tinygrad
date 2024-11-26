@@ -351,46 +351,44 @@ jobs:
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
-  #testwebgpu:
-  #  name: WebGPU Tests
-  #  runs-on: macos-13
-  #  timeout-minutes: 20
-  #  steps:
-  #  - name: Checkout Code
-  #    uses: actions/checkout@v4
-  #  - name: Set up Python 3.11
-  #    uses: actions/setup-python@v5
-  #    with:
-  #      python-version: 3.11
-  #  - name: Cache python packages
-  #    uses: actions/cache@v4
-  #    with:
-  #      path: /Users/runner/Library/Python/3.11/lib/python/site-packages
-  #      key: webgpu-testing-user3-packages-${{ hashFiles('**/setup.py') }}
-  #  - name: Install Dependencies
-  #    run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-  #  - name: Cache downloads
-  #    uses: actions/cache@v4
-  #    with:
-  #      path: ~/Library/Caches/tinygrad/downloads/
-  #      key: downloads-cache-webgpu-${{ env.DOWNLOAD_CACHE_VERSION }}
-  #  - name: Check Device.DEFAULT (WEBGPU) and print some source
-  #    run: |
-  #      WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
-  #      WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-    #- name: Run webgpu pytest
-    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
-  #  - name: Run selected webgpu tests
-  #    run: |
-  #      WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_ops.py test/test_dtype.py \
-  #      test/test_jit.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_linearizer.py \
-  #      test/test_linearizer_failures.py test/test_nn.py
-  #  - name: Build WEBGPU Efficientnet
-  #    run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
-  #  - name: Install Puppeteer
-  #    run: npm install puppeteer
-  #  - name: Run WEBGPU Efficientnet
-  #    run: node test/web/test_webgpu.js
+  testwebgpu:
+    name: WebGPU Tests
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
+    - name: Cache python packages
+      uses: actions/cache@v4
+      with:
+        path: /Users/runner/Library/Python/3.11/lib/python/site-packages
+        key: webgpu-testing-user3-packages-${{ hashFiles('**/setup.py') }}
+    - name: Install Dependencies
+      run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Cache downloads
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Caches/tinygrad/downloads/
+        key: downloads-cache-webgpu-${{ env.DOWNLOAD_CACHE_VERSION }}
+    - name: Check Device.DEFAULT (WEBGPU) and print some source
+      run: |
+        WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
+        WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+    - name: Build WEBGPU Efficientnet
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python3 -m examples.compile_efficientnet
+    - name: Install Puppeteer
+      run: npm install puppeteer
+    - name: Run WEBGPU Efficientnet
+      run: node test/web/test_webgpu.js
+    - name: Run selected webgpu tests
+      run: |
+          WEBGPU=1 WGPU_BACKEND_TYPE=Metal python3 -m pytest test/test_assign.py test/test_arange.py test/test_const_folding.py test/test_dtype.py \
+          test/test_dtype_alu.py test/test_conv.py test/test_conv_shapetracker.py test/test_nn.py test/test_ops.py test/test_optim.py \
+          test/test_randomness.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_uops_stats.py test/test_uops.py --durations=20
 
   testmetal:
     name: Metal Tests

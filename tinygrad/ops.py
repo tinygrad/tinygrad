@@ -360,11 +360,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
-  def view(self, st:ShapeTracker) -> UOp:
-    if self.st is None: return self
-    assert self.op is not Ops.STORE, "VIEW of STORE is invalid, STORE is always base"
-    if st.contiguous and self.base.st == st: return self.base
-    return UOp(Ops.VIEW, self.dtype, (self,), st)
+  def view(self, new_st:ShapeTracker) -> UOp:
+    assert self.op is not Ops.STORE, "STORE must stay base"
+    assert self.st is not None, f"must have shape {self}"
+    if new_st.contiguous and self.base.st == new_st: return self.base
+    return UOp(Ops.VIEW, self.dtype, (self,), new_st)
   def reshape(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).reshape(arg))
 
   # *** uop Buffer stuff ***
@@ -693,6 +693,7 @@ match_stats:Dict[UPat, List[Union[int, float]]] = dict()
 class TrackedRewriteContext:
   loc: Tuple[str, int]                                                                              # location that called graph_rewrite
   sink: UOp                                                                                         # the sink passed into the rewrite
+  bottom_up: bool
   matches: List[Tuple[UOp, Optional[UOp], Optional[UPat], float]] = field(default_factory=list)     # all matches of sparents
 
 rewrite_stack: List[Tuple[Any, List[TrackedRewriteContext]]] = []
@@ -780,7 +781,7 @@ class RewriteContext:
 
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp:
   if TRACK_MATCH_STATS >= 2 and len(rewrite_stack) != 0:
-    rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink))
+    rewrite_stack[-1][1].append(TrackedRewriteContext(((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno), sink, bottom_up))
   return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
@@ -1206,7 +1207,8 @@ merge_views = PatternMatcher([(UPat(Ops.VIEW, name="s0").view(name="s1"), lambda
 # push VIEW to loads
 view_left = merge_views+PatternMatcher([
   # VIEW before elementwise ops
-  (UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN}, name="e").view(name="v"), lambda e,v: e.replace(src=tuple(s.view(v.st) for s in e.src))),
+  (UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN}, name="e").view(name="v"),
+   lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
   # early merge VIEW buffer ops
   (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((s.st+v.st).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
 ])
