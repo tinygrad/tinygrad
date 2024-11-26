@@ -1031,7 +1031,7 @@ class Tensor(SimpleMathTrait):
     print(t.pad((1, 2, 0, -1), value=-float('inf')).numpy())
     ```
     """
-    if mode not in {"constant", "reflect", "replicate"}: raise NotImplementedError(f"{mode=} is not supported")
+    if mode not in {"constant", "reflect", "replicate", "circular"}: raise NotImplementedError(f"{mode=} is not supported")
     if (flat:=all(isinstance(p, (int,UOp)) for p in padding)) and len(padding)%2 != 0: raise ValueError("Flat padding must have even number of pads")
     # turn flat padding into group padding
     pX = ((0,0),)*(self.ndim - len(padding)//2) + tuple(zip(padding[-2::-2], padding[::-2])) if flat else padding
@@ -1045,8 +1045,7 @@ class Tensor(SimpleMathTrait):
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     if mode == "circular":
       if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, X.shape)): raise ValueError('Padding value causes wrapping around more than once.')
-      X = X.shrink(shrinks)
-      if X.numel() == 0: return X.pad(tuple((max(pB-csh, 0), max(pA-csh, 0)) for (pB,pA),csh in zip(pads,X.shape)))
+      if (X := X.shrink(shrinks)).numel() == 0: return X.pad(tuple((max(pB-csh, 0), max(pA-csh, 0)) for (pB,pA),csh in zip(pads,X.shape)))
       cropped, X = X.shape, X.repeat(tuple(bool(pB) + ceildiv(pA,csh) + 1 for (pB,pA),csh in zip(pads, X.shape)))
       X = X.shrink(tuple((max(csh-pB, 0) if pB>0 else 0, xsh - (csh-pA%csh) if pA%csh!=0 else xsh) for (pB,pA),csh,xsh in zip(pads,cropped, X.shape)))
       return X.pad(tuple((max(pB-csh, 0), 0) for (pB,_),csh in zip(pads, cropped)))
