@@ -97,14 +97,14 @@ def _pad_left(*shapes:Tuple[sint, ...]) -> Tuple[Tuple[sint, ...], ...]:
 def _broadcast_shape(*shapes:Tuple[sint, ...]) -> Tuple[sint, ...]:
   return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_pad_left(*shapes)))
 
-def _masked_setitem(target:Tensor, vb:Tensor, mask:Tensor, axes:Tuple[int, ...]):
-  # apply mask to vb (values broadcasted) and reduce such that if mask contains repeated indices the last one remains
-  vb = vb * mask
-  for dim in axes: mask, vb = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), vb.split(1, dim)))
+def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:Tuple[int, ...]):
+  # apply mask to values (already broadcasted) and reduce such that if mask contains repeated indices the last one remains
+  values = values * mask
+  for dim in axes: mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
   # remove extra dims from reduce
-  for dim in reversed(axes): mask, vb = mask.squeeze(dim), vb.squeeze(dim)
-  # select from vb for each True element in mask else select from self
-  return mask.where(vb, target)
+  for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
+  # select from values for each True element in mask else select from self
+  return mask.where(values, target)
 
 ReductionStr = Literal["mean", "sum", "none"]
 
@@ -1203,7 +1203,7 @@ class Tensor(SimpleMathTrait):
         vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(ret.shape, v.shape))
         # add back reduced dims from sum
         for dim in sum_axis: vb = vb.unsqueeze(dim)
-        # run masked_setitem on tuple of axis that is to be reduced to match self.shape
+        # run _masked_setitem on tuple of axis that is to be reduced to match self.shape
         ret = _masked_setitem(self, vb, mask, tuple(range(first_dim, first_dim + len(big_shape))))
 
     return ret
@@ -3386,7 +3386,7 @@ class Tensor(SimpleMathTrait):
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False, device=self.device).tril(0).cast(dtypes.bool)
     if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), 0)
-    qk = (self.matmul(key.transpose(-2,-1)) / math.sqrt(self.shape[-1])).cast(least_upper_dtype(self.dtype, key.dtype, dtypes.float32))
+    qk = self.matmul(key.transpose(-2,-1), acc_dtype=least_upper_dtype(self.dtype, key.dtype, dtypes.float32)) / math.sqrt(self.shape[-1])
     return ((qk+attn_mask) if attn_mask is not None else qk).softmax(-1).cast(self.dtype).dropout(dropout_p) @ value
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
