@@ -69,6 +69,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
   dtype = buf.dtype if buf.op in GroupOp.Meta else buf.dtype.base
   if buf.is_realized:
     ubuf = UOp.new_buffer(buf.device, buf.size, buf.dtype, num=len(buffers))
+    buffers[ubuf] = buf.buffer
     op = None
   elif buf.op is Ops.ASSIGN:
     target, new_val = [to_uop(x, ctx, buffers, cache) for x in buf.srcs]
@@ -76,9 +77,9 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     op = UOp(Ops.ASSIGN, dtype, (ubuf, new_val), buf.arg)
   else:
     ubuf = UOp.new_buffer(buf.device, buf.size, buf.dtype, num=len(buffers))
+    buffers[ubuf] = buf.buffer
     op = UOp(buf.op, dtype, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
-  buffers[ubuf] = buf.buffer
   if op is not None:
     ctx.lazybufs[ubuf] = buf
     ctx.allbufs[ubuf] = ret
