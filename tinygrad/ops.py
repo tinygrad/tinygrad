@@ -366,8 +366,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop Buffer stuff ***
 
+  buf_number = -1
   @staticmethod
-  def new_buffer(device:str, size:int, dtype:DType, num=-1): return  UOp(Ops.BUFFER, dtype.ptr(), (), (num, (device, size, dtype)))
+  def new_buffer(device:str, size:int, dtype:DType):
+    UOp.buf_number += 1
+    return UOp(Ops.BUFFER, dtype.ptr(), (), (UOp.buf_number, (device, size, dtype)))
   @functools.cached_property
   def device(self) -> str:
     match self.op:

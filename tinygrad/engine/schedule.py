@@ -68,18 +68,17 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
   assert buf.op is not None, f"base must be base itself {buf}"
   dtype = buf.dtype if buf.op in GroupOp.Meta else buf.dtype.base
   if buf.is_realized:
-    ubuf = UOp.new_buffer(buf.device, buf.size, buf.dtype, num=len(buffers))
-    buffers[ubuf] = buf.buffer
+    ubuf = UOp.new_buffer(buf.device, buf.size, buf.dtype)
     op = None
   elif buf.op is Ops.ASSIGN:
     target, new_val = [to_uop(x, ctx, buffers, cache) for x in buf.srcs]
     ctx.assigns.add(ubuf:=target.buf_uop)
     op = UOp(Ops.ASSIGN, dtype, (ubuf, new_val), buf.arg)
   else:
-    ubuf = UOp.new_buffer(buf.device, buf.size, buf.dtype, num=len(buffers))
-    buffers[ubuf] = buf.buffer
+    ubuf = UOp.new_buffer(buf.device, buf.size, buf.dtype)
     op = UOp(buf.op, dtype, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
+  buffers[ubuf] = buf.buffer
   if op is not None:
     ctx.lazybufs[ubuf] = buf
     ctx.allbufs[ubuf] = ret
