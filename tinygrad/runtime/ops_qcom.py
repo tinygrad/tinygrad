@@ -36,13 +36,8 @@ class QCOMCompiler(CLCompiler):
   def disassemble(self, lib:bytes): fromimport('extra.disassemblers.adreno', 'disasm')(lib)
 
 class QCOMSignal(HCQSignal):
-  def __init__(self, value=0, is_timeline=False):
-    self._signal = QCOMDevice.signals_pool.pop()
-    super().__init__(value)
-  def __del__(self): QCOMDevice.signals_pool.append(self._signal)
-  def _get_value(self) -> int: return self._signal[0]
-  def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(19.2) # based on the 19.2MHz always-on timer
-  def _set_value(self, new_value:int): self._signal[0] = new_value
+  def __init__(self, value=0, is_timeline=False): super().__init__(QCOMDevice.signals_pool.pop(), value, is_timeline, decimal.Decimal(19.2))
+  def __del__(self): QCOMDevice.signals_pool.append(self.base_addr)
 
 class QCOMComputeQueue(HWQueue):
   def __init__(self):
@@ -69,7 +64,7 @@ class QCOMComputeQueue(HWQueue):
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
     if QCOMDevice.gpu_id < 700:
       self.cmd(adreno.CP_EVENT_WRITE, qreg.cp_event_write_0(event=adreno.CACHE_FLUSH_TS, timestamp=ts),
-               *data64_le(mv_address(signal._signal) + (0 if not ts else 8)), qreg.cp_event_write_3(value & 0xFFFFFFFF))
+               *data64_le(signal.timestamp_addr if ts else signal.value_addr), qreg.cp_event_write_3(value & 0xFFFFFFFF))
       self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
     else:
       # TODO: support devices starting with 8 Gen 1. Also, 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP
@@ -78,15 +73,15 @@ class QCOMComputeQueue(HWQueue):
   def _timestamp(self, signal:QCOMSignal): return self._signal(signal, 0, ts=True)
 
   def _wait(self, signal:QCOMSignal, value=0):
-    self.cmd(adreno.CP_WAIT_REG_MEM, qreg.cp_wait_reg_mem_0(function=adreno.WRITE_GE, poll=adreno.POLL_MEMORY),*data64_le(mv_address(signal._signal)),
+    self.cmd(adreno.CP_WAIT_REG_MEM, qreg.cp_wait_reg_mem_0(function=adreno.WRITE_GE, poll=adreno.POLL_MEMORY),*data64_le(signal.value_addr),
              qreg.cp_wait_reg_mem_3(ref=value&0xFFFFFFFF), qreg.cp_wait_reg_mem_4(mask=0xFFFFFFFF), qreg.cp_wait_reg_mem_5(delay_loop_cycles=32))
 
   def _update_signal(self, cmd_idx, signal:Optional[QCOMSignal], value):
-    if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(mv_address(signal._signal)))
+    if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(signal.value_addr))
     if value is not None: self._patch(cmd_idx, offset=5, data=[value & 0xFFFFFFFF])
 
   def _update_wait(self, cmd_idx, signal:Optional[QCOMSignal], value):
-    if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(mv_address(signal._signal)))
+    if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(signal.value_addr))
     if value is not None: self._patch(cmd_idx, offset=4, data=[value & 0xFFFFFFFF])
 
   def _build_gpu_command(self, dev:QCOMDevice, hw_addr=None):
@@ -343,7 +338,7 @@ class QCOMAllocator(HCQAllocator):
 
 class QCOMDevice(HCQCompiled):
   signals_page: Any = None
-  signals_pool: List[Any] = []
+  signals_pool: List[int] = []
   gpu_id: int = 0
   dummy_addr: int = 0
 
