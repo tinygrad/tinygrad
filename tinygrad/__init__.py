@@ -1,5 +1,7 @@
-import os
-
+from tinygrad.helpers import TYPED
+if TYPED:
+  from typeguard import install_import_hook
+  install_import_hook(__name__)
 from tinygrad.tensor import Tensor                                    # noqa: F401
 from tinygrad.engine.jit import TinyJit                               # noqa: F401
 from tinygrad.ops import UOp
