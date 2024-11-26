@@ -356,10 +356,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
   def view(self, new_st:ShapeTracker) -> UOp:
-    assert self.op is not Ops.STORE, "STORE must stay base"
     assert self.st is not None, f"must have shape {self}"
-    if new_st.contiguous and self.base.st == new_st: return self.base
-    return UOp(Ops.VIEW, self.dtype, (self,), new_st)
+    if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)):
+      return UOp.const_with_shape(self.dtype, 0, new_st.shape)
+    if new_st.contiguous and unwrap(self.base.st).shape == new_st.shape: return self.base
+    return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
   def reshape(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).reshape(arg))
 
   # *** uop Buffer stuff ***
