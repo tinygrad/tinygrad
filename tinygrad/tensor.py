@@ -2352,8 +2352,8 @@ class Tensor(SimpleMathTrait):
     mask = (index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)).transpose(-1, dim)
     src = src.unsqueeze(-1).expand((None,)*src.ndim + (self.shape[dim],)).transpose(-1, dim).shrink(tuple((0,s) for s in mask.shape))
     src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
-    if reduce == "add": return (mask*src).sum(-1, acc_dtype=self.dtype) + self
-    if reduce == "multiply": return mask.where(mask*src, 1).prod(-1, acc_dtype=self.dtype) * self
+    if reduce == "add": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + self
+    if reduce == "multiply": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * self
     return _masked_setitem(self, src, mask, (-1,))
 
   # ***** unary ops *****
