@@ -2344,7 +2344,7 @@ class Tensor(SimpleMathTrait):
     print(t.scatter(dim=1, index=Tensor([[0, 0], [1, 0]]), src=Tensor([[3, 3], [9, 9]]), reduce="add").numpy())
     ```
     """
-    index, dim  = index.to(self.device), self._resolve_dim(dim)
+    index, dim = index.to(self.device), self._resolve_dim(dim)
     src = src.cast(self.dtype) if isinstance(src, Tensor) else Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
     assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
     assert all((d == dim or se >= ind) and sr >= ind for d,(se,ind,sr) in enumerate(zip(self.shape, index.shape, src.shape))), \
