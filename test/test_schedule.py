@@ -1864,6 +1864,37 @@ class TestSwizzle(unittest.TestCase):
     ret = swizzle_rewrite(sink)
     self.assertEqual(swizzle_cnt(ret), 0)
 
+  def test_non_contiguous_view_simplify(self):
+    st = ShapeTracker(views=(View(shape=(2048, 2048), strides=(1, 2048), offset=0, mask=None, contiguous=False),))
+    a = UOp(Ops.LOAD, dtypes.char, (UOp.new_buffer(Device.DEFAULT, 4194304, dtypes.char), st.to_uop()))
+    ret = swizzle_rewrite(a.view(st))
+    self.assertEqual(ret.st_arg, st+st)
+
+  def test_contiguous_view_simplify(self):
+    base = ShapeTracker.from_shape((32, 32))
+    a = UOp(Ops.LOAD, dtypes.char, (UOp.new_buffer(Device.DEFAULT, base.size, dtypes.char), base.to_uop()))
+    swizzle = a.reshape((64, 16))
+    self.assertEqual(swizzle_cnt(swizzle), 1)
+    ret = swizzle_rewrite(swizzle)
+    self.assertEqual(ret.st_arg, base.reshape((64, 16))) # late rewrite
+    reswizzle = a.reshape((64, 16)).reshape((32, 32))
+    self.assertEqual(swizzle_cnt(reswizzle), 0) # instant rule
+    ret = swizzle_rewrite(reswizzle)
+    self.assertIs(ret, reswizzle)
+
+  def test_late_fusion_post_permute_simpler(self):
+    base = ShapeTracker.from_shape((32, 16, 1))
+    start = UOp(Ops.LOAD, dtypes.char, (UOp.new_buffer(Device.DEFAULT, base.size, dtypes.char), base.to_uop()))
+    r = start.view(start.st.expand((32, 16, 16))).r(Ops.ADD, (2,))
+    add = r.reshape((16, 32, 1)) + UOp.const_with_shape(r.dtype, 0, (16, 32, 1))
+    self.assertEqual(add.st, ShapeTracker.from_shape((16, 32, 1)))
+    to_store = add.view(add.st.permute((1, 0, 2))).contiguous()
+    self.assertEqual(to_store.st, ShapeTracker.from_shape((32, 16, 1)))
+    self.assertEqual(to_store.src[0].st, add.st.permute((1, 0, 2)))
+    self.assertIs(to_store.src[0].op, Ops.VIEW)
+    ret = graph_rewrite(to_store, view_left)
+    self.assertEqual(swizzle_cnt(ret), 1)
+
 def store_val(si:ScheduleItem): return si.ast.src[0].src[2]
 class TestView(unittest.TestCase):
   def test_all_masked_out(self):
