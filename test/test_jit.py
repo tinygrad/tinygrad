@@ -144,6 +144,24 @@ class TestJit(unittest.TestCase):
     with self.assertRaises(AssertionError):
       add(a, a)
 
+  def test_jit_assign(self):
+    @TinyJit
+    def add(a):
+      a += 1
+      a.realize()
+    a = Tensor.zeros(1).contiguous().realize()
+    for _ in range(5): add(a)
+    self.assertEqual(a.item(), 5.0)
+
+  def test_jit_assign_int8(self):
+    @TinyJit
+    def add(a):
+      a += 1
+      a.realize()
+    a = Tensor.zeros(1, dtype=dtypes.int8).contiguous().realize()
+    for _ in range(5): add(a)
+    self.assertEqual(a.item(), 5)
+
   def test_kwargs_jit(self):
     @TinyJit
     def add_kwargs(first, second): return (first+second).realize()
