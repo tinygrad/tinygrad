@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor
 from tinygrad import Device
 from tinygrad.helpers import fetch
 from typing import NamedTuple, Any, List
-from pathlib import Path
+import requests
 import argparse
 import numpy as np
 
@@ -60,16 +60,22 @@ def split_safetensor(fn):
   cur_pos = 0
 
   for i, end_pos in enumerate(part_end_offsets):
-    with open(f'./net_part{i}.safetensors', "wb+") as f:
+    with open(os.path.join(os.path.dirname(__file__), f'./net_part{i}.safetensors'), "wb+") as f:
       f.write(net_bytes[cur_pos:end_pos])
       cur_pos = end_pos
 
-  with open(f'./net_textmodel.safetensors', "wb+") as f:
+  with open(os.path.join(os.path.dirname(__file__), f'./net_textmodel.safetensors'), "wb+") as f:
     f.write(net_bytes[text_model_start+8+json_len:])
 
   return part_end_offsets
 
+def fetch_dep(file, url):
+  with open(file, "w", encoding="utf-8") as f:
+    f.write(requests.get(url).text.replace("https://huggingface.co/wpmed/tinygrad-sd-f16/raw/main/bpe_simple_vocab_16e6.mjs", "./bpe_simple_vocab_16e6.mjs"))
+
 if __name__ == "__main__":
+  fetch_dep(os.path.join(os.path.dirname(__file__), "clip_tokenizer.js"), "https://huggingface.co/wpmed/tinygrad-sd-f16/raw/main/clip_tokenizer.js")
+  fetch_dep(os.path.join(os.path.dirname(__file__), "bpe_simple_vocab_16e6.mjs"), "https://huggingface.co/wpmed/tinygrad-sd-f16/raw/main/bpe_simple_vocab_16e6.mjs")
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--remoteweights', action='store_true', help="Use safetensors from Huggingface, or from local")
   args = parser.parse_args()
@@ -94,12 +100,21 @@ if __name__ == "__main__":
 
   prg = ""
 
+  def fixup_code(code, key):
+    code = code.replace(key, 'main')\
+      .replace("var<uniform> INFINITY : f32;\n", "fn inf(a: f32) -> f32 { return a/0.0; }\n")\
+      .replace("@group(0) @binding(0)", "")\
+      .replace("INFINITY", "inf(1.0)")
+
+    for i in range(1,9): code = code.replace(f"binding({i})", f"binding({i-1})")
+    return code
+
   def compile_step(model, step: Step):
     run, special_names = jit_model(step, *step.input)
     functions, statements, bufs, _ = compile_net(run, special_names)
     state = get_state_dict(model)
     weights = {id(x.lazydata.base.realized): name for name, x in state.items()}
-    kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
+    kernel_code = '\n\n'.join([f"const {key} = `{fixup_code(code, key)}`;" for key, code in functions.items()])
     kernel_names = ', '.join([name for (name, _, _, _) in statements])
     kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
     bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}'], '{weights[_key]}'))") + ";"  for name,(size,dtype,_key) in bufs.items()])
@@ -148,14 +163,14 @@ if __name__ == "__main__":
 
     if step.name == "diffusor":
       if args.remoteweights:
-        base_url = "https://huggingface.co/wpmed/tinygrad-sd-f16/resolve/main"
+        base_url = "https://huggingface.co/wpmed/stable-diffusion-f16-new/resolve/main"
       else:
         state = get_state_dict(model)
         safe_save(state, os.path.join(os.path.dirname(__file__), "net.safetensors"))
-        convert_f32_to_f16("./net.safetensors", "./net_conv.safetensors")
-        split_safetensor("./net_conv.safetensors")
-        os.remove("net.safetensors")
-        os.remove("net_conv.safetensors")
+        convert_f32_to_f16(os.path.join(os.path.dirname(__file__), "./net.safetensors"), os.path.join(os.path.dirname(__file__), "./net_conv.safetensors"))
+        split_safetensor(os.path.join(os.path.dirname(__file__), "./net_conv.safetensors"))
+        os.remove(os.path.join(os.path.dirname(__file__), "net.safetensors"))
+        os.remove(os.path.join(os.path.dirname(__file__), "net_conv.safetensors"))
         base_url = "."
 
   prekernel = f"""
@@ -183,20 +198,6 @@ if __name__ == "__main__":
       }}
 
       counter++;
-    }}
-
-    let allZero = true;
-    let out = safetensorParts[selectedPart].subarray(...correctedOffsets);
-
-    for (let i = 0; i < out.length; i++) {{
-        if (out[i] !== 0) {{
-            allZero = false;
-            break;
-        }}
-    }}
-
-    if (allZero) {{
-        console.log("Error: weight '" + key + "' is all zero.");
     }}
 
     return safetensorParts[selectedPart].subarray(...correctedOffsets);
