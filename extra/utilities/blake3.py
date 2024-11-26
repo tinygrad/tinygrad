@@ -8,19 +8,11 @@ def mix(states: Tensor, chunks: Tensor) -> Tensor:
   def rotr(x: Tensor, n: int) -> Tensor: return ((x << (32 - n)) | (x >> n))
   for i, (a,b,c,d) in enumerate([(0,4,8,12), (1,5,9,13), (2,6,10,14), (3,7,11,15), (0,5,10,15), (1,6,11,12), (2,7,8,13), (3,4,9,14)]):
     mx, my = chunks[i * 2], chunks[i * 2 + 1]
-    new_a, new_b, new_c, new_d = states[a], states[b], states[c], states[d]
-    new_a = (new_a + new_b + mx).realize()
-    new_d = rotr(new_d ^ new_a, 16)
-    new_c = (new_c + new_d)
-    new_b = rotr(new_b ^ new_c, 12)
-    new_a = (new_a + new_b + my)
-    new_d = rotr(new_d ^ new_a, 8)
-    new_c = (new_c + new_d)
-    new_b = rotr(new_b ^ new_c, 7)
-    states[a] = new_a
-    states[b] = new_b
-    states[c] = new_c
-    states[d] = new_d
+    for m in (mx, my):
+      states[a] = states[a] + states[b] + m
+      states[d] = rotr(states[d] ^ states[a], 16 if m is mx else 8)
+      states[c] = states[c] + states[d]
+      states[b] = rotr(states[b] ^ states[c], 12 if m is mx else 7)
   return states
 
 def compress_chunks(states: Tensor, chunks: Tensor, chain_vals: Tensor, n_end_blocks: int):
