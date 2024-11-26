@@ -68,7 +68,10 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   return graph
 def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
   if (found:=replaces.get(base)) is not None: return found
-  replaces[base] = ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
+  ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
+  if (final := replaces.get(ret)) is not None:
+      return final
+  replaces[base] = ret
   return ret
 @functools.lru_cache(None)
 def _prg(k:Optional[Kernel]) -> Optional[str]:
@@ -79,14 +82,14 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
   replaces: Dict[UOp, UOp] = {}
   sink = ctx.sink
   for i,(u0,u1,upat,_) in enumerate(ctx.matches):
+    if ctx.bottom_up: replaces = {} # if it's bottom_up it's single pass
     replaces[u0] = u0 if u1 is None else u1
     # if the match didn't result in a rewrite we move forward
     if u1 is None: continue
-    # first, rewrite this UOp with the current rewrite + all the seen matches before this
+    # first, rewrite this UOp with the current rewrite + all the matches in replaces
     new_sink = _replace_uop(sink, {**replaces})
     # sanity check
-    if new_sink is sink:
-      raise AssertionError(f"rewritten sink wasn't rewritten! {i} {unwrap(upat).location}")
+    if new_sink is sink: raise AssertionError(f"rewritten sink wasn't rewritten! {i} {unwrap(upat).location}")
     # update ret data
     g.changed_nodes.append([id(x) for x in u1.sparents if x.op is not Ops.CONST])
     g.diffs.append(list(difflib.unified_diff(pcall(str, u0).splitlines(), pcall(str, u1).splitlines())))

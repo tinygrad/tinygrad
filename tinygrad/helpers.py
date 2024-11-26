@@ -34,10 +34,9 @@ def make_tuple(x:Union[int, Sequence[int]], cnt:int) -> Tuple[int, ...]: return 
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fully_flatten(l):
   if hasattr(l, "__len__") and hasattr(l, "__getitem__") and not isinstance(l, str):
+    if hasattr(l, "shape") and l.shape == (): return [l[()]]
     flattened = []
-    if hasattr(l, "shape") and l.shape == (): flattened.append(l[()])
-    else:
-      for i in range(len(l)): flattened.extend(fully_flatten(l[i]))
+    for li in l: flattened.extend(fully_flatten(li))
     return flattened
   return [l]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
@@ -66,7 +65,7 @@ def get_child(obj, key):
     elif isinstance(obj, dict): obj = obj[k]
     else: obj = getattr(obj, k)
   return obj
-def word_wrap(x, wrap=80): return x if len(x) <= wrap else (x[0:wrap] + "\n" + word_wrap(x[wrap:], wrap))
+def word_wrap(x, wrap=80): return x if len(x) <= wrap or '\n' in x[0:wrap] else (x[0:wrap] + "\n" + word_wrap(x[wrap:], wrap))
 
 # for length N coefficients `p`, returns p[0] * x**(N-1) + p[1] * x**(N-2) + ... + p[-2] * x + p[-1]
 def polyN(x:T, p:List[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
