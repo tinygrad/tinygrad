@@ -33,6 +33,7 @@ def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 class AMDSignal(HCQSignal):
   def __init__(self, value=0, is_timeline=False):
     super().__init__(AMDDevice.signals_pool.pop(), value, is_timeline, decimal.Decimal(100), value_off=0, timestamp_off=8)
+
     if is_timeline:
       self._event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, auto_reset=1)
       self._event_mailbox_ptr = AMDDevice.event_page.va_addr + self._event.event_slot_index*8
@@ -46,7 +47,7 @@ class AMDSignal(HCQSignal):
       if self.value >= value: return
 
       # Wait active for 5s, then going to sleep.
-      if time_spent > 5000 and self._event_mailbox_ptr != 0:
+      if time_spent > 5000 and self.is_timeline:
         kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(self._evt_array), num_events=1, wait_for_all=1, timeout=1000)
     raise RuntimeError(f"wait_signal: not set to {value}, but {self.value}, {timeout} ms TIMEOUT!")
 
@@ -144,7 +145,7 @@ class AMDComputeQueue(HWQueue):
   def _signal(self, signal:AMDSignal, value=0):
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
     self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal.value_addr, value=value, cache_flush=True)
-    if signal._event_mailbox_ptr != 0:
+    if signal.is_timeline:
       self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal._event_mailbox_ptr,
                         value=signal._event.event_id, cst=signal._event.event_id, cache_flush=False)
 
@@ -208,7 +209,7 @@ class AMDCopyQueue(HWQueue):
   def _signal(self, signal:AMDSignal, value=0):
     self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal.value_addr), value])
 
-    if signal._event_mailbox_ptr != 0:
+    if signal.is_timeline:
       self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._event_mailbox_ptr), signal._event.event_id])
       self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(signal._event.event_id)])
 
