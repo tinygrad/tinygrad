@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict
+from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -966,6 +966,56 @@ def div_folding(x:UOp, c:int) -> Optional[UOp]:
   quo:Optional[UOp] = functools.reduce(operator.add, quotient) if quotient else None
   if quo is None: return x.const_like(0) if rem is None else cast(UOp, div_folding(rem, div))//(c//div)
   return quo if rem is None else cast(UOp, div_folding(rem, div))//(c//div)+quo
+
+def div_and_mod_folding(x: UOp, c: int, which: Literal[Ops.MOD, Ops.IDIV]) -> Optional[UOp]:
+  # simplify x // c or x % c, None means no change
+  assert c > 0, "This rule should not have been triggered for c<=0"
+
+  # simple cancel div/mod case
+  if (q:=x.vmin//c) == (x.vmax//c):
+    if which is Ops.MOD: return x - q*c
+    else: return x.const_like(q)
+
+  svars, factors, quotients, remainders, gcd, const, offset, something_changed = [], [], [], [], c, 0, 0, False
+  for u in split_uop(x, Ops.ADD):
+    if which is Ops.MOD and u.op is Ops.MOD and (s1:=u.src[1]).op is Ops.CONST and s1.arg%c == 0:
+      u = u.src[0]
+      something_changed = True
+    v: UOp = u.divides(f:=u.const_factor())
+    q, r = divmod(f, c)
+    if r!=f: something_changed = True
+    offset += r*v.vmin
+    if u.op is Ops.CONST:
+      if const != 0: something_changed = True  # all constants should have been merged already, but just in case
+      const += f
+    else:
+      gcd = math.gcd(r, gcd)
+      factors.append(f), svars.append(v), quotients.append(q), remainders.append(r)
+
+  lbound = ubound = offset = offset % c
+  # we can fold if the expression has only one non-constant term and this term can only take on two values
+  if len(svars)==1 and (v:=svars[0]).vmax-v.vmin == 1:
+    r = (offset+remainders[0])%c - offset%c
+    offset -= r * v.vmin
+    if which is Ops.MOD: return r*v + offset
+    else: return (factors[0]-r)//c * v + (const-offset)//c
+
+  # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
+  # within a mod, we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
+  for (r, v) in zip(remainders, svars):
+    if r > c//2:
+      if (lbound := lbound + (r:=r-c) * (v.vmax-v.vmin)) < 0: break
+    elif (ubound := ubound + r * (v.vmax-v.vmin)) >= c: break
+    offset -= r * v.vmin  # determine what the new offset would be
+  else: # vmin/vmax of the remainder is between 0 and c, we can remove the mod/div
+    remainders = [min(r, r-c, key=abs) for r in remainders]
+    if which is Ops.MOD: return functools.reduce(operator.add, [r*v for r,v in zip(remainders,svars)], offset)
+    else: return functools.reduce(operator.add, [(f-r)//c * v for f,r,v in zip(factors, remainders,svars)], (const-offset)//c)
+
+  if gcd==1 and not something_changed: return None
+  num = functools.reduce(operator.add, [r//gcd * v for r,v in zip(remainders,svars)], const//gcd)
+  if which is Ops.MOD: return gcd*(num % (c//gcd)) + const%gcd
+  else: return (num // (c//gcd)) + functools.reduce(operator.add, [q*v for r,v in zip(quotients,svars)]) + const//c
 
 def lt_folding(x:UOp, c:int) -> Optional[UOp]:
   p, np = partition(split_uop(x, Ops.ADD), lambda u: u.const_factor() == 1)
