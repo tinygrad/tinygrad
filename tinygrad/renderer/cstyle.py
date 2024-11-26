@@ -177,6 +177,23 @@ class ClangRenderer(CStyleLanguage):
   code_for_op = {**({k:v for k,v in CStyleLanguage.code_for_op.items() if k not in [Ops.EXP2, Ops.SIN, Ops.LOG2]}),
                  Ops.SQRT: lambda x,dtype: f"__builtin_sqrt({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})"}
 
+  # extra_matcher for BF16 support
+  extra_matcher = PatternMatcher([
+    # cast bfloat16 operations to float
+    (UPat(GroupOp.ALU, dtype=dtypes.bfloat16, name="x"),
+        lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(dtypes.bfloat16)),
+    # add float intermediate casting for bfloat16
+    (UPat(Ops.CAST, name="x", src=UPat.var("y", dtypes.bfloat16)),
+        lambda x, y: y.cast(dtypes.float).cast(x.dtype) if x.dtype != dtypes.float else None),
+    (UPat(Ops.CAST, dtypes.bfloat16, UPat.var("x")),
+        lambda x: x.cast(dtypes.float).cast(dtypes.bfloat16) if x.dtype != dtypes.float else None),
+    # bfloat16 casting
+    (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg))),
+    (UPat(Ops.CAST, dtype=dtypes.float, src=UPat.var("x", dtype=dtypes.bfloat16)),
+        lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint) << 16).bitcast(dtypes.float)),
+    (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=UPat.var("x", dtype=dtypes.float)), cast_float_to_bf16)
+    ]) + extra_pm
+
   if AMX:
     tensor_cores = [TensorCore(dims=(sz,sz,1), threads=[], reduce_axes=[], upcast_axes=([(1,sz)],[(0,sz)],[(1,sz),(0,sz)]), dtype_in=dt, dtype_out=dt)
       for dt, sz in [(dt, 64//dt.itemsize) for dt in [dtypes.float]]]
