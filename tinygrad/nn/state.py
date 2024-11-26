@@ -143,20 +143,20 @@ def tar_extract(t: Tensor) -> Dict[str, Tensor]:
   # https://en.wikipedia.org/wiki/Tar_(computing)
 
   pos, result, next_ow = 0, {}, cast(Dict[str, str], {})
-  if len(t.shape) != 1 or len(t) < 2*512 or t.dtype != dtypes.uint8: raise tarfile.ReadError("Invalid tar file!")
+  if len(t.shape) != 1 or len(t) < 1024 or t.dtype != dtypes.uint8: raise tarfile.ReadError("Invalid tar file!")
 
   while pos + 512 < len(t) and (header:=bytes(t[pos:pos+512].data())).count(b"\x00") != 512:
-    info, pos, ow, next_ow = tarfile.TarInfo.frombuf(header, "ascii", "strict"), pos+512, next_ow, {}
-    for k, v in [ (n, cfn(ow[n])) for n, cfn in [("path", str), ("size", int)] if n in ow ]: setattr(info, k, v)
+    info, pos, ow, next_ow = tarfile.TarInfo.frombuf(header, "ascii", "strict"), pos + 512, next_ow, {}
+    for n, v in ((n, cfn(ow[n])) for n, cfn in [("path", str), ("size", int)] if n in ow): setattr(info, n, v)
 
-    if info.type == tarfile.REGTYPE: result[info.name] = t[pos:pos + info.size]
+    if info.type == tarfile.REGTYPE: result[info.name] = t[pos:pos+info.size]
 
     # handle GNU @LongLink
-    if info.type == b"L": next_ow = { "path": bytes(t[pos:pos+info.size].data()).decode().rstrip('\x00') }
+    if info.type == b"L": next_ow = { "path": bytes(t[pos:pos+info.size].data()).decode().rstrip("\x00") }
 
-    # handle @PaxHeader
+    # handle @PaxHeader (https://www.mkssoftware.com/docs/man4/pax.4.asp)
     if info.type == b"x":
-      pax_text, entry_len = bytes(t[pos:pos+info.size].data()).decode().rstrip('\x00'), 0
+      pax_text, entry_len = bytes(t[pos:pos+info.size].data()).decode().rstrip("\x00"), 0
       while len(pax_text:=pax_text[entry_len:].lstrip()) > 0:
         next_ow.update(dict([ pax_text[pax_text.index(" ")+1:(entry_len:=int(pax_text[:pax_text.index(" ")]))-1].split("=", 1) ]))
 

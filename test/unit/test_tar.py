@@ -10,14 +10,15 @@ class TestTarExtractPAX(unittest.TestCase):
     'a/file1.txt': b'Hello, World!',
     'a/b/file2.bin': b'\x00\x01\x02\x03\x04',
     'empty_file.txt': b'',
+    '512file': b'a' * 512,
     'long_file': b'some data' * 100,
-    'very'*15 + "/" + "very"*15 + '_long_filename.txt': b'Hello, World!!',
-    "very"*200 + '_long_filename.txt': b'Hello, World!!!',
+    'very' * 15 + '/' + 'very' * 15 + '_long_filename.txt': b'Hello, World!!',
+    'very' * 200 + '_long_filename.txt': b'Hello, World!!!',
   }
 
   def create_tar_tensor(self):
     fobj = io.BytesIO()
-    test_dirs = set(os.path.dirname(k) for k in self.test_files.keys()).difference({ "" })
+    test_dirs = set(os.path.dirname(k) for k in self.test_files.keys()).difference({ '' })
     with tarfile.open(fileobj=fobj, mode='w', format=self.tar_format) as tar:
       for dirname in test_dirs:
         dir_info = tarfile.TarInfo(name=dirname)
@@ -30,7 +31,7 @@ class TestTarExtractPAX(unittest.TestCase):
         tar.addfile(file_info, io.BytesIO(content))
 
         if len(filename) < self.max_link_len:
-          link_info = tarfile.TarInfo(name=filename + ".lnk")
+          link_info = tarfile.TarInfo(name=filename + '.lnk')
           link_info.type = tarfile.SYMTYPE
           link_info.linkname = filename
           tar.addfile(link_info)
