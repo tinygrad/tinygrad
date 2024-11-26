@@ -4,6 +4,9 @@ if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
 class TestMetal(unittest.TestCase):
+  def test_alloc_u_long(self):
+    device = MetalDevice("metal")
+    device.allocator.alloc(2147483648) #int32 max is +2,147,483,647
   def test_alloc_oom(self):
     device = MetalDevice("metal")
     with self.assertRaises(MemoryError):
