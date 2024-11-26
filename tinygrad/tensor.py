@@ -285,10 +285,8 @@ class Tensor(SimpleMathTrait):
     print(t.item())
     ```
     """
-    assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert self.numel() == 1, "must have one element for item"
-    if TYPE_CHECKING or sys.version_info < (3, 12): assert self.dtype.fmt != "e"
-    return self._data().cast(self.dtype.fmt)[0]
+    return self.data()[0 if self.shape else ()]
 
   # TODO: should be Tensor.tolist() -> Union[List[ConstType], ConstType]. The List is Sequence because mypy expects memoryview.tolist() -> list[int]
   # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803
