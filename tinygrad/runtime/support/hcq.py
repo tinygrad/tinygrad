@@ -230,7 +230,7 @@ class HCQSignal:
     Returns:
       The timestamp in microseconds.
     """
-    return self.timestamp_addr[0] / self.ts_divider
+    return self.timestamp_mv[0] / self.ts_divider
 
   def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
     """
