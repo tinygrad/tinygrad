@@ -1,5 +1,5 @@
-import os
-if int(os.getenv("TYPED", "0")):
+from tinygrad.helpers import TYPED
+if TYPED:
   from typeguard import install_import_hook
   install_import_hook(__name__)
 from tinygrad.tensor import Tensor                                    # noqa: F401
