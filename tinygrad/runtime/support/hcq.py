@@ -210,7 +210,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
 
 class HCQSignal:
   def __init__(self, base_addr:int, value:int=0, is_timeline:bool=False, timestamp_divider=decimal.Decimal(1), value_off=0, timestamp_off=8):
-    self.base_addr, self.value_addr, self.timestamp_addr, self.timestamp_divider = base_addr, base_addr+value_off, base_addr+timestamp_off, timestamp_divider
+    self.base_addr, self.value_addr, self.timestamp_addr, self.ts_divider = base_addr, base_addr+value_off, base_addr+timestamp_off, timestamp_divider
     self.value_mv, self.timestamp_mv = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q')
     self.value_mv[0] = value
 
@@ -230,7 +230,7 @@ class HCQSignal:
     Returns:
       The timestamp in microseconds.
     """
-    return self.timestamp_addr[0] / self.timestamp_divider
+    return self.timestamp_addr[0] / self.ts_divider
 
   def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
     """
