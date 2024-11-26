@@ -138,7 +138,7 @@ view_right = merge_views+PatternMatcher([
   # push a VIEW down to STORE, through a reduce (ONLY reshapes)
   (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src").view(name="swizzle"),), name="r"), push_swizzle_down_through_reduce),
   # push VIEW(s) down to STORE, through an elementwise op (ONLY reshapes)
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
