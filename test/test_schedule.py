@@ -1882,7 +1882,6 @@ class TestSwizzle(unittest.TestCase):
     ret = swizzle_rewrite(reswizzle)
     self.assertIs(ret, reswizzle)
 
-  #@track_rewrites(named=True)
   def test_reswizzle_while_left(self):
     base = ShapeTracker.from_shape((32, 16, 1))
     start = UOp(Ops.LOAD, dtypes.char, (UOp.new_buffer(Device.DEFAULT, base.size, dtypes.char), base.to_uop()))
