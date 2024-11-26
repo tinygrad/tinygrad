@@ -90,6 +90,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
 # ** movement ops
 
 def apply_swizzle(u:UOp, arg:ShapeTracker) -> UOp:
+  assert u is u.base, f"{u} must be base to swizzle"
   with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u.view(arg), view_left)
 
 def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
@@ -104,13 +105,13 @@ def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
   return apply_swizzle(src, new_input_st).r(r.arg[0], new_axis).view(ShapeTracker.from_shape(st.shape))
 
-def push_swizzle_down_through_reduce(root:UOp, swizzle:UOp, src:UOp) -> UOp:
+def push_swizzle_down_through_reduce(r:UOp, swizzle:UOp, src:UOp) -> UOp:
   swizzle_st, src_st = unwrap(swizzle.st), unwrap(src.st)
   assert swizzle_st.contiguous, "can't push a non contiguous VIEW down to STORE"
   assert prod(swizzle_st.shape) == prod(src_st.shape), "can't push expands down to STORE"
-  output_shape = swizzle_st.reduce(root.axis_arg)
+  output_shape = swizzle_st.reduce(r.axis_arg)
   new_axis = tuple(i for i,(s,u) in enumerate(zip(src_st.shape, output_shape)) if s != u)
-  return swizzle.src[0].r(root.arg[0], new_axis).view(ShapeTracker.from_shape(output_shape))
+  return src.r(r.arg[0], new_axis).view(ShapeTracker.from_shape(output_shape))
 
 def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   swizzles = [x for x in root.src if x.base is not x]
@@ -133,11 +134,11 @@ view_right = merge_views+PatternMatcher([
   (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.ASSIGN, name="a"))),
    lambda a,b,st: UOp.store(b, (a.arg[0]+st.arg).to_uop(), a.replace(arg=())) if a.arg else None),
   # non contiguous VIEW on a reduce creates a new VIEW
-  (UPat(Ops.REDUCE_AXIS, src=UPat.var("src"), name="r").view(name="v"), lambda v,r,src: None if v.st.contiguous else swizzle_r(r, src, v.st)),
+  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").view(name="v"), lambda v,r,src: None if v.st.contiguous else swizzle_r(r, src, v.st)),
   # push a VIEW down to STORE, through a reduce (ONLY reshapes)
-  (UPat(Ops.REDUCE_AXIS, src=(UPat.var(name="src").view(name="swizzle"),), name="root"), push_swizzle_down_through_reduce),
+  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src").view(name="swizzle"),), name="r"), push_swizzle_down_through_reduce),
   # push VIEW(s) down to STORE, through an elementwise op (ONLY reshapes)
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
