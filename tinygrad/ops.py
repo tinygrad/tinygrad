@@ -266,7 +266,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     src_sts = [x.st for x in self.src if x.st is not None]
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
     from tinygrad.shape.shapetracker import ShapeTracker
-    return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg) if self.op is Ops.REDUCE_AXIS else src_sts[0].shape)
+    return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg)) if self.op is Ops.REDUCE_AXIS else src_sts[0]
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.arg.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
@@ -356,14 +356,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
   def view(self, new_st:ShapeTracker) -> UOp:
-    assert self.st is not None, f"must have shape {self}"
+    assert self.op is not Ops.STORE, "STORE must stay base"
+    assert self.st is not None and self.base.st is not None, f"must have shape {self}"
     if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)):
       return UOp.const_with_shape(self.dtype, 0, new_st.shape)
-    if new_st.contiguous and unwrap(self.base.st).shape == new_st.shape: return self.base
+    if new_st.contiguous and self.base.st.shape == new_st.shape: return self.base
     return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
   def reshape(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).reshape(arg))
-  def expand(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).expand(arg))
-  def permute(self, arg:Tuple[int, ...]): return self.view(unwrap(self.st).permute(arg))
 
   # *** uop Buffer stuff ***
 
