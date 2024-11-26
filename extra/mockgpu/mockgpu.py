@@ -15,14 +15,14 @@ libc.fdopendir.restype = ctypes.c_void_p
 
 # platform.processor calls `uname -p` which can return `unknown` on some systems
 processor = os.getenv("IOCTL_PROCESSOR") or platform.processor()
-OPEN_SYSCALL = {"aarch64": None, "x86_64": 2}[processor]
-CLOSE_SYSCALL = {"aarch64": 57, "x86_64": 3}[processor]
-READ_SYSCALL = {"aarch64": 63, "x86_64": 0}[processor]
-IOCTL_SYSCALL = {"aarch64": 29, "x86_64": 16}[processor]
-MMAP_SYSCALL = {"aarch64": 222, "x86_64": 9}[processor]
-LSEEK_SYSCALL = {"aarch64": 62, "x86_64": 8}[processor]
-NEWFSTATAT_SYSCALL = {"aarch64": 79, "x86_64": 262}[processor]
-GETDENTS64_SYSCALL = {"aarch64": 61, "x86_64": 217}[processor]
+OPEN_SYSCALL = {"aarch64": None, "x86_64": 2}.get(processor, None)
+CLOSE_SYSCALL = {"aarch64": 57, "x86_64": 3}.get(processor, None)
+READ_SYSCALL = {"aarch64": 63, "x86_64": 0}.get(processor, None)
+IOCTL_SYSCALL = {"aarch64": 29, "x86_64": 16}.get(processor, None)
+MMAP_SYSCALL = {"aarch64": 222, "x86_64": 9}.get(processor, None)
+LSEEK_SYSCALL = {"aarch64": 62, "x86_64": 8}.get(processor, None)
+NEWFSTATAT_SYSCALL = {"aarch64": 79, "x86_64": 262}.get(processor, None)
+GETDENTS64_SYSCALL = {"aarch64": 61, "x86_64": 217}.get(processor, None)
 
 def install_hook(c_function, python_function):
   python_function_addr = ctypes.cast(ctypes.byref(python_function), ctypes.POINTER(ctypes.c_ulong)).contents.value
@@ -186,19 +186,39 @@ def _memoryview(cls, mem):
         if st <= addr <= en: return TrackedMemoryView(mem, rcb, wcb)
   return orignal_memoryview(mem)
 
-install_hook(libc.open, _open)
-install_hook(libc.opendir, _opendir)
-install_hook(libc.close, _close)
-install_hook(libc.closedir, _closedir)
-install_hook(libc.ioctl, _ioctl)
-install_hook(libc.read, _read)
-install_hook(libc.lseek64, _lseek64)
-install_hook(libc.stat64, _stat64)
-install_hook(libc.fstat64, _fstat64)
-install_hook(libc.getdents64, _getdents64)
 builtins.memoryview = type("memoryview", (), {'__new__': _memoryview}) # type: ignore
 
-# rewrite autogen's libc mmaps functions.
-import tinygrad.runtime.autogen.libc as autogen_libc
-autogen_libc.mmap = _mmap # type: ignore
-autogen_libc.munmap = _munmap # type: ignore
+import faulthandler
+faulthandler.enable()
+
+def hook_syscalls():
+  install_hook(libc.open, _open)
+  install_hook(libc.opendir, _opendir)
+  install_hook(libc.close, _close)
+  install_hook(libc.closedir, _closedir)
+  install_hook(libc.ioctl, _ioctl)
+  install_hook(libc.read, _read)
+  install_hook(libc.lseek64, _lseek64)
+  install_hook(libc.stat64, _stat64)
+  install_hook(libc.fstat64, _fstat64)
+  install_hook(libc.getdents64, _getdents64)
+
+  # rewrite autogen's libc mmaps functions.
+  import tinygrad.runtime.autogen.libc as autogen_libc
+  autogen_libc.mmap = _mmap # type: ignore
+  autogen_libc.munmap = _munmap # type: ignore
+
+from tinygrad.runtime.support.hcq import HAL
+class MockHAL(HAL):
+  def __init__(self, path:str, flags):
+    self.fd = _open(path.encode(), flags, 0o777)
+    #print("open", path, hex(self.fd))
+  def __del__(self): _close(self.fd)
+  def ioctl(self, request, arg):
+    ret = _ioctl(self.fd, request, ctypes.addressof(arg))
+    #print("ioctl", hex(self.fd), ret)
+    return ret
+  def mmap(self, start, sz, prot, flags, offset):
+    ret = _mmap(start, sz, prot, flags, self.fd, offset)
+    #print("mmap", hex(self.fd), hex(start) if start is not None else None, hex(sz), prot, hex(flags), hex(ret))
+    return ret
