@@ -107,6 +107,9 @@ class Ops(FastEnum):
   EMPTY = auto()
   BUFFER_VIEW = auto()
 
+  # blocks in linearizer
+  BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto()  # noqa: E702
+
   EXPAND = auto()
   CONTRACT = auto()
   VIEW = auto()
@@ -152,8 +155,8 @@ class Ops(FastEnum):
 
   # control flow ops
   BARRIER = auto()
-  IF = auto()
   RANGE = auto()
+  IF = auto()
 
   # ops that are not graph nodes
   ENDRANGE = auto()
@@ -891,7 +894,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   # simple cancel mod case
   if 0 < c and 0 <= x.vmin and (quotient:=x.vmin//c) == x.vmax//c: return x-quotient*c
 
-  terms, rem_const, something_changed, offset = [], 0, False, 0
+  terms, rem_const, something_changed, offset, gcd = [], 0, False, 0, c
   for u in split_uop(x, Ops.ADD):
     factor = u.const_factor()
     e: UOp = u.divides(factor)
@@ -900,6 +903,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
       e = u.src[0]
       something_changed = True
     offset += new_factor * e.vmin
+    gcd = math.gcd(factor, gcd)
     if u.op is Ops.CONST: rem_const += new_factor
     else: terms.append((new_factor, e))
 
@@ -916,7 +920,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
     return functools.reduce(lambda r, t: r + min(t[0], t[0]-c, key=abs)*(t[1]-t[1].vmin), terms, x.const_like(offset))
 
   if not something_changed: return None
-  return functools.reduce(lambda r, t: r + t[0]*t[1], terms, x.const_like(rem_const)) % c
+  return gcd*(functools.reduce(lambda r, t: r + t[0]//gcd * t[1], terms, x.const_like(rem_const//gcd)) % (c//gcd))
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
