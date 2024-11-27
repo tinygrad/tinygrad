@@ -68,7 +68,7 @@ class TestTarExtractPAX(unittest.TestCase):
       tar_extract(Tensor(b'This is not a valid tar file'))
 
   def test_tar_extract_invalid_file_long(self):
-    with self.assertRaises(tarfile.HeaderError):
+    with self.assertRaises(tarfile.ReadError):
       tar_extract(Tensor(b'This is not a valid tar file'*100))
 
 class TestTarExtractUSTAR(TestTarExtractPAX):
