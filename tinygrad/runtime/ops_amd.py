@@ -24,15 +24,16 @@ WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
 COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 
-def _pkt3_build(pref, __val=0, **kwargs):
-  # builds PACKET3 command values based on the kwargs
-  for k, v in kwargs.items():
-    # packet3 values in the nvd.h have different names: with PACKET3_ prefix and without, so try both
-    attr:Any = next((getattr(amd_gpu, arg) for arg in (f'{pref}_{k.upper()}', f'{pref[8:]}_{k.upper()}') if hasattr(amd_gpu, arg)), None)
-    __val |= attr if isinstance(attr, int) else attr(v)
+def _filter_pkt3(pref):
+  return {**{x[len(pref)+1:].lower():y for x,y in amd_gpu.__dict__.items() if x[:len(pref)]==pref},
+          **{x[len(pref)-7:].lower():y for x,y in amd_gpu.__dict__.items() if x[:len(pref)-8]==pref[8:]}}
+
+def _pkt3_build(dct, __val=0, **kwargs):
+  for k, v in kwargs.items(): __val |= cb if (cb:=dct[k]).__class__ is int else cb(v)
   return __val
-pkt3: Any = type("PKT3", (object,), {**{(k[:ps]+k[ps+18:]).upper():v for k,v in amd_gpu.__dict__.items() if (ps:=k.find('__mec_release_mem__'))!=-1},
-  **{nm[8:].lower(): functools.partial(_pkt3_build, nm) for nm in amd_gpu.__dict__.keys() if nm[:8] == 'PACKET3_'}})
+
+pkt3: Any = type("PKT3", (object,), {**{(k[:ps]+k[ps+18:]).upper():v  for k,v in amd_gpu.__dict__.items() if (ps:=k.find('__mec_release_mem__'))!=-1},
+  **{nm[8:].lower(): functools.partial(_pkt3_build, _filter_pkt3(nm)) for nm in amd_gpu.__dict__.keys() if nm[:8] == 'PACKET3_'}})
 
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
