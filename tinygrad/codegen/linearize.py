@@ -16,7 +16,14 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
   in_degree[u] = len(u.src)
   return srcs[u]
 
-def disp(y): return y.arg[0] if y.op is Ops.RANGE else f'IF{id(y)}'
+def disp(y):
+  if y.op is Ops.IF: return f'IF{id(y)}'
+  if y.op is Ops.RANGE: return y.arg[0]
+  assert y.op is Ops.BLOCKSTART, f"op is {y.op}"
+  if y.src[0].op is Ops.IF: return f'wIF{id(y.src[0])}'
+  if y.src[0].op is Ops.RANGE: return "w"+str(y.src[0].arg[0])
+  return "<NONE>"
+
 class BasicBlock:
   def __init__(self, ctx, lst, end=None):
     self.ctx, self.lst, self.end = ctx, lst, end
@@ -25,7 +32,7 @@ class BasicBlock:
            f"{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
 @functools.lru_cache(None)
-def get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
+def _get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
   ret: List[Tuple[UOp, ...]] = []
   for u in x.src:
     if u.op in {Ops.RANGE, Ops.IF}: ret.append((u,))
@@ -33,14 +40,17 @@ def get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
     if u.op is Ops.STORE: continue
     if u.op is Ops.ASSIGN:
       assert u.src[0].op is Ops.DEFINE_ACC
-      ret.append(tuple(x for x in get_block_ctx(u.src[1]) if x not in u.src[0].src[1:]))
+      ret.append(tuple(x for x in _get_block_ctx(u.src[1]) if x not in u.src[0].src[1:]))
     else:
-      ret.append(get_block_ctx(u))
+      ret.append(_get_block_ctx(u))
   return tuple(dedup(sorted(flatten(ret), key=lambda x: x.tuplize)))
 
-                       #Ops.DEFINE_ACC,
-DONT_PLACE_IN_BLOCK = {Ops.RANGE, Ops.ENDRANGE, Ops.CONST, Ops.IF,
-                       Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKIF}
+def get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
+  ret = _get_block_ctx(x)
+  if x.op in {Ops.IF, Ops.RANGE}: return (UOp(Ops.BLOCKSTART, src=(x,)),) + ret
+  return ret
+
+DONT_PLACE_IN_BLOCK = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKSTART}
 def append_to_block(ctx, x:UOp):
   new_srcs = []
   to_append = []
@@ -63,7 +73,7 @@ def append_to_block(ctx, x:UOp):
     new_block = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, lst))
     lrng = list(rng)
     for r in rng[::-1]:
-      if r not in x.arg.ctx:
+      if r not in x.arg.ctx and r.op is not Ops.BLOCKSTART:
         lrng = lrng[:]
         lrng.remove(r)
         new_block = UOp(Ops.BLOCKEND, dtypes.void, (new_block,),
@@ -72,7 +82,6 @@ def append_to_block(ctx, x:UOp):
   return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(x.arg.ctx, to_append+x.arg.lst))
 
 make_basic_blocks = PatternMatcher([
-  #(UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCKEND, src=(UOp(Ops.BLOCK, src=x.src, arg=BasicBlock([], [x])),), arg=BasicBlock([], []))),
   (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock([], [x]))),
   (UPat(Ops.BLOCK, name="x"), append_to_block),
 ])
@@ -85,15 +94,20 @@ def blockend_gobble(ctx, x:UOp):
   # first, see if we are done with placement. if all the children of the range are in here
   in_this_block = set(x.arg.lst)
   if len([y for y in ctx[x.arg.end] if y not in in_this_block]) == 0:
-    if x.arg.end.op is Ops.RANGE:
-      def_acc, non_def_acc = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
-      return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not x.arg.end)+x.arg.end.src,
-                BasicBlock([y for y in x.arg.ctx if y is not x.arg.end], def_acc+[x.arg.end]+non_def_acc))
-    else:
-      block_if = [y for y in x.src if y.op is Ops.BLOCKIF and y.arg.lst[0] is x.arg.end]
-      if len(block_if) == 1:
-        return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not block_if[0])+block_if[0].src,
-                  BasicBlock([y for y in x.arg.ctx if y is not x.arg.end], block_if[0].arg.lst+x.arg.lst))
+    # find the parent block that has the BLOCKSTART in the ctx
+    search_block_start = UOp(Ops.BLOCKSTART, src=(x.arg.end,))
+    parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and search_block_start in y.arg.ctx]
+    if len(parent_blocks) == 1:
+      parent_block = parent_blocks[0]
+      if x.arg.end.op is Ops.RANGE:
+        # range needs DEFINE_ACC to be before the range
+        def_acc, non_def_acc = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
+        return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not parent_block)+parent_block.src,
+                  BasicBlock([y for y in x.arg.ctx if y is not x.arg.end], def_acc+parent_block.arg.lst+non_def_acc))
+      else:
+        return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not parent_block)+parent_block.src,
+                  BasicBlock([y for y in x.arg.ctx if y is not x.arg.end], parent_block.arg.lst+x.arg.lst))
+    assert not len(parent_blocks)
 
   updated = False
   new_ctx = x.arg.ctx[:]
@@ -176,7 +190,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
         forks[u] = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(get_block_ctx(u), [u])),), arg=child_count)
       if u.op is Ops.IF:
         block_srcs = [UOp(Ops.BLOCK, src=x.src, arg=BasicBlock(get_block_ctx(x), [x])) for x in u.src]
-        forks[u] = UOp(Ops.BLOCKIF, src=tuple(block_srcs), arg=BasicBlock(get_block_ctx(u), [u]))
+        forks[u] = UOp(Ops.BLOCKSTART, src=tuple(block_srcs), arg=BasicBlock(get_block_ctx(u), [u]))
 
     if not len(forks): break
     sink = sink.substitute(forks)
@@ -199,7 +213,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   # there should just be one block left
   assert sink.op is Ops.BLOCK
   _uops = dedup(sink.src)
-  assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKIF, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
+  assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
   _uops += sink.arg.lst
 
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
