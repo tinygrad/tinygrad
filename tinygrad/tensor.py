@@ -97,6 +97,15 @@ def _pad_left(*shapes:Tuple[sint, ...]) -> Tuple[Tuple[sint, ...], ...]:
 def _broadcast_shape(*shapes:Tuple[sint, ...]) -> Tuple[sint, ...]:
   return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_pad_left(*shapes)))
 
+def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:Tuple[int, ...]):
+  # apply mask to values (already broadcasted) and reduce such that if mask contains repeated indices the last one remains
+  values = values * mask
+  for dim in axes: mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
+  # remove extra dims from reduce
+  for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
+  # select from values for each True element in mask else select from self
+  return mask.where(values, target)
+
 ReductionStr = Literal["mean", "sum", "none"]
 
 class Tensor(SimpleMathTrait):
@@ -1199,15 +1208,8 @@ class Tensor(SimpleMathTrait):
         vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(ret.shape, v.shape))
         # add back reduced dims from sum
         for dim in sum_axis: vb = vb.unsqueeze(dim)
-        # axis to be reduced to match self.shape
-        axis = tuple(range(first_dim, first_dim + len(big_shape)))
-        # apply mask to vb(broadcasted) and reduce such that if mask contains repeated indices the last one remains
-        vb = vb * mask
-        for dim in axis: mask, vb = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), vb.split(1, dim)))
-        # remove extra dims from reduce
-        for dim in reversed(axis): mask, vb = mask.squeeze(dim), vb.squeeze(dim)
-        # select from vb for each True element in mask else select from self
-        ret = mask.where(vb, self)
+        # run _masked_setitem on tuple of axis that is to be reduced to match self.shape
+        ret = _masked_setitem(self, vb, mask, tuple(range(first_dim, first_dim + len(big_shape))))
 
     return ret
 
@@ -2330,6 +2332,34 @@ class Tensor(SimpleMathTrait):
         index = (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
         x = x.gather(i, index)
     return x.cast(self.dtype)
+
+  def scatter(self, dim:int, index:Tensor, src:Union[Tensor, ConstType], reduce:Union[None, Literal['multiply'], Literal['add']] = None) -> Tensor:
+    """
+    Scatters `src` values along an axis specified by `dim`.
+    Apply `add` or `multiply` reduction operation with `reduce`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2], [3, 4]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.scatter(dim=1, index=Tensor([[0, 0], [1, 0]]), src=9).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.scatter(dim=1, index=Tensor([[0, 0], [1, 0]]), src=Tensor([[3, 3], [9, 9]]), reduce="add").numpy())
+    ```
+    """
+    index, dim = index.to(self.device), self._resolve_dim(dim)
+    src = src.cast(self.dtype) if isinstance(src, Tensor) else Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
+    assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
+    assert all((d == dim or se >= ind) and sr >= ind for d,(se,ind,sr) in enumerate(zip(self.shape, index.shape, src.shape))), \
+      f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
+    mask = (index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)).transpose(-1, dim)
+    src = src.unsqueeze(-1).expand((None,)*src.ndim + (self.shape[dim],)).transpose(-1, dim).shrink(tuple((0,s) for s in mask.shape))
+    src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
+    if reduce == "add": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + self
+    if reduce == "multiply": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * self
+    return _masked_setitem(self, src, mask, (-1,))
 
   # ***** unary ops *****
 
