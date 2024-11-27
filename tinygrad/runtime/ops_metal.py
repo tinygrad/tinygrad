@@ -22,6 +22,9 @@ class MTLResourceOptions:
 class MTLPipelineOption:
   MTLPipelineOptionNone = 0
 
+# 13 is requestType that metal uses to compile source code into MTLB, there aren't any docs or symbols.
+REQUEST_TYPE_COMPILE = 13
+
 libobjc = ctypes.CDLL("/usr/lib/libobjc.dylib")
 libmetal = ctypes.CDLL("/System/Library/Frameworks/Metal.framework/Metal")
 compiler = ctypes.CDLL("/System/Library/PrivateFrameworks/MTLCompiler.framework/MTLCompiler")
@@ -46,6 +49,11 @@ def to_struct(*t: int, _type: type = ctypes.c_ulong):
   class Struct(ctypes.Structure): pass
   Struct._fields_ = [(f"field{i}", _type) for i in range(len(t))]
   return Struct(*t)
+
+def to_block_literal(callback):
+  # Blocks are apple's non-standart extension to add closures to C. See https://clang.llvm.org/docs/Block-ABI-Apple.html#high-level for struct layout.
+  # If fields other than invoke are not accessed we can just use ctypes.byref with negative offset to invoke field + add blockptr argument to function
+  return ctypes.byref(callback, -0x10)
 
 def wait_check(cbuf: Any):
   msg(cbuf, "waitUntilCompleted")
@@ -87,12 +95,7 @@ class MetalCompiler(Compiler):
     # source blob has to be padded to multiple of 4 but at least one 'b\x00' should be added
     request = struct.pack('<Q', round_up(len(src)+1, 4)) + struct.pack('<Q', len(params)+1)
     request += src.encode() + b'\x00'*(4-len(src)%4) + params.encode() + b'\x00'
-    # 13 is requestType that metal uses for this stage of compilation, there aren't any docs or symbols.
-    # The callback is actully not a callback but a block which is apple's non-standart extension to add closures to C.
-    # See https://clang.llvm.org/docs/Block-ABI-Apple.html#high-level for struct layout.
-    # Fields other than invoke are unused in this case so we can just use ctypes.byref with negative offset to invoke field, add blockptr as a first
-    # argument and pretend it's a normal callback
-    compiler.MTLCodeGenServiceBuildRequest(ctypes.c_void_p(self.cgs), None, 13, request, len(request), ctypes.byref(callback, -0x10))
+    compiler.MTLCodeGenServiceBuildRequest(ctypes.c_void_p(self.cgs), None, REQUEST_TYPE_COMPILE, request, len(request), to_block_literal(callback))
     if isinstance(ret, Exception): raise ret
     assert ret[:4] == b"MTLB" and ret[-4:] == b"ENDT", f"Invalid Metal library. {ret!r}"
     return ret
