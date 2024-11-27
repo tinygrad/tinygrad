@@ -1,8 +1,8 @@
-from typing import List, Dict, Tuple, DefaultDict
+from typing import List, Dict, Tuple, DefaultDict, cast
 from collections import defaultdict
 import functools
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import dedup, flatten, partition
 
 def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
@@ -35,8 +35,12 @@ def _get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
   for u in x.src:
     if u.op in {Ops.RANGE, Ops.IF}: ret.append((u,))
     # don't flow through assign and store
-    if u.op is Ops.STORE: continue
-    if u.op is Ops.ASSIGN:
+    elif u.op is Ops.STORE:
+      # ugh, deal with non-reduce locals. probably wrong
+      if cast(PtrDType, u.src[0].dtype).local:
+        idx_context, store_context = _get_block_ctx(u.src[0]), _get_block_ctx(u)
+        ret.append(tuple(x for x in store_context if x not in idx_context and x.op is Ops.RANGE))
+    elif u.op is Ops.ASSIGN:
       assert u.src[0].op is Ops.DEFINE_ACC
       ret.append(tuple(x for x in _get_block_ctx(u.src[1]) if x not in u.src[0].src[1:]))
     else:
