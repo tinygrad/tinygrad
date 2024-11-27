@@ -902,7 +902,8 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[a.numpy().sum()*a.numpy().sum()])[0]
     # RANGE -> LOAD -> ASSIGN -> ALU
     end = max(i for i,u in enumerate(lin.uops) if u.op is Ops.ENDRANGE)
-    assert lin.uops[end+1].op in GroupOp.ALU
+    # the INDEX can be first
+    assert lin.uops[end+1].op in GroupOp.ALU or lin.uops[end+2].op in GroupOp.ALU
 
   def test_range_outer_op_after_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
@@ -910,7 +911,8 @@ class TestLinearizer(unittest.TestCase):
     lin = helper_linearizer_opt(out, wanna_output=[(np.broadcast_to(a.numpy().reshape(2, 1), (2, 3))).sum()*2])[0]
     # RANGE -> LOAD -> ASSIGN -> ALU
     end = max(i for i,u in enumerate(lin.uops) if u.op is Ops.ENDRANGE)
-    assert lin.uops[end+1].op in GroupOp.ALU
+    # the INDEX can be first
+    assert lin.uops[end+1].op in GroupOp.ALU or lin.uops[end+2].op in GroupOp.ALU
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.

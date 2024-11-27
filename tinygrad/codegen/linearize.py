@@ -16,10 +16,10 @@ def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[U
   in_degree[u] = len(u.src)
   return srcs[u]
 
-def disp(y):
+def disp(y) -> str:
   if y.op is Ops.BLOCKSTART: return "w"+disp(y.src[0])
   if y.op is Ops.IF: return f'IF{id(y)}'
-  if y.op is Ops.RANGE: return y.arg[0]
+  if y.op is Ops.RANGE: return str(y.arg[0])
   return "<NONE>"
 
 class BasicBlock:
