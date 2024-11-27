@@ -107,9 +107,6 @@ class Ops(FastEnum):
   EMPTY = auto()
   BUFFER_VIEW = auto()
 
-  # blocks in linearizer
-  BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto()  # noqa: E702
-
   EXPAND = auto()
   CONTRACT = auto()
   VIEW = auto()
@@ -155,8 +152,8 @@ class Ops(FastEnum):
 
   # control flow ops
   BARRIER = auto()
-  RANGE = auto()
   IF = auto()
+  RANGE = auto()
 
   # ops that are not graph nodes
   ENDRANGE = auto()

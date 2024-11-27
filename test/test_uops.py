@@ -336,9 +336,8 @@ class TestAssembly(unittest.TestCase):
     a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
-    ops = [x.op for x in uops]
-    self.assertIn(Ops.SHL, ops)
-    self.assertIn(Ops.MUL, ops)
+    self.assertEqual(uops[-1].op, Ops.SHL)
+    self.assertEqual(uops[-2].op, Ops.MUL)
 
   def test_bitshift_right(self):
     g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
@@ -349,9 +348,8 @@ class TestAssembly(unittest.TestCase):
     a2 = UOp(Ops.IDIV, dtypes.int, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
-    ops = [x.op for x in uops]
-    self.assertIn(Ops.SHR, ops)
-    self.assertIn(Ops.IDIV, ops)
+    self.assertEqual(uops[-1].op, Ops.SHR)
+    self.assertEqual(uops[-2].op, Ops.IDIV)
 
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
