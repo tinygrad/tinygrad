@@ -189,10 +189,20 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
   # combine matching BLOCKENDS
   blockends = [x for x in sink.sparents if x.op is Ops.BLOCKEND]
-  blockends_to_arg = defaultdict(list)
+  blockends_to_arg: DefaultDict[UOp, List[UOp]] = defaultdict(list)
   for be in blockends: blockends_to_arg[be.arg.end].append(be)
   new_forks = {}
   for k,v in blockends_to_arg.items():
+    # parents fixup
+    """
+    to_remove = []
+    for kv in v:
+      for kvv in v:
+        if kvv in kv.parents:
+          new_forks[kvv] = kvv.src[0]
+          to_remove.append(kvv)
+    v = [x for x in v if x not in to_remove]
+    """
     if len(v) > 1:
       new_be = UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)), arg=BasicBlock(dedup(flatten([y.arg.ctx for y in v])), v[0].arg.lst, k))
       out = UOp(Ops.BLOCKFORK, src=(new_be,), arg=len(v))
