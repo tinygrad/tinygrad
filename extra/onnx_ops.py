@@ -3,7 +3,7 @@ from typing import Union, Tuple, Optional, List, Any
 from tinygrad.tensor import Tensor, _broadcast_shape
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten
-from extra.onnx import DTYPE_MAP, to_python_const
+from extra.onnx import dtype_parse, to_python_const
 import numpy as np
 
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Asin", "Acos", "Atan","Relu",
@@ -26,7 +26,7 @@ def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
 def Mean(*data_0): return Sum(*data_0) / len(data_0)
 # NOTE: does not support saturate
-def Cast(x: Tensor, to: int, saturate=1): return x.cast(DTYPE_MAP[to])
+def Cast(x: Tensor, to: int, saturate=1): return x.cast(dtype_parse(to))
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
 # **************** Simple Ops ****************
@@ -502,7 +502,7 @@ def Compress(inp: Tensor, condition: Tensor, axis=None):
 
 def EyeLike(x: Tensor, dtype=None, k=0):
   if dtype is None: dtype = x.dtype
-  else: dtype = DTYPE_MAP[int(dtype)]
+  else: dtype = dtype_parse(int(dtype))
   dim = min(x.shape)
   if x.shape[0] == x.shape[1]:
     return Tensor.eye(dim, dtype=dtype)

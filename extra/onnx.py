@@ -4,7 +4,6 @@ import importlib
 from functools import lru_cache
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import getenv, DEBUG, CI, OSX
 from tinygrad.dtype import ConstType, DType
 from tinygrad.device import is_dtype_supported
@@ -31,15 +30,34 @@ def to_python_const(t, tobytes=False) -> Union[List[ConstType], List[bytes], Uni
   return ret
 
 # src: onnx/mapping.py  https://onnx.ai/onnx/api/mapping.html#l-mod-onnx-mapping
-# not supported: STRING = 8 COMPLEX64 = 14, COMPLEX128 = 15, UINT4 = 21, INT4 = 22
-# TODO: use dtypes.float16 for FLOAT16
-DTYPE_MAP: Dict[TensorProto.DataType, DType] = {
-  TensorProto.FLOAT:dtypes.float, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8, TensorProto.UINT16:dtypes.uint16,
+# TODO: use real float16
+DTYPES: Dict[int, DType] = {
+  TensorProto.FLOAT:dtypes.float32, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8, TensorProto.UINT16:dtypes.uint16,
   TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64, TensorProto.BOOL:dtypes.bool,
-  TensorProto.FLOAT16:dtypes.float, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32, TensorProto.UINT64:dtypes.uint64,
+  TensorProto.FLOAT16:dtypes.float32, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32, TensorProto.UINT64:dtypes.uint64,
   TensorProto.BFLOAT16:dtypes.bfloat16, TensorProto.FLOAT8E4M3FN:dtypes.float, TensorProto.FLOAT8E4M3FNUZ:dtypes.float,
-  TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float
-}
+  TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float}
+def dtype_parse(onnx_dtype: int) -> DType:
+  if onnx_dtype in DTYPES: return DTYPES[onnx_dtype] if is_dtype_supported(DTYPES[onnx_dtype], Device.DEFAULT) else dtypes.float
+  raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
+
+# src: onnx/onnx_ml_pb2.pyi
+# NOTE: this is not a complete list
+# torch's parser at onnx2torch/onnx_node.py: `OnnxNode._parse_attribute_value()`
+ATTRIBUTES = {AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i), AttributeProto.STRING: lambda a: a.s.decode("utf-8"),
+         AttributeProto.TENSOR: lambda a: buffer_parse(a.t), AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats),
+         AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints), AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)}
+def attribute_parse(a: AttributeProto):
+  if a.type in ATTRIBUTES: return ATTRIBUTES[a.type](a)
+  raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(a.type)} is not supported")
+
+def buffer_parse(inp: TensorProto) -> Tensor:
+  if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
+    return Tensor(dat, dtype=dtype_parse(inp.data_type), requires_grad=False).reshape(tuple(inp.dims))
+  if len(inp.raw_data) > 0:
+    return Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).copy().reshape(tuple(inp.dims)),
+                  dtype=dtype_parse(inp.data_type), requires_grad=False)
+  raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
 
@@ -65,29 +83,6 @@ def get_run_onnx(onnx_model: ModelProto):
       elif attr == 'opaque_type': raise NotImplementedError(f"opaque_type is not implemented: {type_proto}")
       elif attr == 'sparse_tensor_type': raise NotImplementedError(f"sparse_tensor_type is not implemented: {type_proto}")
       else: raise AttributeError(f"unknown attr: {attr}, {type_proto}")
-
-  def buffer_parse(inp: TensorProto) -> Tensor:
-    if inp.data_type not in DTYPE_MAP:
-      raise NotImplementedError(f"data type not supported {inp.name} {inp.dims} {inp.data_type}")
-    dtype = DTYPE_MAP[inp.data_type] if is_dtype_supported(DTYPE_MAP[inp.data_type]) else dtypes.float32
-    if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
-      return Tensor(dat, dtype=dtype, requires_grad=False).reshape(tuple(inp.dims))
-    if len(inp.raw_data) > 0:
-      data = np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).astype(_to_np_dtype(dtype)).copy()
-      return Tensor(data.reshape(tuple(inp.dims)), requires_grad=False)
-    return Tensor(None, requires_grad=False)
-
-  def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:
-    # TODO: this is not complete, see onnx/onnx_ml_pb2.pyi for a complete list
-    if a.type == AttributeProto.FLOAT: return float(a.f)
-    elif a.type == AttributeProto.INT: return int(a.i)
-    elif a.type == AttributeProto.STRING: return a.s.decode("utf-8")
-    elif a.type == AttributeProto.TENSOR: return buffer_parse(a.t) # TENSOR
-    elif a.type == AttributeProto.FLOATS: return tuple(float(x) for x in a.floats)
-    elif a.type == AttributeProto.INTS: return tuple(int(x) for x in a.ints)
-    elif a.type == AttributeProto.STRINGS: return tuple(x.decode("utf-8") for x in a.strings)
-    elif a.type == AttributeProto.GRAPH: raise NotImplementedError(f"graph not implemented: {a.g}\n likely an OP requiring control flow")
-    else: raise RuntimeError(f"can't parse {a.type} {a}")
 
   tensors: Dict[str, Tensor] = {}
 
