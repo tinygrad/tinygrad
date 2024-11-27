@@ -195,6 +195,8 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_congruence(self):
     self.helper_test_variable((3+3*Variable("a",0,3))%4, 0, 3, "((a*-1)+3)")
     self.helper_test_variable((17+13*Variable("a",0,3))%18, 2, 17, "((a*-5)+17)")
+    # TODO: 2, 11, (a%2)*9+2
+    self.helper_test_variable((2+9*Variable("a",0,3))%18, 0, 17, "(((a*9)+2)%18)")
 
   def test_mod_congruence_mul_add(self):
     self.helper_test_variable((6*(Variable("a", 0, 2)+1))%9, 0, 6, "((a*-3)+6)")
