@@ -26,7 +26,7 @@ class TestRawTensorIO(unittest.TestCase):
     self.assertEqual(fobj.read(1), data[:1])
     self.assertEqual(fobj.read(5), data[1:6])
     self.assertEqual(fobj.read(100), data[6:])
-    # self.assertEqual(fobj.read(100), b"")
+    self.assertEqual(fobj.read(100), b"")
 
 if __name__ == '__main__':
   unittest.main()
