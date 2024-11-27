@@ -39,7 +39,7 @@ def tensor_to_blake_data(tensor: Tensor) -> Tuple[Tensor, int, int]:
   final_chunk_bytes = unpadded_len - (data.shape[2] - 1) * 1024
   n_end_blocks = max(1, (final_chunk_bytes // 64) + (1 if final_chunk_bytes % 64 else 0))
   end_block_len = 64 if unpadded_len % 64 == 0 and unpadded_len else unpadded_len % 64
-  return data, n_end_blocks, end_block_len # data is [chunks, blocks, words]
+  return data, n_end_blocks, end_block_len # data is [blocks, words, chunks]
 
 def pairwise_concat(chain_vals: Tensor) -> Tuple[Tensor, Optional[Tensor]]:
   leftover_chunk = chain_vals[:, -1:] if chain_vals.shape[1] % 2 else None
