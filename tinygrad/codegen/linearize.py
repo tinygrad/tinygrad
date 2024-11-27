@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple, DefaultDict, cast
+from typing import List, Dict, Tuple, DefaultDict
 from collections import defaultdict
 import functools
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite
@@ -37,7 +37,7 @@ def _get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
     # don't flow through assign and store
     elif u.op is Ops.STORE:
       # ugh, deal with non-reduce locals. probably wrong
-      if cast(PtrDType, u.src[0].dtype).local:
+      if isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.local:
         idx_context, store_context = _get_block_ctx(u.src[0]), _get_block_ctx(u)
         ret.append(tuple(x for x in store_context if x not in idx_context and x.op is Ops.RANGE))
     elif u.op is Ops.ASSIGN:
