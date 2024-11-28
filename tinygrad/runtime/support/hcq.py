@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Callable, ParamSpec, Concatenate
 import contextlib, decimal, statistics, random, json, atexit, time, array, ctypes, functools
-from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv
+from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv, to_mv
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator
 from tinygrad.ops import sym_infer, sint
@@ -280,16 +280,16 @@ HWQueue = HWQueue2
 #     raise NotImplementedError("backend should overload this function")
 
 class HCQSignal:
-  def __init__(self, value:int=0, is_timeline:bool=False): self._set_value(value)
+  def __init__(self, base_addr:int, value:int=0, is_timeline:bool=False, timestamp_divider=decimal.Decimal(1), value_off=0, timestamp_off=8):
+    self.base_addr, self.value_addr, self.timestamp_addr, self.ts_divider = base_addr, base_addr+value_off, base_addr+timestamp_off, timestamp_divider
+    self.value_mv, self.timestamp_mv, self.is_timeline = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q'), is_timeline
+    self.value_mv[0] = value
 
   @property
-  def value(self) -> int: return self._get_value()
+  def value(self) -> int: return self.value_mv[0]
 
   @value.setter
-  def value(self, new_value:int): self._set_value(new_value)
-
-  def _get_value(self) -> int: raise NotImplementedError("_get_value() method must be implemented")
-  def _set_value(self, new_value:int): raise NotImplementedError("_set_value() method must be implemented")
+  def value(self, new_value:int): self.value_mv[0] = new_value
 
   @property
   def timestamp(self) -> decimal.Decimal:
@@ -301,8 +301,7 @@ class HCQSignal:
     Returns:
       The timestamp in microseconds.
     """
-    return self._get_timestamp()
-  def _get_timestamp(self) -> decimal.Decimal: raise NotImplementedError("_get_timestamp() method must be implemented")
+    return self.timestamp_mv[0] / self.ts_divider
 
   def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
     """
