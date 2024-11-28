@@ -155,8 +155,8 @@ class Ops(FastEnum):
 
   # control flow ops
   BARRIER = auto()
-  IF = auto()
   RANGE = auto()
+  IF = auto()
 
   # ops that are not graph nodes
   ENDRANGE = auto()
