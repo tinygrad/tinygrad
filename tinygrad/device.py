@@ -55,10 +55,10 @@ class BufferSpec:
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None,
-               initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
+               initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False, fake=False):
     if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
-    self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
+    self.device, self.size, self.dtype, self.options, self.offset, self.fake = device, size, dtype, options, offset, fake
     if base is None:
       assert offset == 0, "base buffers can't have offset"
       self._base = None
@@ -80,6 +80,7 @@ class Buffer:
   def is_allocated(self) -> bool: return hasattr(self, '_buf')
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
+    assert not self.fake, "can't allocate a fake buffer"
     assert not self.is_allocated(), "can't allocate already allocated buffer"
     self.allocator = Device[self.device].allocator
     if external_ptr is not None:
@@ -95,7 +96,7 @@ class Buffer:
   def __reduce__(self):
     buf = None
     if self._base is not None:
-      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
+      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated(), self.fake)
     if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
     if self.is_allocated():
       buf = bytearray(self.nbytes)
