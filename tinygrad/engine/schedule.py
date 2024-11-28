@@ -344,8 +344,10 @@ def fold_img_cast(ctx:Dict[UOp, UOp], xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kw
   return to_cast.view(unwrap(view.st))
 
 do_realize = PatternMatcher([
+  # view of size 0 is just 0
+  (UPatSrc(), lambda ctx,b,to_store,base: UOp.const_with_shape(base.dtype, 0, base.st.shape) if base.st.size == 0 else None),
   # always realize sinked ops
-  (UPat(Ops.SINK, name="sink"), lambda ctx,sink: ctx.update((x.buf_uop, x) for x in sink.src)),
+  (UPat(Ops.SINK, name="sink"), lambda ctx,sink: ctx.update((x.buf_uop, x) for x in sink.src if is_scheduled(x))),
   # always realize meta ops
   (UPatSrc({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
   # realize before expand or unsafe pad ops
