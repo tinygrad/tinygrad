@@ -100,9 +100,7 @@ class HCQGraph(MultiGraphRunner):
       last_j[enqueue_queue] = j
 
     # Build hardware queues.
-    # self.op_cmd_idx: Dict[int, Tuple[HWQueue, int]] = {}
     self.copy_to_devs: Dict[HCQCompiled, Set[HCQCompiled]] = {dev: set() for dev in self.devices}
-    # self.kickoff_wait_cmds: Dict[HWQueue, List] = {q: list() for q in list(self.comp_queues.values()) + list(self.copy_queues.values())}
 
     self.timeline_vars = {dev : Variable(f"timeline_var_{dev.device_id}", 0, 0xffffffff, dtype=dtypes.uint32) for dev in self.devices}
     for dev in self.devices:
@@ -159,25 +157,10 @@ class HCQGraph(MultiGraphRunner):
     # Update var_vals
     for j, i, v in self.updated_vars(var_vals): self.ji_args[j].update_var(i, v)
 
-    # Update launch dims
-    # for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
-    #   queue, cmd_ptr = self.op_cmd_idx[j]
-    #   queue.update_exec(cmd_ptr, global_dims, local_dims)
-
-    # var_vals[self.kickoff_var] = self.kickoff_value
     upd_dict = {**var_vals, self.kickoff_var: self.kickoff_value, **{var : dev.timeline_value - 1 for dev, var in self.timeline_vars.items()}}
     for dev in self.devices:
-      # comp_queue, copy_queue, need_sig_upd = self.comp_queues[dev], self.copy_queues.get(dev, None), dev.timeline_signal != self.last_timeline[dev][0]
-      # comp_queue.update_wait(1, dev.timeline_signal if need_sig_upd else None, dev.timeline_value - 1) \
-      #           .update_wait(2, value=self.kickoff_value).update_signal(3, value=self.kickoff_value) \
-      #           .update_signal(len(comp_queue)-1, dev.timeline_signal if need_sig_upd else None, dev.timeline_value).submit(dev)
-
-      # print(upd_dict)
       self.comp_queues[dev].submit(dev, upd_dict)
       if (copy_queue:=self.copy_queues.get(dev, None)) is not None: copy_queue.submit(dev, upd_dict)
-
-        # for cmd_idx in self.kickoff_wait_cmds[copy_queue]: copy_queue.update_wait(cmd_idx, value=self.kickoff_value)
-        # copy_queue.submit(dev)
 
       self.last_timeline[dev] = (dev.timeline_signal, dev.timeline_value)
       dev.timeline_value += 1

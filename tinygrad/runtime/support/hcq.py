@@ -14,18 +14,55 @@ ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
 
-class HWQueue2(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
+class HCQSignal:
+  def __init__(self, base_addr:int, value:int=0, is_timeline:bool=False, timestamp_divider=decimal.Decimal(1), value_off=0, timestamp_off=8):
+    self.base_addr, self.value_addr, self.timestamp_addr, self.ts_divider = base_addr, base_addr+value_off, base_addr+timestamp_off, timestamp_divider
+    self.value_mv, self.timestamp_mv, self.is_timeline = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q'), is_timeline
+    self.value_mv[0] = value
+
+  @property
+  def value(self) -> int: return self.value_mv[0]
+
+  @value.setter
+  def value(self, new_value:int): self.value_mv[0] = new_value
+
+  @property
+  def timestamp(self) -> decimal.Decimal:
+    """
+    Get the timestamp field of the signal.
+
+    This property provides read-only access to the signal's timestamp.
+
+    Returns:
+      The timestamp in microseconds.
+    """
+    return self.timestamp_mv[0] / self.ts_divider
+
+  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
+    """
+    Waits the signal is greater than or equal to a specific value.
+
+    Args:
+      value: The value to wait for.
+      timeout: Maximum time to wait in milliseconds. Defaults to 10s.
+    """
+    start_time = time.time() * 1000
+    while time.time() * 1000 - start_time < timeout:
+      if self.value >= value: return
+    raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
+
+class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   """
   A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
   Both compute and copy queues should have the following commands implemented.
   """
 
-  def __init__(self): self._q, self.binded_device, self.sint_offsets, self.ext_sint_mv = [], None, [], []
+  def __init__(self): self._q, self.binded_device, self.q_sints, self.mv_sints = [], None, [], []
   def q(self, *values):
     for v in values: 
       if isinstance(v, int): self._q.append(v)
       else: 
-        self.sint_offsets.append((len(self._q), v))
+        self.q_sints.append((len(self._q), v))
         self._q.append(0xbad0c0de)
 
   def timestamp(self, signal:SignalType):
@@ -84,7 +121,11 @@ class HWQueue2(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       Implementing this method is optional but recommended for performance gains.
     """
 
-  def _ext_update(self, mv, *vals:sint): self.ext_sint_mv.append((mv, tuple(vals)))
+  def bind_mv(self, mv, *vals:sint):
+    for i, val in vals:
+      if isinstance(v, int): mv[i] = val
+      else: self.mv_sints.append((mv, i, val))
+
   def _apply_var_vals(self, var_vals):
     for off, sym in self.sint_offsets: self._q[off] = sym_infer(sym, var_vals)
     for mv, vals in self.ext_sint_mv:
@@ -101,8 +142,6 @@ class HWQueue2(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     if var_vals is not None: self._apply_var_vals(var_vals)
     self._submit(device)
     return self
-
-HWQueue = HWQueue2
 
 # class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
 #   """
@@ -278,43 +317,6 @@ HWQueue = HWQueue2
 #     return self
 #   def _update_copy(self, cmd_idx:int, dest:Optional[int], src:Optional[int]):
 #     raise NotImplementedError("backend should overload this function")
-
-class HCQSignal:
-  def __init__(self, base_addr:int, value:int=0, is_timeline:bool=False, timestamp_divider=decimal.Decimal(1), value_off=0, timestamp_off=8):
-    self.base_addr, self.value_addr, self.timestamp_addr, self.ts_divider = base_addr, base_addr+value_off, base_addr+timestamp_off, timestamp_divider
-    self.value_mv, self.timestamp_mv, self.is_timeline = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q'), is_timeline
-    self.value_mv[0] = value
-
-  @property
-  def value(self) -> int: return self.value_mv[0]
-
-  @value.setter
-  def value(self, new_value:int): self.value_mv[0] = new_value
-
-  @property
-  def timestamp(self) -> decimal.Decimal:
-    """
-    Get the timestamp field of the signal.
-
-    This property provides read-only access to the signal's timestamp.
-
-    Returns:
-      The timestamp in microseconds.
-    """
-    return self.timestamp_mv[0] / self.ts_divider
-
-  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
-    """
-    Waits the signal is greater than or equal to a specific value.
-
-    Args:
-      value: The value to wait for.
-      timeout: Maximum time to wait in milliseconds. Defaults to 10s.
-    """
-    start_time = time.time() * 1000
-    while time.time() * 1000 - start_time < timeout:
-      if self.value >= value: return
-    raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
 
 @contextlib.contextmanager
 def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Optional[Type[HWQueue]]=None, queue:Optional[HWQueue]=None):
