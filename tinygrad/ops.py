@@ -362,7 +362,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return UOp.const_with_shape(self.dtype, 0, new_st.shape)
     if new_st.contiguous and self.base.st.shape == new_st.shape: return self.base
     return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
-  def reshape(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).reshape(arg))
+  def reshape(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).reshape(arg))
+  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self.view(unwrap(self.st).pad(arg))
+  def expand(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).expand(arg))
+  def permute(self, arg:Tuple[int, ...]): return self.view(unwrap(self.st).permute(arg))
+  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self.view(unwrap(self.st).shrink(arg))
+  def stride(self, arg:Tuple[int, ...]): return self.view(unwrap(self.st).stride(arg))
 
   # *** uop Buffer stuff ***
 
