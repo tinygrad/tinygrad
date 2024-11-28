@@ -83,9 +83,9 @@ class AMDComputeQueue(HWQueue):
     event_dw = amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(amd_gpu.CACHE_FLUSH_AND_INV_TS_EVENT) \
              | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(amd_gpu.event_index__mec_release_mem__end_of_pipe)
 
-    mem_sel_dw = amd_gpu.PACKET3_RELEASE_MEM_DATA_SEL(data_sel) | amd_gpu.PACKET3_RELEASE_MEM_INT_SEL(int_sel) | amd_gpu.PACKET3_RELEASE_MEM_DST_SEL(0)
+    memsel_dw = amd_gpu.PACKET3_RELEASE_MEM_DATA_SEL(data_sel) | amd_gpu.PACKET3_RELEASE_MEM_INT_SEL(int_sel) | amd_gpu.PACKET3_RELEASE_MEM_DST_SEL(0)
 
-    self.pkt3(amd_gpu.PACKET3_RELEASE_MEM, event_dw | cache_flags_dw, mem_sel_dw, *data64_le(address), *data64_le(value), ctxid)
+    self.pkt3(amd_gpu.PACKET3_RELEASE_MEM, event_dw | cache_flags_dw, memsel_dw, *data64_le(address), *data64_le(value), ctxid)
 
   def _memory_barrier(self):
     self.wait_reg_mem(reg_req=nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_REQ), reg_done=nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_DONE), value=0xffffffff)
