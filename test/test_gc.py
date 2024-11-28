@@ -65,5 +65,14 @@ class TestGC(unittest.TestCase):
     del y
     self.assertEqual(bufs_allocated()-init, 0)
 
+  def test_gc_metadata_post_realize(self):
+    x = Tensor.empty(3)
+    y = Tensor.empty(3)
+    add = x+y
+    add.realize()
+    from tinygrad.ops import uop_metadata
+    print(list(uop_metadata))
+    self.assertEqual(len(uop_metadata), 0)
+
 if __name__ == '__main__':
   unittest.main()
