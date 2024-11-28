@@ -94,8 +94,7 @@ class LazyBuffer(MathTrait):
       ret = self.alu(Ops.BUFFER_VIEW) if allow_buffer_view and self.can_view() else self.alu(Ops.CONTIGUOUS)
       if (sti := self.st.invert(self.base.shape)) is not None: self.base.contiguous_child = ref(ret), sti
       return ret
-    self.base.forced_realize = True
-    return self
+    return self.alu(Ops.CONTIGUOUS)
 
   def bitcast(self, dtype:DType) -> LazyBuffer: return self.cast(dtype, bitcast=True)
   def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True) -> LazyBuffer:

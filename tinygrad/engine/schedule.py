@@ -324,6 +324,11 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
 
 def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> None: return ctx.update([(b, to_store)])
 
+def realize_src(ctx:Dict[UOp, UOp], src:UOp, src_buf:UOp, src_op:UOp, **kwargs) -> Optional[UOp]:
+  if src_op.op is Ops.CONST: return None
+  realize(ctx, src_buf, src_op, src)
+  return src
+
 def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, to_store:UOp, b:UOp) -> None:
   if to_store.op in {Ops.CONST, Ops.BIND}: return None
   base_shape = unwrap(base.st).shape
@@ -344,6 +349,8 @@ def fold_img_cast(ctx:Dict[UOp, UOp], xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kw
 do_realize = PatternMatcher([
   # always realize sinked ops
   (UPat(Ops.SINK, name="sink"), lambda ctx,sink: ctx.update((x.buf_uop, x) for x in sink.src)),
+  # always realize and fold contiguous base
+  (UPatSrc(Ops.CONTIGUOUS, src=(UPat(Ops.VIEW, src=(UPat.var("src_buf"), UPat.var("src_op")), name="src"),)), realize_src),
   # always realize meta ops
   (UPatSrc({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
   # realize before expand or unsafe pad ops
