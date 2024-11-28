@@ -366,11 +366,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop Buffer stuff ***
 
-  buffer_num = -1
+  buffer_num = itertools.count(start=-1)
   @staticmethod
-  def new_buffer(device:str, size:int, dtype:DType):
-    UOp.buffer_num += 1
-    return UOp(Ops.BUFFER, dtype.ptr(), (), (UOp.buffer_num, (device, size, dtype)))
+  def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype.ptr(), (), (next(UOp.buffer_num), (device, size, dtype)))
   @functools.cached_property
   def device(self) -> str:
     match self.op:
