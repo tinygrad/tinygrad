@@ -107,6 +107,9 @@ class Ops(FastEnum):
   EMPTY = auto()
   BUFFER_VIEW = auto()
 
+  # blocks in linearizer
+  BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto()  # noqa: E702
+
   EXPAND = auto()
   CONTRACT = auto()
   VIEW = auto()
