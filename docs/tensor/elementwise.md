@@ -13,6 +13,9 @@ Elementwise ops operate on a per element basis. They don't change the shape of t
 ::: tinygrad.Tensor.sin
 ::: tinygrad.Tensor.cos
 ::: tinygrad.Tensor.tan
+::: tinygrad.Tensor.asin
+::: tinygrad.Tensor.acos
+::: tinygrad.Tensor.atan
 ::: tinygrad.Tensor.trunc
 ::: tinygrad.Tensor.ceil
 ::: tinygrad.Tensor.floor

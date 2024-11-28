@@ -30,7 +30,7 @@ class _Device:
   def default(self) -> Compiled: return self[self.DEFAULT]
   def get_available_devices(self) -> Iterator[str]:
     for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM"]:
-      with contextlib.suppress(Exception): yield self[device].dname
+      with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
     if (from_env:=next((d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1), None)): return from_env
@@ -44,7 +44,8 @@ Device = _Device()
 # **************** Buffer + Allocators ****************
 
 @dataclass(frozen=True, eq=True)
-class BufferOptions:
+class BufferSpec:
+  # TODO: move device, size, dtype here?
   image: Optional[ImageDType] = None
   uncached: bool = False
   cpu_access: bool = False
@@ -53,9 +54,9 @@ class BufferOptions:
   external_ptr: Optional[int] = None
 
 class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None,
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None,
                initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
-    if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
+    if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
     self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
     if base is None:
@@ -82,7 +83,7 @@ class Buffer:
     assert not self.is_allocated(), "can't allocate already allocated buffer"
     self.allocator = Device[self.device].allocator
     if external_ptr is not None:
-      self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferOptions(external_ptr=external_ptr)
+      self.options = replace(self.options, external_ptr=external_ptr) if self.options else BufferSpec(external_ptr=external_ptr)
     if self._base is not None:
       self._base.ensure_allocated()
       assert hasattr(self.allocator, "_offset"), "offset function required for view"
@@ -135,25 +136,28 @@ class Buffer:
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
-  def alloc(self, size:int, options:Optional[BufferOptions]=None):
+  # overriden in LRUAllocator
+  def alloc(self, size:int, options:Optional[BufferSpec]=None):
     assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
-    return self._alloc(size, options if options is not None else BufferOptions())
-  def _alloc(self, size:int, options:BufferOptions): raise NotImplementedError("need alloc")
-  def free(self, opaque, size:int, options:Optional[BufferOptions]=None): self._free(opaque, options if options is not None else BufferOptions())
-  def _free(self, opaque, options:BufferOptions): pass  # if opaque is a Python object, you don't need a free
+    return self._alloc(size, options if options is not None else BufferSpec())
+  def free(self, opaque, size:int, options:Optional[BufferSpec]=None): self._free(opaque, options if options is not None else BufferSpec())
+
+  # implemented by the runtime
+  def _alloc(self, size:int, options:BufferSpec): raise NotImplementedError("need alloc")
+  def _free(self, opaque, options:BufferSpec): pass  # if opaque is a Python object, you don't need a free
   def _copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
   def _copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
   # def _as_buffer(self, src) -> memoryview:
   # def _offset(self, buf, size:int, offset:int):
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
 
-class LRUAllocator(Allocator):  # pylint: disable=abstract-method
+class LRUAllocator(Allocator):
   """
   The LRU Allocator is responsible for caching buffers.
   It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
   """
-  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
-  def alloc(self, size:int, options:Optional[BufferOptions]=None):
+  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferSpec]], Any] = defaultdict(list)
+  def alloc(self, size:int, options:Optional[BufferSpec]=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
     except (RuntimeError, MemoryError):
@@ -163,12 +167,12 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
     for (sz,options),opaques in self.cache.items():
       for opaque in opaques: super().free(opaque, sz, options)
       opaques.clear()
-  def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
+  def free(self, opaque:Any, size:int, options:Optional[BufferSpec]=None):
     if getenv("LRU", 1) and (options is None or not options.nolru): self.cache[(size, options)].append(opaque)
     else: super().free(opaque, size, options)
 
 class _MallocAllocator(LRUAllocator):
-  def _alloc(self, size:int, options:BufferOptions):
+  def _alloc(self, size:int, options:BufferSpec):
     return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else (ctypes.c_uint8 * size)()
   def _as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
@@ -194,7 +198,7 @@ class Compiler:
 
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
-    self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
+    self.device, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
     self.renderer = renderer or Renderer()
   def synchronize(self):
     """
@@ -210,7 +214,8 @@ def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
   if dtype == dtypes.bfloat16:
     # NOTE: this requires bf16 buffer support
     return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
-  if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
+  if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
+                                          dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32]
   # for CI GPU and OSX, cl_khr_fp16 isn't supported
   # for CI LLVM, it segfaults because it can't link to the casting function
   # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
