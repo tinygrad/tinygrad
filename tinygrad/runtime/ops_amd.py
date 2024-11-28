@@ -24,6 +24,7 @@ WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
 COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 
+def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
@@ -57,8 +58,6 @@ class AMDComputeQueue(HWQueue):
       self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True, uncached=True))
 
   def pkt3(self, cmd, *vals): self.q += [amd_gpu.PACKET3(cmd, len(vals) - 1), *vals]
-
-  def set_sh_reg(self, reg, *vals): self.pkt3(amd_gpu.PACKET3_SET_SH_REG, reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START, *vals)
 
   def wait_reg_mem(self, value, mask=0xffffffff, mem=None, reg_req=None, reg_done=None):
     wrm_info_dw = amd_gpu.WAIT_REG_MEM_MEM_SPACE(int(mem is not None)) | amd_gpu.WAIT_REG_MEM_OPERATION(int(mem is None)) \
@@ -105,21 +104,18 @@ class AMDComputeQueue(HWQueue):
       self.cmd_idx_to_dispatch_packet[cmd_idx] = dp
     user_regs += [*data64_le(args_state.ptr)]
 
-    self.set_sh_reg(amd_gpu.regCOMPUTE_PGM_LO, *data64_le(prg.prog_addr >> 8))
-    self.set_sh_reg(amd_gpu.regCOMPUTE_PGM_RSRC1, prg.rsrc1, prg.rsrc2)
-    self.set_sh_reg(amd_gpu.regCOMPUTE_PGM_RSRC3, 0)
-    self.set_sh_reg(amd_gpu.regCOMPUTE_TMPRING_SIZE, prg.dev.tmpring_size)
-    if prg.dev.has_scratch_base_registers: self.set_sh_reg(amd_gpu.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, *data64_le(prg.dev.scratch.va_addr >> 8))
-    if prg.dev.target < 110000: self.set_sh_reg(amd_gpu.mmCP_COHER_START_DELAY, 0x20)
-    self.set_sh_reg(amd_gpu.regCOMPUTE_RESTART_X, 0, 0, 0, 0)
-    self.set_sh_reg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE0, 0xFFFFFFFF, 0xFFFFFFFF)
-    self.set_sh_reg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE2, 0xFFFFFFFF, 0xFFFFFFFF)
-    self.set_sh_reg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE4, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
-    self.set_sh_reg(amd_gpu.regCOMPUTE_USER_DATA_0, *user_regs)
-
-    self.cmd_idx_to_local_offset[cmd_idx] = len(self.q) - self.cmds_offset[cmd_idx] + 5 # +1 to skip PACKET3_SET_SH_REG + reg + 3 zeros.
-    self.set_sh_reg(amd_gpu.regCOMPUTE_START_X, 0, 0, 0, *local_size, 0, 0)
-    self.set_sh_reg(amd_gpu.regCOMPUTE_RESOURCE_LIMITS, 0)
+    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8))
+    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC1), prg.rsrc1, prg.rsrc2)
+    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_PGM_RSRC3), 0)
+    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_TMPRING_SIZE), prg.dev.tmpring_size)
+    if prg.dev.has_scratch_base_registers:
+      self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO), *data64_le(prg.dev.scratch.va_addr >> 8))
+    if prg.dev.target < 110000: self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.mmCP_COHER_START_DELAY), 0x20)
+    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_RESTART_X), 0, 0, 0, 0)
+    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE0), 0xFFFFFFFF, 0xFFFFFFFF)
+    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE2), 0xFFFFFFFF, 0xFFFFFFFF)
+    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE4), 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
+    self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_USER_DATA_0), *user_regs)
 
     self.cmd_idx_to_global_offset[cmd_idx] = len(self.q) - self.cmds_offset[cmd_idx] + 1 # +1 to skip PACKET3_DISPATCH_DIRECT.
     self.pkt3(amd_gpu.PACKET3_DISPATCH_DIRECT, *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN)
