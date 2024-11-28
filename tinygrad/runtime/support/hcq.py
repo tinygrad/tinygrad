@@ -121,15 +121,23 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       Implementing this method is optional but recommended for performance gains.
     """
 
+  def bind_field(self, st, fname, fmt, val, mask=None):
+    mv = to_mv(ctypes.addressof(st) + getattr(type(st), fname).offset, 8).cast(fmt)
+    if isinstance(val, int):
+      if mask is not None: mv[0] = (mv[0] & ~mask) | val
+      else: mv[0] = val
+    else: self.mv_sints.append((mv, 0, val, mask))
+
   def bind_mv(self, mv, *vals:sint):
-    for i, val in vals:
-      if isinstance(v, int): mv[i] = val
-      else: self.mv_sints.append((mv, i, val))
+    for i, val in enumerate(vals):
+      if isinstance(val, int): mv[i] = val
+      else: self.mv_sints.append((mv, i, val, None))
 
   def _apply_var_vals(self, var_vals):
-    for off, sym in self.sint_offsets: self._q[off] = sym_infer(sym, var_vals)
-    for mv, vals in self.ext_sint_mv:
-      for off, sym in enumerate(vals): mv[off] = sym_infer(sym, var_vals)
+    for off, sym in self.q_sints: self._q[off] = sym_infer(sym, var_vals)
+    for mv, off, sym, mask in self.mv_sints:
+      if mask is not None: mv[off] = (mv[off] & ~mask) | sym_infer(sym, var_vals)
+      else: mv[off] = sym_infer(sym, var_vals)
 
   def submit(self, device, var_vals=None):
     """

@@ -78,61 +78,63 @@ class NVSignal(HCQSignal):
   def __del__(self): NVDevice.signals_pool.append(self.base_addr)
 
 class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
+  def __init__(self):
+    self.active_qmd = None
+    super().__init__()
+  
   def __del__(self):
     if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True))
 
   def setup(self, compute_class=None, copy_class=None, local_mem_window=None, shared_mem_window=None, local_mem=None, local_mem_tpc_bytes=None):
-    if compute_class: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_OBJECT, 1), compute_class]
-    if copy_class: self.q += [nvmethod(4, nv_gpu.NVC6C0_SET_OBJECT, 1), copy_class]
-    if local_mem_window: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, 2), *data64(local_mem_window)]
-    if shared_mem_window: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 2), *data64(shared_mem_window)]
-    if local_mem: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *data64(local_mem)]
-    if local_mem_tpc_bytes: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *data64(local_mem_tpc_bytes), 0xff]
+    if compute_class: self.q(nvmethod(1, nv_gpu.NVC6C0_SET_OBJECT, 1), compute_class)
+    if copy_class: self.q(nvmethod(4, nv_gpu.NVC6C0_SET_OBJECT, 1), copy_class)
+    if local_mem_window: self.q(nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, 2), *data64(local_mem_window))
+    if shared_mem_window: self.q(nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 2), *data64(shared_mem_window))
+    if local_mem: self.q(nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *data64(local_mem))
+    if local_mem_tpc_bytes: self.q(nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *data64(local_mem_tpc_bytes), 0xff)
+    return self
 
-  def _wait(self, signal:NVSignal, value=0):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(signal.value_addr), *data64_le(value),
-               (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
+  def wait(self, signal:NVSignal, value=0):
+    self.q(nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(signal.value_addr), *data64_le(value), (3 << 0) | (1 << 24)) # ACQUIRE | PAYLOAD_SIZE_64BIT
+    self.active_qmd = None
+    return self
 
-  def _update_wait(self, cmd_idx, signal=None, value=None):
-    if signal is not None: self.q[(sigoff:=self.cmds_offset[cmd_idx]+1):sigoff+2] = array.array('I', data64_le(signal.value_addr))
-    if value is not None: self.q[(valoff:=self.cmds_offset[cmd_idx]+3):valoff+2] = array.array('I', data64_le(value))
+  # def _update_wait(self, cmd_idx, signal=None, value=None):
+  #   if signal is not None: self.q[(sigoff:=self.cmds_offset[cmd_idx]+1):sigoff+2] = array.array('I', data64_le(signal.value_addr))
+  #   if value is not None: self.q[(valoff:=self.cmds_offset[cmd_idx]+3):valoff+2] = array.array('I', data64_le(value))
 
-  def _timestamp(self, signal): return self._signal(signal, 0)
+  def timestamp(self, signal): return self.signal(signal, 0)
 
   def bind(self, dev:NVDevice):
     self.binded_device = dev
-    self.hw_page = dev.allocator.alloc(len(self.q) * 4, BufferSpec(cpu_access=True, nolru=True))
+    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True))
     hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
-    for i, value in enumerate(self.q): hw_view[i] = value
+    for i, value in enumerate(self._q): hw_view[i] = value
 
     # From now on, the queue is on the device for faster submission.
-    self.q = hw_view # type: ignore
+    self._q = hw_view # type: ignore
 
   def _submit_to_gpfifo(self, dev:NVDevice, gpfifo:GPFifo):
     if dev == self.binded_device: cmdq_addr = self.hw_page.va_addr
     else:
-      if dev.cmdq_wptr + len(self.q) * 4 > dev.cmdq_page.size:
-        assert (gpfifo.ring[gpfifo.controls.GPGet] & 0xFFFFFFFFFC) >= dev.cmdq_page.va_addr + len(self.q) * 4 or \
+      if dev.cmdq_wptr + len(self._q) * 4 > dev.cmdq_page.size:
+        assert (gpfifo.ring[gpfifo.controls.GPGet] & 0xFFFFFFFFFC) >= dev.cmdq_page.va_addr + len(self._q) * 4 or \
                gpfifo.controls.GPGet == gpfifo.controls.GPPut, "cmdq overrun"
         dev.cmdq_wptr = 0
 
-      dev.cmdq[dev.cmdq_wptr//4:dev.cmdq_wptr//4+len(self.q)] = array.array('I', self.q)
+      dev.cmdq[dev.cmdq_wptr//4:dev.cmdq_wptr//4+len(self._q)] = array.array('I', self._q)
       cmdq_addr = dev.cmdq_page.va_addr+dev.cmdq_wptr
-      dev.cmdq_wptr += len(self.q) * 4
+      dev.cmdq_wptr += len(self._q) * 4
 
-    gpfifo.ring[gpfifo.put_value % gpfifo.entries_count] = (cmdq_addr//4 << 2) | (len(self.q) << 42) | (1 << 41)
+    gpfifo.ring[gpfifo.put_value % gpfifo.entries_count] = (cmdq_addr//4 << 2) | (len(self._q) << 42) | (1 << 41)
     gpfifo.controls.GPPut = (gpfifo.put_value + 1) % gpfifo.entries_count
     dev.gpu_mmio[0x90 // 4] = gpfifo.token
     gpfifo.put_value += 1
 
 class NVComputeQueue(NVCommandQueue):
-  def __init__(self):
-    # self.cmd_to_qmd = []
-    # self.cmd_idx_to_qmd, self.cmd_idx_to_signal_id, self.cmd_idx_to_global_dims, self.cmd_idx_to_local_dims = {}, {}, {}, {}
-    super().__init__()
-
   def memory_barrier(self):
     self.q(nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0))
+    self.active_qmd = None
     return self
 
   def exec(self, prg:NVProgram, args_state:NVArgsState, global_size, local_size):
@@ -140,46 +142,46 @@ class NVComputeQueue(NVCommandQueue):
     assert qmd_addr < (1 << 40), f"large qmd addr {qmd_addr:x}"
 
     qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
-    self.cmd_to_qmd.append(qmd)
-    # self.cmd_idx_to_global_dims[self._cur_cmd_idx()] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I')
-    # self.cmd_idx_to_local_dims[self._cur_cmd_idx()] = to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, 6).cast('H')
 
-    # qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth = global_size
-    # qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2 = local_size
     self.bind_mv(to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I'), *global_size)
     self.bind_mv(to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, 6).cast('H'), *local_size)
+    # qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth = global_size
+    # qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2 = local_size
+
+    # self.bind_field(qmd, 'cta_raster_width', 'I', global_size[0])
+    # self.bind_field(qmd, 'cta_raster_height', 'I', global_size[1])
+    # self.bind_field(qmd, 'cta_raster_depth', 'I', global_size[2])
+    # self.bind_field(qmd, 'cta_thread_dimension0', 'H', local_size[0])
+    # self.bind_field(qmd, 'cta_thread_dimension1', 'H', local_size[1])
+    # self.bind_field(qmd, 'cta_thread_dimension2', 'H', local_size[2])
     qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = data64(args_state.ptr)
 
-    if (prev_qmd:=self.cmd_idx_to_qmd.get(self._cur_cmd_idx() - 1)) is None:
+    if self.active_qmd is None:
       self.q(nvmethod(1, nv_gpu.NVC6C0_SEND_PCAS_A, 0x1), qmd_addr >> 8)
       self.q(nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 0x1), 9)
     else:
-      prev_qmd.dependent_qmd0_pointer = qmd_addr >> 8
-      prev_qmd.dependent_qmd0_action = 1
-      prev_qmd.dependent_qmd0_prefetch = 1
-      prev_qmd.dependent_qmd0_enable = 1
+      self.active_qmd.dependent_qmd0_pointer = qmd_addr >> 8
+      self.active_qmd.dependent_qmd0_action = 1
+      self.active_qmd.dependent_qmd0_prefetch = 1
+      self.active_qmd.dependent_qmd0_enable = 1
 
+    self.active_qmd = qmd
     return self
 
-  # def _update_exec(self, cmd_idx, global_size, local_size):
-  #   # Patch the exec cmd with new launch dims
-  #   if global_size is not None: self.cmd_idx_to_global_dims[cmd_idx][:] = array.array('I', global_size)
-  #   if local_size is not None: self.cmd_idx_to_local_dims[cmd_idx][:] = array.array('H', local_size)
-
-  def _signal(self, signal:NVSignal, value=0):
-    if (prev_qmd:=self.cmd_idx_to_qmd.get(self._cur_cmd_idx() - 1)) is not None:
+  def signal(self, signal:NVSignal, value=0):
+    if self.active_qmd is not None:
       for i in range(2):
-        if getattr(prev_qmd, f'release{i}_enable') == 0:
-          setattr(prev_qmd, f'release{i}_enable', 1)
-          self.bind_mv(field_to_mv(prev_qmd, f'release{i}_address').cast('Q'), signal.value_addr)
-          self.bind_mv(field_to_mv(prev_qmd, f'release{i}_payload').cast('I'), value)
-          # self.cmd_idx_to_qmd[self._cur_cmd_idx()] = prev_qmd
-          # self.cmd_idx_to_signal_id[self._cur_cmd_idx()] = i
-          return
+        if getattr(self.active_qmd, f'release{i}_enable') == 0:
+          setattr(self.active_qmd, f'release{i}_enable', 1)
+          self.bind_field(self.active_qmd, f'release{i}_address', 'Q', signal.value_addr, mask=0xfffffffff)
+          self.bind_field(self.active_qmd, f'release{i}_payload', 'Q', value)
+          return self
 
     self.q(nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(signal.value_addr), *data64_le(value),
            (1 << 0) | (1 << 20) | (1 << 24) | (1 << 25)) # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
     self.q(nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0)
+    self.active_qmd = None
+    return self
 
   def _submit(self, dev): self._submit_to_gpfifo(dev, cast(NVDevice, dev).compute_gpfifo)
 
