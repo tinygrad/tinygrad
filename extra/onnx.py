@@ -29,26 +29,26 @@ def to_python_const(t, tobytes=False) -> Union[List[ConstType], List[bytes], Uni
     cache_misses = info.misses
   return ret
 
-# src: onnx/mapping.py  https://onnx.ai/onnx/api/mapping.html#l-mod-onnx-mapping
 # TODO: use real float16
-DTYPES: Dict[int, DType] = {
-  TensorProto.FLOAT:dtypes.float32, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8, TensorProto.UINT16:dtypes.uint16,
-  TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64, TensorProto.BOOL:dtypes.bool,
-  TensorProto.FLOAT16:dtypes.float32, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32, TensorProto.UINT64:dtypes.uint64,
-  TensorProto.BFLOAT16:dtypes.bfloat16, TensorProto.FLOAT8E4M3FN:dtypes.float, TensorProto.FLOAT8E4M3FNUZ:dtypes.float,
-  TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float}
-def dtype_parse(onnx_dtype: int) -> DType:
-  if onnx_dtype in DTYPES: return DTYPES[onnx_dtype] if is_dtype_supported(DTYPES[onnx_dtype], Device.DEFAULT) else dtypes.float
+# src: onnx/mapping.py
+DTYPE_MAP: Dict[int, DType] = { TensorProto.FLOAT:dtypes.float32, TensorProto.UINT8:dtypes.uint8, TensorProto.INT8:dtypes.int8,
+  TensorProto.UINT16:dtypes.uint16, TensorProto.INT16:dtypes.int16, TensorProto.INT32:dtypes.int32, TensorProto.INT64:dtypes.int64,
+  TensorProto.BOOL:dtypes.bool, TensorProto.FLOAT16:dtypes.float32, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32,
+  TensorProto.UINT64:dtypes.uint64, TensorProto.BFLOAT16:dtypes.bfloat16, TensorProto.FLOAT8E4M3FN:dtypes.float,
+  TensorProto.FLOAT8E4M3FNUZ:dtypes.float, TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float}
+
+def dtype_parse(onnx_dtype: TensorProto.DataType) -> DType:
+  if onnx_dtype in DTYPE_MAP: return DTYPE_MAP[onnx_dtype] if is_dtype_supported(DTYPE_MAP[onnx_dtype], Device.DEFAULT) else dtypes.float
   raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
 
 # src: onnx/onnx_ml_pb2.pyi
-# NOTE: this is not a complete list
-# torch's parser at onnx2torch/onnx_node.py: `OnnxNode._parse_attribute_value()`
-ATTRIBUTES = {AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i), AttributeProto.STRING: lambda a: a.s.decode("utf-8"),
-         AttributeProto.TENSOR: lambda a: buffer_parse(a.t), AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats),
-         AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints), AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)}
+ATTRIBUTE_MAP = {AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i),
+  AttributeProto.STRING: lambda a: a.s.decode("utf-8"), AttributeProto.TENSOR: lambda a: buffer_parse(a.t),
+  AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats), AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints),
+  AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)}
+
 def attribute_parse(a: AttributeProto):
-  if a.type in ATTRIBUTES: return ATTRIBUTES[a.type](a)
+  if a.type in ATTRIBUTE_MAP: return ATTRIBUTE_MAP[a.type](a)
   raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(a.type)} is not supported")
 
 def buffer_parse(inp: TensorProto) -> Tensor:
@@ -59,31 +59,31 @@ def buffer_parse(inp: TensorProto) -> Tensor:
                   dtype=dtype_parse(inp.data_type), requires_grad=False)
   raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
 
+def type_parse(type_proto: TypeProto):
+  ret = []
+  while True:
+    attr = type_proto.WhichOneof('value')
+    if attr == 'tensor_type':
+      if "dim_value" not in type_proto.tensor_type.shape.dim.__dir__(): return () # variable type, unable to determine shape
+      elif not ret:
+        return tuple([x.dim_value for x in type_proto.tensor_type.shape.dim])
+      else:
+        ret.extend([(x.dim_value,) for x in type_proto.tensor_type.shape.dim])
+        return tuple(ret)
+    elif attr == 'sequence_type':
+      type_proto = getattr(type_proto, attr).elem_type
+      ret.append(1)
+    elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
+    elif attr == 'map_type': raise NotImplementedError(f"map_type is not implemented: {type_proto}")
+    elif attr == 'opaque_type': raise NotImplementedError(f"opaque_type is not implemented: {type_proto}")
+    elif attr == 'sparse_tensor_type': raise NotImplementedError(f"sparse_tensor_type is not implemented: {type_proto}")
+    else: raise AttributeError(f"unknown attr: {attr}, {type_proto}")
+
 onnx_ops = importlib.import_module('extra.onnx_ops')
 
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
-  def type_parse(type_proto: TypeProto):
-    ret = []
-    while True:
-      attr = type_proto.WhichOneof('value')
-      if attr == 'tensor_type':
-        if "dim_value" not in type_proto.tensor_type.shape.dim.__dir__(): return () # variable type, unable to determine shape
-        elif not ret:
-          return tuple([x.dim_value for x in type_proto.tensor_type.shape.dim])
-        else:
-          ret.extend([(x.dim_value,) for x in type_proto.tensor_type.shape.dim])
-          return tuple(ret)
-      elif attr == 'sequence_type':
-        type_proto = getattr(type_proto, attr).elem_type
-        ret.append(1)
-      elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
-      elif attr == 'map_type': raise NotImplementedError(f"map_type is not implemented: {type_proto}")
-      elif attr == 'opaque_type': raise NotImplementedError(f"opaque_type is not implemented: {type_proto}")
-      elif attr == 'sparse_tensor_type': raise NotImplementedError(f"sparse_tensor_type is not implemented: {type_proto}")
-      else: raise AttributeError(f"unknown attr: {attr}, {type_proto}")
-
   tensors: Dict[str, Tensor] = {}
 
   # get weights and biases
@@ -143,46 +143,21 @@ def get_run_onnx(onnx_model: ModelProto):
       if debug >= 1: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
 
       # NOTE some ops live here because they require access to some local variables
-      # have to use n.output for cases when num_outputs is absent
       if n.op_type in onnx_ops.tensor_methods:
         ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
+
       elif n.op_type == "Split":
-        axis = opt.get("axis", 0)
-        split = None if len(inp) == 1 else to_python_const(inp[1])
-        if split is None:
-          split = [inp[0].shape[axis] // len(n.output)] * len(n.output)
-          for i in range(inp[0].shape[axis] % len(n.output)):
-            split[i] += 1
-        i, ret = 0, []
-        arg = [None] * inp[0].ndim
-        for s in split:
-          arg[axis] = (i,i+s)
-          ret.append(inp[0].shrink(arg=tuple(arg)))
-          i = i+s
-        ret = tuple(ret)
-
-      # need to check onnx_model_version
+        axis, n_outputs  = opt.get('axis', 0), opt.get('num_outputs') or len(n.output)
+        sz = inp[0].shape[axis]
+        sizes = to_python_const(inp[1]) if len(inp) == 2 else [sz // n_outputs + (1 if i < sz % n_outputs else 0) for i in range(n_outputs)]
+        ret = inp[0].split(sizes, axis)
       elif n.op_type == "Slice":
-        if onnx_model_version < 10:
-          axes, ends, starts, steps = list(opt.get("axes", range(inp[0].ndim))), list(opt["ends"]), list(opt["starts"]), [1]*inp[0].ndim
-        else:
-          starts, ends = inp[1:3]
-          axes = list(range(inp[0].ndim)) if len(inp) <= 3 else to_python_const(inp[3].cast(dtypes.int32))
-          steps = inp[4].cast(dtypes.int32).tolist() if len(inp) > 4 else [1]*inp[0].ndim
-          starts, ends = to_python_const(starts), to_python_const(ends)
-        arg = [(0,x,1) for x in inp[0].shape]
-        for i, axis in enumerate(axes):
-          axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
-          if starts[i] < 0: starts[i] += inp[0].shape[axis]
-          if ends[i] < 0: ends[i] += inp[0].shape[axis]
-          starts[i], ends[i] = max(0, min(starts[i], inp[0].shape[axis])), max(0, min(ends[i], inp[0].shape[axis]))
-          if starts[i] > ends[i] and steps[i] >= 0: steps[i] = -steps[i]
-          arg[axis] = (starts[i], ends[i], steps[i])
-        new_shape = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in arg)
-        if any(s==e for s,e in new_shape): ret = inp[0].shrink(new_shape)
-        else: ret = inp[0][tuple([slice(s,e,st) for s,e,st in arg])]
-
-      # need to call backward on intermediate_tensors
+        inp += [list(v) for v in reversed(opt.values())] # axes, ends, starts -> starts, ends, axes
+        starts, ends, axes, steps = inp[1], inp[2], inp[3] if len(inp)>=4 else list(range(inp[0].ndim)), inp[4] if len(inp)>=5 else [1]*inp[0].ndim
+        starts, ends, axes, steps = (to_python_const(x) for x in (starts, ends, axes, steps))
+        slices = [slice(0,x,1) for x in inp[0].shape]
+        for i, axis in enumerate(axes): slices[axis] = slice(starts[i], ends[i], steps[i])
+        ret = inp[0][tuple(slices)]
       elif n.op_type == "Gradient":
         assert len(opt["xs"]) == len(inp), f"len(opt['xs']):{len(opt['xs'])}, len(inp):{len(inp)} output and input has to match"
         y = opt["y"]
