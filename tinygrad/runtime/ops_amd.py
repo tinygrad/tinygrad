@@ -32,27 +32,24 @@ def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
   def __init__(self, value=0, is_timeline=False):
-    self._signal = AMDDevice.signals_pool.pop()
-    self._value_addr, self._timestamp_addr = mv_address(self._signal), mv_address(self._signal) + 8
+    super().__init__(AMDDevice.signals_pool.pop(), value, is_timeline, decimal.Decimal(100), value_off=0, timestamp_off=8)
+
     if is_timeline:
       self._event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, auto_reset=1)
       self._event_mailbox_ptr = AMDDevice.event_page.va_addr + self._event.event_slot_index*8
       self._evt_array = (kfd.struct_kfd_event_data)(event_id=self._event.event_id)
-    else: self._event_mailbox_ptr = 0
-    super().__init__(value)
-  def __del__(self): AMDDevice.signals_pool.append(self._signal)
-  def _get_value(self) -> int: return self._signal[0]
-  def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(100)
-  def _set_value(self, new_value:int): self._signal[0] = new_value
+
+  def __del__(self): AMDDevice.signals_pool.append(self.base_addr)
+
   def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
     start_time = time.time() * 1000
     while (time_spent:=time.time() * 1000 - start_time) < timeout:
-      if self._signal[0] >= value: return
+      if self.value >= value: return
 
       # Wait active for 5s, then going to sleep.
-      if time_spent > 5000 and self._event_mailbox_ptr != 0:
+      if time_spent > 5000 and self.is_timeline:
         kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(self._evt_array), num_events=1, wait_for_all=1, timeout=1000)
-    raise RuntimeError(f"wait_signal: not set to {value}, but {self._signal[0]}, {timeout} ms TIMEOUT!")
+    raise RuntimeError(f"wait_signal: not set to {value}, but {self.value}, {timeout} ms TIMEOUT!")
 
 class AMDComputeQueue(HWQueue):
   def __init__(self):
@@ -140,24 +137,24 @@ class AMDComputeQueue(HWQueue):
   def _wait(self, signal:AMDSignal, value=0):
     self.q += [amd_gpu.PACKET3(amd_gpu.PACKET3_WAIT_REG_MEM, 5),
       amd_gpu.WAIT_REG_MEM_MEM_SPACE(1) | amd_gpu.WAIT_REG_MEM_OPERATION(0) | amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | \
-      amd_gpu.WAIT_REG_MEM_ENGINE(0), *data64_le(signal._value_addr), value, 0xffffffff, 4]
+      amd_gpu.WAIT_REG_MEM_ENGINE(0), *data64_le(signal.value_addr), value, 0xffffffff, 4]
 
   def _timestamp(self, signal:AMDSignal):
-    self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=signal._timestamp_addr)
+    self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=3, mem_int_sel=0, address=signal.timestamp_addr)
 
   def _signal(self, signal:AMDSignal, value=0):
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
-    self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal._value_addr, value=value, cache_flush=True)
-    if signal._event_mailbox_ptr != 0:
+    self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal.value_addr, value=value, cache_flush=True)
+    if signal.is_timeline:
       self._release_mem(CACHE_FLUSH_AND_INV_TS_EVENT, mem_data_sel=1, mem_int_sel=2, address=signal._event_mailbox_ptr,
                         value=signal._event.event_id, cst=signal._event.event_id, cache_flush=False)
 
   def _update_wait(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
-    if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(signal._value_addr))
+    if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(signal.value_addr))
     if value is not None: self._patch(cmd_idx, offset=4, data=[value])
 
   def _update_signal(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
-    if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(signal._value_addr))
+    if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(signal.value_addr))
     if value is not None: self._patch(cmd_idx, offset=5, data=data64_le(value))
 
     # Check if the signal command has mailptr part
@@ -210,27 +207,27 @@ class AMDCopyQueue(HWQueue):
       if dest is not None: self._patch(cmd_idx, offset=5+i*7, data=[*data64_le(dest + SDMA_MAX_COPY_SIZE*i)])
 
   def _signal(self, signal:AMDSignal, value=0):
-    self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._value_addr), value])
+    self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal.value_addr), value])
 
-    if signal._event_mailbox_ptr != 0:
+    if signal.is_timeline:
       self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._event_mailbox_ptr), signal._event.event_id])
       self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(signal._event.event_id)])
 
   def _wait(self, signal:AMDSignal, value=0):
     self._q([amd_gpu.SDMA_OP_POLL_REGMEM | amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
-      amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(signal._value_addr), value, 0xffffffff,
+      amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(signal.value_addr), value, 0xffffffff,
       amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)])
 
   def _update_signal(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
     return self._update_wait(cmd_idx, signal, value) # the same offsets and commands
 
   def _update_wait(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
-    if signal is not None: self._patch(cmd_idx, offset=1, data=data64_le(signal._value_addr))
+    if signal is not None: self._patch(cmd_idx, offset=1, data=data64_le(signal.value_addr))
     if value is not None: self._patch(cmd_idx, offset=3, data=[value])
 
   def _timestamp(self, signal:AMDSignal):
     self._q([amd_gpu.SDMA_OP_TIMESTAMP | amd_gpu.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
-             *data64_le(signal._timestamp_addr)])
+             *data64_le(signal.timestamp_addr)])
 
   def _submit(self, dev:AMDDevice):
     if dev.sdma_queue.put_value - dev.sdma_queue.read_ptr[0] > dev.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
@@ -333,7 +330,7 @@ class AMDDevice(HCQCompiled):
   kfd:int = -1
   event_page:Any = None  # TODO: fix types in kfd, Optional[kfd.struct_kfd_ioctl_alloc_memory_of_gpu_args]
   signals_page:Any = None
-  signals_pool:List[memoryview] = []
+  signals_pool:List[int] = []
   gpus:List[pathlib.Path] = []
 
   def _gpu_map(self, mem):
@@ -399,7 +396,7 @@ class AMDDevice(HCQCompiled):
     if AMDDevice.event_page is None:
       AMDDevice.signals_page = self._gpu_alloc(16 * 65536, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
       AMDDevice.event_page = self._gpu_alloc(0x8000, kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT, uncached=True)
-      AMDDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, AMDDevice.signals_page.size, 16)]
+      AMDDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
       kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_page_offset=AMDDevice.event_page.handle)
     else:
       self._gpu_map(AMDDevice.signals_page)

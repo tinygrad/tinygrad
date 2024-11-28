@@ -888,7 +888,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   # simple cancel mod case
   if 0 < c and 0 <= x.vmin and (quotient:=x.vmin//c) == x.vmax//c: return x-quotient*c
 
-  terms, rem_const, something_changed, offset = [], 0, False, 0
+  terms, rem_const, something_changed, offset, gcd = [], 0, False, 0, c
   for u in split_uop(x, Ops.ADD):
     factor = u.const_factor()
     e: UOp = u.divides(factor)
@@ -898,7 +898,9 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
       something_changed = True
     offset += new_factor * e.vmin
     if u.op is Ops.CONST: rem_const += new_factor
-    else: terms.append((new_factor, e))
+    else:
+      gcd = math.gcd(factor, gcd)
+      terms.append((new_factor, e))
 
   match terms:  # cases like (x[4-5] + 3) % 4 -> -3*x[4-5]+15
     case [(f, e)] if e.vmax-e.vmin == 1: return ((offset+f)%c - offset%c)*(e - e.vmin) + offset%c
@@ -912,8 +914,8 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   else: # we have found factors such that vmin/vmax of the final expression is between 0 and c, we can remove the mod
     return functools.reduce(lambda r, t: r + min(t[0], t[0]-c, key=abs)*(t[1]-t[1].vmin), terms, x.const_like(offset))
 
-  if not something_changed: return None
-  return functools.reduce(lambda r, t: r + t[0]*t[1], terms, x.const_like(rem_const)) % c
+  if not something_changed and gcd==1: return None
+  return gcd*(functools.reduce(lambda r, t: r + t[0]//gcd * t[1], terms, x.const_like(rem_const//gcd)) % (c//gcd)) + rem_const%gcd
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
