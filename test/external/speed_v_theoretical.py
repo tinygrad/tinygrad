@@ -2,6 +2,7 @@ import unittest, time
 from tinygrad import Tensor, TinyJit, Device
 from tinygrad.helpers import Context, DEBUG
 from tinygrad.nn import Conv2d
+from tinygrad.nn.state import get_parameters
 
 class TestKernelSpeed(unittest.TestCase):
   def _get_tensor(self, *shape:int):
@@ -61,8 +62,11 @@ class TestKernelSpeed(unittest.TestCase):
     def f(conv, x) -> Tensor: return conv(x).realize()
     tms = []
     K = 3
-    with Context(BEAM=2):
+    with Context(BEAM=0, DEBUG=0):
       conv = Conv2d(CIN, COUT, K, padding=1)
+      Tensor.realize(*get_parameters(conv))
+
+    with Context(BEAM=2):
       for _ in range(10):
         x = self._get_tensor(BS, CIN, H, W)
         Device.default.synchronize()
