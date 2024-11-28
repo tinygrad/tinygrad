@@ -57,12 +57,12 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   Both compute and copy queues should have the following commands implemented.
   """
 
-  def __init__(self): self._q, self.binded_device, self.q_sints, self.mv_sints = [], None, [], []
+  def __init__(self): self._q, self.binded_device, self.q_sints, self.mv_sints, self.syms = [], None, [], [], []
   def q(self, *values):
     for v in values: 
       if isinstance(v, int): self._q.append(v)
       else: 
-        self.q_sints.append((len(self._q), v))
+        self.q_sints.append((len(self._q), self._new_sym(v)))
         self._q.append(0xbad0c0de)
 
   def timestamp(self, signal:SignalType):
@@ -121,23 +121,28 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       Implementing this method is optional but recommended for performance gains.
     """
 
+  def _new_sym(self, sym:sint) -> int:
+    if sym not in self.syms: self.syms.append(sym)
+    return self.syms.index(sym)
+
   def bind_field(self, st, fname, fmt, val, mask=None):
     mv = to_mv(ctypes.addressof(st) + getattr(type(st), fname).offset, 8).cast(fmt)
     if isinstance(val, int):
       if mask is not None: mv[0] = (mv[0] & ~mask) | val
       else: mv[0] = val
-    else: self.mv_sints.append((mv, 0, val, mask))
+    else: self.mv_sints.append((mv, 0, self._new_sym(val), mask))
 
   def bind_mv(self, mv, *vals:sint):
     for i, val in enumerate(vals):
       if isinstance(val, int): mv[i] = val
-      else: self.mv_sints.append((mv, i, val, None))
+      else: self.mv_sints.append((mv, i, self._new_sym(val), None))
 
   def _apply_var_vals(self, var_vals):
-    for off, sym in self.q_sints: self._q[off] = sym_infer(sym, var_vals)
-    for mv, off, sym, mask in self.mv_sints:
-      if mask is not None: mv[off] = (mv[off] & ~mask) | sym_infer(sym, var_vals)
-      else: mv[off] = sym_infer(sym, var_vals)
+    resolved_syms = [sym_infer(sym, var_vals) for sym in self.syms]
+    for off, sym_idx in self.q_sints: self._q[off] = resolved_syms[sym_idx]
+    for mv, off, sym_idx, mask in self.mv_sints:
+      if mask is not None: mv[off] = (mv[off] & ~mask) | resolved_syms[sym_idx]
+      else: mv[off] = resolved_syms[sym_idx]
 
   def submit(self, device, var_vals=None):
     """

@@ -40,10 +40,6 @@ class QCOMSignal(HCQSignal):
   def __del__(self): QCOMDevice.signals_pool.append(self.base_addr)
 
 class QCOMComputeQueue(HWQueue):
-  def __init__(self):
-    self.cmd_idx_to_dims = {}
-    super().__init__()
-
   def __del__(self):
     if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True))
 
@@ -58,9 +54,11 @@ class QCOMComputeQueue(HWQueue):
     if memsync: self.cmd(adreno.CP_WAIT_MEM_WRITES)
     if sync: self.cmd(adreno.CP_WAIT_FOR_IDLE)
 
-  def _memory_barrier(self): self._cache_flush(write_back=True, invalidate=True, sync=True, memsync=True)
+  def memory_barrier(self):
+    self._cache_flush(write_back=True, invalidate=True, sync=True, memsync=True)
+    return self
 
-  def _signal(self, signal:QCOMSignal, value=0, ts=False):
+  def signal(self, signal:QCOMSignal, value=0, ts=False):
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
     if QCOMDevice.gpu_id < 700:
       self.cmd(adreno.CP_EVENT_WRITE, qreg.cp_event_write_0(event=adreno.CACHE_FLUSH_TS, timestamp=ts),
@@ -69,20 +67,14 @@ class QCOMComputeQueue(HWQueue):
     else:
       # TODO: support devices starting with 8 Gen 1. Also, 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP
       raise RuntimeError('CP_EVENT_WRITE7 is not supported')
+    return self
 
-  def _timestamp(self, signal:QCOMSignal): return self._signal(signal, 0, ts=True)
+  def timestamp(self, signal:QCOMSignal): return self.signal(signal, 0, ts=True)
 
-  def _wait(self, signal:QCOMSignal, value=0):
+  def wait(self, signal:QCOMSignal, value=0):
     self.cmd(adreno.CP_WAIT_REG_MEM, qreg.cp_wait_reg_mem_0(function=adreno.WRITE_GE, poll=adreno.POLL_MEMORY),*data64_le(signal.value_addr),
              qreg.cp_wait_reg_mem_3(ref=value&0xFFFFFFFF), qreg.cp_wait_reg_mem_4(mask=0xFFFFFFFF), qreg.cp_wait_reg_mem_5(delay_loop_cycles=32))
-
-  def _update_signal(self, cmd_idx, signal:Optional[QCOMSignal], value):
-    if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(signal.value_addr))
-    if value is not None: self._patch(cmd_idx, offset=5, data=[value & 0xFFFFFFFF])
-
-  def _update_wait(self, cmd_idx, signal:Optional[QCOMSignal], value):
-    if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(signal.value_addr))
-    if value is not None: self._patch(cmd_idx, offset=4, data=[value & 0xFFFFFFFF])
+    return self
 
   def _build_gpu_command(self, dev:QCOMDevice, hw_addr=None):
     to_mv((hw_page_addr:=hw_addr or dev._alloc_cmd_buf(len(self.q) * 4)), len(self.q) * 4).cast('I')[:] = array.array('I', self.q)
@@ -103,9 +95,8 @@ class QCOMComputeQueue(HWQueue):
     else: submit_req, _ = self._build_gpu_command(dev)
     dev.last_cmd = kgsl.IOCTL_KGSL_GPU_COMMAND(dev.fd, __payload=submit_req).timestamp
 
-  def _exec(self, prg:QCOMProgram, args_state:QCOMArgsState, global_size, local_size):
+  def exec(self, prg:QCOMProgram, args_state:QCOMArgsState, global_size, local_size):
     global_size_mp = [int(g*l) for g,l in zip(global_size, local_size)]
-    self.cmd_idx_to_dims[self._cur_cmd_idx()] = [global_size, local_size]
 
     self.cmd(adreno.CP_SET_MARKER, qreg.a6xx_cp_set_marker_0(mode=adreno.RM6_COMPUTE))
     self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, qreg.a6xx_hlsq_invalidate_cmd(cs_state=True, cs_ibo=True))
@@ -164,19 +155,7 @@ class QCOMComputeQueue(HWQueue):
              qreg.a6xx_sp_cs_config(enabled=True, nsamp=args_state.prg.samp_cnt, ntex=args_state.prg.tex_cnt, nibo=args_state.prg.ibo_cnt))
     self.cmd(adreno.CP_RUN_OPENCL, 0)
     self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
-
-  def _update_exec(self, cmd_idx, global_size, local_size):
-    if global_size is not None:
-      self._patch(cmd_idx, offset=29, data=[int(math.ceil(global_size[0])), int(math.ceil(global_size[1])), int(math.ceil(global_size[2]))])
-      self.cmd_idx_to_dims[cmd_idx][0] = global_size
-
-    if local_size is not None:
-      payload = qreg.a6xx_hlsq_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1)
-      self._patch(cmd_idx, offset=20, data=[payload])
-      self.cmd_idx_to_dims[cmd_idx][1] = local_size
-
-    global_size_mp = [int(g*l) for g,l in zip(self.cmd_idx_to_dims[cmd_idx][0], self.cmd_idx_to_dims[cmd_idx][1])]
-    self._patch(cmd_idx, offset=21, data=[global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0])
+    return self
 
 class QCOMArgsState(HCQArgsState):
   def __init__(self, ptr:int, prg:QCOMProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
