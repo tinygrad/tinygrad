@@ -24,17 +24,6 @@ WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
 COMPUTE_SHADER_EN, FORCE_START_AT_000, CS_W32_EN = (1 << 0), (1 << 2), (1 << 15)
 
-def _filter_pkt3(pref):
-  return {**{x[len(pref)+1:].lower():y for x,y in amd_gpu.__dict__.items() if x[:len(pref)]==pref},
-          **{x[len(pref)-7:].lower():y for x,y in amd_gpu.__dict__.items() if x[:len(pref)-8]==pref[8:]}}
-
-def _pkt3_build(dct, __val=0, **kwargs):
-  for k, v in kwargs.items(): __val |= cb if (cb:=dct[k]).__class__ is int else cb(v)
-  return __val
-
-pkt3: Any = type("PKT3", (object,), {**{(k[:ps]+k[ps+18:]).upper():v  for k,v in amd_gpu.__dict__.items() if (ps:=k.find('__mec_release_mem__'))!=-1},
-  **{nm[8:].lower(): functools.partial(_pkt3_build, _filter_pkt3(nm)) for nm in amd_gpu.__dict__.keys() if nm[:8] == 'PACKET3_'}})
-
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
@@ -72,21 +61,31 @@ class AMDComputeQueue(HWQueue):
   def set_sh_reg(self, reg, *vals): self.pkt3(amd_gpu.PACKET3_SET_SH_REG, reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START, *vals)
 
   def wait_reg_mem(self, value, mask=0xffffffff, mem=None, reg_req=None, reg_done=None):
-    self.pkt3(amd_gpu.PACKET3_WAIT_REG_MEM, pkt3.wait_reg_mem(mem_space=int(mem is not None), operation=int(mem is None),
-      function=WAIT_REG_MEM_FUNCTION_GEQ), *(data64_le(mem) if mem is not None else (reg_req, reg_done)), value, mask, 4)
+    wrm_info_dw = amd_gpu.WAIT_REG_MEM_MEM_SPACE(int(mem is not None)) | amd_gpu.WAIT_REG_MEM_OPERATION(int(mem is None)) \
+                | amd_gpu.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | amd_gpu.WAIT_REG_MEM_ENGINE(0)
+
+    self.pkt3(amd_gpu.PACKET3_WAIT_REG_MEM, wrm_info_dw, *(data64_le(mem) if mem is not None else (reg_req, reg_done)), value, mask, 4)
 
   def acquire_mem(self, addr=0x0, sz=(1 << 64)-1, gli=1, glm=1, glk=1, glv=1, gl1=1, gl2=1):
-    cache_payload = pkt3.acquire_mem(gcr_cntl_gli_inv=gli, gcr_cntl_glm_inv=glm, gcr_cntl_glm_wb=glm, gcr_cntl_glk_inv=glk, gcr_cntl_glk_wb=glk,
-      gcr_cntl_glv_inv=glv, gcr_cntl_gl1_inv=gl1, gcr_cntl_gl2_inv=gl2, gcr_cntl_gl2_wb=gl2)
+    cache_flags_dw = amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLI_INV(gli) \
+                   | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_INV(glm) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_WB(glm) \
+                   | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(glk) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_WB(glk) \
+                   | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(glv) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(gl1) \
+                   | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(gl2) | amd_gpu.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_WB(gl2)
 
-    self.pkt3(amd_gpu.PACKET3_ACQUIRE_MEM, 0, *data64_le(sz), *data64_le(addr), 0, cache_payload)
+    self.pkt3(amd_gpu.PACKET3_ACQUIRE_MEM, 0, *data64_le(sz), *data64_le(addr), 0, cache_flags_dw)
 
   def release_mem(self, address, value, data_sel, int_sel, ctxid=0, cache_flush=False):
-    cache_flags = pkt3.release_mem(gcr_glv_inv=1,gcr_gl1_inv=1,gcr_gl2_inv=1,gcr_glm_wb=1,gcr_glm_inv=1,gcr_gl2_wb=1,gcr_seq=1) if cache_flush else 0
+    cache_flags_dw = 0 if not cache_flush else (amd_gpu.PACKET3_RELEASE_MEM_GCR_GLV_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL1_INV \
+                   | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GLM_WB \
+                   | amd_gpu.PACKET3_RELEASE_MEM_GCR_GLM_INV | amd_gpu.PACKET3_RELEASE_MEM_GCR_GL2_WB | amd_gpu.PACKET3_RELEASE_MEM_GCR_SEQ)
 
-    self.pkt3(amd_gpu.PACKET3_RELEASE_MEM,
-      pkt3.release_mem(cache_flags, event_type=amd_gpu.CACHE_FLUSH_AND_INV_TS_EVENT, event_index=pkt3.EVENT_INDEX_END_OF_PIPE),
-      pkt3.release_mem(data_sel=data_sel, int_sel=int_sel, dst_sel=0), *data64_le(address), *data64_le(value), ctxid)
+    event_dw = amd_gpu.PACKET3_RELEASE_MEM_EVENT_TYPE(amd_gpu.CACHE_FLUSH_AND_INV_TS_EVENT) \
+             | amd_gpu.PACKET3_RELEASE_MEM_EVENT_INDEX(amd_gpu.event_index__mec_release_mem__end_of_pipe)
+
+    mem_sel_dw = amd_gpu.PACKET3_RELEASE_MEM_DATA_SEL(data_sel) | amd_gpu.PACKET3_RELEASE_MEM_INT_SEL(int_sel) | amd_gpu.PACKET3_RELEASE_MEM_DST_SEL(0)
+
+    self.pkt3(amd_gpu.PACKET3_RELEASE_MEM, event_dw | cache_flags_dw, mem_sel_dw, *data64_le(address), *data64_le(value), ctxid)
 
   def _memory_barrier(self):
     self.wait_reg_mem(reg_req=nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_REQ), reg_done=nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_DONE), value=0xffffffff)
@@ -137,14 +136,18 @@ class AMDComputeQueue(HWQueue):
 
   def _wait(self, signal:AMDSignal, value=0): self.wait_reg_mem(mem=signal.value_addr, value=value, mask=0xffffffff)
 
-  def _timestamp(self, signal:AMDSignal): self.release_mem(signal.timestamp_addr, 0, pkt3.DATA_SEL_SEND_GPU_CLOCK_COUNTER, pkt3.INT_SEL_NONE)
+  def _timestamp(self, signal:AMDSignal):
+    self.release_mem(signal.timestamp_addr, 0, amd_gpu.data_sel__mec_release_mem__send_gpu_clock_counter, amd_gpu.int_sel__mec_release_mem__none)
 
   def _signal(self, signal:AMDSignal, value=0):
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
-    self.release_mem(signal.value_addr, value, pkt3.DATA_SEL_SEND_32_BIT_LOW, pkt3.INT_SEL_SEND_INTERRUPT_AFTER_WRITE_CONFIRM, cache_flush=True)
+    self.release_mem(signal.value_addr, value, amd_gpu.data_sel__mec_release_mem__send_32_bit_low,
+                     amd_gpu.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
+
     if signal.is_timeline:
-      self.release_mem(signal._event_mailbox_ptr, signal._event.event_id, pkt3.DATA_SEL_SEND_32_BIT_LOW,
-                       pkt3.INT_SEL_SEND_INTERRUPT_AFTER_WRITE_CONFIRM, ctxid=signal._event.event_id)
+      self.release_mem(signal._event_mailbox_ptr, signal._event.event_id, amd_gpu.data_sel__mec_release_mem__send_32_bit_low,
+                       amd_gpu.int_sel__mec_release_mem__send_interrupt_after_write_confirm, ctxid=signal._event.event_id)
+
   def _update_wait(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
     if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(signal.value_addr))
     if value is not None: self._patch(cmd_idx, offset=4, data=[value])
