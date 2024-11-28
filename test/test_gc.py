@@ -16,30 +16,32 @@ class TestGC(unittest.TestCase):
 
   def test_gc(self):
     Tensor.manual_seed(0)
+    base = tensors_allocated()
     a = Tensor.rand(4, 4, requires_grad=True)
     b = Tensor.zeros(4, 4, requires_grad=True)
     (a*b).mean().backward()
-    assert (tensors_allocated() > 0)
+    assert (tensors_allocated()-base > 0)
     del a,b
-    assert (tensors_allocated() == 2) # one for Tensor._device_rng_counters, and one for Tensor._device_seeds
+    assert (tensors_allocated()-base == 2) # one for Tensor._device_rng_counters, and one for Tensor._device_seeds
     Tensor.manual_seed(0)
 
   def test_gc_complex(self):
     Tensor.manual_seed(0)
+    base = tensors_allocated()
     a = Tensor(np.zeros((4, 4), dtype=np.float32), requires_grad=True)
     b = Tensor.rand(4, 4, requires_grad=True)
-    assert (tensors_allocated() == 5)
+    assert (tensors_allocated()-base == 5)
     (a*b).mean().backward()
-    assert (tensors_allocated() == 6)
+    assert (tensors_allocated()-base == 6)
     del b
-    assert (tensors_allocated() == 4)
+    assert (tensors_allocated()-base == 4)
     b = Tensor(np.zeros((4, 4), dtype=np.float32), requires_grad=True)
     print(tensors_allocated())
     (a*b).mean().backward()
     print(tensors_allocated())
-    assert (tensors_allocated() == 6)
+    assert (tensors_allocated()-base == 6)
     del b
-    assert (tensors_allocated() == 4)
+    assert (tensors_allocated()-base == 4)
     Tensor.manual_seed(0)
 
   def test_schedule_gc(self):
