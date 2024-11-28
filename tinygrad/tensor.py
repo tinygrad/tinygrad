@@ -2008,19 +2008,12 @@ class Tensor(SimpleMathTrait):
     assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_,d_,i_)), "kernel size cannot be greater than actual input size"
     o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
     if any(resolve(k > s) for k,s in zip(k_,s_)) or any(d != 1 for d in d_):
+      # input size scaling factor to make sure shrink for stride is possible
+      f_ = [1 + int(resolve(o*s > i+d)) for o,s,i,d in zip(o_,s_,i_,d_)]
       # # repeats such that we don't need padding
-      # xup = self.repeat([1]*len(noop) + [o + ceildiv((o*s), i) for o,i,s in zip(o_,i_,s_)])
-      # # handle stride
-      # xup = xup.shrink(tuple(noop + [(0, o*(i+s)) for o,i,s in zip(o_,i_,s_)])).reshape(noop + flatten((o,i+s) for o,i,s in zip(o_,i_,s_)))
-      # # handle dilation
-      # xup = xup.shrink(
-      #   tuple(noop + flatten(((0,o), (0,k*d)) for o,k,d in zip(o_,k_,d_)))).reshape(noop + flatten((o,k,d) for o,k,d in zip(o_,k_,d_)))
-      # xup = xup.shrink(tuple(noop + flatten(((0,o), (0,k), (0,1)) for o,k in zip(o_,k_)))).reshape(noop + flatten((o,k) for o,k in zip(o_,k_)))
-      # # permute to move reduce to the end
-      # return xup.permute(*range(len(noop)), *[len(noop)+i*2 for i in range(len(i_))], *[len(noop)+i*2+1 for i in range(len(i_))])
-      x = self.repeat([1]*len(noop) + [ceildiv(k*(i*2+d),i) for k,i,d in zip(k_,i_,d_)])
+      x = self.repeat([1]*len(noop) + [ceildiv(k*(i*f+d),i) for k,i,d,f in zip(k_,i_,d_,f_)])
       # handle dilation
-      x = x.shrink(tuple(noop + [(0,k*(i*2+d)) for k,i,d in zip(k_,i_,d_)])).reshape(noop + flatten((k,(i*2+d)) for k,i,d in zip(k_,i_,d_)))
+      x = x.shrink(tuple(noop + [(0,k*(i*f+d)) for k,i,d,f in zip(k_,i_,d_,f_)])).reshape(noop + flatten((k,(i*f+d)) for k,i,d,f in zip(k_,i_,d_,f_)))
       # handle stride
       x = x.shrink(tuple(noop + flatten(((0,k), (0,o*s)) for k,o,s in zip(k_,o_,s_)))).reshape(noop + flatten((k,o,s) for k,o,s in zip(k_,o_,s_)))
       x = x.shrink(tuple(noop + flatten(((0,k), (0,o), (0,1)) for k,o in zip(k_,o_)))).reshape(noop + flatten((k,o) for k,o in zip(k_,o_)))
