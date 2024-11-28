@@ -371,6 +371,7 @@ break_sched = PatternMatcher([
   (UPatSrc({Ops.CONST, Ops.BIND}), generate_valid),
   # everything else is a VIEW of BUFFER that either realizes or fuses
   (UPatSrc(), lambda ctx,b,to_store,base: append_kernel(ctx, b, to_store, base) if b in ctx.realizes else append_op(ctx, b, to_store)),
+  # just load realized buffers
   (UPat(Ops.BUFFER, name="b").view(name="v"), lambda ctx,b,v: UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, v.dtype, (b, v.st.to_uop()))),
 ])
 
