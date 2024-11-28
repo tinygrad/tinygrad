@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, pathlib, struct, ctypes, tempfile, functools
 from typing import List, Any, Union, Tuple, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, _cache_dir, T
+from tinygrad.helpers import prod, to_mv, getenv, _cache_dir, T
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -92,9 +92,9 @@ class MetalCompiler(Compiler):
         ret = CompileError(errorMessage.decode())
     # llvm will create modules.timestamp in cache path and cache compilation of metal stdlib (250ms => 8ms compilation time)
     params = f'-fno-fast-math -std=metal3.1 --driver-mode=metal -x metal -fmodules-cache-path="{os.path.join(_cache_dir, "tinygrad")}"'
-    # source blob has to be padded to multiple of 4 but at least one 'b\x00' should be added
-    request = struct.pack('<Q', round_up(len(src)+1, 4)) + struct.pack('<Q', len(params)+1)
-    request += src.encode() + b'\x00'*(4-len(src)%4) + params.encode() + b'\x00'
+    # source blob has to be padded to multiple of 4 but at least one 'b\x00' should be added, params blob just has to be null terminated
+    src_padded, params_padded = src.encode() + b'\x00'*(4-len(src)%4), params.encode() + b'\x00'
+    request = struct.pack('<2Q', len(src_padded), len(params_padded)) + src_padded + params_padded
     compiler.MTLCodeGenServiceBuildRequest(ctypes.c_void_p(self.cgs), None, REQUEST_TYPE_COMPILE, request, len(request), to_block_literal(callback))
     if isinstance(ret, Exception): raise ret
     assert ret[:4] == b"MTLB" and ret[-4:] == b"ENDT", f"Invalid Metal library. {ret!r}"
