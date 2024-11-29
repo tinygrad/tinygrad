@@ -209,7 +209,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     raise NotImplementedError("backend should overload this function")
 
 class HCQSignal(Generic[DeviceType]):
-  def __init__(self, base_addr:int, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8):
+  def __init__(self, base_addr:int=0, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8):
     self.base_addr, self.value_addr, self.timestamp_addr = base_addr, base_addr+value_off, base_addr+timestamp_off
     self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
     self.timeline_for_device:Optional[DeviceType] = timeline_for_device
@@ -373,8 +373,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
                comp_queue_t:Type[HWQueue], copy_queue_t:Optional[Type[HWQueue]]):
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
-    self.timeline_signal:SignalType = self.signal_t(0, timeline_for_device=self)
-    self._shadow_timeline_signal:SignalType = self.signal_t(0, timeline_for_device=self)
+    self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
+    self._shadow_timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
     self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool, Optional[Dict]]] = []
     self.dep_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []

@@ -28,8 +28,8 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
-  def __init__(self, value=0, timeline_for_device:Optional[AMDDevice]=None):
-    super().__init__(AMDDevice.signals_pool.pop(), value, timeline_for_device, timestamp_divider=100, value_off=0, timestamp_off=8)
+  def __init__(self, base_addr:Optional[int]=None, **kwargs):
+    super().__init__(AMDDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100)
 
   def __del__(self): AMDDevice.signals_pool.append(self.base_addr)
 

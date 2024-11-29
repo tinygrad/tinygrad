@@ -36,8 +36,8 @@ class QCOMCompiler(CLCompiler):
   def disassemble(self, lib:bytes): fromimport('extra.disassemblers.adreno', 'disasm')(lib)
 
 class QCOMSignal(HCQSignal):
-  def __init__(self, value=0, timeline_for_device:Optional[QCOMDevice]=None):
-    super().__init__(QCOMDevice.signals_pool.pop(), value, timeline_for_device, timestamp_divider=19.2)
+  def __init__(self, base_addr:Optional[int]=None, **kwargs):
+    super().__init__(QCOMDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=19.2)
 
   def __del__(self): QCOMDevice.signals_pool.append(self.base_addr)
 
