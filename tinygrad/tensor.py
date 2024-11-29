@@ -1098,7 +1098,7 @@ class Tensor(SimpleMathTrait):
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
   def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
     class IndexDimension:
-      def __init__(self, index, size: int, device: Union[str, Tuple[str, ...]], previous: Union['Tensor.IndexDimension', None]):
+      def __init__(self, index, size: int, device: Union[str, Tuple[str, ...]], previous: Union[IndexDimension, None]):
         # we use an inferred dim value based on previous and next
         self.previous, self.next, boundary, stride = previous, None, [0, size], 1
         if previous is not None: previous.next = self
