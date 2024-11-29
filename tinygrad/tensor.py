@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, dataclasses, hashlib
 from contextlib import ContextDecorator
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, cast, get_args, Literal, TYPE_CHECKING
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Dict, cast, get_args, Literal, TYPE_CHECKING, SupportsIndex
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN
@@ -1084,7 +1084,7 @@ class Tensor(SimpleMathTrait):
   #       - reshape [dim_size_padded // stride, 1] -> [dim_size_padded // stride] and now you have your stride
   #   3. None indexing (no copy)
   #     - reshape (inject) a dim at the dim where there's None
-  #   4. Tensor indexing (copy) # TODO i gotta check if our new arange indexing schedule stuff is no copy
+  #   4. Tensor indexing (copy)
   #     - use Tensor.arange == tensor_index to create masks for dims with Tensors (adds a dim for each mask)
   #     - combine masks together with mul
   #     - apply mask to self by mask * self
@@ -1097,76 +1097,70 @@ class Tensor(SimpleMathTrait):
   #   3. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
   def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
-    x = self
-    class Indices(list):
-      none_counter = 0
-      def parse_and_append(self, index, dim:int):
-        size = 1 if index is None else x.shape[dim - self.none_counter]
-        boundary, stride = [0, size], 1
-        match index:
-          case list() | tuple() | Tensor():
-            if not isinstance(index, Tensor): index = Tensor(index, x.device, requires_grad=False)
-            if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-            index = (index < 0).where(size, 0) + index # treat negative index values
-          case int() | UOp(): # sint
-            if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
-            boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
-          case slice():
-            if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
-            if not all(isinstance(s,int) or s is None for s in (index.start,index.stop,index.step)): raise TypeError("only int slicing is supported")
-            # handle int slicing
-            *boundary, stride = index.indices(cast(int, size))
-            if resolve(stride * (boundary[1] - boundary[0]) < 0): boundary = [0, 0]
-            elif resolve(stride < 0): boundary = [boundary[1] + 1, boundary[0] + 1]
-            # update size for slice
-            size = ceildiv((boundary[1] - boundary[0]), abs(stride))
-          case None: self.none_counter += 1
-          case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
-        super().append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})
-
-    # wrap into a list
+    # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
     # turn scalar Tensors into const val for int indexing if possible
-    indices = [x._to_const_val(i) if isinstance(i, Tensor) and i.shape == () else i for i in indices]
+    x, indices = self, [self._to_const_val(i) if isinstance(i, Tensor) and i.shape == () else i for i in indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
     if len(ellipsis_idx := [dim for dim, i in enumerate(indices) if i is Ellipsis]) > 1: raise IndexError("indices can only have a single ellipsis")
     fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
     num_indices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
     if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
-    indices[fill_idx:fill_idx+1] = [slice(None)] * (x.ndim - num_indices)
-    if not indices: return x
+    indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_indices)
 
-    indices_parsed = Indices()
-    for dim, index in enumerate(indices): indices_parsed.parse_and_append(index, dim)
+    indices_parsed, dim = [], 0
+    for index in indices:
+      size = 1 if index is None else self.shape[dim]
+      boundary, stride = [0, size], 1  # defaults
+      match index:
+        case list() | tuple() | Tensor():
+          if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
+          if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
+          index = (index < 0).where(size, 0) + index # treat negative index values
+        case int() | UOp(): # sint
+          if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
+          boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
+        case slice():
+          if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
+          if not all(isinstance(s,int) or s is None for s in (index.start,index.stop,index.step)): raise TypeError("only int slicing is supported")
+          # handle int slicing
+          *boundary, stride = index.indices(cast(SupportsIndex, size))
+          if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
+          elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
+          # update size for slice
+          size = ceildiv((boundary[1] - boundary[0]), abs(stride))
+        case None: pass # do nothing
+        case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
+      indices_parsed.append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})
+      if index is not None: dim += 1
 
-    # movement ops
-    # skip None since we haven't injected dims yet
-    strides = tuple(index['stride'] for index in indices_parsed if index['index'] is not None)
-    # flip negative strides
-    x = x.shrink(index['boundary'] for index in indices_parsed if index['index'] is not None).flip(tuple(i for i,st in enumerate(strides) if st < 0))
-    # handle stride != 1 or -1
-    if any(abs(st) != 1 for st in strides):
-      strides = tuple(abs(s) for s in strides)
-      # pad shape to multiple of stride
-      if not all_int(x.shape): raise RuntimeError("symbolic shape not supprted")
-      x = x.pad(tuple((0, round_up(s, st) - s) for s, st in zip(x.shape, strides)))
-      x = x.reshape(tuple(flatten((s // st, st) for s, st in zip(x.shape, strides))))
-      x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
+    # movement op indexing
+    if mops := [i for i in indices_parsed if i['index'] is not None]:
+      # flip negative strides
+      shrinks, strides = zip(*((i['boundary'], i['stride']) for i in mops))
+      x = x.shrink(shrinks).flip(tuple(i for i,st in enumerate(strides) if st < 0))
+      # handle stride != 1 or -1
+      if any(abs(st) != 1 for st in strides):
+        strides = tuple(abs(s) for s in strides)
+        # pad shape to multiple of stride
+        if not all_int(x.shape): raise RuntimeError("symbolic shape not supprted")
+        x = x.pad(tuple((0, round_up(s, st) - s) for s, st in zip(x.shape, strides)))
+        x = x.reshape(tuple(flatten((s // st, st) for s, st in zip(x.shape, strides))))
+        x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
 
-    # dim injection and collapse
-    # skip int indexes because int collapses dim
+    # dim injection from None by including None and dim collapse by skipping int dim sizes
     x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], int)))
 
     # tensor indexing
-    if tensors := {dim:index for dim, index in enumerate(i for i in indices_parsed if not isinstance(i['index'], int))
-                   if isinstance(index['index'], Tensor)}:
-      masks, first_dim, last_dim = [], min(tensors.keys()), max(tensors.keys())
-      pre_reduce_shape = x.shape[:first_dim] + (big_shape := _broadcast_shape(*(t['index'].shape for t in tensors.values()))) + x.shape[first_dim:]
+    if tensor_index:=[(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
+      # unload the tensor object into actual tensors
+      dims, tensors, masks = [d for d,_ in tensor_index], cast(list[Tensor], [i['index'] for d,i in tensor_index]), []
+      pre_reduce_shape = x.shape[:dims[0]] + (big_shape := _broadcast_shape(*(t.shape for t in tensors))) + x.shape[dims[0]:]
 
       # create index masks
-      for dim, node in tensors.items():
-        try: i = node['index'].reshape(node['index'].shape + (1,)*(x.ndim - first_dim)).expand(pre_reduce_shape)
+      for dim, tensor in zip(dims, tensors):
+        try: i = tensor.reshape(tensor.shape + (1,)*(x.ndim - dims[0])).expand(pre_reduce_shape)
         except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
         a = Tensor.arange(x.shape[dim], device=self.device, requires_grad=False).reshape((x.shape[dim],) + (1,)*(x.ndim - dim - 1))
         masks.append(i == a)
@@ -1175,13 +1169,13 @@ class Tensor(SimpleMathTrait):
       mask: Tensor = functools.reduce(lambda x,y: x.mul(y), masks)
 
       # inject 1's for the extra dims added in create masks
-      reshape_arg = x.shape[:first_dim] + (1,) * len(big_shape) + x.shape[first_dim:]
+      reshape_arg = x.shape[:dims[0]] + (1,) * len(big_shape) + x.shape[dims[0]:]
       # sum reduce the extra dims introduced in create masks
-      x = (x.reshape(reshape_arg) * mask).sum(sum_axis:=tuple(i + len(big_shape) for i in tensors.keys()), acc_dtype=x.dtype)
+      x = (x.reshape(reshape_arg) * mask).sum(sum_axis:=tuple(d + len(big_shape) for d in dims), acc_dtype=x.dtype)
 
       # special permute case
-      if first_dim != 0 and len(tensors) != 1 and tuple(tensors.keys()) != tuple(range(first_dim, last_dim+1)):
-        x = x.permute(*range(first_dim, first_dim+len(big_shape)), *range(0, first_dim), *range(first_dim+len(big_shape), x.ndim))
+      if dims[0] != 0 and len(dims) != 1 and tuple(dims) != tuple(range(dims[0], dims[-1]+1)):
+        x = x.permute(*range(dims[0], dims[0]+len(big_shape)), *range(0, dims[0]), *range(dims[0]+len(big_shape), x.ndim))
 
       # for advanced setitem, returns whole tensor with indices replaced
       if v is not None:
@@ -1189,7 +1183,7 @@ class Tensor(SimpleMathTrait):
         # add back reduced dims from sum
         for dim in sum_axis: vb = vb.unsqueeze(dim)
         # run _masked_setitem on tuple of axis that is to be reduced to match self.shape
-        x = _masked_setitem(self, vb, mask, tuple(range(first_dim, first_dim + len(big_shape))))
+        x = _masked_setitem(self, vb, mask, tuple(range(dims[0], dims[0] + len(big_shape))))
 
     return x
 
