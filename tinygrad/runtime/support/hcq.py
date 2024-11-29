@@ -47,6 +47,8 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
         self.q_sints.append((len(self._q), self._new_sym(v)))
         self._q.append(0xbadc0ded)
 
+  # *** common commands  ***
+
   def timestamp(self, signal:SignalType):
     """
     Enqueues a timestamp command which records the current time in a signal after all previously enqueued commands are completed.
@@ -73,6 +75,8 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       value: The value to wait for
     """
 
+  # *** commands for compute queues ***
+
   def memory_barrier(self):
     """
     Enqueues a memory barrier command to ensure memory coherence between agents. Only on compute queues.
@@ -89,6 +93,8 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       local_size: The local work size
     """
 
+  # *** commands for copy queues ***
+
   def copy(self, dest:sint, src:sint, copy_size:int):
     """
     Enqueues a copy command to transfer data. Only on copy queues.
@@ -98,6 +104,8 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       src: The source of the copy
       copy_size: The size of data to copy
     """
+
+  # *** submit and bind commands  ***
 
   def bind(self, dev:DeviceType):
     """
