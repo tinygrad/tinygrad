@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 from tinygrad.dtype import dtypes
 from tinygrad.engine import jit
 from tinygrad.tensor import Tensor
@@ -14,15 +14,15 @@ def mix(states: Tensor, chunks: Tensor) -> Tensor:
       states[c] = states[c] + states[d]
       states[b] = rotr(states[b] ^ states[c], 12 if m is mx else 7)
 
-def compress_chunks(states: Tensor, chunks: Tensor, chain_vals: Tensor, n_end_blocks: int):
+def compress_chunks(states: Tensor, chunks: Tensor, chain_vals: Tensor, n_end_blocks: int, mix_jitted: Optional[Callable] = None):
   for i in range(16): # parallel over chunks, sequential over blocks
-    compressed = compress_blocks(states[i].contiguous(), chunks[i].contiguous(), chain_vals[i].contiguous())
+    compressed = compress_blocks(states[i].contiguous(), chunks[i].contiguous(), chain_vals[i].contiguous(), mix_jitted)
     if i < chunks.shape[1] - 1: states[i + 1, :8] = compressed[:8] # propagate chain vals to the next block
     if i == n_end_blocks - 1: final_chain_val = compressed[:8, -1:] # for partial chunks
   return compressed[:8] if n_end_blocks == 16 else compressed[:8, :-1].cat(final_chain_val, dim=-1)
 
-def compress_blocks(states: Tensor, chunks: Tensor, chain_vals: Tensor) -> Tensor:
-  mix_jitted = jit.TinyJit(mix)
+def compress_blocks(states: Tensor, chunks: Tensor, chain_vals: Tensor, mix_jitted: Optional[Callable] = None) -> Tensor:
+  mix_jitted = mix_jitted or mix
   for _ in range(6):
     mix_jitted(states, chunks)
     chunks.replace(chunks[[2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]])
@@ -67,23 +67,31 @@ def create_flags(data: Tensor, n_end_blocks: Optional[int], root: bool, parent: 
   if root: flags[end_idx, :, -1] = flags[end_idx, :, -1] + 8 # root flag
   return flags
 
-def compress(data, compressor, count, end_block_len, n_end_blocks, root, parent) -> Tensor:
+def compress(data, compressor, count, end_block_len, n_end_blocks, root, parent, mix_jitted: Optional[Callable] = None) -> Tensor:
   init_chain_vals = [0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19]
   iv = Tensor(init_chain_vals, dtype=dtypes.uint32).reshape(1, 8, 1).expand(16, 8, data.shape[-1]).contiguous()
   states = create_state(iv, count, end_block_len, n_end_blocks, create_flags(data, n_end_blocks, root, parent))
-  return compressor(states, data, iv, n_end_blocks)
+  return compressor(states, data, iv, n_end_blocks, mix_jitted)
 
 def blake3(tensor: Tensor) -> str:
   """Hash a Tensor in parallel using the BLAKE3 hashing algorithm."""
   data, n_end_blocks, end_block_len = tensor_to_blake_data(tensor)
-  chain_vals = compress(data, compress_chunks, 0, end_block_len, n_end_blocks, data.shape[-1] == 1, False)
+  mix_jitted = jit.TinyJit(mix) if data.shape[2] > 1 else None
+  chain_vals = compress(data, compress_chunks, 0, end_block_len, n_end_blocks, data.shape[-1] == 1, False, mix_jitted)
   n_steps = math.ceil(math.log2(max(chain_vals.shape[-1], 1)))
-  tree_compressor = lambda states, data, iv, _: compress_blocks(states[-1].contiguous(), data, iv[0].contiguous())
+  tree_compressor = lambda states, data, iv, _, mix_jitted: compress_blocks(states[-1].contiguous(), data, iv[0].contiguous(), mix_jitted)
   for i in range(n_steps): # tree-hash chain value pairs ~halving them in each step
     chain_vals, leftover_chain_val = pairwise_concat(chain_vals)
     pre_pad_size = chain_vals.shape[1] # use padding to keep the same batch dim - faster
     if i < n_steps - 1: chain_vals = chain_vals.pad(((0,0), (0, data.shape[2] - pre_pad_size)), value=0).contiguous()
-    chain_vals = compress(chain_vals, tree_compressor, None, None, None, i == n_steps - 1, True)
+    chain_vals = compress(chain_vals, tree_compressor, None, None, None, i == n_steps - 1, True, mix_jitted if i < n_steps - 1 else None)
     chain_vals = chain_vals[:8, :pre_pad_size if i < n_steps - 1 else None]
     if leftover_chain_val is not None: chain_vals = chain_vals.cat(leftover_chain_val, dim=1)
   return chain_vals[:, 0].flatten().bitcast(dtypes.uint8).data().tobytes()[:32].hex()
+
+if __name__ == "__main__":
+  import time
+  t = Tensor.ones(1024 * 1024 * 2000 , dtype=dtypes.uint8)
+  st = time.time()
+  print(blake3(t))
+  print(f"Hashed 1GB in {time.time()-st:.2f}s")
