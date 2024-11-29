@@ -105,9 +105,9 @@ class HCQGraph(MultiGraphRunner):
     self.copy_to_devs: Dict[HCQCompiled, Set[HCQCompiled]] = {dev: set() for dev in self.devices}
 
     # Create variable timeline signals for each device.
-    timeline_sigaddrs = {dev : Variable(f"timeline_sig_{dev.device}", 0, 0xffffffffffffffff, dtype=dtypes.uint64) for dev in self.devices}
-    self.virt_timeline_vals = {dev : Variable(f"timeline_var_{dev.device}", 0, 0xffffffff, dtype=dtypes.uint32) for dev in self.devices}
-    self.virt_timeline_signals = {dev : dev.signal_t(base_addr=timeline_sigaddrs[dev], timeline_for_device=dev) for dev in self.devices}
+    timeline_sigaddrs = {dev: Variable(f"timeline_sig_{dev.device}", 0, 0xffffffffffffffff, dtype=dtypes.uint64) for dev in self.devices}
+    self.virt_timeline_vals = {dev: Variable(f"timeline_var_{dev.device}", 0, 0xffffffff, dtype=dtypes.uint32) for dev in self.devices}
+    self.virt_timeline_signals = {dev: dev.signal_t(base_addr=timeline_sigaddrs[dev], timeline_for_device=dev) for dev in self.devices}
 
     for dev in self.devices:
       self.comp_queues[dev].memory_barrier().wait(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev]) \
@@ -158,8 +158,8 @@ class HCQGraph(MultiGraphRunner):
     if PROFILE and self.kickoff_value > 1: self.collect_timestamps()
 
     hcq_var_vals = {self.kickoff_var: self.kickoff_value, **var_vals,
-                    **{var : dev.timeline_value - 1 for dev, var in self.virt_timeline_vals.items()},
-                    **{sig.base_addr : dev.timeline_signal.base_addr for dev, sig in self.virt_timeline_signals.items()}}
+                    **{var: dev.timeline_value - 1 for dev, var in self.virt_timeline_vals.items()},
+                    **{sig.base_addr: dev.timeline_signal.base_addr for dev, sig in self.virt_timeline_signals.items()}}
 
     # Update rawbuffers
     for (j,i),input_idx in self.input_replace.items():
