@@ -45,8 +45,8 @@ def ceildiv(num, amt):
   ret = -(num//-amt)
   return ret if not isinstance(ret, float) else int(ret)
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
-def data64(data: int) -> Tuple[int, int]: return (data >> 32, data & 0xFFFFFFFF)
-def data64_le(data: int) -> Tuple[int, int]: return (data & 0xFFFFFFFF, data >> 32)
+def data64(data:Any) -> Tuple[Any, Any]: return (data >> 32, data & 0xFFFFFFFF)
+def data64_le(data:Any) -> Tuple[Any, Any]: return (data & 0xFFFFFFFF, data >> 32)
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   kvs = set([(k,v) for d in ds for k,v in d.items()])
   assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"

@@ -1,11 +1,10 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic
 import contextlib, decimal, statistics, random, json, atexit, time, ctypes
-from tinygrad import Variable
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv, to_mv
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator
-from tinygrad.ops import sym_infer, sint
+from tinygrad.ops import sym_infer, sint, Variable
 
 # **************** for HCQ Compatible Devices ****************
 
@@ -16,7 +15,7 @@ ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
 
 class HCQSignal(Generic[DeviceType]):
-  def __init__(self, base_addr:sint, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8):
+  def __init__(self, base_addr:sint=0, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8):
     self.base_addr, self.value_addr, self.timestamp_addr = base_addr, base_addr+value_off, base_addr+timestamp_off
     self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
     self.timeline_for_device:Optional[DeviceType] = timeline_for_device
@@ -67,10 +66,12 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
   """
 
-  def __init__(self): self._q, self.binded_device, self.q_sints, self.mv_sints, self.syms = [], None, [], [], []
+  def __init__(self): self._q, self.binded_device, self.q_sints, self.mv_sints, self.syms, self.cached_resolved_syms = [], None, [], [], [], []
 
   def _new_sym(self, sym:sint) -> int:
-    if sym not in self.syms: self.syms.append(sym)
+    if sym not in self.syms:
+      self.syms.append(sym)
+      self.cached_resolved_syms.append(None)
     return self.syms.index(sym)
 
   def q(self, *values):
@@ -118,7 +119,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     Enqueues a memory barrier command to ensure memory coherence between agents. Only on compute queues.
     """
 
-  def exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[sint,sint,sint], local_size:Tuple[sint,sint,sint]):
+  def exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
     """
     Enqueues an execution command for a kernel program. Only on compute queues.
 
@@ -129,7 +130,15 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       local_size: The local work size
     """
 
-  # def copy(self, )
+  def copy(self, dest:sint, src:sint, copy_size:int):
+    """
+    Enqueues a copy command to transfer data. Only on copy queues.
+
+    Args:
+      dest: The destination of the copy
+      src: The source of the copy
+      copy_size: The size of data to copy
+    """
 
   def bind(self, dev:DeviceType):
     """
@@ -145,13 +154,10 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       Implementing this method is optional but recommended for performance gains.
     """
 
-  def bind_sints(self, *vals:sint, struct:ctypes.Structure, start_field:str, fmt:str, mask:Optional[int]=None):
-    """
-    Binds multiple fields in a structure to be updated.
-    """
+  def bind_sints(self, *vals:sint, struct:ctypes.Structure, start_field:str, fmt, mask:Optional[int]=None):
     self.bind_sints_to_ptr(*vals, ptr=ctypes.addressof(struct) + getattr(type(struct), start_field).offset, fmt=fmt, mask=mask)
 
-  def bind_sints_to_ptr(self, *vals:sint, ptr:int, fmt:str, mask:Optional[int]=None):
+  def bind_sints_to_ptr(self, *vals:sint, ptr:int, fmt, mask:Optional[int]=None):
     mv = to_mv(ptr, 8*len(vals)).cast(fmt)
     for i, val in enumerate(vals):
       if isinstance(val, int):
@@ -161,10 +167,14 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
 
   def _apply_var_vals(self, var_vals:Dict[Variable, int]):
     resolved_syms = [sym_infer(sym, var_vals) for sym in self.syms]
-    for off, sym_idx in self.q_sints: self._q[off] = resolved_syms[sym_idx]
+    for off, sym_idx in self.q_sints:
+      if self.cached_resolved_syms[sym_idx] == resolved_syms[sym_idx]: continue
+      self._q[off] = resolved_syms[sym_idx]
     for mv, off, sym_idx, mask in self.mv_sints:
+      if self.cached_resolved_syms[sym_idx] == resolved_syms[sym_idx]: continue
       if mask is not None: mv[off] = (mv[off] & ~mask) | resolved_syms[sym_idx]
       else: mv[off] = resolved_syms[sym_idx]
+    self.cached_resolved_syms = resolved_syms
 
   def submit(self, dev:DeviceType, var_vals:Optional[Dict[Variable, int]]=None):
     """
@@ -177,6 +187,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     if var_vals is not None: self._apply_var_vals(var_vals)
     self._submit(dev)
     return self
+  def _submit(self, dev:DeviceType): raise NotImplementedError("need _submit")
 
 @contextlib.contextmanager
 def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Optional[Type[HWQueue]]=None, queue:Optional[HWQueue]=None):
