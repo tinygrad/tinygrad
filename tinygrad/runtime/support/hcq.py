@@ -371,6 +371,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
   def __init__(self, device:str, allocator:HCQAllocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
                comp_queue_t:Type[HWQueue], copy_queue_t:Optional[Type[HWQueue]]):
+    self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
     self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
