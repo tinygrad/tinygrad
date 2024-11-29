@@ -1,15 +1,15 @@
 import unittest, math
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.ops import UOps
+from tinygrad.ops import Ops
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import CI
 import numpy as np
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
   schedule = create_schedule(t.lazydata.lbs)
-  asts = [s for s in schedule if s.ast.op is UOps.SINK]
+  asts = [s for s in schedule if s.ast.op is Ops.SINK]
   assert len(asts) == desired_count
 
 class TestUnaryOpsConstFolding(unittest.TestCase):
@@ -130,13 +130,16 @@ class TestMovedConstFolding(unittest.TestCase):
 
   def test_cast_padded(self):
     # NOTE: this is folded due to CAST_BEFORE_VIEW
-    _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
-    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
-    _check_ast_count(0, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
-    np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
+    if is_dtype_supported(dtypes.int16):
+      _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
+      np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
+    if is_dtype_supported(dtypes.uint16):
+      _check_ast_count(0, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
+      np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
     # not folded
-    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
-    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
+    if is_dtype_supported(dtypes.int64):
+      _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
+      np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
 
 class TestReduceOpsConstFolding(unittest.TestCase):
   def test_const_sum(self):
@@ -151,7 +154,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).sum())
     np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).sum().numpy(), 4)
 
-    # NOTE: cannot just count the non-padded area because some UnaryOps f do not have f(0) = 0.
+    # NOTE: cannot just count the non-padded area because some Ops f do not have f(0) = 0.
     _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).exp().sum())
     np.testing.assert_allclose(Tensor.ones(4).pad(((1, 1),)).exp().sum().numpy(), 4 * math.e + 2)
 
@@ -248,7 +251,6 @@ class TestTautologicalCompare(unittest.TestCase):
     np.testing.assert_equal((Tensor(True) < Tensor(False)).numpy(), False)
     np.testing.assert_equal((Tensor(True) < Tensor(True)).numpy(), False)
 
-  @unittest.skip("not implemented yet")
   def test_a_eq_a(self):
     # self eq is always true for int or bool
     a = Tensor([1, 2, 3])
@@ -258,7 +260,6 @@ class TestTautologicalCompare(unittest.TestCase):
     a = Tensor([math.nan, 1.0, 2.0])
     np.testing.assert_equal((a == a).numpy(), [False, True, True])
 
-  @unittest.skip("not implemented yet")
   def test_a_ne_a(self):
     # self not eq is always false for int or bool
     a = Tensor([1, 2, 3])

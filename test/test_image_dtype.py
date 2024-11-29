@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Device, dtypes, Tensor, Context
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.realize import lower_schedule
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, unwrap
 
 @unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
 class TestImageCopy(unittest.TestCase):
@@ -104,10 +104,11 @@ class TestImageDType(unittest.TestCase):
       w2 = Tensor.zeros(8, 2)
       loss = x.image_dot(w1).image_dot(w2).float().max()
       loss.backward()
-      sched = w1.grad.schedule()
+      sched = unwrap(w1.grad).schedule()
+      self.assertEqual(len(sched), 10)
       for s,ei in zip(sched, lower_schedule(sched[:])):
         ei.run()
-        if s.outputs[0].dtype is dtypes.float:
+        if s.outputs[0].dtype == dtypes.float:
           lst = s.outputs[0].as_buffer().cast("f").tolist()
           print(lst)
           assert not np.any(np.isnan(lst))

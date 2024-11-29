@@ -1,7 +1,8 @@
 import itertools
 import random
+from tinygrad import Variable, dtypes
+from tinygrad.ops import UOp
 from tinygrad.helpers import DEBUG
-from tinygrad.shape.symbolic import Variable, NumNode
 random.seed(42)
 
 def add_v(expr, rng=None):
@@ -41,9 +42,9 @@ def gt(expr, rng=None):
   return expr > rng, rng
 
 # NOTE: you have to replace these for this test to pass
-from tinygrad.ops import python_alu, BinaryOps
-python_alu[BinaryOps.MOD] = lambda x,y: x%y
-python_alu[BinaryOps.IDIV] = lambda x,y: x//y
+from tinygrad.ops import python_alu, Ops
+python_alu[Ops.MOD] = lambda x,y: x%y
+python_alu[Ops.IDIV] = lambda x,y: x//y
 
 if __name__ == "__main__":
   ops = [add_v, div, mul, add_num, mod]
@@ -56,7 +57,7 @@ if __name__ == "__main__":
     tape = [random.choice(ops) for _ in range(random.randint(2, 30))]
     # 10% of the time, add one of lt, le, gt, ge
     if random.random() < 0.1: tape.append(random.choice([lt, le, gt, ge]))
-    expr = NumNode(0)
+    expr = UOp.const(dtypes.int, 0)
     rngs = []
     for t in tape:
       expr, rng = t(expr)

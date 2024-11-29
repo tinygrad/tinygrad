@@ -1,7 +1,6 @@
 import unittest
 import time
 import numpy as np
-from test.helpers import assert_equiv_uops
 from tinygrad import Tensor, dtypes
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import lower_schedule_item, run_schedule
@@ -43,8 +42,27 @@ class TestFusionOp(unittest.TestCase):
     c = Tensor([1,2,3,4])
     for _ in range(23): c = c + c
     sched3 = create_schedule([c.lazydata])
-    assert_equiv_uops(sched1[-1].ast, sched2[-1].ast)
-    with self.assertRaises(AssertionError): assert_equiv_uops(sched1[-1].ast, sched3[-1].ast)
+    self.assertEqual(sched1[-1].ast, sched2[-1].ast)
+    with self.assertRaises(AssertionError): self.assertEqual(sched1[-1].ast, sched3[-1].ast)
+    self.assertLess(time.perf_counter()-st, 2.0)
+
+  def test_recursive_pad(self):
+    st = time.perf_counter()
+    val = 1.0
+    a = Tensor(val).realize()
+    for _ in range(24): a = Tensor.stack(a, a)[0]
+    r = a.item()
+    self.assertEqual(r, val)
+    self.assertLess(time.perf_counter()-st, 2.0)
+
+  def test_recursive_reshape(self):
+    st = time.perf_counter()
+    a = Tensor.empty(32, 32).realize()
+    b = Tensor.empty(16, 2).realize()
+    r = a.sum(1)
+    for _ in range(24): r = r.reshape(16, 2) + b
+    sched = r.schedule()
+    self.assertEqual(len(sched), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
 
 if __name__ == '__main__':

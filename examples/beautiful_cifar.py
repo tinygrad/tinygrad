@@ -1,7 +1,7 @@
 import time
 start_tm = time.perf_counter()
 import math
-from typing import Tuple
+from typing import Tuple, cast
 import numpy as np
 from tinygrad import Tensor, nn, GlobalCounters, TinyJit, dtypes
 from tinygrad.helpers import partition, trange, getenv, Context
@@ -63,8 +63,8 @@ class ConvGroup:
     self.conv2 = nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
     self.norm1 = nn.BatchNorm(channels_out, track_running_stats=False, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
     self.norm2 = nn.BatchNorm(channels_out, track_running_stats=False, eps=1e-12, momentum=hyp['net']['batch_norm_momentum'])
-    self.norm1.weight.requires_grad = False
-    self.norm2.weight.requires_grad = False
+    cast(Tensor, self.norm1.weight).requires_grad = False
+    cast(Tensor, self.norm2.weight).requires_grad = False
   def __call__(self, x:Tensor) -> Tensor:
     x =    self.norm1(self.conv1(x).max_pool2d().float()).cast(dtypes.default_float).quick_gelu()
     return self.norm2(self.conv2(x).float()).cast(dtypes.default_float).quick_gelu()
@@ -133,7 +133,7 @@ if __name__ == "__main__":
   eval_batchsize = 2500
   @TinyJit
   @Tensor.test()
-  def val_step() -> Tensor:
+  def val_step() -> Tuple[Tensor, Tensor]:
     # TODO with Tensor.no_grad()
     Tensor.no_grad = True
     loss, acc = [], []
@@ -153,7 +153,7 @@ if __name__ == "__main__":
     idxs = np.arange(X_train.shape[0])
     np.random.shuffle(idxs)
     tidxs = Tensor(idxs, dtype='int')[:num_steps_per_epoch*batchsize].reshape(num_steps_per_epoch, batchsize)  # NOTE: long doesn't fold
-    train_loss = 0
+    train_loss:float = 0
     for epoch_step in (t:=trange(num_steps_per_epoch)):
       st = time.perf_counter()
       GlobalCounters.reset()

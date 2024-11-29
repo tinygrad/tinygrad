@@ -16,9 +16,10 @@ from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.device import Buffer
 from tinygrad.helpers import partition, Context, fetch, getenv, DEBUG, tqdm
-from tinygrad.engine.realize import run_schedule, lower_schedule, ExecItem, CompiledRunner, memory_planner
+from tinygrad.engine.realize import run_schedule, lower_schedule, ExecItem, CompiledRunner
+from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule
-from tinygrad.ops import UOps
+from tinygrad.ops import Ops
 from tinygrad.tensor import _to_np_dtype
 Device.DEFAULT = "GPU"
 
@@ -49,7 +50,7 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   print(f"{len(schedule)} schedule items depend on the input, {len(schedule_independent)} don't")
 
   # confirm no non-sink metaop in the (non independent) schedule except for the ones that load the input buffers
-  assert all(si.ast.op is UOps.SINK or out in input_lb for si in schedule for out in si.outputs), "has non SINK ops, can't compile to Thneed"
+  assert all(si.ast.op is Ops.SINK or out in input_lb for si in schedule for out in si.outputs), "has non SINK ops, can't compile to Thneed"
   return schedule, schedule_independent, inputs
 
 def test_vs_onnx(onnx_data, eis:Optional[List[ExecItem]], inputs:Dict[str, Tensor]):
@@ -105,7 +106,7 @@ if __name__ == "__main__":
   #exit(0)
 
   schedule, schedule_independent, inputs = get_schedule(onnx_data)
-  schedule, schedule_input = partition(schedule, lambda x: x.ast.op is UOps.SINK)
+  schedule, schedule_input = partition(schedule, lambda x: x.ast.op is Ops.SINK)
   print(f"{len(schedule_input)} inputs")
 
   run_schedule(schedule_independent)

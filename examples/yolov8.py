@@ -61,7 +61,7 @@ def compute_nms(boxes, scores, iou_threshold):
     if order.size == 1:
       break
     iou = box_iou(boxes[i][None, :], boxes[order[1:]])
-    inds = np.where(iou.squeeze() <= iou_threshold)[0]
+    inds = np.where(np.atleast_1d(iou.squeeze()) <= iou_threshold)[0]
     order = order[inds + 1]
   return np.array(keep)
 
@@ -282,7 +282,7 @@ class SPPF:
     self.cv2 = Conv_Block(c_ * 4, c2, 1, 1, padding=None)
 
     # TODO: this pads with 0s, whereas torch function pads with -infinity. This results in a < 2% difference in prediction which does not make a difference visually.
-    self.maxpool = lambda x : x.pad2d((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=k, stride=1)
+    self.maxpool = lambda x : x.pad((k // 2, k // 2, k // 2, k // 2)).max_pool2d(kernel_size=k, stride=1)
 
   def __call__(self, x):
     x = self.cv1(x)

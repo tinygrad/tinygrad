@@ -1,6 +1,5 @@
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv, DEBUG
-from tinygrad.engine.graph import print_globalcounters
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem
 from dataclasses import replace
@@ -36,4 +35,3 @@ if __name__ == "__main__":
   prg = replace(prg, src=new_src)
   ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
   for i in range(5): ei.run(wait=True)
-  if DEBUG < 2: print_globalcounters()

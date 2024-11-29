@@ -4,7 +4,7 @@ import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW
 from tinygrad.helpers import CI
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 np.random.seed(1337)
 x_init = np.random.randn(1,4).astype(np.float32)

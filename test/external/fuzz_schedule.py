@@ -2,11 +2,11 @@ import itertools
 import numpy as np
 from typing import DefaultDict, Dict, List, Set, Tuple, TypeVar, Union
 from tinygrad.device import Buffer
-from tinygrad.engine.realize import CustomOp, capturing, lower_schedule_item
+from tinygrad.engine.realize import capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, MULTIOUTPUT, colored, getenv
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.schedule import LBScheduleItem, _graph_schedule, ScheduleItem
-from tinygrad.ops import MetaOps
+from tinygrad.ops import Ops
 from tinygrad.tensor import Tensor, _to_np_dtype
 
 ctx_vars = { MULTIOUTPUT: (0, 1) }
@@ -33,7 +33,7 @@ def fuzz_schedule(outs:List[LazyBuffer]):
   for lsi in ts:
     for out in lsi.outputs:
       # freeze assign state before exec
-      if out.op is MetaOps.ASSIGN:
+      if out.op is Ops.ASSIGN:
         prerealized[out] = out.buffer.as_buffer()
         assign_targets[out.srcs[1]] = out
     for x in lsi.inputs:
@@ -50,9 +50,9 @@ def fuzz_schedule(outs:List[LazyBuffer]):
     rawbufs: Dict[LazyBuffer, Buffer] = {}
     for lsi in ts:
       for out in lsi.outputs:
-        base = rawbufs[lsi.inputs[0]].base if out.op is MetaOps.VIEW else None
+        base = rawbufs[lsi.inputs[0]].base if out.op is Ops.BUFFER_VIEW else None
         rawbufs[out] = Buffer(out.buffer.device, out.buffer.size, out.buffer.dtype, base=base)
-        if out.op is MetaOps.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
+        if out.op is Ops.ASSIGN: rawbufs[out].ensure_allocated().copyin(prerealized[out])
       for x in lsi.inputs:
         if x not in rawbufs:
           # override the assign_target after ASSIGN
@@ -72,7 +72,6 @@ def fuzz_schedule(outs:List[LazyBuffer]):
 def _exec_si(si:ScheduleItem, seed:int):
   ei = lower_schedule_item(si)
   if len(capturing): capturing[0].add(ei)
-  if isinstance(ei.prg, CustomOp): Tensor._seed = seed
   ei.run()
 
 T = TypeVar("T")

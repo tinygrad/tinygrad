@@ -107,7 +107,7 @@ class ResNet:
     is_feature_only = self.fc is None
     if is_feature_only: features = []
     out = self.bn1(self.conv1(x)).relu()
-    out = out.pad2d([1,1,1,1]).max_pool2d((3,3), 2)
+    out = out.pad([1,1,1,1]).max_pool2d((3,3), 2)
     out = out.sequential(self.layer1)
     if is_feature_only: features.append(out)
     out = out.sequential(self.layer2)
@@ -160,5 +160,5 @@ if __name__ == "__main__":
   jmodel = TinyJit(model)
   jmodel(Tensor.rand(1, 3, 224, 224)).realize()
   GlobalCounters.reset()
-  with Context(GRAPH=1): jmodel(Tensor.rand(1, 3, 224, 224)).realize()
+  jmodel(Tensor.rand(1, 3, 224, 224)).realize()
   for i in range(10): jmodel(Tensor.rand(1, 3, 224, 224))
