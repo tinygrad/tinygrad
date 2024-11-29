@@ -26,9 +26,9 @@ def hcq_command(func: Callable[Concatenate[QueueType, P], None]) -> Callable[Con
   """
   @functools.wraps(func)
   def __wrapper(self:QueueType, *args:P.args, **kwargs:P.kwargs) -> QueueType:
-    self.cmds_offset.append(len(self.q))
+    self.cmds_offset.append(len(self._q))
     func(self, *args, **kwargs)
-    self.cmds_len.append(len(self.q) - self.cmds_offset[-1])
+    self.cmds_len.append(len(self._q) - self.cmds_offset[-1])
     self.cmds_meta.append(func.__name__)
     return self
   return __wrapper
@@ -39,9 +39,11 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   Both compute and copy queues should have the following commands implemented.
   """
 
-  def __init__(self): self.q, self.binded_device, self.cmds_offset, self.cmds_len, self.cmds_meta = [], None, [], [], []
+  def __init__(self): self._q, self.binded_device, self.cmds_offset, self.cmds_len, self.cmds_meta = [], None, [], [], []
+  def q(self, *args) -> None: self._q.extend(args)
+
   def __len__(self): return len(self.cmds_offset)
-  def _patch(self, cmd_idx, offset, data): self.q[(st:=self.cmds_offset[cmd_idx]+offset):st+len(data)] = array.array('I', data)
+  def _patch(self, cmd_idx, offset, data): self._q[(st:=self.cmds_offset[cmd_idx]+offset):st+len(data)] = array.array('I', data)
   def _cur_cmd_idx(self) -> int:
     """
     Returns the index of the command currently being enqueued.
@@ -135,7 +137,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     Args:
       dev: The device to submit the queue to
     """
-    if self.q: self._submit(dev)
+    if self._q: self._submit(dev)
     return self
   def _submit(self, dev:DeviceType): raise NotImplementedError("backend should overload this function")
 
@@ -209,7 +211,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     raise NotImplementedError("backend should overload this function")
 
 class HCQSignal(Generic[DeviceType]):
-  def __init__(self, base_addr:int, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8):
+  def __init__(self, base_addr:int=0, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8):
     self.base_addr, self.value_addr, self.timestamp_addr = base_addr, base_addr+value_off, base_addr+timestamp_off
     self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
     self.timeline_for_device:Optional[DeviceType] = timeline_for_device
@@ -371,10 +373,11 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
   def __init__(self, device:str, allocator:HCQAllocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
                comp_queue_t:Type[HWQueue], copy_queue_t:Optional[Type[HWQueue]]):
+    self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
-    self.timeline_signal:SignalType = self.signal_t(0, timeline_for_device=self)
-    self._shadow_timeline_signal:SignalType = self.signal_t(0, timeline_for_device=self)
+    self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
+    self._shadow_timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
     self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool, Optional[Dict]]] = []
     self.dep_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []
