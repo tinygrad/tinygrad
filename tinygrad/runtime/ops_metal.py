@@ -50,11 +50,6 @@ def to_struct(*t: int, _type: type = ctypes.c_ulong):
   Struct._fields_ = [(f"field{i}", _type) for i in range(len(t))]
   return Struct(*t)
 
-def to_block_literal(callback):
-  # Blocks are apple's non-standart extension to add closures to C. See https://clang.llvm.org/docs/Block-ABI-Apple.html#high-level for struct layout.
-  # If fields other than invoke are not accessed we can just use ctypes.byref with negative offset to invoke field + add blockptr argument to function
-  return ctypes.byref(callback, -0x10)
-
 def wait_check(cbuf: Any):
   msg(cbuf, "waitUntilCompleted")
   error_check(msg(cbuf, "error", restype=objc_instance))
@@ -76,7 +71,7 @@ def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
 
 class MetalCompiler(Compiler):
   def __init__(self):
-    self.cgs = compiler.MTLCodeGenServiceCreate(b"tinygrad")
+    self.cgs = ctypes.c_void_p(compiler.MTLCodeGenServiceCreate(b"tinygrad"))
     super().__init__("compile_metal_direct")
   def __reduce__(self): return (MetalCompiler,()) # force pickle to create new instance for each multiprocessing fork
   def compile(self, src:str) -> bytes:
@@ -95,7 +90,11 @@ class MetalCompiler(Compiler):
     # source blob has to be padded to multiple of 4 but at least one 'b\x00' should be added, params blob just has to be null terminated
     src_padded, params_padded = src.encode() + b'\x00'*(4-len(src)%4), params.encode() + b'\x00'
     request = struct.pack('<2Q', len(src_padded), len(params_padded)) + src_padded + params_padded
-    compiler.MTLCodeGenServiceBuildRequest(ctypes.c_void_p(self.cgs), None, REQUEST_TYPE_COMPILE, request, len(request), to_block_literal(callback))
+    # The callback is actully not a callback but a block which is apple's non-standart extension to add closures to C.
+    # See https://clang.llvm.org/docs/Block-ABI-Apple.html#high-level for struct layout.
+    # Fields other than invoke are unused in this case so we can just use ctypes.byref with negative offset to invoke field, add blockptr as a first
+    # argument and pretend it's a normal callback
+    compiler.MTLCodeGenServiceBuildRequest(self.cgs, None, REQUEST_TYPE_COMPILE, request, len(request), ctypes.byref(callback, -0x10))
     if isinstance(ret, Exception): raise ret
     assert ret[:4] == b"MTLB" and ret[-4:] == b"ENDT", f"Invalid Metal library. {ret!r}"
     return ret
