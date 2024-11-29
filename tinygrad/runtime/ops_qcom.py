@@ -335,6 +335,7 @@ class QCOMDevice(HCQCompiled):
 
   def __init__(self, device:str=""):
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
+    self.device_id = 0
     QCOMDevice.dummy_addr = self._gpu_alloc(0x1000).va_addr
     QCOMDevice.signals_page = self._gpu_alloc(16 * 65536, uncached=True)
     QCOMDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, self.signals_page.size, 16)]

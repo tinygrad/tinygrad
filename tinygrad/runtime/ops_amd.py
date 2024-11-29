@@ -80,7 +80,7 @@ class AMDComputeQueue(HWQueue):
     self.acquire_mem()
     return self
 
-  def exec(self, prg:AMDProgram, args_state:AMDArgsState, global_size:Tuple[sint,sint,sint], local_size:Tuple[sint,sint,sint]):
+  def exec(self, prg:AMDProgram, args_state:AMDArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
     self.acquire_mem(gli=0, gl2=0)
 
     user_regs = [*data64_le(prg.dev.scratch.va_addr), 0xffffffff, 0xc00000] if prg.enable_private_segment_sgpr else []
