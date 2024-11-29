@@ -370,7 +370,7 @@ def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
   return UOp.const_with_shape(base.dtype, val, unwrap(base.st).shape)
 
-def append_kernel(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
+def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape((st:=unwrap(base.st)).shape).to_uop(), append_op(ctx, b, to_store))
   return UOp(Ops.LOAD, base.dtype, (b, st.to_uop()))
 
@@ -382,7 +382,7 @@ break_sched = PatternMatcher([
   # consts are always fused and generated
   (UPatScheduled({Ops.CONST, Ops.BIND}), generate_valid),
   # everything else is a VIEW of BUFFER that either realizes or fuses
-  (UPatScheduled(), lambda ctx,b,to_store,base: append_kernel(ctx, b, to_store, base) if b in ctx.realizes else append_op(ctx, b, to_store)),
+  (UPatScheduled(), lambda ctx,b,to_store,base: append_realize(ctx, b, to_store, base) if b in ctx.realizes else append_op(ctx, b, to_store)),
   # just load realized buffers
   (UPatRealized(), lambda ctx,b,base: UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, base.dtype, (b, base.st.to_uop()))),
 ])
