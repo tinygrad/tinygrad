@@ -624,6 +624,7 @@ class Kernel:
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           def fix_st(st: ShapeTracker, wd_pattern, tcd_pattern):
+            st = ShapeTracker.from_shape(st.shape) # st needs to be contiguous
             wd, warp_dims = self.global_dims,  tuple(sz for _, sz in tc.threads)
             tcd, tcd_dims = self.first_upcast, tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
 
@@ -638,9 +639,7 @@ class Kernel:
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
-            if tc_pattern:
-              st = srcs[i].st_arg if srcs[i].op is Ops.LOAD else srcs[i].src[0].st_arg
-              srcs[i] = srcs[i].view(fix_st(ShapeTracker.from_shape(st.shape), *tc_pattern))
+            if tc_pattern: srcs[i] = srcs[i].view(fix_st(srcs[i].st_arg if srcs[i].op is Ops.LOAD else srcs[i].src[0].st_arg, *tc_pattern))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
