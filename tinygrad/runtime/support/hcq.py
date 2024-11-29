@@ -248,8 +248,8 @@ class HCQSignal(Generic[DeviceType]):
       value: The value to wait for.
       timeout: Maximum time to wait in milliseconds. Defaults to 10s.
     """
-    start_time = time.time() * 1000
-    while (time_spent:=time.time() * 1000 - start_time) < timeout:
+    start_time = int(time.time() * 1000)
+    while (time_spent:=int(time.time() * 1000) - start_time) < timeout:
       if self.value >= value: return
       self._sleep(time_spent)
     raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
