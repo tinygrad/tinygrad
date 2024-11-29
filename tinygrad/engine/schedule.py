@@ -322,13 +322,14 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
 
 # **** Schedule creation and BFS toposort
 
-# ** ops in the schedule can either be pre realized or scheduled (fused/stored)
+# ** ops in the big graph can either be pre realized or scheduled (fused/stored)
 
 class UPatRealized(UPat):
   def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),))
 class UPatScheduled(UPat):
   def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),
                                                                        UPat(*args, **{**kwargs,"name":"to_store"})))
+
 # ** this decides which ops get realized
 
 def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> None: return ctx.update([(b, to_store)])
