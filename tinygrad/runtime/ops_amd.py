@@ -28,7 +28,7 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
-  def __init__(self, value=0, timeline_for_device:AMDDevice=None):
+  def __init__(self, value=0, timeline_for_device:Optional[AMDDevice]=None):
     super().__init__(AMDDevice.signals_pool.pop(), value, timeline_for_device, timestamp_divider=100, value_off=0, timestamp_off=8)
 
   def __del__(self): AMDDevice.signals_pool.append(self.base_addr)
@@ -145,10 +145,6 @@ class AMDComputeQueue(HWQueue):
   def _update_signal(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
     if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(signal.value_addr))
     if value is not None: self._patch(cmd_idx, offset=5, data=data64_le(value))
-
-    # Check if the signal command has mailptr part
-    if signal is not None and self.cmds_len[cmd_idx] > 8:
-      self._patch(cmd_idx, offset=11, data=[*data64_le(signal._event_mailbox_ptr), *data64_le(signal._event.event_id), signal._event.event_id])
 
   def bind(self, dev:AMDDevice):
     self.binded_device = dev
