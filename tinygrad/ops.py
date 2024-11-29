@@ -365,7 +365,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return UOp.const_with_shape(self.dtype, 0, new_st.shape)
     if new_st.contiguous and self.base.st.shape == new_st.shape: return self.base
     return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
-  def reshape(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).reshape(arg))
+  def reshape(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).reshape(arg))
+  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self.view(unwrap(self.st).pad(arg))
+  def expand(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).expand(arg))
+  def permute(self, arg:Tuple[int, ...]): return self.view(unwrap(self.st).permute(arg))
+  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self.view(unwrap(self.st).shrink(arg))
+  def stride(self, arg:Tuple[int, ...]): return self.view(unwrap(self.st).stride(arg))
 
   # *** uop Buffer stuff ***
 
@@ -900,9 +905,10 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
       e = u.src[0]
       something_changed = True
     offset += new_factor * e.vmin
-    gcd = math.gcd(factor, gcd)
     if u.op is Ops.CONST: rem_const += new_factor
-    else: terms.append((new_factor, e))
+    else:
+      gcd = math.gcd(factor, gcd)
+      terms.append((new_factor, e))
 
   match terms:  # cases like (x[4-5] + 3) % 4 -> -3*x[4-5]+15
     case [(f, e)] if e.vmax-e.vmin == 1: return ((offset+f)%c - offset%c)*(e - e.vmin) + offset%c
@@ -916,8 +922,8 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   else: # we have found factors such that vmin/vmax of the final expression is between 0 and c, we can remove the mod
     return functools.reduce(lambda r, t: r + min(t[0], t[0]-c, key=abs)*(t[1]-t[1].vmin), terms, x.const_like(offset))
 
-  if not something_changed: return None
-  return gcd*(functools.reduce(lambda r, t: r + t[0]//gcd * t[1], terms, x.const_like(rem_const//gcd)) % (c//gcd))
+  if not something_changed and gcd==1: return None
+  return gcd*(functools.reduce(lambda r, t: r + t[0]//gcd * t[1], terms, x.const_like(rem_const//gcd)) % (c//gcd)) + rem_const%gcd
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
