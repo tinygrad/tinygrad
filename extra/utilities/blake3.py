@@ -96,7 +96,8 @@ class BLAKE3:
 
 if __name__ == "__main__":
   import time
-  t = Tensor.ones(1024 * 1024 * 2000, dtype=dtypes.uint8)
-  st = time.time()
+  t = Tensor.rand(1024 * 1024 * 2000 // 2, dtype=dtypes.float16)
+  datasize = t.numel() * t.element_size()
+  st = time.monotonic()
   print(BLAKE3().hash(t))
-  print(f"Hashed 2GB in {time.time()-st:.2f}s")
+  print(f"Hashed {datasize/1024/1024/1024:.2f}GB in {time.monotonic()-st:.2f}s")
