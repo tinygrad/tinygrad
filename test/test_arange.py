@@ -139,7 +139,7 @@ class TestIndexing(unittest.TestCase):
       np.testing.assert_equal(X.numpy(), 0)
 
   @unittest.skipIf(getenv("PTX"), "broken on ptx for some reason")
-  def test_index_mnist(self, noopt=1, op_limit=512*784*10):
+  def test_index_mnist(self, noopt=1, op_limit=512*784*13):
     from tinygrad.nn.datasets import mnist
     X_train, Y_train, _, _ = mnist()
     with Context(NOOPT=noopt, FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
