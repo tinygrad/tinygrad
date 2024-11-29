@@ -96,6 +96,7 @@ class BLAKE3:
 
 if __name__ == "__main__":
   import time
+  import random
   from tinygrad.helpers import memsize_to_str
 
   # warmup on 100MB
@@ -117,12 +118,14 @@ if __name__ == "__main__":
     print(f"Time: {elapsed:.2f}s")
     print(f"Throughput: {throughput:.1f} MB/s")
 
+  n = random.randint(0, 250)
+
   sizes = [
-    100 * 1024 * 1024,      # 100 MB
-    500 * 1024 * 1024,      # 500 MB
-    1024 * 1024 * 1000,     # 1 GB
-    2 * 1024 * 1024 * 1000, # 2 GB
-    4 * 1024 * 1024 * 1024  # 4 GB
+    100 * 1024 * 1024 - n,      # 100 MB
+    500 * 1024 * 1024 - n,      # 500 MB
+    1024 * 1024 * 1000 - n,     # 1 GB
+    2 * 1024 * 1024 * 1000 - n, # 2 GB
+    4 * 1024 * 1024 * 1024 -n  # 4 GB
   ]
 
   print("Running BLAKE3 benchmarks...")
