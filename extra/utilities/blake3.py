@@ -96,8 +96,35 @@ class BLAKE3:
 
 if __name__ == "__main__":
   import time
-  t = Tensor.rand(1024 * 1024 * 2000 // 2, dtype=dtypes.float16)
-  datasize = t.numel() * t.element_size()
-  st = time.monotonic()
-  print(BLAKE3().hash(t))
-  print(f"Hashed {datasize/1024/1024/1024:.2f}GB in {time.monotonic()-st:.2f}s")
+  from tinygrad.helpers import memsize_to_str
+
+  # warmup on 100MB
+  print("\nWarming up...")
+  warmup_data = Tensor.rand(100 * 1024 * 1024 // 2, dtype=dtypes.float16)
+  BLAKE3().hash(warmup_data)
+
+  def benchmark_size(size_bytes):
+    print(f"\nBenchmarking {memsize_to_str(size_bytes)}...")
+    data = Tensor.rand(size_bytes // 2, dtype=dtypes.float16)
+    size = data.numel() * data.element_size()
+
+    start = time.time()
+    BLAKE3().hash(data)
+    end = time.time()
+
+    elapsed = end - start
+    throughput = size / elapsed / 1e6  # MB/s
+    print(f"Time: {elapsed:.2f}s")
+    print(f"Throughput: {throughput:.1f} MB/s")
+
+  sizes = [
+    100 * 1024 * 1024,      # 100 MB
+    500 * 1024 * 1024,      # 500 MB
+    1024 * 1024 * 1000,     # 1 GB
+    2 * 1024 * 1024 * 1000, # 2 GB
+    #4 * 1024 * 1024 * 1024  # 4 GB
+  ]
+
+  print("Running BLAKE3 benchmarks...")
+  for size in sizes:
+    benchmark_size(size)
