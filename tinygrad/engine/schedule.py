@@ -322,7 +322,7 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
 
 # **** Schedule creation and BFS toposort
 
-# ** ops in the big graph can either be pre realized or scheduled (fused/stored)
+# ** ops in the big graph can either be pre-realized or scheduled (fused/realized)
 
 class UPatRealized(UPat):
   def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),))
@@ -364,7 +364,7 @@ do_realize = PatternMatcher([
   (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
 ])
 
-# ** this breaks down realized ops into stores and rewrites the op to LOAD
+# ** this breaks down realized ops into STOREs and rewrites the ops to LOADs
 
 def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
