@@ -153,7 +153,6 @@ class TestJit(unittest.TestCase):
     for _ in range(5): add(a)
     self.assertEqual(a.item(), 5)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "TODO: fix this bug in WebGPU")
   def test_jit_assign_int8(self): self.test_jit_assign(dtypes.int8)
 
   def test_kwargs_jit(self):
