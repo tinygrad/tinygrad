@@ -80,9 +80,9 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       values: The values to enqueue in the queue.
     """
 
-    for v in values: 
+    for v in values:
       if isinstance(v, int): self._q.append(v)
-      else: 
+      else:
         self.q_sints.append((len(self._q), self._new_sym(v)))
         self._q.append(0xbadc0ded)
 
