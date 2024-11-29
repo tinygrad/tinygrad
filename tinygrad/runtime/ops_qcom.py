@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, functools, mmap, struct, array, decimal, math, sys
+import os, ctypes, functools, mmap, struct, array, math, sys
 assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Tuple, List, Any, cast, Optional
@@ -37,7 +37,7 @@ class QCOMCompiler(CLCompiler):
 
 class QCOMSignal(HCQSignal):
   def __init__(self, value=0, timeline_for_device:QCOMDevice=None):
-    super().__init__(QCOMDevice.signals_pool.pop(), value, is_timeline, timestamp_divider=19.2)
+    super().__init__(QCOMDevice.signals_pool.pop(), value, timeline_for_device, timestamp_divider=19.2)
 
   def __del__(self): QCOMDevice.signals_pool.append(self.base_addr)
 
