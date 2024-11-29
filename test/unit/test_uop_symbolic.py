@@ -423,6 +423,14 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(gidx%4+(gidx//4)*4, 0, 124, "gidx")
     self.helper_test_variable((gidx//4)*4+gidx%4, 0, 124, "gidx")
 
+  def test_div_mod_recombine2(self):
+    a = Variable("a", 0, 2)
+    b = Variable("b", 0, 100)
+    # TODO
+    with self.assertRaises(AssertionError):
+      self.helper_test_variable((31 * a + 1) % 30 + ((31 * a + 1) // 30) * 30, 1, 63, "((a*31)+1)")
+      self.helper_test_variable((31 * b + 1) % 18 + ((31 * b + 1) // 18) * 18, 1, 3101, "((b*31)+1)")
+
   def test_arange_unrolled4(self):
     gidx = Variable("gidx", 0, 2559)
     unrolled_div = (gidx+2561)//4+(gidx+2562)//4+(gidx+2560)//4+(gidx+2559)//4
