@@ -484,6 +484,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ret = graph_rewrite(self.simplify() if simplify else self, renderer)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
 
+# *** what was symbolic.py ***
+
+sint = Union[int, UOp]
+Variable = UOp
+
+ConstLike = Union[ConstType, Variable, Tuple[ConstType, ...]]
+
 @dataclass(frozen=True)
 class KernelInfo:
   local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
@@ -1199,13 +1206,6 @@ renderer = PatternMatcher([
   (UPat(Ops.WHERE, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[1].arg} if {x.src[0].arg} else {x.src[2].arg})")),
   (UPat(GroupOp.ALU, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[0].arg}{syms[x.op]}{x.src[1].arg})")),
 ])
-
-# *** what was symbolic.py ***
-
-sint = Union[int, UOp]
-Variable = UOp
-
-ConstLike = Union[ConstType, Variable, Tuple[ConstType, ...]]
 
 # *** uop swizzling ***
 
