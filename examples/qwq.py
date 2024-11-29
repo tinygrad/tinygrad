@@ -7,6 +7,9 @@ from tinygrad.helpers import fetch
 from extra.models.llama import Transformer
 from examples.llama3 import concat_weights, load
 
+# https://huggingface.co/Qwen/QwQ-32B-Preview/blob/main/config.json
+MODEL_PARAMS = dict(dim=5120, hidden_dim=27648, n_heads=40, n_layers=64, norm_eps=1e-05, vocab_size=152064, n_kv_heads=8,  rope_theta=1000000.0)
+
 # https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2/tokenization_qwen2.py
 # https://huggingface.co/yzsydlc/qwen2/blob/main/tokenization_qwen.py
 class Tokenizer:
@@ -18,31 +21,6 @@ class Tokenizer:
     self.special_tokens = {token: len(mergeable_ranks) + i for i, token in enumerate(special_tokens, start=special_token_start)}
     self.model = tiktoken.Encoding(name=model_path, pat_str=self.pat_str, mergeable_ranks=mergeable_ranks, special_tokens=self.special_tokens)
 
-# https://huggingface.co/Qwen/QwQ-32B-Preview/blob/main/config.json
-MODEL_PARAMS = dict(dim=5120, hidden_dim=27648, n_heads=40, n_layers=64, norm_eps=1e-05, vocab_size=152064, n_kv_heads=8,  rope_theta=1000000.0)
-# "attention_dropout": 0.0,
-# "bos_token_id": 151643,
-# "eos_token_id": 151645,
-# # "hidden_act": "silu", # already has
-# # "hidden_size": 5120, # hidden_dim
-# # "initializer_range": 0.02, # not needed cause not training model
-# # "intermediate_size": 27648, # dim
-# "max_position_embeddings": 32768,
-# "max_window_layers": 64,
-# # "model_type": "qwen2", # ignore
-# # "num_attention_heads": 40, # n_heads
-# # "num_hidden_layers": 64, # n_layers
-# # "num_key_value_heads": 8, # n_kv_heads
-# # "rms_norm_eps": 1e-05, # norm_eps
-# # "rope_theta": 1000000.0, # rope_theta
-# "sliding_window": 32768,
-# "tie_word_embeddings": false,
-# "torch_dtype": "bfloat16",
-# "transformers_version": "4.43.1",
-# "use_cache": true,
-# "use_sliding_window": false,
-# # "vocab_size": 152064 # vocab_size
-
 def build_transformer(model_path: Path):
   # load weights
   if model_path.is_dir():
@@ -52,8 +30,8 @@ def build_transformer(model_path: Path):
   else:
     weights = load(str(model_path))
 
-  model = Transformer(**MODEL_PARAMS, jit=True)
   # qwq arch is like the Llama arch but modified with 1) biases in wkqv 2) sliding window attn
+  model = Transformer(**MODEL_PARAMS, jit=True)
   new_layers = []
   for layer in model.layers:
     head_dim = MODEL_PARAMS['dim'] // MODEL_PARAMS['n_heads']
