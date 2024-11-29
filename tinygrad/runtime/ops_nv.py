@@ -73,9 +73,12 @@ assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 def nvmethod(subc, mthd, size, typ=2): return (typ << 28) | (size << 16) | (subc << 13) | (mthd >> 2)
 
 class NVSignal(HCQSignal):
-  def __init__(self, value=0, timeline_for_device:Optional[NVDevice]=None):
-    super().__init__(NVDevice.signals_pool.pop(), value, timeline_for_device, timestamp_divider=1000, value_off=0, timestamp_off=8)
-  def __del__(self): NVDevice.signals_pool.append(self.base_addr)
+  def __init__(self, base_addr:Optional[sint]=None, value=0, timeline_for_device:Optional[NVDevice]=None):
+    base_addr = NVDevice.signals_pool.pop() if base_addr is None else base_addr
+    super().__init__(base_addr, value, timeline_for_device, timestamp_divider=1000, value_off=0, timestamp_off=8)
+
+  def __del__(self):
+    if isinstance(self.base_addr, int): NVDevice.signals_pool.append(self.base_addr)
 
 class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
   def __init__(self):
@@ -98,10 +101,6 @@ class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
     self.q(nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(signal.value_addr), *data64_le(value), (3 << 0) | (1 << 24)) # ACQUIRE | PAYLOAD_SIZE_64BIT
     self.active_qmd = None
     return self
-
-  # def _update_wait(self, cmd_idx, signal=None, value=None):
-  #   if signal is not None: self.q[(sigoff:=self.cmds_offset[cmd_idx]+1):sigoff+2] = array.array('I', data64_le(signal.value_addr))
-  #   if value is not None: self.q[(valoff:=self.cmds_offset[cmd_idx]+3):valoff+2] = array.array('I', data64_le(value))
 
   def timestamp(self, signal): return self.signal(signal, 0)
 
@@ -143,17 +142,8 @@ class NVComputeQueue(NVCommandQueue):
 
     qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
 
-    self.bind_mv(to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, 12).cast('I'), *global_size)
-    self.bind_mv(to_mv(qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, 6).cast('H'), *local_size)
-    # qmd.cta_raster_width, qmd.cta_raster_height, qmd.cta_raster_depth = global_size
-    # qmd.cta_thread_dimension0, qmd.cta_thread_dimension1, qmd.cta_thread_dimension2 = local_size
-
-    # self.bind_field(qmd, 'cta_raster_width', 'I', global_size[0])
-    # self.bind_field(qmd, 'cta_raster_height', 'I', global_size[1])
-    # self.bind_field(qmd, 'cta_raster_depth', 'I', global_size[2])
-    # self.bind_field(qmd, 'cta_thread_dimension0', 'H', local_size[0])
-    # self.bind_field(qmd, 'cta_thread_dimension1', 'H', local_size[1])
-    # self.bind_field(qmd, 'cta_thread_dimension2', 'H', local_size[2])
+    self.bind_sints(*global_size, struct=qmd, start_field='cta_raster_width', fmt='I')
+    self.bind_sints(*local_size, struct=qmd, start_field='cta_thread_dimension0', fmt='H')
     qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = data64(args_state.ptr)
 
     if self.active_qmd is None:

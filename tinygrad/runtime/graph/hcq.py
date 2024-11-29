@@ -4,6 +4,7 @@ from tinygrad.helpers import round_up, PROFILE, memsize_to_str
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device
 from tinygrad import Variable, dtypes
+from tinygrad.ops import sint
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
 
@@ -100,11 +101,16 @@ class HCQGraph(MultiGraphRunner):
       last_j[enqueue_queue] = j
 
     # Build hardware queues.
+    self.input_replace_to_var:Dict[Tuple[int, int], str] = {}
     self.copy_to_devs: Dict[HCQCompiled, Set[HCQCompiled]] = {dev: set() for dev in self.devices}
 
-    self.timeline_vars = {dev : Variable(f"timeline_var_{dev.device_id}", 0, 0xffffffff, dtype=dtypes.uint32) for dev in self.devices}
+    # Create variable timeline signals for each device.
+    timeline_sigaddrs = {dev : Variable(f"timeline_sig_{dev.device_id}", 0, 0xffffffffffffffff, dtype=dtypes.uint64) for dev in self.devices}
+    self.virt_timeline_vals = {dev : Variable(f"timeline_var_{dev.device_id}", 0, 0xffffffff, dtype=dtypes.uint32) for dev in self.devices}
+    self.virt_timeline_signals = {dev : dev.signal_t(base_addr=timeline_sigaddrs[dev], timeline_for_device=dev) for dev in self.devices}
+
     for dev in self.devices:
-      self.comp_queues[dev].memory_barrier().wait(dev.timeline_signal, self.timeline_vars[dev]) \
+      self.comp_queues[dev].memory_barrier().wait(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev]) \
                            .wait(self.signals['CPU'], self.kickoff_var).signal(self.signals[dev], self.kickoff_var)
 
     for j,ji in enumerate(jit_cache):
@@ -122,7 +128,9 @@ class HCQGraph(MultiGraphRunner):
       elif isinstance(ji.prg, BufferXfer):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         cast(HCQAllocator, Device[src.device].allocator).map(dest._buf)
-        enqueue_queue.copy(dest._buf.va_addr, src._buf.va_addr, dest.nbytes)
+
+        # TODO: For now sints is only for copies, should refactor to support exec as well.
+        enqueue_queue.copy(self._buf_addr_as_sint(dest._buf.va_addr), self._buf_addr_as_sint(src._buf.va_addr), dest.nbytes)
         self.copy_to_devs[cast(HCQCompiled, Device[dest.device])].add(cast(HCQCompiled, Device[src.device]))
 
       # Encode finish profile timestamp (if needed).
@@ -134,7 +142,7 @@ class HCQGraph(MultiGraphRunner):
       for dep_dev in list(self.copy_to_devs[dev]) + [dev]:
         if dep_dev in self.copy_queues: self.comp_queues[dev].wait(self.signals[(copy_q:=self.copy_queues[dep_dev])], cast(int, last_j[copy_q]) + 1)
 
-      self.comp_queues[dev].signal(dev.timeline_signal, self.timeline_vars[dev] + 1).bind(dev)
+      self.comp_queues[dev].signal(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev] + 1).bind(dev)
       if dev in self.copy_queues: self.copy_queues[dev].bind(dev)
 
     self.last_timeline: Dict[HCQCompiled, Tuple[HCQSignal, int]] = {dev: (dev.timeline_signal, 0) for dev in self.devices}
@@ -149,18 +157,21 @@ class HCQGraph(MultiGraphRunner):
 
     if PROFILE and self.kickoff_value > 1: self.collect_timestamps()
 
+    hcq_var_vals = {self.kickoff_var: self.kickoff_value, **var_vals,
+                    **{var : dev.timeline_value - 1 for dev, var in self.virt_timeline_vals.items()},
+                    **{sig.base_addr : dev.timeline_signal.base_addr for dev, sig in self.virt_timeline_signals.items()}}
+
     # Update rawbuffers
     for (j,i),input_idx in self.input_replace.items():
-      if j in self.ji_args: self.ji_args[j].update_buffer(i, input_rawbuffers[input_idx]._buf)
-      else: self.op_cmd_idx[j][0].update_copy(self.op_cmd_idx[j][1], **{('dest' if i == 0 else 'src'): input_rawbuffers[input_idx]._buf.va_addr})
+      if (var:=self.input_replace_to_var.get((j,i))) is not None: hcq_var_vals[var] = input_rawbuffers[input_idx]._buf.va_addr
+      else: self.ji_args[j].update_buffer(i, input_rawbuffers[input_idx]._buf)
 
     # Update var_vals
     for j, i, v in self.updated_vars(var_vals): self.ji_args[j].update_var(i, v)
 
-    upd_dict = {**var_vals, self.kickoff_var: self.kickoff_value, **{var : dev.timeline_value - 1 for dev, var in self.timeline_vars.items()}}
     for dev in self.devices:
-      self.comp_queues[dev].submit(dev, upd_dict)
-      if (copy_queue:=self.copy_queues.get(dev, None)) is not None: copy_queue.submit(dev, upd_dict)
+      self.comp_queues[dev].submit(dev, hcq_var_vals)
+      if (copy_queue:=self.copy_queues.get(dev, None)) is not None: copy_queue.submit(dev, hcq_var_vals)
 
       self.last_timeline[dev] = (dev.timeline_signal, dev.timeline_value)
       dev.timeline_value += 1
@@ -180,6 +191,12 @@ class HCQGraph(MultiGraphRunner):
       for x in deps:
         (b_st,_), (b_en,_), b_dev, _, b_is_cp, _, _ = self.prof_records[x]
         dev.dep_prof_records += [(timestamps[b_st], timestamps[b_en], b_dev, b_is_cp, timestamps[st], timestamps[en], dev, is_cp)]
+
+  def _buf_addr_as_sint(self, j:int, i:int, buf:HCQBuffer) -> sint:
+    if (j, i) in self.input_replace:
+      self.input_replace_to_var[(j,i)] = Variable(f"input_{j}_{i}", 0, 0xffffffffffffffff, dtype=dtypes.uint64)
+      return self.input_replace_to_var[(j,i)]
+    return buf.va_addr
 
   def __del__(self):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])

@@ -28,10 +28,12 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
-  def __init__(self, value=0, timeline_for_device:Optional[AMDDevice]=None):
-    super().__init__(AMDDevice.signals_pool.pop(), value, timeline_for_device, timestamp_divider=100, value_off=0, timestamp_off=8)
+  def __init__(self, base_addr:Optional[sint]=None, value=0, timeline_for_device:Optional[AMDDevice]=None):
+    base_addr = AMDDevice.signals_pool.pop() if base_addr is None else base_addr
+    super().__init__(base_addr, value, timeline_for_device, timestamp_divider=100, value_off=0, timestamp_off=8)
 
-  def __del__(self): AMDDevice.signals_pool.append(self.base_addr)
+  def __del__(self):
+    if isinstance(self.base_addr, int): AMDDevice.signals_pool.append(self.base_addr)
 
   def _sleep(self, time_spent_waiting_ms:int):
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
@@ -83,11 +85,12 @@ class AMDComputeQueue(HWQueue):
     user_regs = [*data64_le(prg.dev.scratch.va_addr), 0xffffffff, 0xc00000] if prg.enable_private_segment_sgpr else []
     if prg.enable_dispatch_ptr:
       dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=args_state.ptr + prg.kernargs_segment_size)
-      dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
-      dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
+
+      self.bind_sints(*local_size, struct=dp, start_field='workgroup_size_x', fmt='H')
+      self.bind_sints(*[g*l for g,l in zip(global_size, local_size)], struct=dp, start_field='grid_size_x', fmt='I')
       dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, args_state.ptr
       user_regs += [*data64_le(dp_addr)]
-      # self.cmd_idx_to_dispatch_packet[cmd_idx] = dp
+
     user_regs += [*data64_le(args_state.ptr)]
 
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8))
@@ -158,9 +161,9 @@ class AMDCopyQueue(HWQueue):
     super().q(*arr)
     self.internal_cmd_sizes.append(len(arr))
 
-  def copy(self, dest, src, copy_size):
+  def copy(self, dest:sint, src:sint, copy_size:int):
     copied, copy_commands = 0, (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
-    # self.copy_cmds_per_copy[len(self) - 1] = copy_commands
+
     for _ in range(copy_commands):
       step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
 
@@ -170,30 +173,20 @@ class AMDCopyQueue(HWQueue):
       copied += step_copy_size
     return self
 
-  # def _update_copy(self, cmd_idx, dest=None, src=None):
-  #   for i in range(self.copy_cmds_per_copy[cmd_idx]):
-  #     if src is not None: self._patch(cmd_idx, offset=3+i*7, data=[*data64_le(src + SDMA_MAX_COPY_SIZE*i)])
-  #     if dest is not None: self._patch(cmd_idx, offset=5+i*7, data=[*data64_le(dest + SDMA_MAX_COPY_SIZE*i)])
-
-  def signal(self, signal:AMDSignal, value=0):
+  def signal(self, signal:AMDSignal, value:sint=0):
     self.q(amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal.value_addr), value)
 
     if (dev:=signal.timeline_for_device) is not None:
-      self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id])
-      self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id)])
+      self.q(amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
+      self.q(amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id))
 
-  def wait(self, signal:AMDSignal, value=0):
+    return self
+
+  def wait(self, signal:AMDSignal, value:sint=0):
     self.q(amd_gpu.SDMA_OP_POLL_REGMEM | amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(signal.value_addr), value, 0xffffffff,
       amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
     return self
-
-  # def _update_signal(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
-  #   return self._update_wait(cmd_idx, signal, value) # the same offsets and commands
-
-  # def _update_wait(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
-  #   if signal is not None: self._patch(cmd_idx, offset=1, data=data64_le(signal._value_addr))
-  #   if value is not None: self._patch(cmd_idx, offset=3, data=[value])
 
   def timestamp(self, signal:AMDSignal):
     self.q(amd_gpu.SDMA_OP_TIMESTAMP | amd_gpu.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),

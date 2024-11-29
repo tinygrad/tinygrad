@@ -15,13 +15,14 @@ ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
 
 class HCQSignal(Generic[DeviceType]):
-  def __init__(self, base_addr:int, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8):
+  def __init__(self, base_addr:sint, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8):
     self.base_addr, self.value_addr, self.timestamp_addr = base_addr, base_addr+value_off, base_addr+timestamp_off
     self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
     self.timeline_for_device:Optional[DeviceType] = timeline_for_device
 
-    self.value_mv, self.timestamp_mv = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q')
-    self.value_mv[0] = value
+    if isinstance(base_addr, int):
+      self.value_mv, self.timestamp_mv = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q')
+      self.value_mv[0] = value
 
   @property
   def value(self) -> int: return self.value_mv[0]
@@ -63,16 +64,27 @@ class HCQSignal(Generic[DeviceType]):
 class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   """
   A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
-  Both compute and copy queues should have the following commands implemented.
   """
 
   def __init__(self): self._q, self.binded_device, self.q_sints, self.mv_sints, self.syms = [], None, [], [], []
+
+  def _new_sym(self, sym:sint) -> int:
+    if sym not in self.syms: self.syms.append(sym)
+    return self.syms.index(sym)
+
   def q(self, *values):
+    """
+    Enqueues values in the queue.
+
+    Args:
+      values: The values to enqueue in the queue.
+    """
+
     for v in values: 
       if isinstance(v, int): self._q.append(v)
       else: 
         self.q_sints.append((len(self._q), self._new_sym(v)))
-        self._q.append(0xbad0c0de)
+        self._q.append(0xbadc0ded)
 
   def timestamp(self, signal:SignalType):
     """
@@ -116,6 +128,8 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       local_size: The local work size
     """
 
+  # def copy(self, )
+
   def bind(self, dev:DeviceType):
     """
     Associates the queue with a specific device for optimized execution.
@@ -130,30 +144,26 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       Implementing this method is optional but recommended for performance gains.
     """
 
-  def _new_sym(self, sym:sint) -> int:
-    if sym not in self.syms: self.syms.append(sym)
-    return self.syms.index(sym)
+  def bind_sints(self, *vals:sint, struct:ctypes.Structure, start_field:str, fmt:str, mask:Optional[int]=None):
+    """
+    Binds multiple fields in a structure to be updated.
+    """
+    self.bind_sints_to_ptr(ctypes.addressof(struct) + getattr(type(struct), start_field).offset, fmt, vals, mask)
 
-  def bind_field(self, st, fname, fmt, val, mask=None):
-    mv = to_mv(ctypes.addressof(st) + getattr(type(st), fname).offset, 8).cast(fmt)
-    if isinstance(val, int):
-      if mask is not None: mv[0] = (mv[0] & ~mask) | val
-      else: mv[0] = val
-    else: self.mv_sints.append((mv, 0, self._new_sym(val), mask))
-
-  def bind_mv(self, mv, *vals:sint):
+  def bind_sints_to_ptr(self, ptr:int, fmt:str, *vals:sint, mask:Optional[int]=None):
+    mv = to_mv(ptr, 8*len(vals)).cast(fmt)
     for i, val in enumerate(vals):
       if isinstance(val, int): mv[i] = val
-      else: self.mv_sints.append((mv, i, self._new_sym(val), None))
+      else: self.mv_sints.append((mv, i, self._new_sym(val), mask))
 
-  def _apply_var_vals(self, var_vals):
+  def _apply_var_vals(self, var_vals:Dict[Variable, int]):
     resolved_syms = [sym_infer(sym, var_vals) for sym in self.syms]
     for off, sym_idx in self.q_sints: self._q[off] = resolved_syms[sym_idx]
     for mv, off, sym_idx, mask in self.mv_sints:
       if mask is not None: mv[off] = (mv[off] & ~mask) | resolved_syms[sym_idx]
       else: mv[off] = resolved_syms[sym_idx]
 
-  def submit(self, device, var_vals=None):
+  def submit(self, dev:DeviceType, var_vals:Optional[Dict[Variable, int]]=None):
     """
     Submits the command queue to a specific device for execution.
 
@@ -162,183 +172,8 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     """
 
     if var_vals is not None: self._apply_var_vals(var_vals)
-    self._submit(device)
+    self._submit(dev)
     return self
-
-# class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
-#   """
-#   A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
-#   Both compute and copy queues should have the following commands implemented.
-#   """
-
-#   def __init__(self): self.q, self.binded_device, self.cmds_offset, self.cmds_len, self.cmds_meta = [], None, [], [], []
-#   def __len__(self): return len(self.cmds_offset)
-#   def _patch(self, cmd_idx, offset, data): self.q[(st:=self.cmds_offset[cmd_idx]+offset):st+len(data)] = array.array('I', data)
-#   def _cur_cmd_idx(self) -> int:
-#     """
-#     Returns the index of the command currently being enqueued.
-#     Should be called only within functions that enqueue commands and are decorated with `@hcq_command`.
-#     """
-#     return len(self) - 1
-
-#   @hcq_command
-#   def signal(self, signal:SignalType, value:int):
-#     """
-#     Enqueues a signal command which sets the signal to the given value, ensuring all previous operations are completed.
-
-#     Args:
-#       signal: The signal to set
-#       value: The value to set the signal to
-#     """
-#     self._signal(signal, value)
-#   def _signal(self, signal:SignalType, value:int): raise NotImplementedError("backend should overload this function")
-
-#   @hcq_command
-#   def wait(self, signal:SignalType, value:int):
-#     """
-#     Enqueues a wait command which halts execution until the signal is greater than or equal to a specific value.
-
-#     Args:
-#       signal: The signal to wait on
-#       value: The value to wait for
-#     """
-#     self._wait(signal, value)
-#   def _wait(self, signal, value): raise NotImplementedError("backend should overload this function")
-
-#   @hcq_command
-#   def timestamp(self, signal:SignalType):
-#     """
-#     Enqueues a timestamp command which records the current time in a signal after all previously enqueued commands are completed.
-
-#     Args:
-#       signal: The signal to store the timestamp
-#     """
-#     self._timestamp(signal)
-#   def _timestamp(self, signal): raise NotImplementedError("backend should overload this function")
-
-#   def update_signal(self, cmd_idx:int, signal:Optional[SignalType]=None, value:Optional[int]=None):
-#     """
-#     Updates a previously queued signal command.
-
-#     Args:
-#       cmd_idx: Index of the signal command to update
-#       signal: New signal to set (if None, keeps the original)
-#       value: New value to set (if None, keeps the original)
-#     """
-#     if self.cmds_meta[cmd_idx] != "signal": raise RuntimeError("called update_signal not on a signal command")
-#     self._update_signal(cmd_idx, signal, value)
-#     return self
-#   def _update_signal(self, cmd_idx:int, signal:Optional[SignalType], value:Optional[int]):
-#     raise NotImplementedError("backend should overload this function")
-
-#   def update_wait(self, cmd_idx:int, signal:Optional[SignalType]=None, value:Optional[int]=None):
-#     """
-#     Updates a previously queued wait command.
-
-#     Args:
-#       cmd_idx: Index of the wait command to update
-#       signal: New signal to wait on (if None, keeps the original)
-#       value: New value to wait for (if None, keeps the original)
-#     """
-#     if self.cmds_meta[cmd_idx] != "wait": raise RuntimeError("called update_wait not on a wait command")
-#     self._update_wait(cmd_idx, signal, value)
-#     return self
-#   def _update_wait(self, cmd_idx:int, signal:Optional[SignalType], value:Optional[int]):
-#     raise NotImplementedError("backend should overload this function")
-
-#   def bind(self, dev:DeviceType):
-#     """
-#     Associates the queue with a specific device for optimized execution.
-
-#     This optional method allows backend implementations to tailor the queue for efficient use on the given device. When implemented, it can eliminate
-#     the need to copy queues into the device, thereby enhancing performance.
-
-#     Args:
-#       dev: The target device for queue optimization.
-
-#     Note:
-#       Implementing this method is optional but recommended for performance gains.
-#     """
-
-#   def submit(self, dev:DeviceType):
-#     """
-#     Submits the command queue to a specific device for execution.
-
-#     Args:
-#       dev: The device to submit the queue to
-#     """
-#     if self.q: self._submit(dev)
-#     return self
-#   def _submit(self, dev:DeviceType): raise NotImplementedError("backend should overload this function")
-
-#   # *** commands for compute queues ***
-
-#   @hcq_command
-#   def memory_barrier(self):
-#     """
-#     Enqueues a memory barrier command to ensure memory coherence between agents. Only on compute queues.
-#     """
-#     self._memory_barrier()
-#   def _memory_barrier(self): pass
-
-#   @hcq_command
-#   def exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
-#     """
-#     Enqueues an execution command for a kernel program. Only on compute queues.
-
-#     Args:
-#       prg: The program to execute
-#       args_state: The args state to execute program with
-#       global_size: The global work size
-#       local_size: The local work size
-#     """
-#     self._exec(prg, args_state, global_size, local_size)
-#   def _exec(self, prg:ProgramType, args_state:ArgsStateType, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int]):
-#     raise NotImplementedError("backend should overload this function")
-
-#   def update_exec(self, cmd_idx:int, global_size:Optional[Tuple[int,int,int]]=None, local_size:Optional[Tuple[int,int,int]]=None):
-#     """
-#     Updates a previously queued execution command. Only on compute queues.
-
-#     Args:
-#       cmd_idx: Index of the execution command to update
-#       global_size: New global work size (if None, keeps the original)
-#       local_size: New local work size (if None, keeps the original)
-#     """
-#     if self.cmds_meta[cmd_idx] != "exec": raise RuntimeError("called update_exec not on an exec command")
-#     self._update_exec(cmd_idx, global_size, local_size)
-#     return self
-#   def _update_exec(self, cmd_idx, global_size, local_size): raise NotImplementedError("backend should overload this function")
-
-#   # *** commands for copy queues ***
-
-#   @hcq_command
-#   def copy(self, dest:int, src:int, copy_size:int):
-#     """
-#     Enqueues a copy command to transfer data. Only on copy queues.
-
-#     Args:
-#       dest: The destination of the copy
-#       src: The source of the copy
-#       copy_size: The size of data to copy
-#     """
-#     self._copy(dest, src, copy_size)
-#   def _copy(self, dest:int, src:int, copy_size:int): raise NotImplementedError("backend should overload this function")
-
-#   def update_copy(self, cmd_idx:int, dest:Optional[int]=None, src:Optional[int]=None):
-#     """
-#     Updates a previously queued copy command. Only on copy queues.
-
-#     Args:
-#       cmd_idx: Index of the copy command to update
-#       dest: New destination of the copy (if None, keeps the original)
-#       src: New source of the copy (if None, keeps the original)
-#     """
-#     if self.cmds_meta[cmd_idx] != "copy": raise RuntimeError("called update_copy not on an copy command")
-#     self._update_copy(cmd_idx, dest, src)
-#     return self
-#   def _update_copy(self, cmd_idx:int, dest:Optional[int], src:Optional[int]):
-#     raise NotImplementedError("backend should overload this function")
 
 @contextlib.contextmanager
 def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Optional[Type[HWQueue]]=None, queue:Optional[HWQueue]=None):
@@ -459,8 +294,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
                comp_queue_t:Type[HWQueue], copy_queue_t:Optional[Type[HWQueue]]):
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
-    self.timeline_signal:SignalType = self.signal_t(0, timeline_for_device=self)
-    self._shadow_timeline_signal:SignalType = self.signal_t(0, timeline_for_device=self)
+    self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
+    self._shadow_timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
     self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool, Optional[Dict]]] = []
     self.dep_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []
