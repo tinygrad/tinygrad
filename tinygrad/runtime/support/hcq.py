@@ -14,10 +14,13 @@ ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
 
-class HCQSignal:
-  def __init__(self, base_addr:int, value:int=0, is_timeline:bool=False, timestamp_divider=decimal.Decimal(1), value_off=0, timestamp_off=8):
-    self.base_addr, self.value_addr, self.timestamp_addr, self.ts_divider = base_addr, base_addr+value_off, base_addr+timestamp_off, timestamp_divider
-    self.value_mv, self.timestamp_mv, self.is_timeline = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q'), is_timeline
+class HCQSignal(Generic[DeviceType]):
+  def __init__(self, base_addr:int, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8):
+    self.base_addr, self.value_addr, self.timestamp_addr = base_addr, base_addr+value_off, base_addr+timestamp_off
+    self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
+    self.timeline_for_device:Optional[DeviceType] = timeline_for_device
+
+    self.value_mv, self.timestamp_mv = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q')
     self.value_mv[0] = value
 
   @property
@@ -36,7 +39,12 @@ class HCQSignal:
     Returns:
       The timestamp in microseconds.
     """
-    return self.timestamp_mv[0] / self.ts_divider
+    return self.timestamp_mv[0] / self.timestamp_divider
+
+  def _sleep(self, time_spent_waiting_ms:int):
+    """
+    Optional function which can implement sleep functionality for the signal.
+    """
 
   def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
     """
@@ -46,9 +54,10 @@ class HCQSignal:
       value: The value to wait for.
       timeout: Maximum time to wait in milliseconds. Defaults to 10s.
     """
-    start_time = time.time() * 1000
-    while time.time() * 1000 - start_time < timeout:
+    start_time = int(time.time() * 1000)
+    while (time_spent:=int(time.time() * 1000) - start_time) < timeout:
       if self.value >= value: return
+      self._sleep(time_spent)
     raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
 
 class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
@@ -450,8 +459,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
                comp_queue_t:Type[HWQueue], copy_queue_t:Optional[Type[HWQueue]]):
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
-    self.timeline_signal:SignalType = self.signal_t(0, is_timeline=True)
-    self._shadow_timeline_signal:SignalType = self.signal_t(0, is_timeline=True)
+    self.timeline_signal:SignalType = self.signal_t(0, timeline_for_device=self)
+    self._shadow_timeline_signal:SignalType = self.signal_t(0, timeline_for_device=self)
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
     self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool, Optional[Dict]]] = []
     self.dep_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []
@@ -465,7 +474,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.devices.append(self)
 
   def synchronize(self):
-    try: self.timeline_signal.wait(self.timeline_value - 1) if not hasattr(self, '_syncdev') else self._syncdev()
+    try: self.timeline_signal.wait(self.timeline_value - 1)
     except RuntimeError as e:
       if hasattr(self, 'on_device_hang'): self.on_device_hang()
       else: raise e

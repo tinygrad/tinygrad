@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal, sys
+import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, sys
 assert sys.platform != 'win32'
 from typing import Tuple, List, Any, cast, Union, Dict, Type, Optional
 from dataclasses import dataclass
@@ -73,8 +73,8 @@ assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 def nvmethod(subc, mthd, size, typ=2): return (typ << 28) | (size << 16) | (subc << 13) | (mthd >> 2)
 
 class NVSignal(HCQSignal):
-  def __init__(self, value=0, is_timeline=False):
-    super().__init__(NVDevice.signals_pool.pop(), value, is_timeline, decimal.Decimal(1000), value_off=0, timestamp_off=8)
+  def __init__(self, value=0, timeline_for_device:Optional[NVDevice]=None):
+    super().__init__(NVDevice.signals_pool.pop(), value, timeline_for_device, timestamp_divider=1000, value_off=0, timestamp_off=8)
   def __del__(self): NVDevice.signals_pool.append(self.base_addr)
 
 class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
