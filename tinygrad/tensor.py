@@ -2029,8 +2029,8 @@ class Tensor(SimpleMathTrait):
   def _ceil_mode_padding2d(self,k_:Tuple[sint, ...], s_:Union[Tuple[int, ...], int], d_:Union[Tuple[int, ...], int],
                            p_:Union[Tuple[int, ...], int]) -> Sequence[int]:
     (d_,s_,p_), i_ = (make_tuple(x, len(k_)) for x in (d_,s_,p_)), self.shape[-len(k_):]
-    # https://arxiv.org/pdf/1603.07285 section 5.1.
-    o_ = [ceildiv(i + 2*p - (d*(k-1) + 1), s) + 1 for i,d,k,s,p in zip(i_,d_,k_,s_,p_)]
+    # https://arxiv.org/pdf/1603.07285 section 5.1, relationship 15.
+    o_ = [ceildiv(i+2*p - (d*(k-1)+1), s) + 1 for i,d,k,s,p in zip(i_,d_,k_,s_,p_)]
     # we have to do additional padding before `_pool` so that `o_` in `_pool` is calculated correctly
     # we also remove padding in the case that a shifting window starts in the end padded region, thereby decreasing `o_` in `_pool`
     pads = list(self._padding2d(p_, len(k_)))
