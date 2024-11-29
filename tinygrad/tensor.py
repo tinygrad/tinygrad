@@ -1097,44 +1097,40 @@ class Tensor(SimpleMathTrait):
   #   3. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
 
-  class IndexDimension:
-    def __init__(self, index, size: int, device: Union[str, Tuple[str, ...]], previous: Union['Tensor.IndexDimension', None]):
-      # we use an inferred dim value based on previous and next
-      self.previous, self.next, boundary, stride = previous, None, [0, size], 1
-      if previous is not None: previous.next = self
-
-      # Tensor creation validates the contents of list or tuple index
-      if isinstance(index, (list, tuple)): index = Tensor(index, device, requires_grad=False)
-      # type specific validation
-      if isinstance(index, Tensor):
-        if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-        index = (index < 0).where(size, 0) + index # treat negative index values
-      elif isinstance(index, int):
-        if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
-        boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
-      elif isinstance(index, slice):
-        # TODO add bytes and Tensor?
-        # TODO also is this if check isn't comprehensive?
-        if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
-        if not all(isinstance(s,int) or s is None for s in (index.start, index.stop, index.step)): raise TypeError("only int slicing is supported")
-        # handle int slicing
-        *boundary, stride = index.indices(size)
-        if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
-        elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
-        # update size for slice
-        size = math.ceil((boundary[1] - boundary[0]) / abs(stride))
-      elif index is None: pass # do nothing
-      else: raise IndexError(f"{type(index).__name__} indexing is not supported")
-
-      self.size, self.index, self.boundary, self.stride = size, index, (boundary[0], boundary[1]), stride
-
-    def traverse(self, skip_cond: Callable[[Tensor.IndexDimension], bool] = lambda n: False) -> Iterator[Tensor.IndexDimension]:
-      current: Optional[Tensor.IndexDimension] = self
-      while current is not None:
-        if not skip_cond(current): yield current
-        current = current.next
 
   def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
+    class IndexDimension:
+      def __init__(self, index, size: int, device: Union[str, Tuple[str, ...]], previous: Union['Tensor.IndexDimension', None]):
+        # we use an inferred dim value based on previous and next
+        self.previous, self.next, boundary, stride = previous, None, [0, size], 1
+        if previous is not None: previous.next = self
+        match index:
+          case list() | tuple() | Tensor():
+            if not isinstance(index, Tensor): index = Tensor(index, device, requires_grad=False)
+            if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
+            index = (index < 0).where(size, 0) + index # treat negative index values
+          case int():
+            if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
+            boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
+          case slice():
+            if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
+            if not all(isinstance(s,int) or s is None for s in (index.start, index.stop, index.step)): raise TypeError("only int slicing is supported")
+            # handle int slicing
+            *boundary, stride = index.indices(size)
+            if resolve(stride * (boundary[1] - boundary[0]) < 0): boundary = [0, 0]
+            elif resolve(stride < 0): boundary = [boundary[1] + 1, boundary[0] + 1]
+            # update size for slice
+            size = ceildiv((boundary[1] - boundary[0]), abs(stride))
+          case None: pass # do nothing
+          case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
+        self.size, self.index, self.boundary, self.stride = size, index, (boundary[0], boundary[1]), stride
+
+      def traverse(self, skip_cond: Callable[[IndexDimension], bool] = lambda n: False) -> Iterator[IndexDimension]:
+        current: Optional[IndexDimension] = self
+        while current is not None:
+          if not skip_cond(current): yield current
+          current = current.next
+
     # treat special case of single item index
     if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
     elif not isinstance(indices, (tuple, list)): indices = [indices]
@@ -1142,8 +1138,7 @@ class Tensor(SimpleMathTrait):
     indices = [self._to_const_val(i) if isinstance(i, Tensor) and i.shape == () else i for i in indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
-    ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
-    if len(ellipsis_idx) > 1: raise IndexError("indices can only have a single ellipsis ('...')")
+    if len(ellipsis_idx := [dim for dim, i in enumerate(indices) if i is Ellipsis]) > 1: raise IndexError("indices can only have a single ellipsis")
     fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
     num_indices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
     if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
@@ -1154,7 +1149,7 @@ class Tensor(SimpleMathTrait):
     node, none_counter = None, 0
     for dim, index in enumerate(indices):
       none_counter += int(index is None)
-      node = Tensor.IndexDimension(index, 1 if index is None else cast(int, self.shape[dim - none_counter]), self.device, node)
+      node = IndexDimension(index, 1 if index is None else cast(int, self.shape[dim - none_counter]), self.device, node)
       # we use root as the access point
       # TODO: dim==0 not ideal
       if dim == 0: root = node
