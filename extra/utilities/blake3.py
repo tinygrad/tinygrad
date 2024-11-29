@@ -118,7 +118,7 @@ if __name__ == "__main__":
     print(f"Time: {elapsed:.2f}s")
     print(f"Throughput: {throughput:.1f} MB/s")
 
-  n = random.randint(0, 250)
+  n = random.randint(0, 20_000)
 
   sizes = [
     100 * 1024 * 1024 - n,      # 100 MB
