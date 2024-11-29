@@ -36,8 +36,16 @@ class QCOMCompiler(CLCompiler):
   def disassemble(self, lib:bytes): fromimport('extra.disassemblers.adreno', 'disasm')(lib)
 
 class QCOMSignal(HCQSignal):
-  def __init__(self, value=0, is_timeline=False): super().__init__(QCOMDevice.signals_pool.pop(), value, is_timeline, decimal.Decimal(19.2))
+  def __init__(self, value=0, timeline_for_device:QCOMDevice=None):
+    super().__init__(QCOMDevice.signals_pool.pop(), value, is_timeline, timestamp_divider=19.2)
+
   def __del__(self): QCOMDevice.signals_pool.append(self.base_addr)
+
+  def _sleep(self, time_spent_waiting_ms:int):
+    # Sleep only for only timeline signals. Do it immidiately to free cpu.
+    if self.timeline_for_device is not None:
+      kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.timeline_for_device.fd, context_id=self.timeline_for_device.ctx,
+                                                  timestamp=self.timeline_for_device.last_cmd, timeout=0xffffffff)
 
 class QCOMComputeQueue(HWQueue):
   def __init__(self):
@@ -397,5 +405,3 @@ class QCOMDevice(HCQCompiled):
       self.synchronize()
       self._gpu_free(self._stack)
       self._stack = self._gpu_alloc(sz)
-
-  def _syncdev(self): kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.fd, context_id=self.ctx, timestamp=self.last_cmd, timeout=0xffffffff)

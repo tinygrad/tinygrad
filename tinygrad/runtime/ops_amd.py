@@ -28,25 +28,15 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
-  def __init__(self, value=0, is_timeline=False):
-    super().__init__(AMDDevice.signals_pool.pop(), value, is_timeline, decimal.Decimal(100), value_off=0, timestamp_off=8)
-
-    if is_timeline:
-      self._event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, auto_reset=1)
-      self._event_mailbox_ptr = AMDDevice.event_page.va_addr + self._event.event_slot_index*8
-      self._evt_array = (kfd.struct_kfd_event_data)(event_id=self._event.event_id)
+  def __init__(self, value=0, timeline_for_device:AMDDevice=None):
+    super().__init__(AMDDevice.signals_pool.pop(), value, timeline_for_device, timestamp_divider=100, value_off=0, timestamp_off=8)
 
   def __del__(self): AMDDevice.signals_pool.append(self.base_addr)
 
-  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
-    start_time = time.time() * 1000
-    while (time_spent:=time.time() * 1000 - start_time) < timeout:
-      if self.value >= value: return
-
-      # Wait active for 5s, then going to sleep.
-      if time_spent > 5000 and self.is_timeline:
-        kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(self._evt_array), num_events=1, wait_for_all=1, timeout=1000)
-    raise RuntimeError(f"wait_signal: not set to {value}, but {self.value}, {timeout} ms TIMEOUT!")
+  def _sleep(self, time_spent_waiting_ms:int):
+    # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
+    if time_spent_waiting_ms > 2000 and self.timeline_for_device is not None:
+      kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=self.timeline_for_device.queue_event_arr_ptr, num_events=1, wait_for_all=1, timeout=200)
 
 class AMDComputeQueue(HWQueue):
   def __init__(self):
@@ -144,9 +134,9 @@ class AMDComputeQueue(HWQueue):
     self.release_mem(signal.value_addr, value, amd_gpu.data_sel__mec_release_mem__send_32_bit_low,
                      amd_gpu.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
 
-    if signal.is_timeline:
-      self.release_mem(signal._event_mailbox_ptr, signal._event.event_id, amd_gpu.data_sel__mec_release_mem__send_32_bit_low,
-                       amd_gpu.int_sel__mec_release_mem__send_interrupt_after_write_confirm, ctxid=signal._event.event_id)
+    if (dev:=signal.timeline_for_device) is not None:
+      self.release_mem(dev.queue_event_mailbox_ptr, dev.queue_event.event_id, amd_gpu.data_sel__mec_release_mem__send_32_bit_low,
+                       amd_gpu.int_sel__mec_release_mem__send_interrupt_after_write_confirm, ctxid=dev.queue_event.event_id)
 
   def _update_wait(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
     if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(signal.value_addr))
@@ -208,9 +198,9 @@ class AMDCopyQueue(HWQueue):
   def _signal(self, signal:AMDSignal, value=0):
     self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal.value_addr), value])
 
-    if signal.is_timeline:
-      self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._event_mailbox_ptr), signal._event.event_id])
-      self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(signal._event.event_id)])
+    if (dev:=signal.timeline_for_device) is not None:
+      self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id])
+      self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id)])
 
   def _wait(self, signal:AMDSignal, value=0):
     self._q([amd_gpu.SDMA_OP_POLL_REGMEM | amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
@@ -422,6 +412,11 @@ class AMDDevice(HCQCompiled):
     self.compute_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x100000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size)
     self.sdma_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000)
+
+    self.queue_event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_type=kfd.KFD_IOC_EVENT_SIGNAL, auto_reset=1)
+    self.queue_event_mailbox_ptr = AMDDevice.event_page.va_addr + self.queue_event.event_slot_index * 8
+    self.queue_event_arr = (kfd.struct_kfd_event_data)(event_id=self.queue_event.event_id)
+    self.queue_event_arr_ptr = ctypes.addressof(self.queue_event_arr)
 
     self.mem_fault_event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_type=kfd.KFD_IOC_EVENT_MEMORY)
     self.hw_fault_event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_type=kfd.KFD_IOC_EVENT_HW_EXCEPTION)
