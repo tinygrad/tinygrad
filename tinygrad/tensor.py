@@ -1122,7 +1122,7 @@ class Tensor(SimpleMathTrait):
             size = ceildiv((boundary[1] - boundary[0]), abs(stride))
           case None: self.none_counter += 1
           case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
-        super().append({"index":index, "size":size, "boundary":(boundary[0], boundary[1]), "stride":stride})
+        super().append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})
 
     # wrap into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
@@ -1142,9 +1142,9 @@ class Tensor(SimpleMathTrait):
 
     # movement ops
     # skip None since we haven't injected dims yet
-    strides, boundaries = zip(*((index['stride'], index['boundary']) for index in indices_parsed if index['index'] is not None))
+    strides = tuple(index['stride'] for index in indices_parsed if index['index'] is not None)
     # flip negative strides
-    x = x.shrink(boundaries).flip(tuple(i for i,st in enumerate(strides) if st < 0))
+    x = x.shrink(index['boundary'] for index in indices_parsed if index['index'] is not None).flip(tuple(i for i,st in enumerate(strides) if st < 0))
     # handle stride != 1 or -1
     if any(abs(st) != 1 for st in strides):
       strides = tuple(abs(s) for s in strides)
@@ -1159,7 +1159,8 @@ class Tensor(SimpleMathTrait):
     x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], int)))
 
     # tensor indexing
-    if tensors := {dim:index for dim, index in enumerate(i for i in indices_parsed if not isinstance(i, int)) if isinstance(index['index'], Tensor)}:
+    if tensors := {dim:index for dim, index in enumerate(i for i in indices_parsed if not isinstance(i['index'], int))
+                   if isinstance(index['index'], Tensor)}:
       masks, first_dim, last_dim = [], min(tensors.keys()), max(tensors.keys())
       pre_reduce_shape = x.shape[:first_dim] + (big_shape := _broadcast_shape(*(t['index'].shape for t in tensors.values()))) + x.shape[first_dim:]
 
