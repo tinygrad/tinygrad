@@ -1096,8 +1096,6 @@ class Tensor(SimpleMathTrait):
   #   2. Bool indexing is not supported
   #   3. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
-
-
   def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
     class IndexDimension:
       def __init__(self, index, size: int, device: Union[str, Tuple[str, ...]], previous: Union['Tensor.IndexDimension', None]):
@@ -1114,7 +1112,7 @@ class Tensor(SimpleMathTrait):
             boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
           case slice():
             if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
-            if not all(isinstance(s,int) or s is None for s in (index.start, index.stop, index.step)): raise TypeError("only int slicing is supported")
+            if not all(isinstance(s,int) or s is None for s in (index.start,index.stop,index.step)): raise TypeError("only int slicing is supported")
             # handle int slicing
             *boundary, stride = index.indices(size)
             if resolve(stride * (boundary[1] - boundary[0]) < 0): boundary = [0, 0]
