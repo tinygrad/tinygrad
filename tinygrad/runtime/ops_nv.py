@@ -137,7 +137,7 @@ class NVComputeQueue(NVCommandQueue):
     self.active_qmd = None
     return self
 
-  def exec(self, prg:NVProgram, args_state:NVArgsState, global_size, local_size):
+  def exec(self, prg:NVProgram, args_state:NVArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
     ctypes.memmove(qmd_addr:=(args_state.ptr + round_up(prg.constbufs[0][1], 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
     assert qmd_addr < (1 << 40), f"large qmd addr {qmd_addr:x}"
 
@@ -159,7 +159,7 @@ class NVComputeQueue(NVCommandQueue):
     self.active_qmd = qmd
     return self
 
-  def signal(self, signal:NVSignal, value=0):
+  def signal(self, signal:NVSignal, value:sint=0):
     if self.active_qmd is not None:
       for i in range(2):
         if getattr(self.active_qmd, f'release{i}_enable') == 0:
@@ -174,21 +174,21 @@ class NVComputeQueue(NVCommandQueue):
     self.active_qmd = None
     return self
 
-  def _submit(self, dev): self._submit_to_gpfifo(dev, cast(NVDevice, dev).compute_gpfifo)
+  def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, cast(NVDevice, dev).compute_gpfifo)
 
 class NVCopyQueue(NVCommandQueue):
-  def copy(self, dest, src, copy_size):
+  def copy(self, dest:sint, src:sint, copy_size:int):
     self.q(nvmethod(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, 4), *data64(src), *data64(dest))
     self.q(nvmethod(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 1), copy_size)
     self.q(nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x182) # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
     return self
 
-  def signal(self, signal, value=0):
+  def signal(self, signal:NVSignal, value:sint=0):
     self.q(nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 3), *data64(signal.value_addr), value)
     self.q(nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14)
     return self
 
-  def _submit(self, dev): self._submit_to_gpfifo(dev, cast(NVDevice, dev).dma_gpfifo)
+  def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, cast(NVDevice, dev).dma_gpfifo)
 
 class NVArgsState(HCQArgsState):
   def __init__(self, ptr:int, prg:NVProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):

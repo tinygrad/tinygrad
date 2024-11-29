@@ -19,12 +19,18 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
   """
 
-  def __init__(self): self._q, self.binded_device, self.q_sints, self.mv_sints, self.syms, self.cached_resolved_syms = [], None, [], [], [], []
+  def __init__(self):
+    self._q:Any = []
+    self.binded_device:Optional[DeviceType] = None
+    self.q_sints:List[Tuple[int, int]] = []
+    self.mv_sints:List[Tuple[memoryview, int, int, Optional[int]]] = []
+    self.syms:List[sint] = []
+    self._prev_resolved_syms:List[Optional[int]] = []
 
   def _new_sym(self, sym:sint) -> int:
     if sym not in self.syms:
       self.syms.append(sym)
-      self.cached_resolved_syms.append(None)
+      self._prev_resolved_syms.append(None)
     return self.syms.index(sym)
 
   def q(self, *values):
@@ -113,21 +119,21 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   def bind_sints_to_ptr(self, *vals:sint, ptr:int, fmt, mask:Optional[int]=None):
     mv = to_mv(ptr, 8*len(vals)).cast(fmt)
     for i, val in enumerate(vals):
-      if isinstance(val, int):
-        if mask is not None: mv[i] = (mv[i] & ~mask) | val
-        else: mv[i] = val
+      if isinstance(val, int): mv[i] = val if mask is None else ((mv[i] & ~mask) | val)
       else: self.mv_sints.append((mv, i, self._new_sym(val), mask))
 
   def _apply_var_vals(self, var_vals:Dict[Variable, int]):
     resolved_syms = [sym_infer(sym, var_vals) for sym in self.syms]
+
     for off, sym_idx in self.q_sints:
-      if self.cached_resolved_syms[sym_idx] == resolved_syms[sym_idx]: continue
+      if self._prev_resolved_syms[sym_idx] == resolved_syms[sym_idx]: continue
       self._q[off] = resolved_syms[sym_idx]
+
     for mv, off, sym_idx, mask in self.mv_sints:
-      if self.cached_resolved_syms[sym_idx] == resolved_syms[sym_idx]: continue
-      if mask is not None: mv[off] = (mv[off] & ~mask) | resolved_syms[sym_idx]
-      else: mv[off] = resolved_syms[sym_idx]
-    self.cached_resolved_syms = resolved_syms
+      if self._prev_resolved_syms[sym_idx] == resolved_syms[sym_idx]: continue
+      mv[off] = resolved_syms[sym_idx] if mask is None else ((mv[off] & ~mask) | resolved_syms[sym_idx])
+
+    self._prev_resolved_syms = resolved_syms
 
   def submit(self, dev:DeviceType, var_vals:Optional[Dict[Variable, int]]=None):
     """
@@ -188,7 +194,7 @@ class HCQSignal(Generic[DeviceType]):
       if self.value >= value: return
       self._sleep(time_spent)
     raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
-    
+
 @contextlib.contextmanager
 def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Optional[Type[HWQueue]]=None, queue:Optional[HWQueue]=None):
   st, en = (dev.signal_t(), dev.signal_t()) if enabled else (None, None)

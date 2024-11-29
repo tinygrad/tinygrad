@@ -116,7 +116,6 @@ class HCQGraph(MultiGraphRunner):
     for j,ji in enumerate(jit_cache):
       enqueue_dev, enqueue_queue, sync_signals, deps, signal, signal_val = self.ji_schedule[j]
 
-      # for i in range(len(sync_signals)): self.kickoff_wait_cmds[enqueue_queue].append(len(enqueue_queue) + i)
       for sig, val in sync_signals + deps: enqueue_queue.wait(sig, val)
 
       # Encode waits and start profile timestamp (if needed).
@@ -193,10 +192,8 @@ class HCQGraph(MultiGraphRunner):
         dev.dep_prof_records += [(timestamps[b_st], timestamps[b_en], b_dev, b_is_cp, timestamps[st], timestamps[en], dev, is_cp)]
 
   def _buf_addr_as_sint(self, j:int, i:int, buf:HCQBuffer) -> sint:
-    if (j, i) in self.input_replace:
-      self.input_replace_to_var[(j,i)] = Variable(f"input_{j}_{i}", 0, 0xffffffffffffffff, dtype=dtypes.uint64)
-      return self.input_replace_to_var[(j,i)]
-    return buf.va_addr
+    if (j, i) not in self.input_replace: return buf.va_addr
+    return self.input_replace_to_var.setdefault((j, i), Variable(f"input_{j}_{i}", 0, 0xffffffffffffffff, dtype=dtypes.uint64))
 
   def __del__(self):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
