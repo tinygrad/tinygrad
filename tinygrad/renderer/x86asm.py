@@ -34,7 +34,12 @@ def to_hex(x: int | float, dt:DType) -> str:
 def cflag(x:UOp) -> str:
   if x.op is Ops.CMPLT: return "setl" if x.src[0].dtype in dtypes.sints else "setb"
   if x.op is Ops.CMPNE: return "setne"
-  assert False
+
+def float_cast(x:DType, s:DType):
+  cfrom = "si" if not dtypes.is_float(s) else "sd" if s.itemsize == 8 else "ss"
+  cto = "si" if not dtypes.is_float(x) else "sd" if x.itemsize == 8 else "ss"
+  if cto == "si": cfrom = "t" + cfrom
+  return f"cvt{cfrom}2{cto}"
 
 x86_rewrite = PatternMatcher([
   (UPat(Ops.INDEX, name="x"), lambda ctx,x: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx.r[x.src[1]]}*{x.src[0].dtype.itemsize}]"),
@@ -42,7 +47,7 @@ x86_rewrite = PatternMatcher([
    f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}\ntest {ctx[mask]}, 1\njz .L{ctx.uop_i[x]}\n{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uop_i[x]}:"),
   (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]"),
   (UPat(Ops.STORE, name="x"),
-   lambda ctx,x: f"{x86op[x.src[1].dtype][x.op]}{size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ""} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
+   lambda ctx,x: f"{x86op[x.src[1].dtype][x.op]}{size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ''} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}" if ctx[x.src[0]] != ctx[x.src[1]] else None),
 
@@ -53,14 +58,20 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x: f"inc {ctx[x.src[0]]}\ncmp {ctx[x.src[0]]}, {x.src[0].src[1].arg}\njl .LOOP_{x.src[0].arg[0]}"),
 
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"mov{mov_sufix[x.dtype.itemsize] if ctx.r[x.src[0]] in ctx.all_regs else ""} {ctx[x]}, {ctx[x.src[0]]}"),
-  (UPat(Ops.CAST, name="x"), lambda ctx,x: ctx.x86_cast(x, x.src[0])),
+  # TODO: remove casts that are just movs?
+  # casting to <= int or if src is uint32(already zero extended) we just mov, to bigger uint we zero extend, to bigger sint we sign extend
+  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.ints)), name="x"),
+   lambda ctx,x: f"mov {ctx[x]}, {ctx.regt(ctx.r[x.src[0]], x.dtype)}" if x.dtype.itemsize <= x.src[0].dtype.itemsize or x.src[0].dtype is dtypes.uint32 else None),
+  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool, *dtypes.uints))), name="x"), lambda ctx,x: f"movzx {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.sints)), name="x"), lambda ctx,x: f"movs{'x' if x.src[0].dtype.itemsize < 4 else 'xd'} {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"{float_cast(x.dtype, x.src[0].dtype)} {ctx[x]}, {ctx[x.src[0]]}"),
   # no cmov for floats
   (UPat(Ops.WHERE, dtype=dtypes.floats, name="x"),
    lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[1]]}\ntest {ctx[x.src[0]]}, 1\njnz .L{ctx.uop_i[x]}\n{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[2]]}\n.L{ctx.uop_i[x]}:"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[1]]}\ntest {ctx[x.src[0]]}, 1\ncmovz {ctx[x]}, {ctx[x.src[2]]}"),
 
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
-   lambda ctx,x: f"{x86op[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{cflag(x)} {ctx[x]}{f"\nsetp r15b\nxor {ctx[x]}, r15b" if dtypes.is_float(x.src[0].dtype) else ""}"),
+   lambda ctx,x: f"{x86op[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{cflag(x)} {ctx[x]}{f'\nsetp r15b\nxor {ctx[x]}, r15b' if dtypes.is_float(x.src[0].dtype) else ''}"),
   # idiv requires rax/rdx
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{ctx.idiv(x, x.src[1])}"),
   # rest of binary ops
@@ -80,19 +91,23 @@ class X86Renderer(Renderer):
   global_max = None
 
   extra_matcher = PatternMatcher([
-    # can't cast from float to int8/16 directly
+    # can't cast from float to int8/16 directly and vice versa
     (UPat(Ops.CAST, dtype=(dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16), src=(UPat(dtype=dtypes.floats),), name="c"),
      lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
-    # can't cast from int8/16 to float directly
     (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=(dtypes.bool, dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16)),), name="c"),
      lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
-    # 2 operand imul doesn't work with 8bit registers
+    # 2 operand imul and cmov don't work with 8bit registers
     (UPat(Ops.MUL, dtype=(dtypes.uint8, dtypes.int8), name="x"),
      lambda x: UOp(Ops.MUL, dtype=dtypes.int16, src=(x.src[0].cast(dtypes.int16), x.src[1].cast(dtypes.int16))).cast(x.dtype)),
-    # cmov doesn't work with 8 bit registers
     (UPat(Ops.WHERE, dtype=(dtypes.bool, dtypes.uint8, dtypes.int8), name="x"),
      lambda x: UOp(Ops.WHERE, dtype=dtypes.int16, src=(x.src[0], x.src[1].cast(dtypes.int16), x.src[2].cast(dtypes.int16))).cast(x.dtype)),
-    # *** also in llvm ir***
+    #TODO: get rid of ptrdtype
+    #(UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: UOp(Ops.DEFINE_GLOBAL, dtype=dtypes.int64, src=x.src, arg=x.arg) if isinstance(x.dtype, PtrDType) else None),
+    # *** also in ptx ***
+    #(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx: buf.cast(dtypes.int64) + idx.cast(dtypes.int64)*buf.dtype.itemsize),
+    # cast between pointers does nothing
+    (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) else None),
+    # *** also in llvmir ***
     # rewrite cast to bool to CMPNE 0
     (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
     # rewrite RECIP to FDIV
@@ -123,30 +138,9 @@ class X86Renderer(Renderer):
     if self.r[x] != "rax" and "rax" in self.r.values(): l += "\npop rax"
     return l
 
-  def x86_cast(self, x:UOp, s:UOp) -> str:
-    # NOTE: cast from uint64 to floats is complicated, might not want to allow that
-    # TODO: cast from uint32 to float requires use of 64bit reg (already zero extended)
-    if isinstance(x.dtype.scalar(), PtrDType):
-      assert isinstance(s.dtype.scalar(), PtrDType)
-      return f"mov {self[x]}, {self[s]}"
-
-    if (dtypes.is_int(s.dtype) or s.dtype is dtypes.bool) and dtypes.is_int(x.dtype):
-      if s.dtype.itemsize < x.dtype.itemsize:
-        if s.dtype in dtypes.sints: return f"movs{'x' if s.dtype.itemsize < 4 else 'xd'} {self[x]}, {self[s]}"
-        elif s.dtype.itemsize < 4: return f"movzx {self[x]}, {self[s]}"
-      # cast to smaller int or uint32 to uint64 is just a mov
-      return f"mov {self[x]}, {self.regt(self.r[s], x.dtype)}"
-
-    cfrom = "si" if not dtypes.is_float(s.dtype) else "sd" if s.dtype.itemsize == 8 else "ss"
-    cto = "si" if not dtypes.is_float(x.dtype) else "sd" if x.dtype.itemsize == 8 else "ss"
-    if cto == "si": cfrom = "t" + cfrom
-
-    return f"cvt{cfrom}2{cto} {self[x]}, {self[s]}"
-
   # 64 bit int reg to lower bit reg
   def regt(self, reg:str, dt:DType) -> str:
-    if dtypes.is_float(dt) or isinstance(dt, PtrDType): return reg
-    if dt.itemsize == 8: return reg
+    if dt.itemsize == 8 or dtypes.is_float(dt) or isinstance(dt, PtrDType): return reg
     if dt.itemsize == 4: return reg+'d' if reg[-1].isdigit() else 'e'+reg[1:]
     if dt.itemsize == 2: return reg+'w' if reg[-1].isdigit() else reg[1:]
     if dt.itemsize == 1: return reg+'b' if reg[-1].isdigit() else reg[1:]+'l' if reg[-1] == 'i' else reg[1:-1]+'l'
@@ -281,6 +275,3 @@ class X86Renderer(Renderer):
 
     return "\n".join([".text", f".global {name}", f"{name}:", "push rbp", "mov rbp, rsp", f"sub rsp, {stack_size}"] + kernel + [f"add rsp, {stack_size}", "pop rbp", "ret", "\n"])
 
-# .intel_syntax noprefix <-- add this if using gas
-# TODO: free loop counter for spilling
-# NOTE: for now we mov all operands to regs
