@@ -265,7 +265,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def st(self) -> Optional[ShapeTracker]:
     if self.op is Ops.VIEW: return self.arg
     # buffer ops can have a non contiguous shapetracker
-    if self.op in GroupOp.Buffer and len(src_sts:=[x.st for x in self.src if x.op is Ops.VIEW]) != 0: return src_sts[0]
+    if self.op in GroupOp.Buffer and len(src_sts:=[unwrap(x.st) for x in self.src if x.op is Ops.VIEW]) != 0: return src_sts[0]
     if len(src_sts:=[x.st for x in self.src if x.st is not None]) == 0: return None
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
     # all other ops have a contiguous shapetracker
