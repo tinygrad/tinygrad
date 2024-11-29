@@ -225,14 +225,14 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   cx[2], srcs = True, ('None' if srcfn(x) is None else ''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
 
-
-uop_metadata: WeakKeyDictionary[UOp, Metadata] = WeakKeyDictionary() # this maps fused ops to Metadata
 class UOpMetaClass(type):
   ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
     if (ret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
     UOpMetaClass.ucache[key] = ret = super().__call__(op, dtype, src, arg)
     return ret
+
+uop_metadata:WeakKeyDictionary[UOp, Metadata] = WeakKeyDictionary()
 
 class UOp(MathTrait, metaclass=UOpMetaClass):
   __slots__ = ["op", "dtype", "src", "arg"]
