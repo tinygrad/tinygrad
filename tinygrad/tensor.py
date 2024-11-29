@@ -1149,13 +1149,13 @@ class Tensor(SimpleMathTrait):
         x = x.reshape(tuple(flatten((s // st, st) for s, st in zip(x.shape, strides))))
         x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
 
-    # dim injection from None by including None and dim collapse by skipping int dim sizes
+    # dim injection from None by including None dim size (which is 1) and dim collapse by skipping int dim size
     x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], int)))
 
     # tensor indexing
-    if tensor_index:=[(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
+    if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
       # unload the tensor object into actual tensors
-      dims, tensors, masks = [d for d,_ in tensor_index], cast(list[Tensor], [i['index'] for d,i in tensor_index]), []
+      dims, tensors, masks = [d for d,_ in tops], cast(list[Tensor], [i['index'] for _,i in tops]), []
       pre_reduce_shape = x.shape[:dims[0]] + (big_shape := _broadcast_shape(*(t.shape for t in tensors))) + x.shape[dims[0]:]
 
       # create index masks
