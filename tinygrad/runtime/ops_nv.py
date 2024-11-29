@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, decimal, sys
+import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, sys
 assert sys.platform != 'win32'
 from typing import Tuple, List, Any, cast, Union, Dict, Type, Optional
 from dataclasses import dataclass
@@ -74,14 +74,9 @@ assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 def nvmethod(subc, mthd, size, typ=2): return (typ << 28) | (size << 16) | (subc << 13) | (mthd >> 2)
 
 class NVSignal(HCQSignal):
-  def __init__(self, value=0, is_timeline=False):
-    self._signal = NVDevice.signals_pool.pop()
-    self.signal_addr = mv_address(self._signal)
-    super().__init__(value)
-  def __del__(self): NVDevice.signals_pool.append(self._signal)
-  def _get_value(self) -> int: return self._signal[0]
-  def _get_timestamp(self) -> decimal.Decimal: return decimal.Decimal(self._signal[1]) / decimal.Decimal(1000)
-  def _set_value(self, new_value:int): self._signal[0] = new_value
+  def __init__(self, value=0, timeline_for_device:Optional[NVDevice]=None):
+    super().__init__(NVDevice.signals_pool.pop(), value, timeline_for_device, timestamp_divider=1000, value_off=0, timestamp_off=8)
+  def __del__(self): NVDevice.signals_pool.append(self.base_addr)
 
 class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
   def __del__(self):
@@ -97,11 +92,11 @@ class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
     if local_mem_tpc_bytes: self.q += [nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *data64(local_mem_tpc_bytes), 0xff]
 
   def _wait(self, signal:NVSignal, value=0):
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(signal.signal_addr), *data64_le(value),
+    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(signal.value_addr), *data64_le(value),
                (3 << 0) | (1 << 24)] # ACQUIRE | PAYLOAD_SIZE_64BIT
 
   def _update_wait(self, cmd_idx, signal=None, value=None):
-    if signal is not None: self.q[(sigoff:=self.cmds_offset[cmd_idx]+1):sigoff+2] = array.array('I', data64_le(signal.signal_addr))
+    if signal is not None: self.q[(sigoff:=self.cmds_offset[cmd_idx]+1):sigoff+2] = array.array('I', data64_le(signal.value_addr))
     if value is not None: self.q[(valoff:=self.cmds_offset[cmd_idx]+3):valoff+2] = array.array('I', data64_le(value))
 
   def _timestamp(self, signal): return self._signal(signal, 0)
@@ -170,19 +165,19 @@ class NVComputeQueue(NVCommandQueue):
       for i in range(2):
         if getattr(prev_qmd, f'release{i}_enable') == 0:
           setattr(prev_qmd, f'release{i}_enable', 1)
-          setattr(prev_qmd, f'release{i}_address', signal.signal_addr)
+          setattr(prev_qmd, f'release{i}_address', signal.value_addr)
           setattr(prev_qmd, f'release{i}_payload', value)
           self.cmd_idx_to_qmd[self._cur_cmd_idx()] = prev_qmd
           self.cmd_idx_to_signal_id[self._cur_cmd_idx()] = i
           return
 
-    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(signal.signal_addr), *data64_le(value),
+    self.q += [nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(signal.value_addr), *data64_le(value),
                (1 << 0) | (1 << 20) | (1 << 24) | (1 << 25)] # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
     self.q += [nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0]
 
   def _update_signal(self, cmd_idx, signal:Optional[NVSignal]=None, value=None):
     if (qmd:=self.cmd_idx_to_qmd.get(cmd_idx)) is None: return super()._update_wait(cmd_idx, signal, value) # reuse wait, same offsets to update.
-    if signal is not None: setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_address', signal.signal_addr)
+    if signal is not None: setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_address', signal.value_addr)
     if value is not None: setattr(qmd, f'release{self.cmd_idx_to_signal_id[cmd_idx]}_payload', value)
 
   def _submit(self, dev): self._submit_to_gpfifo(dev, cast(NVDevice, dev).compute_gpfifo)
@@ -198,11 +193,11 @@ class NVCopyQueue(NVCommandQueue):
     if src is not None: self._patch(cmd_idx, offset=1, data=data64(src))
 
   def _signal(self, signal, value=0):
-    self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 3), *data64(signal.signal_addr), value]
+    self.q += [nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 3), *data64(signal.value_addr), value]
     self.q += [nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14]
 
   def _update_signal(self, cmd_idx, signal=None, value=None):
-    if signal is not None: self._patch(cmd_idx, offset=1, data=data64(signal.signal_addr))
+    if signal is not None: self._patch(cmd_idx, offset=1, data=data64(signal.value_addr))
     if value is not None: self._patch(cmd_idx, offset=3, data=[value])
 
   def _submit(self, dev): self._submit_to_gpfifo(dev, cast(NVDevice, dev).dma_gpfifo)
@@ -316,7 +311,7 @@ class NVDevice(HCQCompiled[NVSignal]):
   fd_uvm: int = -1
   gpus_info: Union[List, ctypes.Array] = []
   signals_page: Any = None
-  signals_pool: List[Any] = []
+  signals_pool: List[int] = []
   low_uvm_vaddr: int = 0x1000000000 # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings
   uvm_vaddr: int = 0x2000000000 # 0x2000000000+
   host_object_enumerator: int = 0x1000
@@ -467,7 +462,7 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     if NVDevice.signals_page is None:
       NVDevice.signals_page = self._gpu_system_alloc(16 * 65536, map_to_cpu=True)
-      NVDevice.signals_pool = [to_mv(self.signals_page.va_addr + off, 16).cast("Q") for off in range(0, NVDevice.signals_page.size, 16)]
+      NVDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, NVDevice.signals_page.size, 16)]
     else: self._gpu_map(NVDevice.signals_page)
 
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)

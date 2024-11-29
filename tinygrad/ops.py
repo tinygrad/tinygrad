@@ -107,6 +107,9 @@ class Ops(FastEnum):
   EMPTY = auto()
   BUFFER_VIEW = auto()
 
+  # blocks in linearizer
+  BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto()  # noqa: E702
+
   EXPAND = auto()
   CONTRACT = auto()
   VIEW = auto()
@@ -152,8 +155,8 @@ class Ops(FastEnum):
 
   # control flow ops
   BARRIER = auto()
-  IF = auto()
   RANGE = auto()
+  IF = auto()
 
   # ops that are not graph nodes
   ENDRANGE = auto()
@@ -260,11 +263,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def has_st(self) -> bool: return self.op not in {Ops.DEFINE_LOCAL, Ops.DEFINE_GLOBAL, Ops.BUFFER, Ops.CONST, Ops.DEFINE_VAR}
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
-    if not self.has_st: return None
-    if self.op in GroupOp.Buffer: return self.st_arg
     if self.op is Ops.VIEW: return self.arg
-    src_sts = [x.st for x in self.src if x.st is not None]
+    # buffer ops can have a non contiguous shapetracker
+    if self.op in GroupOp.Buffer and len(src_sts:=[unwrap(x.st) for x in self.src if x.op is Ops.VIEW]) != 0: return src_sts[0]
+    if len(src_sts:=[x.st for x in self.src if x.st is not None]) == 0: return None
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
+    # all other ops have a contiguous shapetracker
     from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg) if self.op is Ops.REDUCE_AXIS else src_sts[0].shape)
   @functools.cached_property
@@ -357,10 +361,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
   def view(self, new_st:ShapeTracker) -> UOp:
     assert self.op is not Ops.STORE, "STORE must stay base"
-    assert self.st is not None, f"must have shape {self}"
-    if new_st.contiguous and self.base.st == new_st: return self.base
-    return UOp(Ops.VIEW, self.dtype, (self,), new_st)
-  def reshape(self, arg:Tuple[sint, ...]) -> UOp: return self.view(unwrap(self.st).reshape(arg))
+    assert self.st is not None and self.base.st is not None, f"must have shape {self}"
+    if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)):
+      return UOp.const_with_shape(self.dtype, 0, new_st.shape)
+    if new_st.contiguous and self.base.st.shape == new_st.shape: return self.base
+    return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
+  def reshape(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).reshape(arg))
+  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self.view(unwrap(self.st).pad(arg))
+  def expand(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).expand(arg))
+  def permute(self, arg:Tuple[int, ...]): return self.view(unwrap(self.st).permute(arg))
+  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self.view(unwrap(self.st).shrink(arg))
+  def stride(self, arg:Tuple[int, ...]): return self.view(unwrap(self.st).stride(arg))
 
   # *** uop Buffer stuff ***
 
@@ -886,7 +897,7 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   # simple cancel mod case
   if 0 < c and 0 <= x.vmin and (quotient:=x.vmin//c) == x.vmax//c: return x-quotient*c
 
-  terms, rem_const, something_changed, offset = [], 0, False, 0
+  terms, rem_const, something_changed, offset, gcd = [], 0, False, 0, c
   for u in split_uop(x, Ops.ADD):
     factor = u.const_factor()
     e: UOp = u.divides(factor)
@@ -896,7 +907,9 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
       something_changed = True
     offset += new_factor * e.vmin
     if u.op is Ops.CONST: rem_const += new_factor
-    else: terms.append((new_factor, e))
+    else:
+      gcd = math.gcd(factor, gcd)
+      terms.append((new_factor, e))
 
   match terms:  # cases like (x[4-5] + 3) % 4 -> -3*x[4-5]+15
     case [(f, e)] if e.vmax-e.vmin == 1: return ((offset+f)%c - offset%c)*(e - e.vmin) + offset%c
@@ -910,8 +923,8 @@ def mod_folding(x:UOp, c:int) -> Optional[UOp]:
   else: # we have found factors such that vmin/vmax of the final expression is between 0 and c, we can remove the mod
     return functools.reduce(lambda r, t: r + min(t[0], t[0]-c, key=abs)*(t[1]-t[1].vmin), terms, x.const_like(offset))
 
-  if not something_changed: return None
-  return functools.reduce(lambda r, t: r + t[0]*t[1], terms, x.const_like(rem_const)) % c
+  if not something_changed and gcd==1: return None
+  return gcd*(functools.reduce(lambda r, t: r + t[0]//gcd * t[1], terms, x.const_like(rem_const//gcd)) % (c//gcd)) + rem_const%gcd
 
 def div_folding(x:UOp, c:int) -> Optional[UOp]:
   # simplify x // c, None means no change
@@ -1203,7 +1216,7 @@ merge_views = PatternMatcher([(UPat(Ops.VIEW, name="s0").view(name="s1"), lambda
 view_left = merge_views+PatternMatcher([
   # VIEW before elementwise ops
   (UPat({*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN}, name="e").view(name="v"),
-   lambda e,v: e.replace(src=tuple(s.view(v.st) if s.has_st else s for s in e.src))),
+   lambda e,v: e.replace(src=tuple(s if not s.has_st else s.view(v.st) if s is s.base else s.base.view(s.st+v.st) for s in e.src))),
   # early merge VIEW buffer ops
   (UPat(GroupOp.Buffer, name="b").view(name="v"), lambda b,v: b.replace(src=tuple((s.st+v.st).to_uop() if s.op is Ops.VIEW else s for s in b.src))),
 ])
