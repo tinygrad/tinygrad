@@ -81,18 +81,23 @@ class X86Renderer(Renderer):
 
   extra_matcher = PatternMatcher([
     # can't cast from float to int8/16 directly
-    (UPat(Ops.CAST, dtype=(dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16), src=(UPat(dtype=dtypes.floats),), name="cast"),
-     lambda cast: cast.src[0].cast(dtypes.int32).cast(cast.dtype)),
-    # rewrite cast to bool to CMPNE 0
-    (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
+    (UPat(Ops.CAST, dtype=(dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16), src=(UPat(dtype=dtypes.floats),), name="c"),
+     lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
+    # can't cast from int8/16 to float directly
+    (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=(dtypes.bool, dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16)),), name="c"),
+     lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
     # 2 operand imul doesn't work with 8bit registers
     (UPat(Ops.MUL, dtype=(dtypes.uint8, dtypes.int8), name="x"),
      lambda x: UOp(Ops.MUL, dtype=dtypes.int16, src=(x.src[0].cast(dtypes.int16), x.src[1].cast(dtypes.int16))).cast(x.dtype)),
     # cmov doesn't work with 8 bit registers
     (UPat(Ops.WHERE, dtype=(dtypes.bool, dtypes.uint8, dtypes.int8), name="x"),
      lambda x: UOp(Ops.WHERE, dtype=dtypes.int16, src=(x.src[0], x.src[1].cast(dtypes.int16), x.src[2].cast(dtypes.int16))).cast(x.dtype)),
+    # *** also in llvm ir***
+    # rewrite cast to bool to CMPNE 0
+    (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
     # rewrite RECIP to FDIV
     (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
+    # *** also in cstyle ***
     # gate any stores that aren't gated with ifs
     (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
       lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
@@ -135,9 +140,6 @@ class X86Renderer(Renderer):
     cfrom = "si" if not dtypes.is_float(s.dtype) else "sd" if s.dtype.itemsize == 8 else "ss"
     cto = "si" if not dtypes.is_float(x.dtype) else "sd" if x.dtype.itemsize == 8 else "ss"
     if cto == "si": cfrom = "t" + cfrom
-    if (dtypes.is_int(s.dtype) or s.dtype is dtypes.bool) and s.dtype.itemsize < 4:
-      # need to zero/sign extend to 32bit temp reg before cast
-      return f"mov{'zx' if dtypes.is_unsigned(s.dtype) else 'sx'} r15d, {self[s]}\ncvt{cfrom}2{cto} {self[x]}, r15d"
 
     return f"cvt{cfrom}2{cto} {self[x]}, {self[s]}"
 
