@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Sequence
+from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Any
 import contextlib, decimal, statistics, random, json, atexit, time, ctypes
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv, to_mv
 from tinygrad.renderer import Renderer
@@ -20,12 +20,12 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   """
 
   def __init__(self):
-    self._q:Sequence = []
+    self._q:Any = []
     self.binded_device:Optional[DeviceType] = None
     self.q_sints:List[Tuple[int, int]] = []
     self.mv_sints:List[Tuple[memoryview, int, int, Optional[int]]] = []
     self.syms:List[sint] = []
-    self._prev_resolved_syms:Sequence[Optional[int]] = []
+    self._prev_resolved_syms:List[Optional[int]] = []
 
   def _new_sym(self, sym:sint) -> int:
     if sym not in self.syms:
@@ -133,7 +133,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
       if self._prev_resolved_syms[sym_idx] == resolved_syms[sym_idx]: continue
       mv[off] = resolved_syms[sym_idx] if mask is None else ((mv[off] & ~mask) | resolved_syms[sym_idx])
 
-    self._prev_resolved_syms = resolved_syms
+    self._prev_resolved_syms = cast(List[Optional[int]], resolved_syms)
 
   def submit(self, dev:DeviceType, var_vals:Optional[Dict[Variable, int]]=None):
     """
