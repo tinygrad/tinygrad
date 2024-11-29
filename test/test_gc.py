@@ -5,6 +5,7 @@ import numpy as np
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.tensor import Tensor
+from tinygrad.ops import uop_metadata
 
 def tensors_allocated():
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])
@@ -66,13 +67,12 @@ class TestGC(unittest.TestCase):
     self.assertEqual(bufs_allocated()-init, 0)
 
   def test_gc_metadata_post_realize(self):
+    init_cnt = len(uop_metadata)
     x = Tensor.empty(3)
     y = Tensor.empty(3)
     add = x+y
     add.realize()
-    from tinygrad.ops import uop_metadata
-    print(list(uop_metadata))
-    self.assertEqual(len(uop_metadata), 0)
+    self.assertEqual(len(uop_metadata)-init_cnt, 0)
 
 if __name__ == '__main__':
   unittest.main()
