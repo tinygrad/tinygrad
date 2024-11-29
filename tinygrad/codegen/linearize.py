@@ -1,5 +1,4 @@
-from typing import List, Dict, Tuple, DefaultDict
-from collections import defaultdict
+from typing import List, Dict, Tuple
 import functools
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite
 from tinygrad.dtype import dtypes, PtrDType
@@ -25,7 +24,7 @@ def append_to_block(ctx, x:UOp):
   block_ctxs, children = ctx
   new_srcs: List[UOp] = []
   to_append: List[UOp] = []
-  new_blocks: DefaultDict[Tuple[UOp, ...], List[UOp]] = defaultdict(list)
+  new_blocks: Dict[Tuple[UOp, ...], List[UOp]] = {}
   in_this_block = set(x.arg.lst)
   for u in x.src:
     if u.op in DONT_PLACE_IN_BLOCK or len([y for y in children[u] if y not in in_this_block]) > 0: new_srcs.append(u)
@@ -35,7 +34,7 @@ def append_to_block(ctx, x:UOp):
       to_append.append(u)
     else:
       # otherwise, we create a new block with this UOp
-      new_blocks[block_ctx].append(u)
+      new_blocks.setdefault(block_ctx, []).append(u)
   if len(to_append) == 0 and len(new_blocks) == 0: return None
 
   for rng,lst in new_blocks.items():
@@ -98,7 +97,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
   @functools.lru_cache(None)
-  def _get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
+  def get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
     ret: List[Tuple[UOp, ...]] = []
     for u in x.src:
       if u.op in {Ops.RANGE, Ops.IF}: ret.append((u,))
@@ -106,27 +105,24 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
       elif u.op is Ops.STORE:
         # ugh, deal with non-reduce locals. probably wrong
         if isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.local:
-          idx_context, store_context = _get_block_ctx(u.src[0]), _get_block_ctx(u)
+          idx_context, store_context = get_block_ctx(u.src[0]), get_block_ctx(u)
           ret.append(tuple(x for x in store_context if x not in idx_context and x.op is Ops.RANGE))
       elif u.op is Ops.ASSIGN:
         # flow though assign, but remove the ranges used in the assign
         assert u.src[0].op is Ops.DEFINE_ACC
-        ret.append(tuple(x for x in _get_block_ctx(u.src[1]) if x not in u.src[0].src[1:]))
+        ret.append(tuple(x for x in get_block_ctx(u.src[1]) if x not in u.src[0].src[1:]))
       else:
         # flow though everything else
-        ret.append(_get_block_ctx(u))
+        ret.append(get_block_ctx(u))
     return tuple(dedup(sorted(flatten(ret), key=lambda x: x.tuplize)))
-
-  def get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
-    ret = _get_block_ctx(x)
-    return ((UOp(Ops.BLOCKSTART, src=(x,)),) + ret) if x.op in {Ops.IF, Ops.RANGE} else ret
 
   # get children and all block contexts
   block_ctxs: Dict[UOp, Tuple[UOp, ...]] = {}
   children: Dict[UOp, List[UOp]] = {}
   for u in sink.sparents:
     for s in u.src: children.setdefault(s, []).append(u)
-    block_ctxs[u] = get_block_ctx(u)
+    this_block_ctx = get_block_ctx(u)
+    block_ctxs[u] = ((UOp(Ops.BLOCKSTART, src=(u,)),) + this_block_ctx) if u.op in {Ops.IF, Ops.RANGE} else this_block_ctx
 
   # TODO: there's probably a clever way to remove this while loop
   while 1:
@@ -146,9 +142,9 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     sink = sink.substitute(forks)
 
   # combine matching BLOCKENDS
-  blockends_to_arg: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+  blockends_to_arg: Dict[UOp, List[UOp]] = {}
   for be in sink.sparents:
-    if be.op is Ops.BLOCKEND: blockends_to_arg[be.arg.end].append(be)
+    if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg.end, []).append(be)
   new_forks = {}
   for k,v in blockends_to_arg.items():
     # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
