@@ -623,13 +623,12 @@ class Kernel:
         grouped_axes = reduced_axes(self.first_reduce, self.first_reduce + self.group_for_reduces)
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
-
           def fix_st(st: ShapeTracker, wd_pattern, tcd_pattern):
             st = ShapeTracker.from_shape(st.shape) # st needs to be contiguous
             wd, tcd, permaxis = self.global_dims, self.first_upcast, list(range(len(st.shape)))
 
             permaxis[wd:wd + len(wd_pattern)] = [y + (wd if x == 0 else tcd) for x, y in wd_pattern]
-            permaxis[tcd:tcd + len(tcd_pattern)] = [y + (wd if x == 0 else tcd) for x, y in tcd_pattern]33
+            permaxis[tcd:tcd + len(tcd_pattern)] = [y + (wd if x == 0 else tcd) for x, y in tcd_pattern]
 
             return st.permute(tuple(permaxis))
 
