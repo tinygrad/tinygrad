@@ -142,8 +142,8 @@ class NVComputeQueue(NVCommandQueue):
 
     qmd = qmd_struct_t.from_address(qmd_addr) # Save qmd for later update
 
-    self.bind_sints(*global_size, struct=qmd, start_field='cta_raster_width', fmt='I')
-    self.bind_sints(*local_size, struct=qmd, start_field='cta_thread_dimension0', fmt='H')
+    self.bind_sints_to_ptr(*global_size, ptr=qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_RASTER_WIDTH[1] // 8, fmt='I')
+    self.bind_sints_to_ptr(*local_size, ptr=qmd_addr + nv_gpu.NVC6C0_QMDV03_00_CTA_THREAD_DIMENSION0[1] // 8, fmt='H')
     qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = data64(args_state.ptr)
 
     if self.active_qmd is None:
@@ -163,8 +163,8 @@ class NVComputeQueue(NVCommandQueue):
       for i in range(2):
         if getattr(self.active_qmd, f'release{i}_enable') == 0:
           setattr(self.active_qmd, f'release{i}_enable', 1)
-          self.bind_field(self.active_qmd, f'release{i}_address', 'Q', signal.value_addr, mask=0xfffffffff)
-          self.bind_field(self.active_qmd, f'release{i}_payload', 'Q', value)
+          self.bind_sints(signal.value_addr, struct=self.active_qmd, start_field=f'release{i}_address', fmt='Q', mask=0xfffffffff)
+          self.bind_sints(value, struct=self.active_qmd, start_field=f'release{i}_payload', fmt='Q')
           return self
 
     self.q(nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(signal.value_addr), *data64_le(value),

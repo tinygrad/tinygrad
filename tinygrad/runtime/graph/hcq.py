@@ -130,7 +130,7 @@ class HCQGraph(MultiGraphRunner):
         cast(HCQAllocator, Device[src.device].allocator).map(dest._buf)
 
         # TODO: For now sints is only for copies, should refactor to support exec as well.
-        enqueue_queue.copy(self._buf_addr_as_sint(dest._buf.va_addr), self._buf_addr_as_sint(src._buf.va_addr), dest.nbytes)
+        enqueue_queue.copy(self._buf_addr_as_sint(j, 0, dest._buf), self._buf_addr_as_sint(j, 1, src._buf), dest.nbytes)
         self.copy_to_devs[cast(HCQCompiled, Device[dest.device])].add(cast(HCQCompiled, Device[src.device]))
 
       # Encode finish profile timestamp (if needed).

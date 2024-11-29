@@ -148,12 +148,14 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     """
     Binds multiple fields in a structure to be updated.
     """
-    self.bind_sints_to_ptr(ctypes.addressof(struct) + getattr(type(struct), start_field).offset, fmt, vals, mask)
+    self.bind_sints_to_ptr(*vals, ptr=ctypes.addressof(struct) + getattr(type(struct), start_field).offset, fmt=fmt, mask=mask)
 
-  def bind_sints_to_ptr(self, ptr:int, fmt:str, *vals:sint, mask:Optional[int]=None):
+  def bind_sints_to_ptr(self, *vals:sint, ptr:int, fmt:str, mask:Optional[int]=None):
     mv = to_mv(ptr, 8*len(vals)).cast(fmt)
     for i, val in enumerate(vals):
-      if isinstance(val, int): mv[i] = val
+      if isinstance(val, int):
+        if mask is not None: mv[i] = (mv[i] & ~mask) | val
+        else: mv[i] = val
       else: self.mv_sints.append((mv, i, self._new_sym(val), mask))
 
   def _apply_var_vals(self, var_vals:Dict[Variable, int]):
