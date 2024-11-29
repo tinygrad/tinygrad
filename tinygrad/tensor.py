@@ -1097,11 +1097,9 @@ class Tensor(SimpleMathTrait):
   #   3. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are out of bounds
   def _getitem(self, indices, v: Optional[Tensor] = None) -> Tensor:
-    class IndexDimension:
-      def __init__(self, index, size: int, device: Union[str, Tuple[str, ...]], previous: Union[IndexDimension, None]):
-        # we use an inferred dim value based on previous and next
-        self.previous, self.next, boundary, stride = previous, None, [0, size], 1
-        if previous is not None: previous.next = self
+    class IndexNode:
+      def __init__(self, index, size: int, device: Union[str, Tuple[str, ...]], previous: Union[IndexNode, None]):
+        boundary, stride = [0, size], 1
         match index:
           case list() | tuple() | Tensor():
             if not isinstance(index, Tensor): index = Tensor(index, device, requires_grad=False)
@@ -1121,17 +1119,18 @@ class Tensor(SimpleMathTrait):
             size = ceildiv((boundary[1] - boundary[0]), abs(stride))
           case None: pass # do nothing
           case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
-        self.size, self.index, self.boundary, self.stride = size, index, (boundary[0], boundary[1]), stride
+        self.previous, self.next, self.size, self.index, self.boundary, self.stride = previous, None, size, index, (boundary[0], boundary[1]), stride
+        # we use an inferred dim value based on previous and next
+        if previous is not None: previous.next = self
 
-      def traverse(self, skip_cond: Callable[[IndexDimension], bool] = lambda n: False) -> Iterator[IndexDimension]:
-        current: Optional[IndexDimension] = self
+      def traverse(self, skip_cond: Callable[[IndexNode], bool] = lambda n: False) -> Iterator[IndexNode]:
+        current: Optional[IndexNode] = self
         while current is not None:
           if not skip_cond(current): yield current
           current = current.next
 
-    # treat special case of single item index
-    if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
-    elif not isinstance(indices, (tuple, list)): indices = [indices]
+    # wrap into a list
+    if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
     # turn scalar Tensors into const val for int indexing if possible
     indices = [self._to_const_val(i) if isinstance(i, Tensor) and i.shape == () else i for i in indices]
 
@@ -1143,11 +1142,11 @@ class Tensor(SimpleMathTrait):
     indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_indices)
     if not indices: return self
 
-    # create IndexDimension chain
+    # create IndexNode chain
     node, none_counter = None, 0
     for dim, index in enumerate(indices):
       none_counter += int(index is None)
-      node = IndexDimension(index, 1 if index is None else cast(int, self.shape[dim - none_counter]), self.device, node)
+      node = IndexNode(index, 1 if index is None else cast(int, self.shape[dim - none_counter]), self.device, node)
       # we use root as the access point
       # TODO: dim==0 not ideal
       if dim == 0: root = node
