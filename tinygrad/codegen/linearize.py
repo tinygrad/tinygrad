@@ -89,81 +89,45 @@ make_basic_blocks = PatternMatcher([
   (UPat(Ops.BLOCK, name="x"), append_to_block),
 ])
 
-def blockend_gobble(ctx, x:UOp):
-  # x is a blockend
-  new_srcs = []
-  to_append = []
-
-  # first, see if we are done with placement. if all the children of the range are in here
-  in_this_block = set(x.arg.lst)
-  if len([y for y in ctx[x.arg.end] if y not in in_this_block]) == 0:
-    # find the parent block that has the BLOCKSTART in the ctx
-    search_block_start = UOp(Ops.BLOCKSTART, src=(x.arg.end,))
-    parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and search_block_start in y.arg.ctx]
-    if len(parent_blocks) == 1:
-      parent_block = parent_blocks[0]
-      # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
-      early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
-      return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not parent_block)+parent_block.src,
-                BasicBlock([y for y in x.arg.ctx if y is not x.arg.end], early_ops+parent_block.arg.lst+late_ops))
-    assert not len(parent_blocks)
+def block_gobble(ctx, x:UOp):
+  if x.op is Ops.BLOCKEND:
+    # if it's a BLOCKEND, see if we are done with placement. if all the children of the range are in here
+    in_this_block = set(x.arg.lst)
+    if len([y for y in ctx[x.arg.end] if y not in in_this_block]) == 0:
+      # find the parent block that has the BLOCKSTART in the ctx
+      search_block_start = UOp(Ops.BLOCKSTART, src=(x.arg.end,))
+      parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and search_block_start in y.arg.ctx]
+      if len(parent_blocks) == 1:
+        parent_block = parent_blocks[0]
+        # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
+        early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
+        return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not parent_block)+parent_block.src,
+                  BasicBlock([y for y in x.arg.ctx if y is not x.arg.end], early_ops+parent_block.arg.lst+late_ops))
+      assert not len(parent_blocks)
 
   updated = False
-  new_ctx = x.arg.ctx[:]
+  new_srcs = []
+  to_append = []
+  new_ctx = list(x.arg.ctx[:])
   placed = set()
   for u in x.src:
-    if u.op is Ops.BLOCK and x.arg.end in u.arg.ctx:
+    if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(x.arg.ctx) or (x.arg.end is not None and x.arg.end in u.arg.ctx)):
       new_ctx += u.arg.ctx
       new_srcs += list(u.src)
       to_append += u.arg.lst
       updated = True
-    elif u.op is Ops.BLOCKFORK:
-      # block fork appears # of times in srcs
-      seen_count = len([y for y in x.src if y is u])
-      if seen_count == u.arg:
-        if u not in placed:
-          new_srcs += list(u.src)
-          placed.add(u)
-          updated = True
-      else:
-        # keep it
-        new_srcs.append(u)
+    elif u.op is Ops.BLOCKFORK and len([y for y in x.src if y is u]) == u.arg: # block fork appears # of times in srcs
+      if u not in placed:
+        new_srcs += list(u.src)
+        placed.add(u)
+        updated = True
     else:
+      # keep it in srcs
       new_srcs.append(u)
   if not updated: return None
-  return UOp(Ops.BLOCKEND, dtypes.void, tuple(new_srcs), BasicBlock(dedup(new_ctx), to_append+x.arg.lst, x.arg.end))
+  return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(dedup(new_ctx), to_append+x.arg.lst, x.arg.end))
 
-def block_merge(ctx, x:UOp):
-  updated = False
-  new_srcs = []
-  to_append = []
-  placed = set()
-  for u in x.src:
-    if u.op is Ops.BLOCK and tuple(u.arg.ctx) == tuple(x.arg.ctx):
-      new_srcs += list(u.src)
-      to_append += u.arg.lst
-      updated = True
-    # TODO: copied from above
-    elif u.op is Ops.BLOCKFORK:
-      # block fork appears # of times in srcs
-      seen_count = len([y for y in x.src if y is u])
-      if seen_count == u.arg:
-        if u not in placed:
-          new_srcs += list(u.src)
-          placed.add(u)
-          updated = True
-      else:
-        # keep it
-        new_srcs.append(u)
-    else:
-      new_srcs.append(u)
-  if not updated: return None
-  return UOp(Ops.BLOCK, dtypes.void, tuple(new_srcs), BasicBlock(x.arg.ctx, to_append+x.arg.lst))
-
-blockend = PatternMatcher([
-  (UPat(Ops.BLOCKEND, name="x"), blockend_gobble),
-  (UPat(Ops.BLOCK, name="x"), block_merge),
-])
+blockend = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_gobble),])
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
