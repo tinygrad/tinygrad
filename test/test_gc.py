@@ -67,12 +67,12 @@ class TestGC(unittest.TestCase):
     self.assertEqual(bufs_allocated()-init, 0)
 
   def test_gc_metadata_post_realize(self):
-    init_cnt = len(uop_metadata)
+    init = len(uop_metadata)
     x = Tensor.empty(3)
     y = Tensor.empty(3)
     add = x+y
-    add.realize()
-    self.assertEqual(len(uop_metadata)-init_cnt, 0)
+    add.schedule()
+    self.assertEqual(len(uop_metadata)-init, 0)
 
 if __name__ == '__main__':
   unittest.main()
