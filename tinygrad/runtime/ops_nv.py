@@ -174,7 +174,7 @@ class NVComputeQueue(NVCommandQueue):
     self.active_qmd = None
     return self
 
-  def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, cast(NVDevice, dev).compute_gpfifo)
+  def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.compute_gpfifo)
 
 class NVCopyQueue(NVCommandQueue):
   def copy(self, dest:sint, src:sint, copy_size:int):
@@ -188,7 +188,7 @@ class NVCopyQueue(NVCommandQueue):
     self.q(nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14)
     return self
 
-  def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, cast(NVDevice, dev).dma_gpfifo)
+  def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.dma_gpfifo)
 
 class NVArgsState(HCQArgsState):
   def __init__(self, ptr:int, prg:NVProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
