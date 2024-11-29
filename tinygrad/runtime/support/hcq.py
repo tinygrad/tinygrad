@@ -26,9 +26,9 @@ def hcq_command(func: Callable[Concatenate[QueueType, P], None]) -> Callable[Con
   """
   @functools.wraps(func)
   def __wrapper(self:QueueType, *args:P.args, **kwargs:P.kwargs) -> QueueType:
-    self.cmds_offset.append(len(self.q))
+    self.cmds_offset.append(len(self._q))
     func(self, *args, **kwargs)
-    self.cmds_len.append(len(self.q) - self.cmds_offset[-1])
+    self.cmds_len.append(len(self._q) - self.cmds_offset[-1])
     self.cmds_meta.append(func.__name__)
     return self
   return __wrapper
@@ -39,9 +39,11 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   Both compute and copy queues should have the following commands implemented.
   """
 
-  def __init__(self): self.q, self.binded_device, self.cmds_offset, self.cmds_len, self.cmds_meta = [], None, [], [], []
+  def __init__(self): self._q, self.binded_device, self.cmds_offset, self.cmds_len, self.cmds_meta = [], None, [], [], []
+  def q(self, *args) -> None: self._q.extend(args)
+
   def __len__(self): return len(self.cmds_offset)
-  def _patch(self, cmd_idx, offset, data): self.q[(st:=self.cmds_offset[cmd_idx]+offset):st+len(data)] = array.array('I', data)
+  def _patch(self, cmd_idx, offset, data): self._q[(st:=self.cmds_offset[cmd_idx]+offset):st+len(data)] = array.array('I', data)
   def _cur_cmd_idx(self) -> int:
     """
     Returns the index of the command currently being enqueued.
@@ -135,7 +137,7 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     Args:
       dev: The device to submit the queue to
     """
-    if self.q: self._submit(dev)
+    if self._q: self._submit(dev)
     return self
   def _submit(self, dev:DeviceType): raise NotImplementedError("backend should overload this function")
 

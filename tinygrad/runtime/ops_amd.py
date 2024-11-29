@@ -47,7 +47,7 @@ class AMDComputeQueue(HWQueue):
     if self.binded_device is not None:
       self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True, uncached=True))
 
-  def pkt3(self, cmd, *vals): self.q += [amd_gpu.PACKET3(cmd, len(vals) - 1), *vals]
+  def pkt3(self, cmd, *vals): self.q(amd_gpu.PACKET3(cmd, len(vals) - 1), *vals)
 
   def wait_reg_mem(self, value, mask=0xffffffff, mem=None, reg_req=None, reg_done=None):
     wrm_info_dw = amd_gpu.WAIT_REG_MEM_MEM_SPACE(int(mem is not None)) | amd_gpu.WAIT_REG_MEM_OPERATION(int(mem is None)) \
@@ -107,11 +107,11 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE4), 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_USER_DATA_0), *user_regs)
 
-    self.cmd_idx_to_local_offset[cmd_idx] = len(self.q) - self.cmds_offset[cmd_idx] + 5 # +1 to skip PACKET3_SET_SH_REG + reg + 3 zeros.
+    self.cmd_idx_to_local_offset[cmd_idx] = len(self._q) - self.cmds_offset[cmd_idx] + 5 # +1 to skip PACKET3_SET_SH_REG + reg + 3 zeros.
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_START_X), 0, 0, 0, *local_size, 0, 0)
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_RESOURCE_LIMITS), 0)
 
-    self.cmd_idx_to_global_offset[cmd_idx] = len(self.q) - self.cmds_offset[cmd_idx] + 1 # +1 to skip PACKET3_DISPATCH_DIRECT.
+    self.cmd_idx_to_global_offset[cmd_idx] = len(self._q) - self.cmds_offset[cmd_idx] + 1 # +1 to skip PACKET3_DISPATCH_DIRECT.
     self.pkt3(amd_gpu.PACKET3_DISPATCH_DIRECT, *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN)
     self.pkt3(amd_gpu.PACKET3_EVENT_WRITE, amd_gpu.EVENT_TYPE(amd_gpu.CS_PARTIAL_FLUSH) | amd_gpu.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
 
@@ -148,16 +148,16 @@ class AMDComputeQueue(HWQueue):
 
   def bind(self, dev:AMDDevice):
     self.binded_device = dev
-    self.hw_page = dev.allocator.alloc(len(self.q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
+    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
     hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
-    for i, value in enumerate(self.q): hw_view[i] = value
+    for i, value in enumerate(self._q): hw_view[i] = value
 
     self.indirect_cmd = [amd_gpu.PACKET3(amd_gpu.PACKET3_INDIRECT_BUFFER, 2), *data64_le(self.hw_page.va_addr),
-                         len(self.q) | amd_gpu.INDIRECT_BUFFER_VALID]
-    self.q = hw_view # type: ignore
+                         len(self._q) | amd_gpu.INDIRECT_BUFFER_VALID]
+    self._q = hw_view # type: ignore
 
   def _submit(self, dev:AMDDevice):
-    cmds = self.indirect_cmd if dev == self.binded_device else self.q
+    cmds = self.indirect_cmd if dev == self.binded_device else self._q
 
     for i, value in enumerate(cmds): dev.compute_queue.ring[(dev.compute_queue.put_value + i) % len(dev.compute_queue.ring)] = value
 
@@ -171,8 +171,8 @@ class AMDCopyQueue(HWQueue):
     self.internal_cmd_sizes, self.copy_cmds_per_copy = [], {}
     super().__init__()
 
-  def _q(self, arr):
-    self.q += arr
+  def q(self, *arr):
+    super().q(*arr)
     self.internal_cmd_sizes.append(len(arr))
 
   def _copy(self, dest, src, copy_size):
@@ -181,8 +181,8 @@ class AMDCopyQueue(HWQueue):
     for _ in range(copy_commands):
       step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
 
-      self._q([amd_gpu.SDMA_OP_COPY | amd_gpu.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_COPY_LINEAR),
-        amd_gpu.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(step_copy_size - 1), 0, *data64_le(src + copied), *data64_le(dest + copied)])
+      self.q(amd_gpu.SDMA_OP_COPY | amd_gpu.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_COPY_LINEAR),
+        amd_gpu.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(step_copy_size - 1), 0, *data64_le(src + copied), *data64_le(dest + copied))
 
       copied += step_copy_size
 
@@ -192,16 +192,16 @@ class AMDCopyQueue(HWQueue):
       if dest is not None: self._patch(cmd_idx, offset=5+i*7, data=[*data64_le(dest + SDMA_MAX_COPY_SIZE*i)])
 
   def _signal(self, signal:AMDSignal, value=0):
-    self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal.value_addr), value])
+    self.q(amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal.value_addr), value)
 
     if (dev:=signal.timeline_for_device) is not None:
-      self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id])
-      self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id)])
+      self.q(amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
+      self.q(amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id))
 
   def _wait(self, signal:AMDSignal, value=0):
-    self._q([amd_gpu.SDMA_OP_POLL_REGMEM | amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
+    self.q(amd_gpu.SDMA_OP_POLL_REGMEM | amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
       amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(signal.value_addr), value, 0xffffffff,
-      amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)])
+      amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
 
   def _update_signal(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
     return self._update_wait(cmd_idx, signal, value) # the same offsets and commands
@@ -223,15 +223,15 @@ class AMDCopyQueue(HWQueue):
       tail_blit_dword += cmdsz
 
     start_idx = (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes) // 4
-    dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', self.q[:tail_blit_dword])
+    dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', self._q[:tail_blit_dword])
     dev.sdma_queue.put_value += tail_blit_dword * 4
 
-    if (rem_packet_cnt := len(self.q) - tail_blit_dword) > 0:
+    if (rem_packet_cnt := len(self._q) - tail_blit_dword) > 0:
       zero_fill = dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes
       ctypes.memset(mv_address(dev.sdma_queue.ring) + (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes), 0, zero_fill)
       dev.sdma_queue.put_value += zero_fill
 
-      dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', self.q[tail_blit_dword:])
+      dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', self._q[tail_blit_dword:])
       dev.sdma_queue.put_value += rem_packet_cnt * 4
 
     dev.sdma_queue.write_ptr[0] = dev.sdma_queue.put_value
