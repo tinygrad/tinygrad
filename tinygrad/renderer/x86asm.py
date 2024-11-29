@@ -51,7 +51,7 @@ x86_rewrite = PatternMatcher([
 
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx[x.src[0]]}\n.LOOP_{x.arg[0]}:"),
   (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x: f"inc {ctx[x.src[0]]}\ncmp {ctx[x.src[0]]}, {x.src[0].src[1].arg}\njl .LOOP_{x.src[0].arg[0]}"),
-  
+
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"mov{mov_sufix[x.dtype.itemsize] if ctx.r[x.src[0]] in ctx.all_regs else ""} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: ctx.x86_cast(x, x.src[0])),
   # no cmov for floats
@@ -122,7 +122,7 @@ class X86Renderer(Renderer):
     if self.r[x] != "rdx" and "rdx" in self.r.values(): l += "\npop rdx"
     if self.r[x] != "rax" and "rax" in self.r.values(): l += "\npop rax"
     return l
-  
+
   def x86_cast(self, x:UOp, s:UOp) -> str:
     # NOTE: cast from uint64 to floats is complicated, might not want to allow that
     # TODO: cast from uint32 to float requires use of 64bit reg (already zero extended)
@@ -222,7 +222,7 @@ class X86Renderer(Renderer):
         continue
 
       if u.op is Ops.DEFINE_GLOBAL and u.arg > 5:
-        # address in stack instead of register
+        # address is in stack instead of register
         r[u] = mem[u] = f"[rbp + {stack_size}]"
         stack_size += 8
         continue
@@ -230,7 +230,6 @@ class X86Renderer(Renderer):
       for s in u.src:
         # these can't take imm values
         if is_imm(s) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD): mov_to_reg(s)
-        #elif is_imm(s) and u.op is Ops.LOAD and len(u.src) == 3: mov_to_reg(s)
         elif is_mem(s): mov_to_reg(s)
         else: assert is_reg(s) or is_imm(s) or s.op is Ops.RANGE or u.dtype is dtypes.void
 
@@ -279,10 +278,9 @@ class X86Renderer(Renderer):
         if s in live_range and live_range[s][-1] == i and is_reg(s):
           reg = r.pop(s)
           if reg not in r.values(): free_reg(reg)
-    
+
     return "\n".join([".text", f".global {name}", f"{name}:", "push rbp", "mov rbp, rsp", f"sub rsp, {stack_size}"] + kernel + [f"add rsp, {stack_size}", "pop rbp", "ret", "\n"])
 
 # .intel_syntax noprefix <-- add this if using gas
 # TODO: free loop counter for spilling
 # NOTE: for now we mov all operands to regs
-# NOTE: we can take the src register if src is in the same loop or there's no loop and isn't used elsewhere

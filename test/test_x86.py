@@ -120,12 +120,12 @@ class TestX86(unittest.TestCase):
 
   def test_randint(self):
     a = Tensor.randint(3).tolist()
-  
+
   def test_log(self):
     a = Tensor([1,2,3]).log().tolist()
     b = Tensor([1,2,3], device="CLANG").log().tolist()
     assert np.allclose(a, b, rtol=1e-7)
-  
+
   def test_exp(self):
     a = Tensor([1,2,3]).exp().tolist()
     b = Tensor([1,2,3], device="CLANG").exp().tolist()
