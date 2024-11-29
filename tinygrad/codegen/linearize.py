@@ -5,17 +5,6 @@ from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewr
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import dedup, flatten, partition
 
-def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
-  if u in children: return srcs[u]
-  srcs[u] = {}
-  children[u] = []
-  for x in u.src:
-    srcs[u].update(get_children_dfs(x, children, srcs, in_degree))
-    if x.op is Ops.RANGE and x.arg[1]: srcs[u][x] = None
-    children[x].append(u)
-  in_degree[u] = len(u.src)
-  return srcs[u]
-
 def disp(y) -> str:
   if y.op is Ops.BLOCKSTART: return "w"+disp(y.src[0])
   if y.op is Ops.IF: return f'IF{id(y)}'
@@ -29,6 +18,7 @@ class BasicBlock:
     return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+\
            f"{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
+# TODO: this can't be a global cache
 @functools.lru_cache(None)
 def _get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
   ret: List[Tuple[UOp, ...]] = []
@@ -89,14 +79,13 @@ make_basic_blocks = PatternMatcher([
   (UPat(Ops.BLOCK, name="x"), append_to_block),
 ])
 
-def block_gobble(ctx, x:UOp):
+def block_merge(ctx, x:UOp):
   if x.op is Ops.BLOCKEND:
     # if it's a BLOCKEND, see if we are done with placement. if all the children of the range are in here
     in_this_block = set(x.arg.lst)
     if len([y for y in ctx[x.arg.end] if y not in in_this_block]) == 0:
       # find the parent block that has the BLOCKSTART in the ctx
-      search_block_start = UOp(Ops.BLOCKSTART, src=(x.arg.end,))
-      parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and search_block_start in y.arg.ctx]
+      parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and UOp(Ops.BLOCKSTART, src=(x.arg.end,)) in y.arg.ctx]
       if len(parent_blocks) == 1:
         parent_block = parent_blocks[0]
         # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
@@ -112,6 +101,7 @@ def block_gobble(ctx, x:UOp):
   placed = set()
   for u in x.src:
     if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(x.arg.ctx) or (x.arg.end is not None and x.arg.end in u.arg.ctx)):
+      # NOTE: this can't appear in srcs twice or it would be a BLOCKFORK
       new_ctx += u.arg.ctx
       new_srcs += list(u.src)
       to_append += u.arg.lst
@@ -127,16 +117,15 @@ def block_gobble(ctx, x:UOp):
   if not updated: return None
   return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(dedup(new_ctx), to_append+x.arg.lst, x.arg.end))
 
-blockend = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_gobble),])
+pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
-  # filter nodes that don't link to a sink
-  # BFS toposort
+
+  # get children
   children: Dict[UOp, List[UOp]] = {}
-  range_srcs: Dict[UOp, Dict[UOp, None]] = {}
-  in_degree: Dict[UOp, int] = {}
-  get_children_dfs(sink, children, range_srcs, in_degree)
+  for u in sink.sparents:
+    for s in u.src: children.setdefault(s, []).append(u)
 
   # TODO: there's probably a clever way to remove this while loop
   while 1:
@@ -161,26 +150,17 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   for be in blockends: blockends_to_arg[be.arg.end].append(be)
   new_forks = {}
   for k,v in blockends_to_arg.items():
-    # parents fixup
-    """
-    to_remove = []
-    for kv in v:
-      for kvv in v:
-        if kvv in kv.parents:
-          new_forks[kvv] = kvv.src[0]
-          to_remove.append(kvv)
-    v = [x for x in v if x not in to_remove]
-    """
+    # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
     if len(v) > 1:
-      new_be = UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)), arg=BasicBlock(dedup(flatten([y.arg.ctx for y in v])), v[0].arg.lst, k))
-      out = UOp(Ops.BLOCKFORK, src=(new_be,), arg=len(v))
+      new_blockend = UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)), arg=BasicBlock(dedup(flatten([y.arg.ctx for y in v])), v[0].arg.lst, k))
+      out = UOp(Ops.BLOCKFORK, src=(new_blockend,), arg=len(v))
       for u in v: new_forks[u] = out
   sink = sink.substitute(new_forks)
 
-  # final rewrite to linearizer
-  sink = graph_rewrite(sink, blockend, ctx=children)
+  # final rewrite to merge all blocks into one
+  sink = graph_rewrite(sink, pm_block_merge, ctx=children)
 
-  # there should just be one block left
+  # there should just be one block left, with a few parents with 0 srcs
   assert sink.op is Ops.BLOCK
   _uops = sorted(dedup(sink.src), key=lambda x: x.tuplize)
   assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
