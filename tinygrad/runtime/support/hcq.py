@@ -14,53 +14,6 @@ ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
 
-class HCQSignal(Generic[DeviceType]):
-  def __init__(self, base_addr:sint=0, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8):
-    self.base_addr, self.value_addr, self.timestamp_addr = base_addr, base_addr+value_off, base_addr+timestamp_off
-    self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
-    self.timeline_for_device:Optional[DeviceType] = timeline_for_device
-
-    if isinstance(base_addr, int):
-      self.value_mv, self.timestamp_mv = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q')
-      self.value_mv[0] = value
-
-  @property
-  def value(self) -> int: return self.value_mv[0]
-
-  @value.setter
-  def value(self, new_value:int): self.value_mv[0] = new_value
-
-  @property
-  def timestamp(self) -> decimal.Decimal:
-    """
-    Get the timestamp field of the signal.
-
-    This property provides read-only access to the signal's timestamp.
-
-    Returns:
-      The timestamp in microseconds.
-    """
-    return self.timestamp_mv[0] / self.timestamp_divider
-
-  def _sleep(self, time_spent_waiting_ms:int):
-    """
-    Optional function which can implement sleep functionality for the signal.
-    """
-
-  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
-    """
-    Waits the signal is greater than or equal to a specific value.
-
-    Args:
-      value: The value to wait for.
-      timeout: Maximum time to wait in milliseconds. Defaults to 10s.
-    """
-    start_time = int(time.time() * 1000)
-    while (time_spent:=int(time.time() * 1000) - start_time) < timeout:
-      if self.value >= value: return
-      self._sleep(time_spent)
-    raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
-
 class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   """
   A base class for hardware command queues in the HCQ (Hardware Command Queue) API.
@@ -189,6 +142,53 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
     return self
   def _submit(self, dev:DeviceType): raise NotImplementedError("need _submit")
 
+class HCQSignal(Generic[DeviceType]):
+  def __init__(self, base_addr:sint=0, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8):
+    self.base_addr, self.value_addr, self.timestamp_addr = base_addr, base_addr+value_off, base_addr+timestamp_off
+    self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
+    self.timeline_for_device:Optional[DeviceType] = timeline_for_device
+
+    if isinstance(base_addr, int):
+      self.value_mv, self.timestamp_mv = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q')
+      self.value_mv[0] = value
+
+  @property
+  def value(self) -> int: return self.value_mv[0]
+
+  @value.setter
+  def value(self, new_value:int): self.value_mv[0] = new_value
+
+  @property
+  def timestamp(self) -> decimal.Decimal:
+    """
+    Get the timestamp field of the signal.
+
+    This property provides read-only access to the signal's timestamp.
+
+    Returns:
+      The timestamp in microseconds.
+    """
+    return self.timestamp_mv[0] / self.timestamp_divider
+
+  def _sleep(self, time_spent_waiting_ms:int):
+    """
+    Optional function which can implement sleep functionality for the signal.
+    """
+
+  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
+    """
+    Waits the signal is greater than or equal to a specific value.
+
+    Args:
+      value: The value to wait for.
+      timeout: Maximum time to wait in milliseconds. Defaults to 10s.
+    """
+    start_time = int(time.time() * 1000)
+    while (time_spent:=int(time.time() * 1000) - start_time) < timeout:
+      if self.value >= value: return
+      self._sleep(time_spent)
+    raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
+    
 @contextlib.contextmanager
 def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Optional[Type[HWQueue]]=None, queue:Optional[HWQueue]=None):
   st, en = (dev.signal_t(), dev.signal_t()) if enabled else (None, None)
@@ -306,6 +306,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
   def __init__(self, device:str, allocator:HCQAllocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
                comp_queue_t:Type[HWQueue], copy_queue_t:Optional[Type[HWQueue]]):
+    self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
     self.timeline_value:int = 1
     self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)

@@ -74,9 +74,8 @@ assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 def nvmethod(subc, mthd, size, typ=2): return (typ << 28) | (size << 16) | (subc << 13) | (mthd >> 2)
 
 class NVSignal(HCQSignal):
-  def __init__(self, base_addr:Optional[sint]=None, value=0, timeline_for_device:Optional[NVDevice]=None):
-    base_addr = NVDevice.signals_pool.pop() if base_addr is None else base_addr
-    super().__init__(base_addr, value, timeline_for_device, timestamp_divider=1000, value_off=0, timestamp_off=8)
+  def __init__(self, base_addr:Optional[int]=None, **kwargs):
+    super().__init__(NVDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=1000, value_off=0, timestamp_off=8)
 
   def __del__(self):
     if isinstance(self.base_addr, int): NVDevice.signals_pool.append(self.base_addr)

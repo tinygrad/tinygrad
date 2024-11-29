@@ -29,9 +29,8 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
-  def __init__(self, base_addr:Optional[sint]=None, value=0, timeline_for_device:Optional[AMDDevice]=None):
-    base_addr = AMDDevice.signals_pool.pop() if base_addr is None else base_addr
-    super().__init__(base_addr, value, timeline_for_device, timestamp_divider=100, value_off=0, timestamp_off=8)
+  def __init__(self, base_addr:Optional[int]=None, **kwargs):
+    super().__init__(AMDDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100)
 
   def __del__(self):
     if isinstance(self.base_addr, int): AMDDevice.signals_pool.append(self.base_addr)
@@ -185,8 +184,8 @@ class AMDCopyQueue(HWQueue):
 
   def wait(self, signal:AMDSignal, value:sint=0):
     self.q(amd_gpu.SDMA_OP_POLL_REGMEM | amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
-      amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(signal.value_addr), value, 0xffffffff,
-      amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
+           amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(signal.value_addr), value, 0xffffffff,
+           amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
     return self
 
   def timestamp(self, signal:AMDSignal):
