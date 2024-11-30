@@ -25,7 +25,7 @@ class BLAKE3:
   def compress_chunks(self, states: Tensor, chunks: Tensor, chain_vals: Tensor, len_info: Dict) -> Tensor:
     n_end_blocks, n_chunks = len_info["n_end_blocks"], len_info["n_chunks"]
     for i in range(16): # parallel over chunks, sequential over blocks
-      compressed = self.compress_blocks(states[i].contiguous(), chunks[i].contiguous(), chain_vals[i])
+      compressed = self.compress_blocks(states[i].contiguous().realize(), chunks[i].contiguous().realize(), chain_vals[i].contiguous().realize())
       if i < chunks.shape[1] - 1: states[i + 1, :8] = compressed[:8] # propagate chain vals
       if i == n_end_blocks - 1: final_chain_val = compressed[:8, n_chunks - 1].reshape(-1, 1) # for partial chunks
     return compressed[:8, :n_chunks] if n_end_blocks == 16 else compressed[:8, :n_chunks - 1].cat(final_chain_val, dim=-1)
@@ -42,12 +42,11 @@ class BLAKE3:
   def tensor_to_blake_data(self, tensor: Tensor) -> Tuple[Tensor, int, int]:
     data = tensor.flatten().bitcast(dtypes.uint8)
     pad_amt = min(size for size in self.std_sizes if size >= tensor.nbytes()) - tensor.nbytes()
-    data = data.pad(((0, pad_amt),), value=0).bitcast(dtypes.uint32).reshape(-1, 16, 16).permute(1, 2, 0)
-    print(f"post padding data size MB: {data.numel() * data.element_size() / 1024 / 1024 :.1f}")
+    data = data.pad(((0, pad_amt),), value=0).bitcast(dtypes.uint32).reshape(-1, 16, 16).permute(1, 2, 0).contiguous()
     final_chunk_len = 0 if tensor.nbytes() == 0 else (tensor.nbytes() % 1024 or 1024)
     n_end_blocks, end_block_len = ceildiv(final_chunk_len, 64) or 1, 0 if tensor.nbytes() == 0 else tensor.nbytes() % 64 or 64
     n_chunks = max(1, ceildiv(tensor.nbytes(), 1024))
-    return data.contiguous(), {"n_end_blocks": n_end_blocks, "end_block_len": end_block_len, "n_chunks": n_chunks}
+    return data, {"n_end_blocks": n_end_blocks, "end_block_len": end_block_len, "n_chunks": n_chunks}
 
   def pairwise_concat(self, chain_vals: Tensor) -> Tuple[Tensor, Optional[Tensor]]:
     leftover_chunk = chain_vals[:, -1:] if chain_vals.shape[1] % 2 else None
