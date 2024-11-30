@@ -112,6 +112,7 @@ if __name__ == "__main__":
       print(f"Warming up {size / 1024 / 1024 :.1f} MB...")
       warmup_data = Tensor.rand(size // 2, dtype=dtypes.float16)
       BLAKE3().hash(warmup_data)
+    for size in BLAKE3().std_sizes: warmup(size)
   else:
     def benchmark_size(size_bytes):
       print(f"\nBenchmarking {size_bytes / 1024 / 1024 :.1f} MB...")
