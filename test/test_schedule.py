@@ -1885,10 +1885,10 @@ class TestSwizzle(unittest.TestCase):
   def test_late_fusion_post_permute_simpler(self):
     base = ShapeTracker.from_shape((32, 16, 1))
     start = UOp(Ops.LOAD, dtypes.char, (UOp.new_buffer(Device.DEFAULT, base.size, dtypes.char), base.to_uop()))
-    r = start.view(start.st.expand((32, 16, 16))).r(Ops.ADD, (2,))
+    r = start.expand((32, 16, 16)).r(Ops.ADD, (2,))
     add = r.reshape((16, 32, 1)) + UOp.const_with_shape(r.dtype, 0, (16, 32, 1))
     self.assertEqual(add.st, ShapeTracker.from_shape((16, 32, 1)))
-    to_store = add.view(add.st.permute((1, 0, 2))).contiguous()
+    to_store = add.permute((1, 0, 2)).contiguous()
     self.assertEqual(to_store.st, ShapeTracker.from_shape((32, 16, 1)))
     self.assertEqual(to_store.src[0].st, add.st.permute((1, 0, 2)))
     self.assertIs(to_store.src[0].op, Ops.VIEW)
@@ -1936,14 +1936,22 @@ class TestBigGraph(unittest.TestCase):
   def test_sink_childless_const(self):
     x = UOp.const(dtypes.int, 0)
     big_graph = big_graph_rewrite(x.sink(), realizes:={})
-    self.assertIs(big_graph, UOp(Ops.SINK, dtypes.void, (x,)))
+    self.assertIs(big_graph, UOp(Ops.NOOP))
     self.assertEqual(len(realizes), 0)
 
   def test_sink_childless_const_alt(self):
     x = UOp.const(dtypes.int, 0)
-    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape((10, 10)))
+    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
     big_graph = big_graph_rewrite(UOp.sink(x, y), realizes:={})
-    self.assertIs(big_graph, UOp(Ops.SINK, dtypes.void, (x, y)))
+    self.assertIs(big_graph, UOp(Ops.NOOP))
+    self.assertEqual(len(realizes), 0)
+
+  def test_sink_childless_const_alt_expanded(self):
+    # this is a real STORE of CONST (post expand)
+    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
+    out = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), y.reshape((1,)).expand((2,)).contiguous(),), ShapeTracker.from_shape((2,)))
+    big_graph = big_graph_rewrite(out.sink(), realizes:={})
+    self.assertIs(big_graph, out.sink())
     self.assertEqual(len(realizes), 1)
 
 if __name__ == '__main__':
