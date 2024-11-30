@@ -360,7 +360,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
   def view(self, new_st:ShapeTracker) -> UOp:
-    assert self.op is not Ops.STORE, "STORE must stay base"
     assert self.st is not None and self.base.st is not None, f"must have shape {self}"
     if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)):
       return UOp.const_with_shape(self.dtype, 0, new_st.shape)
