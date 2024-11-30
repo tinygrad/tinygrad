@@ -9,9 +9,9 @@ from tinygrad.tensor import Tensor
 class BLAKE3:
   def __init__(self, std_sizes: Optional[List[int]] = None):
     self.IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
-    self.mix = jit.TinyJit(self.mix)
-    self.std_sizes = std_sizes or [128 * (1024**2), 1024**3, 2 * (1024**3), 4 * (1024**3)] # size rounding for JIT consistency
+    self.std_sizes = std_sizes or [1024 * (1024**2)] #, 1024**3, 2 * (1024**3), 4 * (1024**3)] # size rounding for JIT consistency
 
+  @jit.TinyJit
   def mix(self, states: Tensor, chunks: Tensor) -> Tensor:
     def rotr(x: Tensor, n: int) -> Tensor: return ((x << (32 - n)) | (x >> n))
     for i, (a,b,c,d) in enumerate([(0,4,8,12), (1,5,9,13), (2,6,10,14), (3,7,11,15), (0,5,10,15), (1,6,11,12), (2,7,8,13), (3,4,9,14)]):
@@ -43,6 +43,7 @@ class BLAKE3:
     data = tensor.flatten().bitcast(dtypes.uint8)
     pad_amt = min(size for size in self.std_sizes if size >= tensor.nbytes()) - tensor.nbytes()
     data = data.pad(((0, pad_amt),), value=0).bitcast(dtypes.uint32).reshape(-1, 16, 16).permute(1, 2, 0)
+    print(f"post padding data size MB: {data.numel() * data.element_size() / 1024 / 1024 :.1f}")
     final_chunk_len = 0 if tensor.nbytes() == 0 else (tensor.nbytes() % 1024 or 1024)
     n_end_blocks, end_block_len = ceildiv(final_chunk_len, 64) or 1, 0 if tensor.nbytes() == 0 else tensor.nbytes() % 64 or 64
     n_chunks = max(1, ceildiv(tensor.nbytes(), 1024))
