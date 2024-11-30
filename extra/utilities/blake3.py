@@ -134,7 +134,7 @@ if __name__ == "__main__":
     1024 * 1024 * 1000 - n,     # 1 GB
   ]
 
-  if Device.DEFAULT == "NV":
+  if Device.DEFAULT in ["NV", "CUDA"]:
     # OOMs on METAL
     sizes += [
       2 * 1024 * 1024 * 1000 - n, # 2 GB
