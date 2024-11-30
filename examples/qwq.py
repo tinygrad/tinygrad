@@ -53,7 +53,7 @@ def load_model(model_path, model_params):
   load_state_dict(model, weights, strict=False, consume=True)
 
   return model
-  
+
 
 if __name__ == "__main__":
   Tensor.no_grad = True
