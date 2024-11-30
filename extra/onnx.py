@@ -4,16 +4,10 @@ import importlib
 from functools import lru_cache
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import getenv, DEBUG, CI, OSX
+from tinygrad.helpers import getenv, DEBUG, CI, OSX, mv_address
 from tinygrad.dtype import ConstType, DType
 from tinygrad.device import is_dtype_supported
-from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
-try:
-  from onnx.helper import tensor_dtype_to_np_dtype
-except ImportError:
-  # for onnx < 1.13
-  from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
-  def tensor_dtype_to_np_dtype(tensor_dtype:int) -> np.dtype: return TENSOR_TYPE_TO_NP_TYPE[tensor_dtype]
+from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, ValueInfoProto
 
 cache_misses = 0
 @lru_cache(None)
@@ -36,28 +30,20 @@ DTYPE_MAP: Dict[int, DType] = { TensorProto.FLOAT:dtypes.float32, TensorProto.UI
   TensorProto.BOOL:dtypes.bool, TensorProto.FLOAT16:dtypes.float32, TensorProto.DOUBLE:dtypes.double, TensorProto.UINT32:dtypes.uint32,
   TensorProto.UINT64:dtypes.uint64, TensorProto.BFLOAT16:dtypes.bfloat16, TensorProto.FLOAT8E4M3FN:dtypes.float,
   TensorProto.FLOAT8E4M3FNUZ:dtypes.float, TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float}
+def dtype_parse(onnx_dtype: TensorProto.DataType) -> DType:
+  if onnx_dtype in DTYPE_MAP: return DTYPE_MAP[onnx_dtype] if is_dtype_supported(DTYPE_MAP[onnx_dtype], Device.DEFAULT) else dtypes.float
+  raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
 
 # src: onnx/onnx_ml_pb2.pyi
 ATTRIBUTE_MAP = {AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i),
   AttributeProto.STRING: lambda a: a.s.decode("utf-8"), AttributeProto.TENSOR: lambda a: buffer_parse(a.t),
   AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats), AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints),
   AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)}
+def attribute_parse(onnx_attribute: AttributeProto):
+  if onnx_attribute.type in ATTRIBUTE_MAP: return ATTRIBUTE_MAP[onnx_attribute.type](onnx_attribute)
+  raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(onnx_attribute.type)} is not supported")
 
-def dtype_parse(onnx_dtype: TensorProto.DataType) -> DType:
-  if onnx_dtype in DTYPE_MAP: return DTYPE_MAP[onnx_dtype] if is_dtype_supported(DTYPE_MAP[onnx_dtype], Device.DEFAULT) else dtypes.float
-  raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
-
-def attribute_parse(a: AttributeProto):
-  if a.type in ATTRIBUTE_MAP: return ATTRIBUTE_MAP[a.type](a)
-  raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(a.type)} is not supported")
-
-def buffer_parse(inp: TensorProto) -> Tensor:
-  if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
-    return Tensor(dat, dtype=dtype_parse(inp.data_type), requires_grad=False).reshape(tuple(inp.dims))
-  if len(inp.raw_data) > 0:
-    return Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).copy().reshape(tuple(inp.dims)),
-                  dtype=dtype_parse(inp.data_type), requires_grad=False)
-  raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
+# def value_info_parse(onnx_value_info: ValueInfoProto):
 
 def type_parse(type_proto: TypeProto):
   ret = []
@@ -78,6 +64,11 @@ def type_parse(type_proto: TypeProto):
     elif attr == 'opaque_type': raise NotImplementedError(f"opaque_type is not implemented: {type_proto}")
     elif attr == 'sparse_tensor_type': raise NotImplementedError(f"sparse_tensor_type is not implemented: {type_proto}")
     else: raise AttributeError(f"unknown attr: {attr}, {type_proto}")
+
+def buffer_parse(inp: TensorProto) -> Tensor:
+  if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data) or inp.raw_data:
+    return Tensor(dat, dtype=dtype_parse(inp.data_type), requires_grad=False).reshape(tuple(inp.dims))
+  raise NotImplementedError(f"buffer parsing with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
 
