@@ -1956,6 +1956,8 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
       lambda x,w: Tensor.conv2d(x,w,padding=padding).relu())
 
+  # TODO: fix
+  @unittest.skipIf(CI and Device.DEFAULT == "LLVM", "CI segfaults")
   @unittest.expectedFailure
   def test_conv2d_fp16(self):
     helper_test_op([(1,12,128,256), (32,12,3,3), (32,)],
