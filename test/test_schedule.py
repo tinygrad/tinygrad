@@ -1936,15 +1936,15 @@ class TestBigGraph(unittest.TestCase):
   def test_sink_childless_const(self):
     x = UOp.const(dtypes.int, 0)
     big_graph = big_graph_rewrite(x.sink(), realizes:={})
-    self.assertIs(big_graph, UOp(Ops.SINK, dtypes.void, (x,)))
+    self.assertIs(big_graph, UOp(Ops.NOOP))
     self.assertEqual(len(realizes), 0)
 
   def test_sink_childless_const_alt(self):
     x = UOp.const(dtypes.int, 0)
     y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
     big_graph = big_graph_rewrite(UOp.sink(x, y), realizes:={})
-    self.assertIs(big_graph, UOp(Ops.SINK, dtypes.void, (x, y)))
-    self.assertEqual(len(realizes), 1) # TODO: this should fold a flat CONST
+    self.assertIs(big_graph, UOp(Ops.NOOP))
+    self.assertEqual(len(realizes), 0)
 
   def test_sink_childless_const_alt_expanded(self):
     # this is a real STORE of CONST (post expand)
