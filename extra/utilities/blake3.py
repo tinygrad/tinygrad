@@ -101,48 +101,33 @@ class BLAKE3:
 
 if __name__ == "__main__":
   import time
-  import random
+  import sys
 
-  # warmup the JIT
-  print("\nWarming up...")
-  def warmup(size):
-    print(f"Warming up {size / 1024 / 1024 :.1f} MB...")
-    warmup_data = Tensor.rand(size // 2, dtype=dtypes.float16)
-    BLAKE3().hash(warmup_data)
+  arg = sys.argv[1]
 
-  sizes = BLAKE3().std_sizes
-  if Device.DEFAULT == "METAL": sizes = sizes[:-1]
-  for std_size in sizes: warmup(std_size)
+  if arg == "warmup":
+    # warmup the JIT
+    print("\nWarming up...")
+    def warmup(size):
+      print(f"Warming up {size / 1024 / 1024 :.1f} MB...")
+      warmup_data = Tensor.rand(size // 2, dtype=dtypes.float16)
+      BLAKE3().hash(warmup_data)
+  else:
+    def benchmark_size(size_bytes):
+      print(f"\nBenchmarking {size_bytes / 1024 / 1024 :.1f} MB...")
+      data = Tensor.rand(size_bytes // 2, dtype=dtypes.float16)
+      size = data.numel() * data.element_size()
 
-  def benchmark_size(size_bytes):
-    print(f"\nBenchmarking {size_bytes / 1024 / 1024 :.1f} MB...")
-    data = Tensor.rand(size_bytes // 2, dtype=dtypes.float16)
-    size = data.numel() * data.element_size()
+      start = time.time()
+      BLAKE3().hash(data)
+      end = time.time()
 
-    start = time.time()
-    BLAKE3().hash(data)
-    end = time.time()
+      elapsed = end - start
+      throughput = size / elapsed / 1e6  # MB/s
+      print(f"Time: {elapsed:.2f}s")
+      print(f"Throughput: {throughput:.1f} MB/s")
 
-    elapsed = end - start
-    throughput = size / elapsed / 1e6  # MB/s
-    print(f"Time: {elapsed:.2f}s")
-    print(f"Throughput: {throughput:.1f} MB/s")
+    size_mb = float(sys.argv[1])
+    size = int(size_mb * 1024 * 1024)
 
-  n = random.randint(0, 20_000)
-
-  sizes = [
-    100 * 1024 * 1024 - n,      # 100 MB
-    500 * 1024 * 1024 - n,      # 500 MB
-    1024 * 1024 * 1000 - n,     # 1 GB
-  ]
-
-  if Device.DEFAULT in ["NV", "CUDA"]:
-    # OOMs on METAL
-    sizes += [
-      2 * 1024 * 1024 * 1024 - n, # 2 GB
-      4 * 1024 * 1024 * 1024 -n  # 4 GB
-    ]
-
-  print("Running BLAKE3 benchmarks...")
-  for size in sizes:
     benchmark_size(size)
