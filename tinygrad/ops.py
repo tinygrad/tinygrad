@@ -274,8 +274,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.arg.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
-  @property
-  def size(self) -> int: return self.arg[1][1] if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # *** uop evaluation ***
 
@@ -385,6 +383,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       case Ops.COPY: return self.arg
       case Ops.BUFFER: return self.arg[1][0]
       case _: return self.src[0].device
+  @property
+  def size(self) -> int: return self.buf_uop.arg[1][1]
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
