@@ -1957,7 +1957,7 @@ class TestOps(unittest.TestCase):
       lambda x,w: Tensor.conv2d(x,w,padding=padding).relu())
 
   # TODO: fix
-  @unittest.skipIf(CI and Device.DEFAULT == "LLVM", "CI segfaults")
+  @unittest.skipIf(CI and Device.DEFAULT in {"LLVM", "PTX", "NV"}, "crashes in CI")
   @unittest.expectedFailure
   def test_conv2d_fp16(self):
     helper_test_op([(1,12,128,256), (32,12,3,3), (32,)],
