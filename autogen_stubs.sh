@@ -162,6 +162,8 @@ generate_amd() {
   clang2py -k cdefstum \
     extra/hip_gpu_driver/sdma_registers.h \
     extra/hip_gpu_driver/nvd.h \
+    extra/hip_gpu_driver/kfd_pm4_headers_ai.h \
+    extra/hip_gpu_driver/soc21_enum.h \
     extra/hip_gpu_driver/sdma_v6_0_0_pkt_open.h \
     extra/hip_gpu_driver/gc_11_0_0_offset.h \
     extra/hip_gpu_driver/gc_10_3_0_offset.h \

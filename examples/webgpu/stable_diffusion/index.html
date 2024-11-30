@@ -5,103 +5,213 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>tinygrad has WebGPU</title>
-
     <style>
-        body {
-            font-family: 'Arial', sans-serif;
-            text-align: center;
-            padding: 30px;
+        /* General Reset */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
 
-        a {
-            text-decoration: none;
-            color: #4A90E2;
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f4f7fb;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+            flex-direction: column;
+            text-align: center;
         }
 
         h1 {
-            font-size: 36px;
-            font-weight: normal;
+            font-size: 2.2rem;
             margin-bottom: 20px;
+            color: #4A90E2;
+        }
+
+        #wgpuError {
+            color: red;
+            font-size: 1.2rem;
+            margin-top: 20px;
+            display: none;
+        }
+
+        #sdTitle {
+            font-size: 1.5rem;
+            margin-bottom: 30px;
         }
 
         #mybox {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 20px;
-            width: 50%;
-            margin: 0 auto;
+            background: #ffffff;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            width: 120%;
+            max-width: 550px;
+            margin-bottom: 10px;
         }
 
-        #promptText, #stepRange, #btnRunNet, #guidanceRange {
-            font-size: 18px;
+        input[type="text"] {
             width: 100%;
+            padding: 12px;
+            margin-bottom: 20px;
+            font-size: 1rem;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            outline: none;
+            transition: all 0.3s ease;
         }
 
-        #result {
-            font-size: 48px;
-        }
-
-        #time {
-            font-size: 16px;
-            color: grey;
-        }
-
-        canvas {
-            margin-top: 20px;
-            border: 1px solid #000; 
+        input[type="text"]:focus {
+            border-color: #4A90E2;
         }
 
         label {
             display: flex;
+            justify-content: space-between;
+            font-size: 1rem;
+            margin-bottom: 15px;
             align-items: center;
-            gap: 10px;
-            width: 100%;
         }
-        
-        #sliderValue {
-            margin-right: 10px;/
+
+        input[type="range"] {
+            width: 100%;
+            margin-left: 10px;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 8px;
+            border-radius: 4px;
+            background: #ddd;
+            outline: none;
+            transition: background 0.3s ease;
+        }
+
+        input[type="range"]:focus {
+            background: #4A90E2;
+        }
+
+        #stepRange,
+        #guidanceRange {
+            width: 80%;
+        }
+
+        span {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        input[type="button"] {
+            padding: 12px 25px;
+            background-color: #4A90E2;
+            color: #fff;
+            font-size: 1.2rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        input[type="button"]:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        input[type="button"]:hover {
+            background-color: #357ABD;
+        }
+
+        #divModelDl, #divStepProgress {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        #modelDlProgressBar,
+        #progressBar {
+            width: 80%;
+            height: 12px;
+            border-radius: 6px;
+            background-color: #e0e0e0;
+        }
+
+        #modelDlProgressBar::-webkit-progress-bar,
+        #progressBar::-webkit-progress-bar {
+            border-radius: 6px;
+        }
+
+        #modelDlProgressValue, #progressFraction {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        canvas {
+            max-width: 100%;
+            max-height: 450px;
+            margin-top: 10px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
         }
     </style>
 
     <script type="module">
-        import ClipTokenizer from 'https://softwired.nyc3.cdn.digitaloceanspaces.com/sd/clip_tokenizer.js';
+        import ClipTokenizer from './clip_tokenizer.js';
         window.clipTokenizer = new ClipTokenizer();
     </script>
-    <script src="./f16_to_f32.js"></script>
+    <script type="module">
+        import { f16tof32GPU } from 'https://unpkg.com/f16-to-f32-gpu@0.1.0/src/index.js';
+        window.f16tof32GPU = f16tof32GPU;
+    </script>
     <script src="./net.js"></script>
 </head>
-
 <body>
-<h1 id="wgpuError" style="display: none; color: red;">WebGPU is not supported in this browser</h1>
-<h1 id="sdTitle">StableDiffusion by <a href="https://github.com/tinygrad/tinygrad" target="_blank">tinygrad</a> WebGPU</h1>
-<div id="mybox">
-    <input id="promptText" type="text" placeholder="Enter your prompt here" value="a horse sized cat eating a bagel">
+    <h1 id="wgpuError" style="display: none;">WebGPU is not supported in this browser</h1>
+    <h1 id="sdTitle">StableDiffusion powered by <a href="https://github.com/tinygrad/tinygrad" target="_blank" style="color: #4A90E2;">tinygrad</a></h1>
+    <a href="https://github.com/tinygrad/tinygrad" target="_blank" style="position: absolute; top: 20px; right: 20px;">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/9/91/Octicons-mark-github.svg"
+             alt="GitHub Logo"
+             style="width: 32px; height: 32px;">
+    </a>
     
-    <label>
-        Steps: <span id="stepValue">8</span>
-        <input id="stepRange" type="range" min="5" max="20" value="8" step="1">
-    </label>
+    <div id="mybox">
+        <input id="promptText" type="text" placeholder="Enter your prompt here" value="a human standing on the surface of mars">
 
-    <label>
-        Guidance: <span id="guidanceValue">7.5</span>
-        <input id="guidanceRange" type="range" min="3" max="15" value="7.5" step="0.1">
-    </label>
-    
-    <input id="btnRunNet" type="button" value="Run" disabled>
+        <label>
+            Steps: <span id="stepValue">9</span>
+            <input id="stepRange" type="range" min="5" max="20" value="9" step="1">
+        </label>
 
-    <div id="divModelDl" style="display: flex; align-items: center; width: 100%; gap: 10px;">
-        <span id="modelDlTitle">Downloading model</span>
-        <progress id="modelDlProgressBar" value="0" max="100" style="flex-grow: 1;"></progress>
-        <span id="modelDlProgressValue"></span>
+        <label>
+            Guidance: <span id="guidanceValue">8.0</span>
+            <input id="guidanceRange" type="range" min="3" max="15" value="8.0" step="0.1">
+        </label>
+
+        <input id="btnRunNet" type="button" value="Run" disabled>
+
+        <div id="divModelDl" style="display: flex; align-items: center; width: 100%; gap: 10px;">
+            <span id="modelDlTitle">Downloading model</span>
+            <progress id="modelDlProgressBar" value="0" max="100" style="flex-grow: 1;"></progress>
+            <span id="modelDlProgressValue"></span>
+        </div>
+
+        <div id="divStepProgress" style="display: none; align-items: center; width: 100%; gap: 10px;">
+            <progress id="progressBar" value="0" max="100" style="flex-grow: 1;"></progress>
+            <span id="progressFraction"></span>
+        </div>
+
+        <div id="divStepTime" style="display: none; align-items: center; width: 100%; gap: 10px;">
+            <span id="stepTimeValue">0 ms</span>
+        </div>
     </div>
 
-    <div id="divStepProgress" style="display: none; align-items: center; width: 100%; gap: 10px;">
-        <progress id="progressBar" value="0" max="100" style="flex-grow: 1;"></progress>
-        <span id="progressFraction"></span>
-    </div>
-</div>
-<canvas id="canvas" width="512" height="512"></canvas>
+    <canvas id="canvas" width="512" height="512"></canvas>
 
 <script>
     function initDb() {
@@ -129,30 +239,36 @@
     }
 
     function saveTensorToDb(db, id, tensor) {
-        return new Promise((resolve, reject) => {
-            if (db == null) {
-                resolve(null);
+        return readTensorFromDb(db, id).then((result) => {
+            if (!result) {
+                new Promise((resolve, reject) => {
+                    if (db == null) {
+                        resolve(null);
+                    }
+
+                    const transaction = db.transaction(['tensors'], 'readwrite');
+                    const store = transaction.objectStore('tensors');
+                    const request = store.put({ id: id, content: tensor });
+
+                    transaction.onabort = (event) => {
+                        console.log("Transaction error while saving tensor: " + event.target.error);
+                        resolve(null);
+                    };
+
+                    request.onsuccess = () => {
+                        console.log('Tensor saved successfully.');
+                        resolve();
+                    };
+
+                    request.onerror = (event) => {
+                        console.error('Tensor save failed:', event.target.error);
+                        resolve(null);
+                    };
+                });
+            } else {
+                return null;
             }
-
-            const transaction = db.transaction(['tensors'], 'readwrite');
-            const store = transaction.objectStore('tensors');
-            const request = store.put({ id: id, content: tensor });
-
-            transaction.onabort = (event) => {
-                console.log("Transaction error while saving tensor: " + event.target.error);
-                resolve(null);
-            };
-
-            request.onsuccess = () => {
-                console.log('Tensor saved successfully.');
-                resolve();
-            };
-
-            request.onerror = (event) => {
-                console.error('Tensor save failed:', event.target.error);
-                resolve(null);
-            };
-        });
+        }).catch(()=> null);
     }
 
     function readTensorFromDb(db, id) {
@@ -173,10 +289,8 @@
             request.onsuccess = (event) => {
                 const result = event.target.result;
                 if (result) {
-                    console.log("Cache hit: " + id);
                     resolve(result);
                 } else {
-                    console.log("Cache miss: " + id);
                     resolve(null);
                 }
             };
@@ -190,7 +304,7 @@
 
     window.addEventListener('load', async function() {
         if (!navigator.gpu) {
-            document.getElementById("wgpuError").style.display = "";
+            document.getElementById("wgpuError").style.display = "block";
             document.getElementById("sdTitle").style.display = "none";
             return;
         }
@@ -247,6 +361,18 @@
             let totalSize = 0;
             let partSize = {};
 
+            const getPart = async(key) => {
+                let part = await readTensorFromDb(db, key);
+
+                if (part) {
+                    console.log(`Cache hit: ${key}`);
+                    return Promise.resolve(part.content);
+                } else {
+                    console.log(`Cache miss: ${key}`);
+                    return getProgressDlForPart(`${window.MODEL_BASE_URL}/${key}.safetensors`, progressCallback);
+                }
+            }
+
             const progressCallback = (part, loaded, total) => {
                 totalLoaded += loaded;
 
@@ -258,63 +384,31 @@
                 progress(totalLoaded, totalSize);
             };
 
-            let combinedBuffer = await readTensorFromDb(db, "net.f16");
-            let textModelU8 = await readTensorFromDb(db, "net.text");
-            let textModelFetched = false;
+            let netKeys = ["net_part0", "net_part1", "net_part2", "net_part3", "net_textmodel"];
+            let buffers = await Promise.all(netKeys.map(key => getPart(key)));
 
-            if (combinedBuffer == null) {
-                let dlParts = [
-                    getProgressDlForPart(window.MODEL_BASE_URL + '/net_part0.safetensors', progressCallback),
-                    getProgressDlForPart(window.MODEL_BASE_URL + '/net_part1.safetensors', progressCallback),
-                    getProgressDlForPart(window.MODEL_BASE_URL + '/net_part2.safetensors', progressCallback),
-                    getProgressDlForPart(window.MODEL_BASE_URL + '/net_part3.safetensors', progressCallback)
-                ];
-
-                if (textModelU8 == null) {
-                    dlParts.push(getProgressDlForPart(window.MODEL_BASE_URL + '/net_textmodel.safetensors', progressCallback));
+            // Combine everything except for text model, since that's already f32
+            const totalLength = buffers.reduce((acc, buffer, index, array) => {
+                if (index < 4) {
+                    return acc + buffer.byteLength;
+                } else {
+                    return acc;
                 }
+                }, 0
+            );
 
-                let buffers = await Promise.all(dlParts);
-
-                // Combine everything except for text model, since that's alreafy f32
-                const totalLength = buffers.reduce((acc, buffer, index, array) => {
-                    if (index < 4) {
-                        return acc + buffer.byteLength;
-                    } else {
-                        return acc;
-                    }
-                    }, 0
-                );
-
-                combinedBuffer = new Uint8Array(totalLength);
-
-                let offset = 0;
-                buffers.forEach((buffer, index) => {
-                    if (index < 4) {
-                        combinedBuffer.set(new Uint8Array(buffer), offset);
-                        offset += buffer.byteLength;
-                        buffer = null;
-                    }
-                });
-
-                await saveTensorToDb(db, "net.f16", combinedBuffer);
-
-                if (textModelU8 == null) {
-                    textModelFetched = true;
-                    textModelU8 = new Uint8Array(buffers[4]);
-                    await saveTensorToDb(db, "net.text", textModelU8);
+            combinedBuffer = new Uint8Array(totalLength);
+            let offset = 0;
+            buffers.forEach((buffer, index) => {
+                saveTensorToDb(db, netKeys[index], new Uint8Array(buffer));
+                if (index < 4) {
+                    combinedBuffer.set(new Uint8Array(buffer), offset);
+                    offset += buffer.byteLength;
+                    buffer = null;
                 }
-            } else {
-                combinedBuffer = combinedBuffer.content;
-            }
+            });
 
-            if (textModelU8 == null) {
-                textModelU8 = new Uint8Array(await getProgressDlForPart(window.MODEL_BASE_URL + '/net_textmodel.safetensors', progressCallback));
-                await saveTensorToDb(db, "net.text", textModelU8);
-            } else if (!textModelFetched) {
-                textModelU8 = textModelU8.content;
-            }
-
+            let textModelU8 = new Uint8Array(buffers[4]);
             document.getElementById("modelDlTitle").innerHTML = "Decompressing model";
 
             const textModelOffset = 3772703308;
@@ -346,16 +440,7 @@
                 let chunkStartF16 = 8 + metadataLength + (decodeChunkSize * i);
                 let chunkEndF16 = chunkStartF16 + decodeChunkSize;
                 let chunk = combinedBuffer.subarray(chunkStartF16, chunkEndF16);
-
-                if (chunk.byteLength %4 != 0) {
-                    const paddingBytes = 4 - (chunk.byteLength % 4);
-                    const alignedBuffer = new ArrayBuffer(chunk.byteLength + paddingBytes);
-                    const alignedView = new Uint8Array(alignedBuffer);
-                    alignedView.set(new Uint8Array(chunk));
-                    chunk = alignedView;
-                }
-
-                let result = await f16tof32GPU(device, chunk);
+                let result = await f16tof32GPU(chunk);
                 let resultUint8 = new Uint8Array(result.buffer);
                 let chunkStartF32 = 8 + metadataLength + (decodeChunkSize * i * 2);
                 let chunkEndF32 = chunkStartF32 + resultUint8.byteLength;
@@ -421,7 +506,7 @@
             document.getElementById("btnRunNet").disabled = false;
         }
 
-        function runStableDiffusion(prompt, steps, guidance) {
+        function runStableDiffusion(prompt, steps, guidance, showStep) {
             return new Promise(async (resolve, reject) => {
                 let context = await timer(() => nets["textModel"](clipTokenizer.encodeForCLIP(prompt)));
                 let unconditional_context = await timer(() => nets["textModel"](clipTokenizer.encodeForCLIP("")));
@@ -456,8 +541,16 @@
                 
                 for (let i = timesteps.length - 1; i >= 0; i--) {
                     let timestep = new Float32Array([timesteps[i]]);
-                    let x_prev = await timer(() => nets["diffusor"](unconditional_context, context, latent, timestep, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]]), new Float32Array([guidance])));
+                    let start = performance.now()
+                    let x_prev = await nets["diffusor"](unconditional_context, context, latent, timestep, new Float32Array([alphas[i]]), new Float32Array([alphas_prev[i]]), new Float32Array([guidance]));
+                    document.getElementById("divStepTime").style.display = "block";
+                    document.getElementById("stepTimeValue").innerText = `${(performance.now() - start).toFixed(1)} ms / step`
                     latent = x_prev;
+
+                    if (showStep != null) {
+                        showStep(await nets["decoder"](latent));
+                    }
+
                     document.getElementById("progressBar").value = ((steps - i) / steps) * 100
                     document.getElementById("progressFraction").innerHTML = (steps - i) + "/" + steps
                 }
@@ -466,27 +559,37 @@
             });
         }
 
+        function renderImage(e, image) {
+            let pixels = []
+            let pixelCounter = 0
+
+            for (let j = 0; j < 512; j++) {
+                for (let k = 0; k < 512; k++) {
+                    pixels.push(image[pixelCounter])
+                    pixels.push(image[pixelCounter+1])
+                    pixels.push(image[pixelCounter+2])
+                    pixels.push(255)
+                    pixelCounter += 3
+                }
+            }
+
+            ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), 512, 512), 0, 0);
+            e.target.disabled = false;
+        }
+
         document.getElementById("btnRunNet").addEventListener("click", function(e) {
             e.target.disabled = true;
+            const canvas = document.getElementById("canvas");
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            runStableDiffusion(document.getElementById("promptText").value, document.getElementById("stepRange").value, document.getElementById("guidanceRange").value).then((image) => {
-                let pixels = []
-                let pixelCounter = 0
-
-                for (let j = 0; j < 512; j++) {
-                    for (let k = 0; k < 512; k++) {
-                        pixels.push(image[pixelCounter])
-                        pixels.push(image[pixelCounter+1])
-                        pixels.push(image[pixelCounter+2])
-                        pixels.push(255)
-                        pixelCounter += 3
-                    }
-                }
-                
-                ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), 512, 512), 0, 0);
-                console.log(image);
-                console.log("Success");
-                e.target.disabled = false;
+            runStableDiffusion(
+                document.getElementById("promptText").value,
+                document.getElementById("stepRange").value,
+                document.getElementById("guidanceRange").value,
+                // Decode at each step
+                null
+            ).then((image) => {
+                renderImage(e, image);
             });
         }, false);
 

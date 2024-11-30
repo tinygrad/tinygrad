@@ -34,10 +34,9 @@ def make_tuple(x:Union[int, Sequence[int]], cnt:int) -> Tuple[int, ...]: return 
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fully_flatten(l):
   if hasattr(l, "__len__") and hasattr(l, "__getitem__") and not isinstance(l, str):
+    if hasattr(l, "shape") and l.shape == (): return [l[()]]
     flattened = []
-    if hasattr(l, "shape") and l.shape == (): flattened.append(l[()])
-    else:
-      for i in range(len(l)): flattened.extend(fully_flatten(l[i]))
+    for li in l: flattened.extend(fully_flatten(li))
     return flattened
   return [l]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
@@ -46,10 +45,10 @@ def ceildiv(num, amt):
   ret = -(num//-amt)
   return ret if not isinstance(ret, float) else int(ret)
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
-def lo32(x:int) -> int: return x & 0xFFFFFFFF
-def hi32(x:int) -> int: return x >> 32
-def data64(data: int) -> Tuple[int, int]: return (data >> 32, data & 0xFFFFFFFF)
-def data64_le(data: int) -> Tuple[int, int]: return (data & 0xFFFFFFFF, data >> 32)
+def lo32(x:Any) -> Any: return x & 0xFFFFFFFF # Any is sint
+def hi32(x:Any) -> Any: return x >> 32 # Any is sint
+def data64(data:Any) -> Tuple[Any, Any]: return (data >> 32, data & 0xFFFFFFFF) # Any is sint
+def data64_le(data:Any) -> Tuple[Any, Any]: return (data & 0xFFFFFFFF, data >> 32) # Any is sint
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   kvs = set([(k,v) for d in ds for k,v in d.items()])
   assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
@@ -68,7 +67,7 @@ def get_child(obj, key):
     elif isinstance(obj, dict): obj = obj[k]
     else: obj = getattr(obj, k)
   return obj
-def word_wrap(x, wrap=80): return x if len(x) <= wrap else (x[0:wrap] + "\n" + word_wrap(x[wrap:], wrap))
+def word_wrap(x, wrap=80): return x if len(x) <= wrap or '\n' in x[0:wrap] else (x[0:wrap] + "\n" + word_wrap(x[wrap:], wrap))
 
 # for length N coefficients `p`, returns p[0] * x**(N-1) + p[1] * x**(N-2) + ... + p[-2] * x + p[-1]
 def polyN(x:T, p:List[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
@@ -271,7 +270,7 @@ def cpu_objdump(lib, objdump_tool='objdump'):
 # TODO: make this work with read only memoryviews (if possible)
 def from_mv(mv:memoryview, to_type=ctypes.c_char):
   return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type * len(mv))).contents
-def to_mv(ptr, sz) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
+def to_mv(ptr:int, sz:int) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
 def mv_address(mv:memoryview): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
 def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])  # noqa: E501
 @functools.lru_cache(maxsize=None)
