@@ -4,10 +4,16 @@ import importlib
 from functools import lru_cache
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import getenv, DEBUG, CI, OSX, mv_address
+from tinygrad.helpers import getenv, DEBUG
 from tinygrad.dtype import ConstType, DType
 from tinygrad.device import is_dtype_supported
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, ValueInfoProto
+try:
+  from onnx.helper import tensor_dtype_to_np_dtype
+except ImportError:
+  # for onnx < 1.13
+  from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
+  def tensor_dtype_to_np_dtype(tensor_dtype:int) -> np.dtype: return TENSOR_TYPE_TO_NP_TYPE[tensor_dtype]
 
 cache_misses = 0
 @lru_cache(None)
@@ -66,9 +72,12 @@ def type_parse(type_proto: TypeProto):
     else: raise AttributeError(f"unknown attr: {attr}, {type_proto}")
 
 def buffer_parse(inp: TensorProto) -> Tensor:
-  if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data) or inp.raw_data:
+  if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
     return Tensor(dat, dtype=dtype_parse(inp.data_type), requires_grad=False).reshape(tuple(inp.dims))
-  raise NotImplementedError(f"buffer parsing with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
+  if len(inp.raw_data) > 0:
+    return Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).copy().reshape(tuple(inp.dims)),
+                  dtype=dtype_parse(inp.data_type), requires_grad=False)
+  raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
 
