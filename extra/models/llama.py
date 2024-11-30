@@ -40,10 +40,10 @@ class Attention:
     self.n_rep = self.n_heads // self.n_kv_heads
     self.max_context = max_context
 
-    self.wq = linear(dim, self.n_heads * self.head_dim, bias=True)
-    self.wk = linear(dim, self.n_kv_heads * self.head_dim, bias=True)
-    self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=True)
-    self.wo = linear(self.n_heads * self.head_dim, dim, bias=True)
+    self.wq = linear(dim, self.n_heads * self.head_dim, bias=False)
+    self.wk = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
+    self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
+    self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
     if getenv("WQKV"):
@@ -197,13 +197,13 @@ def convert_from_huggingface(weights:Dict[str, Tensor], model: Transformer, n_he
   sd = {}
   for k, v in weights.items():
     if ".rotary_emb." in k: continue
-    print(f"{k=} {v.shape=}")
     v = v.to(Device.DEFAULT)
-    if "model.layers" in k:
-      if "q_proj.weight" in k:
-        v = permute(v, n_heads)
-      elif "k_proj.weight" in k:
-        v = permute(v, n_kv_heads)
+    # TODO: Isolate this logic for QwQ
+    # if "model.layers" in k:
+    #   if "q_proj.weight" in k:
+    #     v = permute(v, n_heads)
+    #   elif "k_proj.weight" in k:
+    #     v = permute(v, n_kv_heads)
     sd[keymap[k]] = v
   return sd
 
