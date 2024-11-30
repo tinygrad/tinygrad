@@ -251,16 +251,16 @@ class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
     gmem = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
-    idx = gidx0 * UOp.const(dtypes.int, 2)
+    idx = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem, gidx0))
     val = UOp.const(dtypes.float, 42.0)
     gate = gidx0.lt(UOp.const(dtypes.int, 1))
-    store = UOp(Ops.STORE, dtypes.void, (gmem, idx, val, gate))
+    store = UOp(Ops.STORE, dtypes.void, (idx, val, gate))
     uops = to_uops_list([store])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.op is Ops.IF)
     endif = next(u for u in uops if u.op is Ops.ENDIF)
     assert endif.src[0] is if_uop
-    gated_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
+    gated_uops = tuple(uops[uops.index(if_uop)+1:uops.index(endif)])
     self.assertEqual(len(gated_uops), 1)
     self.assertIs(gated_uops[-1].op, Ops.STORE)
 
