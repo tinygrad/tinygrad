@@ -131,7 +131,7 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
 view_right = merge_views+PatternMatcher([
   # ASSIGN can override st
   (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.ASSIGN, name="a"))),
-   lambda a,b,st: UOp.store(b, (a.arg[0]+st.arg).to_uop(), a.replace(arg=())) if a.arg else None),
+   lambda a,b,st: None if a.arg is None else UOp.store(b, (a.arg+st.arg).to_uop(), a.replace(arg=None))),
   # non contiguous VIEW on a reduce creates a new VIEW
   (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").view(name="v"), lambda v,r,src: None if v.st.contiguous else swizzle_r(r, src, v.st)),
   # push a VIEW down to STORE, through a reduce (ONLY reshapes)
