@@ -397,7 +397,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   cache: Dict[LazyBuffer, UOp] = {}
   buffers: Dict[UOp, Buffer] = {}
   big_graph = graph_rewrite(UOp.sink(*(to_uop(x, ctx, buffers, cache) for x in outs)), do_realize, ctx.realizes)
-  for x in big_graph.src: ctx.realizes[x.buf_uop] = x
+  for u in big_graph.src: ctx.realizes[u.buf_uop] = u
   # group realizes into kernels
   store_groups = group_realizes(ctx)
   graph_rewrite(big_graph, break_sched, ctx)
