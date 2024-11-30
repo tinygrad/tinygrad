@@ -105,12 +105,14 @@ if __name__ == "__main__":
 
   # warmup the JIT
   print("\nWarming up...")
+  def warmup(size):
+    print(f"Warming up {size / 1024 / 1024 :.1f} MB...")
+    warmup_data = Tensor.rand(size // 2, dtype=dtypes.float16)
+    BLAKE3().hash(warmup_data)
+
   sizes = BLAKE3().std_sizes
   if Device.DEFAULT == "METAL": sizes = sizes[:-1]
-  for std_size in sizes:
-    print(f"Warming up {std_size / 1024 / 1024 :.1f} MB...")
-    warmup_data = Tensor.rand(std_size // 2, dtype=dtypes.float16)
-    BLAKE3().hash(warmup_data)
+  for std_size in sizes: warmup(std_size)
 
   def benchmark_size(size_bytes):
     print(f"\nBenchmarking {size_bytes / 1024 / 1024 :.1f} MB...")
@@ -137,7 +139,7 @@ if __name__ == "__main__":
   if Device.DEFAULT in ["NV", "CUDA"]:
     # OOMs on METAL
     sizes += [
-      2 * 1024 * 1024 * 1000 - n, # 2 GB
+      2 * 1024 * 1024 * 1024 - n, # 2 GB
       4 * 1024 * 1024 * 1024 -n  # 4 GB
     ]
 
