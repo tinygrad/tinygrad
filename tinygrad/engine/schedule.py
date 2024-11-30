@@ -120,6 +120,7 @@ def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   new_shape, new_input_shape = swizzle_shapes[0]
   new_src = tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x, ShapeTracker.from_shape(new_input_shape)) for x in root.src)
   ret = root.replace(src=new_src)
+  if ret.op is Ops.ASSIGN and ret.arg: ret = ret.replace(arg=(ret.arg[0]+ShapeTracker.from_shape(new_input_shape),))
   return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(new_shape))
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
