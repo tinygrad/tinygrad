@@ -101,6 +101,6 @@ if __name__ == "__main__":
     }
     try:
       assert text == expected[key], f"invalid output: `{colored(text, 'red')}` != `{expected[key]}`"
-      print("\n" + colored("output validated", "green"))  # NOTE: "\n" iside colored does not render the color in github action
+      print("\n" + colored("output validated", "green"))
     except KeyError:
       pass
