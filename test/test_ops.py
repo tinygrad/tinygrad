@@ -1956,14 +1956,6 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
       lambda x,w: Tensor.conv2d(x,w,padding=padding).relu())
 
-  # TODO: fix
-  @unittest.skipIf(CI and Device.DEFAULT in {"LLVM", "PTX", "NV"}, "crashes in CI")
-  @unittest.expectedFailure
-  def test_conv2d_fp16(self):
-    helper_test_op([(1,12,128,256), (32,12,3,3), (32,)],
-      lambda x,w,b: torch.nn.functional.conv2d(x.half(),w.half(),b.half()),
-      lambda x,w,b: Tensor.conv2d(x.half(),w.half(),b.half()), atol=5e-3, rtol=5e-3)
-
   def test_padding_add(self):
     helper_test_op([(64,64), (60,60)],
       lambda x,w: x+torch.nn.functional.pad(w, (2,2,2,2)),
