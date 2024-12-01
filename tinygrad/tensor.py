@@ -2007,10 +2007,15 @@ class Tensor(SimpleMathTrait):
     (d_,s_,p_), i_ = (make_tuple(x, len(k_)) for x in (d_,s_,p_)), self.shape[-len(k_):]
     # https://arxiv.org/pdf/1603.07285 section 5.1, relationship 15.
     o_ = [ceildiv(i+2*p - (d*(k-1)+1), s) + 1 for i,d,k,s,p in zip(i_,d_,k_,s_,p_)]
-    # we have to do additional padding before `_pool` so that `o_` in `_pool` is calculated correctly
-    # we also remove padding in the case that a shifting window starts in the end padded region, thereby decreasing `o_` in `_pool`
     pads = list(self._padding2d(p_, len(k_)))
-    for j, (o,i,s,p,k,d) in enumerate(zip(o_, i_, s_, p_, k_, d_)): pads[-1-j*2] = pads[-1-j*2] + ((o-1)*s+d*(k-1)+1)-(i+2*p) - smax(0, s*(o-1)+1-i-p)
+    # we have to do additional padding before `_pool` so that `o_` in `_pool` is calculated correctly
+    # `s*(o-1) + (d*(k-1)+1) - (i+2*p)` -> last_sliding_window_start + full_kernel_size - padded_input_shape
+    # `pads[-1-dim*2]` -> end pads
+    for dim,(o,i,s,p,k,d) in enumerate(zip(o_,i_,s_,p_,k_,d_)): pads[-1-dim*2] += s*(o-1) + (d*(k-1)+1) - (i+2*p)
+    # we also remove padding in the case that a sliding window starts in the end padded region, thereby decreasing `o_` in `_pool`
+    # `smax(s*(o-1) - (i+p), 0)` -> last_sliding_window_start - (left_pad + input_size)
+    for dim,(o,i,s,p,k,d) in enumerate(zip(o_,i_,s_,p_,k_,d_)): pads[-1-dim*2] -= smax(s*(o-1) - (i+p), 0)
+    # NOTE: adding pad and removing pad never interferes with each other
     return pads
 
   # NOTE: these work for more than 2D
