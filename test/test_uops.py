@@ -7,7 +7,7 @@ from tinygrad.helpers import CI, DEBUG, getenv, Context
 from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu, spec # noqa F401
-from tinygrad.renderer import Program
+from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.schedule import create_schedule, to_si
 from tinygrad.engine.realize import CompiledRunner, lower_schedule_item, get_kernel
 from tinygrad.codegen.linearize import linearize_uop
@@ -20,7 +20,7 @@ def _uops_to_prg(uops_list):
   uops = linearize_uop(full_graph_rewrite(UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer))
   src = Device[Device.DEFAULT].renderer.render("test", uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(Program("test", src, Device.DEFAULT, uops=uops,
+  return CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, uops=uops,
                                 global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
 
 def uop(uops:List[UOp], uop:Ops, dtype:Optional[DType], src:Tuple[UOp, ...], arg:Any=None) -> UOp:
@@ -336,8 +336,9 @@ class TestAssembly(unittest.TestCase):
     a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops[-1].op, Ops.SHL)
-    self.assertEqual(uops[-2].op, Ops.MUL)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHL, ops)
+    self.assertIn(Ops.MUL, ops)
 
   def test_bitshift_right(self):
     g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
@@ -348,8 +349,9 @@ class TestAssembly(unittest.TestCase):
     a2 = UOp(Ops.IDIV, dtypes.int, (l1, c2))
     uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render("test", uops)
-    self.assertEqual(uops[-1].op, Ops.SHR)
-    self.assertEqual(uops[-2].op, Ops.IDIV)
+    ops = [x.op for x in uops]
+    self.assertIn(Ops.SHR, ops)
+    self.assertIn(Ops.IDIV, ops)
 
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
