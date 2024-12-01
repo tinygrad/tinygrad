@@ -3,7 +3,7 @@ from pathlib import Path
 from tiktoken.load import load_tiktoken_bpe
 from tinygrad import Tensor, nn, dtypes
 from tinygrad.nn.state import load_state_dict, get_parameters, get_state_dict
-from tinygrad.helpers import fetch
+from tinygrad.helpers import fetch, tqdm
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from examples.llama3 import concat_weights, load
 
@@ -59,7 +59,7 @@ def build_transformer(model_path: Path, model_size="32B"):
   weights = {k: v for k, v in weights.items() if 'model.layers' not in k or int(k.split('.')[2]) < args['n_layers']}
   if "model.embed_tokens.weight" in weights:
     weights = convert_from_huggingface(weights, model, MODEL_PARAMS[model_size]["args"]["n_heads"], MODEL_PARAMS[model_size]["args"]["n_kv_heads"])
-  weights = fix_bf16(weights) # on mac, need to run with `SUPPORT_BF16=1` flag
+  # weights = fix_bf16(weights) # on mac, need to run with `SUPPORT_BF16=1` flag
 
   # weights = {k: v.cast(dtypes.float) for k, v in weights.items()}
 
@@ -67,6 +67,39 @@ def build_transformer(model_path: Path, model_size="32B"):
   load_state_dict(model, weights, strict=False, consume=True)
   return model
 
+
+
+
+  toks = [spp.bos_id()]
+  start_pos = 0
+  for i in range(args.count):
+    GlobalCounters.reset()
+    with Profiling(sort="time", frac=0.1, enabled=args.profile):
+      with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
+        tok = model(Tensor([toks[start_pos:]]), 0 if start_pos == 0 else Variable("start_pos", 1, 1024).bind(start_pos), args.temperature).item()
+    toks.append(tok)
+    start_pos += 1
+    print(spp.decode(toks))
+
+
+def generate(model, tokenizer, prompt: str, n_tokens_to_gen: int = 10, temp: bool = 1.0, sample: bool = False, top_k: int = None):
+  tks = tokenizer(prompt)["input_ids"]
+  while len(tks) < 4:
+    tks = [50279] + tks
+
+  # Loading in the prompt tokens
+  logits = model.forward(Tensor([tks]))[:, -1, :]
+  for _ in tqdm(range(n_tokens_to_gen), desc="Speed Gen"):
+    if sample:
+      tok_Tens = (logits/temp).softmax().multinomial()
+    else:
+      tok_Tens = logits.argmax(axis=-1).unsqueeze(0)
+    tok = tok_Tens.item()
+    tks.append(tok)
+    logits = model.forward_jit(tok_Tens)[:, -1, :]
+
+  output_completions = ''.join([tokenizer.decode(output) for output in tks])
+  return output_completions
 
 def main():
   Tensor.no_grad = True
@@ -96,13 +129,13 @@ def main():
   TEMPERATURE = args.temperature
 
   model = build_transformer(args.model, args.model_size)
-  tokenizer = Tokenizer(str((args.model if args.model.is_dir() else args.model.parent) / "merges.txt"))
-  # tokenizer = AutoTokenizer.from_pretrained("Qwen/QwQ-32B-Preview")
-
+  # tokenizer = Tokenizer(str((args.model if args.model.is_dir() else args.model.parent) / "merges.txt"))
+  tokenizer = AutoTokenizer.from_pretrained("Qwen/QwQ-32B-Preview")
   msg = ["How are you?"]
   start_pos, tokens = 0, Tensor(tokenizer(msg)['input_ids'])
   ic(tokens, tokens.numpy())
   out = model(tokens, start_pos)
+
 
 if __name__ == '__main__':
   main()
