@@ -37,8 +37,8 @@ DTYPE_MAP: Dict[int, DType] = { TensorProto.FLOAT:dtypes.float32, TensorProto.UI
   TensorProto.UINT64:dtypes.uint64, TensorProto.BFLOAT16:dtypes.bfloat16, TensorProto.FLOAT8E4M3FN:dtypes.float,
   TensorProto.FLOAT8E4M3FNUZ:dtypes.float, TensorProto.FLOAT8E5M2:dtypes.float, TensorProto.FLOAT8E5M2FNUZ:dtypes.float}
 def dtype_parse(onnx_dtype: TensorProto.DataType) -> DType:
-  if onnx_dtype in DTYPE_MAP: return DTYPE_MAP[onnx_dtype] if is_dtype_supported(DTYPE_MAP[onnx_dtype], Device.DEFAULT) else dtypes.float
-  raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
+  if onnx_dtype not in DTYPE_MAP: raise NotImplementedError(f"onnx dtype {TensorProto.DataType.Name(onnx_dtype)} is not supported")
+  return DTYPE_MAP[onnx_dtype] if is_dtype_supported(DTYPE_MAP[onnx_dtype]) else dtypes.float
 
 # src: onnx/onnx_ml_pb2.pyi
 ATTRIBUTE_MAP = {AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT: lambda a: int(a.i),
@@ -46,10 +46,9 @@ ATTRIBUTE_MAP = {AttributeProto.FLOAT: lambda a: float(a.f), AttributeProto.INT:
   AttributeProto.FLOATS: lambda a: tuple(float(x) for x in a.floats), AttributeProto.INTS: lambda a: tuple(int(x) for x in a.ints),
   AttributeProto.STRINGS: lambda a: tuple(x.decode("utf-8") for x in a.strings)}
 def attribute_parse(onnx_attribute: AttributeProto):
-  if onnx_attribute.type in ATTRIBUTE_MAP: return ATTRIBUTE_MAP[onnx_attribute.type](onnx_attribute)
-  raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(onnx_attribute.type)} is not supported")
-
-# def value_info_parse(onnx_value_info: ValueInfoProto):
+  if onnx_attribute.type not in ATTRIBUTE_MAP:
+    raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(onnx_attribute.type)} is not supported")
+  return ATTRIBUTE_MAP[onnx_attribute.type](onnx_attribute)
 
 def type_parse(type_proto: TypeProto):
   ret = []
