@@ -162,6 +162,7 @@ class Transformer:
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
     _bsz, seqlen = tokens.shape
+    ic(tokens, self.tok_embeddings.weight)
     h = self.tok_embeddings(tokens)
 
     self.freqs_cis = self.freqs_cis.cast(h.dtype).realize()
@@ -189,6 +190,7 @@ def convert_from_huggingface(weights:Dict[str, Tensor], model: Transformer, n_he
     "model.embed_tokens.weight": "tok_embeddings.weight",
     **{f"model.layers.{l}.input_layernorm.weight": f"layers.{l}.attention_norm.weight" for l in range(len(model.layers))},
     **{f"model.layers.{l}.self_attn.{x}_proj.weight": f"layers.{l}.attention.w{x}.weight" for x in ["q", "k", "v", "o"] for l in range(len(model.layers))},
+    **{f"model.layers.{l}.self_attn.{x}_proj.bias": f"layers.{l}.attention.w{x}.bias" for x in ["q", "k", "v", "o"] for l in range(len(model.layers))},
     **{f"model.layers.{l}.post_attention_layernorm.weight": f"layers.{l}.ffn_norm.weight" for l in range(len(model.layers))},
     **{f"model.layers.{l}.mlp.{x}_proj.weight": f"layers.{l}.feed_forward.w{y}.weight" for x, y in {"gate": "1", "down": "2", "up": "3"}.items() for l in range(len(model.layers))},
     "model.norm.weight": "norm.weight",
@@ -198,11 +200,11 @@ def convert_from_huggingface(weights:Dict[str, Tensor], model: Transformer, n_he
   for k, v in weights.items():
     if ".rotary_emb." in k: continue
     v = v.to(Device.DEFAULT)
-    if "model.layers" in k:
-      if "q_proj" in k:
-        v = permute(v, n_heads)
-      elif "k_proj" in k:
-        v = permute(v, n_kv_heads)
+    # if "model.layers" in k:
+    #   if "q_proj" in k:
+    #     v = permute(v, n_heads)
+    #   elif "k_proj" in k:
+    #     v = permute(v, n_kv_heads)
     sd[keymap[k]] = v
   return sd
 
