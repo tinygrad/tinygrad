@@ -38,4 +38,5 @@ class TestNumericalAccuracy(unittest.TestCase):
     np.testing.assert_allclose(fp32_out.numpy(), fp16_out.numpy(), rtol=2e-2, atol=2e-2)
 
 if __name__ == "__main__":
+  np.random.seed(0)
   unittest.main()
