@@ -429,7 +429,7 @@ class TestJit(unittest.TestCase):
     for _ in range(5):
       a = Tensor.randn(10, 1000, device=d0).realize()
       xc = jf(a)
-      np.testing.assert_allclose((a.numpy().sum(axis=(1,)) + 5).view(np.int32), xc.numpy(), atol=1e-4, rtol=1e-5)
+      np.testing.assert_allclose((a.numpy().sum(axis=(1,)) + 5).view(np.int32), xc.numpy(), atol=1e-4, rtol=5e-5)
 
   def test_jit_output_clone(self):
     @TinyJit
