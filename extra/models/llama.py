@@ -162,7 +162,6 @@ class Transformer:
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
     _bsz, seqlen = tokens.shape
-    ic(tokens, self.tok_embeddings.weight)
     h = self.tok_embeddings(tokens)
 
     self.freqs_cis = self.freqs_cis.cast(h.dtype).realize()

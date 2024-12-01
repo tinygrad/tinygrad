@@ -1,15 +1,12 @@
 import argparse
 from pathlib import Path
 from tiktoken.load import load_tiktoken_bpe
-from tinygrad import Tensor, nn, dtypes
-from tinygrad.nn.state import load_state_dict, get_parameters, get_state_dict
-from tinygrad.helpers import fetch, tqdm
+from tinygrad import Tensor, nn, GlobalCounters, Device
+from tinygrad.nn.state import load_state_dict
+from tinygrad.helpers import fetch
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
-from examples.llama3 import concat_weights, load
-
-from icecream import ic, install
+from examples.llama3 import concat_weights, load, prefill
 from transformers import AutoTokenizer
-install()
 
 # https://huggingface.co/Qwen/QwQ-32B-Preview/blob/main/config.json
 MODEL_PARAMS = {
@@ -59,61 +56,30 @@ def build_transformer(model_path: Path, model_size="32B"):
   weights = {k: v for k, v in weights.items() if 'model.layers' not in k or int(k.split('.')[2]) < args['n_layers']}
   if "model.embed_tokens.weight" in weights:
     weights = convert_from_huggingface(weights, model, MODEL_PARAMS[model_size]["args"]["n_heads"], MODEL_PARAMS[model_size]["args"]["n_kv_heads"])
-  # weights = fix_bf16(weights) # on mac, need to run with `SUPPORT_BF16=1` flag
-
-  # weights = {k: v.cast(dtypes.float) for k, v in weights.items()}
+  # weights = fix_bf16(weights)
 
   # replace weights in model
   load_state_dict(model, weights, strict=False, consume=True)
   return model
 
 
-
-
-  toks = [spp.bos_id()]
-  start_pos = 0
-  for i in range(args.count):
-    GlobalCounters.reset()
-    with Profiling(sort="time", frac=0.1, enabled=args.profile):
-      with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
-        tok = model(Tensor([toks[start_pos:]]), 0 if start_pos == 0 else Variable("start_pos", 1, 1024).bind(start_pos), args.temperature).item()
-    toks.append(tok)
-    start_pos += 1
-    print(spp.decode(toks))
-
-
-def generate(model, tokenizer, prompt: str, n_tokens_to_gen: int = 10, temp: bool = 1.0, sample: bool = False, top_k: int = None):
-  tks = tokenizer(prompt)["input_ids"]
-  while len(tks) < 4:
-    tks = [50279] + tks
-
-  # Loading in the prompt tokens
-  logits = model.forward(Tensor([tks]))[:, -1, :]
-  for _ in tqdm(range(n_tokens_to_gen), desc="Speed Gen"):
-    if sample:
-      tok_Tens = (logits/temp).softmax().multinomial()
-    else:
-      tok_Tens = logits.argmax(axis=-1).unsqueeze(0)
-    tok = tok_Tens.item()
-    tks.append(tok)
-    logits = model.forward_jit(tok_Tens)[:, -1, :]
-
-  output_completions = ''.join([tokenizer.decode(output) for output in tks])
-  return output_completions
-
 def main():
   Tensor.no_grad = True
   parser = argparse.ArgumentParser()
   parser.add_argument("--download_model", action="store_true", help="Download a model")
   parser.add_argument("--model", type=Path, help="Model path")
-  parser.add_argument("--seed", type=int, help="Random seed")
   parser.add_argument('--model_size', type=str, choices=['32B', 'test'], default='32B', help="Model size")
-  parser.add_argument("--temperature", type=int, default=0.85, help="Temperature")
-  parser.add_argument("--benchmark", action="store_true", help="Run a benchmark")
   parser.add_argument('--max_tokens', type=int, help='maximum tokens outputted')
+  parser.add_argument("--prompt", type=str, default="Why is gravity ", help="Prompt for LLM completion")
+  parser.add_argument("--temperature", type=int, default=0.85, help="Temperature")
+  parser.add_argument('--top_p', type=float, default=0, help='Top-p sampling')
+  parser.add_argument('--top_k', type=float, default=0, help='Top-k sampling')
+  parser.add_argument('--alpha_f', type=float, default=0, help='Top-k sampling')
+  parser.add_argument('--alpha_p', type=float, default=0, help='Top-k sampling')
+  parser.add_argument("--seed", type=int, help="Random seed")
   args = parser.parse_args()
 
-  # download model maybe
+  # maybe download model
   assert (args.model and not args.download_model) or (not args.model and args.download_model), "either download or provide model"
   if args.download_model:
     subdir = 'qwq-32b-preview'
@@ -126,15 +92,21 @@ def main():
   if args.seed is not None: Tensor.manual_seed(args.seed)
   if args.benchmark: Tensor.manual_seed(42)
   print(f"seed = {Tensor._seed}")
-  TEMPERATURE = args.temperature
 
   model = build_transformer(args.model, args.model_size)
   # tokenizer = Tokenizer(str((args.model if args.model.is_dir() else args.model.parent) / "merges.txt"))
   tokenizer = AutoTokenizer.from_pretrained("Qwen/QwQ-32B-Preview")
-  msg = ["How are you?"]
-  start_pos, tokens = 0, Tensor(tokenizer(msg)['input_ids'])
-  ic(tokens, tokens.numpy())
-  out = model(tokens, start_pos)
+
+  toks = [tokenizer.bos_id] + tokenizer.encode(args.prompt, allow_special=True)
+  start_pos = prefill(model, toks[:-1])
+  last_tok = toks[-1]
+  while True:
+    GlobalCounters.reset()
+    tok = model(Tensor([[last_tok]], device=Device.DEFAULT), start_pos, args.temperature, args.top_k, args.top_p, args.alpha_f, args.alpha_p).item()
+    start_pos += 1
+    last_tok = tok
+    if tok in tokenizer.stop_tokens: break
+    print(tokenizer.decode([tok]), end="", flush=True)
 
 
 if __name__ == '__main__':
