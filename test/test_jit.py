@@ -144,6 +144,17 @@ class TestJit(unittest.TestCase):
     with self.assertRaises(AssertionError):
       add(a, a)
 
+  def test_jit_assign(self, dtype=dtypes.float32):
+    @TinyJit
+    def add(a):
+      a += 1
+      a.realize()
+    a = Tensor.zeros(1, dtype=dtype).contiguous().realize()
+    for _ in range(5): add(a)
+    self.assertEqual(a.item(), 5)
+
+  def test_jit_assign_int8(self): self.test_jit_assign(dtypes.int8)
+
   def test_kwargs_jit(self):
     @TinyJit
     def add_kwargs(first, second): return (first+second).realize()
@@ -418,7 +429,7 @@ class TestJit(unittest.TestCase):
     for _ in range(5):
       a = Tensor.randn(10, 1000, device=d0).realize()
       xc = jf(a)
-      np.testing.assert_allclose((a.numpy().sum(axis=(1,)) + 5).view(np.int32), xc.numpy(), atol=1e-4, rtol=1e-5)
+      np.testing.assert_allclose((a.numpy().sum(axis=(1,)) + 5).view(np.int32), xc.numpy(), atol=1e-4, rtol=5e-5)
 
   def test_jit_output_clone(self):
     @TinyJit

@@ -17,24 +17,25 @@ from extra.models.unet import ResBlock
 
 global_mem_used = 0
 def helper_test(nm, gen, model, max_memory_allowed, max_kernels_allowed, all_jitted=False):
-  tms = []
-  for _ in range(4):
-    early_gen = [x.realize() if isinstance(x, Tensor) else x for x in gen()]
-    GlobalCounters.reset()
-    Device[Device.DEFAULT].synchronize()
-    st = time.perf_counter_ns()
-    model(*early_gen)
-    Device[Device.DEFAULT].synchronize()
-    tms.append(time.perf_counter_ns() - st)
-  mem_used = GlobalCounters.mem_used - global_mem_used
+  with Context(JIT=2):
+    tms = []
+    for _ in range(4):
+      early_gen = [x.realize() if isinstance(x, Tensor) else x for x in gen()]
+      GlobalCounters.reset()
+      Device[Device.DEFAULT].synchronize()
+      st = time.perf_counter_ns()
+      model(*early_gen)
+      Device[Device.DEFAULT].synchronize()
+      tms.append(time.perf_counter_ns() - st)
+    mem_used = GlobalCounters.mem_used - global_mem_used
 
-  # TODO: jit should expose this correctly with graph
-  kernels_used = len(model.jit_cache) if hasattr(model, "jit_cache") else None
-  print(f"{nm}: used {mem_used/1e9:.2f} GB and {kernels_used} kernels in {min(tms)/1e6:.2f} ms")
-  assert mem_used/1e9 < max_memory_allowed, f"{nm} used more than {max_memory_allowed:.2f} GB"
-  assert not kernels_used or kernels_used <= max_kernels_allowed, f"{nm} used more than {max_kernels_allowed} kernels"
-  if all_jitted:
-    assert kernels_used > 0 and kernels_used == GlobalCounters.kernel_count or (kernels_used <= GlobalCounters.kernel_count and getattr(Device[Device.DEFAULT], "graph", None)), f"only {kernels_used} out of {GlobalCounters.kernel_count} were jitted"  # noqa: E501
+    # TODO: jit should expose this correctly with graph
+    kernels_used = len(model.jit_cache) if hasattr(model, "jit_cache") else None
+    print(f"{nm}: used {mem_used/1e9:.2f} GB and {kernels_used} kernels in {min(tms)/1e6:.2f} ms")
+    assert mem_used/1e9 < max_memory_allowed, f"{nm} used more than {max_memory_allowed:.2f} GB"
+    assert not kernels_used or kernels_used <= max_kernels_allowed, f"{nm} used more than {max_kernels_allowed} kernels"
+    if all_jitted:
+      assert kernels_used > 0 and kernels_used == GlobalCounters.kernel_count or (kernels_used <= GlobalCounters.kernel_count and getattr(Device[Device.DEFAULT], "graph", None)), f"only {kernels_used} out of {GlobalCounters.kernel_count} were jitted"  # noqa: E501
 
 class TestRealWorld(unittest.TestCase):
   def setUp(self):
@@ -68,7 +69,7 @@ class TestRealWorld(unittest.TestCase):
     def test(t, t2):
       for l in model: t = l(t, t2)
       return t.realize()
-    helper_test("test_unet_resblock", lambda: (Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24)), test, 0.01, 43)
+    helper_test("test_unet_resblock", lambda: (Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24)), test, 0.01, 37)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_llama(self):
@@ -80,7 +81,7 @@ class TestRealWorld(unittest.TestCase):
     @TinyJit
     def test(t): return model(t, 0).realize()
     # TODO: test first token vs rest properly
-    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.27, 192, all_jitted=True)
+    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.27, 168, all_jitted=True)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_gpt2(self):
@@ -92,7 +93,7 @@ class TestRealWorld(unittest.TestCase):
     @TinyJit
     def test(t, v):
       with Context(JIT=0): return model(t, v).realize()
-    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 164 if CI else 468, all_jitted=True)
+    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 137 if CI else 396, all_jitted=True)
 
   @unittest.skipIf(CI and Device.DEFAULT == "CLANG", "slow")
   def test_train_mnist(self):
@@ -110,7 +111,7 @@ class TestRealWorld(unittest.TestCase):
         loss.backward()
         optimizer.step()
 
-      helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, 0.07, 127)
+      helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, 0.07, 63)
 
   @unittest.skipIf(CI and Device.DEFAULT in {"CLANG", "GPU", "LLVM"}, "slow")
   def test_train_cifar(self):
@@ -127,7 +128,7 @@ class TestRealWorld(unittest.TestCase):
         loss.backward()
         optimizer.step()
 
-      helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 142 if CI else 154)   # it's 154 on metal
+      helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 123)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_train_cifar_hyp(self):

@@ -1,13 +1,45 @@
 from __future__ import annotations
-from typing import Tuple, Any
+from typing import Tuple, Any, List
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys
 assert sys.platform != 'win32'
-from tinygrad.device import BufferOptions, Compiled, Allocator
+from tinygrad.device import BufferSpec, Compiled, Allocator
+from tinygrad.dtype import dtypes, DType, PtrDType
+from tinygrad.ops import Ops, UOp
 from tinygrad.helpers import from_mv, getenv, round_up, mv_address, to_mv
 from tinygrad.runtime.ops_clang import ClangCompiler
-from tinygrad.renderer.cstyle import DSPRenderer
+from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
+
+class DSPRenderer(ClangRenderer):
+  device = "DSP"
+  supports_float4 = False
+  buffer_suffix = " restrict __attribute__((align_value(128)))"
+  kernel_prefix = "__attribute__((noinline)) "
+  type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
+  code_for_op = {**ClangRenderer.code_for_op, Ops.SIN: lambda x,dtype: f"__builtin_sin({x})",
+                 Ops.LOG2: lambda x,dtype: f"__builtin_log2l({x})" if dtype == dtypes.float64 else f"__builtin_log2f({x})",
+                 Ops.EXP2: lambda x,dtype: f"__builtin_exp2l({x})" if dtype == dtypes.float64 else f"__builtin_exp2f({x})"}
+
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,Tuple[DType,bool]]], uops:List[UOp], prefix=None) -> str:
+    ret = super().render_kernel(function_name, kernel, bufs, uops, prefix)
+    msrc = ['''struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency; _Bool set_dcvs_params;
+                 short _pad2; char target_corner; char min_corner; char max_corner; int _pad3[3]; };''', 'int HAP_power_set(void*, void*);',
+            'typedef union { struct { void *pv; unsigned int len; } buf; struct { int fd; unsigned int offset; } dma; } remote_arg;',
+            'void* HAP_mmap(void *addr, int len, int prot, int flags, int fd, long offset);', 'int HAP_munmap(void *addr, int len);',
+            'unsigned long long HAP_perf_get_time_us(void);', 'int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
+            'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};',
+            'HAP_power_set((void*)handle, (void*)&req);']
+    msrc += ['if ((sc>>24) != 2) return 0;']
+    msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
+    msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
+    msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0], PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
+    msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
+    msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0], PtrDType)]
+    msrc += ["return 0; }"]
+    return ret + '\n' + '\n'.join(msrc)
 
 def rpc_sc(method=0, ins=0, outs=0, fds=0): return (method << 24) | (ins << 16) | (outs << 8) | fds
 def rpc_prep_args(ins=None, outs=None, in_fds=None):
@@ -21,8 +53,8 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
   return pra, fds, attrs, (ins, outs)
 
 class DSPProgram:
-  def __init__(self, device:DSPDevice, name:str, lib:bytes):
-    self.device, self.lib = device, lib
+  def __init__(self, dev:DSPDevice, name:str, lib:bytes):
+    self.dev, self.lib = dev, lib
 
   def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
     if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
@@ -31,7 +63,7 @@ class DSPProgram:
                                        outs=[timer:=memoryview(bytearray(8)).cast('Q')], in_fds=[b.share_info.fd for b in bufs])
     var_vals_mv.cast('i')[:] = array.array('i', tuple(b.size for b in bufs) + vals)
     off_mv.cast('I')[:] = array.array('I', tuple(b.offset for b in bufs))
-    self.device.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
+    self.dev.exec_lib(self.lib, rpc_sc(method=2, ins=2, outs=1, fds=len(bufs)), pra, fds, attrs)
     return timer[0] / 1e6
 
 class DSPBuffer:
@@ -39,25 +71,25 @@ class DSPBuffer:
     self.va_addr, self.size, self.share_info, self.offset = va_addr, size, share_info, offset
 
 class DSPAllocator(Allocator):
-  def __init__(self, device:DSPDevice):
-    self.device = device
+  def __init__(self, dev:DSPDevice):
+    self.dev = dev
     super().__init__()
 
-  def _alloc(self, size:int, options:BufferOptions):
-    b = qcom_dsp.ION_IOC_ALLOC(self.device.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
-    share_info = qcom_dsp.ION_IOC_SHARE(self.device.ion_fd, handle=b.handle)
+  def _alloc(self, size:int, options:BufferSpec):
+    b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
+    share_info = qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)
     va_addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, share_info.fd, 0)
     return DSPBuffer(va_addr, size, share_info, offset=0)
 
-  def _free(self, opaque:DSPBuffer, options:BufferOptions):
+  def _free(self, opaque:DSPBuffer, options:BufferSpec):
     libc.munmap(opaque.va_addr, opaque.size)
     os.close(opaque.share_info.fd)
-    qcom_dsp.ION_IOC_FREE(self.device.ion_fd, handle=opaque.share_info.handle)
+    qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
 
-  def as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
-  def copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
-  def copyout(self, dest:memoryview, src:DSPBuffer): ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
-  def offset(self, buf, size:int, offset:int): return DSPBuffer(buf.va_addr+offset, size, buf.share_info, buf.offset+offset)
+  def _as_buffer(self, src:DSPBuffer) -> memoryview: return to_mv(src.va_addr, src.size)
+  def _copyin(self, dest:DSPBuffer, src:memoryview): ctypes.memmove(dest.va_addr, from_mv(src), src.nbytes)
+  def _copyout(self, dest:memoryview, src:DSPBuffer): ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
+  def _offset(self, buf, size:int, offset:int): return DSPBuffer(buf.va_addr+offset, size, buf.share_info, buf.offset+offset)
 
 class DSPDevice(Compiled):
   def __init__(self, device:str=""):
@@ -75,7 +107,7 @@ class DSPDevice(Compiled):
                      ClangCompiler("compile_dsp", args=compiler_args, objdump_tool='llvm-objdump'), functools.partial(DSPProgram, self))
 
     fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
-    self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferOptions(nolru=True))
+    self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
     ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
 
     self.init_dsp()
