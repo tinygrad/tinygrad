@@ -31,27 +31,21 @@ def load_model(model_path, model_params):
   # build model
   model = Transformer(**model_params, linear=nn.Linear, max_context=32000)
 
-  new_layers = []
+  # update layers to add bias
+  updated_layers = []
   for layer in model.layers:
     head_dim = model_params["dim"] // model_params["n_heads"]
     layer.attention.wq = nn.Linear(model_params["dim"], model_params["n_heads"] * head_dim, bias=True)
     layer.attention.wk = nn.Linear(model_params["dim"], model_params["n_kv_heads"] * head_dim, bias=True)
     layer.attention.wv = nn.Linear(model_params["dim"], model_params["n_kv_heads"] * head_dim, bias=True)
-    new_layers.append(layer)
-  model.layers = new_layers
+    updated_layers.append(layer)
+  model.layers = updated_layers
 
   # load weights
-  if model_path.is_dir():
-    if (model_path / "model.safetensors.index.json").exists(): weights = load(str(model_path / "model.safetensors.index.json"))
-  else:
-    weights = load(str(model_path))
-  if "model.embed_tokens.weight" in weights:
-    weights = convert_from_huggingface(weights, model, model_params["n_heads"], model_params["n_kv_heads"])
-  weights = fix_bf16(weights)
+  weights = fix_bf16(convert_from_huggingface(load(str(model_path / "model.safetensors.index.json")), model, model_params["n_heads"], model_params["n_kv_heads"], permute_layers=False))
 
   # replace weights in model
   load_state_dict(model, weights, strict=False, consume=True)
-
   return model
 
 
