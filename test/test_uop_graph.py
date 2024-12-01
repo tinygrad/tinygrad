@@ -645,7 +645,8 @@ class TestLoadStoreFolder(unittest.TestCase):
     assert len([x for x in sink.sparents if x.op is Ops.STORE]) == 1
     one_store = [x for x in sink.sparents if x.op is Ops.STORE][0]
     assert len(one_store.src) == 3
-    assert (_if:=one_store.src[2]).op == Ops.IF and _if.src[0] == gate
+    _if_node = one_store.src[2]
+    assert _if_node.op == Ops.IF and _if_node.src[0] == gate
 
   def test_simple_store_dont_fold(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr())
