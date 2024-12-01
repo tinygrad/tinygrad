@@ -331,9 +331,8 @@ class UPatScheduled(UPat):
   def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),
                                                                        UPat(*args, **{**kwargs,"name":"to_store"})))
 
-# ** this folds ops that don't need extra compute to CONST
+# ** this is schedule level const folding
 
-# folds a scheduled op into a CONST (keeping BUFFER)
 def _as_const(u:UOp, val:ConstType) -> UOp:
   assert is_scheduled(u), f"must be scheduled to fold {u}"
   st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
