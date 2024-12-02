@@ -127,7 +127,7 @@ class CStyleLanguage(Renderer):
 
       # mark buffers that we store to writable
       if u.op is Ops.STORE:
-        for up in u.src[0].sparents:
+        for up in u.src[0].toposort:
           if up.op is Ops.DEFINE_GLOBAL: bufs[up] = (bufs[up][0], (bufs[up][1][0], True))
 
       # naming

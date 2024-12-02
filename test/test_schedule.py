@@ -1673,7 +1673,7 @@ class TestIndexing(unittest.TestCase):
 @track_rewrites(named=True)
 def swizzle_rewrite(u:UOp) -> UOp: return graph_rewrite(graph_rewrite(u, view_left), view_right)
 
-def swizzle_cnt(u:UOp) -> int: return len([x for x in u.sparents if x.op is Ops.VIEW and len(x.src) != 0])
+def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort if x.op is Ops.VIEW and len(x.src) != 0])
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
