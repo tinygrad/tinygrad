@@ -433,8 +433,7 @@ class TestSymbolic(unittest.TestCase):
   def test_div_mod_recombine_folded_mod(self):
     a = Variable("a", 0, 2)
     b = Variable("b", 0, 100)
-    with self.assertRaises(AssertionError):
-      self.helper_test_variable((31 * a + 1) % 30 + ((31 * a + 1) // 30) * 30, 1, 63, "((a*31)+1)")
+    self.helper_test_variable((31 * a + 1) % 30 + ((31 * a + 1) // 30) * 30, 1, 63, "((a*31)+1)")
     with self.assertRaises(AssertionError):
       self.helper_test_variable((31 * b + 1) % 18 + ((31 * b + 1) // 18) * 18, 1, 3101, "((b*31)+1)")
 
