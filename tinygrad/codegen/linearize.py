@@ -1,5 +1,6 @@
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import collections
+from dataclasses import dataclass
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import dedup, flatten, partition
@@ -13,9 +14,11 @@ def disp(y:UOp) -> str:
   if y.op is Ops.RANGE: return str(y.arg[0])
   return "<NONE>"
 
+@dataclass(frozen=True)
 class BasicBlock:
-  def __init__(self, ctx, lst, end=None):
-    self.ctx, self.lst, self.end = ctx, lst, end
+  ctx: Tuple[UOp, ...]
+  lst: Tuple[UOp, ...]
+  end: Optional[UOp] = None
   def __repr__(self):
     return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+\
            f"{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
@@ -40,17 +43,18 @@ def append_to_block(ctx, x:UOp):
   if len(to_append) == 0 and len(new_blocks) == 0: return None
 
   for rng,lst in new_blocks.items():
-    new_block = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, lst))
+    new_block = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, tuple(lst)))
     lrng = list(rng)
     for r in rng[::-1]:
       if r not in x.arg.ctx and r.op is not Ops.BLOCKSTART:
         lrng.remove(r)
-        new_block = UOp(Ops.BLOCKEND, src=(new_block,), arg=BasicBlock(lrng[:], [UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))], r))
+        new_block = UOp(Ops.BLOCKEND, src=(new_block,),
+                        arg=BasicBlock(tuple(lrng), (UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,)),), r))
     new_srcs.append(new_block)
-  return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(x.arg.ctx, to_append+x.arg.lst))
+  return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(x.arg.ctx, tuple(to_append)+x.arg.lst))
 
 make_basic_blocks = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock([], [x]))),
+  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock((), (x,)))),
   (UPat(Ops.BLOCK, name="x"), append_to_block),
 ])
 
@@ -67,12 +71,12 @@ def block_merge(ctx, x:UOp):
         # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
         early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
         return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not parent_block)+parent_block.src,
-                  BasicBlock([y for y in x.arg.ctx if y is not x.arg.end], early_ops+parent_block.arg.lst+late_ops))
+                  BasicBlock(tuple(y for y in x.arg.ctx if y is not x.arg.end), tuple(early_ops)+parent_block.arg.lst+tuple(late_ops)))
       assert not len(parent_blocks)
 
   new_srcs: List[UOp] = []
   to_append: List[UOp] = []
-  new_ctx = list(x.arg.ctx[:])
+  new_ctx = x.arg.ctx
   placed = set()
   for u in x.src:
     if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(x.arg.ctx) or (x.arg.end is not None and x.arg.end in u.arg.ctx)):
@@ -88,7 +92,7 @@ def block_merge(ctx, x:UOp):
       # keep it in srcs
       new_srcs.append(u)
   if len(to_append) == 0 and len(placed) == 0: return None
-  return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(dedup(new_ctx), to_append+x.arg.lst, x.arg.end))
+  return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(tuple(dedup(new_ctx)), tuple(to_append)+x.arg.lst, x.arg.end))
 
 pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
 
@@ -131,11 +135,9 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
     # add BLOCKFORK (slow!)
     block_parent_count = collections.Counter(flatten([x.src for x in sink.toposort if x.op is Ops.BLOCK]))
-    non_block_parents = flatten([x.src for x in sink.toposort if x.op is not Ops.BLOCK])
-    forks = {}
-    for u,child_count in block_parent_count.items():
-      if u.op not in DONT_PLACE_IN_BLOCK and child_count > 1 and u not in non_block_parents:
-        forks[u] = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(block_ctxs[u], [u])),), arg=child_count)
+    non_block_parents = set(flatten([x.src for x in sink.toposort if x.op is not Ops.BLOCK]))
+    forks = {u:UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(block_ctxs[u], (u,))),), arg=child_count)
+      for u,child_count in block_parent_count.items() if u.op not in DONT_PLACE_IN_BLOCK and child_count > 1 and u not in non_block_parents}
 
     if not len(forks): break
     sink = sink.substitute(forks)
@@ -148,8 +150,8 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   for k,v in blockends_to_arg.items():
     # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
     if len(v) > 1:
-      new_blockend = UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)), arg=BasicBlock(dedup(flatten([y.arg.ctx for y in v])), v[0].arg.lst, k))
-      out = UOp(Ops.BLOCKFORK, src=(new_blockend,), arg=len(v))
+      out = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)),
+                                        arg=BasicBlock(tuple(dedup(flatten([y.arg.ctx for y in v]))), v[0].arg.lst, k)),), arg=len(v))
       for u in v: new_forks[u] = out
   sink = sink.substitute(new_forks)
 
