@@ -2688,7 +2688,7 @@ class Tensor(SimpleMathTrait):
     """
     return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
 
-  def selu(self, alpha=1.67326, scale=1.0507):
+  def selu(self, alpha=1.67326, gamma=1.0507):
     """
     Applies the Scaled Exponential Linear Unit (SELU) function element-wise.
 
@@ -2696,10 +2696,10 @@ class Tensor(SimpleMathTrait):
     - Paper: https://arxiv.org/abs/1706.02515v5
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softsign().numpy())
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).selu().numpy())
     ```
     """
-    return scale * (self.relu() - (-alpha * self.exp() + alpha).relu())
+    return gamma * (self >= 0).detach().where(self, alpha * (self.exp() - 1))
 
   def swish(self):
     """
