@@ -2010,7 +2010,7 @@ class Tensor(SimpleMathTrait):
     pads = list(self._padding2d(p_, len(k_)))
     # we have to do additional padding before `_pool` so that `o_` in `_pool` is calculated correctly
     # `s*(o-1) + (d*(k-1)+1) - (i+2*p)` -> last_sliding_window_start + full_kernel_size - padded_input_shape
-    # we then decrease padding in the case that a sliding window starts in the end padded region, thereby decreasing `o_` in `_pool`
+    # we then decrease padding in the case that a sliding window starts in the right padded region, thereby decreasing `o_` in `_pool`
     # `smax(s*(o-1) + 1 - (i+p), 0)` -> last_sliding_window_start + zero_offset - (input_size + left_pad)
     for dim,(o,i,s,p,k,d) in enumerate(zip(o_,i_,s_,p_,k_,d_)): pads[-1-dim*2] += s*(o-1) + (d*(k-1)+1) - (i+2*p) - smax(s*(o-1) + 1 - (i+p), 0)
     return pads
