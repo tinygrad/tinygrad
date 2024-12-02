@@ -67,6 +67,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
   if buf.is_realized:
     ubuf = UOp.new_buffer(buf.device, buf.size, buf.dtype)
     buffers[ubuf] = buf.buffer
+    op = None
   elif buf.op is Ops.ASSIGN:
     target, new_val = [to_uop(x, ctx, buffers, cache) for x in buf.srcs]
     ctx.assigns.add(ubuf:=target.buf_uop)
