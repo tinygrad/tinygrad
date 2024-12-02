@@ -11,7 +11,7 @@ DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.
 def disp(y:UOp) -> str:
   if y.op is Ops.BLOCKSTART: return "w"+disp(y.src[0])
   if y.op is Ops.IF: return f'IF{id(y)}'
-  if y.op is Ops.RANGE: return str(y.arg[0])
+  if y.op is Ops.RANGE: return str(y.arg)
   return "<NONE>"
 
 @dataclass(frozen=True)
