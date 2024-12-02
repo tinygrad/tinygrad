@@ -672,7 +672,7 @@ class TestIFUOps(unittest.TestCase):
     store = UOp(Ops.STORE, dtypes.void, (gbuf.index(UOp.const(dtypes.int, 0), gate), lbuf))
     sink = UOp(Ops.SINK, dtypes.void, (store,))
     sink = full_graph_rewrite(sink)
-    if_uops = [u for u in sink.parents if u.op is Ops.IF]
+    if_uops = [u for u in sink.toposort if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
     for st in sink.src:
@@ -690,7 +690,7 @@ class TestIFUOps(unittest.TestCase):
     stores = [UOp(Ops.STORE, dtypes.void, (gbuf.index(UOp.const(dtypes.int, i), gate), lbufs[i])) for i in range(4)]
     sink = UOp(Ops.SINK, dtypes.void, tuple(stores))
     sink = full_graph_rewrite(sink)
-    if_uops = [u for u in sink.parents if u.op is Ops.IF]
+    if_uops = [u for u in sink.toposort if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
     for st in sink.src:
@@ -706,7 +706,7 @@ class TestIFUOps(unittest.TestCase):
     stores = [UOp(Ops.STORE, dtypes.void, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate)) for i in range(4)]
     sink = UOp(Ops.SINK, dtypes.void, tuple(stores))
     sink = full_graph_rewrite(sink)
-    if_uops = [u for u in sink.parents if u.op is Ops.IF]
+    if_uops = [u for u in sink.toposort if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
     for st in sink.src:
