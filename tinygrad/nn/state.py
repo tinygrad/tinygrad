@@ -7,12 +7,11 @@ from tinygrad.shape.view import strides_for_shape
 from tinygrad.multi import MultiLazyBuffer
 
 class TensorIO(io.RawIOBase, BinaryIO):
-  readable, seekable = (lambda _: True,) * 2
-
   def __init__(self, t: Tensor):
     if len(t.shape) != 1 or t.dtype != dtypes.uint8: raise ValueError("Tensor must be 1d and of dtype uint8!")
     self._position, self._tensor = 0, t
 
+  def readable(self) -> bool: return True
   def read(self, size: int = -1) -> bytes:
     if (buf:=super().read(size)) is None: raise ValueError("io.RawIOBase.read returned None") # only happens, if readinto returns None (never)
     return buf
@@ -22,6 +21,7 @@ class TensorIO(io.RawIOBase, BinaryIO):
     self._position += len(data)
     return len(data)
 
+  def seekable(self) -> bool: return True
   def seek(self, offset: int, whence: int = 0) -> int:
     self._position = min(len(self._tensor), max(0, [offset, self._position+offset, len(self._tensor)+offset][whence]))
     return self._position
