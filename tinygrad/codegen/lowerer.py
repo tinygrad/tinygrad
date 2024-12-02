@@ -71,10 +71,10 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
              get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
   else:
     # all loops are RANGES
-    idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(g)), (i, False)) for i,g in enumerate(full_shape[:first_reduce])]
+    idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(g)), i) for i,g in enumerate(full_shape[:first_reduce])]
 
   # reduce loops
-  idxs += [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(g)), (i, True))
+  idxs += [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(g)), i)
     for i,g in enumerate(full_shape[first_reduce+group_for_reduces:first_upcasted], start=first_reduce+group_for_reduces)]
 
   # upcast loops
@@ -85,7 +85,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   # late indexes (group for reduce)
   ridxs = idxs[:]
   for a in range(first_reduce, first_reduce+group_for_reduces):
-    ridxs[a] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(full_shape[a])), (1000+a, True))
+    ridxs[a] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(full_shape[a])), 1000+a)
 
   return IndexContext(idxs, ridxs)
 
