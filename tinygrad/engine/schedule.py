@@ -5,7 +5,7 @@ from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
-from tinygrad.dtype import ImageDType, dtypes
+from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.engine.lazy import LazyBuffer
@@ -54,28 +54,28 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, buffers, cache).view(buf.st)
     return ret
-  # make things that can't be images not images
-  if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
-                                            not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
-    if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to {buf.dtype.base}")
-    # hack the underlying buffer too
-    buf.dtype = buf.buffer.dtype = buf.dtype.base
-    assert not buf.is_realized, "can't fixup allocated buffer"
-    buf.buffer.options = None
   assert buf.op is not None, f"base must be base itself {buf}"
-  dtype = buf.dtype if buf.op in GroupOp.Meta else buf.dtype.base
+  # make things that can't be images not images
+  dtype = buf.dtype
+  if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
+    assert buf.realized is None, "can't fixup allocated buffer"
+    if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
+    dtype = buf.dtype.base
+    # hack the underlying buffer too
+    buf.buffer.dtype = buf.dtype = dtype
+    buf.buffer.options = None
   if buf.is_realized:
-    ubuf = UOp.new_buffer(buf.device, buf.size, buf.dtype, num=len(buffers))
+    ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
     buffers[ubuf] = buf.buffer
     op = None
   elif buf.op is Ops.ASSIGN:
     target, new_val = [to_uop(x, ctx, buffers, cache) for x in buf.srcs]
     ctx.assigns.add(ubuf:=target.buf_uop)
-    op = UOp(Ops.ASSIGN, dtype, (ubuf, new_val), buf.arg)
+    op = UOp(Ops.ASSIGN, dtype.base, (ubuf, new_val), buf.arg)
   else:
-    ubuf = UOp.new_buffer(buf.device, buf.size, buf.dtype, num=len(buffers))
+    ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
     buffers[ubuf] = buf.buffer
-    op = UOp(buf.op, dtype, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
+    op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
   if op is not None:
     ctx.lazybufs[ubuf] = buf
@@ -126,7 +126,7 @@ def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
-  assert not any(x.op is Ops.REDUCE_AXIS for x in first_reduce.parents), "can't merge more than two reduceops at a time"
+  assert not any(x.op is Ops.REDUCE_AXIS for x in first_reduce.src[0].toposort), "can't merge more than two reduceops at a time"
   return first_reduce.src[0].r(first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg)
 
 # push VIEW to stores
@@ -331,9 +331,22 @@ class UPatScheduled(UPat):
   def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),
                                                                        UPat(*args, **{**kwargs,"name":"to_store"})))
 
+# ** this is schedule level const folding
+
+def _as_const(u:UOp, val:ConstType) -> UOp:
+  assert is_scheduled(u), f"must be scheduled to fold {u}"
+  st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
+  return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
+
+ops_folding = PatternMatcher([
+  # op with size 0 is zero
+  (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+])
+
 # ** this decides which ops get realized
 
-def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> None: return ctx.update([(b, to_store)])
+def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> None:
+  if to_store.op not in {Ops.CONST, Ops.BIND}: ctx.update([(b, to_store)])
 
 def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, to_store:UOp, b:UOp) -> None:
   if to_store.op in {Ops.CONST, Ops.BIND}: return None
@@ -353,7 +366,7 @@ def fold_img_cast(ctx:Dict[UOp, UOp], xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kw
   return to_cast.view(unwrap(view.st))
 
 def init_big_graph(ctx:ScheduleContext, sink:UOp) -> Optional[UOp]:
-  new_src = tuple(x for x in sink.src if is_scheduled(x) and uval(x).op is not Ops.CONST)
+  new_src = tuple(x.base for x in sink.src if is_scheduled(x.base) and uval(x.base).op is not Ops.CONST)
   return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
 
 do_realize = PatternMatcher([
@@ -399,7 +412,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
   buffers: Dict[UOp, Buffer] = {}
-  big_graph = graph_rewrite(UOp.sink(*(to_uop(x, ctx, buffers, cache) for x in outs)), do_realize, ctx.realizes)
+  big_graph = graph_rewrite(UOp.sink(*(to_uop(x, ctx, buffers, cache) for x in outs)), ops_folding+do_realize, ctx.realizes)
   for u in big_graph.src: ctx.realizes[u.buf_uop] = u
   # group realizes into kernels
   store_groups = group_realizes(ctx)
