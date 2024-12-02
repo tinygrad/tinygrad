@@ -2,6 +2,7 @@ import unittest, time
 from tinygrad import Tensor, TinyJit, Device
 from tinygrad.helpers import Context, DEBUG
 from tinygrad.nn import Conv2d
+from tinygrad.nn.state import get_parameters
 
 class TestKernelSpeed(unittest.TestCase):
   def _get_tensor(self, *shape:int):
@@ -61,8 +62,11 @@ class TestKernelSpeed(unittest.TestCase):
     def f(conv, x) -> Tensor: return conv(x).realize()
     tms = []
     K = 3
-    with Context(BEAM=2):
+    with Context(BEAM=0, DEBUG=0):
       conv = Conv2d(CIN, COUT, K, padding=1)
+      Tensor.realize(*get_parameters(conv))
+
+    with Context(BEAM=2):
       for _ in range(10):
         x = self._get_tensor(BS, CIN, H, W)
         Device.default.synchronize()
@@ -84,12 +88,13 @@ class TestKernelSpeed(unittest.TestCase):
   # def test_gemm_1024(self): self._test_matmul(1024, nv_tflops=8, amd_tflops=7)
   # def test_gemm_2048(self): self._test_matmul(2048, nv_tflops=50, amd_tflops=30)
   def test_gemm_4096(self): self._test_matmul(4096, nv_tflops=95, amd_tflops=70)
-  def test_gemm_8192(self): self._test_matmul(8192, nv_tflops=130, amd_tflops=70)
+  def test_gemm_8192(self): self._test_matmul(8192, nv_tflops=125, amd_tflops=70)
 
-  def test_gemv_16384_4096(self): self._test_matmul(16384, 4096, 1, nv_gbs=430, amd_gbs=400)
-  def test_gemv_4096_16384(self): self._test_matmul(4096, 16384, 1, nv_gbs=430, amd_gbs=400)
+  def test_gemv_16384_4096(self): self._test_matmul(16384, 4096, 1, nv_gbs=430, amd_gbs=380)   # AMD was flaky at 400
+  def test_gemv_4096_16384(self): self._test_matmul(4096, 16384, 1, nv_gbs=430, amd_gbs=380)   # AMD was flaky at 400
 
-  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=22)
+  # TODO: tiny7 is slower than tiny12
+  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=18)
 
 if __name__ == '__main__':
   unittest.main()

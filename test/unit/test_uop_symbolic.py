@@ -195,6 +195,7 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_congruence(self):
     self.helper_test_variable((3+3*Variable("a",0,3))%4, 0, 3, "((a*-1)+3)")
     self.helper_test_variable((17+13*Variable("a",0,3))%18, 2, 17, "((a*-5)+17)")
+    self.helper_test_variable((2+9*Variable("a",0,3))%18, 2, 11, "(((a%2)*9)+2)")
 
   def test_mod_congruence_mul_add(self):
     self.helper_test_variable((6*(Variable("a", 0, 2)+1))%9, 0, 6, "((a*-3)+6)")
@@ -339,7 +340,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "((((idx*-10)+99)//11)+-9)")
 
   def test_div_into_mod(self):
-    self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(((idx*4)%8)//4)")
+    self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
 
   # TODO: simplify the expression
   def test_div_neg_cancel(self):
@@ -421,6 +422,19 @@ class TestSymbolic(unittest.TestCase):
     gidx = Variable("gidx", 0, 124)
     self.helper_test_variable(gidx%4+(gidx//4)*4, 0, 124, "gidx")
     self.helper_test_variable((gidx//4)*4+gidx%4, 0, 124, "gidx")
+
+  def test_div_mod_recombine_folded_mod(self):
+    a = Variable("a", 0, 2)
+    b = Variable("b", 0, 100)
+    with self.assertRaises(AssertionError):
+      self.helper_test_variable((31 * a + 1) % 30 + ((31 * a + 1) // 30) * 30, 1, 63, "((a*31)+1)")
+    with self.assertRaises(AssertionError):
+      self.helper_test_variable((31 * b + 1) % 18 + ((31 * b + 1) // 18) * 18, 1, 3101, "((b*31)+1)")
+
+  def test_div_mod_recombine_with_gcd(self):
+    b = Variable("b", 0, 100)
+    with self.assertRaises(AssertionError):
+      self.helper_test_variable((30 * b + 1) % 18 + ((30 * b + 1) // 18) * 18, 1, 3001, "((b*30)+1)")
 
   def test_arange_unrolled4(self):
     gidx = Variable("gidx", 0, 2559)
