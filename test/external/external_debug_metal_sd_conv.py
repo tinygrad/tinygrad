@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.dtype import dtypes
 from tinygrad.engine.realize import CompiledRunner
