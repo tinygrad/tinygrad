@@ -697,6 +697,9 @@ class TestOps(unittest.TestCase):
     for val in range(1, 5):
       helper_test_op([(45,65)], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val))
       helper_test_op([()], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val))
+  def test_selu(self):
+    helper_test_op([(45,65)], torch.nn.functional.selu, Tensor.selu)
+    helper_test_op([()], torch.nn.functional.selu, Tensor.selu)
 
   def test_abs(self):
     helper_test_op([(45,65)], torch.abs, Tensor.abs)
