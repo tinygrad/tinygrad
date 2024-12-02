@@ -253,6 +253,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property  # parents with self
   def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
 
+  # TODO: replace usage of sparents with this
+  @functools.cached_property
+  def toposort(self) -> Dict[UOp, None]:
+    nodes: Dict[UOp, None] = {}
+    # NOTE: this is a lot faster than the comprehension in parents
+    for parent in self.src: nodes.update(parent.toposort)
+    nodes[self] = None
+    return nodes
+
   @functools.cached_property
   def tuplize(self:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
     return (self.op.value, self.arg, self.dtype, tuple(x.tuplize for x in self.src))
