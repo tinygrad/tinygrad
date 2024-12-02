@@ -1,5 +1,5 @@
 from typing import List, Dict, Tuple
-import functools
+import functools, collections
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import dedup, flatten, partition
@@ -128,13 +128,11 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
     sink = graph_rewrite(sink, make_basic_blocks, ctx=(block_ctxs, children))
 
     # add BLOCKFORK (slow!)
-    block_parents = flatten([x.src for x in sink.sparents if x.op is Ops.BLOCK])
+    block_parent_count = collections.Counter(flatten([x.src for x in sink.sparents if x.op is Ops.BLOCK]))
     non_block_parents = flatten([x.src for x in sink.sparents if x.op is not Ops.BLOCK])
     forks = {}
-    for u in block_parents:
-      if u in non_block_parents: continue
-      child_count = len([x for x in block_parents if x is u])
-      if child_count > 1 and u.op not in DONT_PLACE_IN_BLOCK:
+    for u,child_count in block_parent_count.items():
+      if u.op not in DONT_PLACE_IN_BLOCK and child_count > 1 and u not in non_block_parents:
         forks[u] = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(block_ctxs[u], [u])),), arg=child_count)
 
     if not len(forks): break
