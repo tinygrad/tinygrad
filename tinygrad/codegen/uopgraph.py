@@ -221,7 +221,7 @@ def no_vectorized_wmma(wmma:UOp):
   return UOp(Ops.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 def reduce_collapse(acc:UOp, ret:UOp, alu:UOp):
-  reduce_parented, reduce_unparented = partition(acc.src[1:], lambda x: x in ret.sparents)
+  reduce_parented, reduce_unparented = partition(acc.src[1:], lambda x: x in ret.toposort)
   if len(reduce_unparented) == 0: return None
   new_acc = acc.replace(src=acc.src[0:1]+tuple(reduce_parented))
   ret = new_acc.assign(new_acc.alu(alu.op, ret))
@@ -447,7 +447,7 @@ devectorize = PatternMatcher([
 ])
 
 def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:Optional[UOp]=None) -> Optional[UOp]:
-  if store_gate not in [gate.src[0] for gate in val.sparents if gate.op is Ops.IF]: return None
+  if store_gate not in [gate.src[0] for gate in val.toposort if gate.op is Ops.IF]: return None
   # remove the gate from the index
   return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val)
 
@@ -483,6 +483,9 @@ pm_render = PatternMatcher([
   # move masks of loads/stores
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat.any(masked_index:=UPat(Ops.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))),
                                                masked_index.cast(None).named("cast")),), allow_any_len=True, name="x"), move_mask),
+  # gate any stores that aren't gated with ifs
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
+    lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
 ])
 
 # *** uop graph ***

@@ -199,7 +199,7 @@ class TestSchedule(unittest.TestCase):
     r1 = (x - r0).sum(axis=0).div(2)
     out = r0 + r1
     schedule = check_schedule(out, 2)
-    reduceops = [x for si in schedule for x in si.ast.parents if x.op is Ops.REDUCE_AXIS]
+    reduceops = [x for si in schedule for x in si.ast.toposort if x.op is Ops.REDUCE_AXIS]
     assert len(reduceops) == 2
 
   def test_cache_reduce_multiple_children(self):
@@ -210,7 +210,7 @@ class TestSchedule(unittest.TestCase):
     out0 = r0 + y
     out1 = r1 + y
     schedule = check_schedule([out0, out1], 4)
-    reduceops = [x for si in schedule for x in si.ast.parents if x.op is Ops.REDUCE_AXIS]
+    reduceops = [x for si in schedule for x in si.ast.toposort if x.op is Ops.REDUCE_AXIS]
     assert len(reduceops) == 2
 
   def test_fold_double_unary(self):
@@ -1673,7 +1673,7 @@ class TestIndexing(unittest.TestCase):
 @track_rewrites(named=True)
 def swizzle_rewrite(u:UOp) -> UOp: return graph_rewrite(graph_rewrite(u, view_left), view_right)
 
-def swizzle_cnt(u:UOp) -> int: return len([x for x in u.sparents if x.op is Ops.VIEW and len(x.src) != 0])
+def swizzle_cnt(u:UOp) -> int: return len([x for x in u.toposort if x.op is Ops.VIEW and len(x.src) != 0])
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
@@ -1755,7 +1755,7 @@ class TestSwizzle(unittest.TestCase):
     # EXPAND is rewritten
     self.assertEqual(prod(ret.st.shape), prod(ret.src[0].st.shape))
     # and pushed to the LOAD
-    new_load_st = unwrap([x for x in ret.parents if x.op is Ops.VIEW][0].st)
+    new_load_st = unwrap([x for x in ret.toposort if x.op is Ops.VIEW][0].st)
     self.assertGreater(prod(new_load_st.shape), prod(ld_st.shape))
     self.assertEqual(new_load_st.views[0].strides, (0, 9, 3, 0, 1, 0, 27))
 
@@ -1936,14 +1936,22 @@ class TestBigGraph(unittest.TestCase):
   def test_sink_childless_const(self):
     x = UOp.const(dtypes.int, 0)
     big_graph = big_graph_rewrite(x.sink(), realizes:={})
-    self.assertIs(big_graph, UOp(Ops.SINK, dtypes.void, (x,)))
+    self.assertIs(big_graph, UOp(Ops.NOOP))
     self.assertEqual(len(realizes), 0)
 
   def test_sink_childless_const_alt(self):
     x = UOp.const(dtypes.int, 0)
-    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape((10, 10)))
+    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
     big_graph = big_graph_rewrite(UOp.sink(x, y), realizes:={})
-    self.assertIs(big_graph, UOp(Ops.SINK, dtypes.void, (x, y)))
+    self.assertIs(big_graph, UOp(Ops.NOOP))
+    self.assertEqual(len(realizes), 0)
+
+  def test_sink_childless_const_alt_expanded(self):
+    # this is a real STORE of CONST (post expand)
+    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
+    out = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), y.reshape((1,)).expand((2,)).contiguous(),), ShapeTracker.from_shape((2,)))
+    big_graph = big_graph_rewrite(out.sink(), realizes:={})
+    self.assertIs(big_graph, out.sink())
     self.assertEqual(len(realizes), 1)
 
 if __name__ == '__main__':

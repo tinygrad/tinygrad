@@ -11,7 +11,6 @@ from weakref import ref, ReferenceType, WeakValueDictionary
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Ops]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(LAZYCACHE)):
-  if st.size == 0: op, arg, srcs, base = Ops.CONST, 0, (), None
   dtype = to_dtype(dtype)
   if op is Ops.CONST: arg, enable_cache = dtypes.as_const(arg, dtype) if not isinstance(arg, UOp) else arg, True
 
@@ -82,7 +81,7 @@ class LazyBuffer(MathTrait):
   def assign(self, x:LazyBuffer) -> LazyBuffer:
     assert x.size == self.size, f"assign target must have same size {self.size=} != {x.size=}"
     assert self.is_realized, f"assign target must be realized {self}"
-    return LazyBuffer.metaop(Ops.ASSIGN, self.shape, self.dtype, self.device, arg=() if self.st.contiguous else (self.st,),
+    return LazyBuffer.metaop(Ops.ASSIGN, self.shape, self.dtype, self.device, arg=None if self.st.contiguous else self.st,
                              src=(self.base, x), enable_cache=True)
 
   def can_view(self):
