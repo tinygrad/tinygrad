@@ -68,7 +68,8 @@ class Kernel:
     self.reduceops = dedup([x for x in ordered_parents(self.ast) if x.op is Ops.REDUCE_AXIS])
 
     self.vars: List[Variable] = self.ast.variables()
-    self.bufs: List[UOp] = [x for x in self.ast.old_parents if x.op in GroupOp.Buffer]
+    # NOTE: this requires a specific order with the [::-1], this is likely a bug
+    self.bufs: List[UOp] = [x for x in self.ast.toposort if x.op in GroupOp.Buffer][::-1]
 
     # get earlybufs, before any reduceops
     earlybufs: List[UOp] = [x for reduceop in self.reduceops for x in reduceop.src[0].toposort if x.op in GroupOp.Buffer]
