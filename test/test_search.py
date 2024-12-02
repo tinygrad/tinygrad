@@ -18,7 +18,7 @@ class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
     si = [i for i in create_schedule([Tensor([1,2,3,4]).add(1).lazydata]) if i.ast.op is Ops.SINK][0]
     out = Buffer(Device.DEFAULT, si.outputs[0].size, si.outputs[0].dtype).allocate()
-    memops = {x.src[0].arg:x.src[-1].arg.real_size() for x in si.ast.parents if x.op is Ops.LOAD}
+    memops = {x.src[0].arg:x.src[-1].arg.real_size() for x in si.ast.toposort if x.op is Ops.LOAD}
     rawbufs = [out] + [Buffer(Device.DEFAULT, memops[i], x.dtype).allocate() for i,x in enumerate(si.inputs, start=len(si.outputs))]
     tm = time_linearizer(Kernel(si.ast), rawbufs, allow_test_size=False, cnt=10, disable_cache=True)
     assert tm > 0 and tm != float('inf')
