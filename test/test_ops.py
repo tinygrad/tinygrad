@@ -2039,10 +2039,10 @@ class TestOps(unittest.TestCase):
           lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True))
 
   def test_max_pool2d_ceil_mode_output_size_reduce_by_one(self):
-    # sliding window ignored from both right and bottom padded region
-    helper_test_op([(1,1,2,2)],
-      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(1,1), stride=2, ceil_mode=True),
-      lambda x: Tensor.max_pool2d(x, kernel_size=(1,1), stride=2, ceil_mode=True))
+    # sliding window ignored from end region
+    helper_test_op([(1,1,5,5)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True))
 
   def test_avg_pool2d(self):
     shape = (32,2,111,28)
@@ -2082,10 +2082,10 @@ class TestOps(unittest.TestCase):
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, count_include_pad=False), rtol=1e-5)
 
   def test_avg_pool2d_ceil_mode_output_size_reduce_by_one(self):
-    # sliding window ignored from both right and bottom padded region
-    helper_test_op([(1,1,2,2)],
-      lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(1,1), stride=2, ceil_mode=True),
-      lambda x: Tensor.avg_pool2d(x, kernel_size=(1,1), stride=2, ceil_mode=True))
+    # sliding window ignored from end region
+    helper_test_op([(1,1,5,5)],
+      lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True),
+      lambda x: Tensor.avg_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True))
 
   def test_avg_pool2d_ceil_mode_include_pad(self):
     shape = (1,1,6,6)
@@ -2096,10 +2096,10 @@ class TestOps(unittest.TestCase):
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True, count_include_pad=True), rtol=1e-5)
 
   def test_avg_pool2d_ceil_mode_include_pad_output_size_reduce_by_one(self):
-    # sliding window ignored from both right and bottom padded region
-    helper_test_op([(1,1,2,2)],
-      lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(1,1), stride=2, ceil_mode=True, count_include_pad=True),
-      lambda x: Tensor.avg_pool2d(x, kernel_size=(1,1), stride=2, ceil_mode=True, count_include_pad=True))
+    # sliding window ignored from end region
+    helper_test_op([(1,1,5,5)],
+      lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True, count_include_pad=True),
+      lambda x: Tensor.avg_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True, count_include_pad=True))
 
   def test_global_avg_pool2d(self):
     helper_test_op([(32,2,111,28)],
