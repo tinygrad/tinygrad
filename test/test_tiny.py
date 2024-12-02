@@ -41,6 +41,7 @@ class TestTiny(unittest.TestCase):
 
   def test_jit(self):
     cnt = 0
+    random.seed(0)
     def new_rand_list(ln=10): return [random.randint(0, 100000) for _ in range(ln)]
 
     @TinyJit
