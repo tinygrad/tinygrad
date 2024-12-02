@@ -2010,11 +2010,9 @@ class Tensor(SimpleMathTrait):
     pads = list(self._padding2d(p_, len(k_)))
     # we have to do additional padding before `_pool` so that `o_` in `_pool` is calculated correctly
     # `s*(o-1) + (d*(k-1)+1) - (i+2*p)` -> last_sliding_window_start + full_kernel_size - padded_input_shape
-    # `pads[-1-dim*2]` -> end pads
-    for dim,(o,i,s,p,k,d) in enumerate(zip(o_,i_,s_,p_,k_,d_)): pads[-1-dim*2] += s*(o-1) + (d*(k-1)+1) - (i+2*p)
     # we then decrease padding in the case that a sliding window starts in the end padded region, thereby decreasing `o_` in `_pool`
     # `smax(s*(o-1) + 1 - (i+p), 0)` -> last_sliding_window_start + zero_offset - (input_size + left_pad)
-    for dim,(o,i,s,p,k,d) in enumerate(zip(o_,i_,s_,p_,k_,d_)): pads[-1-dim*2] -= smax(s*(o-1) + 1 - (i+p), 0)
+    for dim,(o,i,s,p,k,d) in enumerate(zip(o_,i_,s_,p_,k_,d_)): pads[-1-dim*2] += s*(o-1) + (d*(k-1)+1) - (i+2*p) - smax(s*(o-1) + 1 - (i+p), 0)
     return pads
 
   # NOTE: these work for more than 2D
@@ -2035,13 +2033,13 @@ class Tensor(SimpleMathTrait):
     ```
     """
     k_ = make_tuple(kernel_size, 2)
-    real_pads, axis = self._padding2d(padding,len(k_)), tuple(range(-len(k_), 0))
+    reg_pads, axis = self._padding2d(padding,len(k_)), tuple(range(-len(k_), 0))
     def pool(x:Tensor, padding_:Sequence[int]) -> Tensor: return x.pad(padding_)._pool(k_, stride if stride is not None else k_, dilation)
-    if not ceil_mode: return pool(self, real_pads).mean(axis=axis) if count_include_pad else \
-                             pool(self, real_pads).sum(axis=axis) / pool(self.ones_like(), real_pads).sum(axis=axis)
+    if not ceil_mode and count_include_pad: return pool(self, reg_pads).mean(axis=axis)
+    if not ceil_mode and not count_include_pad: return pool(self, reg_pads).sum(axis=axis) / pool(self.ones_like(), reg_pads).sum(axis=axis)
     ceil_pads = self._ceil_mode_padding2d(k_, stride if stride is not None else k_, dilation, padding)
-    return pool(self, ceil_pads).sum(axis) / pool(self.pad(real_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, real_pads))).sum(axis) \
-           if count_include_pad else pool(self, ceil_pads).sum(axis=axis) / pool(self.ones_like(), ceil_pads).sum(axis=axis)
+    if not count_include_pad: return pool(self, ceil_pads).sum(axis=axis) / pool(self.ones_like(), ceil_pads).sum(axis=axis)
+    return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
 
   def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False):
     """
