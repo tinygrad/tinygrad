@@ -54,28 +54,28 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, buffers, cache).view(buf.st)
     return ret
-  # make things that can't be images not images
-  if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
-                                            not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
-    if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to {buf.dtype.base}")
-    # hack the underlying buffer too
-    buf.dtype = buf.buffer.dtype = buf.dtype.base
-    assert not buf.is_realized, "can't fixup allocated buffer"
-    buf.buffer.options = None
   assert buf.op is not None, f"base must be base itself {buf}"
-  dtype = buf.dtype if buf.op in GroupOp.Meta else buf.dtype.base
+  # make things that can't be images not images
+  dtype = buf.dtype
+  if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
+    assert buf.realized is None, "can't fixup allocated buffer"
+    if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
+    dtype = buf.dtype.base
+    # hack the underlying buffer too
+    buf.buffer.dtype = buf.dtype = dtype
+    buf.buffer.options = None
   if buf.is_realized:
-    ubuf = UOp.new_buffer(buf.device, buf.size, buf.dtype)
+    ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
     buffers[ubuf] = buf.buffer
     op = None
   elif buf.op is Ops.ASSIGN:
     target, new_val = [to_uop(x, ctx, buffers, cache) for x in buf.srcs]
     ctx.assigns.add(ubuf:=target.buf_uop)
-    op = UOp(Ops.ASSIGN, dtype, (ubuf, new_val), buf.arg)
+    op = UOp(Ops.ASSIGN, dtype.base, (ubuf, new_val), buf.arg)
   else:
-    ubuf = UOp.new_buffer(buf.device, buf.size, buf.dtype)
+    ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
     buffers[ubuf] = buf.buffer
-    op = UOp(buf.op, dtype, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
+    op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
   if op is not None:
     ctx.lazybufs[ubuf] = buf

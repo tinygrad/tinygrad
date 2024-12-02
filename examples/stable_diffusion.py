@@ -189,7 +189,7 @@ class StableDiffusion:
     # make image correct size and scale
     x = (x + 1.0) / 2.0
     x = x.reshape(3,512,512).permute(1,2,0).clip(0,1)*255
-    return x.cast(dtypes.uint8) if Device.DEFAULT != "WEBGPU" else x
+    return x.cast(dtypes.uint8)
 
   def __call__(self, unconditional_context, context, latent, timestep, alphas, alphas_prev, guidance):
     e_t = self.get_model_output(unconditional_context, context, latent, timestep, guidance)
@@ -280,7 +280,7 @@ if __name__ == "__main__":
   print(x.shape)
 
   # save image
-  im = Image.fromarray(x.numpy().astype(np.uint8, copy=False))
+  im = Image.fromarray(x.numpy())
   print(f"saving {args.out}")
   im.save(args.out)
   # Open image.
