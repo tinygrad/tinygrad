@@ -95,7 +95,7 @@ class TestLinearizerDumb(unittest.TestCase):
     print(prg.src)
     if_uops = [u for u in k.uops if u.op is Ops.IF]
     self.assertIn(len(if_uops), {1,2,3})
-    conditions = if_uops[0].src[0].sparents
+    conditions = if_uops[0].src[0].toposort
     self.assertLessEqual(len(conditions), 9)
 
   # this was a bug in embedding, someday we should fold this anyway

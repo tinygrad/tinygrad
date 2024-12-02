@@ -55,7 +55,7 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   full_shape = ast.full_shape
   first_upcasted = len(full_shape)-ki.upcasted
   # if there's no reduce, this is first_upcasted. assumes reduces are at the end
-  first_reduce = min([first_upcasted]+flatten(x.axis_arg for x in ast.sparents if x.op is Ops.REDUCE_AXIS))
+  first_reduce = min([first_upcasted]+flatten(x.axis_arg for x in ast.toposort if x.op is Ops.REDUCE_AXIS))
   local_loads = [x for x in ast.parents if x.op is Ops.LOAD and x.src[0].op is Ops.DEFINE_LOCAL]
   # NOTE: sum up the reduced axes looking across all local loads, yields the number of grouped reduces
   group_for_reduces = sum([any(l.st_arg.shape[i]!=ast.src[0].st_arg.shape[i] for l in local_loads) for i in range(first_reduce,first_upcasted)])
