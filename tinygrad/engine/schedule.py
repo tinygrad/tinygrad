@@ -3,6 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
+from tinygrad.ops import identity_element
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -338,9 +339,25 @@ def _as_const(u:UOp, val:ConstType) -> UOp:
   st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
   return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
 
+def simplify_const_reduce(ctx, src:UOp, to_store:UOp, **kwargs) -> Optional[UOp]:
+  # must be unmasked
+  if any(v.mask is not None for v in unwrap(src.st).views): return None
+  prshape = prod(unwrap(to_store.src[0].st).shape[i] for i in to_store.arg[1])
+  val = src.src[1].arg
+  match to_store.arg[0]:
+    case Ops.ADD: ret = val*prshape
+    case Ops.MUL: ret = val**prshape
+    case _: ret = val
+  return _as_const(src, ret)
+
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+  # reduce of unmasked CONST is CONST
+  (UPatScheduled(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, name="src", src=(UPat(), UPat(Ops.CONST))),)), simplify_const_reduce),
+  # reduce of shape 0 is CONST
+  (UPatScheduled(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, name="src"),)),
+   lambda ctx,src,b,to_store,base: _as_const(base, identity_element(to_store.arg[0], base.dtype)) if src.size == 0 and base.size != 0 else None),
 ])
 
 # ** this decides which ops get realized
