@@ -5,7 +5,7 @@ from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
-from tinygrad.dtype import ImageDType, dtypes
+from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.engine.lazy import LazyBuffer
@@ -120,6 +120,8 @@ def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   new_shape, new_input_shape = swizzle_shapes[0]
   new_src = tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x, ShapeTracker.from_shape(new_input_shape)) for x in root.src)
   ret = root.replace(src=new_src)
+  # update the ASSIGN offset to match the new shape
+  if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+ShapeTracker.from_shape(new_input_shape),)
   return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(new_shape))
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
@@ -129,9 +131,9 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
 
 # push VIEW to stores
 view_right = merge_views+PatternMatcher([
-  # ASSIGN can override st
+  # ASSIGN with offset swizzles STORE
   (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.ASSIGN, name="a"))),
-   lambda a,b,st: UOp.store(b, (a.arg[0]+st.arg).to_uop(), a.replace(arg=())) if a.arg else None),
+   lambda a,b,st: None if a.arg is None else apply_swizzle(UOp.store(b, st, a.replace(arg=None)), a.arg)),
   # non contiguous VIEW on a reduce creates a new VIEW
   (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").view(name="v"), lambda v,r,src: None if v.st.contiguous else swizzle_r(r, src, v.st)),
   # push a VIEW down to STORE, through a reduce (ONLY reshapes)
@@ -329,9 +331,22 @@ class UPatScheduled(UPat):
   def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),
                                                                        UPat(*args, **{**kwargs,"name":"to_store"})))
 
+# ** this is schedule level const folding
+
+def _as_const(u:UOp, val:ConstType) -> UOp:
+  assert is_scheduled(u), f"must be scheduled to fold {u}"
+  st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
+  return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
+
+ops_folding = PatternMatcher([
+  # op with size 0 is zero
+  (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+])
+
 # ** this decides which ops get realized
 
-def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> None: return ctx.update([(b, to_store)])
+def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> None:
+  if to_store.op not in {Ops.CONST, Ops.BIND}: ctx.update([(b, to_store)])
 
 def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, to_store:UOp, b:UOp) -> None:
   if to_store.op in {Ops.CONST, Ops.BIND}: return None
@@ -350,9 +365,13 @@ def fold_img_cast(ctx:Dict[UOp, UOp], xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kw
   del ctx[b]
   return to_cast.view(unwrap(view.st))
 
+def init_big_graph(ctx:ScheduleContext, sink:UOp) -> Optional[UOp]:
+  new_src = tuple(x.base for x in sink.src if is_scheduled(x.base) and uval(x.base).op is not Ops.CONST)
+  return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
+
 do_realize = PatternMatcher([
   # always realize sinked ops
-  (UPat(Ops.SINK, name="sink"), lambda ctx,sink: ctx.update((x.buf_uop, x) for x in sink.src if is_scheduled(x))),
+  (UPat(Ops.SINK, name="sink"), init_big_graph),
   # always realize meta ops
   (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
   # realize before expand or unsafe pad ops
@@ -393,7 +412,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
   buffers: Dict[UOp, Buffer] = {}
-  big_graph = graph_rewrite(UOp.sink(*(to_uop(x, ctx, buffers, cache) for x in outs)), do_realize, ctx.realizes)
+  big_graph = graph_rewrite(UOp.sink(*(to_uop(x, ctx, buffers, cache) for x in outs)), ops_folding+do_realize, ctx.realizes)
+  for u in big_graph.src: ctx.realizes[u.buf_uop] = u
   # group realizes into kernels
   store_groups = group_realizes(ctx)
   graph_rewrite(big_graph, break_sched, ctx)

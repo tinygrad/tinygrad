@@ -263,16 +263,21 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def has_st(self) -> bool: return self.op not in {Ops.DEFINE_LOCAL, Ops.DEFINE_GLOBAL, Ops.BUFFER, Ops.CONST, Ops.DEFINE_VAR}
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
-    if not self.has_st: return None
-    if self.op in GroupOp.Buffer: return self.st_arg
     if self.op is Ops.VIEW: return self.arg
-    src_sts = [x.st for x in self.src if x.st is not None]
+    # buffer ops can have a non contiguous shapetracker
+    if self.op in GroupOp.Buffer and len(src_sts:=[unwrap(x.st) for x in self.src if x.op is Ops.VIEW]) != 0: return src_sts[0]
+    if len(src_sts:=[x.st for x in self.src if x.st is not None]) == 0: return None
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
+    # all other ops have a contiguous shapetracker
     from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg) if self.op is Ops.REDUCE_AXIS else src_sts[0].shape)
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.arg.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
+  @property
+  def shape(self) -> Tuple[sint, ...]: return unwrap(self.st).shape
+  @property
+  def size(self) -> int: return self.arg[1][1] if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # *** uop evaluation ***
 
@@ -359,7 +364,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
   def view(self, new_st:ShapeTracker) -> UOp:
-    assert self.op is not Ops.STORE, "STORE must stay base"
     assert self.st is not None and self.base.st is not None, f"must have shape {self}"
     if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)):
       return UOp.const_with_shape(self.dtype, 0, new_st.shape)
@@ -382,8 +386,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       case Ops.COPY: return self.arg
       case Ops.BUFFER: return self.arg[1][0]
       case _: return self.src[0].device
-  @property
-  def size(self) -> int: return self.buf_uop.arg[1][1]
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
