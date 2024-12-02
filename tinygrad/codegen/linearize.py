@@ -118,8 +118,10 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   # get children and all block contexts
   block_ctxs: Dict[UOp, Tuple[UOp, ...]] = {}
   children: Dict[UOp, List[UOp]] = {}
-  for u in sink.sparents:
-    for s in u.src: children.setdefault(s, []).append(u)
+  for u in sink.toposort:
+    for s in u.src:
+      assert s in block_ctxs
+      children.setdefault(s, []).append(u)
     this_block_ctx = get_block_ctx(u)
     block_ctxs[u] = ((UOp(Ops.BLOCKSTART, src=(u,)),) + this_block_ctx) if u.op in {Ops.IF, Ops.RANGE} else this_block_ctx
 
