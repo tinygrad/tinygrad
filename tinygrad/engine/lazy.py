@@ -186,10 +186,10 @@ class LazyBuffer(MathTrait):
 
     # const folding
     # TODO: fold this for symbolic?
-    if self.is_unrealized_unmasked_const() and all_int(self.shape):
-      if op is Ops.ADD: return self.const_with_shape(self.base.arg * prod(self.shape[i] for i in axis), new_shape)
-      if op is Ops.MUL: return self.const_with_shape(self.base.arg ** prod(self.shape[i] for i in axis), new_shape)
-      if op is Ops.MAX: return self.const_with_shape(self.base.arg, new_shape)
+    #if self.is_unrealized_unmasked_const() and all_int(self.shape):
+    #  if op is Ops.ADD: return self.const_with_shape(self.base.arg * prod(self.shape[i] for i in axis), new_shape)
+    #  if op is Ops.MUL: return self.const_with_shape(self.base.arg ** prod(self.shape[i] for i in axis), new_shape)
+    #  if op is Ops.MAX: return self.const_with_shape(self.base.arg, new_shape)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not SPLIT_REDUCEOP or not all_int(self.shape) or (0 in self.shape) or \

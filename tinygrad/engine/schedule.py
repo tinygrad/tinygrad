@@ -347,7 +347,7 @@ def simplify_const_reduce(ctx, src:UOp, to_store:UOp, **kwargs) -> Optional[UOp]
   match to_store.arg[0]:
     case Ops.ADD: ret = val*prshape
     case Ops.MUL: ret = val**prshape
-    case _: ret = val
+    case Ops.MAX: ret = val
   return _as_const(src, ret)
 
 ops_folding = PatternMatcher([
