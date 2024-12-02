@@ -1,24 +1,31 @@
-import os, json, pathlib, zipfile, pickle, tarfile, struct, functools, io
-from typing import Dict, Union, List, Optional, Any, Tuple, Callable, BinaryIO
+import os, json, pathlib, zipfile, pickle, tarfile, struct, functools, io, collections.abc
+from typing import Dict, Union, List, Optional, Any, Tuple, Callable, BinaryIO, Iterable
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.multi import MultiLazyBuffer
 
-class RawTensorIO(io.RawIOBase, BinaryIO): # type: ignore[misc]  # incompatible definitions of methods in the base classes
+class TensorIO(io.IOBase, BinaryIO):
+  readable, seekable = (lambda _: True,) * 2
+
   def __init__(self, t: Tensor):
-    if len(t.shape) != 1 or t.dtype != dtypes.uint8: raise ValueError("Invalid Tensor, expected 1 dimensional tensor with dtype=uint8")
+    if len(t.shape) != 1 or t.dtype != dtypes.uint8: raise ValueError("Tensor must be 1d and of dtype uint8!")
     self._position, self._tensor = 0, t
-  def readable(self) -> bool: return True
-  def readinto(self, buffer: Union[bytearray, memoryview]) -> int:  # type: ignore[override]  # expects Buffer, which is not always writable
-    data = self._tensor[self._position:self._position+len(buffer)].data()
-    buffer[:len(data)], self._position = data, self._position + len(data)
-    return len(data)
-  def seekable(self) -> bool: return True
+
+  def read(self, n: int = -1) -> bytes:
+    t = self._tensor[self._position:]
+    if n >= 0: t = t[:n]
+    self._position += len(t)
+    return t.data().tobytes()
   def seek(self, offset: int, whence: int = 0) -> int:
     self._position = min(len(self._tensor), max(0, [offset, self._position+offset, len(self._tensor)+offset][whence]))
     return self._position
+
+  # required to correctly implement BinaryIO
+  def __enter__(self): return self
+  def write(self, s: collections.abc.Buffer): raise io.UnsupportedOperation("TensorIO.write not supported")
+  def writelines(self, lines: Iterable[Union[collections.abc.Buffer, str]]): raise io.UnsupportedOperation("TensorIO.writelines not supported")
 
 safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dtypes.int16, "U16":dtypes.uint16, "I32":dtypes.int, "U32":dtypes.uint,
                "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
@@ -154,8 +161,7 @@ def tar_extract(t: Tensor) -> Dict[str, Tensor]:
   tensors = nn.state.tar_extract(Tensor(pathlib.Path("archive.tar")))
   ```
   """
-
-  with tarfile.open(fileobj=RawTensorIO(t), mode="r") as tar:
+  with tarfile.open(fileobj=TensorIO(t), mode="r") as tar:
     return {member.name:t[member.offset_data:member.offset_data+member.size] for member in tar if member.type == tarfile.REGTYPE}
 
 # torch support!
