@@ -1,92 +1,164 @@
-from typing import List, Set, Dict, Tuple
-import functools, heapq
-from tinygrad.ops import type_verify, END_FOR_UOP, UOp, Ops, GroupOp
-from tinygrad.dtype import dtypes
-from tinygrad.helpers import DEBUG
+from typing import List, Dict, Tuple
+import functools, collections
+from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite
+from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.helpers import dedup, flatten, partition
 
-def get_children_dfs(u:UOp, children:Dict[UOp, List[UOp]], srcs:Dict[UOp, Dict[UOp, None]], in_degree:Dict[UOp, int]):
-  if u in children: return srcs[u]
-  srcs[u] = {}
-  children[u] = []
-  for x in u.src:
-    srcs[u].update(get_children_dfs(x, children, srcs, in_degree))
-    if x.op is Ops.RANGE and x.arg[1]: srcs[u][x] = None
-    children[x].append(u)
-  in_degree[u] = len(u.src)
-  return srcs[u]
+DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST,
+                       Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKSTART}
+
+def disp(y:UOp) -> str:
+  if y.op is Ops.BLOCKSTART: return "w"+disp(y.src[0])
+  if y.op is Ops.IF: return f'IF{id(y)}'
+  if y.op is Ops.RANGE: return str(y.arg[0])
+  return "<NONE>"
+
+class BasicBlock:
+  def __init__(self, ctx, lst, end=None):
+    self.ctx, self.lst, self.end = ctx, lst, end
+  def __repr__(self):
+    return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+\
+           f"{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
+
+def append_to_block(ctx, x:UOp):
+  block_ctxs, children = ctx
+  new_srcs: List[UOp] = []
+  to_append: List[UOp] = []
+  new_blocks: Dict[Tuple[UOp, ...], List[UOp]] = {}
+  in_this_block = set(x.arg.lst)
+  for u in x.src:
+    if u.op in DONT_PLACE_IN_BLOCK or len([y for y in children[u] if y not in in_this_block]) > 0:
+      # if it's a fork or not placed, we don't place it
+      new_srcs.append(u)
+    elif (block_ctx:=block_ctxs[u]) == x.arg.ctx:
+      # if it's the same context, we place the UOp in this block and append the parents to it's srcs
+      new_srcs += list(u.src)
+      to_append.append(u)
+    else:
+      # otherwise, we create a new block with this UOp
+      new_blocks.setdefault(block_ctx, []).append(u)
+  if len(to_append) == 0 and len(new_blocks) == 0: return None
+
+  for rng,lst in new_blocks.items():
+    new_block = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, lst))
+    lrng = list(rng)
+    for r in rng[::-1]:
+      if r not in x.arg.ctx and r.op is not Ops.BLOCKSTART:
+        lrng.remove(r)
+        new_block = UOp(Ops.BLOCKEND, src=(new_block,), arg=BasicBlock(lrng[:], [UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))], r))
+    new_srcs.append(new_block)
+  return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(x.arg.ctx, to_append+x.arg.lst))
+
+make_basic_blocks = PatternMatcher([
+  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock([], [x]))),
+  (UPat(Ops.BLOCK, name="x"), append_to_block),
+])
+
+def block_merge(ctx, x:UOp):
+  # ctx is children here
+  if x.op is Ops.BLOCKEND:
+    # if it's a BLOCKEND, see if we are done with placement. if all the children of the range are in here
+    in_this_block = set(x.arg.lst)
+    if len([y for y in ctx[x.arg.end] if y not in in_this_block]) == 0:
+      # find the parent block that has the BLOCKSTART in the ctx
+      parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and UOp(Ops.BLOCKSTART, src=(x.arg.end,)) in y.arg.ctx]
+      if len(parent_blocks) == 1:
+        parent_block = parent_blocks[0]
+        # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
+        early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
+        return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not parent_block)+parent_block.src,
+                  BasicBlock([y for y in x.arg.ctx if y is not x.arg.end], early_ops+parent_block.arg.lst+late_ops))
+      assert not len(parent_blocks)
+
+  new_srcs: List[UOp] = []
+  to_append: List[UOp] = []
+  new_ctx = list(x.arg.ctx[:])
+  placed = set()
+  for u in x.src:
+    if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(x.arg.ctx) or (x.arg.end is not None and x.arg.end in u.arg.ctx)):
+      # NOTE: this can't appear in srcs twice or it would be a BLOCKFORK
+      new_ctx += u.arg.ctx
+      new_srcs += list(u.src)
+      to_append += u.arg.lst
+    elif u.op is Ops.BLOCKFORK and len([y for y in x.src if y is u]) == u.arg: # block fork appears # of times in srcs
+      if u not in placed:
+        new_srcs += list(u.src)
+        placed.add(u)
+    else:
+      # keep it in srcs
+      new_srcs.append(u)
+  if len(to_append) == 0 and len(placed) == 0: return None
+  return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(dedup(new_ctx), to_append+x.arg.lst, x.arg.end))
+
+pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
-  # filter nodes that don't link to a sink
-  # BFS toposort
+
+  @functools.lru_cache(None)
+  def get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
+    ret: List[UOp] = []
+    for u in x.src:
+      if u.op in {Ops.RANGE, Ops.IF}: ret.append(u)
+      # don't flow (fully) through assign and store
+      elif u.op is Ops.STORE:
+        # ugh, deal with non-reduce locals. probably wrong
+        if isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.local:
+          idx_context, store_context = get_block_ctx(u.src[0]), get_block_ctx(u)
+          ret += [x for x in store_context if x not in idx_context and x.op is Ops.RANGE]
+      elif u.op is Ops.ASSIGN:
+        # flow though assign, but remove the ranges used in the assign
+        assert u.src[0].op is Ops.DEFINE_ACC
+        ret += [x for x in get_block_ctx(u.src[1]) if x not in u.src[0].src[1:]]
+      else:
+        # flow though everything else
+        ret += get_block_ctx(u)
+    return tuple(dedup(sorted(ret, key=lambda x: x.tuplize)))
+
+  # get children and all block contexts
+  block_ctxs: Dict[UOp, Tuple[UOp, ...]] = {}
   children: Dict[UOp, List[UOp]] = {}
-  range_srcs: Dict[UOp, Dict[UOp, None]] = {}
-  in_degree: Dict[UOp, int] = {}
-  get_children_dfs(sink, children, range_srcs, in_degree)
+  for u in sink.sparents:
+    for s in u.src: children.setdefault(s, []).append(u)
+    this_block_ctx = get_block_ctx(u)
+    block_ctxs[u] = ((UOp(Ops.BLOCKSTART, src=(u,)),) + this_block_ctx) if u.op in {Ops.IF, Ops.RANGE} else this_block_ctx
 
-  @functools.lru_cache(None)
-  def get_recursive_children(x:UOp, end:Ops, include_self=False) -> Set[UOp]:
-    if x.op is Ops.SINK: return set()
-    return set.union({x} if include_self else set(), *([get_recursive_children(u, end, True) for u in children[x] if x.op is not end]))
+  # TODO: there's probably a clever way to remove this while loop
+  while 1:
+    sink = graph_rewrite(sink, make_basic_blocks, ctx=(block_ctxs, children))
 
-  # scope children impact the toposort and END* insertion
-  scope_children = {p:get_recursive_children(p, END_FOR_UOP[p.op][0]) for p in reversed(in_degree) if p.op in END_FOR_UOP}
-  range_phi = {r:[p for p in scope_children[r] if p.op is Ops.ASSIGN] for r in scope_children if r.op is Ops.RANGE}
+    # add BLOCKFORK (slow!)
+    block_parent_count = collections.Counter(flatten([x.src for x in sink.sparents if x.op is Ops.BLOCK]))
+    non_block_parents = flatten([x.src for x in sink.sparents if x.op is not Ops.BLOCK])
+    forks = {}
+    for u,child_count in block_parent_count.items():
+      if u.op not in DONT_PLACE_IN_BLOCK and child_count > 1 and u not in non_block_parents:
+        forks[u] = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(block_ctxs[u], [u])),), arg=child_count)
 
-  # assign priorities
-  def get_priority(u:UOp):
-    priority = 0
-    # prefer ranges that depend on the least number of independent ranges
-    if u.op is Ops.RANGE and u.arg[1]:
-      priority += u.arg[0]
-      for p in range_phi[u]:
-        priority += 10000*len([r for r in range_srcs[p] if not any(i in range_phi[u] for i in range_phi[r])])
-    elif u.op is Ops.CONST:
-      # place consts first here, they don't do anything and it can cause issues with DEFINE_ACC
-      priority -= 100000000000
-    else:
-      # prefer uops that are loop children
-      priority -= sum([(l.arg[0]+1) + 1000*l.arg[1] for l,ss in scope_children.items() if l.op is Ops.RANGE and u in ss])
-    if u.op is Ops.IF and len(u.src) == 1: priority += 10000000 # if penalty
-    return priority
-  priorities:Dict[UOp, int] = {u:get_priority(u) for u in children}
+    if not len(forks): break
+    sink = sink.substitute(forks)
 
-  # prevent priority inversion
-  @functools.lru_cache(None)
-  def fix_priority(u:UOp, lowest_priority):
-    if u.op in {Ops.CAST, Ops.BITCAST, *GroupOp.ALU, Ops.VECTORIZE, Ops.GEP, Ops.SPECIAL, Ops.DEFINE_LOCAL, Ops.LOAD}:
-      priorities[u] = min(priorities[u], lowest_priority)
-      if u.op is Ops.LOAD: priorities[u] += 100 # load penalty (here)
-    for x in u.src: fix_priority(x, priorities[u])
-  fix_priority(sink, 0)
+  # combine matching BLOCKENDS
+  blockends_to_arg: Dict[UOp, List[UOp]] = {}
+  for be in sink.sparents:
+    if be.op is Ops.BLOCKEND: blockends_to_arg.setdefault(be.arg.end, []).append(be)
+  new_forks = {}
+  for k,v in blockends_to_arg.items():
+    # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
+    if len(v) > 1:
+      new_blockend = UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)), arg=BasicBlock(dedup(flatten([y.arg.ctx for y in v])), v[0].arg.lst, k))
+      out = UOp(Ops.BLOCKFORK, src=(new_blockend,), arg=len(v))
+      for u in v: new_forks[u] = out
+  sink = sink.substitute(new_forks)
 
-  # NOTE: the compare should never make it all the way to u
-  queue:List[Tuple[int, Tuple, UOp]] = []
-  def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
+  # final rewrite to merge all blocks into one
+  sink = graph_rewrite(sink, pm_block_merge, ctx=children)
 
-  for u in children:
-    if in_degree[u] == 0: push(u)
-
-  scope_end: Dict[UOp, UOp] = {}
-  _uops: List[UOp] = []
-  while queue:
-    p,_,x = heapq.heappop(queue)
-    if DEBUG >= 7: print(f"{p:5d}", x.op, x.dtype, x.arg)
-    if x in scope_children: scope_end[x] = x
-    if x.op is Ops.DEFINE_ACC:
-      idx = min([_uops.index(l) for l in x.src if l.op is Ops.RANGE])
-      _uops.insert(idx, x)
-    else: _uops.append(x)
-    for u, ss in scope_children.items():
-      if x in ss:
-        ss.remove(x)
-        if len(ss) == 0: scope_end[u] = x
-    for u in children[x]:
-      in_degree[u] -= 1
-      if in_degree[u] == 0: push(u)
-
-  # end scopes in toposort order
-  for u, x in scope_end.items(): _uops.insert(_uops.index(x)+1, UOp(END_FOR_UOP[u.op][1], dtypes.void, (u,)))
+  # there should just be one block left, with a few parents with 0 srcs
+  assert sink.op is Ops.BLOCK
+  _uops = sorted(dedup(sink.src), key=lambda x: x.tuplize)
+  assert all(len(x.src) == 0 and x.op not in {Ops.BLOCK, Ops.BLOCKSTART, Ops.BLOCKEND, Ops.BLOCKFORK} for x in _uops)
+  _uops += sink.arg.lst
 
   # sanity checks (NOTE: these can cause things to be skipped in BEAM)
   if not skip_check: type_verify(_uops)
