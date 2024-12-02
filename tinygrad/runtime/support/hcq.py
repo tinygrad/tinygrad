@@ -157,14 +157,14 @@ class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   def _submit(self, dev:DeviceType): raise NotImplementedError("need _submit")
 
 class HCQSignal(Generic[DeviceType]):
-  def __init__(self, base_addr:sint=0, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8):
+  def __init__(self, base_addr:sint=0, value:int=0, timeline_for_device:Optional[DeviceType]=None, timestamp_divider=1, value_off=0, timestamp_off=8, cpu_off=0):
     self.base_addr, self.value_addr, self.timestamp_addr = base_addr, base_addr+value_off, base_addr+timestamp_off
     self.timestamp_divider:decimal.Decimal = decimal.Decimal(timestamp_divider)
     self.timeline_for_device:Optional[DeviceType] = timeline_for_device
 
     if isinstance(base_addr, int):
-      self.value_mv, self.timestamp_mv = to_mv(self.value_addr, 8).cast('Q'), to_mv(self.timestamp_addr, 8).cast('Q')
-      self.value_mv[0] = value
+      self.value_mv, self.timestamp_mv = to_mv(self.value_addr + cpu_off, 8).cast('Q'), to_mv(self.timestamp_addr + cpu_off, 8).cast('Q')
+      if value is not None: self.value_mv[0] = value
 
   @property
   def value(self) -> int: return self.value_mv[0]

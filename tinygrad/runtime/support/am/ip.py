@@ -92,6 +92,12 @@ class AM_GMC(AM_IP):
     for eng_i in range(18): self.adev.wreg_pair(f"reg{ip}VM_INVALIDATE_ENG{eng_i}_ADDR_RANGE", "_LO32", "_HI32", 0x1fffffffff)
     self.hub_initted[ip] = True
 
+  def check_page_faults(self):
+    if self.adev.regMMVM_L2_PROTECTION_FAULT_STATUS.read():
+      raise RuntimeError(f"MMVM_L2_PROTECTION_FAULT_STATUS: {self.adev.regMMVM_L2_PROTECTION_FAULT_STATUS.read()} {self.adev.regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR.read()}")
+    if self.adev.regGCVM_L2_PROTECTION_FAULT_STATUS.read():
+      raise RuntimeError(f"GCVM_L2_PROTECTION_FAULT_STATUS: {self.adev.regGCVM_L2_PROTECTION_FAULT_STATUS.read()} {self.adev.regGCVM_L2_PROTECTION_FAULT_DEFAULT_ADDR.read()}")
+
 class AM_SMU(AM_IP):
   def init(self):
     self._smu_cmn_send_smc_msg_with_param(smu_v13_0_0.PPSMC_MSG_RunDcBtc, 0, poll=True)
@@ -161,6 +167,7 @@ class AM_GFX(AM_IP):
     self.adev.regCP_HQD_ACTIVE.write(0x1)
 
     self._grbm_select()
+    time.sleep(5)
 
   def _grbm_select(self, me=0, pipe=0, queue=0, vmid=0): self.adev.regGRBM_GFX_CNTL.write(meid=me, pipeid=pipe, vmid=vmid, queueid=queue)
 
@@ -190,6 +197,42 @@ class AM_GFX(AM_IP):
     self._grbm_select()
     self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=1, mec_pipe1_reset=1, mec_pipe2_reset=1, mec_pipe3_reset=1)
     self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=0, mec_pipe1_reset=0, mec_pipe2_reset=0, mec_pipe3_reset=0)
+
+class AM_IH(AM_IP):
+  AMDGPU_NAVI10_DOORBELL_IH = 0x178
+
+  def __init__(self, adev):
+    super().__init__(adev)
+
+    self.rings = [(self.adev.mm.valloc(262144), self.adev.mm.valloc(0x1000), suf, i) for i,suf in enumerate(["", "_RING1"])]
+
+  def enable_ring(self, addr_vm, rwptr_vm, suf, ring_id):
+    self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", addr_vm.vaddr >> 8)
+
+    self.adev.reg(f"regIH_RB_CNTL{suf}").write(0xC0310120 if ring_id == 0 else 0xC0100320)
+
+    if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", rwptr_vm.vaddr)
+
+    self.adev.reg(f"regIH_RB_WPTR{suf}").write(0)
+    self.adev.reg(f"regIH_RB_RPTR{suf}").write(0)
+
+    self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write((self.AMDGPU_NAVI10_DOORBELL_IH + ring_id), enable=1)
+
+  def init(self):
+    for ring in self.rings: self.enable_ring(*ring)
+
+    self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
+    self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
+    self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
+    self.adev.regIH_RING1_CLIENT_CFG_INDEX.update(index=0)
+    self.adev.regIH_RING1_CLIENT_CFG_DATA.update(client_id=0xa, source_id=0x0, source_id_match_enable=1)
+
+    # set master
+    self.adev.hal.pci_set_master()
+
+    # toggle interrupts
+    for addr_vm, rwptr_vm, suf, ring_id in self.rings:
+      self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
 
 class AM_PSP(AM_IP):
   def __init__(self, adev):

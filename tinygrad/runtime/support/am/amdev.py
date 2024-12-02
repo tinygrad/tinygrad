@@ -1,11 +1,12 @@
+from __future__ import annotations
 import os, ctypes, collections, time
-from typing import Tuple, Dict, Set
-from tinygrad.runtime.autogen import libpciaccess
-from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
+from typing import Tuple, Dict, Set, Optional
 from tinygrad.helpers import to_mv, mv_address, getenv
+from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
 from tinygrad.runtime.support.am.mm import MM, PhysicalMemory
 from tinygrad.runtime.support.am.firmware import Firmware
-from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_PSP, AM_SMU, AM_GFX
+from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX
+from tinygrad.runtime.support.am.hal import HAL, PCIHAL, read_pagemap
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
@@ -34,12 +35,15 @@ class AMRegister:
   def read(self, inst=0): return self.adev.rreg(self.reg_off)
 
 class AMDev:
-  def __init__(self, pcidev):
-    self.pcidev = pcidev
+  hal:Optional[HAL] = None
 
-    self.vram_cpu_addr, self.vram = self._map_pci_range(bar=0, cast='B')
-    self.doorbell_cpu_addr, self.doorbell64 = self._map_pci_range(bar=2, cast='Q')
-    self.mmio_cpu_addr, self.mmio = self._map_pci_range(bar=5, cast='I')
+  def __init__(self, dev_idx:int):
+    if AMDev.hal is None: AMDev.hal = PCIHAL()
+    AMDev.hal.open_device(dev_idx)
+
+    self.vram_cpu_addr, self.vram = AMDev.hal.map_pci_range(bar=0, cast='B')
+    self.doorbell_cpu_addr, self.doorbell64 = AMDev.hal.map_pci_range(bar=2, cast='Q')
+    self.mmio_cpu_addr, self.mmio = AMDev.hal.map_pci_range(bar=5, cast='I')
 
     self._run_discovery()
     self._build_regs()
@@ -51,6 +55,7 @@ class AMDev:
     # Initialize IP blocks
     self.soc21 = AM_SOC21(self)
     self.gmc = AM_GMC(self)
+    self.ih = AM_IH(self)
     self.psp = AM_PSP(self)
     self.smu = AM_SMU(self)
     self.gfx = AM_GFX(self)
@@ -62,14 +67,14 @@ class AMDev:
 
     self.soc21.init()
     self.gmc.init()
+    self.regRLC_SPM_MC_CNTL.write(0xf)
+    self.ih.init()
     self.psp.init()
     self.smu.init()
     self.gfx.init()
 
-  def _map_pci_range(self, bar, cast='I'):
-    ret = libpciaccess.pci_device_map_range(ctypes.byref(self.pcidev), self.pcidev.regions[bar].base_addr, size:=self.pcidev.regions[bar].size,
-      libpciaccess.PCI_DEV_MAP_FLAG_WRITABLE, ctypes.byref(pcimem:=ctypes.c_void_p()))
-    return pcimem.value, to_mv(pcimem.value, size).cast(cast)
+    # print(read_pagemap(self.vram_cpu_addr))
+    # exit(0)
 
   def ip_base(self, ip:str, inst:int, seg:int) -> int: return self.regs_offset[am.__dict__.get(f"{ip}_HWIP")][inst][seg]
  

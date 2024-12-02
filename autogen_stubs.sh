@@ -254,6 +254,12 @@ generate_pciaccess() {
     -o $BASE/libpciaccess.py
 }
 
+generate_vfio() {
+  clang2py -k cdefstum \
+    /usr/include/linux/vfio.h \
+    -o $BASE/vfio.py
+}
+
 generate_am() {
   clang2py -k cdefstum \
     extra/amdpci/headers/v11_structs.h \
@@ -318,6 +324,7 @@ elif [ "$1" == "libc" ]; then generate_libc
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "pciaccess" ]; then generate_pciaccess
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc
+elif [ "$1" == "vfio" ]; then generate_vfio
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am
 else echo "usage: $0 <type>"
 fi

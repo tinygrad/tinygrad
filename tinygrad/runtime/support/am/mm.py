@@ -42,9 +42,10 @@ class AMPageTableEntry:
   def set_table(self, entry_id, pte:PageTableEntry, valid=True):
     self.view[entry_id] = (pte.pm.paddr & 0x0000FFFFFFFFF000) | (am.AMDGPU_PTE_VALID if valid else 0)
 
-  def set_page(self, entry_id, paddr, uncached=False, frag=0, valid=True):
+  def set_page(self, entry_id, paddr, uncached=False, system=False, frag=0, valid=True):
     f = (am.AMDGPU_PTE_VALID if valid else 0) | am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE \
-      | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE if self.lv != am.AMDGPU_VM_PTB else 0) | (am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC) if uncached else 0)
+      | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE if self.lv != am.AMDGPU_VM_PTB else 0) \
+      | ((am.AMDGPU_PTE_SYSTEM) if system else 0) | (am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC) if uncached else 0)
     self.view[entry_id] = (paddr & 0x0000FFFFFFFFF000) | f
 
   def get_entry(self, entry_id): return self.view[entry_id]
@@ -91,7 +92,7 @@ class MM:
     # Last pte is not full covered
     if size > 0: yield from _level_down(vaddr, size)
 
-  def map_range(self, vaddr, paddr, size, uncached=False) -> VirtualMapping:
+  def map_range(self, vaddr, paddr, size, uncached=False, system=False) -> VirtualMapping:
     if AM_DEBUG >= 3: print(f"Mapping {vaddr=:#x} -> {paddr=:#x} ({size=:#x})")
     for va, off, pte_st_idx, n_ptes, pte_covers, page_table in self.page_table_walker(self.root_page_table, vaddr, size):
       # To optimize TLB entries count, need to map pages as contigous entries. Determine size of each chunks.
@@ -102,7 +103,7 @@ class MM:
         update_ptes = (1 << (frags_cnt + 12)) // pte_covers
         for pte_idx in range(update_ptes):
           assert page_table.get_entry(pte_st_idx + pte_idx) & am.AMDGPU_PTE_VALID == 0, "Entry already set"
-          page_table.set_page(pte_st_idx + pte_idx, paddr=paddr + off, uncached=uncached, frag=frags_cnt, valid=True)
+          page_table.set_page(pte_st_idx + pte_idx, paddr=paddr + off, uncached=uncached, system=system, frag=frags_cnt, valid=True)
           off += pte_covers
 
         if AM_DEBUG >= 3: print(f"\tnptes={update_ptes:#x} incr={pte_covers:#x} upd_flags={page_table.get_entry(pte_st_idx):#x} frags={frags_cnt:#x}")
@@ -123,6 +124,7 @@ class MM:
   def valloc(self, size:int, align=0x1000, uncached=False) -> VirtualMapping:
     size = round_up(size, 0x1000)
 
+    # TODO: need for here?
     for i in range(31):
       if (1 << i) <= size: align = (1 << i)
 
