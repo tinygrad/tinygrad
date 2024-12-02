@@ -2038,6 +2038,15 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True),
           lambda x: Tensor.max_pool2d(x, kernel_size=ksz, padding=1, stride=3, ceil_mode=True))
 
+  def test_max_pool2d_ceil_mode_output_size_reduce_by_one(self):
+    helper_test_op([(1,1,2,2)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(1,1), stride=2, ceil_mode=True),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(1,1), stride=2, ceil_mode=True))
+
+    helper_test_op([(1,1,2,5)],
+      lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(1,3), stride=(1,2), ceil_mode=True),
+      lambda x: Tensor.max_pool2d(x, kernel_size=(1,3), stride=(1,2), ceil_mode=True))
+
   def test_avg_pool2d(self):
     shape = (32,2,111,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:

@@ -2012,10 +2012,9 @@ class Tensor(SimpleMathTrait):
     # `s*(o-1) + (d*(k-1)+1) - (i+2*p)` -> last_sliding_window_start + full_kernel_size - padded_input_shape
     # `pads[-1-dim*2]` -> end pads
     for dim,(o,i,s,p,k,d) in enumerate(zip(o_,i_,s_,p_,k_,d_)): pads[-1-dim*2] += s*(o-1) + (d*(k-1)+1) - (i+2*p)
-    # we also remove padding in the case that a sliding window starts in the end padded region, thereby decreasing `o_` in `_pool`
-    # `smax(s*(o-1) - (i+p), 0)` -> last_sliding_window_start - (left_pad + input_size)
-    for dim,(o,i,s,p,k,d) in enumerate(zip(o_,i_,s_,p_,k_,d_)): pads[-1-dim*2] -= smax(s*(o-1) - (i+p), 0)
-    # NOTE: adding pad and removing pad never interferes with each other
+    # we then decrease padding in the case that a sliding window starts in the end padded region, thereby decreasing `o_` in `_pool`
+    # `smax(s*(o-1) + 1 - (i+p), 0)` -> last_sliding_window_start + zero_offset - (input_size + left_pad)
+    for dim,(o,i,s,p,k,d) in enumerate(zip(o_,i_,s_,p_,k_,d_)): pads[-1-dim*2] -= smax(s*(o-1) + 1 - (i+p), 0)
     return pads
 
   # NOTE: these work for more than 2D
