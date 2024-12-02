@@ -250,10 +250,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else self.arg
   @functools.cached_property
   def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents}}
-  @functools.cached_property  # parents with self
-  def sparents(self) -> Dict[UOp, None]: return {**self.parents, self:None}
 
-  # TODO: replace usage of sparents with this
   @functools.cached_property
   def toposort(self) -> Dict[UOp, None]:
     nodes: Dict[UOp, None] = {}
@@ -422,12 +419,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def val(self) -> int: return self.unbind()[1]
   def vars(self) -> Set[UOp]:
-    bound_vars = set([x for x in self.sparents if x.op is Ops.BIND and x.src[0].op is Ops.DEFINE_VAR])
+    bound_vars = set([x for x in self.toposort if x.op is Ops.BIND and x.src[0].op is Ops.DEFINE_VAR])
     bound_var_base = set(x.src[0] for x in bound_vars)
-    all_vars = set([x for x in self.sparents if x.op is Ops.DEFINE_VAR])
+    all_vars = set([x for x in self.toposort if x.op is Ops.DEFINE_VAR])
     return bound_vars.union(set([x for x in all_vars if x not in bound_var_base]))
   def variables(self) -> List[Variable]:
-    st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.sparents if x.op in GroupOp.Buffer]
+    st_vars: List[Set[Variable]] = [x.st_arg.vars() for x in self.toposort if x.op in GroupOp.Buffer]
     return sorted(set.union(*st_vars, [x.unbind()[0] if x.op is not Ops.DEFINE_VAR else x for x in self.vars()]), key=lambda v: v.arg)
 
   # *** uop symbolic stuff ***
@@ -484,7 +481,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def _sym_fxn(self):
     sself = self.simplify()
-    varnames = tuple(x.arg[0] for x in sself.sparents if x.op is Ops.DEFINE_VAR)
+    varnames = tuple(x.arg[0] for x in sself.toposort if x.op is Ops.DEFINE_VAR)
     # TODO: sanitize varnames, or don't use naked eval while staying fast
     return eval("lambda "+','.join(varnames)+": "+sself.render()), varnames  # pylint: disable=eval-used
 
@@ -542,10 +539,10 @@ def flops_mem(uops:List[UOp], ignore_indexing=False) -> Tuple[sint, sint]:
   if ignore_indexing:
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
-        dont_count = dont_count.union(u.src[0].sparents)
-        if len(u.src) > 2: dont_count = dont_count.union(u.src[2].sparents)
+        dont_count = dont_count.union(u.src[0].toposort)
+        if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort)
       elif u.op is Ops.IF:
-        dont_count = dont_count.union(u.src[0].sparents)
+        dont_count = dont_count.union(u.src[0].toposort)
   for u in uops:
     if u.op is Ops.RANGE:
       mult_stack.append(mults)
@@ -1056,7 +1053,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
       candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in split_uop(expr, Ops.ADD)])
     # try checking the whole clause
-    if expr in uop.sparents:
+    if expr in uop.toposort:
       candidates.append([(expr, UOp.variable("fake", expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1], expr.dtype))])
 
     for candidate in candidates:
