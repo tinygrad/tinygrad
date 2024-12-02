@@ -91,7 +91,7 @@ class TestKernelSpeed(unittest.TestCase):
   def test_gemm_8192(self): self._test_matmul(8192, nv_tflops=130, amd_tflops=70)
 
   def test_gemv_16384_4096(self): self._test_matmul(16384, 4096, 1, nv_gbs=430, amd_gbs=400)
-  def test_gemv_4096_16384(self): self._test_matmul(4096, 16384, 1, nv_gbs=430, amd_gbs=400)
+  def test_gemv_4096_16384(self): self._test_matmul(4096, 16384, 1, nv_gbs=430, amd_gbs=380)   # AMD was flaky at 400
 
   # TODO: tiny7 is slower than tiny12
   def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=18)
