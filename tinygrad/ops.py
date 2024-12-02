@@ -249,7 +249,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else self.arg
   @functools.cached_property
-  def parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.parents}}
+  def old_parents(self) -> Dict[UOp, None]: return {**{x:None for x in self.src}, **{k:None for x in self.src for k in x.old_parents}}
 
   @functools.cached_property
   def toposort(self) -> Dict[UOp, None]:
@@ -1068,7 +1068,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> Optional[UOp]:
 
 def _valid_priority(v: UOp, valids:List[UOp]):
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
-  try: return sum(-1 if parse_valid(v)[0] in other.parents else 0 for other in valids)
+  try: return sum(-1 if parse_valid(v)[0] in other.old_parents else 0 for other in valids)
   except ValueError: return 0
 
 def simplify_valid(valid:UOp) -> Optional[UOp]:
