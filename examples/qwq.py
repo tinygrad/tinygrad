@@ -23,7 +23,7 @@ def download_weights(total_num_weights):
   model = fetch("https://huggingface.co/Qwen/QwQ-32B-Preview/resolve/main/model.safetensors.index.json?download=true", "model.safetensors.index.json", subdir="qwq_32b_preview")
 
   for i in range(1, total_num_weights + 1):
-    filename = f"model-{str(i).zfill(5)}-of-{str(total_num_weights).zfill(5)}.safetensors"
+    filename = f"model-{i:05d}-of-{total_num_weights:05d}.safetensors"
     fetch(f"https://huggingface.co/Qwen/QwQ-32B-Preview/resolve/main/{filename}?download=true", filename, subdir="qwq_32b_preview")
 
   return Path(os.path.dirname(model))
