@@ -76,7 +76,7 @@ def block_merge(ctx, x:UOp):
 
   new_srcs: List[UOp] = []
   to_append: List[UOp] = []
-  new_ctx = list(x.arg.ctx[:])
+  new_ctx = x.arg.ctx
   placed = set()
   for u in x.src:
     if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(x.arg.ctx) or (x.arg.end is not None and x.arg.end in u.arg.ctx)):
@@ -135,11 +135,9 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
 
     # add BLOCKFORK (slow!)
     block_parent_count = collections.Counter(flatten([x.src for x in sink.toposort if x.op is Ops.BLOCK]))
-    non_block_parents = flatten([x.src for x in sink.toposort if x.op is not Ops.BLOCK])
-    forks = {}
-    for u,child_count in block_parent_count.items():
-      if u.op not in DONT_PLACE_IN_BLOCK and child_count > 1 and u not in non_block_parents:
-        forks[u] = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(block_ctxs[u], (u,))),), arg=child_count)
+    non_block_parents = set(flatten([x.src for x in sink.toposort if x.op is not Ops.BLOCK]))
+    forks = {u:UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCK, src=u.src, arg=BasicBlock(block_ctxs[u], (u,))),), arg=child_count)
+      for u,child_count in block_parent_count.items() if u.op not in DONT_PLACE_IN_BLOCK and child_count > 1 and u not in non_block_parents}
 
     if not len(forks): break
     sink = sink.substitute(forks)
@@ -152,9 +150,8 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   for k,v in blockends_to_arg.items():
     # NOTE: if any BLOCKEND is the parent of any other with the same arg, this algo fails
     if len(v) > 1:
-      new_blockend = UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)),
-                         arg=BasicBlock(tuple(dedup(flatten([y.arg.ctx for y in v]))), v[0].arg.lst, k))
-      out = UOp(Ops.BLOCKFORK, src=(new_blockend,), arg=len(v))
+      out = UOp(Ops.BLOCKFORK, src=(UOp(Ops.BLOCKEND, src=tuple(flatten(x.src for x in v)),
+                                        arg=BasicBlock(tuple(dedup(flatten([y.arg.ctx for y in v]))), v[0].arg.lst, k)),), arg=len(v))
       for u in v: new_forks[u] = out
   sink = sink.substitute(new_forks)
 
