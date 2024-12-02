@@ -105,12 +105,12 @@
         }
 
         async function detectObjectsOnFrame(offscreenContext) {
-            if (!net) net = await loadNet();
+            if (!net) net = await loadNet(await getDevice());
             let start = performance.now();
             const [input,img_width,img_height] = await prepareInput(offscreenContext);
             console.log("Preprocess took: " + (performance.now() - start) + " ms");
             start = performance.now();
-            const output = net(new Float32Array(input));
+            const output = await net(new Float32Array(input));
             console.log("Inference took: " + (performance.now() - start) + " ms");
             start = performance.now();
             let out = processOutput(output,img_width,img_height);
@@ -134,24 +134,21 @@
                 resolve([input, img_width, img_height])
             })
         }
-        
-        const loadNet = async () => {
-            try {
-                const safetensor = await (new Uint8Array(await (await fetch("./net.safetensors")).arrayBuffer()));
-                const gl = document.createElement("canvas").getContext("webgl2");
-                return setupNet(gl, safetensor);
-            } catch (e) {
-                console.log(e);
-                return null;
-            }
-        }
 
+        const getDevice = async () => {
+            if (!navigator.gpu) error("WebGPU not supported.");
+            const adapter = await navigator.gpu.requestAdapter();
+            return await adapter.requestDevice();
+        };
+        
         function processOutput(output, img_width, img_height) {
             let boxes = [];
+            console.log(output)
             for (let index=0;index<8400;index++) {
                 const [class_id,prob] = [...Array(80).keys()]
                     .map(col => [col, output[8400*(col+4)+index]])
                     .reduce((accum, item) => item[1]>accum[1] ? item : accum,[0,0]);
+
                 if (prob < 0.25) {
                     continue;
                 }

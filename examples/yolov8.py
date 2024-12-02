@@ -92,6 +92,7 @@ def postprocess(preds, img, orig_imgs):
   #if you are on CPU, this causes an overflow runtime error. doesn't "seem" to make any difference in the predictions though.
   # TODO: make non_max_suppression in tinygrad - to make this faster
   preds = preds.numpy() if isinstance(preds, Tensor) else preds
+  print(preds)
   preds = non_max_suppression(prediction=preds, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300)
   all_preds = []
   for i, pred in enumerate(preds):
@@ -385,6 +386,28 @@ class YOLOv8:
     yolov8_head_weights = [(22, self.head)]
     return [*zip(backbone_modules, self.net.return_modules()), *zip(yolov8neck_modules, self.fpn.return_modules()), *yolov8_head_weights]
 
+import json
+def convert_weights_to_f32(input_file):
+    with open(input_file, 'rb') as f:
+        metadata_length_bytes = f.read(8)
+        metadata_length = int.from_bytes(metadata_length_bytes, byteorder='little', signed=False)
+        metadata_json_bytes = f.read(metadata_length)
+        float32_values = np.fromfile(f, dtype=np.float16).astype(np.float32)
+
+    meta = json.loads(metadata_json_bytes.decode())
+    for v in meta:
+        if meta[v]["dtype"] == "F16":
+            meta[v]["dtype"] = "F32"
+            meta[v]["data_offsets"] = [meta[v]["data_offsets"][0] * 2, meta[v]["data_offsets"][1] * 2]
+
+    new_json_bytes = json.dumps(meta).encode()
+    metadata_length_bytes = len(new_json_bytes).to_bytes(8, byteorder='little', signed=False)
+    f.close()
+    with open(input_file, 'wb') as f:
+        f.write(metadata_length_bytes)
+        f.write(new_json_bytes)
+        float32_values.tofile(f)
+        
 if __name__ == '__main__':
 
   # usage : python3 yolov8.py "image_URL OR image_path" "v8 variant" (optional, n is default)
@@ -410,8 +433,10 @@ if __name__ == '__main__':
   # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/models/v8/yolov8.yaml
   depth, width, ratio = get_variant_multiples(yolo_variant)
   yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
-
-  state_dict = safe_load(fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors'))
+  
+  weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
+  convert_weights_to_f32(fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location))
+  state_dict = safe_load(weights_location)
   load_state_dict(yolo_infer, state_dict)
 
   st = time.time()
