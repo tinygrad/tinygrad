@@ -1,4 +1,4 @@
-import os, json, pathlib, zipfile, pickle, tarfile, struct, functools, io, collections.abc
+import os, json, pathlib, zipfile, pickle, tarfile, struct, functools, io
 from typing import Dict, Union, List, Optional, Any, Tuple, Callable, BinaryIO, Iterable
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
@@ -24,8 +24,8 @@ class TensorIO(io.IOBase, BinaryIO):
 
   # required to correctly implement BinaryIO
   def __enter__(self): return self
-  def write(self, s: collections.abc.Buffer): raise io.UnsupportedOperation("TensorIO.write not supported")
-  def writelines(self, lines: Iterable[Union[collections.abc.Buffer, str]]): raise io.UnsupportedOperation("TensorIO.writelines not supported")
+  def write(self, s: Any): raise io.UnsupportedOperation("TensorIO.write not supported")
+  def writelines(self, lines: Iterable[Any]): raise io.UnsupportedOperation("TensorIO.writelines not supported")
 
 safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dtypes.int16, "U16":dtypes.uint16, "I32":dtypes.int, "U32":dtypes.uint,
                "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
