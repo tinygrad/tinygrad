@@ -6,18 +6,22 @@ from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCou
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.multi import MultiLazyBuffer
 
-class TensorIO(io.IOBase, BinaryIO):
+class TensorIO(io.RawIOBase, BinaryIO):
   readable, seekable = (lambda _: True,) * 2
 
   def __init__(self, t: Tensor):
     if len(t.shape) != 1 or t.dtype != dtypes.uint8: raise ValueError("Tensor must be 1d and of dtype uint8!")
     self._position, self._tensor = 0, t
 
-  def read(self, n: int = -1) -> bytes:
-    t = self._tensor[self._position:]
-    if n >= 0: t = t[:n]
-    self._position += len(t)
-    return t.data().tobytes()
+  def read(self, size: int = -1) -> bytes:
+    if (buf:=super().read(size)) is None: raise ValueError("io.RawIOBase.read returned None") # only happens, if readinto returns None (never)
+    return buf
+  def readinto(self, buffer: Any) -> int:
+    data = self._tensor[self._position:self._position+len(buffer)].data()
+    buffer[:len(data)] = data
+    self._position += len(data)
+    return len(data)
+
   def seek(self, offset: int, whence: int = 0) -> int:
     self._position = min(len(self._tensor), max(0, [offset, self._position+offset, len(self._tensor)+offset][whence]))
     return self._position
