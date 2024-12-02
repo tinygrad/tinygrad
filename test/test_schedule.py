@@ -16,7 +16,7 @@ from tinygrad.shape.view import View
 from tinygrad.ops import UOp, Ops, graph_rewrite, track_rewrites
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule, view_right, view_left
+from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule, view_right, view_left, do_realize
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
 from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
 from extra.models.llama import precompute_freqs_cis
@@ -1885,10 +1885,10 @@ class TestSwizzle(unittest.TestCase):
   def test_late_fusion_post_permute_simpler(self):
     base = ShapeTracker.from_shape((32, 16, 1))
     start = UOp(Ops.LOAD, dtypes.char, (UOp.new_buffer(Device.DEFAULT, base.size, dtypes.char), base.to_uop()))
-    r = start.view(start.st.expand((32, 16, 16))).r(Ops.ADD, (2,))
+    r = start.expand((32, 16, 16)).r(Ops.ADD, (2,))
     add = r.reshape((16, 32, 1)) + UOp.const_with_shape(r.dtype, 0, (16, 32, 1))
     self.assertEqual(add.st, ShapeTracker.from_shape((16, 32, 1)))
-    to_store = add.view(add.st.permute((1, 0, 2))).contiguous()
+    to_store = add.permute((1, 0, 2)).contiguous()
     self.assertEqual(to_store.st, ShapeTracker.from_shape((32, 16, 1)))
     self.assertEqual(to_store.src[0].st, add.st.permute((1, 0, 2)))
     self.assertIs(to_store.src[0].op, Ops.VIEW)
@@ -1929,6 +1929,30 @@ class TestView(unittest.TestCase):
     self.assertEqual(store_val(sched[-1]).st_arg, b.lazydata.st)
     run_schedule(sched)
     np.testing.assert_allclose(b.numpy(), np.pad(a.numpy(), ((0, 5), (0, 0)))[5:])
+
+@track_rewrites(named=True)
+def big_graph_rewrite(big_graph:UOp, realizes={}) -> UOp: return graph_rewrite(big_graph, do_realize, realizes)
+class TestBigGraph(unittest.TestCase):
+  def test_sink_childless_const(self):
+    x = UOp.const(dtypes.int, 0)
+    big_graph = big_graph_rewrite(x.sink(), realizes:={})
+    self.assertIs(big_graph, UOp(Ops.NOOP))
+    self.assertEqual(len(realizes), 0)
+
+  def test_sink_childless_const_alt(self):
+    x = UOp.const(dtypes.int, 0)
+    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
+    big_graph = big_graph_rewrite(UOp.sink(x, y), realizes:={})
+    self.assertIs(big_graph, UOp(Ops.NOOP))
+    self.assertEqual(len(realizes), 0)
+
+  def test_sink_childless_const_alt_expanded(self):
+    # this is a real STORE of CONST (post expand)
+    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
+    out = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), y.reshape((1,)).expand((2,)).contiguous(),), ShapeTracker.from_shape((2,)))
+    big_graph = big_graph_rewrite(out.sink(), realizes:={})
+    self.assertIs(big_graph, out.sink())
+    self.assertEqual(len(realizes), 1)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
