@@ -1,5 +1,5 @@
 from typing import List, Dict, Tuple
-import functools, collections
+import collections
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import dedup, flatten, partition
@@ -95,35 +95,35 @@ pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), blo
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
 
-  @functools.lru_cache(None)
-  def get_block_ctx(x:UOp) -> Tuple[UOp, ...]:
-    ret: List[UOp] = []
-    for u in x.src:
-      if u.op in {Ops.RANGE, Ops.IF}: ret.append(u)
-      # don't flow (fully) through assign and store
-      elif u.op is Ops.STORE:
-        # ugh, deal with non-reduce locals. probably wrong
-        if isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.local:
-          idx_context, store_context = get_block_ctx(u.src[0]), get_block_ctx(u)
-          ret += [x for x in store_context if x not in idx_context and x.op is Ops.RANGE]
-      elif u.op is Ops.ASSIGN:
-        # flow though assign, but remove the ranges used in the assign
-        assert u.src[0].op is Ops.DEFINE_ACC
-        ret += [x for x in get_block_ctx(u.src[1]) if x not in u.src[0].src[1:]]
-      else:
-        # flow though everything else
-        ret += get_block_ctx(u)
-    return tuple(dedup(sorted(ret, key=lambda x: x.tuplize)))
-
   # get children and all block contexts
-  block_ctxs: Dict[UOp, Tuple[UOp, ...]] = {}
+  temp_block_ctxs: Dict[UOp, List[UOp]] = {}
   children: Dict[UOp, List[UOp]] = {}
   for u in sink.toposort:
+    this_block_ctx: List[UOp] = []
     for s in u.src:
-      assert s in block_ctxs
+      # save children
       children.setdefault(s, []).append(u)
-    this_block_ctx = get_block_ctx(u)
-    block_ctxs[u] = ((UOp(Ops.BLOCKSTART, src=(u,)),) + this_block_ctx) if u.op in {Ops.IF, Ops.RANGE} else this_block_ctx
+      # compute block ctx
+      if s.op in {Ops.RANGE, Ops.IF}: this_block_ctx.append(s)
+      # don't flow (fully) through assign and store
+      elif s.op is Ops.STORE:
+        # ugh, deal with non-reduce locals. probably wrong
+        if isinstance(s.src[0].dtype, PtrDType) and s.src[0].dtype.local:
+          idx_context, store_context = temp_block_ctxs[s.src[0]], temp_block_ctxs[s]
+          this_block_ctx += [x for x in store_context if x not in idx_context and x.op is Ops.RANGE]
+      elif s.op is Ops.ASSIGN:
+        # flow though assign, but remove the ranges used in the assign
+        assert s.src[0].op is Ops.DEFINE_ACC
+        this_block_ctx += [x for x in temp_block_ctxs[s.src[1]] if x not in s.src[0].src[1:]]
+      else:
+        # flow though everything else
+        this_block_ctx += temp_block_ctxs[s]
+    temp_block_ctxs[u] = dedup(sorted(this_block_ctx, key=lambda x: x.tuplize))
+
+  # make final block_ctxs, add BLOCKSTART to block_ctxs for IF and RANGE
+  block_ctxs: Dict[UOp, Tuple[UOp, ...]] = {}
+  for u in sink.toposort:
+    block_ctxs[u] = ((UOp(Ops.BLOCKSTART, src=(u,)),) + tuple(temp_block_ctxs[u])) if u.op in {Ops.IF, Ops.RANGE} else tuple(temp_block_ctxs[u])
 
   # TODO: there's probably a clever way to remove this while loop
   while 1:
