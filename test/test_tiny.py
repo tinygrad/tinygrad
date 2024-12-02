@@ -46,8 +46,9 @@ class TestTiny(unittest.TestCase):
       nonlocal cnt
       cnt += 1
       return a+b
-    fa,fb = Tensor([1.,2,3]), Tensor([4.,5,6])
-    for _ in range(3): fxn(fa, fb)
+    for _ in range(3):
+      fa,fb = Tensor([1.,2,3]), Tensor([4.,5,6])
+      fxn(fa, fb)
     # function is only called twice
     self.assertEqual(cnt, 2)
 
