@@ -79,7 +79,7 @@ class AMDComputeQueue(HWQueue):
     self.acquire_mem()
     return self
 
-  def exec(self, prg:AMDProgram, args_state:AMDArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
+  def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
     self.acquire_mem(gli=0, gl2=0)
 
     if prg.enable_private_segment_sgpr:

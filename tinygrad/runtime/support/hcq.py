@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Any
-import contextlib, decimal, statistics, random, json, atexit, time, ctypes
+import contextlib, decimal, statistics, random, json, atexit, time, ctypes, array
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv, to_mv
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator
