@@ -41,7 +41,7 @@ def float_cast(x:DType, s:DType):
 x86_rewrite = PatternMatcher([
   (UPat(Ops.INDEX, name="x"), lambda ctx,x: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx.r[x.src[1]]}*{x.src[0].dtype.itemsize}]"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
-   f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}\ntest {ctx[mask]}, 1\njz .L{ctx.uop_i[x]}\n{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uop_i[x]}:"),
+   f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}\ntest {ctx[mask]}, 1\njz .L{ctx.uop_i[x]}\n{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uop_i[x]}:"),
   (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]"),
   (UPat(Ops.STORE, name="x"),
    lambda ctx,x: f"{x86op[x.src[1].dtype][x.op]}{size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ''} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
@@ -149,7 +149,6 @@ class X86Renderer(Renderer):
     # can be a register, memory location or immediate value
     r: Dict[UOp, str] = {}
     self.r = r
-
     mem: Dict[UOp, str] = {}
     stack_size: int = 8
     kernel: List[str] = []
@@ -193,40 +192,29 @@ class X86Renderer(Renderer):
         if not is_imm(u):
           mov_to_reg(u, "r15")
           mov_to_stack(u)
-        continue
-      #TODO: fix this
-      if u.op is Ops.DEFINE_GLOBAL and u.arg > 5:
-        # address is in stack instead of register
-        r[u] = mem[u] = f"[rbp + {stack_size}]"
-        stack_size += 8
-        continue
-
-      for s in u.src:
-        # these can't take imm values
-        if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD): mov_to_reg(s, assign_reg(i, s.dtype))
-        elif is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
-     
-      if u.dtype != dtypes.void:
-        if u.op is Ops.ASSIGN:
-          # define acc is always spilled here
-          r[u] = mem[u] = mem[u.src[0]]
-        else: r[u] = assign_reg(i, u.dtype)
-
-      if u.op is Ops.RANGE:
-        # all registers get moved to stack before loop TODO: remove range check
-        for var in (v for v in r if is_reg(r[v]) and v.op is not Ops.RANGE):
-          free_reg(r[var])
-          mov_to_stack(var)
- 
-      l = x86_rewrite.rewrite(u, ctx=self)
-      if l: kernel.append(l)
-      else: assert u.op in (Ops.ASSIGN, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR), f"{u.op}, {i}"
-
-      if u.op is Ops.GEP: assert u.dtype == dtypes.float32 and u.dtype.count == 1 and len(u.arg) == 1
-      if u.op is Ops.VECTORIZE: assert u.dtype.scalar() == dtypes.float32
-      if u.op is Ops.BITCAST: assert dtypes.is_int(u.dtype) != dtypes.is_int(u.src[0].dtype)
-
-      # free dead regs
+      elif u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
+        if u.arg < 6: r[u] = assign_reg(i, u.dtype)
+        else: # value is in stack instead of register, TODO: fix this
+          r[u] = mem[u] = f"[rbp + {stack_size}]"
+          stack_size += 8
+      else:
+        for s in u.src: # mov srcs
+          # these can't take imm values
+          if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD): mov_to_reg(s, assign_reg(i, s.dtype))
+          elif is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
+        if u.dtype != dtypes.void: # assign destination
+          if u.op is Ops.ASSIGN:
+            # define acc was already spilled here
+            r[u] = mem[u] = mem[u.src[0]]
+          else: r[u] = assign_reg(i, u.dtype)
+        if u.op is Ops.RANGE: # all registers get moved to stack before loop TODO: remove range check
+          for var in (v for v in r if is_reg(r[v]) and v.op is not Ops.RANGE):
+            free_reg(r[var])
+            mov_to_stack(var)
+        # render x86 assembly
+        if (l:=x86_rewrite.rewrite(u, ctx=self)) is None: raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
+        kernel.append(l)
+      # free dead registers
       for loc in (r.pop(v) for v in (u,) + u.src if v in r and last_use[v] == i):
         if is_reg(loc): assert loc not in r.values(); free_reg(loc)
 
