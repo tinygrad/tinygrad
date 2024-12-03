@@ -95,7 +95,6 @@ def postprocess(preds, img, orig_imgs):
   #if you are on CPU, this causes an overflow runtime error. doesn't "seem" to make any difference in the predictions though.
   # TODO: make non_max_suppression in tinygrad - to make this faster
   preds = preds.numpy() if isinstance(preds, Tensor) else preds
-  print(preds)
   preds = non_max_suppression(prediction=preds, conf_thres=0.25, iou_thres=0.7, agnostic=False, max_det=300)
   all_preds = []
   for i, pred in enumerate(preds):
@@ -389,7 +388,7 @@ class YOLOv8:
     yolov8_head_weights = [(22, self.head)]
     return [*zip(backbone_modules, self.net.return_modules()), *zip(yolov8neck_modules, self.fpn.return_modules()), *yolov8_head_weights]
 
-def convert_f16_safetensor_to_f32(input_file, output_file):
+def convert_f16_safetensor_to_f32(input_file: Path, output_file: Path):
   with open(input_file, 'rb') as f:
     metadata_length = int.from_bytes(f.read(8), 'little')
     metadata = json.loads(f.read(metadata_length).decode())
@@ -403,6 +402,17 @@ def convert_f16_safetensor_to_f32(input_file, output_file):
     f.write(len(new_metadata_bytes).to_bytes(8, 'little'))
     f.write(new_metadata_bytes)
     float32_values.tofile(f)
+
+def get_weights_location(yolo_variant: str) -> Path:
+  weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
+  fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location)
+
+  if not is_dtype_supported(dtypes.half):
+    f32_weights = weights_location.with_name(f"{weights_location.stem}_f32.safetensors")
+    if not f32_weights.exists(): convert_f16_safetensor_to_f32(weights_location, f32_weights)
+    weights_location = f32_weights
+
+  return weights_location
 
 if __name__ == '__main__':
 
@@ -429,16 +439,7 @@ if __name__ == '__main__':
   # Different YOLOv8 variants use different w , r, and d multiples. For a list , refer to this yaml file (the scales section) https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/models/v8/yolov8.yaml
   depth, width, ratio = get_variant_multiples(yolo_variant)
   yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
-  
-  weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
-  fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location)
-  f32_weights = weights_location.with_name(f"{weights_location.stem}_f32.safetensors")
-
-  if not is_dtype_supported(dtypes.half) and not f32_weights.exists():
-    convert_f16_safetensor_to_f32(weights_location, f32_weights)
-    weights_location = f32_weights
-
-  state_dict = safe_load(weights_location)
+  state_dict = safe_load(get_weights_location(yolo_variant))
   load_state_dict(yolo_infer, state_dict)
 
   st = time.time()
