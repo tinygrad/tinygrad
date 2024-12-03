@@ -463,5 +463,12 @@ class TestUPatHelpers(unittest.TestCase):
       test_upat = UPat(Ops.CONST, dtypes.bool)
       self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])
 
+class TestUopsImmutable(unittest.TestCase):
+  @unittest.expectedFailure
+  def test_immutable(self):
+    const_4 = UOp.const(dtypes.int, 4)
+    with self.assertRaises(Exception):
+      const_4.arg = 5
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
