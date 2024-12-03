@@ -8,8 +8,8 @@ from pathlib import Path
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from examples.llama3 import load
 from tinygrad import nn, Tensor
-from tinygrad.helpers import fetch, colored
-from tinygrad.nn.state import load_state_dict
+from tinygrad.helpers import fetch, colored, GlobalCounters, Timing, DEBUG
+from tinygrad.nn.state import load_state_dict, get_parameters
 
 MODELS = {
   "32B": {
@@ -59,6 +59,7 @@ if __name__ == "__main__":
   parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--prompt", type=str, default="Hello.", help="Phrase to start with")
   parser.add_argument("--weights", type=str, default=None, help="Path to the downloaded weights")
+  parser.add_argument("--timing", action="store_true", help="Print timing per token")
   args = parser.parse_args()
 
   model_info = MODELS[args.size]
@@ -66,6 +67,7 @@ if __name__ == "__main__":
   model_path = Path(args.weights) if args.weights else download_weights(model_info["total_num_weights"])
   transformer = load_model(model_path, model_info["model_params"])
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"])
+  param_bytes = sum(x.lazydata.size * x.dtype.itemsize for x in get_parameters(transformer))
 
   outputted = args.prompt
   start_pos, toks = 0, tokenizer(outputted)["input_ids"]
@@ -78,9 +80,15 @@ if __name__ == "__main__":
 
   tok_tensor = None
   for i in range(args.count):
+    if args.timing or args.profile: print("")
+    st = GlobalCounters.time_sum_s
     next_tok = Tensor([toks[start_pos:]]) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
-    tok_tensor = transformer(next_tok, start_pos, args.temperature)
-    tok = tok_tensor.item()
+    with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
+      with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "") +
+                  f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB" +
+                  (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
+        tok_tensor = transformer(next_tok, start_pos, args.temperature)
+      tok = tok_tensor.item()
 
     # use the kv cache
     start_pos = len(toks)
