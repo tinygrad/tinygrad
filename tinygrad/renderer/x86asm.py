@@ -1,10 +1,9 @@
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from tinygrad.ops import UOp, Ops, GroupOp, PatternMatcher, UPat
 from tinygrad.renderer import Renderer
 from tinygrad import dtypes
 from tinygrad.dtype import DType, PtrDType
 import struct
-from collections import Counter
 
 x86_mov_ops = {Ops.STORE: "mov", Ops.LOAD: "mov", Ops.ASSIGN: "mov", Ops.DEFINE_ACC: "mov"}
 x86_unsigned_ops = {**x86_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "div", Ops.MOD: "div", Ops.CMPNE: "cmp",
@@ -28,7 +27,7 @@ mov_sufix = {4: "d", 8: "q"}
 
 def to_hex(x: int | float, dt:DType) -> str:
   if not dtypes.is_float(dt): return hex(x)
-  if dt is dtypes.double: return struct.unpack('<Q', struct.pack('<d', x))[0]
+  if dt is dtypes.float64: return struct.unpack('<Q', struct.pack('<d', x))[0]
   return struct.unpack('<I', struct.pack('<f', x))[0]
 
 def cflag(x:UOp) -> str:
@@ -49,7 +48,7 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.STORE, name="x"),
    lambda ctx,x: f"{x86op[x.src[1].dtype][x.op]}{size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ''} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
-  (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}" if ctx[x.src[0]] != ctx[x.src[1]] else None),
+  (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}" if ctx[x] != ctx[x.src[1]] else None),
 
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"insertps {ctx[x]}, {ctx[x.src[0]]}, {gep_imm[x.arg[0]]}"),
   (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {vec_imm[i]}" for i,s in enumerate(x.src))),
@@ -58,11 +57,10 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x: f"inc {ctx[x.src[0]]}\ncmp {ctx[x.src[0]]}, {x.src[0].src[1].arg}\njl .LOOP_{x.src[0].arg[0]}"),
 
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"mov{mov_sufix[x.dtype.itemsize] if ctx.r[x.src[0]] in ctx.all_regs else ""} {ctx[x]}, {ctx[x.src[0]]}"),
-  # TODO: remove casts that are just movs?
   # casting to <= int or if src is uint32(already zero extended) we just mov, to bigger uint we zero extend, to bigger sint we sign extend
-  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.ints)), name="x"),
+  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.ints)), name="x"),
    lambda ctx,x: f"mov {ctx[x]}, {ctx.regt(ctx.r[x.src[0]], x.dtype)}" if x.dtype.itemsize <= x.src[0].dtype.itemsize or x.src[0].dtype is dtypes.uint32 else None),
-  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool, *dtypes.uints))), name="x"), lambda ctx,x: f"movzx {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints)), name="x"), lambda ctx,x: f"movzx {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.sints)), name="x"), lambda ctx,x: f"movs{'x' if x.src[0].dtype.itemsize < 4 else 'xd'} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"{float_cast(x.dtype, x.src[0].dtype)} {ctx[x]}, {ctx[x.src[0]]}"),
   # no cmov for floats
@@ -72,7 +70,7 @@ x86_rewrite = PatternMatcher([
 
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
    lambda ctx,x: f"{x86op[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{cflag(x)} {ctx[x]}{f'\nsetp r15b\nxor {ctx[x]}, r15b' if dtypes.is_float(x.src[0].dtype) else ''}"),
-  # idiv requires rax/rdx
+  # requires rax/rdx
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{ctx.idiv(x, x.src[1])}"),
   # rest of binary ops
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
@@ -148,10 +146,9 @@ class X86Renderer(Renderer):
   def __getitem__(self, key:UOp): return self.regt(self.r[key], key.dtype) if self.r[key] in self.all_regs else self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
     # 64 bit general registers, rsp/rbp not included, r15 temp register for now
-    gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx"] + ['r'+str(i) for i in range(10,15)]
+    gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx", "r10", "r11", "r12", "r13", "r14"]
     float_regs = ["xmm" + str(i) for i in range(0,16)]
-    all_regs = gen_regs + float_regs
-    self.all_regs = all_regs
+    self.all_regs = gen_regs + float_regs
     # can be a register, memory location or immediate value
     r: Dict[UOp, str] = {}
     self.r = r
@@ -160,20 +157,16 @@ class X86Renderer(Renderer):
     stack_size: int = 8
     kernel: List[str] = []
 
-    child_count = Counter(v for ru in uops for v in ru.src)
     uop_i = {u:i for i,u in enumerate(uops)}
     self.uop_i = uop_i
-    # move everything to stack before loop so that spilling works correctly, the alternative is more complicated
-    uops_to_spill: List[UOp] = []
 
     def is_imm(u:UOp) -> bool: return u.op is Ops.CONST and not dtypes.is_float(u.dtype) and abs(u.arg) <= dtypes.max(dtypes.int32)
-    def is_reg(u:UOp) -> bool: return u in r and r[u] in all_regs
+    def is_reg(loc:str) -> bool: return loc in self.all_regs
     def is_mem(u:UOp) -> bool: return u in r and u in mem and r[u] == mem[u]
     def free_reg(reg:str): float_regs.append(reg) if reg.startswith("xmm") else gen_regs.append(reg)
 
-    def mov_to_reg(u:UOp, temp:bool=False) -> str:
-      dt = dtypes.int64 if isinstance(u.dtype, PtrDType) or temp else u.dtype
-      reg = "r15" if temp else assign_reg(i, u.dtype)
+    def mov_to_reg(u:UOp, reg:str) -> str:
+      dt = dtypes.int64 if isinstance(u.dtype, PtrDType) or reg == "r15" else u.dtype
       kernel.append(f"{x86op[dt][Ops.LOAD]} {reg}, {r[u]}")
       r[u] = reg
 
@@ -189,32 +182,27 @@ class X86Renderer(Renderer):
     def assign_reg(i:int, dt:DType) -> str:
       type_regs = float_regs if dtypes.is_float(dt) and not isinstance(dt, PtrDType) else gen_regs
       if type_regs: return type_regs.pop(0)
-      # no available regs, spill one TODO: remove live_range check once RANGE is added to live range
       t = 'x' if dtypes.is_float(dt) and not isinstance(dt, PtrDType) else 'r'
-      candidates = [u for u in r if u in live_range and live_range[u][-1] > i and r[u][0] == t]
-      nonlocal stack_size
-      # we choose who to spill by looking for the reg whose next instruction is the latest
-      chosen = max(candidates, key=lambda u: min(v for v in live_range[u] if v >= i))
+      # TODO: remove range check
+      candidates = [u for u in r if r[u][0] == t and u not in (uops[i],) + uops[i].src and u.op is not Ops.RANGE]
+      chosen = max(candidates, key=lambda u: last_use[u])
       reg = r[chosen]
       mov_to_stack(chosen)
       return reg
 
-    # do a pass over ops to assign ranges, ranges allow us to get rid of dead regs and pick the best reg to spill
-    live_range: Dict[UOp, List[int]] = {}
+    last_use: Dict[UOp, int] = {}
     for i,u in enumerate(uops):
-      for s in (u,) + u.src:
-        if s.op not in (Ops.RANGE,) and s.dtype != dtypes.void:
-          if s not in live_range: live_range[s] = []
-          live_range[s].append(i)
+      for s in (s for s in u.src if s in last_use): last_use[s] = i
+      if u.dtype is not dtypes.void: last_use[u] = i
 
     for i,u in enumerate(uops):
       if u.op is Ops.CONST:
         r[u] = to_hex(u.arg, u.dtype)
         if not is_imm(u):
-          mov_to_reg(u, True)
+          mov_to_reg(u, "r15")
           mov_to_stack(u)
         continue
-
+      #TODO: fix this
       if u.op is Ops.DEFINE_GLOBAL and u.arg > 5:
         # address is in stack instead of register
         r[u] = mem[u] = f"[rbp + {stack_size}]"
@@ -223,55 +211,32 @@ class X86Renderer(Renderer):
 
       for s in u.src:
         # these can't take imm values
-        if is_imm(s) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD): mov_to_reg(s)
-        elif is_mem(s): mov_to_reg(s)
-        else: assert is_reg(s) or is_imm(s) or s.op is Ops.RANGE or u.dtype is dtypes.void
-
+        if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD): mov_to_reg(s, assign_reg(i, s.dtype))
+        elif is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
+        else: assert is_imm(s) or s.op is Ops.RANGE and u.op is Ops.DEFINE_ACC or is_reg(r[s]), f"{s.op}, {s.dtype}, {r[s]}, {u.op}"
+     
       if u.dtype != dtypes.void:
-        r[u] = r[u.src[0]] if u.op in (Ops.ASSIGN,) else assign_reg(i, u.dtype)
-      # TODO: can only take src reg if in same loop or no loop
-      #elif u.op in GroupOp.ALU and u.op not in (Ops.CMPLT, Ops.CMPNE) and child_count[ss:=u.src[0 if u.op != Ops.WHERE else 1]] == 1 and is_reg(ss): r[u] = r[ss]
+        if u.op is Ops.ASSIGN:
+          # define acc is always spilled here
+          r[u] = mem[u] = mem[u.src[0]]
+        else: r[u] = assign_reg(i, u.dtype)
 
-      # we spill everything before a loop, the altenative is to spill inside the loop and load before the next iteration and also not allow regs from outside to die inside a loop if used in loop
-      if any(uu.op is Ops.RANGE for uu in uops[i+1:]) and is_reg(u) and u.op not in (Ops.RANGE, Ops.ENDRANGE):
-        uops_to_spill.append(u)
       if u.op is Ops.RANGE:
-        for uu in uops_to_spill:
-          if is_reg(uu):
-            free_reg(r[uu])
-            mov_to_stack(uu)
-        uops_to_spill.clear()
-
+        # all registers get moved to stack before loop TODO: remove range check
+        for var in (v for v in r if is_reg(r[v]) and v.op is not Ops.RANGE):
+          free_reg(r[var])
+          mov_to_stack(var)
+ 
       l = x86_rewrite.rewrite(u, ctx=self)
       if l: kernel.append(l)
       else: assert u.op in (Ops.ASSIGN, Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR), f"{u.op}, {i}"
-
-      # this should be just for uops in uops_to_spill
-      for s in u.src:
-        if s in mem and is_reg(s):
-          reg = r[s]
-          mov_to_stack(s)
-          if reg not in r.values(): free_reg(reg)
-
-      # this is fucking stupid
-      for s in u.src:
-        if is_imm(s) and is_reg(s):
-          free_reg(r[s])
-          r[s] = to_hex(s.arg, s.dtype)
-
-      if u.op is Ops.ASSIGN:
-        free_reg(r[u])
-        mov_to_stack(u)
 
       if u.op is Ops.GEP: assert u.dtype == dtypes.float32 and u.dtype.count == 1 and len(u.arg) == 1
       if u.op is Ops.VECTORIZE: assert u.dtype.scalar() == dtypes.float32
       if u.op is Ops.BITCAST: assert dtypes.is_int(u.dtype) != dtypes.is_int(u.src[0].dtype)
 
       # free dead regs
-      for s in (u,) + u.src:
-        if s in live_range and live_range[s][-1] == i and is_reg(s):
-          reg = r.pop(s)
-          if reg not in r.values(): free_reg(reg)
+      for loc in (r.pop(v) for v in (u,) + u.src if v in r and last_use[v] == i):
+        if is_reg(loc) and loc not in r.values(): free_reg(loc)
 
     return "\n".join([".text", f".global {name}", f"{name}:", "push rbp", "mov rbp, rsp", f"sub rsp, {stack_size}"] + kernel + [f"add rsp, {stack_size}", "pop rbp", "ret", "\n"])
-
