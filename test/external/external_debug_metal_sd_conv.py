@@ -3,7 +3,6 @@ from tinygrad.codegen.kernel import Kernel, Opt, OptOps
 from tinygrad.dtype import dtypes
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.engine.search import bufs_from_lin
-from tinygrad.helpers import Timing
 from tinygrad.ops import UOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -38,8 +37,9 @@ bufs = bufs_from_lin(k)
 
 prg = CompiledRunner(k.to_program())
 
-with Timing("run "):
-  prg(bufs, var_vals={}, wait=True)
+for i in range(10):
+  speed = prg(bufs, var_vals={}, wait=True)
+  print(f"kernel time: {speed*1e3:.2f} ms")
 
 # on M1 Max
 # 11ms before block 9b0859d71780fef5cf3831e317f74e53f2483229
