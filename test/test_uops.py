@@ -464,11 +464,14 @@ class TestUPatHelpers(unittest.TestCase):
       self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])
 
 class TestUopsObject(unittest.TestCase):
+  # LOL, running this test breaks all instances of "4"
+  """
   @unittest.expectedFailure
   def test_immutable(self):
     const_4 = UOp.const(dtypes.int, 4)
     with self.assertRaises(Exception):
       const_4.arg = 5
+  """
 
   def test_timing(self):
     with Timing("create 10k uops:"): ret = [UOp(Ops.CONST, dtypes.int, arg=10000000+i) for i in range(10000)]
