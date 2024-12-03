@@ -88,11 +88,15 @@ def compress(data: Tensor, compressor: Callable, counts: Tensor, info: Tensor, p
 def compress_tree(states: Tensor, data: Tensor, iv: Tensor, _) -> Tensor: return compress_blocks(states[-1].contiguous(), data, iv[0])
 
 def blake3(tensor: Tensor, max_memory: int = 1024**3) -> str:
+  print(f"--- init compress ---")
+  start = time.time()
   data, info, n_steps = tensor_to_blake_data(tensor, max_memory)
   counts = Tensor.arange(0, data.shape[-1], dtype=dtypes.uint32).reshape(-1, 1).expand(-1, 16).reshape(-1, 16, 1).permute(1, 2, 0)
   chain_vals = compress(data, compress_chunks, counts, info, False, False)
   info = (info < DEFAULT_LEN).where(64, info)
   counts = Tensor.zeros((16, 1, data.shape[-1]), dtype=dtypes.uint32)
+  end = time.time()
+  print(f"--- init compress time: {end - start:.2f}s ---")
   for i in range(n_steps): # tree-hash chain value pairs ~halving them in each step
     chain_vals, leftover_chain_val = pairwise_concat(chain_vals)
     valid = chain_vals.any(0)
@@ -108,7 +112,7 @@ if __name__ == "__main__":
   import sys
 
   arg = sys.argv[1]
-  max_memory = (1024**3 * 3)
+  max_memory = (1024**4) - (1024**2 * 100)
 
   if arg == "warmup":
     # warmup the JIT
