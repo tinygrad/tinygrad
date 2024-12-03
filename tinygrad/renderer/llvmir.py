@@ -60,13 +60,13 @@ llvm_rewrite = PatternMatcher([
 
   # range
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
-   f"  br label %loop_entry_{x.arg[0]}\nloop_entry_{x.arg[0]}:\n"
-   f"  br label %loop_body_{x.arg[0]}\nloop_body_{x.arg[0]}:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x.src[0]]}, %loop_entry_{x.arg[0]}], [{ctx[x]}phi, %loop_latch_{x.arg[0]}]"),
+   f"  br label %loop_entry_{x.arg}\nloop_entry_{x.arg}:\n"
+   f"  br label %loop_body_{x.arg}\nloop_body_{x.arg}:\n"
+   f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x.src[0]]}, %loop_entry_{x.arg}], [{ctx[x]}phi, %loop_latch_{x.arg}]"),
   (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x:
-   f"  br label %loop_latch_{x.src[0].arg[0]}\nloop_latch_{x.src[0].arg[0]}:\n"
+   f"  br label %loop_latch_{x.src[0].arg}\nloop_latch_{x.src[0].arg}:\n"
    f"  {ctx[x.src[0]]}phi = add i32 {ctx[x.src[0]]}, 1\n  {ctx[x]} = icmp ult i32 {ctx[x.src[0]]}phi, {ctx[x.src[0].src[1]]}\n"
-   f"  br i1 {ctx[x]}, label %loop_body_{x.src[0].arg[0]}, label %loop_exit_{x.src[0].arg[0]}\nloop_exit_{x.src[0].arg[0]}:"),
+   f"  br i1 {ctx[x]}, label %loop_body_{x.src[0].arg}, label %loop_exit_{x.src[0].arg}\nloop_exit_{x.src[0].arg}:"),
 
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
@@ -131,7 +131,7 @@ class LLVMRenderer(Renderer):
           for x in acc_to_assign:
             if u in x.src:  # if this range is relevent for this acc
               vc += 1
-              kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)}" f"[{r[x]}, %loop_entry_{u.arg[0]}], [{r[acc_to_assign[x]]}, %loop_latch_{u.arg[0]}]")
+              kernel.append(f"  %acc{vc} = phi {ldt(x.dtype)}" f"[{r[x]}, %loop_entry_{u.arg}], [{r[acc_to_assign[x]]}, %loop_latch_{u.arg}]")
               r[x] = f"%acc{vc}"
 
     # output the function

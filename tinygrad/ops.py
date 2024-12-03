@@ -1,10 +1,9 @@
 from __future__ import annotations
 from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
-from weakref import WeakValueDictionary
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
 from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp, unwrap, T
 if TYPE_CHECKING:
@@ -194,7 +193,6 @@ def can_pad(u:UOp, edges:Dict[UOp, UOp], visisted:Set[UOp]) -> bool:
   visisted.add(u)
   return all(can_pad(x.base, edges, visisted) for x in u.src)
 
-END_FOR_UOP = {Ops.IF:(Ops.STORE, Ops.ENDIF), Ops.RANGE:(Ops.ASSIGN, Ops.ENDRANGE)}
 
 # With True as the default, this matches the old symbolic behavior
 def resolve(x, default:bool=True):
@@ -226,21 +224,24 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
 
 class UOpMetaClass(type):
-  ucache:WeakValueDictionary[Tuple, UOp] = WeakValueDictionary()
+  ucache:Dict[Tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
-    if (ret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None: return ret
-    UOpMetaClass.ucache[key] = ret = super().__call__(op, dtype, src, arg)
-    return ret
+    if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
+    UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
+    return created
 
+# NOTE: this should be frozen, but frozen is slower
+@dataclass(eq=False, slots=True)
 class UOp(MathTrait, metaclass=UOpMetaClass):
-  __slots__ = ["op", "dtype", "src", "arg"]
-  def __init__(self, op:Ops, dtype:DType=dtypes.void, src: Tuple[UOp,...]=tuple(), arg:Any=None):
-    # TODO: instant check rules here make debugging easier
-    self.op, self.dtype, self.src, self.arg = op, dtype, src, arg
+  op:Ops
+  dtype:DType = dtypes.void
+  src:Tuple[UOp, ...] = tuple()
+  arg:Any = None
+  def __del__(self): del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg)]
   def __reduce__(self): return UOp, (self.op, self.dtype, self.src, self.arg)
   def replace(self, **kwargs) -> UOp:
-    for k in kwargs: assert k in self.__slots__, f"unkown replace arg, expected one of {self.__slots__}, got {k}"
-    new_args = (kwargs.get("op", self.op), kwargs.get("dtype", self.dtype), kwargs.get("src", self.src), kwargs.get("arg", self.arg))
+    new_args = (kwargs.pop("op", self.op), kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg))
+    assert len(kwargs) == 0, f"unused kwargs in replace {list(kwargs)}"
     if (self.op, self.dtype, self.src, self.arg) == new_args: return self
     return UOp(*new_args)
   @functools.cached_property
@@ -277,7 +278,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg) if self.op is Ops.REDUCE_AXIS else src_sts[0].shape)
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
-    return self.arg.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
+    return self.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
   @property
   def shape(self) -> Tuple[sint, ...]: return unwrap(self.st).shape
   @property
@@ -338,8 +339,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
   def alu(self, arg, *src:UOp):
     out_dtype = (self, *src)[-1].dtype
-    if arg in {Ops.CMPLT, Ops.CMPNE} and out_dtype is not None:
-      out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
+    if arg in {Ops.CMPLT, Ops.CMPNE}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(arg, out_dtype, (self,)+src)
   @staticmethod
   def const(dtype:DType, b:ConstLike):
@@ -384,13 +384,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   buffer_num = itertools.count(0)
   @staticmethod
-  def new_buffer(device:str, size:int, dtype:DType): return UOp(Ops.BUFFER, dtype.ptr(), (), (next(UOp.buffer_num), (device, size, dtype)))
+  def new_buffer(device:str, size:int, dtype:DType) -> UOp: return UOp(Ops.BUFFER, dtype.ptr(), (), (next(UOp.buffer_num), (device, size, dtype)))
   @functools.cached_property
-  def device(self) -> str:
-    match self.op:
-      case Ops.COPY: return self.arg
-      case Ops.BUFFER: return self.arg[1][0]
-      case _: return self.src[0].device
+  def device(self) -> str: return self.arg[1][0] if self.op is Ops.BUFFER else self.src[0].device
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
@@ -573,7 +569,7 @@ def lines(fn) -> List[str]:
   with open(fn) as f: return f.readlines()
 
 class UPat(MathTrait):
-  __slots__ = ["op", "dtype", "arg", "name", "src"]
+  __slots__ = ("op", "dtype", "arg", "name", "src")
   def __init__(self, op:Optional[Union[Ops, Tuple[Ops, ...], Set[Ops]]]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None,
                src:Optional[Union[Tuple[UPat, ...], List[UPat], UPat]]=None, arg:Any=None,
                name:Optional[str]=None, allow_any_len:bool=False, location=None, custom_early_reject:Optional[Set[Ops]]=None):
@@ -627,7 +623,7 @@ class UPat(MathTrait):
   def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
   def alu(self, op:Ops, *src:UPat):
     asrc = (self,)+src
-    return UPat(op, None if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].dtype, list(asrc) if op in GroupOp.Commutative else asrc)
+    return UPat(op, dtypes.bool if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].dtype, list(asrc) if op in GroupOp.Commutative else asrc)
 
   def printable(self:UPat) -> str:
     try: return lines(self.location[0])[self.location[1]-1].strip()
@@ -725,15 +721,11 @@ def track_rewrites(named=False):
   return _decorator
 
 class TrackedPatternMatcher(PatternMatcher):
-  def __init__(self, patterns:List[Tuple[UPat, Callable]]):
-    super().__init__(patterns)
-    for p,_ in self.patterns:
-      if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
-
   def rewrite(self, uop:UOp, ctx=None) -> Optional[UOp]:
     ret = None
     ler = {u.op for u in uop.src}
     for p,fxn,early_reject,has_ctx in self.pdict.get(uop.op, []):
+      if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
       st = time.perf_counter()
       if not early_reject.issubset(ler):
         match_stats[p][2] += time.perf_counter()-st
@@ -807,7 +799,7 @@ spec = PatternMatcher([
    lambda x,c: all(y.op is Ops.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
   (UPat(Ops.DEFINE_VAR, src=(), name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
-  (UPat(Ops.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype),
+  (UPat(Ops.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype and isinstance(rng.arg, int)),
   (UPat(Ops.SPECIAL, src=()), lambda: True),
 
   # TODO: confirm the args of both of these are shapetrackers
@@ -1137,6 +1129,9 @@ symbolic = symbolic_simple+PatternMatcher([
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
+  # alu of two where with same conds can combine, only do if true branch or false branch is const
+  (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
+   lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
   # ALU min==max -> CONST (slow!)
   (UPat(GroupOp.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding

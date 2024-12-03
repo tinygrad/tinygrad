@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import List, Dict, Tuple, Optional
 import collections
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.
 def disp(y:UOp) -> str:
   if y.op is Ops.BLOCKSTART: return "w"+disp(y.src[0])
   if y.op is Ops.IF: return f'IF{id(y)}'
-  if y.op is Ops.RANGE: return str(y.arg[0])
+  if y.op is Ops.RANGE: return str(y.arg)
   return "<NONE>"
 
 @dataclass(frozen=True)
@@ -19,21 +20,23 @@ class BasicBlock:
   ctx: Tuple[UOp, ...]
   lst: Tuple[UOp, ...]
   end: Optional[UOp] = None
+  def __lt__(self, o:BasicBlock): return tuple(x.tuplize for x in self.ctx+self.lst) < tuple(x.tuplize for x in o.ctx+o.lst)
   def __repr__(self):
     return f"{(str(disp(self.end))+' ') if self.end is not None else ''}"+\
            f"{[disp(y) for y in self.ctx]} {len(self.lst)}" + "\n" + '\n'.join([str(x.op) for x in self.lst])
 
-def append_to_block(ctx, x:UOp):
+def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]], x:UOp):
   block_ctxs, children = ctx
   new_srcs: List[UOp] = []
   to_append: List[UOp] = []
   new_blocks: Dict[Tuple[UOp, ...], List[UOp]] = {}
-  in_this_block = set(x.arg.lst)
+  bb: BasicBlock = x.arg
+  in_this_block = set(bb.lst)
   for u in x.src:
     if u.op in DONT_PLACE_IN_BLOCK or len([y for y in children[u] if y not in in_this_block]) > 0:
       # if it's a fork or not placed, we don't place it
       new_srcs.append(u)
-    elif (block_ctx:=block_ctxs[u]) == x.arg.ctx:
+    elif (block_ctx:=block_ctxs[u]) == bb.ctx:
       # if it's the same context, we place the UOp in this block and append the parents to it's srcs
       new_srcs += list(u.src)
       to_append.append(u)
@@ -46,12 +49,12 @@ def append_to_block(ctx, x:UOp):
     new_block = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, tuple(lst)))
     lrng = list(rng)
     for r in rng[::-1]:
-      if r not in x.arg.ctx and r.op is not Ops.BLOCKSTART:
+      if r not in bb.ctx and r.op is not Ops.BLOCKSTART:
         lrng.remove(r)
         new_block = UOp(Ops.BLOCKEND, src=(new_block,),
                         arg=BasicBlock(tuple(lrng), (UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,)),), r))
     new_srcs.append(new_block)
-  return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(x.arg.ctx, tuple(to_append)+x.arg.lst))
+  return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(bb.ctx, tuple(to_append)+bb.lst))
 
 make_basic_blocks = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock((), (x,)))),
