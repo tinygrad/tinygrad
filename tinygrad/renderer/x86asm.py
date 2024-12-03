@@ -39,41 +39,40 @@ def float_cast(x:DType, s:DType):
   return f"cvt{cfrom}2{cto}"
 
 x86_rewrite = PatternMatcher([
+  # loads/stores
   (UPat(Ops.INDEX, name="x"), lambda ctx,x: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx.r[x.src[1]]}*{x.src[0].dtype.itemsize}]"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}\ntest {ctx[mask]}, 1\njz .L{ctx.uop_i[x]}\n{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uop_i[x]}:"),
   (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]"),
   (UPat(Ops.STORE, name="x"),
    lambda ctx,x: f"{x86op[x.src[1].dtype][x.op]}{size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ''} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
+  # register to register movs
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}" if ctx[x] != ctx[x.src[1]] else None),
-
+  # devectorize/vectorize
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"insertps {ctx[x]}, {ctx[x.src[0]]}, {gep_imm[x.arg[0]]}"),
   (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {vec_imm[i]}" for i,s in enumerate(x.src))),
-
+  # range
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx[x.src[0]]}\n.LOOP_{x.arg}:"),
   (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x: f"inc {ctx[x.src[0]]}\ncmp {ctx[x.src[0]]}, {x.src[0].src[1].arg}\njl .LOOP_{x.src[0].arg}"),
-  # casting to <= int or if src is uint32(already zero extended) we just mov, to bigger uint we zero extend, to bigger sint we sign extend
-  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.ints)), name="x"),
-   lambda ctx,x: f"mov {ctx[x]}, {ctx.regt(ctx.r[x.src[0]], x.dtype)}" if x.dtype.itemsize <= x.src[0].dtype.itemsize or x.src[0].dtype is dtypes.uint32 else None),
+  # casting
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints)), name="x"), lambda ctx,x: f"movzx {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.sints)), name="x"), lambda ctx,x: f"movs{'x' if x.src[0].dtype.itemsize < 4 else 'xd'} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"{float_cast(x.dtype, x.src[0].dtype)} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"mov{'q' if x.dtype.itemsize == 8 else 'd'} {ctx[x]}, {ctx[x.src[0]]}"),
-  # no cmov for floats
+  # ternary ops (no cmov for floats)
   (UPat(Ops.WHERE, dtype=dtypes.floats, name="x"),
    lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[1]]}\ntest {ctx[x.src[0]]}, 1\njnz .L{ctx.uop_i[x]}\n{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[2]]}\n.L{ctx.uop_i[x]}:"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[1]]}\ntest {ctx[x.src[0]]}, 1\ncmovz {ctx[x]}, {ctx[x.src[2]]}"),
-
+  # binary ops
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
    lambda ctx,x: f"{x86op[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{cflag(x)} {ctx[x]}{f"\nsetp r15b\nxor {ctx[x]}, r15b" if dtypes.is_float(x.src[0].dtype) else ''}"),
   # requires rax/rdx
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{ctx.idiv(x, x.src[1])}"),
-  # rest of binary ops
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
-
+  # unary ops
   (UPat(Ops.SQRT, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
-
+  # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"test {ctx[x.src[0]]}, 1\njz .L{ctx.uop_i[x]}"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f".L{ctx.uop_i[x.src[0]]}:"),
 ])
@@ -197,6 +196,9 @@ class X86Renderer(Renderer):
         else: # value is in stack instead of register, TODO: fix this
           r[u] = mem[u] = f"[rbp + {stack_size}]"
           stack_size += 8
+      # casting to <= int or src is uint32 (already zero extended) is a noop
+      elif u.op is Ops.CAST and dtypes.is_int(u.dtype) and u.src[0].dtype in (dtypes.bool,) + dtypes.ints \
+            and (u.dtype.itemsize <= u.src[0].dtype.itemsize or u.src[0].dtype is dtypes.uint32): r[u] = r[u.src[0]]
       else:
         for s in u.src: # mov srcs
           # these can't take imm values
@@ -216,6 +218,6 @@ class X86Renderer(Renderer):
         kernel.append(l)
       # free dead registers
       for loc in (r.pop(v) for v in (u,) + u.src if v in r and last_use[v] == i):
-        if is_reg(loc): assert loc not in r.values(); free_reg(loc)
+        if is_reg(loc) and loc not in r.values(): free_reg(loc)
 
     return "\n".join([".text", f".global {name}", f"{name}:", "push rbp", "mov rbp, rsp", f"sub rsp, {stack_size}"] + kernel + [f"add rsp, {stack_size}", "pop rbp", "ret", "\n"])
