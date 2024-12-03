@@ -81,6 +81,8 @@ if __name__ == "__main__":
 
   tok_tensor = None
   for i in range(args.count):
+    GlobalCounters.reset()
+
     if args.timing: print("")
     st = GlobalCounters.time_sum_s
     next_tok = Tensor([toks[start_pos:]]) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
