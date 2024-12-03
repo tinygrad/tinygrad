@@ -154,8 +154,8 @@ class X86Renderer(Renderer):
     stack_size: int = 8
     kernel: List[str] = []
 
-    uop_i = {u:i for i,u in enumerate(uops)}
-    self.uop_i = uop_i
+    self.uop_i = {u:i for i,u in enumerate(uops)}
+    last_use: Dict[UOp, int] = {var: i for i,u in enumerate(uops) for var in (v for v in (u,) + u.src if v.dtype != dtypes.void)}
 
     def is_imm(u:UOp) -> bool: return u.op is Ops.CONST and not dtypes.is_float(u.dtype) and abs(u.arg) <= dtypes.max(dtypes.int32)
     def is_mem(u:UOp) -> bool: return u in r and u in mem and r[u] == mem[u]
@@ -186,10 +186,6 @@ class X86Renderer(Renderer):
       reg = r[chosen]
       mov_to_stack(chosen)
       return reg
-
-    last_use: Dict[UOp, int] = {}
-    for i,u in enumerate(uops):
-      for var in (v for v in (u,) + u.src if v.dtype != dtypes.void): last_use[var] = i
 
     for i,u in enumerate(uops):
       if u.op is Ops.CONST:
