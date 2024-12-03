@@ -513,8 +513,9 @@ class TestSymbolic(unittest.TestCase):
     ba = cond.where(b, a)
     self.helper_test_variable(ab+ba, 0, 6, "((a if (x<2) else b)+(b if (x<2) else a))")
 
-    # not combining  # TODO: can combine if one is identity element const
-    self.helper_test_variable(aa+ab, 0, 6, "((a if (x<2) else b)+(a if (x<2) else 0))")
+    # combining if one is identity element const
+    self.helper_test_variable(aa+ab, 0, 6, "((a*2) if (x<2) else b)")
+    self.helper_test_variable(bb*ab, 0, 9, "((a*b) if (x<2) else b)")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
