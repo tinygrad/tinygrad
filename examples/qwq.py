@@ -4,6 +4,7 @@ import sys
 
 from transformers import AutoTokenizer
 from pathlib import Path
+from typing import Dict, Union
 
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from examples.llama3 import load
@@ -19,7 +20,7 @@ MODELS = {
   }
 }
 
-def download_weights(total_num_weights):
+def download_weights(total_num_weights:int) -> Path:
   model = fetch("https://huggingface.co/Qwen/QwQ-32B-Preview/resolve/main/model.safetensors.index.json?download=true", "model.safetensors.index.json", subdir="qwq_32b_preview")
 
   for i in range(1, total_num_weights + 1):
@@ -28,7 +29,7 @@ def download_weights(total_num_weights):
 
   return Path(os.path.dirname(model))
 
-def load_model(model_path, model_params):
+def load_model(model_path:Path, model_params:Dict[str, Union[int, float]]) -> Transformer:
   # build model
   model = Transformer(**model_params, linear=nn.Linear, max_context=32000)
 
