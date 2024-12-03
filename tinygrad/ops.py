@@ -15,6 +15,11 @@ class FastEnum(IntEnum):
   @staticmethod
   def _generate_next_value_(_, __, ___, last_values): return 1 + max([0, *last_values, *[max(c) for c in FastEnum.__subclasses__()]])
 
+
+# define ConstLike and Variable as forward references
+Variable = 'UOp'
+ConstLike = Union[ConstType, 'Variable', Tuple[ConstType, ...]]
+
 class SimpleMathTrait:
   # required to implement
   def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
@@ -1191,8 +1196,6 @@ renderer = PatternMatcher([
 
 sint = Union[int, UOp]
 Variable = UOp
-
-ConstLike = Union[ConstType, Variable, Tuple[ConstType, ...]]
 
 # *** uop swizzling ***
 
