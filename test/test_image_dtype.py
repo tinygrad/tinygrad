@@ -7,11 +7,17 @@ from tinygrad.helpers import prod, unwrap
 
 @unittest.skipIf(Device.DEFAULT not in ("QCOM", "GPU"), "only images on GPU")
 class TestImageCopy(unittest.TestCase):
-  def test_image_copyout_1x1(self):
-    it = Tensor.arange(4).cast(dtypes.imagef((1,1,4))).realize()
+  def test_image_copyout_1x1(self, img_type=dtypes.imagef):
+    it = Tensor.arange(4).cast(img_type((1,1,4))).realize()
     buf = it.lazydata.buffer
     out = buf.as_buffer()
-    np.testing.assert_equal(out.cast('f').tolist(), np.arange(4))
+    np.testing.assert_equal(out.cast(it.dtype.fmt).tolist(), np.arange(4))
+  def test_imageh_copyout_1x1(self): self.test_image_copyout_1x1(img_type=dtypes.imageh)
+
+  def test_image_numpy_1x1(self, img_type=dtypes.imagef):
+    it = Tensor.arange(4).cast(img_type((1,1,4))).realize()
+    np.testing.assert_equal(it.numpy(), np.arange(4))
+  def test_imageh_numpy_1x1(self): self.test_image_numpy_1x1(img_type=dtypes.imageh)
 
   def test_image_copyout_2x3(self):
     it = Tensor.arange(2*3*4).cast(dtypes.imagef((2,3,4))).realize()
