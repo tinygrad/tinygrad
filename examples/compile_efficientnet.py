@@ -12,13 +12,13 @@ if __name__ == "__main__":
   dirname = Path(__file__).parent
   # exporting a model that's loaded from safetensors doesn't work without loading in from safetensors first
   # loading the state dict from a safetensor file changes the generated kernels
-  if getenv("WEBGPU") or getenv("WEBGL"):
+  if getenv("WEBGPU"):
     safe_save(get_state_dict(model), (dirname / "net.safetensors").as_posix())
     load_state_dict(model, safe_load(str(dirname / "net.safetensors")))
-  mode = "clang" if getenv("CLANG", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else "webgl" if getenv("WEBGL", "") != "" else ""
+  mode = "clang" if getenv("CLANG", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else ""
   prg, inp_sizes, out_sizes, state = export_model(model, mode, Tensor.randn(1,3,224,224))
   if getenv("CLANG", "") == "":
-    ext = "js" if getenv("WEBGPU", "") != "" or getenv("WEBGL", "") != "" else "json"
+    ext = "js" if getenv("WEBGPU", "") != "" else "json"
     with open(dirname / f"net.{ext}", "w") as text_file:
       text_file.write(prg)
   else:
