@@ -193,7 +193,7 @@ class NVCopyQueue(NVCommandQueue):
 class NVArgsState(CLikeArgsState):
   def __init__(self, ptr:int, prg:NVProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
     if MOCKGPU: prg.constbuffer_0[0:2] = [len(bufs), len(vals)]
-    super().__init__(ptr, prg, bufs, vals=vals, fill_prefix=prg.constbuffer_0)
+    super().__init__(ptr, prg, bufs, vals=vals, prefix=prg.constbuffer_0)
 
 class NVProgram(HCQProgram):
   def __init__(self, dev:NVDevice, name:str, lib:bytes):

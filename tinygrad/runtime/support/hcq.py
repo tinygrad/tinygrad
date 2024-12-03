@@ -229,13 +229,13 @@ class HCQArgsState(Generic[ProgramType]):
   def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
 
 class CLikeArgsState(HCQArgsState[ProgramType]):
-  def __init__(self, ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), fill:Optional[memoryview]=None):
+  def __init__(self, ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), prefix:Optional[memoryview]=None):
     super().__init__(ptr, prg, bufs, vals=vals)
 
-    if fill is not None: to_mv(self.ptr, len(fill))[:] = fill
+    if prefix is not None: to_mv(self.ptr, len(prefix))[:] = prefix
 
-    self.bufs = to_mv(self.ptr + len(fill or []), len(bufs) * 8).cast('Q')
-    self.vals = to_mv(self.ptr + len(fill or []) + len(bufs) * 8, len(vals) * 4).cast('I')
+    self.bufs = to_mv(self.ptr + len(prefix or []), len(bufs) * 8).cast('Q')
+    self.vals = to_mv(self.ptr + len(prefix or []) + len(bufs) * 8, len(vals) * 4).cast('I')
 
     self.bufs[:] = array.array('Q', [b.va_addr for b in bufs])
     self.vals[:] = array.array('I', vals)
