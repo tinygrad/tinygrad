@@ -56,13 +56,13 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     return ret
   assert buf.op is not None, f"base must be base itself {buf}"
   # make things that can't be images not images
-  dtype = buf.dtype
+  dtype = buf.buffer.dtype
   if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
     assert buf.realized is None, "can't fixup allocated buffer"
     if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
     dtype = buf.dtype.base
     # hack the underlying buffer too
-    buf.buffer.dtype = buf.dtype = dtype
+    buf.buffer.dtype = dtype
     buf.buffer.options = None
   if buf.is_realized:
     ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
@@ -78,6 +78,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
   if op is not None:
+    buf.buffer.ref(1)
     ctx.lazybufs[ubuf] = buf
     ctx.allbufs[ubuf] = ret
     for x in op.src:

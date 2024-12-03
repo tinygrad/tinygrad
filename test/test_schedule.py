@@ -1919,6 +1919,13 @@ class TestView(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_equal(b.numpy(), 0)
 
+  def test_zero_size_alt(self):
+    st = ShapeTracker.from_shape((135, 0, 9))
+    a = UOp(Ops.VIEW, dtypes.float, (UOp.new_buffer(Device.DEFAULT, 121, dtypes.float), UOp(Ops.EMPTY, dtypes.float)), st)
+    b = a.pad(pad_arg:=((0, 0), (0, 0), (18, 0)))
+    self.assertEqual(b.st, st.pad(pad_arg))
+    self.assertIs(b, b.const_like(0))
+
   def test_partial_mask(self):
     # partial masked out does not degrade into CONST
     a = Tensor.rand(10, 10).realize()

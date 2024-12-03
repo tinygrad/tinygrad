@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>YOLOv8 tinygrad WebGL</title>
+    <title>YOLOv8 tinygrad WebGPU</title>
     <script src="./net.js"></script>
     <style>
        body {
@@ -38,7 +38,7 @@
     </style>
 </head>
 <body>
-    <h1>YOLOv8 tinygrad WebGL</h1>
+    <h1>YOLOv8 tinygrad WebGPU</h1>
     <div class="video-container">
         <video id="video" muted autoplay playsinline></video>
         <canvas id="canvas"></canvas>
@@ -56,7 +56,7 @@
         const offscreenContext = offscreenCanvas.getContext('2d');
 
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            navigator.mediaDevices.getUserMedia({ audio: false, video: true }).then(function (stream) {
+            navigator.mediaDevices.getUserMedia({ audio: false,  video: { facingMode: { ideal: "environment" }}}).then(function (stream) {
                 video.srcObject = stream;
                 video.onloadedmetadata = function() {
                     canvas.width = video.clientWidth;
@@ -66,54 +66,69 @@
         }
 
         async function processFrame() {
-            offscreenContext.drawImage(video, 0, 0, 640, 640);
+            if (video.videoWidth == 0 || video.videoHeight == 0) {
+                requestAnimationFrame(processFrame);
+                return;
+            }
+            const videoAspectRatio = video.videoWidth / video.videoHeight;
+            let targetWidth, targetHeight;
+
+            if (videoAspectRatio > 1) {
+                targetWidth = 640;
+                targetHeight = 640 / videoAspectRatio;
+            } else {
+                targetHeight = 640;
+                targetWidth = 640 * videoAspectRatio;
+            }
+
+            const offsetX = (640 - targetWidth) / 2;
+            const offsetY = (640 - targetHeight) / 2;
+            offscreenContext.clearRect(0, 0, 640, 640);
+            offscreenContext.drawImage(video, offsetX, offsetY, targetWidth, targetHeight);
             const boxes = await detectObjectsOnFrame(offscreenContext);
-            drawBoxes(offscreenCanvas, boxes);
+            drawBoxes(offscreenCanvas, boxes, targetWidth, targetHeight, offsetX, offsetY);
             requestAnimationFrame(processFrame);
         }
 
         requestAnimationFrame(processFrame);
 
-        function drawBoxes(offscreenCanvas, boxes) {
-            const canvas = document.querySelector("canvas");
-            const ctx = canvas.getContext("2d");
+        function drawBoxes(offscreenCanvas, boxes, targetWidth, targetHeight, offsetX, offsetY) {
+            const ctx = document.querySelector("canvas").getContext("2d");
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.lineWidth = 3;
-            ctx.font = "20px serif";
-            const scaleX = canvas.width / 640;
-            const scaleY = canvas.height / 640;
+            ctx.font = "30px serif";
+            const scaleX = canvas.width / targetWidth;
+            const scaleY = canvas.height / targetHeight;
 
             boxes.forEach(([x1, y1, x2, y2, label]) => {
                 const classIndex = yolo_classes.indexOf(label);
                 const color = classColors[classIndex];
-                const textWidth = ctx.measureText(label).width;
                 ctx.strokeStyle = color;
                 ctx.fillStyle = color;
-
-                let adjustedX1 = x1 * scaleX;
-                let adjustedY1 = y1 * scaleY;
-                let adjustedX2 = x2 * scaleX;
-                let adjustedY2 = y2 * scaleY;
-                let boxWidth = adjustedX2 - adjustedX1;
-                let boxHeight = adjustedY2 - adjustedY1;
-
+                const adjustedX1 = (x1 - offsetX) * scaleX;
+                const adjustedY1 = (y1 - offsetY) * scaleY;
+                const adjustedX2 = (x2 - offsetX) * scaleX;
+                const adjustedY2 = (y2 - offsetY) * scaleY;
+                const boxWidth = adjustedX2 - adjustedX1;
+                const boxHeight = adjustedY2 - adjustedY1;
                 ctx.strokeRect(adjustedX1, adjustedY1, boxWidth, boxHeight);
+                const textWidth = ctx.measureText(label).width;
                 ctx.fillRect(adjustedX1, adjustedY1 - 25, textWidth + 10, 25);
-                ctx.fillStyle = "#000000";
-                ctx.fillText(label, adjustedX1, adjustedY1 - 7);
+                ctx.fillStyle = "#FFFFFF";
+                ctx.fillText(label, adjustedX1 + 5, adjustedY1 - 7);
             });
         }
 
         async function detectObjectsOnFrame(offscreenContext) {
-            if (!net) net = await loadNet();
+            if (!net) net = await loadNet(await getDevice());
             let start = performance.now();
             const [input,img_width,img_height] = await prepareInput(offscreenContext);
             console.log("Preprocess took: " + (performance.now() - start) + " ms");
             start = performance.now();
-            const output = net(new Float32Array(input));
+            const output = await net(new Float32Array(input));
             console.log("Inference took: " + (performance.now() - start) + " ms");
             start = performance.now();
-            let out = processOutput(output,img_width,img_height);
+            let out = processOutput(output[0],img_width,img_height);
             console.log("Postprocess took: " + (performance.now() - start) + " ms");
             return out;
         }
@@ -134,27 +149,21 @@
                 resolve([input, img_width, img_height])
             })
         }
-        
-        const loadNet = async () => {
-            try {
-                const safetensor = await (new Uint8Array(await (await fetch("./net.safetensors")).arrayBuffer()));
-                const gl = document.createElement("canvas").getContext("webgl2");
-                return setupNet(gl, safetensor);
-            } catch (e) {
-                console.log(e);
-                return null;
-            }
-        }
 
+        const getDevice = async () => {
+            if (!navigator.gpu) error("WebGPU not supported.");
+            const adapter = await navigator.gpu.requestAdapter();
+            return await adapter.requestDevice();
+        };
+        
         function processOutput(output, img_width, img_height) {
             let boxes = [];
             for (let index=0;index<8400;index++) {
                 const [class_id,prob] = [...Array(80).keys()]
                     .map(col => [col, output[8400*(col+4)+index]])
                     .reduce((accum, item) => item[1]>accum[1] ? item : accum,[0,0]);
-                if (prob < 0.25) {
-                    continue;
-                }
+
+                if (prob < 0.25) continue;
                 const label = yolo_classes[class_id];
                 const xc = output[index];
                 const yc = output[8400+index];
