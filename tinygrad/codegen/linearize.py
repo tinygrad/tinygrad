@@ -27,6 +27,7 @@ class BasicBlock:
 
 def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]], x:UOp):
   block_ctxs, children = ctx
+
   new_srcs: List[UOp] = []
   to_append: List[UOp] = []
   new_blocks: Dict[Tuple[UOp, ...], List[UOp]] = {}
@@ -54,19 +55,20 @@ def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]],
         new_block = UOp(Ops.BLOCKEND, src=(new_block,),
                         arg=BasicBlock(tuple(lrng), (UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,)),), r))
     new_srcs.append(new_block)
-  return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(bb.ctx, tuple(to_append)+bb.lst))
+  return UOp(x.op, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(bb.ctx, tuple(to_append)+bb.lst, bb.end))
 
 make_basic_blocks = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock((), (x,)))),
   (UPat(Ops.BLOCK, name="x"), append_to_block),
 ])
 
-def block_merge(ctx, x:UOp):
-  # ctx is children here
+def block_merge(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]], x:UOp):
+  _, children = ctx
+
   if x.op is Ops.BLOCKEND:
     # if it's a BLOCKEND, see if we are done with placement. if all the children of the range are in here
     in_this_block = set(x.arg.lst)
-    if len([y for y in ctx[x.arg.end] if y not in in_this_block]) == 0:
+    if len([y for y in children[x.arg.end] if y not in in_this_block]) == 0:
       # find the parent block that has the BLOCKSTART in the ctx
       parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and UOp(Ops.BLOCKSTART, src=(x.arg.end,)) in y.arg.ctx]
       if len(parent_blocks) == 1:
@@ -79,10 +81,11 @@ def block_merge(ctx, x:UOp):
 
   new_srcs: List[UOp] = []
   to_append: List[UOp] = []
-  new_ctx = x.arg.ctx
+  bb: BasicBlock = x.arg
+  new_ctx = bb.ctx
   placed = set()
   for u in x.src:
-    if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(x.arg.ctx) or (x.arg.end is not None and x.arg.end in u.arg.ctx)):
+    if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(bb.ctx) or (bb.end is not None and bb.end in u.arg.ctx)):
       # NOTE: this can't appear in srcs twice or it would be a BLOCKFORK
       new_ctx += u.arg.ctx
       new_srcs += list(u.src)
@@ -95,7 +98,7 @@ def block_merge(ctx, x:UOp):
       # keep it in srcs
       new_srcs.append(u)
   if len(to_append) == 0 and len(placed) == 0: return None
-  return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(tuple(dedup(new_ctx)), tuple(to_append)+x.arg.lst, x.arg.end))
+  return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(tuple(dedup(new_ctx)), tuple(to_append)+bb.lst, bb.end))
 
 pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
 
@@ -159,7 +162,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   sink = sink.substitute(new_forks)
 
   # final rewrite to merge all blocks into one
-  sink = graph_rewrite(sink, pm_block_merge, ctx=children)
+  sink = graph_rewrite(sink, pm_block_merge, ctx=(block_ctxs, children))
 
   # there should just be one block left, with a few parents with 0 srcs
   assert sink.op is Ops.BLOCK
