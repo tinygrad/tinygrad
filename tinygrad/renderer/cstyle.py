@@ -299,6 +299,12 @@ class CUDARenderer(CStyleLanguage):
     st1_pattern=(((1,1),(1,0),(0,2),(0,3),(0,4)),((1,3),(1,5),(1,2),(0,0),(0,1),(1,4))),
     st2_pattern=(((1,1),(1,0),(1,4),(0,0),(0,1)),((0,4),(0,2),(1,5),(0,3),(1,3),(1,2))), reduce_axes=[(0,8),(1,2)],
     upcast_axes=([(0,8)],[(2,2),(3,2)],[(3,2),(2,2)])) for di, do in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
+  
+  tensor_cores += [
+    TensorCore(dims=(8,16,32), threads=[(0,4),(0,4),(1,4),(1,4)], dtype_in=di, dtype_out=do, expanded_shape=(4,4,4,4),
+    st1_pattern=(((1,1),(1,0),(0,2),(0,3)),((1,3),(1,2),(0,0),(0,1))),
+    st2_pattern=(((1,1),(1,0),(0,0),(0,1)),((0,2),(1,3),(0,3),(1,2))), reduce_axes=[(0,32)],
+    upcast_axes=([(0,32)],[(1,32)],[(1,32)])) for di, do in ([(dtypes.fp8_e4m3,dtypes.float), (dtypes.fp8_e5m2,dtypes.float)])]
   def __init__(self, arch:str): self.tensor_cores, self.arch = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else [], arch
   def __reduce__(self): return self.__class__, (self.arch,)
 
@@ -316,7 +322,17 @@ class CUDARenderer(CStyleLanguage):
     Ops.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",
     Ops.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
     Ops.RECIP: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})" }
-  type_map = {dtypes.bfloat16: "nv_bfloat16"}
+  type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.fp8_e4m3: "__nv_fp8_e4m3", dtypes.fp8_e5m2: "__nv_fp8_e5m2"}
+
+  extra_matcher = PatternMatcher([
+    # upcast comparisons to float32. fp8 not supported
+    (UPat((Ops.CMPLT, Ops.CMPNE), src=(UPat.var("x", dtype=(dtypes.fp8_e4m3, dtypes.fp8_e5m2)), 
+                                      UPat.var("y", dtype=(dtypes.fp8_e4m3, dtypes.fp8_e5m2))), name="cmp"),
+      lambda cmp,x,y: UOp(cmp.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), cmp.arg)),
+    # upcast to float32 all the ops that don't support fp8
+    (UPat(GroupOp.ALU, dtype=(dtypes.fp8_e4m3, dtypes.fp8_e5m2), name="x"),
+      lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(x.dtype))
+  ]) + extra_pm
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
@@ -330,9 +346,10 @@ class CUDARenderer(CStyleLanguage):
     used_dtypes = uops_to_dtypes(uops)
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#include <cuda_fp16.h>")
     if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("#include <cuda_bf16.h>")
+    if any(dt.scalar() in {dtypes.fp8_e5m2, dtypes.fp8_e4m3} for dt in used_dtypes): prefix.append("#include <cuda_fp8.h>")
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if dt.count in (4,8) and dt.scalar() in {dtypes.half, dtypes.bfloat16}]
 
-    dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16" }
+    dt_map = { dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.fp8_e4m3: "e4m3", dtypes.fp8_e5m2: "e5m2" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in dedup([uop.arg for uop in uops if uop.op is Ops.WMMA]):
       upcast_sizes = [prod(size for _, size in upcast) for upcast in upcast_axes]
       wmma_dtypes = [self.render_dtype(dtype.vec(size)) for dtype, size in zip([dtype_in, dtype_in, dtype_out], upcast_sizes)]
