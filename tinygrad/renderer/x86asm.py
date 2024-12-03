@@ -39,14 +39,13 @@ def float_cast(x:DType, s:DType):
   return f"cvt{cfrom}2{cto}"
 
 x86_rewrite = PatternMatcher([
-  # loads/stores
+  # loads/stores/movs
   (UPat(Ops.INDEX, name="x"), lambda ctx,x: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx.r[x.src[1]]}*{x.src[0].dtype.itemsize}]"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}\ntest {ctx[mask]}, 1\njz .L{ctx.uop_i[x]}\n{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uop_i[x]}:"),
   (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]"),
   (UPat(Ops.STORE, name="x"),
    lambda ctx,x: f"{x86op[x.src[1].dtype][x.op]}{size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ''} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
-  # register to register movs
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}" if ctx[x] != ctx[x.src[1]] else None),
   # devectorize/vectorize
