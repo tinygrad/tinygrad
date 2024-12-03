@@ -31,7 +31,7 @@ def to_hex(x, dt:DType) -> str:
 def cflag(x:UOp) -> str:
   if x.op is Ops.CMPLT: return "setl" if x.src[0].dtype in dtypes.sints else "setb"
   if x.op is Ops.CMPNE: return "setne"
-  raise RuntimeError("invalid op for cmp flag")
+  raise RuntimeError(f"invalid op for cmp flag: {x.op}")
 
 def float_cast(x:DType, s:DType) -> str:
   cfrom = "si" if not dtypes.is_float(s) else "sd" if s.itemsize == 8 else "ss"
@@ -143,6 +143,7 @@ class X86Renderer(Renderer):
     if dt.itemsize == 4: return reg+'d' if reg[-1].isdigit() else 'e'+reg[1:]
     if dt.itemsize == 2: return reg+'w' if reg[-1].isdigit() else reg[1:]
     if dt.itemsize == 1: return reg+'b' if reg[-1].isdigit() else reg[1:]+'l' if reg[-1] == 'i' else reg[1:-1]+'l'
+    raise RuntimeError(f"invalid dtype for register: {dt}")
 
   def __getitem__(self, key:UOp): return self.regt(self.r[key], key.dtype) if self.r[key] in self.all_regs else self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
