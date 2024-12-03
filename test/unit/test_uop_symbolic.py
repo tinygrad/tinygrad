@@ -251,6 +251,10 @@ class TestSymbolic(unittest.TestCase):
   def test_div_div(self):
     self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
 
+  def test_div_const_div(self):
+    a = Variable("a", 0, 124)
+    self.helper_test_variable((a//2+1)//2, 0, 31, "((a+2)//4)")
+
   def test_distribute_mul(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
     self.helper_test_variable((1+Variable("a", 0, 3))*(-2)+12, 4, 10, "((a*-2)+10)")

@@ -1132,8 +1132,9 @@ symbolic = symbolic_simple+PatternMatcher([
   # not x < 1 -> X > 0
   ((UPat.var("x", dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # ** div **
-  # # div folding
   (UPat.var("x", dtypes.sints) // UPat.cvar("c", vec=False), lambda x,c: div_and_mod_folding(x,c.arg,Ops.IDIV) if 0 < c.arg else None),
+  # # div folding
+  ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)),  # (x//c+a)//d -> (x+a*c)//(c*d)
   # ** mod **
   # mod folding
   (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: div_and_mod_folding(x,c.arg,Ops.MOD) if 0 < c.arg else None),
