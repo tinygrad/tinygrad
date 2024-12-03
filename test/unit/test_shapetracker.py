@@ -793,6 +793,12 @@ class TestShapeTrackerSize(unittest.TestCase):
     st = ShapeTracker.from_shape((100, 100))
     self.assertEqual(st.real_size(), 100*100)
 
+  def test_0_in_shape_size(self):
+    st = ShapeTracker.from_shape((0, 100))
+    self.assertEqual(st.real_size(), 0)
+    st = ShapeTracker.from_shape((100, 0))
+    self.assertEqual(st.real_size(), 0)
+
   def test_expand_size(self):
     st = ShapeTracker.from_shape((100, 100))
     st = st.reshape((100, 100, 1))
