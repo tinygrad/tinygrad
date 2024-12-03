@@ -124,11 +124,11 @@ class X86Renderer(Renderer):
     # divisor can't be rax or rdx
     if self.r[s] in ("rax", "rdx"): l += f"mov r15, {self.r[s]}\n"
     divisor = "r15" if self.r[s] in ("rax", "rdx") else self.r[s]
-    l += f"mov {self.regt("rax", x.dtype)}, {self[x]}\n"
+    l += f"mov {self.regt('rax', x.dtype)}, {self[x]}\n"
     if dtypes.is_unsigned(x.dtype): l += f"xor rdx, rdx\n" if x.dtype.itemsize > 1 else f"xor ah, ah\n"
     else: l += f"{remainder_signex[x.dtype.itemsize]}\n"
     l += f"{x86op[x.dtype][x.op]} {self.regt(divisor, s.dtype)}\n"
-    l += f"mov {self[x]}, {self.regt("rax" if x.op is Ops.IDIV else "rdx", x.dtype)}"
+    l += f"mov {self[x]}, {self.regt('rax' if x.op is Ops.IDIV else 'rdx', x.dtype)}"
     if self.r[x] != "rdx" and "rdx" in self.r.values(): l += "\npop rdx"
     if self.r[x] != "rax" and "rax" in self.r.values(): l += "\npop rax"
     return l
