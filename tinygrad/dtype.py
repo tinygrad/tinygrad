@@ -131,7 +131,7 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, None, dtypes.float32, False, 1, shp)
+  def imageh(shp): return ImageDType(100, 2, "imageh", 'f', 1, None, dtypes.float32, False, 1, shp)
   @staticmethod
   def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, None, dtypes.float32, False, 1, shp)
 
