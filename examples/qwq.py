@@ -93,11 +93,16 @@ if __name__ == "__main__":
     sys.stdout.flush()
     outputted = cur
 
-  if args.temperature == 0 and args.count == 10 and args.prompt == "Hello.":
+  if args.temperature == 0:
     text = tokenizer.decode(toks)
-    key = args.size
+    key = (args.size, args.count, args.prompt)
     expected = {
-      "32B": "Hello. I'm trying to make a program that will read",
+      ("32B", 10, "Hello."): "Hello. I'm trying to make a program that will read",
+      (
+        "32B",
+        50,
+        "Can you tell me more about machine learning?"
+      ): "Can you tell me more about machine learning? Sure, I'd be happy to help! Machine learning is a subset of artificial intelligence that focuses on building systems that can learn from data and make predictions or decisions without being explicitly programmed to do so. It's a fascinating field with a lot of real"
     }
     try:
       assert text == expected[key], f"invalid output: `{colored(text, 'red')}` != `{expected[key]}`"
