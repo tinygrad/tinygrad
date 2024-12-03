@@ -81,7 +81,7 @@ if __name__ == "__main__":
 
   tok_tensor = None
   for i in range(args.count):
-    if args.timing or args.profile: print("")
+    if args.timing: print("")
     st = GlobalCounters.time_sum_s
     next_tok = Tensor([toks[start_pos:]]) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
     with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
