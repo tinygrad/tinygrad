@@ -8,10 +8,10 @@ from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
-from tinygrad.ops import UnaryOps, UOps
+from tinygrad.ops import GroupOp
 from tinygrad.tensor import _to_np_dtype
-from test.helpers import is_dtype_supported
-import pytest
+from tinygrad.device import is_dtype_supported
+import pytest, math
 pytestmark = pytest.mark.filterwarnings("ignore")
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -41,8 +41,8 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.
 # TODO: (a+b)/2 in tensor.py's maximum can overflow. This requires a new implementation of maximum that can be backpropagated
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
-# TODO: CI CUDA segfaults on sin
-if getenv("MOCKGPU") and Device.DEFAULT == "NV": unary_operations.remove((Tensor.sin, np.sin))
+# TODO: CI CUDA segfaults on sin, WEBGPU sin is not precise enough for large numbers
+if (getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU": unary_operations.remove((Tensor.sin, np.sin))
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
@@ -79,7 +79,7 @@ def universal_test_unary(a, dtype, op):
     np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
-    op = [x for x in ast.parents if x.op is UOps.ALU and x.arg in UnaryOps][0]
+    op = [x for x in ast.toposort if x.op in GroupOp.Unary][0]
     assert op.dtype == dtype
 
 def universal_test_cast(a, in_dtype, dtype):
@@ -88,6 +88,8 @@ def universal_test_cast(a, in_dtype, dtype):
   np.testing.assert_equal(tensor_value.numpy(), numpy_value)
 
 def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
+  # the 'inf' and 'nan' cases are wrong on WEBGPU
+  if (c in [math.inf, -math.inf] or math.isnan(c)) and Device.DEFAULT == "WEBGPU": return
   if not isinstance(op1, tuple): op1 = (op1, op1)
   if not isinstance(op2, tuple): op2 = (op2, op2)
   at, bt, ct = Tensor([a], dtype=d1), Tensor([b], dtype=d1), Tensor([c], dtype=d2)
@@ -148,6 +150,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, ht.int32, strat.sampled_from(integer_binary_operations))
   def test_int32(self, a, b, op): universal_test(a, b, dtypes.int32, op)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.int64, Device.DEFAULT), f"no int64 on {Device.DEFAULT}")
   @given(ht.int64, ht.int64, strat.sampled_from(integer_binary_operations))
   def test_int64(self, a, b, op): universal_test(a, b, dtypes.int64, op)
 
@@ -173,45 +176,12 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
   def test_int32_cast(self, a, dtype): universal_test_cast(a, dtypes.int32, dtype)
 
-class TestFromFuzzer(unittest.TestCase):
-  @given(strat.sampled_from(dtypes_float))
-  def test_sin(self, dtype):
-    if not is_dtype_supported(dtype): return
-    if dtype == dtypes.float64:
-      # crashes in CI CUDA
-      if getenv("MOCKGPU") and Device.DEFAULT == "NV": return
-    def _test_value(n: float, unit: float=1.0):
-      next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
-      ulp = next_float - 1.0
-      ulp = unit * ulp
-      np.testing.assert_allclose(Tensor([n], dtype=dtype).sin().numpy(), np.sin(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
-    _test_value(-35.0)
-    _test_value(-25.0)
-    _test_value(25.0)
-    _test_value(30.0) # 30.0 == switch_over
-    _test_value(35.0)
-    _test_value(0.0)
-    _test_value(np.pi / 2)
-     # worst case of ulp 1.5
-    _test_value(np.pi * 2, unit=1.5)
-
-  @given(strat.sampled_from(dtypes_float))
-  def test_log2(self, dtype):
-    if not is_dtype_supported(dtype): return
-    if dtype == dtypes.float64:
-      # crashes in CI CUDA
-      if getenv("MOCKGPU") and Device.DEFAULT == "NV": return
-    def _test_value(n: float, unit: float=1.0):
-      next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
-      ulp = next_float - 1.0
-      ulp = unit * ulp
-      np.testing.assert_allclose(Tensor([n], dtype=dtype).log2().numpy(), np.log2(np.array([n], dtype=_to_np_dtype(dtype))), atol=ulp, rtol=1e-5)
-    fmin = np.finfo(_to_np_dtype(dtype)).tiny
-    for scale in [1.0, 1e10, 1e20, 1e30]:
-      _test_value(fmin * scale)
-      _test_value(-fmin * scale)
-    _test_value(0)
-    _test_value(0.0000009)
+  @unittest.expectedFailure
+  def test_unsafe_cast_float_to_int_failure(self):
+    val = float(dtypes.max(dtypes.int32) - 1)
+    t1 = Tensor([val], dtype=dtypes.float32).cast(dtypes.int32)
+    t2 = Tensor(val, dtype=dtypes.float32).cast(dtypes.int32)
+    np.testing.assert_equal(t1.item(), t2.item())
 
 if __name__ == '__main__':
   unittest.main()

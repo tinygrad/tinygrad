@@ -6,9 +6,9 @@ from tinygrad.helpers import prod, flatten
 from extra.onnx import DTYPE_MAP, to_python_const
 import numpy as np
 
-tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
-                  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-                  "Elu", "Celu", "Xor", "Round", "Erf"}
+tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Asin", "Acos", "Atan","Relu",
+                  "Sigmoid", "MatMul", "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign",
+                  "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf"}
 
 # **************** Free Ops ****************
 
@@ -44,7 +44,6 @@ def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, v
 
 def HardSigmoid(x: Tensor, alpha=0.2, beta=0.5): return (alpha*x + beta).clip(0, 1)
 def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
-def Selu(X: Tensor, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
 def PRelu(X:Tensor, slope:Tensor):
   slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope # HACK OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
   return (X > 0).where(X, X * slope)
@@ -87,22 +86,6 @@ def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > 
 def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
 def Not(x:Tensor): return x.logical_not()
-
-def Asin(x): return Atan(x / (1 - x * x).sqrt())
-def Acos(x: Tensor):
-  negate = (x < 0)
-  x = x.abs()
-  ret = ((((-0.0187293 * x) + 0.0742610)*x - 0.2121144) * x + 1.5707288) * (1.0 - x).sqrt()
-  ret = ret - 2 * negate * ret
-  return negate * math.pi + ret
-def Atan(y: Tensor):
-  t1 = y.abs()
-  t3 = (1 > t1).where(t1, t1.reciprocal())
-  t4 = t3 * t3
-  t0 = ((((-0.013480470 * t4 + 0.057477314) * t4 - 0.121239071) * t4 + 0.195635925) * t4 - 0.332994597) * t4 + 0.999995630
-  t3 = t0 * t3
-  t3 = (t1 > 1).where(1.570796327 - t3, t3)
-  return y.sign() * t3
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
   k = to_python_const(k) if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
@@ -225,34 +208,13 @@ def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations):
     return pad_shape[::2] + pad_shape[1::2] if auto_pad == "SAME_UPPER" else pad_shape[1::2] + pad_shape[::2]
   raise NotImplementedError(f"auto_pad={auto_pad} not implemented")
 
-def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
-  constant_value = value if constant_value is None else float(to_python_const(constant_value))
-  seq_pads = list(pads) if isinstance(pads, tuple) else to_python_const(pads)
-  seq_pads = [math.ceil(i) for i in seq_pads]
-  seq_axes = to_python_const(axes) if axes is not None else None
-  base_shape = x.shape
-  pads = _format_padding(seq_pads, ndims=len(x.shape), axes=seq_axes)
-  if mode == "wrap":
-    repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(pads, base_shape)]
-    new_shape = [s*r for s,r in zip(base_shape, repeat_args)]
-    shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh if dim[1]%sh != 0 else 0)) for dim, sh, nsh in zip(pads, base_shape, new_shape)]
-    return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
-  if mode == "reflect":
-    for i,s in enumerate(x.shape):
-      if pads[i] != (0,0):
-        xL = x.flip(i).shrink(tuple((s-pads[i][0]-1, s_-1) if i_ == i else None for i_,s_ in enumerate(x.shape)))
-        xR = x.flip(i).shrink(tuple((1, pads[i][1]+1) if i_ == i else None for i_ in range(x.ndim)))
-        x = xL.cat(x, xR, dim=i)
-    return x
-  if mode == "edge":
-    for i,s in enumerate(x.shape):
-      if pads[i] != (0,0):
-        xL = x.shrink(tuple((0,1) if i_ == i else None for i_ in range(x.ndim))).expand([pads[i][0] if i_ == i else None for i_ in range(x.ndim)])
-        xR = x.shrink(tuple((s_-1, s_) if i_ == i else None for i_,s_ in enumerate(x.shape))).expand([pads[i][1] if i_ == i else None for i_ in range(x.ndim)])
-        x = xL.cat(x, xR, dim=i)
-    return x
-  if mode == "constant":
-    return _padded(x, seq_pads, axes=seq_axes, constant_value=constant_value)
+# (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> (..., x2_start, x2_end, x1_start, x1_end)
+def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed(list((pB, pE) for pB, pE in zip(pads, pads[len(pads)//2:]))))
+def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Optional[Tensor]=None, axes: Optional[Tensor]=None, mode="constant", value=0):
+  pads, value, axes = to_python_const(pads), to_python_const(constant_value) or value or 0, to_python_const(axes) or list(range(x.ndim))
+  real_pads = [0] * (x.ndim*2)
+  for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
+  return x.pad(padding=_onnx_pads_to_pad2d_pads(to_python_const(real_pads)), mode={"edge":"replicate", "wrap":"circular"}.get(mode, mode), value=value)
 
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
   pixel_axes = tuple(range(2, X.ndim))
@@ -282,7 +244,7 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
   if outshape is not None and (outshape := to_python_const(outshape)) != ret.shape:
     diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
     pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
-    ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
+    ret = ret.pad((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
   return ret
 
 def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
@@ -334,7 +296,7 @@ def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
 
 def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
   bs, c, iy, ix = x.shape
-  return x / x.mul(x).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
+  return x / x.mul(x).reshape(bs,1,c,iy*ix).pad((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
 
 def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)):
   mean = x.mean(axis, keepdim=True)
@@ -384,7 +346,12 @@ def Gather(x: Tensor, indices: Tensor, axis=0):
     return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
   # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
   return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
+def Scatter(*args, **kwargs): return ScatterElements(*args, **kwargs) # deprecated
 
+def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Optional[str]=None):
+  if reduction in {"min", "max"}: raise NotImplementedError("min and max reduction not supported")
+  indices = (indices < 0).where(x.shape[axis], 0) + indices
+  return x.scatter(axis, indices, updates, reduction)
 def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
   return x.gather(axis, indices)
@@ -563,29 +530,13 @@ def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
   raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
 def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
-  _, _, *data_sz = to_python_const(size)
-  size_zeros, original_grid = Tensor.zeros(data_sz), Tensor.ones(data_sz)
-  stackable = [original_grid]
-  for dim, dim_sz in enumerate(data_sz):
-    a = Tensor.arange(-1, 1.0001, 2/(dim_sz-1)) if align_corners == 1 else Tensor.arange(-1+1/dim_sz, 1, 2/dim_sz)
-    if dim == 0: stackable = [a.reshape(dim_sz, *[1]*(len(data_sz)-1)) + size_zeros, *stackable]
-    elif dim == 1: stackable = [a.reshape(1, dim_sz, *[1]*(len(data_sz)-2)) + size_zeros, *stackable]
-    else: stackable = [a.reshape(1, dim_sz) + size_zeros, *stackable]
-  original_grid = Tensor.stack(*stackable, dim=len(data_sz))
-  if original_grid.ndim == 3:
-    N, dim_2d, dim_homo = theta.shape
-    assert dim_2d == 2 and dim_homo == 3
-    H, W, dim_homo = original_grid.shape
-    assert dim_homo == 3
-    original_grid = original_grid.reshape(H*W, dim_homo).transpose()
-    return theta.matmul(original_grid).permute(0,2,1).reshape(N, H, W, dim_2d)
-  assert original_grid.ndim == 4
-  N, dim_3d, dim_homo = theta.shape
-  assert dim_3d == 3 and dim_homo == 4
-  D, H, W, dim_homo = original_grid.shape
-  assert dim_homo == 4
-  original_grid = original_grid.reshape(D*H*W, dim_homo).transpose()
-  return theta.matmul(original_grid).permute(0,2,1).reshape(N, D, H, W, dim_3d)
+  N, _, *spatial_dims = to_python_const(size)
+  def generate_grid(steps):
+    return Tensor.linspace(-1, 1, steps, device=theta.device) if align_corners else Tensor.linspace(-1+1/steps, 1-1/steps, steps, device=theta.device)
+  grids = Tensor.meshgrid(*(generate_grid(d) for d in spatial_dims))
+  base_grid = Tensor.stack(*reversed(grids), Tensor.ones_like(grids[0], device=theta.device), dim=-1)
+  base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
+  return (base_grid @ theta.transpose(1, 2)).reshape(N, *spatial_dims, -1)
 
 # **************** com.microsoft Ops ****************
 

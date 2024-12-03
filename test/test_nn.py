@@ -2,14 +2,15 @@
 import unittest
 import numpy as np
 import torch
-from tinygrad import Tensor, Device, TinyJit
-from tinygrad.ops import UOps
+from tinygrad import Tensor, Device, TinyJit, dtypes
+from tinygrad.ops import Ops
 from tinygrad.helpers import CI, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
+from tinygrad.device import is_dtype_supported
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestNN(unittest.TestCase):
@@ -474,6 +475,7 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=2e-3, rtol=1e-3)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), f"no long on {Device.DEFAULT}")
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
 
@@ -517,7 +519,7 @@ class TestNN(unittest.TestCase):
                 [12, 19, 8, 1]])
     result = layer(a)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(3, len([item for item in schedule if item.ast.op is UOps.SINK]), "first run realizes arange, weight, and embedding")
+    self.assertEqual(3, len([item for item in schedule if item.ast.op is Ops.SINK]), "first run realizes arange, weight, and embedding")
     run_schedule(schedule)
 
     b = Tensor([[1, 2, 3],
@@ -525,7 +527,7 @@ class TestNN(unittest.TestCase):
                 [7, 8, 9]])
     result = layer(b)
     schedule = create_schedule([result.lazydata])
-    self.assertEqual(1, len([item for item in schedule if item.ast.op is UOps.SINK]), "second run realizes embedding only")
+    self.assertEqual(1, len([item for item in schedule if item.ast.op is Ops.SINK]), "second run realizes embedding only")
     run_schedule(schedule)
 
   def test_embedding_shape(self):
@@ -550,22 +552,93 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
-  def test_load_state_dict_sharded(self):
+  def test_load_state_dict_sharded_model(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
 
     layer = Conv2d(3, 5, kernel_size=3)
-    layer.weight.shard_(devices, -1)
+    layer.weight.shard_(devices, 3)
     layer.bias.shard_(devices, None)
     state_dict = {
-      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, -1),
+      'weight': Tensor.randn(5, 3, 3, 3),
+      'bias': Tensor.randn(5),
+    }
+    load_state_dict(layer, state_dict)
+
+    # sharded model shards the state_dict
+    self.assertEqual(layer.weight.device, devices)
+    self.assertEqual(layer.weight.lazydata.axis, 3)
+    self.assertEqual(layer.bias.device, devices)
+    self.assertEqual(layer.bias.lazydata.axis, None)
+    np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
+    np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  def test_load_state_dict_sharded_dict(self):
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+
+    layer = Conv2d(3, 5, kernel_size=3)
+    state_dict = {
+      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, 3),
+      'bias': Tensor.randn(5).shard(devices, None),
+    }
+    load_state_dict(layer, state_dict)
+
+    # NOTE: model is not sharded, still not sharded after load_state_dict
+    self.assertEqual(layer.weight.device, Device.DEFAULT)
+    self.assertEqual(layer.bias.device, Device.DEFAULT)
+    np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
+    np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  def test_load_state_dict_sharded_model_dict_same_axis(self):
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+
+    layer = Conv2d(3, 5, kernel_size=3)
+    layer.weight.shard_(devices, 3)
+    layer.bias.shard_(devices, None)
+
+    state_dict = {
+      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, 3),
       'bias': Tensor.randn(5).shard(devices, None),
     }
     load_state_dict(layer, state_dict)
 
     self.assertEqual(layer.weight.device, devices)
+    self.assertEqual(layer.weight.lazydata.axis, 3)
     self.assertEqual(layer.bias.device, devices)
+    self.assertEqual(layer.bias.lazydata.axis, None)
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+  def test_load_state_dict_sharded_model_dict_different_axis(self):
+    devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2")
+
+    layer = Conv2d(3, 5, kernel_size=3)
+    layer.weight.shard_(devices, 3)
+    layer.bias.shard_(devices, None)
+
+    # different shard axis
+    state_dict = {
+      'weight': Tensor.randn(5, 3, 3, 3).shard(devices, None),
+      'bias': Tensor.randn(5).shard(devices, 0),
+    }
+    load_state_dict(layer, state_dict)
+
+    # NOTE: model and state_dict shard differently, use the state_dict sharding  # TODO: revisit this?
+    self.assertEqual(layer.weight.device, devices)
+    self.assertEqual(layer.weight.lazydata.axis, None)
+    self.assertEqual(layer.bias.device, devices)
+    self.assertEqual(layer.bias.lazydata.axis, 0)
+    np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
+    np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
+
+  def test_load_state_dict_shape_mismatch(self):
+    d1, d2 = 2, 4
+    layer = Linear(d1, d1, bias=False)
+    state_dict = {'weight': Tensor.randn(d2, d2)}
+    with self.assertRaisesRegex(ValueError, r'Shape mismatch in layer `weight`: Expected shape \(2, 2\), but found \(4, 4\) in state dict.'):
+      load_state_dict(layer, state_dict)
 
   def test_lstm_cell(self):
     layer = LSTMCell(32, 16)

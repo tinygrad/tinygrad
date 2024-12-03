@@ -5,7 +5,7 @@ import onnx.backend.test
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import getenv, OSX
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
@@ -142,7 +142,7 @@ backend_test.exclude('test_melweightmatrix_*')
 backend_test.exclude('test_basic_deform_conv_*')
 backend_test.exclude('test_deform_conv_*')
 backend_test.exclude('test_lppool_*')
-backend_test.exclude('test_scan*')
+backend_test.exclude('test_scan_*')
 backend_test.exclude('test_split_to_sequence_*')
 backend_test.exclude('test_resize_downsample_scales_cubic_*') # unsure how to implement cubic
 backend_test.exclude('test_resize_downsample_sizes_cubic_*') # unsure how to implement cubic
@@ -157,6 +157,8 @@ backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill v
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 backend_test.exclude('test_group_normalization_*') # numerical inaccuracy problem. Current Group Normalization OP fails test
+backend_test.exclude('test_scatter_elements_with_reduction_min_cpu') # min not yet supported
+backend_test.exclude('test_scatter_elements_with_reduction_max_cpu') # max not yet supported
 
 if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')

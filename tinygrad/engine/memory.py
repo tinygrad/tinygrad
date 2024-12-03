@@ -3,7 +3,7 @@ from collections import defaultdict
 from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.device import Device, Buffer
 from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG
-from tinygrad.ops import UOps
+from tinygrad.ops import Ops
 
 # **************** memory planning ****************
 
@@ -47,5 +47,5 @@ def _internal_memory_planner(buffers:List[Union[List[Buffer], Tuple[Buffer, ...]
 def memory_planner(schedule:List[ScheduleItem]) -> List[ScheduleItem]:
   # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
   assigned = _internal_memory_planner([si.bufs for si in schedule],
-                                      noopt_buffers={b for si in schedule if si.ast.op is not UOps.SINK for b in si.bufs})
+                                      noopt_buffers={b for si in schedule if si.ast.op is not Ops.SINK for b in si.bufs})
   return [ScheduleItem(si.ast, tuple(assigned.get(x, x) for x in si.bufs), si.metadata, si.assign_preloads) for si in schedule]

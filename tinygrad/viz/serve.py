@@ -5,13 +5,14 @@ from urllib.parse import parse_qs, urlparse
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Tuple, Optional
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
-from tinygrad.ops import TrackedRewriteContext, UOp, UOps, lines
+from tinygrad.ops import TrackedRewriteContext, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
 
-uops_colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.CONST: "#e0e0e0", UOps.VCONST: "#e0e0e0",
-               UOps.DEFINE_GLOBAL: "#ffe0b0", UOps.DEFINE_LOCAL: "#ffe0d0", UOps.DEFINE_ACC: "#f0ffe0", UOps.REDUCE: "#C4A484",
-               UOps.RANGE: "#c8a0e0", UOps.ASSIGN: "#e0ffc0", UOps.BARRIER: "#ff8080", UOps.IF: "#c8b0c0", UOps.SPECIAL: "#c0c0ff",
-               UOps.INDEX: "#e8ffa0", UOps.WMMA: "#efefc0", UOps.VIEW: "#C8F9D4", UOps.REDUCE_AXIS: "#f58488"}
+uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0",
+               Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_ACC: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
+               Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#e0ffc0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
+               Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", **{x:"#ffffc0" for x in GroupOp.ALU},
+               Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF",}
 
 # ** API spec
 
@@ -50,7 +51,7 @@ def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List
   for k,ctxs in contexts:
     name = to_function_name(k.name) if isinstance(k, Kernel) else k
     for ctx in ctxs:
-      if ctx.sink.op is UOps.CONST: continue
+      if ctx.sink.op is Ops.CONST: continue
       upats = [(upat.location, upat.printable(), tm) for _,_,upat,tm in ctx.matches if upat is not None]
       if name not in kernels: kernels[name] = []
       kernels[name].append((k, ctx, GraphRewriteMetadata(ctx.loc, lines(ctx.loc[0])[ctx.loc[1]-1].strip(), name, upats)))
@@ -59,16 +60,19 @@ def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List
 def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
-  for u in x.sparents:
-    if u.op is UOps.CONST: continue
-    label = f"{str(u.op)[5:]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
+  for u in x.toposort:
+    if u.op is Ops.CONST: continue
+    label = f"{str(u.op).split('.')[1]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
-      if x.op is UOps.CONST: label += f"\nCONST{idx} {x.arg:g}"
-    graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x.op is not UOps.CONST], str(u.arg), uops_colors.get(u.op, "#ffffff"))
+      if x.op is Ops.CONST: label += f"\nCONST{idx} {x.arg:g}"
+    graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x.op is not Ops.CONST], str(u.arg), uops_colors.get(u.op, "#ffffff"))
   return graph
 def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:
   if (found:=replaces.get(base)) is not None: return found
-  replaces[base] = ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
+  ret = base.replace(src=tuple(_replace_uop(x, replaces) for x in base.src))
+  if (final := replaces.get(ret)) is not None:
+      return final
+  replaces[base] = ret
   return ret
 @functools.lru_cache(None)
 def _prg(k:Optional[Kernel]) -> Optional[str]:
@@ -79,16 +83,16 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
   replaces: Dict[UOp, UOp] = {}
   sink = ctx.sink
   for i,(u0,u1,upat,_) in enumerate(ctx.matches):
+    if ctx.bottom_up: replaces = {} # if it's bottom_up it's single pass
     replaces[u0] = u0 if u1 is None else u1
     # if the match didn't result in a rewrite we move forward
     if u1 is None: continue
-    # first, rewrite this UOp with the current rewrite + all the seen matches before this
+    # first, rewrite this UOp with the current rewrite + all the matches in replaces
     new_sink = _replace_uop(sink, {**replaces})
     # sanity check
-    if new_sink is sink:
-      raise AssertionError(f"rewritten sink wasn't rewritten! {i} {unwrap(upat).location}")
+    if new_sink is sink: raise AssertionError(f"rewritten sink wasn't rewritten! {i} {unwrap(upat).location}")
     # update ret data
-    g.changed_nodes.append([id(x) for x in u1.sparents if x.op is not UOps.CONST])
+    g.changed_nodes.append([id(x) for x in u1.toposort if x.op is not Ops.CONST])
     g.diffs.append(list(difflib.unified_diff(pcall(str, u0).splitlines(), pcall(str, u1).splitlines())))
     g.graphs.append(sink:=new_sink)
   return g
@@ -97,24 +101,30 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
+    ret, status_code, content_type = b"", 200, "text/html"
+
     if (url:=urlparse(self.path)).path == "/":
-      self.send_response(200)
-      self.send_header("Content-type", "text/html")
-      self.end_headers()
-      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f:
-        ret = f.read()
+      with open(os.path.join(os.path.dirname(__file__), "index.html"), "rb") as f: ret = f.read()
+    elif self.path.startswith("/assets/") and '/..' not in self.path:
+      try:
+        with open(os.path.join(os.path.dirname(__file__), self.path.strip('/')), "rb") as f: ret = f.read()
+        if url.path.endswith(".js"): content_type = "application/javascript"
+        if url.path.endswith(".css"): content_type = "text/css"
+      except FileNotFoundError: status_code = 404
     elif url.path == "/kernels":
-      self.send_response(200)
-      self.send_header("Content-type", "application/json")
-      self.end_headers()
       query = parse_qs(url.query)
       if (qkernel:=query.get("kernel")) is not None:
         g = get_details(*kernels[int(qkernel[0])][int(query["idx"][0])])
-        ret = json.dumps({**asdict(g), "graphs": list(map(uop_to_json, g.graphs)), "uops": list(map(lambda x:pcall(str,x), g.graphs))}).encode()
-      else: ret = json.dumps([list(map(lambda x:asdict(x[2]), v)) for v in kernels]).encode()
-    else:
-      self.send_response(404)
-      ret = b""
+        jret: Any = {**asdict(g), "graphs": [uop_to_json(x) for x in g.graphs], "uops": [pcall(str,x) for x in g.graphs]}
+      else: jret = [list(map(lambda x:asdict(x[2]), v)) for v in kernels]
+      ret, content_type = json.dumps(jret).encode(), "application/json"
+    else: status_code = 404
+
+    # send response
+    self.send_response(status_code)
+    self.send_header('Content-Type', content_type)
+    self.send_header('Content-Length', str(len(ret)))
+    self.end_headers()
     return self.wfile.write(ret)
 
 # ** main loop

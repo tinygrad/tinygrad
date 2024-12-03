@@ -9,15 +9,15 @@ from typing import Tuple
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite, sym
-from tinygrad.ops import UOp, UOps, graph_rewrite, sym_infer
+from tinygrad.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad import Variable
 import functools
 
 def render(self) -> Tuple[str, ConstType, ConstType]:
   # NOTE: we need STORE so the ALU op has children
-  glbl = UOp(UOps.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
-  uops = linearize_uop(full_graph_rewrite(UOp(UOps.STORE, dtypes.void, (glbl, UOp.const(dtypes.int, 0), self)).sink()))
-  rewritten_uop = [uop for uop in uops if uop.op is UOps.STORE][0].src[-1]
+  glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
+  uops = linearize_uop(full_graph_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), self)).sink()))
+  rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[-1]
   return rewritten_uop.render(simplify=False), rewritten_uop.vmin, rewritten_uop.vmax
 
 def NumNode(val): return UOp.const(dtypes.int, val)
@@ -187,10 +187,34 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
 
   def test_mod_factor(self):
-    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 99, "((b*50)%100)")
+    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 50, "((b%2)*50)")
 
   def test_mod_to_sub(self):
     self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, "(a+-1)")
+
+  def test_mod_congruence(self):
+    self.helper_test_variable((3+3*Variable("a",0,3))%4, 0, 3, "((a*-1)+3)")
+    self.helper_test_variable((17+13*Variable("a",0,3))%18, 2, 17, "((a*-5)+17)")
+    self.helper_test_variable((2+9*Variable("a",0,3))%18, 2, 11, "(((a%2)*9)+2)")
+
+  def test_mod_congruence_mul_add(self):
+    self.helper_test_variable((6*(Variable("a", 0, 2)+1))%9, 0, 6, "((a*-3)+6)")
+
+  def test_mod_congruence_multiple_vars(self):
+    self.helper_test_variable((9+9*Variable("x",0,3)+9*Variable("y",0,3))%10, 3, 9, "(((x*-1)+(y*-1))+9)")
+    self.helper_test_variable((7+9*Variable("x",0,2)+9*Variable("y",0,2)+Variable("z",0,2))%10, 3, 9, "(((z+(x*-1))+(y*-1))+7)")
+    self.helper_test_variable((10+12*Variable("x",0,2)+Variable("y", 0, 4)%3)%13, 8, 12, "(((x*-1)+(y%3))+10)")
+
+  def test_div_congruence(self):
+    self.helper_test_variable((3+3*Variable("a",0,3))//4, 0, 3, "a")
+    self.helper_test_variable((18+17*Variable("a",0,2)+17)//18, 1, 3, "(a+1)")
+
+  def test_div_congruence_multiple_vars(self):
+    self.helper_test_variable((9+(9+10)*Variable("x",0,3)+(8+10)*Variable("y",0,2))//10, 0, 10, "((x*2)+(y*2))")
+
+  def test_mod_binary_expression(self):
+    self.helper_test_variable((3+Variable("a",0,1))%4, 0, 3, "((a*-3)+3)")
+    self.helper_test_variable((3+Variable("a",4,5))%4, 0, 3, "((a*-3)+15)")
 
   def test_sum_div_const(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 4, 0, 7, "a")
@@ -323,7 +347,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "((((idx*-10)+99)//11)+-9)")
 
   def test_div_into_mod(self):
-    self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(((idx*4)%8)//4)")
+    self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
 
   # TODO: simplify the expression
   def test_div_neg_cancel(self):
@@ -406,6 +430,18 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(gidx%4+(gidx//4)*4, 0, 124, "gidx")
     self.helper_test_variable((gidx//4)*4+gidx%4, 0, 124, "gidx")
 
+  def test_div_mod_recombine_folded_mod(self):
+    a = Variable("a", 0, 2)
+    b = Variable("b", 0, 100)
+    self.helper_test_variable((31 * a + 1) % 30 + ((31 * a + 1) // 30) * 30, 1, 63, "((a*31)+1)")
+    with self.assertRaises(AssertionError):
+      self.helper_test_variable((31 * b + 1) % 18 + ((31 * b + 1) // 18) * 18, 1, 3101, "((b*31)+1)")
+
+  def test_div_mod_recombine_with_gcd(self):
+    b = Variable("b", 0, 100)
+    with self.assertRaises(AssertionError):
+      self.helper_test_variable((30 * b + 1) % 18 + ((30 * b + 1) // 18) * 18, 1, 3001, "((b*30)+1)")
+
   def test_arange_unrolled4(self):
     gidx = Variable("gidx", 0, 2559)
     unrolled_div = (gidx+2561)//4+(gidx+2562)//4+(gidx+2560)//4+(gidx+2559)//4
@@ -420,11 +456,9 @@ class TestSymbolic(unittest.TestCase):
     unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
     self.helper_test_variable(unrolled_div, 0, 2, "gidx")
 
-    # TODO: fix this, it has only one term and is no longer an add chain
-    with self.assertRaises(AssertionError):
-      gidx = Variable("gidx", 0, 1)
-      unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
-      self.helper_test_variable(unrolled_div, 0, 1, "gidx")
+    gidx = Variable("gidx", 0, 1)
+    unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
+    self.helper_test_variable(unrolled_div, 0, 1, "gidx")
 
   def test_arange_unrolled2(self):
     gidx = Variable("gidx", 0, 2559)
@@ -454,6 +488,37 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a*3+d*4).lt(1).ne(True), 0, 1, "((((a*3)+(d*4))<1)!=True)")  # var can be negative, should not be simplified
     self.helper_test_variable((a+b+c*2).lt(1).ne(True), 0, 1, ("((((a+b)+c)<1)!=True)", "(((c+(a+b))<1)!=True)"))
     self.helper_test_variable((a+b*2+c*4).lt(1).ne(True), 0, 1, ("((((a+b)+c)<1)!=True)", "(((c+(a+b))<1)!=True)"))
+
+  def test_where_removal(self):
+    cond = Variable("a", 0, 3).lt(2)
+    u1, u0 = cond.ufix(1), cond.ufix(0)
+    self.helper_test_variable(cond, 0, 1, "(a<2)")
+    self.helper_test_variable(cond.where(u1, u0), 0, 1, "(a<2)")
+    self.helper_test_variable(cond.where(u1, u0).where(u1, u0), 0, 1, "(a<2)")
+
+  def test_where_combine(self):
+    cond = Variable("x", 0, 3).lt(2)
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    aa = cond.where(a, a.ufix(0))
+    bb = cond.where(b, b.ufix(1))
+    self.helper_test_variable(aa, 0, 3, "(a if (x<2) else 0)")
+    self.helper_test_variable(bb, 0, 3, "(b if (x<2) else 1)")
+    self.helper_test_variable(aa+bb, 0, 6, "((a+b) if (x<2) else 1)")
+    self.helper_test_variable(aa.maximum(bb), 0, 3, "(max(a, b) if (x<2) else 1)")
+
+    # not combining because it increased total ALU
+    c = Variable("c", 0, 3)
+    cc = cond.where(c, c+1)
+    self.helper_test_variable(bb+cc, 0, 7, "((b if (x<2) else 1)+(c if (x<2) else (c+1)))")
+
+    # not combining  # TODO: can combine if it can further simplify?
+    ab = cond.where(a, b)
+    ba = cond.where(b, a)
+    self.helper_test_variable(ab+ba, 0, 6, "((a if (x<2) else b)+(b if (x<2) else a))")
+
+    # not combining  # TODO: can combine if one is identity element const
+    self.helper_test_variable(aa+ab, 0, 6, "((a if (x<2) else b)+(a if (x<2) else 0))")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
