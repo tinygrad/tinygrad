@@ -5,23 +5,23 @@ from tinygrad.engine import jit
 from tinygrad.helpers import ceildiv
 from tinygrad.tensor import Tensor
 
-PAD, DEFAULT_LEN = 66, 65 # symbolic constants for masks
+PAD, DEFAULT_LEN, PERMS = 66, 65, [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]
 
 @jit.TinyJit
-def permute_data(data: Tensor) -> Tensor: return data[[2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]].realize()
+def permute_data(data: Tensor, perms: Tensor) -> Tensor: return data[perms].realize()
 
 @jit.TinyJit
 def mix(states: Tensor, chunks: Tensor) -> Tensor:
   def rotr(x: Tensor, n: int) -> Tensor: return ((x << (32 - n)) | (x >> n))
-  xs = [states[i] for i in range(16)] # for intermediate states
+  new_states = states.clone()
   for i, (a,b,c,d) in enumerate([(0,4,8,12), (1,5,9,13), (2,6,10,14), (3,7,11,15), (0,5,10,15), (1,6,11,12), (2,7,8,13), (3,4,9,14)]):
     mx, my = chunks[i * 2], chunks[i * 2 + 1]
     for m in (mx, my):
-      xs[a] = (xs[a] + xs[b] + m)
-      xs[d] = rotr(xs[d] ^ xs[a], 16 if m is mx else 8)
-      xs[c] = xs[c] + xs[d]
-      xs[b] = rotr(xs[b] ^ xs[c], 12 if m is mx else 7)
-  return Tensor.cat(*xs).reshape(16, states.shape[1]).realize()
+      new_states[a] = (new_states[a] + new_states[b] + m)
+      new_states[d] = rotr(new_states[d] ^ new_states[a], 16 if m is mx else 8)
+      new_states[c] = new_states[c] + new_states[d]
+      new_states[b] = rotr(new_states[b] ^ new_states[c], 12 if m is mx else 7)
+  return new_states.realize()
 
 def compress_chunks(states: Tensor, data: Tensor, chain_vals: Tensor, info: Tensor) -> Tensor:
   new_states, last_state = [], states[0]
@@ -34,10 +34,14 @@ def compress_chunks(states: Tensor, data: Tensor, chain_vals: Tensor, info: Tens
   return (states[-1, :] | end_block)[:8] # combine last block of each chunk with end block
 
 def compress_blocks(states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
+  perms = Tensor(PERMS, dtype=dtypes.uint32)
   for _ in range(6):
+    print("--- mix ---")
     states = mix(states, data).clone().realize()
-    data = permute_data(data).clone().realize()
+    print("--- permute ---")
+    data = permute_data(data, perms).clone().realize()
   states = mix(states, data)
+  print("--- finalize ---")
   states = (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:])
   return states.realize()
 
@@ -111,7 +115,7 @@ if __name__ == "__main__":
   import sys
 
   arg = sys.argv[1]
-  max_memory = (1024**3 * 3)
+  max_memory = (1024**3 * 1)
 
   if arg == "warmup":
     # warmup the JIT

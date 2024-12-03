@@ -147,5 +147,4 @@ class TestBLAKE3(unittest.TestCase):
     self._test(102400, "bc3e3d41a1146b069abffad3c0d44860cf664390afce4d9661f7902e7943e085")
 
 if __name__ == "__main__":
-  unittest.main(verbosity=2)
-  # TestBLAKE3().test_1023_bytes()
+  unittest.main()
