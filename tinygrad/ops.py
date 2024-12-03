@@ -228,10 +228,10 @@ class UOpMetaClass(type):
   ucache:Dict[Tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
-    created = super().__call__(op, dtype, src, arg)
-    UOpMetaClass.ucache[key] = weakref.ref(created)
+    UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
     return created
 
+# NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
 class UOp(MathTrait, metaclass=UOpMetaClass):
   op:Ops
