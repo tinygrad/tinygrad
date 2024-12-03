@@ -40,7 +40,8 @@ class TinygradBackend(Backend):
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
-backend_test.exclude('test_adam_*')
+# backend_test.exclude('test_adam_*')
+backend_test.exclude('test_adam_multiple_cpu')
 backend_test.exclude('test_adagrad_*')
 backend_test.exclude('test_momentum_*')
 backend_test.exclude('test_nesterov_momentum_cpu')

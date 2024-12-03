@@ -1,4 +1,4 @@
-import functools, io, math
+import functools, itertools, io, math
 from typing import Union, Tuple, Optional, List, Any, cast
 from tinygrad.tensor import Tensor, _broadcast_shape
 from tinygrad.dtype import ImageDType, dtypes
@@ -510,3 +510,73 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
   bsz, _, seq_len, _ = xq.shape
   out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
   return out, present
+
+# **************** ai.onnx.preview.training Ops ****************
+
+# # TODO not entirely sure these optimizers are correct
+# def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
+#   grouped_inputs = _group_inputs(inputs, 3)
+#   r = to_python_const(R / (1 + T * decay_factor))
+#   ret = []
+#   for X, G, H in grouped_inputs:
+#     X.grad = norm_coefficient * X + G
+#     X.grad.requires_grad, H.requires_grad = False, False # TODO manually turning off requires_grad, see TODO under (domain == "ai.onnx.preview.training") in onnx.py
+#     H.assign(H.detach() + X.grad * X.grad).realize()
+#     H_adaptive = H.sqrt() + epsilon
+#     X.assign(X.detach() - r * X.grad / H_adaptive)
+#     ret.extend([X, H])
+#   ret = ret[::2] + ret[1::2]
+#   return tuple(ret)
+#
+# def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
+#   grouped_inputs = _group_inputs(inputs, 3)
+#   T, R.requires_grad = to_python_const(T), False
+#   beta_adjusted = beta if T > 0 else 1
+#   ret = []
+#   for X, G, V in grouped_inputs:
+#     X.grad = (norm_coefficient * X + G).realize()
+#     X.grad.requires_grad, V.requires_grad = False, False
+#     V.assign(alpha * V + beta_adjusted * X.grad).realize()
+#     if mode == "standard": X.assign(X.detach() - R * V).realize()
+#     elif mode == "nesterov": X.assign(X.detach() - R * (X.grad + alpha + V)).realize()
+#     ret.extend([X, V])
+#   ret = ret[::2] + ret[1::2]
+#   return tuple(ret)
+
+from tinygrad.nn.optim import Adam as TinyAdam
+
+def _group_inputs(inputs, n):
+  groups = len(inputs) // n
+  return [inputs[i::groups] for i in range(groups)]
+def _unpack_outputs(outputs, n): return tuple(itertools.chain.from_iterable(outputs[i::n] for i in range(n)))
+
+def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
+  old_training = Tensor.training
+  Tensor.training = True
+  T, R = to_python_const(T), R.detach()
+  ret = []
+  for X, G, V, H in _group_inputs(inputs, 4):
+    G, V, H = G.detach(), V.detach(), H.detach()
+    X.grad = (norm_coefficient * X.detach() + G)
+    opt = TinyAdam([X], b1=alpha, b2=beta, eps=epsilon)
+    opt.m, opt.v, opt.lr = [V], [H], R
+    # need no-op for m_hat and v_hat if T == 0
+    if T == 0: opt.b1_t, opt.b2_t = opt.b1_t.zeros_like(), opt.b2_t.zeros_like()
+    opt.step()
+    X = (1 - norm_coefficient_post) * X
+    ret.extend([X, V, H])
+  Tensor.training = old_training
+  return _unpack_outputs(ret, 3)
+
+  # ret = []
+  # for X, G, V, H in grouped_inputs:
+  #   X.grad = (norm_coefficient * X + G).realize()
+  #   # V.requires_grad, H.requires_grad, X.grad.requires_grad = False, False, False
+  #   V.assign(alpha * V + (1.0 - alpha) * X.grad).realize()
+  #   H.assign(beta * H + (1.0 - beta) * (X.grad * X.grad)).realize()
+  #   up = (V / (1.0 - alpha**T)) / ((H / (1.0 - beta**T)).sqrt() + epsilon) if T > 0 else V / (H.sqrt() + epsilon)
+  #   X.assign(X.detach() - R * up).realize()
+  #   X = (1 - norm_coefficient_post) * X
+  #   ret.extend([X, V, H])
+  # ret = ret[::3] + ret[1::3] + ret[2::3]
+  # return tuple(ret)
