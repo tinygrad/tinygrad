@@ -2,6 +2,8 @@ import os, ctypes, mmap, struct
 from tinygrad.helpers import getenv, mv_address, to_mv
 from tinygrad.runtime.autogen import libpciaccess, vfio, libc
 
+AM_DEBUG = getenv('AM_DEBUG', 0)
+
 def scan_pci_devs():
   libpciaccess.pci_system_init()
   pci_iter = libpciaccess.pci_id_match_iterator_create(None)
@@ -22,10 +24,10 @@ def read_pagemap(va):
 
     entry_value = struct.unpack("Q", entry)[0]
     present = (entry_value >> 63) & 1
-    swapped = (entry_value >> 62) & 0b11
+    swapped = (entry_value >> 62) & 1
     page_frame_number = entry_value & ((1 << 55) - 1)
 
-    return None if present or swapped else page_frame_number * mmap.PAGESIZE
+    return None if not present or swapped else page_frame_number * mmap.PAGESIZE
 
 class SystemMemory:
   def __init__(self, vaddr:int, size:int): self.vaddr, self.size = vaddr, size
@@ -41,21 +43,23 @@ class PCIHAL(HAL):
     super().__init__(has_dma=has_dma, has_iommu=has_iommu)
 
   def open_device(self, dev_idx:int):
-    self.pcidev = self.devs[dev_idx]
-    libpciaccess.pci_device_probe(ctypes.byref(self.pcidev))
-    libpciaccess.pci_device_enable(ctypes.byref(self.pcidev))
+    pcidev = self.devs[dev_idx]
+    if AM_DEBUG >= 1: print(f"Opening device {pcidev.domain_16:04x}:{pcidev.bus:02x}:{pcidev.dev:02x}.{pcidev.func:d}")
+    libpciaccess.pci_device_probe(ctypes.byref(pcidev))
+    libpciaccess.pci_device_enable(ctypes.byref(pcidev))
+    return pcidev
 
-  def vram_pci_addr(self): return self.pcidev.regions[0].base_addr
+  def vram_pci_addr(self, pcidev): return pcidev.regions[0].base_addr
 
-  def map_pci_range(self, bar, cast='I'):
-    ret = libpciaccess.pci_device_map_range(ctypes.byref(self.pcidev), self.pcidev.regions[bar].base_addr, size:=self.pcidev.regions[bar].size,
+  def map_pci_range(self, pcidev, bar, cast='I'):
+    ret = libpciaccess.pci_device_map_range(ctypes.byref(pcidev), pcidev.regions[bar].base_addr, size:=pcidev.regions[bar].size,
       libpciaccess.PCI_DEV_MAP_FLAG_WRITABLE, ctypes.byref(pcimem:=ctypes.c_void_p()))
     return pcimem.value, to_mv(pcimem.value, size).cast(cast)
 
-  def pci_set_master(self):
+  def pci_set_master(self, pcidev):
     # TODO: parse from linux/include/uapi/linux/pci_regs.h
-    libpciaccess.pci_device_cfg_read_u16(self.pcidev, ctypes.byref(val:=ctypes.c_uint16()), 0x4)
-    libpciaccess.pci_device_cfg_write_u16(self.pcidev, val.value | 0x4, 0x4)
+    libpciaccess.pci_device_cfg_read_u16(pcidev, ctypes.byref(val:=ctypes.c_uint16()), 0x4)
+    libpciaccess.pci_device_cfg_write_u16(pcidev, val.value | 0x4, 0x4)
 
   def alloc_pinned_memory(self, sz:int) -> SystemMemory:
     va = libc.mmap(0, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, -1, 0)

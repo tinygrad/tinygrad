@@ -128,7 +128,7 @@ class AMDComputeQueue(HWQueue):
 
   def signal(self, signal:AMDSignal, value:sint=0):
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
-    print("sig", hex(signal.value_addr))
+    # print("sig", hex(signal.value_addr))
     self.release_mem(signal.value_addr, value, amd_gpu.data_sel__mec_release_mem__send_32_bit_low,
                      amd_gpu.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
 
@@ -200,6 +200,8 @@ class AMDCopyQueue(HWQueue):
     return self
 
   def _submit(self, dev:AMDDevice):
+    # print(dev.sdma_queue.write_ptr[0], dev.sdma_queue.read_ptr[0])
+
     if dev.sdma_queue.put_value - dev.sdma_queue.read_ptr[0] > dev.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
 
     tail_blit_dword = 0
@@ -219,8 +221,14 @@ class AMDCopyQueue(HWQueue):
       dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', self._q[tail_blit_dword:])
       dev.sdma_queue.put_value += rem_packet_cnt * 4
 
+    # print(dev.sdma_queue.write_ptr[0], dev.sdma_queue.read_ptr[0])
+
     dev.sdma_queue.write_ptr[0] = dev.sdma_queue.put_value
     dev.sdma_queue.doorbell[0] = dev.sdma_queue.put_value
+
+    # import time
+    # time.sleep(1)
+    # print(dev.sdma_queue.write_ptr[0], dev.sdma_queue.read_ptr[0])
 
 class AMDArgsState(HCQArgsState):
   def __init__(self, ptr:Tuple[int, int], prg:AMDProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
@@ -273,7 +281,8 @@ class AMDProgram(HCQProgram):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))
 
 class AMDPciBuffer(HCQBuffer):
-  def __init__(self, va_addr, size, cpu_addr, vm=None): self.va_addr, self.size, self.cpu_addr, self.vm = va_addr, size, cpu_addr, vm
+  def __init__(self, va_addr, size, cpu_addr, owner, vm=None):
+    self.adev, self.va_addr, self.size, self.cpu_addr, self.vm = owner, va_addr, size, cpu_addr, vm
 
 class AMDDriverAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice): super().__init__(dev, batch_size=SDMA_MAX_COPY_SIZE)
@@ -370,10 +379,9 @@ class AMDDevice(HCQCompiled):
 
     self.compute_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x100000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size)
+    self.sdma_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000)
 
     if not self.driverless:
-      # self.sdma_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000)
-
       # self.queue_event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_type=kfd.KFD_IOC_EVENT_SIGNAL, auto_reset=1)
       # self.queue_event_mailbox_ptr = AMDDevice.event_page.va_addr + self.queue_event.event_slot_index * 8
       # self.queue_event_arr = (kfd.struct_kfd_event_data)(event_id=self.queue_event.event_id)
@@ -384,6 +392,9 @@ class AMDDevice(HCQCompiled):
       # allocator, copy_queue_t = AMDDriverAllocator(self), AMDCopyQueue # AMDPciAllocator(self), None
       allocator, copy_queue_t = AMDPciAllocator(self), None
     else: allocator, copy_queue_t = AMDPciAllocator(self), None
+    # AMDDriverAllocator(self), AMDCopyQueue
+
+    # AMDDriverAllocator(self), AMDCopyQueue
 
     # # Alloc cpu mem and write into it
 
@@ -393,8 +404,17 @@ class AMDDevice(HCQCompiled):
     #   vx = self.adev.mm.map_range(vaddr=0x300000000, paddr=sys_mem.phys_pages()[0], size=0x1000, system=True, uncached=False)
     #   print(hex(vx.vaddr))
 
-    super().__init__(device, allocator, AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
-                     AMDSignal, AMDComputeQueue, copy_queue_t)
+    super().__init__(device, AMDDriverAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
+                     AMDSignal, AMDComputeQueue, AMDCopyQueue)
+
+    # print(self.timeline_signal.value)
+
+    # AMDCopyQueue().signal(self.timeline_signal, self.timeline_value).submit(self)
+    # self.timeline_value += 1
+    # self.synchronize()
+
+    # print(self.timeline_signal.value)
+    # exit(0)
 
     # def read_physical_memory(address, length):
     #   try:
@@ -521,42 +541,65 @@ class AMDDevice(HCQCompiled):
     self.properties = {'simd_count': 192, 'simd_per_cu': 2, 'max_waves_per_simd': 16, 'gfx_target_version': 110000, 'max_slots_scratch_cu': 32,
                        'array_count': 12, 'simd_arrays_per_engine': 2, 'lds_size_in_kb': 64}
 
-  def _pci_gpu_alloc(self, size:int, host=False, uncached=False, cpu_access=False):
-    return AMDPciBuffer((vm:=self.adev.mm.valloc(round_up(size, 0x1000), uncached=uncached)).vaddr, vm.size, vm.cpu_addr(), vm)
+  def _pci_gpu_alloc(self, size:int, host=False, uncached=False, cpu_access=False, zero=False):
+    if host:
+      # print("HOST alloc")
+      vm = self.adev.hal.alloc_pinned_memory(size)
+
+      vaddr = self.adev.mm.alloc_vaddr(size)
+      for i,paddr in enumerate(vm.phys_pages()):
+        self.adev.mm.map_range(vaddr=vaddr + 0x1000 * i, paddr=paddr, size=0x1000, system=True, snooped=True, uncached=True)
+
+      return AMDPciBuffer(vaddr + self.adev.gmc.vm_base, vm.size, vm.vaddr, self, vm)
+    else:
+      x = AMDPciBuffer((vm:=self.adev.mm.valloc(round_up(size, 0x1000), uncached=uncached)).vaddr, vm.size, vm.cpu_addr(), vm)
+      if zero: ctypes.memset(vm.cpu_addr(), 0, x.size)
+      return x
 
   def _pci_gpu_free(self, mem): pass
 
   def _pci_gpu_map(self, mem:AMDPciBuffer): pass
-  #   self.adev.mm.map_range(vaddr=mem.va_addr, paddr=mem.cpu_addr, size=mem.size, system=True, uncached=mem.vm.uncached)
-  #   return AMDPciBuffer((vm:=self.adev.mm.valloc(round_up(size, 0x1000), uncached=uncached)).vaddr, vm.size, vm.cpu_addr(), vm)
+    # self.adev.mm.map_range(vaddr=mem.va_addr, paddr=mem.paddr, size=mem.size, system=True, uncached=mem.vm.uncached)
+    # return AMDPciBuffer((vm:=self.adev.mm.valloc(round_up(size, 0x1000), uncached=uncached)).vaddr, vm.size, vm.cpu_addr(), vm)
 
   def _pci_alloc_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0) -> AMDQueueDesc:
-    doorbell_index = 3
-    mqd = self._gpu_alloc(0x1000, uncached=True)
-    gart = self._gpu_alloc(0x1000, uncached=True)
-    ring = self._gpu_alloc(ring_size, uncached=True)
+    mqd = self._gpu_alloc(0x1000, uncached=True, zero=True)
+    gart = self._gpu_alloc(0x1000, uncached=True, zero=True)
+    ring = self._gpu_alloc(ring_size, uncached=True, zero=True)
     eop_buffer = self._gpu_alloc(eop_buffer_size) if eop_buffer_size else None
 
-    mqd_struct = am.struct_v11_compute_mqd(header=0xC0310800, cp_mqd_base_addr_lo=lo32(mqd.va_addr), cp_mqd_base_addr_hi=hi32(mqd.va_addr),
-      cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.build(preload_size=0x55, preload_req=1),
-      cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
-      cp_hqd_pq_base_lo=lo32(ring.va_addr>>8), cp_hqd_pq_base_hi=hi32(ring.va_addr>>8),
-      cp_hqd_pq_rptr_report_addr_lo=lo32(gart.va_addr+8), cp_hqd_pq_rptr_report_addr_hi=hi32(gart.va_addr+8),
-      cp_hqd_pq_wptr_poll_addr_lo=lo32(gart.va_addr), cp_hqd_pq_wptr_poll_addr_hi=hi32(gart.va_addr),
-      cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.build(doorbell_offset=doorbell_index*2, doorbell_en=1),
-      cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.build(rptr_block_size=5, unord_dispatch=1, queue_size=(ring_size//4).bit_length()-2),
-      cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.build(min_ib_avail_size=0x3), cp_hqd_hq_status0=0x20004000,
-      cp_mqd_control=self.adev.regCP_MQD_CONTROL.build(priv_state=1),
-      cp_hqd_eop_base_addr_lo=lo32(eop_buffer.va_addr>>8), cp_hqd_eop_base_addr_hi=hi32(eop_buffer.va_addr>>8),
-      cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.build(eop_size=(eop_buffer_size//4).bit_length()-2))
+    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
+      doorbell_index = 0x100 # 0x100 is the first doorbell index for SDMA
+      mqd_struct = am.struct_v11_sdma_mqd(sdmax_rlcx_rb_base=lo32(ring.va_addr>>8), sdmax_rlcx_rb_base_hi=hi32(ring.va_addr>>8),
+        sdmax_rlcx_rb_cntl=self.adev.regSDMA0_QUEUE0_RB_CNTL.build(rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=1,
+          f32_wptr_poll_enable=1, rb_size=(ring_size//4).bit_length()-1),
+        sdmax_rlcx_rb_rptr_addr_lo=lo32(gart.va_addr), sdmax_rlcx_rb_rptr_addr_hi=hi32(gart.va_addr),
+        sdmax_rlcx_rb_wptr_poll_addr_lo=lo32(gart.va_addr+0x10), sdmax_rlcx_rb_wptr_poll_addr_hi=hi32(gart.va_addr+0x10),
+        sdmax_rlcx_doorbell_offset=self.adev.regSDMA0_QUEUE0_DOORBELL_OFFSET.build(offset=doorbell_index*2))
+    else:
+      doorbell_index = 8
+      mqd_struct = am.struct_v11_compute_mqd(header=0xC0310800, cp_mqd_base_addr_lo=lo32(mqd.va_addr), cp_mqd_base_addr_hi=hi32(mqd.va_addr),
+        cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.build(preload_size=0x55, preload_req=1),
+        cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
+        cp_hqd_pq_base_lo=lo32(ring.va_addr>>8), cp_hqd_pq_base_hi=hi32(ring.va_addr>>8),
+        cp_hqd_pq_rptr_report_addr_lo=lo32(gart.va_addr), cp_hqd_pq_rptr_report_addr_hi=hi32(gart.va_addr),
+        cp_hqd_pq_wptr_poll_addr_lo=lo32(gart.va_addr+0x10), cp_hqd_pq_wptr_poll_addr_hi=hi32(gart.va_addr+0x10),
+        cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.build(doorbell_offset=doorbell_index*2, doorbell_en=1),
+        cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.build(rptr_block_size=5, unord_dispatch=1, queue_size=(ring_size//4).bit_length()-2),
+        cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.build(min_ib_avail_size=0x3), cp_hqd_hq_status0=0x20004000,
+        cp_mqd_control=self.adev.regCP_MQD_CONTROL.build(priv_state=1),
+        cp_hqd_eop_base_addr_lo=lo32(eop_buffer.va_addr>>8), cp_hqd_eop_base_addr_hi=hi32(eop_buffer.va_addr>>8),
+        cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.build(eop_size=(eop_buffer_size//4).bit_length()-2))
 
     # Copy mqd into memory
     ctypes.memmove(mqd.cpu_addr, ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct))
     self.adev.gmc.flush_hdp()
-    self.adev.gfx.load_mqd(mqd_struct, pipe=0, queue=0)
+
+    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA: self.adev.sdma.load_mqd(mqd_struct, pipe=0, queue=0)
+    else: self.adev.gfx.load_mqd(mqd_struct, pipe=0, queue=0)
 
     return AMDQueueDesc(ring=to_mv(ring.cpu_addr, ring_size).cast("I"),
-                        read_ptr=to_mv(gart.cpu_addr+8, 8).cast("Q"), write_ptr=to_mv(gart.cpu_addr, 8).cast("Q"),
+                        read_ptr=to_mv(gart.cpu_addr, 8).cast("Q"), write_ptr=to_mv(gart.cpu_addr+0x10, 8).cast("Q"),
                         doorbell=to_mv(self.adev.doorbell_cpu_addr + doorbell_index * 8, 8).cast("Q"))
 
   def invalidate_caches(self):

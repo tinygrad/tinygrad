@@ -228,11 +228,41 @@ class AM_IH(AM_IP):
     self.adev.regIH_RING1_CLIENT_CFG_DATA.update(client_id=0xa, source_id=0x0, source_id_match_enable=1)
 
     # set master
-    self.adev.hal.pci_set_master()
+    self.adev.hal.pci_set_master(self.adev.hal_dev)
 
     # toggle interrupts
     for addr_vm, rwptr_vm, suf, ring_id in self.rings:
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
+
+class AM_SDMA(AM_IP):
+  def load_mqd(self, mqd:am.struct_v11_sdma_mqd, pipe:int, queue:int):
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_CNTL").update(rb_enable=0)
+    while not self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_CONTEXT_STATUS").read(idle=1): pass
+
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_DOORBELL_OFFSET").write(mqd.sdmax_rlcx_doorbell_offset)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_DOORBELL").update(enable=1)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_RPTR").write(0)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_RPTR_HI").write(0)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_WPTR").write(0)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_WPTR_HI").write(0)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_BASE").write(mqd.sdmax_rlcx_rb_base)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_BASE_HI").write(mqd.sdmax_rlcx_rb_base_hi)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_RPTR_ADDR_LO").write(mqd.sdmax_rlcx_rb_rptr_addr_lo)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_RPTR_ADDR_HI").write(mqd.sdmax_rlcx_rb_rptr_addr_hi)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_WPTR_POLL_ADDR_LO").write(mqd.sdmax_rlcx_rb_wptr_poll_addr_lo)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_WPTR_POLL_ADDR_HI").write(mqd.sdmax_rlcx_rb_wptr_poll_addr_hi)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_CNTL").write(mqd.sdmax_rlcx_rb_cntl, rb_enable=1)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_IB_CNTL").update(ib_enable=1)
+
+  def init(self):
+    for i in range(2):
+      self.adev.reg(f"regSDMA{i}_F32_CNTL").update(halt=0)
+
+      self.adev.reg(f"regSDMA{i}_WATCHDOG_CNTL").write(0x1)
+      self.adev.reg(f"regSDMA{i}_UTCL1_CNTL").write(0x2c000689)
+      self.adev.reg(f"regSDMA{i}_UTCL1_PAGE").write(0x10cec20)
+      self.adev.reg(f"regSDMA{i}_F32_CNTL").write(0x8084000)
+    self.adev.regS2A_DOORBELL_ENTRY_2_CTRL.write(0x3051001d)
 
 class AM_PSP(AM_IP):
   def __init__(self, adev):

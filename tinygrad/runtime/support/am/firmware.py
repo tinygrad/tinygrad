@@ -18,6 +18,7 @@ class Firmware:
   RLC_PATH = "/lib/firmware/amdgpu/gc_11_0_0_rlc.bin"
   MEC_PATH = "/lib/firmware/amdgpu/gc_11_0_0_mec.bin"
   IMU_PATH = "/lib/firmware/amdgpu/gc_11_0_0_imu.bin"
+  SDMA_PATH = "/lib/firmware/amdgpu/sdma_6_0_0.bin"
 
   def __init__(self, adev):
     self.init_sos_fw()
@@ -30,11 +31,18 @@ class Firmware:
     blob, hdr = load_fw(self.SMU_PATH, am.struct_smc_firmware_header_v1_0)
     self.smu_psp_desc = psp_desc(am.GFX_FW_TYPE_SMU, blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes)
 
+    # SDMA firmware
+    blob, hdr = load_fw(self.SDMA_PATH, am.struct_sdma_firmware_header_v2_0)
+    self.descs += [psp_desc(am.GFX_FW_TYPE_SDMA_UCODE_TH0, blob, hdr.header.ucode_array_offset_bytes, hdr.ctx_ucode_size_bytes)]
+    self.descs += [psp_desc(am.GFX_FW_TYPE_SDMA_UCODE_TH1, blob, hdr.ctl_ucode_offset, hdr.ctl_ucode_size_bytes)]
+
     # PFP, ME, MEC firmware
+    # Code
     for (fw_path, fw_name) in [(self.PFP_PATH, 'PFP'), (self.ME_PATH, 'ME'), (self.MEC_PATH, 'MEC')]:
       blob, hdr = load_fw(fw_path, am.struct_gfx_firmware_header_v2_0)
       self.descs += [psp_desc(getattr(am, f'GFX_FW_TYPE_RS64_{fw_name}'), blob, hdr.header.ucode_array_offset_bytes, hdr.ucode_size_bytes)]
 
+    # Stack
     for (fw_path, fw_name, fw_cnt) in [(self.PFP_PATH, 'PFP', 2), (self.ME_PATH, 'ME', 2), (self.MEC_PATH, 'MEC', 4)]:
       blob, hdr = load_fw(fw_path, am.struct_gfx_firmware_header_v2_0)
       fw_types = [getattr(am, f'GFX_FW_TYPE_RS64_{fw_name}_P{fwnun}_STACK') for fwnun in range(fw_cnt)]

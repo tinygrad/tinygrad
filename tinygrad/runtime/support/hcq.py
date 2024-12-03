@@ -457,7 +457,7 @@ class HCQAllocator(LRUAllocator, Generic[DeviceType]):
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
         self.dev.timeline_signal.wait(self.b_timeline[self.b_next])
-        ctypes.memmove(self.b[self.b_next].va_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
+        ctypes.memmove(self.b[self.b_next].cpu_addr, from_mv(src[i:]), lsize:=min(self.b[self.b_next].size, src.nbytes-i))
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                   .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
                                   .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
@@ -469,16 +469,16 @@ class HCQAllocator(LRUAllocator, Generic[DeviceType]):
       # Check if the next buffer is safe to be used (its signal has passed) and reserve it.
       if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.dev.timeline_signal.value:
         self.b_timeline[(self.b_next + 1) % len(self.b)], self.b_next = (1 << 64), (self.b_next + 1) % len(self.b)
-        return (self.b[self.b_next].va_addr, self.b_next)
+        return (self.b[self.b_next].cpu_addr, self.b[self.b_next].va_addr, self.b_next)
       return None
 
     assert self.dev.hw_copy_queue_t is not None
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"DISK -> {self.dev.device}", enabled=PROFILE):
       for (batch_info, dst_off, src_off, copy_size) in src.device.allocator._copyout_sharded(src, size, _get_temp_buf, seg_len=self.b[0].size):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                                  .copy(dest.va_addr + dst_off, batch_info[0] + src_off, copy_size) \
+                                  .copy(dest.va_addr + dst_off, batch_info[1] + src_off, copy_size) \
                                   .signal(self.dev.timeline_signal, self.dev.timeline_value).submit(self.dev)
-        self.b_timeline[batch_info[1]] = self.dev.timeline_value
+        self.b_timeline[batch_info[2]] = self.dev.timeline_value
         self.dev.timeline_value += 1
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
@@ -493,7 +493,7 @@ class HCQAllocator(LRUAllocator, Generic[DeviceType]):
         self.dev.timeline_signal.wait(self.dev.timeline_value)
         self.dev.timeline_value += 1
 
-        ctypes.memmove(from_mv(dest[i:]), self.b[0].va_addr, lsize)
+        ctypes.memmove(from_mv(dest[i:]), self.b[0].cpu_addr, lsize)
 
   def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:DeviceType, dest_dev:DeviceType):
     cast(HCQAllocator, src_dev.allocator).map(dest)
@@ -514,6 +514,6 @@ class HCQAllocator(LRUAllocator, Generic[DeviceType]):
 
   def map(self, buf:HCQBuffer): pass
 
-  def _offset(self, buf, size:int, offset:int) -> HCQBuffer:
-    return type(buf)(va_addr=buf.va_addr + offset, size=size, **{k:v for k,v in buf.__dict__.items() if k not in ['va_addr', 'size']},
-                     **{x[0]:getattr(buf, x[0]) for x in getattr(buf, '_fields_', []) if x[0] not in ['va_addr', 'size']}, _base=buf)
+  # def _offset(self, buf, size:int, offset:int) -> HCQBuffer:
+  #   return type(buf)(va_addr=buf.va_addr + offset, size=size, **{k:v for k,v in buf.__dict__.items() if k not in ['va_addr', 'size']},
+  #                    **{x[0]:getattr(buf, x[0]) for x in getattr(buf, '_fields_', []) if x[0] not in ['va_addr', 'size']}, _base=buf)

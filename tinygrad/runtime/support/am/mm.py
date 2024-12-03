@@ -1,17 +1,30 @@
 from __future__ import annotations
 import ctypes
+from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Any
 from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import to_mv, round_up, getenv
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
-class PhysicalMemory:
-  def __init__(self, adev, paddr, size): self.adev, self.paddr, self.size = adev, paddr, size
+PhysicalMemoryBlockType = TypeVar('PhysicalMemoryBlockType', bound='PhysicalMemoryBlock')
+
+class PhysicalMemoryBlock:
+  def __init__(self, paddr, size): self.paddr, self.size = paddr, size
+
+class GPUPhysicalMemoryBlock(PhysicalMemoryBlock):
+  def __init__(self, adev, paddr, size):
+    super().__init__(paddr, size)
+    self.adev = adev
+
   def mc_addr(self): return self.adev.gmc.mc_base + self.paddr
   def cpu_addr(self): return self.adev.vram_cpu_addr + self.paddr
-  def cpu_view(self): return to_mv(self.adev.vram_cpu_addr + self.paddr, self.size)
+  def cpu_view(self): return to_mv(self.cpu_addr(), self.size)
 
-class VirtualMapping(PhysicalMemory):
+class ScatterList(Generic[PhysicalMemoryBlockType]):
+  def __init__(self, blocks:List[PhysicalMemoryBlockType]): self.blocks = blocks
+  def __iter__(self): return iter(self.blocks)
+
+class VirtualMapping(GPUPhysicalMemoryBlock):
   def __init__(self, adev, ptable_vaddr, paddr, size):
     self.vaddr, self.ptable_vaddr = ptable_vaddr + adev.gmc.vm_base, ptable_vaddr
     super().__init__(adev, paddr, size)
@@ -26,15 +39,15 @@ class PhysicalAllocator:
     parts = vram_size // (cnt:=1)
     self.next_paddr = [parts * i for i in range(cnt)]
 
-  def alloc(self, size:int, align=0x1000) -> PhysicalMemory:
+  def alloc(self, size:int, align=0x1000) -> GPUPhysicalMemoryBlock:
     addr = round_up(self.next_paddr[self.nxt], align)
     self.next_paddr[self.nxt] = addr + size
     assert self.next_paddr[self.nxt] <= self.vram_size
     self.nxt += 1
     self.nxt %= len(self.next_paddr)
-    return PhysicalMemory(self.adev, addr, size)
+    return GPUPhysicalMemoryBlock(self.adev, addr, size)
 
-  def free(self, mem:PhysicalMemory): pass
+  def free(self, mem:GPUPhysicalMemoryBlock): pass
 
 class AMPageTableEntry:
   def __init__(self, pm, lv): self.pm, self.view, self.lv = pm, pm.cpu_view().cast('Q'), lv
@@ -42,10 +55,11 @@ class AMPageTableEntry:
   def set_table(self, entry_id, pte:PageTableEntry, valid=True):
     self.view[entry_id] = (pte.pm.paddr & 0x0000FFFFFFFFF000) | (am.AMDGPU_PTE_VALID if valid else 0)
 
-  def set_page(self, entry_id, paddr, uncached=False, system=False, frag=0, valid=True):
+  def set_page(self, entry_id, paddr, uncached=False, system=False, snooped=False, frag=0, valid=True):
     f = (am.AMDGPU_PTE_VALID if valid else 0) | am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE \
       | am.AMDGPU_PTE_FRAG(frag) | (am.AMDGPU_PDE_PTE if self.lv != am.AMDGPU_VM_PTB else 0) \
-      | ((am.AMDGPU_PTE_SYSTEM) if system else 0) | (am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC) if uncached else 0)
+      | ((am.AMDGPU_PTE_SYSTEM) if system else 0) | ((am.AMDGPU_PTE_SNOOPED) if snooped else 0) \
+      | (am.AMDGPU_PTE_MTYPE_NV10(0, am.MTYPE_UC) if uncached else 0)
     self.view[entry_id] = (paddr & 0x0000FFFFFFFFF000) | f
 
   def get_entry(self, entry_id): return self.view[entry_id]
@@ -70,7 +84,7 @@ class MM:
       entry = page_table.get_entry(pte_idx:=(va // pte_covers) % 512)
       if entry & am.AMDGPU_PTE_VALID:
         assert entry & am.AMDGPU_PDE_PTE == 0, "Must be table"
-        child_page_table = AMPageTableEntry(PhysicalMemory(self.adev, entry & 0x0000FFFFFFFFF000, 0x1000), lv=page_table.lv+1)
+        child_page_table = AMPageTableEntry(GPUPhysicalMemoryBlock(self.adev, entry & 0x0000FFFFFFFFF000, 0x1000), lv=page_table.lv+1)
       else:
         child_page_table = AMPageTableEntry(self.palloc(0x1000, zero=True), lv=page_table.lv+1)
         page_table.set_table(pte_idx, child_page_table)
@@ -92,7 +106,7 @@ class MM:
     # Last pte is not full covered
     if size > 0: yield from _level_down(vaddr, size)
 
-  def map_range(self, vaddr, paddr, size, uncached=False, system=False) -> VirtualMapping:
+  def map_range(self, vaddr, paddr, size, uncached=False, system=False, snooped=False):
     if AM_DEBUG >= 3: print(f"Mapping {vaddr=:#x} -> {paddr=:#x} ({size=:#x})")
     for va, off, pte_st_idx, n_ptes, pte_covers, page_table in self.page_table_walker(self.root_page_table, vaddr, size):
       # To optimize TLB entries count, need to map pages as contigous entries. Determine size of each chunks.
@@ -101,9 +115,11 @@ class MM:
         assert frags_cnt >= 0
 
         update_ptes = (1 << (frags_cnt + 12)) // pte_covers
+        if paddr is None: paddr, off = self.phys_allocator.alloc(update_ptes * pte_covers).paddr, 0
+
         for pte_idx in range(update_ptes):
           assert page_table.get_entry(pte_st_idx + pte_idx) & am.AMDGPU_PTE_VALID == 0, "Entry already set"
-          page_table.set_page(pte_st_idx + pte_idx, paddr=paddr + off, uncached=uncached, system=system, frag=frags_cnt, valid=True)
+          page_table.set_page(pte_st_idx + pte_idx, paddr=paddr + off, uncached=uncached, system=system, snooped=snooped, frag=frags_cnt, valid=True)
           off += pte_covers
 
         if AM_DEBUG >= 3: print(f"\tnptes={update_ptes:#x} incr={pte_covers:#x} upd_flags={page_table.get_entry(pte_st_idx):#x} frags={frags_cnt:#x}")
@@ -115,13 +131,13 @@ class MM:
     self.adev.gmc.flush_tlb(ip="MM", vmid=0)
     return VirtualMapping(self.adev, vaddr, paddr, size)
 
-  def unmap_range(self, vm:VirtualMapping):
-    for va, off, pte_st_idx, n_ptes, pte_covers, page_table in self.page_table_walker(self.root_page_table, vm.va, vm.size, free_pt=True):
+  def unmap_range(self, vaddr:int, size:int):
+    for va, off, pte_st_idx, n_ptes, pte_covers, page_table in self.page_table_walker(self.root_page_table, vaddr, size, free_pt=True):
       for pte_idx in range(update_ptes):
         assert page_table.get_entry(pte_st_idx + pte_idx) & am.AMDGPU_PTE_VALID == am.AMDGPU_PTE_VALID, "Entry must be set"
         page_table.set_page(pte_st_idx + pte_idx, valid=False)
 
-  def valloc(self, size:int, align=0x1000, uncached=False) -> VirtualMapping:
+  def alloc_vaddr(self, size:int, align=0x1000) -> int:
     size = round_up(size, 0x1000)
 
     # TODO: need for here?
@@ -130,16 +146,38 @@ class MM:
 
     addr = round_up(self.next_vaddr, align)
     self.next_vaddr = addr + size
+
     assert self.next_vaddr <= self.adev.gmc.vm_end
-    return self.map_range(addr, self.palloc(size).paddr, size, uncached=uncached)
+    return addr
 
-  def vfree(self, vm:VirtualMapping):
-    self.unmap_range(vm)
-    self.pfree(vm.pm)
+  def valloc(self, size:int, align=0x1000, uncached=False) -> VirtualMapping:
+    size = round_up(size, 0x1000)
+    return self.map_range(self.alloc_vaddr(size, align), self.palloc(size).paddr, size, uncached=uncached)
 
-  def palloc(self, size, align=0x1000, zero=False) -> PhysicalMemory:
+  def palloc(self, size, align=0x1000, zero=False) -> GPUPhysicalMemoryBlock:
     pm = self.phys_allocator.alloc(size, align)
     if zero: ctypes.memset(pm.cpu_addr(), 0, pm.size)
     return pm
 
-  def pfree(self, pm:PhysicalMemory): self.phys_allocator.free(pm)
+  def pfree(self, pm:GPUPhysicalMemoryBlock): self.phys_allocator.free(pm)
+
+# class VirtualMemoryRange:
+#   def __init__(self, adev, ptable_vaddr:int, size:int, phys_sg:Optional[ScatterList]=None, contigous=False,
+#                uncached=False, system=False, snooped=False):
+#     self.adev, self.vaddr, self.ptable_vaddr, self.size = adev, ptable_vaddr + adev.gmc.vm_base, ptable_vaddr, size
+
+#     if contigous: phys_sg = ScatterList(self.adev.mm.palloc(self.size))
+
+#     # Allocate on map
+#     if phys_sg is None: self.adev.mm.map_range(self.vaddr, self.size, uncached=uncached, system=system, snooped=snooped)
+#     else:
+#       assert self.size == sum(pm.size for pm in phys_sg), f"Size mismatch: {self.size} != {sum(pm.size for pm in phys_sg)}"
+
+#       vaddr = self.vaddr
+#       for pm in phys_sg:
+#         paddr = pm.paddr if isinstance(pm, GPUPhysicalMemoryBlock) and self.adev != pm.adev else paddr + pm.adev.pci_pmem_base
+#         self.adev.mm.map_range(vaddr, paddr, pm.size, uncached=uncached, system=system, snooped=snooped)
+#         vaddr += pm.size
+#       self.phys_sg = phys_sg
+
+#   def __del__(self): self.adev.mm.unmap_range(self.vaddr, self.size)

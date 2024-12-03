@@ -3,9 +3,9 @@ import os, ctypes, collections, time
 from typing import Tuple, Dict, Set, Optional
 from tinygrad.helpers import to_mv, mv_address, getenv
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
-from tinygrad.runtime.support.am.mm import MM, PhysicalMemory
+from tinygrad.runtime.support.am.mm import MM, GPUPhysicalMemoryBlock
 from tinygrad.runtime.support.am.firmware import Firmware
-from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX
+from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 from tinygrad.runtime.support.am.hal import HAL, PCIHAL, read_pagemap
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
@@ -32,18 +32,20 @@ class AMRegister:
     mask, values = self._parse_kwargs(**kwargs)
     self.adev.wreg(self.reg_off, (value & mask) | values)
 
-  def read(self, inst=0): return self.adev.rreg(self.reg_off)
+  def read(self, **kwargs): return self.adev.rreg(self.reg_off) & self._parse_kwargs(**kwargs)[0]
 
 class AMDev:
   hal:Optional[HAL] = None
 
   def __init__(self, dev_idx:int):
     if AMDev.hal is None: AMDev.hal = PCIHAL()
-    AMDev.hal.open_device(dev_idx)
+    self.hal_dev = AMDev.hal.open_device(dev_idx)
 
-    self.vram_cpu_addr, self.vram = AMDev.hal.map_pci_range(bar=0, cast='B')
-    self.doorbell_cpu_addr, self.doorbell64 = AMDev.hal.map_pci_range(bar=2, cast='Q')
-    self.mmio_cpu_addr, self.mmio = AMDev.hal.map_pci_range(bar=5, cast='I')
+    self.vram_cpu_addr, self.vram = AMDev.hal.map_pci_range(self.hal_dev, bar=0, cast='B')
+    self.doorbell_cpu_addr, self.doorbell64 = AMDev.hal.map_pci_range(self.hal_dev, bar=2, cast='Q')
+    self.mmio_cpu_addr, self.mmio = AMDev.hal.map_pci_range(self.hal_dev, bar=5, cast='I')
+
+    # print(read_pagemap(self.vram_cpu_addr))
 
     self._run_discovery()
     self._build_regs()
@@ -59,6 +61,7 @@ class AMDev:
     self.psp = AM_PSP(self)
     self.smu = AM_SMU(self)
     self.gfx = AM_GFX(self)
+    self.sdma = AM_SDMA(self)
 
     if self.psp.is_sos_alive():
       if AM_DEBUG >= 2: print("sOS is alive, issue mode1 reset...")
@@ -72,6 +75,7 @@ class AMDev:
     self.psp.init()
     self.smu.init()
     self.gfx.init()
+    self.sdma.init()
 
     # print(read_pagemap(self.vram_cpu_addr))
     # exit(0)
@@ -117,7 +121,7 @@ class AMDev:
     #       The table is located at the end of VRAM - 64KB and is 10KB in size.
     mmRCC_CONFIG_MEMSIZE = 0xde3
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
-    self.discovery_pm = PhysicalMemory(self, self.vram_size - (64 << 10), 10 << 10)
+    self.discovery_pm = GPUPhysicalMemoryBlock(self, self.vram_size - (64 << 10), 10 << 10)
 
     bhdr = am.struct_binary_header.from_address(self.discovery_pm.cpu_addr())
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(bhdr) + bhdr.table_list[am.IP_DISCOVERY].offset)
