@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, cast
 from tinygrad.ops import UOp, Ops, GroupOp, PatternMatcher, UPat
 from tinygrad.renderer import Renderer
 from tinygrad import dtypes
@@ -31,8 +31,9 @@ def to_hex(x: int | float, dt:DType) -> str:
 def cflag(x:UOp) -> str:
   if x.op is Ops.CMPLT: return "setl" if x.src[0].dtype in dtypes.sints else "setb"
   if x.op is Ops.CMPNE: return "setne"
+  raise RuntimeError("invalid op for cmp flag")
 
-def float_cast(x:DType, s:DType):
+def float_cast(x:DType, s:DType) -> str:
   cfrom = "si" if not dtypes.is_float(s) else "sd" if s.itemsize == 8 else "ss"
   cto = "si" if not dtypes.is_float(x) else "sd" if x.itemsize == 8 else "ss"
   if cto == "si": cfrom = "t" + cfrom
@@ -164,12 +165,12 @@ class X86Renderer(Renderer):
     def is_reg(loc:str) -> bool: return loc in self.all_regs
     def free_reg(reg:str): float_regs.append(reg) if reg.startswith("xmm") else gen_regs.append(reg)
 
-    def mov_to_reg(u:UOp, reg:str) -> str:
+    def mov_to_reg(u:UOp, reg:str):
       dt = dtypes.int64 if isinstance(u.dtype, PtrDType) or reg == "r15" else u.dtype
       kernel.append(f"{x86op[dt][Ops.LOAD]} {reg}, {r[u]}")
       r[u] = reg
 
-    def mov_to_stack(u:UOp) -> str:
+    def mov_to_stack(u:UOp):
       nonlocal stack_size
       if u not in mem:
         mem[u] = f"[rbp - {stack_size}]"
@@ -220,7 +221,7 @@ class X86Renderer(Renderer):
         # render x86 assembly
         if (l:=x86_rewrite.rewrite(u, ctx=self)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
-        kernel.append(l)
+        kernel.append(cast(str, l))
       # free dead registers
       for loc in (r.pop(v) for v in (u,) + u.src if v in r and last_use[v] == i):
         if is_reg(loc) and loc not in r.values(): free_reg(loc)
