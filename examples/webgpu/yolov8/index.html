@@ -56,7 +56,7 @@
         const offscreenContext = offscreenCanvas.getContext('2d');
 
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            navigator.mediaDevices.getUserMedia({ audio: false,  video: { facingMode: { exact: "environment" }}}).then(function (stream) {
+            navigator.mediaDevices.getUserMedia({ audio: false,  video: { facingMode: { ideal: "environment" }}}).then(function (stream) {
                 video.srcObject = stream;
                 video.onloadedmetadata = function() {
                     canvas.width = video.clientWidth;
@@ -66,41 +66,56 @@
         }
 
         async function processFrame() {
-            offscreenContext.drawImage(video, 0, 0, 640, 640);
+            if (video.videoWidth == 0 || video.videoHeight == 0) {
+                requestAnimationFrame(processFrame);
+                return;
+            }
+            const videoAspectRatio = video.videoWidth / video.videoHeight;
+            let targetWidth, targetHeight;
+
+            if (videoAspectRatio > 1) {
+                targetWidth = 640;
+                targetHeight = 640 / videoAspectRatio;
+            } else {
+                targetHeight = 640;
+                targetWidth = 640 * videoAspectRatio;
+            }
+
+            const offsetX = (640 - targetWidth) / 2;
+            const offsetY = (640 - targetHeight) / 2;
+            offscreenContext.clearRect(0, 0, 640, 640);
+            offscreenContext.drawImage(video, offsetX, offsetY, targetWidth, targetHeight);
             const boxes = await detectObjectsOnFrame(offscreenContext);
-            drawBoxes(offscreenCanvas, boxes);
+            drawBoxes(offscreenCanvas, boxes, targetWidth, targetHeight, offsetX, offsetY);
             requestAnimationFrame(processFrame);
         }
 
         requestAnimationFrame(processFrame);
 
-        function drawBoxes(offscreenCanvas, boxes) {
-            const canvas = document.querySelector("canvas");
-            const ctx = canvas.getContext("2d");
+        function drawBoxes(offscreenCanvas, boxes, targetWidth, targetHeight, offsetX, offsetY) {
+            const ctx = document.querySelector("canvas").getContext("2d");
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.lineWidth = 3;
             ctx.font = "30px serif";
-            const scaleX = canvas.width / 640;
-            const scaleY = canvas.height / 640;
+            const scaleX = canvas.width / targetWidth;
+            const scaleY = canvas.height / targetHeight;
 
             boxes.forEach(([x1, y1, x2, y2, label]) => {
                 const classIndex = yolo_classes.indexOf(label);
                 const color = classColors[classIndex];
                 ctx.strokeStyle = color;
                 ctx.fillStyle = color;
-
-                let adjustedX1 = x1 * scaleX;
-                let adjustedY1 = y1 * scaleY;
-                let adjustedX2 = x2 * scaleX;
-                let adjustedY2 = y2 * scaleY;
-                let boxWidth = adjustedX2 - adjustedX1;
-                let boxHeight = adjustedY2 - adjustedY1;
-
+                const adjustedX1 = (x1 - offsetX) * scaleX;
+                const adjustedY1 = (y1 - offsetY) * scaleY;
+                const adjustedX2 = (x2 - offsetX) * scaleX;
+                const adjustedY2 = (y2 - offsetY) * scaleY;
+                const boxWidth = adjustedX2 - adjustedX1;
+                const boxHeight = adjustedY2 - adjustedY1;
                 ctx.strokeRect(adjustedX1, adjustedY1, boxWidth, boxHeight);
                 const textWidth = ctx.measureText(label).width;
                 ctx.fillRect(adjustedX1, adjustedY1 - 25, textWidth + 10, 25);
                 ctx.fillStyle = "#FFFFFF";
-                ctx.fillText(label, adjustedX1 + 10, adjustedY1 - 7);
+                ctx.fillText(label, adjustedX1 + 5, adjustedY1 - 7);
             });
         }
 
