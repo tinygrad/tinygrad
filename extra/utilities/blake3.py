@@ -115,7 +115,7 @@ if __name__ == "__main__":
   import sys
 
   arg = sys.argv[1]
-  max_memory = (1024**3 * 1)
+  max_memory = (1024**3 * 3)
 
   if arg == "warmup":
     # warmup the JIT
