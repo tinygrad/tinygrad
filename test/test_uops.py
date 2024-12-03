@@ -247,58 +247,59 @@ class TestConstantFolding(unittest.TestCase):
     assert any(uop.op is Ops.BITCAST for uop in ji.prg.p.uops), f"{[uop.op for uop in ji.prg.p.uops]} does not contain bitcast"
 
 class TestGatedStoreRewrite(unittest.TestCase):
-  @unittest.expectedFailure
   def test_tiny_gate_store(self):
     gmem = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
-    idx = gidx0 * UOp.const(dtypes.int, 2)
+    idx = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem, gidx0 * UOp.const(dtypes.int, 2)))
     val = UOp.const(dtypes.float, 42.0)
     gate = gidx0.lt(UOp.const(dtypes.int, 1))
-    store = UOp(Ops.STORE, dtypes.void, (gmem, idx, val, gate))
+    store = UOp(Ops.STORE, dtypes.void, (idx, val, gate))
     uops = to_uops_list([store])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.op is Ops.IF)
     endif = next(u for u in uops if u.op is Ops.ENDIF)
     assert endif.src[0] is if_uop
-    gated_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
+    gated_uops = tuple(uops[uops.index(if_uop)+1:uops.index(endif)])
     self.assertEqual(len(gated_uops), 1)
     self.assertIs(gated_uops[-1].op, Ops.STORE)
 
-  @unittest.expectedFailure
   def test_gate_some_stores(self):
     gmem0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     gmem1 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
-    idx = gidx0*UOp.const(dtypes.int, 2)
+    idx = gidx0 * UOp.const(dtypes.int, 2)
+    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx))
+    idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx))
     val = UOp.const(dtypes.float, 42.0)
     gate = gidx0.lt(UOp.const(dtypes.int, 1))
-    stores = [UOp.store(gmem0, idx, val, gate), UOp.store(gmem1, idx, val)]
-    uops = linearize_uop(stores)
+    stores = [UOp.store(idx0, val, gate), UOp.store(idx1, val)]
+    uops = to_uops_list(stores)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     if_uop = next(u for u in uops if u.op is Ops.IF)
     endif = next(u for u in uops if u.op is Ops.ENDIF)
     assert endif.src[0] is if_uop
-    gated_uops = tuple(uops.uops[uops.uops.index(if_uop)+1:uops.uops.index(endif)])
+    gated_uops = tuple(uops[uops.index(if_uop)+1:uops.index(endif)])
     self.assertEqual(len(gated_uops), 1)
     self.assertIs(gated_uops[-1].op, Ops.STORE)
 
   # scaled down version of TestLinearizerDumb.test_unmerged_ifs
-  @unittest.expectedFailure
   def test_merge_ifs_alt(self):
     gmem0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     gmem1 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
     idx = gidx0*UOp.const(dtypes.int, 2)
+    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx))
+    idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx))
     val = UOp.const(dtypes.float, 42.0)
     gate = gidx0.lt(UOp.const(dtypes.int, 1))
-    stores = [UOp.store(gmem0, idx, val, gate), UOp.store(gmem1, idx, val, gate)]
-    uops = linearize_uop(stores)
+    stores = [UOp.store(idx0, val, gate), UOp.store(idx1, val, gate)]
+    uops = to_uops_list(stores)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
     ifs = [u for u in uops if u.op is Ops.IF]
     endifs = [u for u in uops if u.op is Ops.ENDIF]
     self.assertEqual(len(ifs), 1)
     self.assertEqual(len(endifs), 1)
-    gated_uops = tuple(uops.uops[uops.uops.index(ifs[0])+1:uops.uops.index(endifs[0])])
+    gated_uops = tuple(uops[uops.index(ifs[0])+1:uops.index(endifs[0])])
     self.assertEqual(len(gated_uops), 2)
     for x in gated_uops: self.assertIs(x.op, Ops.STORE)
 
@@ -313,6 +314,16 @@ class TestLocalAccess(unittest.TestCase):
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
     sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
+
+  # NOTE: webgpu specific, since only webgpu performs bitpacking for uchar
+  @unittest.skipUnless(Device.DEFAULT == "WEBGPU", "Test local access with packed data type")
+  def test_local_packed(self):
+    uops = []
+    smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.uint8.ptr(local=True), (), ('smem', 16))
+    st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.uint8, (), 42)))
+    barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
+    sres = uop(uops, Ops.LOAD, dtypes.uint8, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
+    self.assertEqual(_test_uops_result(dtypes.uint8, uops, sres), 42)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_indirect(self):

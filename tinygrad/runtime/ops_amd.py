@@ -1,9 +1,10 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, Optional
-import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, time, array, contextlib, decimal, sys
+import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram
+from tinygrad.ops import sint
 from tinygrad.device import BufferSpec
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address
 from tinygrad.renderer.cstyle import AMDRenderer
@@ -28,36 +29,23 @@ def gfxreg(reg): return reg + 0x00001260 - amd_gpu.PACKET3_SET_SH_REG_START
 def nbioreg(reg): return reg + 0x00000d20 # NBIO_BASE__INST0_SEG2
 
 class AMDSignal(HCQSignal):
-  def __init__(self, value=0, is_timeline=False):
-    super().__init__(AMDDevice.signals_pool.pop(), value, is_timeline, decimal.Decimal(100), value_off=0, timestamp_off=8)
+  def __init__(self, base_addr:Optional[int]=None, **kwargs):
+    super().__init__(AMDDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=100)
 
-    if is_timeline:
-      self._event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, auto_reset=1)
-      self._event_mailbox_ptr = AMDDevice.event_page.va_addr + self._event.event_slot_index*8
-      self._evt_array = (kfd.struct_kfd_event_data)(event_id=self._event.event_id)
+  def __del__(self):
+    if isinstance(self.base_addr, int): AMDDevice.signals_pool.append(self.base_addr)
 
-  def __del__(self): AMDDevice.signals_pool.append(self.base_addr)
-
-  def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
-    start_time = time.time() * 1000
-    while (time_spent:=time.time() * 1000 - start_time) < timeout:
-      if self.value >= value: return
-
-      # Wait active for 5s, then going to sleep.
-      if time_spent > 5000 and self.is_timeline:
-        kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(self._evt_array), num_events=1, wait_for_all=1, timeout=1000)
-    raise RuntimeError(f"wait_signal: not set to {value}, but {self.value}, {timeout} ms TIMEOUT!")
+  def _sleep(self, time_spent_waiting_ms:int):
+    # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
+    if time_spent_waiting_ms > 2000 and self.timeline_for_device is not None:
+      kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=self.timeline_for_device.queue_event_arr_ptr, num_events=1, wait_for_all=1, timeout=200)
 
 class AMDComputeQueue(HWQueue):
-  def __init__(self):
-    self.cmd_idx_to_local_offset, self.cmd_idx_to_global_offset, self.cmd_idx_to_dispatch_packet = {}, {}, {}
-    super().__init__()
-
   def __del__(self):
     if self.binded_device is not None:
       self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True, uncached=True))
 
-  def pkt3(self, cmd, *vals): self.q += [amd_gpu.PACKET3(cmd, len(vals) - 1), *vals]
+  def pkt3(self, cmd, *vals): self.q(amd_gpu.PACKET3(cmd, len(vals) - 1), *vals)
 
   def wait_reg_mem(self, value, mask=0xffffffff, mem=None, reg_req=None, reg_done=None):
     wrm_info_dw = amd_gpu.WAIT_REG_MEM_MEM_SPACE(int(mem is not None)) | amd_gpu.WAIT_REG_MEM_OPERATION(int(mem is None)) \
@@ -86,22 +74,28 @@ class AMDComputeQueue(HWQueue):
 
     self.pkt3(amd_gpu.PACKET3_RELEASE_MEM, event_dw | cache_flags_dw, memsel_dw, *data64_le(address), *data64_le(value), ctxid)
 
-  def _memory_barrier(self):
+  def memory_barrier(self):
     self.wait_reg_mem(reg_req=nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_REQ), reg_done=nbioreg(regBIF_BX_PF1_GPU_HDP_FLUSH_DONE), value=0xffffffff)
     self.acquire_mem()
+    return self
 
-  def _exec(self, prg:AMDProgram, args_state:AMDArgsState, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1)):
+  def exec(self, prg:AMDProgram, args_state:AMDArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
     self.acquire_mem(gli=0, gl2=0)
 
-    cmd_idx = self._cur_cmd_idx()
-    user_regs = [*data64_le(prg.dev.scratch.va_addr), 0xffffffff, 0xc00000] if prg.enable_private_segment_sgpr else []
+    if prg.enable_private_segment_sgpr:
+      scratch_hilo = data64_le(prg.dev.scratch.va_addr)
+      # sgpr word1 bit31 enables swizzle
+      # sgpr word3 = 0x14 << 12 | 2 << 28 | 2 << 21 | 1 << 23
+      user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000] if prg.enable_private_segment_sgpr else []
+    else: user_regs = []
     if prg.enable_dispatch_ptr:
       dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=args_state.ptr + prg.kernargs_segment_size)
-      dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
-      dp.grid_size_x, dp.grid_size_y, dp.grid_size_z = global_size[0]*local_size[0], global_size[1]*local_size[1], global_size[2]*local_size[2]
+
+      self.bind_sints(*local_size, struct=dp, start_field='workgroup_size_x', fmt='H')
+      self.bind_sints(*[g*l for g,l in zip(global_size, local_size)], struct=dp, start_field='grid_size_x', fmt='I')
       dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, args_state.ptr
       user_regs += [*data64_le(dp_addr)]
-      self.cmd_idx_to_dispatch_packet[cmd_idx] = dp
+
     user_regs += [*data64_le(args_state.ptr)]
 
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_PGM_LO), *data64_le(prg.prog_addr >> 8))
@@ -117,61 +111,44 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_STATIC_THREAD_MGMT_SE4), 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_USER_DATA_0), *user_regs)
 
-    self.cmd_idx_to_local_offset[cmd_idx] = len(self.q) - self.cmds_offset[cmd_idx] + 5 # +1 to skip PACKET3_SET_SH_REG + reg + 3 zeros.
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_START_X), 0, 0, 0, *local_size, 0, 0)
     self.pkt3(amd_gpu.PACKET3_SET_SH_REG, gfxreg(amd_gpu.regCOMPUTE_RESOURCE_LIMITS), 0)
 
-    self.cmd_idx_to_global_offset[cmd_idx] = len(self.q) - self.cmds_offset[cmd_idx] + 1 # +1 to skip PACKET3_DISPATCH_DIRECT.
     self.pkt3(amd_gpu.PACKET3_DISPATCH_DIRECT, *global_size, CS_W32_EN | FORCE_START_AT_000 | COMPUTE_SHADER_EN)
     self.pkt3(amd_gpu.PACKET3_EVENT_WRITE, amd_gpu.EVENT_TYPE(amd_gpu.CS_PARTIAL_FLUSH) | amd_gpu.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
+    return self
 
-  def _update_exec(self, cmd_idx, global_size, local_size):
-    if local_size is not None: self._patch(cmd_idx, offset=self.cmd_idx_to_local_offset[cmd_idx], data=local_size)
-    if global_size is not None: self._patch(cmd_idx, offset=self.cmd_idx_to_global_offset[cmd_idx], data=global_size)
+  def wait(self, signal:AMDSignal, value:sint=0):
+    self.wait_reg_mem(mem=signal.value_addr, value=value, mask=0xffffffff)
+    return self
 
-    if (dp:=self.cmd_idx_to_dispatch_packet.get(cmd_idx)) is not None:
-      if local_size is not None: dp.workgroup_size_x, dp.workgroup_size_y, dp.workgroup_size_z = local_size[0], local_size[1], local_size[2]
-      if global_size is not None:
-        dp.grid_size_x,dp.grid_size_y,dp.grid_size_z = [g*l for g,l in zip(global_size,[dp.workgroup_size_x,dp.workgroup_size_y,dp.workgroup_size_z])]
-
-  def _wait(self, signal:AMDSignal, value=0): self.wait_reg_mem(mem=signal.value_addr, value=value, mask=0xffffffff)
-
-  def _timestamp(self, signal:AMDSignal):
+  def timestamp(self, signal:AMDSignal):
     self.release_mem(signal.timestamp_addr, 0, amd_gpu.data_sel__mec_release_mem__send_gpu_clock_counter, amd_gpu.int_sel__mec_release_mem__none)
+    return self
 
-  def _signal(self, signal:AMDSignal, value=0):
+  def signal(self, signal:AMDSignal, value:sint=0):
     # NOTE: this needs an EOP buffer on the queue or it will NULL pointer
     self.release_mem(signal.value_addr, value, amd_gpu.data_sel__mec_release_mem__send_32_bit_low,
                      amd_gpu.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
 
-    if signal.is_timeline:
-      self.release_mem(signal._event_mailbox_ptr, signal._event.event_id, amd_gpu.data_sel__mec_release_mem__send_32_bit_low,
-                       amd_gpu.int_sel__mec_release_mem__send_interrupt_after_write_confirm, ctxid=signal._event.event_id)
-
-  def _update_wait(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
-    if signal is not None: self._patch(cmd_idx, offset=2, data=data64_le(signal.value_addr))
-    if value is not None: self._patch(cmd_idx, offset=4, data=[value])
-
-  def _update_signal(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
-    if signal is not None: self._patch(cmd_idx, offset=3, data=data64_le(signal.value_addr))
-    if value is not None: self._patch(cmd_idx, offset=5, data=data64_le(value))
-
-    # Check if the signal command has mailptr part
-    if signal is not None and self.cmds_len[cmd_idx] > 8:
-      self._patch(cmd_idx, offset=11, data=[*data64_le(signal._event_mailbox_ptr), *data64_le(signal._event.event_id), signal._event.event_id])
+    if (dev:=signal.timeline_for_device) is not None:
+      self.release_mem(dev.queue_event_mailbox_ptr, dev.queue_event.event_id, amd_gpu.data_sel__mec_release_mem__send_32_bit_low,
+                       amd_gpu.int_sel__mec_release_mem__send_interrupt_after_write_confirm, ctxid=dev.queue_event.event_id)
+    return self
 
   def bind(self, dev:AMDDevice):
     self.binded_device = dev
-    self.hw_page = dev.allocator.alloc(len(self.q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
+    self.hw_page = dev.allocator.alloc(len(self._q) * 4, BufferSpec(cpu_access=True, nolru=True, uncached=True))
     hw_view = to_mv(self.hw_page.va_addr, self.hw_page.size).cast("I")
-    for i, value in enumerate(self.q): hw_view[i] = value
+    for i, value in enumerate(self._q): hw_view[i] = value
 
     self.indirect_cmd = [amd_gpu.PACKET3(amd_gpu.PACKET3_INDIRECT_BUFFER, 2), *data64_le(self.hw_page.va_addr),
-                         len(self.q) | amd_gpu.INDIRECT_BUFFER_VALID]
-    self.q = hw_view # type: ignore
+                         len(self._q) | amd_gpu.INDIRECT_BUFFER_VALID]
+    self._q = hw_view # type: ignore
+    return self
 
   def _submit(self, dev:AMDDevice):
-    cmds = self.indirect_cmd if dev == self.binded_device else self.q
+    cmds = self.indirect_cmd if dev == self.binded_device else self._q
 
     for i, value in enumerate(cmds): dev.compute_queue.ring[(dev.compute_queue.put_value + i) % len(dev.compute_queue.ring)] = value
 
@@ -182,51 +159,44 @@ class AMDComputeQueue(HWQueue):
 SDMA_MAX_COPY_SIZE = 0x400000
 class AMDCopyQueue(HWQueue):
   def __init__(self):
-    self.internal_cmd_sizes, self.copy_cmds_per_copy = [], {}
+    self.internal_cmd_sizes = []
     super().__init__()
 
-  def _q(self, arr):
-    self.q += arr
+  def q(self, *arr):
+    super().q(*arr)
     self.internal_cmd_sizes.append(len(arr))
 
-  def _copy(self, dest, src, copy_size):
+  def copy(self, dest:sint, src:sint, copy_size:int):
     copied, copy_commands = 0, (copy_size + SDMA_MAX_COPY_SIZE - 1) // SDMA_MAX_COPY_SIZE
-    self.copy_cmds_per_copy[len(self) - 1] = copy_commands
+
     for _ in range(copy_commands):
       step_copy_size = min(copy_size - copied, SDMA_MAX_COPY_SIZE)
 
-      self._q([amd_gpu.SDMA_OP_COPY | amd_gpu.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_COPY_LINEAR),
-        amd_gpu.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(step_copy_size - 1), 0, *data64_le(src + copied), *data64_le(dest + copied)])
+      self.q(amd_gpu.SDMA_OP_COPY | amd_gpu.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_COPY_LINEAR),
+        amd_gpu.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(step_copy_size - 1), 0, *data64_le(src + copied), *data64_le(dest + copied))
 
       copied += step_copy_size
+    return self
 
-  def _update_copy(self, cmd_idx, dest=None, src=None):
-    for i in range(self.copy_cmds_per_copy[cmd_idx]):
-      if src is not None: self._patch(cmd_idx, offset=3+i*7, data=[*data64_le(src + SDMA_MAX_COPY_SIZE*i)])
-      if dest is not None: self._patch(cmd_idx, offset=5+i*7, data=[*data64_le(dest + SDMA_MAX_COPY_SIZE*i)])
+  def signal(self, signal:AMDSignal, value:sint=0):
+    self.q(amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal.value_addr), value)
 
-  def _signal(self, signal:AMDSignal, value=0):
-    self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal.value_addr), value])
+    if (dev:=signal.timeline_for_device) is not None:
+      self.q(amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
+      self.q(amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id))
 
-    if signal.is_timeline:
-      self._q([amd_gpu.SDMA_OP_FENCE | amd_gpu.SDMA_PKT_FENCE_HEADER_MTYPE(3), *data64_le(signal._event_mailbox_ptr), signal._event.event_id])
-      self._q([amd_gpu.SDMA_OP_TRAP, amd_gpu.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(signal._event.event_id)])
+    return self
 
-  def _wait(self, signal:AMDSignal, value=0):
-    self._q([amd_gpu.SDMA_OP_POLL_REGMEM | amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
-      amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(signal.value_addr), value, 0xffffffff,
-      amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)])
+  def wait(self, signal:AMDSignal, value:sint=0):
+    self.q(amd_gpu.SDMA_OP_POLL_REGMEM | amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
+           amd_gpu.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(signal.value_addr), value, 0xffffffff,
+           amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | amd_gpu.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
+    return self
 
-  def _update_signal(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
-    return self._update_wait(cmd_idx, signal, value) # the same offsets and commands
-
-  def _update_wait(self, cmd_idx, signal:Optional[AMDSignal]=None, value=None):
-    if signal is not None: self._patch(cmd_idx, offset=1, data=data64_le(signal.value_addr))
-    if value is not None: self._patch(cmd_idx, offset=3, data=[value])
-
-  def _timestamp(self, signal:AMDSignal):
-    self._q([amd_gpu.SDMA_OP_TIMESTAMP | amd_gpu.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
-             *data64_le(signal.timestamp_addr)])
+  def timestamp(self, signal:AMDSignal):
+    self.q(amd_gpu.SDMA_OP_TIMESTAMP | amd_gpu.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(amd_gpu.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
+           *data64_le(signal.timestamp_addr))
+    return self
 
   def _submit(self, dev:AMDDevice):
     if dev.sdma_queue.put_value - dev.sdma_queue.read_ptr[0] > dev.sdma_queue.ring.nbytes: raise RuntimeError("SDMA queue overrun")
@@ -237,15 +207,15 @@ class AMDCopyQueue(HWQueue):
       tail_blit_dword += cmdsz
 
     start_idx = (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes) // 4
-    dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', self.q[:tail_blit_dword])
+    dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', self._q[:tail_blit_dword])
     dev.sdma_queue.put_value += tail_blit_dword * 4
 
-    if (rem_packet_cnt := len(self.q) - tail_blit_dword) > 0:
+    if (rem_packet_cnt := len(self._q) - tail_blit_dword) > 0:
       zero_fill = dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes
       ctypes.memset(mv_address(dev.sdma_queue.ring) + (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes), 0, zero_fill)
       dev.sdma_queue.put_value += zero_fill
 
-      dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', self.q[tail_blit_dword:])
+      dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', self._q[tail_blit_dword:])
       dev.sdma_queue.put_value += rem_packet_cnt * 4
 
     dev.sdma_queue.write_ptr[0] = dev.sdma_queue.put_value
@@ -405,12 +375,16 @@ class AMDDevice(HCQCompiled):
     max_cu_id = self.properties['simd_count'] // self.properties['simd_per_cu'] - 1
     max_wave_id = self.properties['max_waves_per_simd'] * self.properties['simd_per_cu'] - 1
     self.max_private_segment_size = 4096
-    wave_scratch_len = round_up(((max_wave_id + 1) * self.max_private_segment_size), 256) # gfx11 requires alignment of 256
+    # <gfx103 requires alignment of 1024, >=gfx11 requires 256
+    wave_scratch_len = round_up(((max_wave_id + 1) * self.max_private_segment_size), 256 if self.target >= 110000 else 1024)
     self.scratch_len = (max_cu_id + 1) * self.properties['max_slots_scratch_cu'] * wave_scratch_len
     self.scratch = self._gpu_alloc(self.scratch_len, kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
     self.has_scratch_base_registers = self.target >= 110000
     engines = self.properties['array_count'] // self.properties['simd_arrays_per_engine']
-    self.tmpring_size = (wave_scratch_len // 256) << 12 | (self.scratch_len // (wave_scratch_len * engines))
+    waves = wave_scratch_len // (256 if self.target >= 110000 else 1024)
+    # >=gfx11 wavesize is per SE
+    wavesize = self.scratch_len // ((wave_scratch_len * engines) if self.target >= 110000 else wave_scratch_len)
+    self.tmpring_size = waves << 12 | wavesize
 
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
     sgrp_size_per_cu, lds_size_per_cu, hwreg_size_per_cu = 0x4000, 0x10000, 0x1000
@@ -422,6 +396,11 @@ class AMDDevice(HCQCompiled):
     self.compute_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x100000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size)
     self.sdma_queue = self._alloc_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000)
+
+    self.queue_event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_type=kfd.KFD_IOC_EVENT_SIGNAL, auto_reset=1)
+    self.queue_event_mailbox_ptr = AMDDevice.event_page.va_addr + self.queue_event.event_slot_index * 8
+    self.queue_event_arr = (kfd.struct_kfd_event_data)(event_id=self.queue_event.event_id)
+    self.queue_event_arr_ptr = ctypes.addressof(self.queue_event_arr)
 
     self.mem_fault_event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_type=kfd.KFD_IOC_EVENT_MEMORY)
     self.hw_fault_event = kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_type=kfd.KFD_IOC_EVENT_HW_EXCEPTION)

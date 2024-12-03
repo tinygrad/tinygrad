@@ -697,6 +697,9 @@ class TestOps(unittest.TestCase):
     for val in range(1, 5):
       helper_test_op([(45,65)], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val))
       helper_test_op([()], lambda x: torch.nn.functional.celu(x,val), lambda x: x.celu(val))
+  def test_selu(self):
+    helper_test_op([(45,65)], torch.nn.functional.selu, Tensor.selu)
+    helper_test_op([()], torch.nn.functional.selu, Tensor.selu)
 
   def test_abs(self):
     helper_test_op([(45,65)], torch.abs, Tensor.abs)
@@ -2038,9 +2041,7 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.avg_pool2d(x, kernel_size=ksz), rtol=1e-5)
 
-  # TODO fix edge case
-  @unittest.expectedFailure
-  def test_avg_pool2d_failure(self):
+    # regression test for https://github.com/tinygrad/tinygrad/pull/7581
     helper_test_op([(1,1,8,8)],
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(1,2), padding=(0,1), stride=(5,1)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(1,2), padding=(0,1), stride=(5,1)), rtol=1e-5)
