@@ -23,7 +23,7 @@ vec_imm = {0: "0x00", 1: "0x10", 2:"0x20", 3:"0x30"}
 
 size_prefix = {1: " byte ptr", 2: " word ptr", 4: " dword ptr", 8: " qword ptr"}
 
-def to_hex(x: int | float, dt:DType) -> str:
+def to_hex(x, dt:DType) -> str:
   if not dtypes.is_float(dt): return hex(x)
   if dt is dtypes.float64: return struct.unpack('<Q', struct.pack('<d', x))[0]
   return struct.unpack('<I', struct.pack('<f', x))[0]
