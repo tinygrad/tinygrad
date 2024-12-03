@@ -150,7 +150,6 @@
                     .reduce((accum, item) => item[1]>accum[1] ? item : accum,[0,0]);
 
                 if (prob < 0.25) continue;
-                console.log(class_id);
                 const label = yolo_classes[class_id];
                 const xc = output[index];
                 const yc = output[8400+index];
