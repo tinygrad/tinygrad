@@ -3,7 +3,7 @@ from typing import Tuple, List, Any, Optional
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram
 from tinygrad.ops import sint
 from tinygrad.device import BufferSpec
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address
@@ -221,19 +221,6 @@ class AMDCopyQueue(HWQueue):
     dev.sdma_queue.write_ptr[0] = dev.sdma_queue.put_value
     dev.sdma_queue.doorbell[0] = dev.sdma_queue.put_value
 
-class AMDArgsState(HCQArgsState):
-  def __init__(self, ptr:int, prg:AMDProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
-    super().__init__(ptr, prg, bufs, vals=vals)
-
-    self.bufs = to_mv(self.ptr, len(bufs) * 8).cast('Q')
-    self.vals = to_mv(self.ptr + len(bufs) * 8, len(vals) * 4).cast('I')
-
-    self.bufs[:] = array.array('Q', [b.va_addr for b in bufs])
-    self.vals[:] = array.array('I', vals)
-
-  def update_buffer(self, index:int, buf:HCQBuffer): self.bufs[index] = buf.va_addr
-  def update_var(self, index:int, val:int): self.vals[index] = val
-
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
@@ -266,7 +253,7 @@ class AMDProgram(HCQProgram):
     self.enable_private_segment_sgpr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
     additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
 
-    super().__init__(AMDArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
+    super().__init__(CLikeArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))

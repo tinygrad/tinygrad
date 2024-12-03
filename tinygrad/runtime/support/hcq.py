@@ -228,6 +228,21 @@ class HCQArgsState(Generic[ProgramType]):
   def update_buffer(self, index:int, buf:HCQBuffer): raise NotImplementedError("need update_buffer")
   def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
 
+class CLikeArgsState(HCQArgsState[ProgramType]):
+  def __init__(self, ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), fill_prefix=Optional[memoryview]=None):
+    super().__init__(ptr, prg, bufs, vals=vals)
+
+    if fill_prefix is not None: to_mv(self.ptr, len(fill_prefix))[:] = fill_prefix
+
+    self.bufs = to_mv(self.ptr + len(fill_prefix or []), len(bufs) * 8).cast('Q')
+    self.vals = to_mv(self.ptr + len(fill_prefix or []) + len(bufs) * 8, len(vals) * 4).cast('I')
+
+    self.bufs[:] = array.array('Q', [b.va_addr for b in bufs])
+    self.vals[:] = array.array('I', vals)
+
+  def update_buffer(self, index:int, buf:HCQBuffer): self.bufs[index] = buf.va_addr
+  def update_var(self, index:int, val:int): self.vals[index] = val
+
 class HCQProgram(Generic[DeviceType]):
   def __init__(self, args_state_t:Type[HCQArgsState], dev:DeviceType, name:str, kernargs_alloc_size:int):
     self.args_state_t, self.dev, self.name, self.kernargs_alloc_size = args_state_t, dev, name, kernargs_alloc_size
