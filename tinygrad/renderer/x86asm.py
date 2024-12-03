@@ -15,7 +15,6 @@ x86_double_ops = {**{k:v[:-1]+'d' for k,v in x86_float_ops.items()}}
 # NOTE: are doubles vectorized? 2 doubles is "ups" not "lps", use a instead of u
 x86_vec2_ops = {**{k:v+"lps" for k,v in x86_mov_ops.items()}}
 x86_vec4_ops = {**{k:v+"ups" for k,v in x86_mov_ops.items()}}
-
 x86op = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86_signed_ops for x in dtypes.sints},
          **{x:x86_float_ops for x in dtypes.floats}, dtypes.float64:x86_double_ops, dtypes.float32.vec(2):x86_vec2_ops, dtypes.float32.vec(4):x86_vec4_ops}
 
@@ -23,7 +22,6 @@ gep_imm = {0: "0x00", 1: "0x40", 2:"0x80", 3:"0xC0"}
 vec_imm = {0: "0x00", 1: "0x10", 2:"0x20", 3:"0x30"}
 
 size_prefix = {1: " byte ptr", 2: " word ptr", 4: " dword ptr", 8: " qword ptr"}
-mov_sufix = {4: "d", 8: "q"}
 
 def to_hex(x: int | float, dt:DType) -> str:
   if not dtypes.is_float(dt): return hex(x)
@@ -55,14 +53,13 @@ x86_rewrite = PatternMatcher([
 
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx[x.src[0]]}\n.LOOP_{x.arg[0]}:"),
   (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x: f"inc {ctx[x.src[0]]}\ncmp {ctx[x.src[0]]}, {x.src[0].src[1].arg}\njl .LOOP_{x.src[0].arg[0]}"),
-
-  (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"mov{mov_sufix[x.dtype.itemsize] if ctx.r[x.src[0]] in ctx.all_regs else ""} {ctx[x]}, {ctx[x.src[0]]}"),
   # casting to <= int or if src is uint32(already zero extended) we just mov, to bigger uint we zero extend, to bigger sint we sign extend
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.ints)), name="x"),
    lambda ctx,x: f"mov {ctx[x]}, {ctx.regt(ctx.r[x.src[0]], x.dtype)}" if x.dtype.itemsize <= x.src[0].dtype.itemsize or x.src[0].dtype is dtypes.uint32 else None),
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints)), name="x"), lambda ctx,x: f"movzx {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.sints)), name="x"), lambda ctx,x: f"movs{'x' if x.src[0].dtype.itemsize < 4 else 'xd'} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"{float_cast(x.dtype, x.src[0].dtype)} {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"mov{'q' if x.dtype.itemsize == 8 else 'd'} {ctx[x]}, {ctx[x.src[0]]}"),
   # no cmov for floats
   (UPat(Ops.WHERE, dtype=dtypes.floats, name="x"),
    lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[1]]}\ntest {ctx[x.src[0]]}, 1\njnz .L{ctx.uop_i[x]}\n{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[2]]}\n.L{ctx.uop_i[x]}:"),
@@ -161,8 +158,8 @@ class X86Renderer(Renderer):
     self.uop_i = uop_i
 
     def is_imm(u:UOp) -> bool: return u.op is Ops.CONST and not dtypes.is_float(u.dtype) and abs(u.arg) <= dtypes.max(dtypes.int32)
-    def is_reg(loc:str) -> bool: return loc in self.all_regs
     def is_mem(u:UOp) -> bool: return u in r and u in mem and r[u] == mem[u]
+    def is_reg(loc:str) -> bool: return loc in self.all_regs
     def free_reg(reg:str): float_regs.append(reg) if reg.startswith("xmm") else gen_regs.append(reg)
 
     def mov_to_reg(u:UOp, reg:str) -> str:
