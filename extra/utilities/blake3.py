@@ -20,6 +20,7 @@ def mix(states: Tensor, chunks: Tensor) -> Tensor:
       states[d] = rotr(states[d] ^ states[a], 16 if m is mx else 8)
       states[c] = states[c] + states[d]
       states[b] = rotr(states[b] ^ states[c], 12 if m is mx else 7)
+  return states.realize()
 
 def compress_blocks(states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
   for _ in range(6):
@@ -28,12 +29,14 @@ def compress_blocks(states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
   mix(states, data)
   states[:8] = states[:8] ^ states[8:]
   states[8:] = chain_vals[:8] ^ states[8:]
-  return states
+  return states.realize()
 
 def compress_chunks(states: Tensor, data: Tensor, chain_vals: Tensor, info: Tensor) -> Tensor:
   for i in range(16): # parallel over chunks, sequential over blocks
-    compress_blocks(states[i].contiguous(), data[i].contiguous(), chain_vals[i].contiguous())
-    if i < data.shape[1] - 1: states[i + 1, :8] = states[i, :8] # propagate chaining values
+    compressed = compress_blocks(states[i].contiguous(), data[i].contiguous(), chain_vals[i].contiguous()).clone().realize()
+    if i < data.shape[1] - 1:
+      states[i, :] = compressed
+      states[i + 1, :8] = compressed[:8] # propagate chaining values
   states = states * (info < PAD)
   end_block = (states * (info < DEFAULT_LEN)).sum(0) # pick out partial chunk end block
   return (states[-1, :] | end_block)[:8] # last block of each chunk + partial chunk end block
@@ -95,7 +98,8 @@ def blake3(tensor: Tensor, max_memory: int = 1024**3) -> str:
   for _ in range(n_steps): # tree-hash chain value pairs ~halving them in each step
     chain_vals, leftover_chain_val = pairwise_concat(chain_vals)
     valid = chain_vals.any(0)
-    chain_vals = compress(chain_vals.contiguous(), compress_tree, counts, info, parents, final_step)[:8] * valid
+    chain_vals = compress(chain_vals.contiguous(), compress_tree, counts, info, parents, final_step)
+    chain_vals = (chain_vals[:8] * valid)
     insertion_mask = (valid ^ valid.roll(1, -1))
     insertion_mask[0] = 0
     chain_vals = insertion_mask.where(leftover_chain_val, chain_vals)
