@@ -898,7 +898,7 @@ def div_and_mod_folding(x: UOp, c: int, which: Literal[Ops.MOD, Ops.IDIV], split
   # simple cancel div/mod case
   if (q:=x.vmin//c) == (x.vmax//c):
     if which is Ops.MOD: return x - q*c
-    else: return x.const_like(q)
+    return x.const_like(q)
 
   svars, factors, quotients, remainders, gcd, div, const, offset, something_changed = [], [], [], [], c, 1, 0, 0, False
   for u in split_uop(x, Ops.ADD):
@@ -921,7 +921,7 @@ def div_and_mod_folding(x: UOp, c: int, which: Literal[Ops.MOD, Ops.IDIV], split
     r = (offset+remainders[0])%c - offset%c
     offset -= r * v.vmin
     if which is Ops.MOD: return r*v + offset
-    else: return (factors[0]-r)//c * v + (const-offset)//c
+    return (factors[0]-r)//c * v + (const-offset)//c
 
   # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
   # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
@@ -933,12 +933,12 @@ def div_and_mod_folding(x: UOp, c: int, which: Literal[Ops.MOD, Ops.IDIV], split
   else: # vmin/vmax of the remainder is between 0 and c, we can remove the mod/div
     remainders = [min(r, r-c, key=abs) for r in remainders]
     if which is Ops.MOD: return functools.reduce(operator.add, [r*v for r,v in zip(remainders,svars)], offset)
-    else: return functools.reduce(operator.add, [(f-r)//c * v for f,r,v in zip(factors, remainders,svars)], (const-offset)//c)
+    return functools.reduce(operator.add, [(f-r)//c * v for f,r,v in zip(factors, remainders,svars)], (const-offset)//c)
 
   if gcd != 1: something_changed = True
   if not something_changed:
     if which is Ops.IDIV and (1 < div < c) and (newx:=div_and_mod_folding(x, div, Ops.IDIV)) is not None: return newx//(c//div)
-    else: return None
+    return None
   quo, rem = const//c, (const%c)//gcd
   for q,r,f,v in zip(quotients, remainders, factors, svars):
     if which is Ops.IDIV and (not split_rem) and r!=0:
