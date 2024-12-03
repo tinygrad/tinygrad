@@ -321,7 +321,7 @@ class Tensor(SimpleMathTrait):
     if self.dtype == dtypes.bfloat16: return self.float().numpy()
     assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return np.frombuffer(self._data(), dtype=_to_np_dtype(self.lazydata.buffer.dtype)).reshape(self.shape)
+    return np.frombuffer(self._data(), dtype=_to_np_dtype(self.lazydata.base.buffer.dtype)).reshape(self.shape)
 
   def clone(self) -> Tensor:
     """
