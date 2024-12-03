@@ -35,8 +35,8 @@ def compress_chunks(states: Tensor, data: Tensor, chain_vals: Tensor, info: Tens
 
 def compress_blocks(states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
   for _ in range(6):
-    states = mix(states, data).realize()
-    data = permute_data(data).realize()
+    states = mix(states, data).clone().realize()
+    data = permute_data(data).clone().realize()
   states = mix(states, data)
   states = (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:])
   return states.realize()
@@ -111,7 +111,7 @@ if __name__ == "__main__":
   import sys
 
   arg = sys.argv[1]
-  max_memory = (1024**3 * 2) - (1024**2 * 100)
+  max_memory = (1024**3 * 3)
 
   if arg == "warmup":
     # warmup the JIT
