@@ -56,7 +56,7 @@
         const offscreenContext = offscreenCanvas.getContext('2d');
 
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            navigator.mediaDevices.getUserMedia({ audio: false, video: true }).then(function (stream) {
+            navigator.mediaDevices.getUserMedia({ audio: false,  video: { facingMode: { exact: "environment" }}}).then(function (stream) {
                 video.srcObject = stream;
                 video.onloadedmetadata = function() {
                     canvas.width = video.clientWidth;
@@ -79,14 +79,13 @@
             const ctx = canvas.getContext("2d");
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.lineWidth = 3;
-            ctx.font = "20px serif";
+            ctx.font = "30px serif";
             const scaleX = canvas.width / 640;
             const scaleY = canvas.height / 640;
 
             boxes.forEach(([x1, y1, x2, y2, label]) => {
                 const classIndex = yolo_classes.indexOf(label);
                 const color = classColors[classIndex];
-                const textWidth = ctx.measureText(label).width;
                 ctx.strokeStyle = color;
                 ctx.fillStyle = color;
 
@@ -98,9 +97,10 @@
                 let boxHeight = adjustedY2 - adjustedY1;
 
                 ctx.strokeRect(adjustedX1, adjustedY1, boxWidth, boxHeight);
+                const textWidth = ctx.measureText(label).width;
                 ctx.fillRect(adjustedX1, adjustedY1 - 25, textWidth + 10, 25);
-                ctx.fillStyle = "#000000";
-                ctx.fillText(label, adjustedX1, adjustedY1 - 7);
+                ctx.fillStyle = "#FFFFFF";
+                ctx.fillText(label, adjustedX1 + 10, adjustedY1 - 7);
             });
         }
 

@@ -1,5 +1,7 @@
 from tinygrad.nn import Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
+from tinygrad.device import is_dtype_supported
+from tinygrad import dtypes
 import numpy as np
 from itertools import chain
 from pathlib import Path
@@ -387,7 +389,7 @@ class YOLOv8:
     yolov8_head_weights = [(22, self.head)]
     return [*zip(backbone_modules, self.net.return_modules()), *zip(yolov8neck_modules, self.fpn.return_modules()), *yolov8_head_weights]
 
-def convert_f16_safetensor_to_f32(input_file):
+def convert_f16_safetensor_to_f32(input_file, output_file):
   with open(input_file, 'rb') as f:
     metadata_length = int.from_bytes(f.read(8), 'little')
     metadata = json.loads(f.read(metadata_length).decode())
@@ -396,7 +398,7 @@ def convert_f16_safetensor_to_f32(input_file):
   for v in metadata.values():
     if v["dtype"] == "F16": v.update({"dtype": "F32", "data_offsets": [offset * 2 for offset in v["data_offsets"]]})
 
-  with open(input_file, 'wb') as f:
+  with open(output_file, 'wb') as f:
     new_metadata_bytes = json.dumps(metadata).encode()
     f.write(len(new_metadata_bytes).to_bytes(8, 'little'))
     f.write(new_metadata_bytes)
@@ -429,7 +431,13 @@ if __name__ == '__main__':
   yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
   
   weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
-  convert_weights_to_f32(fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location))
+  fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location)
+  f32_weights = weights_location.with_name(f"{weights_location.stem}_f32.safetensors")
+
+  if not is_dtype_supported(dtypes.half) and not f32_weights.exists():
+    convert_f16_safetensor_to_f32(weights_location, f32_weights)
+    weights_location = f32_weights
+
   state_dict = safe_load(weights_location)
   load_state_dict(yolo_infer, state_dict)
 
