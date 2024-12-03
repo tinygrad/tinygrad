@@ -1,8 +1,8 @@
 import functools, io, math
-from typing import Union, Tuple, Optional, List, Any, Literal, cast
+from typing import Union, Tuple, Optional, List, Any, cast
 from tinygrad.tensor import Tensor, _broadcast_shape
 from tinygrad.dtype import ImageDType, dtypes
-from tinygrad.helpers import prod, flatten, make_tuple
+from tinygrad.helpers import prod, flatten
 from extra.onnx import DTYPE_MAP, to_python_const
 import numpy as np
 
@@ -250,7 +250,6 @@ def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilat
     padding = [p for ps in zip(pads[:len(pads)//2][::-1], pads[len(pads)//2:][::-1]) for p in ps] if pads is not None else 0
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=padding)
 
-# TODO: this op has asymmetrical padding
 def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, output_shape=None, output_padding=0, strides=1):
   if kernel_shape is None: kernel_shape = W.shape[2:]
   if isinstance(strides, int): strides = [strides]*(W.ndim-2)
@@ -368,8 +367,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
 
   if mode == "nearest":
     indexes = [_apply_nearest_mode(index, shape, nearest_mode) for (index, shape) in zip(indexes, input_shape)]
-    # meshgrid
-    X = X[(..., *[idx.reshape(*(-1 if i == dim else 1 for i in range(len(sizes)))).expand(sizes) for dim, idx in enumerate(indexes)])]
+    X = X[(..., *Tensor.meshgrid(*indexes))]
   if mode == "linear":
     expand = list(X.shape)
     for i in range(-len(sizes), 0):
