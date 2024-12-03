@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Set
 import collections
 from dataclasses import dataclass
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite
@@ -32,10 +32,17 @@ def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]],
   to_append: List[UOp] = []
   new_blocks: Dict[Tuple[UOp, ...], List[UOp]] = {}
   bb: BasicBlock = x.arg
+  new_ctx = bb.ctx
   in_this_block = set(bb.lst)
+  placed: Set[UOp] = set()
+
   for u in x.src:
-    if u.op not in DONT_PLACE_IN_BLOCK and len([y for y in children[u] if y not in in_this_block]) == 0:
-      # if it can go in blocks and all it's children are in the block, we add it to the block
+    if u.op is Ops.BLOCKFORK and len([y for y in x.src if y is u]) == u.arg: # block fork appears # of times in srcs
+      if u not in placed:
+        new_srcs += list(u.src)
+        placed.add(u)
+    elif u.op not in DONT_PLACE_IN_BLOCK and len([y for y in children[u] if y not in in_this_block]) == 0:
+      # if it can go in blocks and all its children are in the block, we add it to the block
       if block_ctxs[u] == bb.ctx:
         # if it's the same context, we place the UOp in this block and append the parents to it's srcs
         new_srcs += list(u.src)
@@ -46,7 +53,7 @@ def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]],
     else:
       # otherwise, we keep it in the srcs
       new_srcs.append(u)
-  if len(to_append) == 0 and len(new_blocks) == 0: return None
+  if len(to_append) == 0 and len(new_blocks) == 0 and len(placed) == 0: return None
 
   for rng,lst in new_blocks.items():
     new_block = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, tuple(lst)))
@@ -57,7 +64,7 @@ def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]],
         new_block = UOp(Ops.BLOCKEND, src=(new_block,),
                         arg=BasicBlock(tuple(lrng), (UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,)),), r))
     new_srcs.append(new_block)
-  return UOp(x.op, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(bb.ctx, tuple(to_append)+bb.lst, bb.end))
+  return UOp(x.op, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(tuple(dedup(new_ctx)), tuple(to_append)+bb.lst, bb.end))
 
 make_basic_blocks = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock((), (x,)))),
