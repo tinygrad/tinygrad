@@ -143,7 +143,6 @@
         
         function processOutput(output, img_width, img_height) {
             let boxes = [];
-            console.log(output)
             for (let index=0;index<8400;index++) {
                 const [class_id,prob] = [...Array(80).keys()]
                     .map(col => [col, output[8400*(col+4)+index]])
