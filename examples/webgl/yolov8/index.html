@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>YOLOv8 tinygrad WebGL</title>
+    <title>YOLOv8 tinygrad WebGPU</title>
     <script src="./net.js"></script>
     <style>
        body {
@@ -113,7 +113,7 @@
             const output = await net(new Float32Array(input));
             console.log("Inference took: " + (performance.now() - start) + " ms");
             start = performance.now();
-            let out = processOutput(output,img_width,img_height);
+            let out = processOutput(output[0],img_width,img_height);
             console.log("Postprocess took: " + (performance.now() - start) + " ms");
             return out;
         }
@@ -149,9 +149,8 @@
                     .map(col => [col, output[8400*(col+4)+index]])
                     .reduce((accum, item) => item[1]>accum[1] ? item : accum,[0,0]);
 
-                if (prob < 0.25) {
-                    continue;
-                }
+                if (prob < 0.25) continue;
+                console.log(class_id);
                 const label = yolo_classes[class_id];
                 const xc = output[index];
                 const yc = output[8400+index];

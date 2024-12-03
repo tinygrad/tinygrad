@@ -8,6 +8,7 @@ from collections import defaultdict
 import time, sys
 from tinygrad.helpers import fetch
 from tinygrad.nn.state import safe_load, load_state_dict
+import json
 
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 #The upsampling class has been taken from this pull request https://github.com/tinygrad/tinygrad/pull/784 by dc-dc-dc. Now 2(?) models use upsampling. (retinet and this)
@@ -386,28 +387,21 @@ class YOLOv8:
     yolov8_head_weights = [(22, self.head)]
     return [*zip(backbone_modules, self.net.return_modules()), *zip(yolov8neck_modules, self.fpn.return_modules()), *yolov8_head_weights]
 
-import json
-def convert_weights_to_f32(input_file):
-    with open(input_file, 'rb') as f:
-        metadata_length_bytes = f.read(8)
-        metadata_length = int.from_bytes(metadata_length_bytes, byteorder='little', signed=False)
-        metadata_json_bytes = f.read(metadata_length)
-        float32_values = np.fromfile(f, dtype=np.float16).astype(np.float32)
+def convert_f16_safetensor_to_f32(input_file):
+  with open(input_file, 'rb') as f:
+    metadata_length = int.from_bytes(f.read(8), 'little')
+    metadata = json.loads(f.read(metadata_length).decode())
+    float32_values = np.fromfile(f, dtype=np.float16).astype(np.float32)
 
-    meta = json.loads(metadata_json_bytes.decode())
-    for v in meta:
-        if meta[v]["dtype"] == "F16":
-            meta[v]["dtype"] = "F32"
-            meta[v]["data_offsets"] = [meta[v]["data_offsets"][0] * 2, meta[v]["data_offsets"][1] * 2]
+  for v in metadata.values():
+    if v["dtype"] == "F16": v.update({"dtype": "F32", "data_offsets": [offset * 2 for offset in v["data_offsets"]]})
 
-    new_json_bytes = json.dumps(meta).encode()
-    metadata_length_bytes = len(new_json_bytes).to_bytes(8, byteorder='little', signed=False)
-    f.close()
-    with open(input_file, 'wb') as f:
-        f.write(metadata_length_bytes)
-        f.write(new_json_bytes)
-        float32_values.tofile(f)
-        
+  with open(input_file, 'wb') as f:
+    new_metadata_bytes = json.dumps(metadata).encode()
+    f.write(len(new_metadata_bytes).to_bytes(8, 'little'))
+    f.write(new_metadata_bytes)
+    float32_values.tofile(f)
+
 if __name__ == '__main__':
 
   # usage : python3 yolov8.py "image_URL OR image_path" "v8 variant" (optional, n is default)
