@@ -189,8 +189,7 @@ class X86Renderer(Renderer):
 
     last_use: Dict[UOp, int] = {}
     for i,u in enumerate(uops):
-      for s in (s for s in u.src if s in last_use): last_use[s] = i
-      if u.dtype is not dtypes.void: last_use[u] = i
+      for var in (v for v in (u,) + u.src if v.dtype != dtypes.void): last_use[var] = i
 
     for i,u in enumerate(uops):
       if u.op is Ops.CONST:
@@ -210,7 +209,6 @@ class X86Renderer(Renderer):
         # these can't take imm values
         if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD): mov_to_reg(s, assign_reg(i, s.dtype))
         elif is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
-        else: assert is_imm(s) or s.op is Ops.RANGE and u.op is Ops.DEFINE_ACC or is_reg(r[s]), f"{s.op}, {s.dtype}, {r[s]}, {u.op}"
      
       if u.dtype != dtypes.void:
         if u.op is Ops.ASSIGN:
@@ -234,6 +232,6 @@ class X86Renderer(Renderer):
 
       # free dead regs
       for loc in (r.pop(v) for v in (u,) + u.src if v in r and last_use[v] == i):
-        if is_reg(loc) and loc not in r.values(): free_reg(loc)
+        if is_reg(loc): assert loc not in r.values(); free_reg(loc)
 
     return "\n".join([".text", f".global {name}", f"{name}:", "push rbp", "mov rbp, rsp", f"sub rsp, {stack_size}"] + kernel + [f"add rsp, {stack_size}", "pop rbp", "ret", "\n"])
