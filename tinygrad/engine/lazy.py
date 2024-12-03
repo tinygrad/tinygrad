@@ -81,7 +81,7 @@ class LazyBuffer(MathTrait):
     assert x.size == self.size, f"assign target must have same size {self.size=} != {x.size=}"
     assert self.is_realized, f"assign target must be realized {self}"
     return LazyBuffer.metaop(Ops.ASSIGN, self.shape, self.dtype, self.device, arg=None if self.st.contiguous else self.st,
-                             src=(self.base, x), enable_cache=True)
+                             src=(self, x), enable_cache=True) # NOTE: assign to VIEW is fine
 
   def can_view(self):
     return (self.st.consecutive and not self.is_unrealized_const() and not isinstance(self.dtype, ImageDType) and
