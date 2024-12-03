@@ -23,12 +23,12 @@ def mix(states: Tensor, chunks: Tensor) -> Tensor:
   return new_states.realize()
 
 def compress_chunks(states: Tensor, data: Tensor, chain_vals: Tensor, info: Tensor) -> Tensor:
-  new_states, last_state = [], states[0]
+  last_state, results = states[0], Tensor.empty((16, 8, states.shape[-1]), dtype=dtypes.uint32)
   for i in range(16): # parallel over chunks, sequential over blocks
-    next_state = last_state[:8].cat(states[i, 8:]).realize()
+    next_state = last_state[:8].cat(states[i, 8:]) # propagate chain value
     last_state = compress_blocks(next_state, data[i].contiguous(), chain_vals[i].contiguous())
-    new_states.append(last_state)
-  states = Tensor.stack(*new_states) * (info < PAD)
+    results[i] = last_state[:8]
+  states = results * (info < PAD)
   end_block = (states * (info < DEFAULT_LEN)).sum(0) # pick out the end block
   return (states[-1, :] | end_block)[:8] # combine last block of each chunk with end block
 
@@ -69,17 +69,17 @@ def create_state(iv: Tensor, counts: Tensor, info: Tensor, flags: Tensor) -> Ten
   states = iv.cat(iv[:, :4], counts, lengths, flags, dim=1) # create states
   return states * (info < PAD).cast(dtypes.uint32) # zero out padding
 
-def create_flags(info: Tensor, parents: Tensor, final_step: Tensor) -> Tensor:
+def create_flags(info: Tensor, parents: bool, final_step: bool) -> Tensor:
   flags = Tensor.zeros((16, 1, info.shape[-1]), dtype=dtypes.uint32).contiguous()
   flags[-1, 0] = flags[-1, 0] + 2 # chunk end flag
   flags = (flags + 2 * ((flags != 2) * (info < DEFAULT_LEN))) # chunk end flag for partial final chunk
   flags[0] = flags[0] + 1 # chunk start flag
-  flags = parents.where(4, flags) # parent flag
+  if parents: flags[:] = 4
   flags = (flags + (8 * (((info < PAD).sum() <= 16) * (info < DEFAULT_LEN)))) # add root flag if <= 1 chunk
-  flags = final_step.where(12, flags) * (info < PAD) # add final step flag and zero out padding
+  if final_step: flags[:] = 12
   return flags.cast(dtypes.uint32)
 
-def compress(data: Tensor, compressor: Callable, counts: Tensor, info: Tensor, parents: Tensor, final_step: Tensor) -> Tensor:
+def compress(data: Tensor, compressor: Callable, counts: Tensor, info: Tensor, parents: bool, final_step: bool) -> Tensor:
   IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
   iv = IV.reshape(1, 8, 1).expand(16, 8, info.shape[-1]).contiguous()
   states = create_state(iv, counts, info, create_flags(info, parents, final_step))
@@ -89,26 +89,19 @@ def compress_tree(states: Tensor, data: Tensor, iv: Tensor, _) -> Tensor: return
 
 def blake3(tensor: Tensor, max_memory: int = 1024**3) -> str:
   data, info, n_steps = tensor_to_blake_data(tensor, max_memory)
-  parents = final_step = Tensor.zeros((1,), dtype=dtypes.bool).contiguous()
   counts = Tensor.arange(0, data.shape[-1], dtype=dtypes.uint32).reshape(-1, 1).expand(-1, 16).reshape(-1, 16, 1).permute(1, 2, 0)
-  chain_vals = compress(data, compress_chunks, counts, info, parents, final_step)
+  chain_vals = compress(data, compress_chunks, counts, info, False, False)
   info = (info < DEFAULT_LEN).where(64, info)
-  counts, parents = Tensor.zeros((16, 1, data.shape[-1]), dtype=dtypes.uint32), Tensor.ones((1,), dtype=dtypes.bool)
-  final_step = chain_vals.any(0).sum(-1) == 2
-  tree_steps = math.ceil(math.log2(max(data.shape[-1], 1)))
-  results = Tensor.zeros((tree_steps + 1, 8), dtype=dtypes.uint32).contiguous()
-  results[0] = chain_vals[:, 0]
-  for i in range(tree_steps): # tree-hash chain value pairs ~halving them in each step
+  counts = Tensor.zeros((16, 1, data.shape[-1]), dtype=dtypes.uint32)
+  for i in range(n_steps): # tree-hash chain value pairs ~halving them in each step
     chain_vals, leftover_chain_val = pairwise_concat(chain_vals)
     valid = chain_vals.any(0)
-    chain_vals = compress(chain_vals.contiguous(), compress_tree, counts, info, parents, final_step)
+    chain_vals = compress(chain_vals.contiguous(), compress_tree, counts, info, True, i == n_steps - 1)
     chain_vals = (chain_vals[:8] * valid)
-    results[i + 1] = chain_vals[:, 0]
     insertion_mask = (valid ^ valid.roll(1, -1))
     insertion_mask[0] = 0
     chain_vals = insertion_mask.where(leftover_chain_val, chain_vals)
-    final_step = chain_vals.any(0).sum(-1) == 2
-  return results[n_steps].flatten().bitcast(dtypes.uint8).data().tobytes().hex()
+  return chain_vals[:, 0].flatten().bitcast(dtypes.uint8).data().tobytes().hex()
 
 if __name__ == "__main__":
   import time
