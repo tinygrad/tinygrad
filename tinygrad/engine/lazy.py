@@ -31,6 +31,7 @@ class LazyBuffer(MathTrait):
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a UOp, except the src is LazyBuffers and not UOps
+      assert self.op is not Ops.ASSIGN or srcs[0].base.realized is not None, "assign target must be realized"
       assert all_same([x.st.shape for x in self.srcs]), f"src shape mismatch! {self.srcs}"
 
       if self.op is Ops.BUFFER_VIEW:
