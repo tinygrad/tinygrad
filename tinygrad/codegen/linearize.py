@@ -28,6 +28,20 @@ class BasicBlock:
 def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]], x:UOp):
   block_ctxs, children = ctx
 
+  if x.op is Ops.BLOCKEND:
+    # if it's a BLOCKEND, see if we are done with placement. if all the children of the range are in here
+    in_this_block = set(x.arg.lst)
+    if len([y for y in children[x.arg.end] if y not in in_this_block]) == 0:
+      # find the parent block that has the BLOCKSTART in the ctx
+      parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and UOp(Ops.BLOCKSTART, src=(x.arg.end,)) in y.arg.ctx]
+      if len(parent_blocks) == 1:
+        parent_block = parent_blocks[0]
+        # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
+        early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
+        return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not parent_block)+parent_block.src,
+                  BasicBlock(tuple(y for y in x.arg.ctx if y is not x.arg.end), tuple(early_ops)+parent_block.arg.lst+tuple(late_ops)))
+      assert not len(parent_blocks)
+
   new_srcs: List[UOp] = []
   to_append: List[UOp] = []
   new_blocks: Dict[Tuple[UOp, ...], List[UOp]] = {}
@@ -37,7 +51,12 @@ def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]],
   placed: Set[UOp] = set()
 
   for u in x.src:
-    if u.op is Ops.BLOCKFORK and len([y for y in x.src if y is u]) == u.arg: # block fork appears # of times in srcs
+    if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(bb.ctx) or (bb.end is not None and bb.end in u.arg.ctx)):
+      # block merging. NOTE: this can't appear in srcs twice or it would be a BLOCKFORK
+      new_ctx += u.arg.ctx
+      new_srcs += list(u.src)
+      to_append += u.arg.lst
+    elif u.op is Ops.BLOCKFORK and len([y for y in x.src if y is u]) == u.arg: # block fork appears # of times in srcs
       if u not in placed:
         new_srcs += list(u.src)
         placed.add(u)
