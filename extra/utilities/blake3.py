@@ -8,38 +8,38 @@ from tinygrad.tensor import Tensor
 PAD, DEFAULT_LEN = 66, 65 # symbolic constants for masks
 
 @jit.TinyJit
-def permute_data(data: Tensor) -> Tensor: data[:] = data[[2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]]
+def permute_data(data: Tensor) -> Tensor: return data[[2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]].realize()
 
 @jit.TinyJit
 def mix(states: Tensor, chunks: Tensor) -> Tensor:
   def rotr(x: Tensor, n: int) -> Tensor: return ((x << (32 - n)) | (x >> n))
+  xs = [states[i] for i in range(16)] # for intermediate states
   for i, (a,b,c,d) in enumerate([(0,4,8,12), (1,5,9,13), (2,6,10,14), (3,7,11,15), (0,5,10,15), (1,6,11,12), (2,7,8,13), (3,4,9,14)]):
     mx, my = chunks[i * 2], chunks[i * 2 + 1]
     for m in (mx, my):
-      states[a] = states[a] + states[b] + m
-      states[d] = rotr(states[d] ^ states[a], 16 if m is mx else 8)
-      states[c] = states[c] + states[d]
-      states[b] = rotr(states[b] ^ states[c], 12 if m is mx else 7)
-  return states.realize()
+      xs[a] = (xs[a] + xs[b] + m)
+      xs[d] = rotr(xs[d] ^ xs[a], 16 if m is mx else 8)
+      xs[c] = xs[c] + xs[d]
+      xs[b] = rotr(xs[b] ^ xs[c], 12 if m is mx else 7)
+  return Tensor.cat(*xs).reshape(16, states.shape[1]).realize()
+
+def compress_chunks(states: Tensor, data: Tensor, chain_vals: Tensor, info: Tensor) -> Tensor:
+  new_states, last_state = [], states[0]
+  for i in range(16): # parallel over chunks, sequential over blocks
+    next_state = last_state[:8].cat(states[i, 8:]).realize()
+    last_state = compress_blocks(next_state, data[i].contiguous(), chain_vals[i].contiguous())
+    new_states.append(last_state)
+  states = Tensor.stack(*new_states) * (info < PAD)
+  end_block = (states * (info < DEFAULT_LEN)).sum(0) # pick out the end block
+  return (states[-1, :] | end_block)[:8] # combine last block of each chunk with end block
 
 def compress_blocks(states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
   for _ in range(6):
-    mix(states, data)
-    permute_data(data)
-  mix(states, data)
-  states[:8] = states[:8] ^ states[8:]
-  states[8:] = chain_vals[:8] ^ states[8:]
+    states = mix(states, data).realize()
+    data = permute_data(data).realize()
+  states = mix(states, data)
+  states = (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:])
   return states.realize()
-
-def compress_chunks(states: Tensor, data: Tensor, chain_vals: Tensor, info: Tensor) -> Tensor:
-  for i in range(16): # parallel over chunks, sequential over blocks
-    compressed = compress_blocks(states[i].contiguous(), data[i].contiguous(), chain_vals[i].contiguous()).clone().realize()
-    if i < data.shape[1] - 1:
-      states[i, :] = compressed
-      states[i + 1, :8] = compressed[:8] # propagate chaining values
-  states = states * (info < PAD)
-  end_block = (states * (info < DEFAULT_LEN)).sum(0) # pick out partial chunk end block
-  return (states[-1, :] | end_block)[:8] # last block of each chunk + partial chunk end block
 
 def tensor_to_blake_data(tensor: Tensor, max_memory: int) -> Tuple[Tensor, Tensor]:
   assert max_memory % 1024 == 0, "max_memory must be divisible by 1024"
@@ -105,3 +105,38 @@ def blake3(tensor: Tensor, max_memory: int = 1024**3) -> str:
     chain_vals = insertion_mask.where(leftover_chain_val, chain_vals)
     final_step = chain_vals.any(0).sum(-1) == 2
   return chain_vals[:, 0].flatten().bitcast(dtypes.uint8).data().tobytes().hex()
+
+if __name__ == "__main__":
+  import time
+  import sys
+
+  arg = sys.argv[1]
+  max_memory = (1024**3 * 2) - (1024**2 * 100)
+
+  if arg == "warmup":
+    # warmup the JIT
+    print("\nWarming up...")
+    def warmup(size):
+      print(f"Warming up {size / 1024 / 1024 :.1f} MB...")
+      warmup_data = Tensor.rand(size // 2, dtype=dtypes.float16)
+      blake3(warmup_data, max_memory=max_memory)
+    warmup(max_memory)
+  else:
+    def benchmark_size(size_bytes):
+      print(f"\nBenchmarking {size_bytes / 1024 / 1024 :.1f} MB...")
+      data = Tensor.rand(size_bytes // 2, dtype=dtypes.float16)
+      size = data.numel() * data.element_size()
+
+      start = time.time()
+      blake3(data, max_memory=max_memory)
+      end = time.time()
+
+      elapsed = end - start
+      throughput = size / elapsed / 1e6  # MB/s
+      print(f"Time: {elapsed:.2f}s")
+      print(f"Throughput: {throughput:.1f} MB/s")
+
+    size_mb = float(sys.argv[1])
+    size = int(size_mb * 1024 * 1024)
+
+    benchmark_size(size)
