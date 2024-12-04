@@ -56,7 +56,7 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {vec_imm[i]}" for i,s in enumerate(x.src))),
   # range
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx[x.src[0]]}\n.LOOP_{x.arg}:"),
-  (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x: f"inc {ctx[x.src[0]]}\ncmp {ctx[x.src[0]]}, {x.src[0].src[1].arg}\njl .LOOP_{x.src[0].arg}"),
+  (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x: f"inc {ctx[x.src[0]]}\ncmp {ctx[x.src[0]]}, {ctx[x.src[0].src[1]]}\njl .LOOP_{x.src[0].arg}"),
   # casting
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints),), name="x"), lambda ctx,x: f"movzx {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.sints),), name="x"),
@@ -87,6 +87,7 @@ x86_rewrite = PatternMatcher([
 
 x86_matcher = PatternMatcher([
   # TODO: casts from uint64 to float are complicated
+  # TODO: bitcast from uint64 to uint8 is broken
   # can't cast from float to int8/16 directly and vice versa
   (UPat(Ops.CAST, dtype=(dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16), src=(UPat(dtype=dtypes.floats),), name="c"),
     lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
@@ -202,7 +203,7 @@ class X86Renderer(Renderer):
           mov_to_reg(u, "r15")
           mov_to_stack(u)
       elif u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
-        if u.arg < 6: r[u] = assign_reg(i, u.dtype)
+        if i < 6: r[u] = assign_reg(i, u.dtype)
         else: # value is in stack instead of register, TODO: fix this
           r[u] = mem[u] = f"[rbp + {stack_size}]"
           stack_size += 8
@@ -223,6 +224,8 @@ class X86Renderer(Renderer):
           for var in (v for v in r if is_reg(r[v]) and v.op is not Ops.RANGE):
             free_reg(r[var])
             mov_to_stack(var)
+          # TODO?: if we do the cmp at the start of the loop we don't need this
+          last_use[u.src[1]] = max(last_use[u], last_use[u.src[1]])
         # render x86 assembly
         if (l:=x86_rewrite.rewrite(u, ctx=self)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
