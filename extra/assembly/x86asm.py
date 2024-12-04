@@ -30,9 +30,8 @@ def to_hex(x, dt:DType) -> str:
   return hex(struct.unpack('<I', struct.pack('<f', x))[0])
 
 def cflag(x:UOp) -> str:
-  if x.op is Ops.CMPLT: return "setl" if x.src[0].dtype in dtypes.sints else "setb"
   if x.op is Ops.CMPNE: return "setne"
-  raise RuntimeError(f"invalid op for cmp flag: {x.op}")
+  return "setl" if x.src[0].dtype in dtypes.sints else "setb"
 
 def float_cast(x:DType, s:DType) -> str:
   cfrom = "si" if not dtypes.is_float(s) else "sd" if s.itemsize == 8 else "ss"
@@ -142,7 +141,7 @@ class X86Renderer(Renderer):
     if self.r[x] != "rax" and "rax" in self.r.values(): l += "\npop rax"
     return l
 
-  # 64 bit int reg to lower bit reg
+  # 64 bit reg to lower bit reg
   def regt(self, reg:str, dt:DType) -> str:
     if dt.itemsize == 8 or dtypes.is_float(dt) or isinstance(dt, PtrDType): return reg
     if dt.itemsize == 4: return reg+'d' if reg[-1].isdigit() else 'e'+reg[1:]
@@ -152,7 +151,7 @@ class X86Renderer(Renderer):
 
   def __getitem__(self, key:UOp): return self.regt(self.r[key], key.dtype) if self.r[key] in self.all_regs else self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
-    # 64 bit general registers, rsp/rbp not included, r15 temp register for now
+    # 64 bit general registers, rsp/rbp not included, r15 temp register
     gen_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "rax", "rbx", "r10", "r11", "r12", "r13", "r14"]
     float_regs = ["xmm" + str(i) for i in range(0,16)]
     self.all_regs = gen_regs + float_regs
