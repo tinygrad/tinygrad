@@ -119,6 +119,10 @@ def block_reorder(in_block:UOp):
   in_degree: DefaultDict[UOp, int] = collections.defaultdict(int)
   priorities:Dict[UOp, int] = {}
 
+  # placement queue
+  queue:List[Tuple[int, Tuple, UOp]] = []
+  def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
+
   # get local children and assign priorities
   for u in reversed(in_block.arg.lst):
     for s in u.src:
@@ -127,15 +131,10 @@ def block_reorder(in_block:UOp):
         in_degree[u] += 1
     # put loads in the beginning of the block and prevent priority inversion
     priorities[u] = min([-1000 if u.op is Ops.LOAD else 0] + [priorities[x] for x in local_children[u]])
-
-  # placement queue
-  queue:List[Tuple[int, Tuple, UOp]] = []
-  def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
-
-  # place the first ones that don't have deps
-  for u in in_block.arg.lst:
+    # place the first ones that don't have deps
     if u not in in_degree: push(u)
 
+  # do priority toposort
   newlst = []
   while queue:
     _,_,x = heapq.heappop(queue)
