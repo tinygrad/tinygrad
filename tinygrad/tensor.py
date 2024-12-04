@@ -104,7 +104,7 @@ def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:Tuple[int, .
   # select from values for each True element in mask else select from self
   return mask.where(values, target)
 
-def _arange_select(indices:Tensor, arange_size, target_dim=0):
+def _arange_select(indices:Tensor, arange_size:sint, target_dim:sint=0):
   # indices have to be the same device as `self` Tensor
   return indices == Tensor.arange(arange_size, requires_grad=False, device=indices.device).reshape((arange_size,) + (1,)*target_dim)
 
@@ -2342,7 +2342,7 @@ class Tensor(SimpleMathTrait):
     assert all((d == dim or se >= ind) and sr >= ind for d,(se,ind,sr) in enumerate(zip(self.shape, index.shape, src.shape))), \
       f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
     # shrink src to index shape to shrink away the unused values
-    src = src.shrink((0,s) for s in index.shape)
+    src = src.shrink(tuple((0,s) for s in index.shape))
     # prepare src and mask for reduce w.r.t dim
     src = src.unsqueeze(-1).expand(src.shape + (self.shape[dim],)).transpose(-1, dim)
     mask = _arange_select(index.unsqueeze(-1), self.shape[dim]).transpose(-1, dim)
