@@ -177,6 +177,18 @@ class TestReduceOpsConstFolding(unittest.TestCase):
       _check_ast_count(0, reduceop((Tensor.randn(0, 1)+1).realize()))
       np.testing.assert_equal(reduceop((Tensor.randn(shape:=(0, 1))+1).realize()).numpy(), reduceop(np.empty(shape)))
 
+  def test_zero_size_realize_folded(self):
+    # non contiguous folded output doesn't realize
+    _check_ast_count(0, Tensor.empty(1, 0).sum())
+    # contiguous folded const can still schedule
+    a = Tensor.empty(1, 0).sum().contiguous()
+    _check_ast_count(2, a+2)
+    self.assertIsNotNone(a.lazydata.realized)
+    np.testing.assert_equal((Tensor.empty(1, 0).sum().contiguous()+2).numpy(), 2)
+    # otherwise we just fuse it
+    _check_ast_count(1, (Tensor.empty(1, 0).sum()+2).contiguous())
+    np.testing.assert_equal((Tensor.empty(1, 0).sum()+2).numpy(), 2)
+
   def test_const_prod(self):
     _check_ast_count(0, Tensor.full((2, 3), fill_value=2).prod())
     np.testing.assert_equal(Tensor.full((2, 3), fill_value=2).prod().numpy(), 2**(2*3))
