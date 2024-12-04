@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Set
 import collections
 from dataclasses import dataclass
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite
@@ -27,46 +27,11 @@ class BasicBlock:
 
 def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]], x:UOp):
   block_ctxs, children = ctx
-  new_srcs: List[UOp] = []
-  to_append: List[UOp] = []
-  new_blocks: Dict[Tuple[UOp, ...], List[UOp]] = {}
-  bb: BasicBlock = x.arg
-  in_this_block = set(bb.lst)
-  for u in x.src:
-    if u.op in DONT_PLACE_IN_BLOCK or len([y for y in children[u] if y not in in_this_block]) > 0:
-      # if it's a fork or not placed, we don't place it
-      new_srcs.append(u)
-    elif (block_ctx:=block_ctxs[u]) == bb.ctx:
-      # if it's the same context, we place the UOp in this block and append the parents to it's srcs
-      new_srcs += list(u.src)
-      to_append.append(u)
-    else:
-      # otherwise, we create a new block with this UOp
-      new_blocks.setdefault(block_ctx, []).append(u)
-  if len(to_append) == 0 and len(new_blocks) == 0: return None
 
-  for rng,lst in new_blocks.items():
-    new_block = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, tuple(lst)))
-    lrng = list(rng)
-    for r in rng[::-1]:
-      if r not in bb.ctx and r.op is not Ops.BLOCKSTART:
-        lrng.remove(r)
-        new_block = UOp(Ops.BLOCKEND, src=(new_block,),
-                        arg=BasicBlock(tuple(lrng), (UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,)),), r))
-    new_srcs.append(new_block)
-  return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(bb.ctx, tuple(to_append)+bb.lst))
-
-make_basic_blocks = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock((), (x,)))),
-  (UPat(Ops.BLOCK, name="x"), append_to_block),
-])
-
-def block_merge(ctx, x:UOp):
-  # ctx is children here
   if x.op is Ops.BLOCKEND:
     # if it's a BLOCKEND, see if we are done with placement. if all the children of the range are in here
     in_this_block = set(x.arg.lst)
-    if len([y for y in ctx[x.arg.end] if y not in in_this_block]) == 0:
+    if len([y for y in children[x.arg.end] if y not in in_this_block]) == 0:
       # find the parent block that has the BLOCKSTART in the ctx
       parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and UOp(Ops.BLOCKSTART, src=(x.arg.end,)) in y.arg.ctx]
       if len(parent_blocks) == 1:
@@ -79,25 +44,55 @@ def block_merge(ctx, x:UOp):
 
   new_srcs: List[UOp] = []
   to_append: List[UOp] = []
-  new_ctx = x.arg.ctx
-  placed = set()
+  new_blocks: Dict[Tuple[UOp, ...], List[UOp]] = {}
+  bb: BasicBlock = x.arg
+  new_ctx = bb.ctx
+  in_this_block = set(bb.lst)
+  placed: Set[UOp] = set()
+
   for u in x.src:
-    if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(x.arg.ctx) or (x.arg.end is not None and x.arg.end in u.arg.ctx)):
-      # NOTE: this can't appear in srcs twice or it would be a BLOCKFORK
+    if u in placed: continue
+    if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(bb.ctx) or (bb.end is not None and bb.end in u.arg.ctx)):
+      # block merging. NOTE: this can't appear in srcs twice or it would be a BLOCKFORK
       new_ctx += u.arg.ctx
       new_srcs += list(u.src)
       to_append += u.arg.lst
+      placed.add(u)
     elif u.op is Ops.BLOCKFORK and len([y for y in x.src if y is u]) == u.arg: # block fork appears # of times in srcs
-      if u not in placed:
+      new_srcs += list(u.src)
+      placed.add(u)
+    elif u.op not in DONT_PLACE_IN_BLOCK and len([y for y in children[u] if y not in in_this_block]) == 0:
+      # if it can go in blocks and all its children are in the block, we add it to the block
+      if block_ctxs[u] == bb.ctx:
+        # if it's the same context, we place the UOp in this block and append the parents to it's srcs
         new_srcs += list(u.src)
-        placed.add(u)
+        to_append.append(u)
+      else:
+        # if it's a different context, we create a new block with this UOp
+        new_blocks.setdefault(block_ctxs[u], []).append(u)
+      placed.add(u)
     else:
-      # keep it in srcs
+      # otherwise, we keep it in the srcs
       new_srcs.append(u)
-  if len(to_append) == 0 and len(placed) == 0: return None
-  return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(tuple(dedup(new_ctx)), tuple(to_append)+x.arg.lst, x.arg.end))
+  if len(to_append) == 0 and len(new_blocks) == 0 and len(placed) == 0: return None
 
-pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
+  for rng,lst in new_blocks.items():
+    new_block = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, tuple(lst)))
+    lrng = list(rng)
+    for r in rng[::-1]:
+      if r not in bb.ctx and r.op is not Ops.BLOCKSTART:
+        lrng.remove(r)
+        new_block = UOp(Ops.BLOCKEND, src=(new_block,),
+                        arg=BasicBlock(tuple(lrng), (UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,)),), r))
+    new_srcs.append(new_block)
+  return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(tuple(dedup(new_ctx)), tuple(to_append)+bb.lst, bb.end))
+
+make_basic_blocks = PatternMatcher([
+  (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock((), (x,)))),
+  (UPat(Ops.BLOCK, name="x"), append_to_block),
+])
+
+pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), append_to_block),])
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
@@ -159,7 +154,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   sink = sink.substitute(new_forks)
 
   # final rewrite to merge all blocks into one
-  sink = graph_rewrite(sink, pm_block_merge, ctx=children)
+  sink = graph_rewrite(sink, pm_block_merge, ctx=(block_ctxs, children))
 
   # there should just be one block left, with a few parents with 0 srcs
   assert sink.op is Ops.BLOCK
