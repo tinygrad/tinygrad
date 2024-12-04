@@ -252,7 +252,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
     idx = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem, gidx0 * UOp.const(dtypes.int, 2)))
     val = UOp.const(dtypes.float, 42.0)
-    gate = gidx0.lt(UOp.const(dtypes.int, 1))
+    gate = gidx0<UOp.const(dtypes.int, 1)
     store = UOp(Ops.STORE, dtypes.void, (idx, val, gate))
     uops = to_uops_list([store])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
@@ -271,7 +271,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx))
     idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx))
     val = UOp.const(dtypes.float, 42.0)
-    gate = gidx0.lt(UOp.const(dtypes.int, 1))
+    gate = gidx0<UOp.const(dtypes.int, 1)
     stores = [UOp.store(idx0, val, gate), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
@@ -291,7 +291,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx))
     idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx))
     val = UOp.const(dtypes.float, 42.0)
-    gate = gidx0.lt(UOp.const(dtypes.int, 1))
+    gate = gidx0<UOp.const(dtypes.int, 1)
     stores = [UOp.store(idx0, val, gate), UOp.store(idx1, val, gate)]
     uops = to_uops_list(stores)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
