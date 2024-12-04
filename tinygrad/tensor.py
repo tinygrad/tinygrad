@@ -104,9 +104,8 @@ def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:Tuple[int, .
   # select from values for each True element in mask else select from self
   return mask.where(values, target)
 
-def _arange_select(indices:Tensor, arange_size:sint, target_dim:sint=0):
-  # indices have to be the same device as `self` Tensor
-  return indices == Tensor.arange(arange_size, requires_grad=False, device=indices.device).reshape((arange_size,) + (1,)*target_dim)
+def _arange_select(target:Tensor, arange_size:sint, target_dim:sint=0):
+  return target == Tensor.arange(arange_size, requires_grad=False, device=target.device).reshape((arange_size,) + (1,)*target_dim)
 
 ReductionStr = Literal["mean", "sum", "none"]
 
@@ -1121,7 +1120,7 @@ class Tensor(SimpleMathTrait):
         case list() | tuple() | Tensor():
           if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-          index = (index < 0).where(size, 0) + index # treat negative index values
+          index = (index.to(self.device) < 0).where(size, 0) + index # treat negative index values
         case int() | UOp(): # sint
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
@@ -3449,7 +3448,7 @@ class Tensor(SimpleMathTrait):
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
     assert reduction in ("mean", "sum", "none"), "reduction must be one of ['mean', 'sum', 'none']"
     log_probs, loss_mask = self.log_softmax(), (Y != ignore_index) if ignore_index != -1 else Y.ones_like(dtype=dtypes.bool)
-    y_counted = _arange_select(Y.flatten().reshape(-1, 1), self.shape[-1])
+    y_counted = _arange_select(Y.to(self.device).flatten().reshape(-1, 1), self.shape[-1])
     y = (y_counted * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
     smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
     unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
