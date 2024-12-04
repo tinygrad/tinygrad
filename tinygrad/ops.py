@@ -127,8 +127,9 @@ class Ops(FastEnum):
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 
-  # loads before math
+  # load/store before math
   LOAD = auto()
+  STORE = auto()
 
   # early INDEX
   INDEX = auto()
@@ -144,7 +145,6 @@ class Ops(FastEnum):
   WHERE = auto(); MULACC = auto() # noqa: E702
 
   # assignment ops
-  STORE = auto()
   ASSIGN = auto()
   BIND = auto()
 
