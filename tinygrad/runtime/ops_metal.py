@@ -86,7 +86,7 @@ class MetalCompiler(Compiler):
       else:
         ret = CompileError(errorMessage.decode())
     # llvm will create modules.timestamp in cache path and cache compilation of metal stdlib (250ms => 8ms compilation time)
-    # note that llvm won't necessarily create anything else here as apple has prebuilt versions of many standart libraries
+    # note that llvm won't necessarily create anything else here as apple has prebuilt versions of many standard libraries
     params = f'-fno-fast-math -std=metal3.1 --driver-mode=metal -x metal -fmodules-cache-path="{os.path.join(_cache_dir, "tinygrad")}"'
     # source blob has to be padded to multiple of 4 but at least one 'b\x00' should be added, params blob just has to be null terminated
     src_padded, params_padded = src.encode() + b'\x00'*(round_up(len(src) + 1, 4) - len(src)), params.encode() + b'\x00'
