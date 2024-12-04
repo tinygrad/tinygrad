@@ -66,7 +66,7 @@ class TestVminVmaxProperties(unittest.TestCase):
     x = UOp.variable('x', 0, 10)
     y = UOp.variable('y', 1, 11)
     z = UOp.variable('z', 2, 12)
-    uop = x.lt(5).where(y, z)
+    uop = (x<5).where(y, z)
     self.assertEqual(uop.vmin, 1)
     self.assertEqual(uop.vmax, 12)
 
