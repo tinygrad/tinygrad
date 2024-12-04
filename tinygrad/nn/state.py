@@ -170,7 +170,7 @@ def tar_extract(t: Tensor) -> Dict[str, Tensor]:
 
 # torch support!
 
-def torch_load(fn:str) -> Dict[str, Tensor]:
+def torch_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   """
   Loads a torch .pth file from disk.
 
@@ -178,7 +178,10 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
   state_dict = nn.state.torch_load("test.pth")
   ```
   """
-  t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
+  t = fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn))
+  fobj = io.BufferedReader(TensorIO(t))
+
+  def passthrough_reset(v: bool): return fobj.seek(0, 0) or v
 
   offsets: Dict[Union[str, int], int] = {}
   lens: Dict[Union[str, int], int] = {}
@@ -220,8 +223,8 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       return intercept[name] if module_root == "torch" else super().find_class(module, name)
     def persistent_load(self, pid): return deserialized_objects.get(pid, pid)
 
-  if zipfile.is_zipfile(fn):
-    myzip = zipfile.ZipFile(fn, 'r')
+  if passthrough_reset(zipfile.is_zipfile(fobj)):
+    myzip = zipfile.ZipFile(fobj, 'r')
     base_name = myzip.namelist()[0].split('/', 1)[0]
     for n in myzip.namelist():
       if n.startswith(f'{base_name}/data/'):
@@ -229,8 +232,8 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
           offsets[n.split("/")[-1]] = myfile._orig_compress_start # type: ignore
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       return TorchPickle(myfile).load()
-  elif tarfile.is_tarfile(fn):
-    with tarfile.open(fn, "r") as tar:
+  elif passthrough_reset(tarfile.is_tarfile(fobj)):
+    with tarfile.open(fileobj=fobj, mode="r") as tar:
       storages_offset = tar.getmember('storages').offset_data
       f = unwrap(tar.extractfile('storages'))
       for i in range(TorchPickle(f).load()):  # num_storages
@@ -245,14 +248,13 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
         deserialized_objects[str(key)] = _rebuild_tensor_v2((None, storage_type, storage_id, None, -1), storage_offset, size, stride)
       return {k:v.tensor if isinstance(v, Parameter) else v for k,v in TorchPickle(unwrap(tar.extractfile('pickle'))).load().items()}
   else:
-    with open(fn, "rb") as f:
-      pkl = TorchPickle(f)
-      _, _, _, rwd, _, ids, base_offset = pkl.load(), pkl.load(), pkl.load(), f.tell(), pkl.load(), pkl.load(), f.tell()
-      for i in ids:
-        offsets[i] = base_offset + 8
-        base_offset += 8 + lens[i]
-      f.seek(rwd)
-      return TorchPickle(f).load()
+    pkl = TorchPickle(fobj)
+    _, _, _, rwd, _, ids, base_offset = pkl.load(), pkl.load(), pkl.load(), fobj.tell(), pkl.load(), pkl.load(), fobj.tell()
+    for i in ids:
+      offsets[i] = base_offset + 8
+      base_offset += 8 + lens[i]
+    fobj.seek(rwd)
+    return TorchPickle(fobj).load()
 
 def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """
