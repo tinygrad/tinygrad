@@ -513,6 +513,14 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
 
 # **************** ai.onnx.preview.training Ops ****************
 
+from tinygrad.nn.optim import Adam as TinyAdam
+from tinygrad.nn.optim import LARS
+
+def _group_inputs(inputs, n):
+  groups = len(inputs) // n
+  return [inputs[i::groups] for i in range(groups)]
+def _unpack_outputs(outputs, n): return tuple(itertools.chain.from_iterable(outputs[i::n] for i in range(n)))
+
 # # TODO not entirely sure these optimizers are correct
 # def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
 #   grouped_inputs = _group_inputs(inputs, 3)
@@ -527,28 +535,36 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
 #     ret.extend([X, H])
 #   ret = ret[::2] + ret[1::2]
 #   return tuple(ret)
-#
-# def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
-#   grouped_inputs = _group_inputs(inputs, 3)
-#   T, R.requires_grad = to_python_const(T), False
-#   beta_adjusted = beta if T > 0 else 1
-#   ret = []
-#   for X, G, V in grouped_inputs:
-#     X.grad = (norm_coefficient * X + G).realize()
-#     X.grad.requires_grad, V.requires_grad = False, False
-#     V.assign(alpha * V + beta_adjusted * X.grad).realize()
-#     if mode == "standard": X.assign(X.detach() - R * V).realize()
-#     elif mode == "nesterov": X.assign(X.detach() - R * (X.grad + alpha + V)).realize()
-#     ret.extend([X, V])
-#   ret = ret[::2] + ret[1::2]
-#   return tuple(ret)
 
-from tinygrad.nn.optim import Adam as TinyAdam
+def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
+  old_training = Tensor.training
+  Tensor.training = True
+  T, R = to_python_const(T), R.detach()
+  ret = []
+  for X, G, V in _group_inputs(inputs, 3):
+    G, V = G.detach(), V.detach()
+    X.grad = (norm_coefficient * X.detach() + G) * (beta if T > 0 else 1)
+    opt = LARS([X], momentum=alpha, nesterov=(mode=="nesterov"), classic=False, tcoef=0.0)
+    opt.b, opt.lr = [V], R
+    opt.step()
+    ret.extend([X, V])
+  Tensor.training = old_training
+  return _unpack_outputs(ret, 2)
 
-def _group_inputs(inputs, n):
-  groups = len(inputs) // n
-  return [inputs[i::groups] for i in range(groups)]
-def _unpack_outputs(outputs, n): return tuple(itertools.chain.from_iterable(outputs[i::n] for i in range(n)))
+
+  # grouped_inputs = _group_inputs(inputs, 3)
+  # T, R.requires_grad = to_python_const(T), False
+  # beta_adjusted = beta if T > 0 else 1
+  # ret = []
+  # for X, G, V in grouped_inputs:
+  #   X.grad = (norm_coefficient * X + G).realize()
+  #   X.grad.requires_grad, V.requires_grad = False, False
+  #   V.assign(alpha * V + beta_adjusted * X.grad).realize() ok
+  #   if mode == "standard": X.assign(X.detach() - R * V).realize()
+  #   elif mode == "nesterov": X.assign(X.detach() - R * (X.grad + alpha + V)).realize()
+  #   ret.extend([X, V])
+  # ret = ret[::2] + ret[1::2]
+  # return tuple(ret)
 
 def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
   old_training = Tensor.training
@@ -556,8 +572,8 @@ def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0
   T, R = to_python_const(T), R.detach()
   ret = []
   for X, G, V, H in _group_inputs(inputs, 4):
-    G, V, H = G.detach(), V.detach(), H.detach()
-    X.grad = (norm_coefficient * X.detach() + G)
+    G, V, H = G.detach(), V.detach(), H.detach()  # TODO we shouldn't have these detachs
+    X.grad = norm_coefficient * X.detach() + G
     opt = TinyAdam([X], b1=alpha, b2=beta, eps=epsilon)
     opt.m, opt.v, opt.lr = [V], [H], R
     # need no-op for m_hat and v_hat if T == 0
