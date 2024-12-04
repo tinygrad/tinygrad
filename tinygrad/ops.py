@@ -57,18 +57,14 @@ class SimpleMathTrait:
   def __ror__(self, x): return self.bitwise_or(x, True)
   def __rxor__(self, x): return self.xor(x, True)
 
-  def lt(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
-  def gt(self, x): return self.ufix(x).alu(Ops.CMPLT, self)
-  def ne(self, x): return self.alu(Ops.CMPNE, self.ufix(x))
-  def ge(self, x): return self.lt(x).logical_not()
-  def le(self, x): return self.gt(x).logical_not()
-  def eq(self, x): return self.ne(x).logical_not()
+  def __lt__(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
+  def __gt__(self, x): return self.ufix(x).alu(Ops.CMPLT, self)
+  def __ge__(self, x): return (self < x).logical_not()
+  def __le__(self, x): return (self > x).logical_not()
 
-  def __lt__(self, x): return self.lt(x)
-  def __gt__(self, x): return self.gt(x)
+  def ne(self, x): return self.alu(Ops.CMPNE, self.ufix(x))
+  def eq(self, x): return self.ne(x).logical_not()
   def __ne__(self, x): return self.ne(x)
-  def __ge__(self, x): return self.ge(x)
-  def __le__(self, x): return self.le(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
 class MathTrait(SimpleMathTrait):
@@ -97,42 +93,34 @@ class MathTrait(SimpleMathTrait):
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
-  SINK = auto()
-  CONTIGUOUS = auto()
-  PRELOAD = auto()
+  SINK = auto(); CONTIGUOUS = auto(); PRELOAD = auto() # noqa: E702
 
   # MetaOps
-  COPY = auto()
-  EMPTY = auto()
-  BUFFER_VIEW = auto()
+  COPY = auto(); EMPTY = auto(); BUFFER_VIEW = auto() # noqa: E702
 
   # blocks in linearizer
-  BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto()  # noqa: E702
+  BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto() # noqa: E702
 
-  EXPAND = auto()
-  CONTRACT = auto()
-  VIEW = auto()
-  DEFINE_GLOBAL = auto()
-  BUFFER = auto()
-  DEFINE_VAR = auto()
-  DEFINE_LOCAL = auto()
-  DEFINE_ACC = auto()
-  VALID = auto()
-  SPECIAL = auto()
-  NOOP = auto()
+  # misc ops
+  EXPAND = auto(); CONTRACT = auto() # noqa: E702
+  VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
+  DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
+  VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
 
   # reduce
   REDUCE_AXIS = auto()
 
   # helper ops
-  GEP = auto()
-  VECTORIZE = auto()
+  GEP = auto(); VECTORIZE = auto() # noqa: E702
 
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 
-  # loads before math
-  LOAD = auto()
+  # load/store before math
+  LOAD = auto(); STORE = auto() # noqa: E702
+
+  # early INDEX
+  INDEX = auto()
 
   # math ops
   WMMA = auto()
@@ -145,25 +133,14 @@ class Ops(FastEnum):
   WHERE = auto(); MULACC = auto() # noqa: E702
 
   # assignment ops
-  STORE = auto()
   ASSIGN = auto()
   BIND = auto()
 
-  # late INDEX
-  INDEX = auto()
-
   # control flow ops
-  BARRIER = auto()
-  RANGE = auto()
-  IF = auto()
-
-  # ops that are not graph nodes
-  ENDRANGE = auto()
-  ENDIF = auto()
+  BARRIER = auto(); RANGE = auto(); IF = auto(); ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
   # consts last!
-  VCONST = auto()
-  CONST = auto()
+  VCONST = auto(); CONST = auto() # noqa: E702
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG}
@@ -177,6 +154,7 @@ class GroupOp:
   # meta ops
   Meta = {Ops.COPY, Ops.EMPTY, Ops.BUFFER_VIEW}
   Buffer = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID}
+  Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKSTART}
 
   # BinaryOps that can be flipped
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.XOR, Ops.AND, Ops.OR}
@@ -192,7 +170,6 @@ def can_pad(u:UOp, edges:Dict[UOp, UOp], visisted:Set[UOp]) -> bool:
   if (len(u.src) == 2 and u.src[0] in edges) or u in visisted: return True
   visisted.add(u)
   return all(can_pad(x.base, edges, visisted) for x in u.src)
-
 
 # With True as the default, this matches the old symbolic behavior
 def resolve(x, default:bool=True):
