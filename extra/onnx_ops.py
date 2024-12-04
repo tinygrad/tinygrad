@@ -1,4 +1,4 @@
-import functools, itertools, io, math
+import functools, io, math
 from typing import Union, Tuple, Optional, List, Any, cast
 from tinygrad.tensor import Tensor, _broadcast_shape
 from tinygrad.dtype import ImageDType, dtypes
