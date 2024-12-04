@@ -2020,6 +2020,9 @@ class Tensor(SimpleMathTrait):
     """
     Applies average pooling over a tensor.
 
+    When `ceil_mode` is set to True, output shape will be determined using ceil division
+    When `count_include_pad` is set to True, zero padding will be included in the averaging calculation
+
     NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
 
     See: https://paperswithcode.com/method/average-pooling
@@ -2029,7 +2032,13 @@ class Tensor(SimpleMathTrait):
     print(t.avg_pool2d().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
+    print(t.avg_pool2d(ceil_mode=True).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
     print(t.avg_pool2d(padding=1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.avg_pool2d(padding=1, count_include_pad=False).numpy())
     ```
     """
     axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
@@ -2045,6 +2054,8 @@ class Tensor(SimpleMathTrait):
     """
     Applies max pooling over a tensor.
 
+    When `ceil_mode` is set to True, output shape will be determined using ceil division
+
     NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
 
     See: https://paperswithcode.com/method/max-pooling
@@ -2052,6 +2063,12 @@ class Tensor(SimpleMathTrait):
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(25).reshape(1, 1, 5, 5)
     print(t.max_pool2d().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.max_pool2d(ceil_mode=True).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.max_pool2d(padding=1).numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.max_pool2d(padding=1).numpy())
