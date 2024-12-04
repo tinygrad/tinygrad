@@ -130,6 +130,9 @@ class Ops(FastEnum):
   # loads before math
   LOAD = auto()
 
+  # early INDEX
+  INDEX = auto()
+
   # math ops
   WMMA = auto()
 
@@ -144,9 +147,6 @@ class Ops(FastEnum):
   STORE = auto()
   ASSIGN = auto()
   BIND = auto()
-
-  # late INDEX
-  INDEX = auto()
 
   # control flow ops
   BARRIER = auto()
