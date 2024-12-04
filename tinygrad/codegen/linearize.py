@@ -2,12 +2,11 @@ from __future__ import annotations
 from typing import List, Dict, Tuple, Optional
 import collections
 from dataclasses import dataclass
-from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite
+from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite, GroupOp
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import dedup, flatten, partition
 
-DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST,
-                       Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKSTART}
+DONT_PLACE_IN_BLOCK = {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST, *GroupOp.Block}
 
 def disp(y:UOp) -> str:
   if y.op is Ops.BLOCKSTART: return "w"+disp(y.src[0])
