@@ -129,8 +129,12 @@ def block_reorder(in_block:UOp):
     priorities[u] = min([-1000 if u.op is Ops.LOAD else 0] + [priorities[x] for x in local_children[u]])
 
   # placement queue
-  queue:List[Tuple[int, Tuple, UOp]] = [(priorities[u], u.tuplize, u) for u in in_block.arg.lst if u not in in_degree]
-  heapq.heapify(queue)
+  queue:List[Tuple[int, Tuple, UOp]] = []
+  def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
+
+  # place the first ones that don't have deps
+  for u in in_block.arg.lst:
+    if u not in in_degree: push(u)
 
   newlst = []
   while queue:
@@ -138,7 +142,7 @@ def block_reorder(in_block:UOp):
     newlst.append(x)
     for u in local_children[x]:
       in_degree[u] -= 1
-      if in_degree[u] == 0: heapq.heappush(queue, (priorities[u], u.tuplize, u))
+      if in_degree[u] == 0: push(u)
 
   assert len(newlst) == len(in_block.arg.lst), f"len mismatch {len(newlst)} != {len(in_block.arg.lst)}"
   return in_block.replace(arg=BasicBlock(in_block.arg.ctx, tuple(newlst)))
