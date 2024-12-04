@@ -15,6 +15,7 @@ x86_double_ops = {**{k:v[:-1]+'d' for k,v in x86_float_ops.items()}}
 # NOTE: are doubles vectorized? 2 doubles is "ups" not "lps", use a instead of u
 x86_vec2_ops = {**{k:v+"lps" for k,v in x86_mov_ops.items()}}
 x86_vec4_ops = {**{k:v+"ups" for k,v in x86_mov_ops.items()}}
+#TODO: add float16 support?
 x86op = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86_signed_ops for x in dtypes.sints},
          dtypes.float32:x86_float_ops, dtypes.float64:x86_double_ops, dtypes.float32.vec(2):x86_vec2_ops, dtypes.float32.vec(4):x86_vec4_ops}
 
@@ -25,8 +26,8 @@ size_prefix = {1: " byte ptr", 2: " word ptr", 4: " dword ptr", 8: " qword ptr"}
 
 def to_hex(x, dt:DType) -> str:
   if not dtypes.is_float(dt): return hex(x)
-  if dt is dtypes.float64: return struct.unpack('<Q', struct.pack('<d', x))[0]
-  return struct.unpack('<I', struct.pack('<f', x))[0]
+  if dt is dtypes.float64: return hex(struct.unpack('<Q', struct.pack('<d', x))[0])
+  return hex(struct.unpack('<I', struct.pack('<f', x))[0])
 
 def cflag(x:UOp) -> str:
   if x.op is Ops.CMPLT: return "setl" if x.src[0].dtype in dtypes.sints else "setb"
