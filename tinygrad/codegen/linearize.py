@@ -29,10 +29,15 @@ def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]],
   block_ctxs, children = ctx
   new_srcs: List[UOp] = []
   to_append: List[UOp] = []
+  old_blocks: Dict[Tuple[UOp, ...], UOp] = {}
   new_blocks: Dict[Tuple[UOp, ...], List[UOp]] = {}
   in_this_block = set(x.arg.lst)
   for u in x.src:
-    if u.op not in DONT_PLACE_IN_BLOCK and set(children[u]).issubset(in_this_block):
+    if u.op is Ops.BLOCK:
+      # merge sibling blocks. NOTE: blocks must only have one output source
+      assert u.arg.ctx not in old_blocks, "sibiling should never have been created"
+      old_blocks[u.arg.ctx] = u
+    elif u.op not in DONT_PLACE_IN_BLOCK and set(children[u]).issubset(in_this_block):
       # if it can go in blocks and all its children are in the block, we add it to the block
       if (block_ctx:=block_ctxs[u]) == x.arg.ctx:
         # if it's the same context, we place the UOp in this block and append the parents to its srcs
@@ -47,7 +52,13 @@ def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]],
   if len(to_append) == 0 and len(new_blocks) == 0: return None
 
   for rng,lst in new_blocks.items():
-    new_block = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(flatten(y.src for y in lst))), BasicBlock(rng, tuple(lst)))
+    srcs = flatten(y.src for y in lst)
+    if (old_block:=old_blocks.get(rng, None)) is not None:
+      # NOTE: order shouldn't matter here
+      srcs += list(old_block.src)
+      lst += list(old_block.arg.lst)
+      del old_blocks[rng]
+    new_block = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(srcs)), BasicBlock(rng, tuple(lst)))
     lrng = list(rng)
     for r in rng[::-1]:
       if r not in x.arg.ctx and r.op is not Ops.BLOCKSTART:
@@ -55,7 +66,7 @@ def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]],
         new_block = UOp(Ops.BLOCKEND, src=(new_block,),
                         arg=BasicBlock(tuple(lrng), (UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,)),), r))
     new_srcs.append(new_block)
-  return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(new_srcs)), BasicBlock(x.arg.ctx, tuple(to_append)+x.arg.lst))
+  return UOp(Ops.BLOCK, dtypes.void, tuple(dedup(list(old_blocks.values())+new_srcs)), BasicBlock(x.arg.ctx, tuple(to_append)+x.arg.lst))
 
 make_basic_blocks = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: UOp(Ops.BLOCK, src=x.src, arg=BasicBlock((), (x,)))),
