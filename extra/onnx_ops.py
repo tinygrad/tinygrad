@@ -513,40 +513,38 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
 
 # **************** ai.onnx.preview.training Ops ****************
 # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
-# NOTE: optim doesn't need to track state since onnx provides that in `T`
+# NOTE: onnx training ops actually don't need the state for optim, all the ops work in a functional way, but we still can reuse optim.py code
 
 from tinygrad.nn.optim import Adam as TinyAdam
 from tinygrad.nn.optim import SGD
 
-def onnx_training(group_size):
+def onnx_training(input_group_size):
   def decorator(fxn):
     def wrap(R, T, *inputs, **kwargs):
-      groups = len(inputs) // group_size
       old_training = Tensor.training
       Tensor.training = True
       T, R = to_python_const(T), R.detach()
+      groups = len(inputs) // input_group_size
       ret = [fxn(R, T, *inps, **kwargs) for inps in (inputs[i::groups] for i in range(groups))]
       Tensor.training = old_training
       return tuple(flatten(zip(*ret)))
     return wrap
   return decorator
 
-# super similar to LAMB! but can't use :(
 @onnx_training(3)
 def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
+  X, G, H = (i.detach() for i in inputs)
+  grad = norm_coefficient * X + G
+  H.assign(H + grad.square())
+  up = grad / (H.sqrt() + epsilon)
   r = R / (1 + T * decay_factor)
-  X, G, H = inputs
-  G, H = G.detach(), H.detach()
-  X.grad = norm_coefficient * X.detach() + G
-  H.assign(H + X.grad.square())
-  up = X.grad / (H.sqrt() + epsilon)
   X.assign(X.detach() - r * up)
   return [X, H]
 
 @onnx_training(4)
 def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
   X, G, V, H = inputs
-  G, V, H = G.detach(), V.detach(), H.detach()  # TODO we shouldn't have to do these detach
+  G, V, H = G.detach(), V.detach(), H.detach()  # TODO we shouldn't need these detaches
   X.grad = norm_coefficient * X.detach() + G
   opt = TinyAdam([X], b1=alpha, b2=beta, eps=epsilon)
   opt.m, opt.v, opt.lr = [V], [H], R
