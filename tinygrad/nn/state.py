@@ -35,14 +35,13 @@ safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dt
                "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
-def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
+def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Dict[str, Any]]:
   """
   Loads a .safetensor file from disk, returning the data, metadata length, and metadata.
   """
-  t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
-  json_len = t[0:8].bitcast(dtypes.int64).item()
-  assert isinstance(json_len, int)
-  return t, json_len, json.loads(t[8:8+json_len].data().tobytes())
+  t = fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn))
+  data_start = struct.unpack("<Q", t[0:8].data())[0] + 8
+  return t, data_start, json.loads(t[8:data_start].data().tobytes())
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   """
@@ -52,14 +51,9 @@ def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   state_dict = nn.state.safe_load("test.safetensor")
   ```
   """
-  t, json_len, metadata = safe_load_metadata(fn)
-  ret = {}
-  for k,v in metadata.items():
-    if k == "__metadata__": continue
-    dtype = safe_dtypes[v['dtype']]
-    sz = (v['data_offsets'][1]-v['data_offsets'][0])
-    ret[k] = t[8+json_len+v['data_offsets'][0]:8+json_len+v['data_offsets'][0]+sz].bitcast(dtype).reshape(v['shape'])
-  return ret
+  t, data_start, metadata = safe_load_metadata(fn)
+  return { k: t[data_start+v['data_offsets'][0]:data_start+v['data_offsets'][1]].bitcast(safe_dtypes[v['dtype']]).reshape(v['shape'])
+          for k, v in metadata.items() if k != "__metadata__" }
 
 def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
   """
