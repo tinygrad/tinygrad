@@ -44,7 +44,7 @@ backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 # `0: op Adam shape [(), (), (1,), (2,), (1,), (2,), (1,), (2,), (1,), (2,)]
 #               opt {'alpha': 0.949999988079071, 'beta': 0.8500000238418579, 'norm_coefficient': 0.0010000000474974513}`
 # but in their documentation (https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-176)
-# adam_multiple uses `epsilon = 1e-2` with overriding the default value of `epsilon = 0.0`
+# adam_multiple uses `epsilon = 1e-2`, over-riding the default value of `epsilon = 0.0`
 # with hard coded in epsilon = 1e-2, test passes
 backend_test.exclude('test_adam_multiple_cpu')
 
