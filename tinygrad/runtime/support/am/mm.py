@@ -152,7 +152,7 @@ class MM:
 
   def valloc(self, size:int, align=0x1000, uncached=False) -> VirtualMapping:
     size = round_up(size, 0x1000)
-    return self.map_range(self.alloc_vaddr(size, align), self.palloc(size).paddr, size, uncached=uncached)
+    return self.map_range(self.alloc_vaddr(size, align), self.palloc(size, zero=True).paddr, size, uncached=uncached)
 
   def palloc(self, size, align=0x1000, zero=False) -> GPUPhysicalMemoryBlock:
     pm = self.phys_allocator.alloc(size, align)

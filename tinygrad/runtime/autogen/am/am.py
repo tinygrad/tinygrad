@@ -124,6 +124,25 @@ if ctypes.sizeof(ctypes.c_longdouble) == 16:
 else:
     c_long_double_t = ctypes.c_ubyte*16
 
+def string_cast(char_pointer, encoding='utf-8', errors='strict'):
+    value = ctypes.cast(char_pointer, ctypes.c_char_p).value
+    if value is not None and encoding is not None:
+        value = value.decode(encoding, errors=errors)
+    return value
+
+
+def char_pointer_cast(string, encoding='utf-8'):
+    if encoding is not None:
+        try:
+            string = string.encode(encoding)
+        except AttributeError:
+            # In Python3, bytes has no encode attribute
+            pass
+    string = ctypes.c_char_p(string)
+    return ctypes.cast(string, ctypes.POINTER(ctypes.c_char))
+
+
+
 
 
 V11_STRUCTS_H_ = True # macro
@@ -34069,6 +34088,219 @@ SCPM_DISABLE = 0
 SCPM_ENABLE = 1
 SCPM_ENABLE_WITH_SCPM_ERR = 2
 psp_runtime_scpm_authentication = ctypes.c_uint32 # enum
+__AMDGPU_IRQ_H__ = True # macro
+AMDGPU_MAX_IRQ_SRC_ID = 0x100 # macro
+AMDGPU_MAX_IRQ_CLIENT_ID = 0x100 # macro
+AMDGPU_IRQ_CLIENTID_LEGACY = 0 # macro
+AMDGPU_IRQ_SRC_DATA_MAX_SIZE_DW = 4 # macro
+class struct_amdgpu_device(Structure):
+    pass
+
+
+# values for enumeration 'amdgpu_interrupt_state'
+amdgpu_interrupt_state__enumvalues = {
+    0: 'AMDGPU_IRQ_STATE_DISABLE',
+    1: 'AMDGPU_IRQ_STATE_ENABLE',
+}
+AMDGPU_IRQ_STATE_DISABLE = 0
+AMDGPU_IRQ_STATE_ENABLE = 1
+amdgpu_interrupt_state = ctypes.c_uint32 # enum
+class struct_amdgpu_iv_entry(Structure):
+    pass
+
+struct_amdgpu_iv_entry._pack_ = 1 # source:False
+struct_amdgpu_iv_entry._fields_ = [
+    ('client_id', ctypes.c_uint32),
+    ('src_id', ctypes.c_uint32),
+    ('ring_id', ctypes.c_uint32),
+    ('vmid', ctypes.c_uint32),
+    ('vmid_src', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('timestamp', ctypes.c_uint64),
+    ('timestamp_src', ctypes.c_uint32),
+    ('pasid', ctypes.c_uint32),
+    ('node_id', ctypes.c_uint32),
+    ('src_data', ctypes.c_uint32 * 4),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('iv_entry', ctypes.POINTER(ctypes.c_uint32)),
+]
+
+
+# values for enumeration 'interrupt_node_id_per_aid'
+interrupt_node_id_per_aid__enumvalues = {
+    0: 'AID0_NODEID',
+    1: 'XCD0_NODEID',
+    2: 'XCD1_NODEID',
+    4: 'AID1_NODEID',
+    5: 'XCD2_NODEID',
+    6: 'XCD3_NODEID',
+    8: 'AID2_NODEID',
+    9: 'XCD4_NODEID',
+    10: 'XCD5_NODEID',
+    12: 'AID3_NODEID',
+    13: 'XCD6_NODEID',
+    14: 'XCD7_NODEID',
+    15: 'NODEID_MAX',
+}
+AID0_NODEID = 0
+XCD0_NODEID = 1
+XCD1_NODEID = 2
+AID1_NODEID = 4
+XCD2_NODEID = 5
+XCD3_NODEID = 6
+AID2_NODEID = 8
+XCD4_NODEID = 9
+XCD5_NODEID = 10
+AID3_NODEID = 12
+XCD6_NODEID = 13
+XCD7_NODEID = 14
+NODEID_MAX = 15
+interrupt_node_id_per_aid = ctypes.c_uint32 # enum
+__SOC15_IH_CLIENTID_H__ = True # macro
+
+# values for enumeration 'soc15_ih_clientid'
+soc15_ih_clientid__enumvalues = {
+    0: 'SOC15_IH_CLIENTID_IH',
+    1: 'SOC15_IH_CLIENTID_ACP',
+    2: 'SOC15_IH_CLIENTID_ATHUB',
+    3: 'SOC15_IH_CLIENTID_BIF',
+    4: 'SOC15_IH_CLIENTID_DCE',
+    5: 'SOC15_IH_CLIENTID_ISP',
+    6: 'SOC15_IH_CLIENTID_PCIE0',
+    7: 'SOC15_IH_CLIENTID_RLC',
+    8: 'SOC15_IH_CLIENTID_SDMA0',
+    9: 'SOC15_IH_CLIENTID_SDMA1',
+    10: 'SOC15_IH_CLIENTID_SE0SH',
+    11: 'SOC15_IH_CLIENTID_SE1SH',
+    12: 'SOC15_IH_CLIENTID_SE2SH',
+    13: 'SOC15_IH_CLIENTID_SE3SH',
+    14: 'SOC15_IH_CLIENTID_UVD1',
+    15: 'SOC15_IH_CLIENTID_THM',
+    16: 'SOC15_IH_CLIENTID_UVD',
+    17: 'SOC15_IH_CLIENTID_VCE0',
+    18: 'SOC15_IH_CLIENTID_VMC',
+    19: 'SOC15_IH_CLIENTID_XDMA',
+    20: 'SOC15_IH_CLIENTID_GRBM_CP',
+    21: 'SOC15_IH_CLIENTID_ATS',
+    22: 'SOC15_IH_CLIENTID_ROM_SMUIO',
+    23: 'SOC15_IH_CLIENTID_DF',
+    24: 'SOC15_IH_CLIENTID_VCE1',
+    25: 'SOC15_IH_CLIENTID_PWR',
+    26: 'SOC15_IH_CLIENTID_RESERVED',
+    27: 'SOC15_IH_CLIENTID_UTCL2',
+    28: 'SOC15_IH_CLIENTID_EA',
+    29: 'SOC15_IH_CLIENTID_UTCL2LOG',
+    30: 'SOC15_IH_CLIENTID_MP0',
+    31: 'SOC15_IH_CLIENTID_MP1',
+    32: 'SOC15_IH_CLIENTID_MAX',
+    16: 'SOC15_IH_CLIENTID_VCN',
+    14: 'SOC15_IH_CLIENTID_VCN1',
+    1: 'SOC15_IH_CLIENTID_SDMA2',
+    4: 'SOC15_IH_CLIENTID_SDMA3',
+    5: 'SOC15_IH_CLIENTID_SDMA3_Sienna_Cichlid',
+    5: 'SOC15_IH_CLIENTID_SDMA4',
+    17: 'SOC15_IH_CLIENTID_SDMA5',
+    19: 'SOC15_IH_CLIENTID_SDMA6',
+    24: 'SOC15_IH_CLIENTID_SDMA7',
+    6: 'SOC15_IH_CLIENTID_VMC1',
+}
+SOC15_IH_CLIENTID_IH = 0
+SOC15_IH_CLIENTID_ACP = 1
+SOC15_IH_CLIENTID_ATHUB = 2
+SOC15_IH_CLIENTID_BIF = 3
+SOC15_IH_CLIENTID_DCE = 4
+SOC15_IH_CLIENTID_ISP = 5
+SOC15_IH_CLIENTID_PCIE0 = 6
+SOC15_IH_CLIENTID_RLC = 7
+SOC15_IH_CLIENTID_SDMA0 = 8
+SOC15_IH_CLIENTID_SDMA1 = 9
+SOC15_IH_CLIENTID_SE0SH = 10
+SOC15_IH_CLIENTID_SE1SH = 11
+SOC15_IH_CLIENTID_SE2SH = 12
+SOC15_IH_CLIENTID_SE3SH = 13
+SOC15_IH_CLIENTID_UVD1 = 14
+SOC15_IH_CLIENTID_THM = 15
+SOC15_IH_CLIENTID_UVD = 16
+SOC15_IH_CLIENTID_VCE0 = 17
+SOC15_IH_CLIENTID_VMC = 18
+SOC15_IH_CLIENTID_XDMA = 19
+SOC15_IH_CLIENTID_GRBM_CP = 20
+SOC15_IH_CLIENTID_ATS = 21
+SOC15_IH_CLIENTID_ROM_SMUIO = 22
+SOC15_IH_CLIENTID_DF = 23
+SOC15_IH_CLIENTID_VCE1 = 24
+SOC15_IH_CLIENTID_PWR = 25
+SOC15_IH_CLIENTID_RESERVED = 26
+SOC15_IH_CLIENTID_UTCL2 = 27
+SOC15_IH_CLIENTID_EA = 28
+SOC15_IH_CLIENTID_UTCL2LOG = 29
+SOC15_IH_CLIENTID_MP0 = 30
+SOC15_IH_CLIENTID_MP1 = 31
+SOC15_IH_CLIENTID_MAX = 32
+SOC15_IH_CLIENTID_VCN = 16
+SOC15_IH_CLIENTID_VCN1 = 14
+SOC15_IH_CLIENTID_SDMA2 = 1
+SOC15_IH_CLIENTID_SDMA3 = 4
+SOC15_IH_CLIENTID_SDMA3_Sienna_Cichlid = 5
+SOC15_IH_CLIENTID_SDMA4 = 5
+SOC15_IH_CLIENTID_SDMA5 = 17
+SOC15_IH_CLIENTID_SDMA6 = 19
+SOC15_IH_CLIENTID_SDMA7 = 24
+SOC15_IH_CLIENTID_VMC1 = 6
+soc15_ih_clientid = ctypes.c_uint32 # enum
+AMDGPU_IRQ_CLIENTID_MAX = SOC15_IH_CLIENTID_MAX # macro
+soc15_ih_clientid_name = [] # Variable ctypes.POINTER(ctypes.c_char) * 0
+
+# values for enumeration 'soc21_ih_clientid'
+soc21_ih_clientid__enumvalues = {
+    0: 'SOC21_IH_CLIENTID_IH',
+    2: 'SOC21_IH_CLIENTID_ATHUB',
+    3: 'SOC21_IH_CLIENTID_BIF',
+    4: 'SOC21_IH_CLIENTID_DCN',
+    5: 'SOC21_IH_CLIENTID_ISP',
+    6: 'SOC21_IH_CLIENTID_MP3',
+    7: 'SOC21_IH_CLIENTID_RLC',
+    10: 'SOC21_IH_CLIENTID_GFX',
+    11: 'SOC21_IH_CLIENTID_IMU',
+    14: 'SOC21_IH_CLIENTID_VCN1',
+    15: 'SOC21_IH_CLIENTID_THM',
+    16: 'SOC21_IH_CLIENTID_VCN',
+    17: 'SOC21_IH_CLIENTID_VPE1',
+    18: 'SOC21_IH_CLIENTID_VMC',
+    20: 'SOC21_IH_CLIENTID_GRBM_CP',
+    22: 'SOC21_IH_CLIENTID_ROM_SMUIO',
+    23: 'SOC21_IH_CLIENTID_DF',
+    24: 'SOC21_IH_CLIENTID_VPE',
+    25: 'SOC21_IH_CLIENTID_PWR',
+    26: 'SOC21_IH_CLIENTID_LSDMA',
+    30: 'SOC21_IH_CLIENTID_MP0',
+    31: 'SOC21_IH_CLIENTID_MP1',
+    32: 'SOC21_IH_CLIENTID_MAX',
+}
+SOC21_IH_CLIENTID_IH = 0
+SOC21_IH_CLIENTID_ATHUB = 2
+SOC21_IH_CLIENTID_BIF = 3
+SOC21_IH_CLIENTID_DCN = 4
+SOC21_IH_CLIENTID_ISP = 5
+SOC21_IH_CLIENTID_MP3 = 6
+SOC21_IH_CLIENTID_RLC = 7
+SOC21_IH_CLIENTID_GFX = 10
+SOC21_IH_CLIENTID_IMU = 11
+SOC21_IH_CLIENTID_VCN1 = 14
+SOC21_IH_CLIENTID_THM = 15
+SOC21_IH_CLIENTID_VCN = 16
+SOC21_IH_CLIENTID_VPE1 = 17
+SOC21_IH_CLIENTID_VMC = 18
+SOC21_IH_CLIENTID_GRBM_CP = 20
+SOC21_IH_CLIENTID_ROM_SMUIO = 22
+SOC21_IH_CLIENTID_DF = 23
+SOC21_IH_CLIENTID_VPE = 24
+SOC21_IH_CLIENTID_PWR = 25
+SOC21_IH_CLIENTID_LSDMA = 26
+SOC21_IH_CLIENTID_MP0 = 30
+SOC21_IH_CLIENTID_MP1 = 31
+SOC21_IH_CLIENTID_MAX = 32
+soc21_ih_clientid = ctypes.c_uint32 # enum
 __all__ = \
     ['ACCEPT_UNSOLICITED_RESPONSE_ENABLE',
     'ACCEPT_UNSOLICITED_RESPONSE_NOT_ENABLE', 'ACP_HWID',
@@ -34119,11 +34351,12 @@ __all__ = \
     'AFMT_NOT_RESET_AUDIO_FIFO_WHEN_AUDIO_DISABLED_RESERVED',
     'AFMT_RAMP_CONTROL0_SIGN', 'AFMT_RAMP_SIGNED',
     'AFMT_RAMP_UNSIGNED', 'AFMT_RESET_AUDIO_FIFO_WHEN_AUDIO_DISABLED',
-    'AFMT_VBI_PACKET_CONTROL_ACP_SOURCE', 'ALLOW_SR_ON_TRANS_REQ',
-    'ALLOW_SR_ON_TRANS_REQ_DISABLE', 'ALLOW_SR_ON_TRANS_REQ_ENABLE',
-    'ALL_USE_R', 'ALPHA_DATA_ONTO_ALPHA_PORT',
-    'ALPHA_DATA_ONTO_CB_B_PORT', 'ALPHA_DATA_ONTO_CR_R_PORT',
-    'ALPHA_DATA_ONTO_Y_G_PORT',
+    'AFMT_VBI_PACKET_CONTROL_ACP_SOURCE', 'AID0_NODEID',
+    'AID1_NODEID', 'AID2_NODEID', 'AID3_NODEID',
+    'ALLOW_SR_ON_TRANS_REQ', 'ALLOW_SR_ON_TRANS_REQ_DISABLE',
+    'ALLOW_SR_ON_TRANS_REQ_ENABLE', 'ALL_USE_R',
+    'ALPHA_DATA_ONTO_ALPHA_PORT', 'ALPHA_DATA_ONTO_CB_B_PORT',
+    'ALPHA_DATA_ONTO_CR_R_PORT', 'ALPHA_DATA_ONTO_Y_G_PORT',
     'ALPHA_DP_AUX_DEFINITE_ERR_REACHED_ACK',
     'ALPHA_DP_AUX_DEFINITE_ERR_REACHED_NOT_ACK', 'AMCLOCK_ENABLE',
     'AMDGPU_CPCE_UCODE_LOADED', 'AMDGPU_CPMEC1_UCODE_LOADED',
@@ -34131,11 +34364,14 @@ __all__ = \
     'AMDGPU_CPPFP_UCODE_LOADED', 'AMDGPU_CPRLC_UCODE_LOADED',
     'AMDGPU_FW_LOAD_DIRECT', 'AMDGPU_FW_LOAD_PSP',
     'AMDGPU_FW_LOAD_RLC_BACKDOOR_AUTO', 'AMDGPU_FW_LOAD_SMU',
-    'AMDGPU_GFXHUB_START', 'AMDGPU_MAX_VMHUBS', 'AMDGPU_MMHUB0_START',
-    'AMDGPU_MMHUB1_START', 'AMDGPU_MTYPE_CC', 'AMDGPU_MTYPE_NC',
-    'AMDGPU_PDE_PTE', 'AMDGPU_PDE_PTE_GFX12',
-    'AMDGPU_PTE_DEFAULT_ATC', 'AMDGPU_PTE_EXECUTABLE',
-    'AMDGPU_PTE_IS_PTE', 'AMDGPU_PTE_LOG',
+    'AMDGPU_GFXHUB_START', 'AMDGPU_IRQ_CLIENTID_LEGACY',
+    'AMDGPU_IRQ_CLIENTID_MAX', 'AMDGPU_IRQ_SRC_DATA_MAX_SIZE_DW',
+    'AMDGPU_IRQ_STATE_DISABLE', 'AMDGPU_IRQ_STATE_ENABLE',
+    'AMDGPU_MAX_IRQ_CLIENT_ID', 'AMDGPU_MAX_IRQ_SRC_ID',
+    'AMDGPU_MAX_VMHUBS', 'AMDGPU_MMHUB0_START', 'AMDGPU_MMHUB1_START',
+    'AMDGPU_MTYPE_CC', 'AMDGPU_MTYPE_NC', 'AMDGPU_PDE_PTE',
+    'AMDGPU_PDE_PTE_GFX12', 'AMDGPU_PTE_DEFAULT_ATC',
+    'AMDGPU_PTE_EXECUTABLE', 'AMDGPU_PTE_IS_PTE', 'AMDGPU_PTE_LOG',
     'AMDGPU_PTE_MTYPE_GFX12_MASK', 'AMDGPU_PTE_MTYPE_NV10_MASK',
     'AMDGPU_PTE_MTYPE_VG10_MASK', 'AMDGPU_PTE_NOALLOC',
     'AMDGPU_PTE_PRT', 'AMDGPU_PTE_PRT_GFX12', 'AMDGPU_PTE_READABLE',
@@ -38469,10 +38705,10 @@ __all__ = \
     'MTYPE_RESERVED_5', 'MTYPE_RESERVED_7', 'MTYPE_UC', 'MTYPE_WC',
     'MULTIPLE_BY1', 'MULTIPLE_BY2', 'MULTIPLE_BY3_RESERVED',
     'MULTIPLE_BY4', 'MULTIPLE_RESERVED', 'MULT_16', 'MULT_8',
-    'MemArbMode', 'NBIF_HWID', 'NBIF_HWIP', 'NBIO_HWIP', 'NON_BYPASS',
-    'NOT_FORCE_THE_CLOCK_DISABLED', 'NOT_SENT', 'NO_DIST', 'NO_DIV',
-    'NO_FORCE', 'NO_FORCE_REQ', 'NO_FORCE_REQUEST',
-    'NO_MIN_CHUNK_SIZE', 'NO_MIN_META_CHUNK_SIZE',
+    'MemArbMode', 'NBIF_HWID', 'NBIF_HWIP', 'NBIO_HWIP', 'NODEID_MAX',
+    'NON_BYPASS', 'NOT_FORCE_THE_CLOCK_DISABLED', 'NOT_SENT',
+    'NO_DIST', 'NO_DIV', 'NO_FORCE', 'NO_FORCE_REQ',
+    'NO_FORCE_REQUEST', 'NO_MIN_CHUNK_SIZE', 'NO_MIN_META_CHUNK_SIZE',
     'NO_OUTSTANDING_REQ', 'NPS_INFO', 'NPS_INFO_TABLE_ID',
     'NPS_INFO_TABLE_MAX_NUM_INSTANCES', 'NTBCCP_HWID', 'NTB_HWID',
     'NUM_SIMD_PER_CU', 'OBUF_BYPASS_DIS', 'OBUF_BYPASS_EN',
@@ -41208,11 +41444,45 @@ __all__ = \
     'SIMM16_WAIT_EVENT_EXP_RDY_START', 'SIZE_16K', 'SIZE_8K',
     'SLVERR', 'SMUIO_HWID', 'SMUIO_HWIP', 'SMU_INTR',
     'SMU_INTR_STATUS_CLEAR', 'SMU_INTR_STATUS_NOOP',
-    'SMU_MSG_INTR_NOOP', 'SM_MODE_RESERVED', 'SOFT_RESET',
-    'SOFT_RESET_0', 'SOFT_RESET_1', 'SO_VGTSTREAMOUT_FLUSH',
-    'SPI_FOG_EXP', 'SPI_FOG_EXP2', 'SPI_FOG_LINEAR', 'SPI_FOG_MODE',
-    'SPI_FOG_NONE', 'SPI_LB_WAVES_RSVD', 'SPI_LB_WAVES_SELECT',
-    'SPI_PERFCNT_SEL', 'SPI_PERF_BUSY', 'SPI_PERF_CSGN_BUSY',
+    'SMU_MSG_INTR_NOOP', 'SM_MODE_RESERVED', 'SOC15_IH_CLIENTID_ACP',
+    'SOC15_IH_CLIENTID_ATHUB', 'SOC15_IH_CLIENTID_ATS',
+    'SOC15_IH_CLIENTID_BIF', 'SOC15_IH_CLIENTID_DCE',
+    'SOC15_IH_CLIENTID_DF', 'SOC15_IH_CLIENTID_EA',
+    'SOC15_IH_CLIENTID_GRBM_CP', 'SOC15_IH_CLIENTID_IH',
+    'SOC15_IH_CLIENTID_ISP', 'SOC15_IH_CLIENTID_MAX',
+    'SOC15_IH_CLIENTID_MP0', 'SOC15_IH_CLIENTID_MP1',
+    'SOC15_IH_CLIENTID_PCIE0', 'SOC15_IH_CLIENTID_PWR',
+    'SOC15_IH_CLIENTID_RESERVED', 'SOC15_IH_CLIENTID_RLC',
+    'SOC15_IH_CLIENTID_ROM_SMUIO', 'SOC15_IH_CLIENTID_SDMA0',
+    'SOC15_IH_CLIENTID_SDMA1', 'SOC15_IH_CLIENTID_SDMA2',
+    'SOC15_IH_CLIENTID_SDMA3',
+    'SOC15_IH_CLIENTID_SDMA3_Sienna_Cichlid',
+    'SOC15_IH_CLIENTID_SDMA4', 'SOC15_IH_CLIENTID_SDMA5',
+    'SOC15_IH_CLIENTID_SDMA6', 'SOC15_IH_CLIENTID_SDMA7',
+    'SOC15_IH_CLIENTID_SE0SH', 'SOC15_IH_CLIENTID_SE1SH',
+    'SOC15_IH_CLIENTID_SE2SH', 'SOC15_IH_CLIENTID_SE3SH',
+    'SOC15_IH_CLIENTID_THM', 'SOC15_IH_CLIENTID_UTCL2',
+    'SOC15_IH_CLIENTID_UTCL2LOG', 'SOC15_IH_CLIENTID_UVD',
+    'SOC15_IH_CLIENTID_UVD1', 'SOC15_IH_CLIENTID_VCE0',
+    'SOC15_IH_CLIENTID_VCE1', 'SOC15_IH_CLIENTID_VCN',
+    'SOC15_IH_CLIENTID_VCN1', 'SOC15_IH_CLIENTID_VMC',
+    'SOC15_IH_CLIENTID_VMC1', 'SOC15_IH_CLIENTID_XDMA',
+    'SOC21_IH_CLIENTID_ATHUB', 'SOC21_IH_CLIENTID_BIF',
+    'SOC21_IH_CLIENTID_DCN', 'SOC21_IH_CLIENTID_DF',
+    'SOC21_IH_CLIENTID_GFX', 'SOC21_IH_CLIENTID_GRBM_CP',
+    'SOC21_IH_CLIENTID_IH', 'SOC21_IH_CLIENTID_IMU',
+    'SOC21_IH_CLIENTID_ISP', 'SOC21_IH_CLIENTID_LSDMA',
+    'SOC21_IH_CLIENTID_MAX', 'SOC21_IH_CLIENTID_MP0',
+    'SOC21_IH_CLIENTID_MP1', 'SOC21_IH_CLIENTID_MP3',
+    'SOC21_IH_CLIENTID_PWR', 'SOC21_IH_CLIENTID_RLC',
+    'SOC21_IH_CLIENTID_ROM_SMUIO', 'SOC21_IH_CLIENTID_THM',
+    'SOC21_IH_CLIENTID_VCN', 'SOC21_IH_CLIENTID_VCN1',
+    'SOC21_IH_CLIENTID_VMC', 'SOC21_IH_CLIENTID_VPE',
+    'SOC21_IH_CLIENTID_VPE1', 'SOFT_RESET', 'SOFT_RESET_0',
+    'SOFT_RESET_1', 'SO_VGTSTREAMOUT_FLUSH', 'SPI_FOG_EXP',
+    'SPI_FOG_EXP2', 'SPI_FOG_LINEAR', 'SPI_FOG_MODE', 'SPI_FOG_NONE',
+    'SPI_LB_WAVES_RSVD', 'SPI_LB_WAVES_SELECT', 'SPI_PERFCNT_SEL',
+    'SPI_PERF_BUSY', 'SPI_PERF_CSGN_BUSY',
     'SPI_PERF_CSGN_CRAWLER_STALL', 'SPI_PERF_CSGN_EVENT_WAVE',
     'SPI_PERF_CSGN_NUM_THREADGROUPS', 'SPI_PERF_CSGN_PWS_STALL',
     'SPI_PERF_CSGN_WAVE', 'SPI_PERF_CSGN_WINDOW_VALID',
@@ -42759,7 +43029,9 @@ __all__ = \
     'WD_IA_DRAW_TYPE_EVENT_INIT', 'WD_IA_DRAW_TYPE_IMM_DATA',
     'WD_IA_DRAW_TYPE_INDX_OFF', 'WD_IA_DRAW_TYPE_MAX_INDX',
     'WD_IA_DRAW_TYPE_MIN_INDX', 'WD_IA_DRAW_TYPE_REG_XFER',
-    'WRITE_BASE_ONLY', 'WRITE_BOTH', 'WritePolicy', 'XDMA_HWID',
+    'WRITE_BASE_ONLY', 'WRITE_BOTH', 'WritePolicy', 'XCD0_NODEID',
+    'XCD1_NODEID', 'XCD2_NODEID', 'XCD3_NODEID', 'XCD4_NODEID',
+    'XCD5_NODEID', 'XCD6_NODEID', 'XCD7_NODEID', 'XDMA_HWID',
     'XGBE_HWID', 'XGMI_HWID', 'XGMI_HWIP', 'XNORM', 'XNORM_A',
     'XNORM_B', 'XTAL_REF_CLOCK_SOURCE_SEL',
     'XTAL_REF_CLOCK_SOURCE_SEL_DCCGREFCLK',
@@ -42778,15 +43050,17 @@ __all__ = \
     'ZPASS_DISABLE', 'ZPASS_PIXELS', 'ZPASS_SAMPLES',
     'ZSamplePosition', 'Z_SAMPLE_CENTER', 'Z_SAMPLE_CENTROID',
     'ZpassControl', '_DISCOVERY_H_', '_PSP_TEE_GFX_IF_H_',
-    '__AMDGPU_PSP_H__', '__AMDGPU_UCODE_H__', '__AMDGPU_VM_H__',
+    '__AMDGPU_IRQ_H__', '__AMDGPU_PSP_H__', '__AMDGPU_UCODE_H__',
+    '__AMDGPU_VM_H__', '__SOC15_IH_CLIENTID_H__',
     '_soc21_ENUM_HEADER', 'amd_hw_ip_block_type',
-    'amdgpu_firmware_load_type', 'amdgpu_vm_level', 'binary_header',
-    'bool', 'c__EA_table', 'die_header', 'die_info',
-    'ge1_assembler_busy', 'ge1_assembler_dma_starved',
-    'ge1_assembler_stalled', 'ge1_dma_busy', 'ge1_dma_lat_bin_0',
-    'ge1_dma_lat_bin_1', 'ge1_dma_lat_bin_2', 'ge1_dma_lat_bin_3',
-    'ge1_dma_lat_bin_4', 'ge1_dma_lat_bin_5', 'ge1_dma_lat_bin_6',
-    'ge1_dma_lat_bin_7', 'ge1_dma_return_cl0', 'ge1_dma_return_cl1',
+    'amdgpu_firmware_load_type', 'amdgpu_interrupt_state',
+    'amdgpu_vm_level', 'binary_header', 'bool', 'c__EA_table',
+    'die_header', 'die_info', 'ge1_assembler_busy',
+    'ge1_assembler_dma_starved', 'ge1_assembler_stalled',
+    'ge1_dma_busy', 'ge1_dma_lat_bin_0', 'ge1_dma_lat_bin_1',
+    'ge1_dma_lat_bin_2', 'ge1_dma_lat_bin_3', 'ge1_dma_lat_bin_4',
+    'ge1_dma_lat_bin_5', 'ge1_dma_lat_bin_6', 'ge1_dma_lat_bin_7',
+    'ge1_dma_return_cl0', 'ge1_dma_return_cl1',
     'ge1_dma_return_size_cl0', 'ge1_dma_return_size_cl1',
     'ge1_dma_utcl1_consecutive_retry_event',
     'ge1_dma_utcl1_request_event', 'ge1_dma_utcl1_retry_event',
@@ -42889,17 +43163,21 @@ __all__ = \
     'ge_te11_stall_prim_funnel', 'ge_te11_stall_vert_funnel',
     'ge_tf_ret_data_stalling_hs_done', 'harvest_info',
     'harvest_info_header', 'harvest_table', 'hw_id_map', 'int16_t',
-    'int32_t', 'int8_t', 'ip', 'ip_discovery_header', 'ip_structure',
-    'ip_v3', 'ip_v4', 'psp_bootloader_cmd', 'psp_fw_type',
-    'psp_gfx_boot_config', 'psp_gfx_boot_config_cmd',
-    'psp_gfx_cmd_id', 'psp_gfx_crtl_cmd_id', 'psp_gfx_fw_type',
+    'int32_t', 'int8_t', 'interrupt_node_id_per_aid', 'ip',
+    'ip_discovery_header', 'ip_structure', 'ip_v3', 'ip_v4',
+    'psp_bootloader_cmd', 'psp_fw_type', 'psp_gfx_boot_config',
+    'psp_gfx_boot_config_cmd', 'psp_gfx_cmd_id',
+    'psp_gfx_crtl_cmd_id', 'psp_gfx_fw_type',
     'psp_memory_training_init_flag', 'psp_memory_training_ops',
     'psp_reg_prog_id', 'psp_ring_type',
     'psp_runtime_boot_cfg_feature', 'psp_runtime_entry_type',
     'psp_runtime_scpm_authentication', 'psp_shared_mem_size',
-    'struct__fuse_data_bits', 'struct_amdgpu_firmware_info',
-    'struct_binary_header', 'struct_common_firmware_header',
-    'struct_die', 'struct_die_header', 'struct_die_info',
+    'soc15_ih_clientid', 'soc15_ih_clientid_name',
+    'soc21_ih_clientid', 'struct__fuse_data_bits',
+    'struct_amdgpu_device', 'struct_amdgpu_firmware_info',
+    'struct_amdgpu_iv_entry', 'struct_binary_header',
+    'struct_common_firmware_header', 'struct_die',
+    'struct_die_header', 'struct_die_info',
     'struct_dmcu_firmware_header_v1_0',
     'struct_dmcub_firmware_header_v1_0', 'struct_firmware',
     'struct_gc_info_v1_0', 'struct_gc_info_v1_1',

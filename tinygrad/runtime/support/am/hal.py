@@ -1,4 +1,4 @@
-import os, ctypes, mmap, struct
+import os, ctypes, mmap, struct, subprocess, select, fcntl
 from tinygrad.helpers import getenv, mv_address, to_mv
 from tinygrad.runtime.autogen import libpciaccess, vfio, libc
 
@@ -66,53 +66,48 @@ class PCIHAL(HAL):
     libc.mlock(va, sz)
     return SystemMemory(va, sz)
 
-# class VFIOHAL(PCIHAL):
-#   vfio_fd = -1
+class VFIOHAL(PCIHAL):
+  vfio_fd:int = -1
   
-#   def __init__(self): 
-#     if VFIOHAL.vfio_fd == -1: VFIOHAL.vfio_fd = os.open("/dev/vfio/vfio", os.O_RDWR)
-#     assert vfio.VFIO_CHECK_EXTENSION(VFIOHAL.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU), "VFIO does not support IOMMU"
-#     # assert vfio.VFIO_SET_IOMMU(VFIOHAL.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU) == 0, "Failed to set IOMMU"
+  def __init__(self):
+    if VFIOHAL.vfio_fd == -1:
+      subprocess.run(['modprobe', 'vfio_pci'], capture_output=True, text=True, check=True)
+      with open("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", 'w') as f: f.write("1")
+      VFIOHAL.vfio_fd = os.open("/dev/vfio/vfio", os.O_RDWR)
+      self.irq_poller = select.poll()
+    assert vfio.VFIO_CHECK_EXTENSION(VFIOHAL.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU), "VFIO does not support IOMMU"
 
-#     super().__init__(has_dma=True)
+    super().__init__(has_dma=True)
 
-#   def open_device(self, dev_idx:int):
-#     # readlink /sys/bus/pci/devices/0000:06:0d.0/iommu_group
-#     self.pcidev = self.devs[dev_idx]
-  
-#     self.pcifmt = "{:04x}:{:02x}:{:02x}.{:d}".format(self.pcidev.domain_16, self.pcidev.bus, self.pcidev.dev, self.pcidev.func)
-#     iommu_group = os.readlink(f"/sys/bus/pci/devices/{self.pcifmt}/iommu_group").split('/')[-1]
-#     print(iommu_group)
+  def open_device(self, dev_idx:int):
+    pcidev = self.devs[dev_idx]
+    self.pcibus = f"{pcidev.domain_16:04x}:{pcidev.bus:02x}:{pcidev.dev:02x}.{pcidev.func:d}"
+    if AM_DEBUG >= 1: print(f"Opening device (vfio) {self.pcibus}")
 
-#     self.vfio_group = os.open(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
-#     vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(VFIOHAL.vfio_fd))
+    if os.path.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
+      with open(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", 'w') as f: f.write(self.pcibus)
+    with open(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", 'w') as f: f.write("15")
+    with open(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", 'w') as f: f.write("vfio-pci")
+    with open(f"/sys/bus/pci/drivers_probe", 'w') as f: f.write(self.pcibus)
 
-#     va = self.alloc_pinned_memory(sz=4096)
-#     print(hex(va))
+    iommu_group = os.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
 
-#     print(read_pagemap(va))
+    self.vfio_group = os.open(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
+    vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(VFIOHAL.vfio_fd))
 
-#     # print(self.pcifmt)
-#     # xxx = memoryview(bytearray(self.pcifmt.encode()))
-#     # xxxx = (ctypes.c_char * len(self.pcifmt))(*bytearray(self.pcifmt.encode()))
-#     # print(xxxx)
-#     # self.vfio_dev = vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, xxxx)
-#     # print(self.vfio_dev)
-#     # device = ioctl(group, VFIO_GROUP_GET_DEVICE_FD, "0000:06:0d.0");
+    vfio.VFIO_SET_IOMMU(VFIOHAL.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
+    self.vfio_dev = vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, (ctypes.c_char * (len(self.pcibus) + 1))(*bytearray(self.pcibus.encode() + b'\0')))
 
-#     # ioctl(container, VFIO_IOMMU_MAP_DMA, )
+    self.irq_fd = os.eventfd(0, 0)
+    self.irq_poller.register(self.irq_fd, select.POLLIN)
 
-#     # dma_map.vaddr = mmap(0, 1024 * 1024, PROT_READ | PROT_WRITE,
-#     #                  MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
-#     # dma_map.size = 1024 * 1024;
-#     # dma_map.iova = 0; /* 1MB starting at 0x0 from device view */
-#     # dma_map.flags = VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE;
+    irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
+      argsz=ctypes.sizeof(vfio.struct_vfio_irq_set), count=1, data=(ctypes.c_int * 1)(self.irq_fd))
+    vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
 
-#     # ioctl(container, VFIO_IOMMU_MAP_DMA, &dma_map);
+    return pcidev
 
-#     # vfio.VFIO_DEVICE_GET_INFO(self.vfio_dev, vfio_info:=vfio.struct_vfio_device_info())
-#     # print(vfio_info)
-
-    
-
-
+  def map_pci_range(self, pcidev, bar, cast='I'):
+    vfio.VFIO_DEVICE_GET_REGION_INFO(self.vfio_dev, reg:=vfio.struct_vfio_region_info(argsz=ctypes.sizeof(vfio.struct_vfio_region_info), index=bar))
+    addr = libc.mmap(0, reg.size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, self.vfio_dev, reg.offset)
+    return addr, to_mv(addr, reg.size).cast(cast)

@@ -167,7 +167,8 @@ class AM_GFX(AM_IP):
     self.adev.regCP_HQD_ACTIVE.write(0x1)
 
     self._grbm_select()
-    time.sleep(5)
+
+    self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1)
 
   def _grbm_select(self, me=0, pipe=0, queue=0, vmid=0): self.adev.regGRBM_GFX_CNTL.write(meid=me, pipeid=pipe, vmid=vmid, queueid=queue)
 
@@ -204,7 +205,26 @@ class AM_IH(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
 
-    self.rings = [(self.adev.mm.valloc(262144), self.adev.mm.valloc(0x1000), suf, i) for i,suf in enumerate(["", "_RING1"])]
+    self.rings = [(self.adev.mm.valloc(262144, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), suf, i) for i,suf in enumerate(["", "_RING1"])]
+    self.rptr = 0
+
+  def interrupt_handler(self):
+    addr_vm, rwptr_vm, suf, ring_id = self.rings[0]
+    ring_view = to_mv(addr_vm.cpu_addr(), 262144).cast('I')
+    wptr = to_mv(rwptr_vm.cpu_addr(), 8).cast('Q')[0]
+
+    while self.rptr < wptr:
+      ring_index = (self.rptr >> 2)
+      iv_entry = am.struct_amdgpu_iv_entry(client_id=ring_view[ring_index + 0] & 0xff, src_id=(ring_view[ring_index + 0] >> 8) & 0xff,
+        ring_id=(ring_view[ring_index + 0] >> 16) & 0xff, vmid=(ring_view[ring_index + 0] >> 24) & 0xf, vmid_src=(ring_view[ring_index + 0] >> 31),
+        timestamp=ring_view[ring_index + 1] | ((ring_view[ring_index + 2] & 0xffff) << 32), timestamp_src=(ring_view[ring_index + 2] >> 31),
+        pasid=ring_view[ring_index + 3] & 0xffff, node_id=(ring_view[ring_index + 3] >> 16) & 0xff)
+
+      # print(iv_entry.client_id, iv_entry.timestamp, am.soc21_ih_clientid__enumvalues.get(iv_entry.client_id, "UNK CLIENT"))
+      self.rptr += 32
+
+    self.adev.regIH_RB_RPTR.write(self.rptr)
+    # to_mv(self.adev.doorbell_cpu_addr, 0x2000).cast('I')[self.AMDGPU_NAVI10_DOORBELL_IH * 2] = self.rptr
 
   def enable_ring(self, addr_vm, rwptr_vm, suf, ring_id):
     self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", addr_vm.vaddr >> 8)
@@ -216,7 +236,7 @@ class AM_IH(AM_IP):
     self.adev.reg(f"regIH_RB_WPTR{suf}").write(0)
     self.adev.reg(f"regIH_RB_RPTR{suf}").write(0)
 
-    self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write((self.AMDGPU_NAVI10_DOORBELL_IH + ring_id), enable=1)
+    self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write(((self.AMDGPU_NAVI10_DOORBELL_IH + ring_id) * 2), enable=1)
 
   def init(self):
     for ring in self.rings: self.enable_ring(*ring)
@@ -224,8 +244,8 @@ class AM_IH(AM_IP):
     self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
     self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
     self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
-    self.adev.regIH_RING1_CLIENT_CFG_INDEX.update(index=0)
-    self.adev.regIH_RING1_CLIENT_CFG_DATA.update(client_id=0xa, source_id=0x0, source_id_match_enable=1)
+    # self.adev.regIH_RING1_CLIENT_CFG_INDEX.update(index=0)
+    # self.adev.regIH_RING1_CLIENT_CFG_DATA.update(client_id=0xa, source_id=0x0, source_id_match_enable=1)
 
     # set master
     self.adev.hal.pci_set_master(self.adev.hal_dev)
