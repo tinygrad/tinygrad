@@ -40,7 +40,7 @@ def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Dict[str, Any
   Loads a .safetensor file from disk, returning the data, metadata length, and metadata.
   """
   t = fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn))
-  data_start = struct.unpack("<Q", t[0:8].data())[0] + 8
+  data_start = int.from_bytes(t[0:8].data(), "little") + 8
   return t, data_start, json.loads(t[8:data_start].data().tobytes())
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
@@ -52,7 +52,8 @@ def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   ```
   """
   t, data_start, metadata = safe_load_metadata(fn)
-  return { k: t[data_start+v['data_offsets'][0]:data_start+v['data_offsets'][1]].bitcast(safe_dtypes[v['dtype']]).reshape(v['shape'])
+  data = t[data_start:]
+  return { k: data[v['data_offsets'][0]:v['data_offsets'][1]].bitcast(safe_dtypes[v['dtype']]).reshape(v['shape'])
           for k, v in metadata.items() if k != "__metadata__" }
 
 def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
