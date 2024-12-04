@@ -2020,8 +2020,8 @@ class Tensor(SimpleMathTrait):
     """
     Applies average pooling over a tensor.
 
-    When `ceil_mode` is set to True, output shape will be determined using ceil division
-    When `count_include_pad` is set to True, zero padding will be included in the averaging calculation
+    When `ceil_mode` is set to True, output shape will be determined using ceil division.
+    When `count_include_pad` is set to False, zero padding will not be included in the averaging calculation.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
 
@@ -2054,7 +2054,7 @@ class Tensor(SimpleMathTrait):
     """
     Applies max pooling over a tensor.
 
-    When `ceil_mode` is set to True, output shape will be determined using ceil division
+    When `ceil_mode` is set to True, output shape will be determined using ceil division.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
 
