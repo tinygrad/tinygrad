@@ -2339,10 +2339,10 @@ class Tensor(SimpleMathTrait):
       f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
     # shrink src to index shape to shrink away the unused values
     src = src.shrink(tuple((0,s) for s in index.shape))
-    # prepare src and mask for reduce w.r.t dim
+    # prepare src and mask for reduce with respect to dim
     src = src.unsqueeze(-1).expand(src.shape + (self.shape[dim],)).transpose(-1, dim)
     mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
-    # pad to self.shape so that reduce can be done with padded values as no-ops
+    # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
     src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
     if reduce == "add": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + self
     if reduce == "multiply": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * self
