@@ -130,9 +130,9 @@ def block_reorder(ctx, in_block:UOp):
   priorities:Dict[UOp, int] = {}
   def get_priority(u:UOp):
     # put loads in the beginning of the block
-    priority = -100 if u.op is Ops.LOAD else 0
-    # prevent priority inversion
-    return min([priority] + [priorities[x] for x in local_children[u]])
+    priority = -1000 if u.op is Ops.LOAD else 0
+    # prevent priority inversion, prefer more local children
+    return min([priority] + [priorities[x]+1 for x in local_children[u]])
   for u in in_block.arg.lst[::-1]: priorities[u] = get_priority(u)
 
   queue:List[Tuple[int, Tuple, UOp]] = []
