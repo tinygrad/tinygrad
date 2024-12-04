@@ -158,6 +158,15 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).exp().sum())
     np.testing.assert_allclose(Tensor.ones(4).pad(((1, 1),)).exp().sum().numpy(), 4 * math.e + 2)
 
+  def test_bool_zero_max(self):
+    _check_ast_count(0, Tensor.full((1, 2), True).shrink(((0, 1), (0, 0))).max((1, 0)))
+    np.testing.assert_equal(Tensor.full((1, 2), True).shrink(((0, 1), (0, 0))).max((1, 0)).numpy(), False)
+
+  def test_zero_size_ops(self):
+    for reduceop in [lambda x:x.prod(), lambda x:x.sum()]: # lambda x:x.max() NOTE: numpy gives "reduction operation maximum which has no identity"
+      _check_ast_count(0, reduceop(Tensor.empty(1, 0)))
+      np.testing.assert_equal(reduceop(Tensor.empty((1, 0))).numpy(), reduceop(np.empty((1, 0))))
+
   def test_const_prod(self):
     _check_ast_count(0, Tensor.full((2, 3), fill_value=2).prod())
     np.testing.assert_equal(Tensor.full((2, 3), fill_value=2).prod().numpy(), 2**(2*3))
