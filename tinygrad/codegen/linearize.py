@@ -113,11 +113,7 @@ def block_merge(ctx, x:UOp):
 pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
-def block_reorder(ctx, in_block:UOp):
-  # only visit each block once
-  if in_block in ctx: return None
-  ctx[in_block] = None
-
+def block_reorder(in_block:UOp):
   in_this_block = set(in_block.arg.lst)
   local_children: DefaultDict[UOp, List[UOp]] = collections.defaultdict(list)
   in_degree: DefaultDict[UOp, int] = collections.defaultdict(int)
@@ -146,8 +142,6 @@ def block_reorder(ctx, in_block:UOp):
 
   assert len(newlst) == len(in_block.arg.lst), f"len mismatch {len(newlst)} != {len(in_block.arg.lst)}"
   return in_block.replace(arg=BasicBlock(in_block.arg.ctx, tuple(newlst)))
-
-pm_block_reorder = PatternMatcher([(UPat(Ops.BLOCK, name="in_block"), block_reorder),])
 
 def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   assert sink.op is Ops.SINK, f"sink isn't sink, it's {sink.op}"
@@ -209,7 +203,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
   sink = sink.substitute(new_forks)
 
   # reorder ops in block for speed
-  sink = graph_rewrite(sink, pm_block_reorder, ctx={})
+  sink = sink.substitute({u:newu for u in sink.toposort if u.op is Ops.BLOCK and (newu:=block_reorder(u)) is not u})
 
   # final rewrite to merge all blocks into one
   sink = graph_rewrite(sink, pm_block_merge, ctx=children)
