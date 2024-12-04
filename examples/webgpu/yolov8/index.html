@@ -32,6 +32,18 @@
             background: transparent;
         }
 
+        #fps-meter {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            font-size: 18px;
+            border-radius: 5px;
+            z-index: 10;
+        }
+
         h1 {
             margin-top: 20px;
         }
@@ -42,19 +54,24 @@
     <div class="video-container">
         <video id="video" muted autoplay playsinline></video>
         <canvas id="canvas"></canvas>
+        <div id="fps-meter"></div>
     </div>
     
     <script>
         let net = null;
+        const modelInputSize = 256
+        let lastCalledTime;
+        let fps = 0, accumFps = 0, frameCounter = 0;
 
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const context = canvas.getContext('2d');
         const offscreenCanvas = document.createElement('canvas');
-        const modelInputSize = 320
+        const fpsMeter = document.getElementById('fps-meter');
         offscreenCanvas.width = modelInputSize;
         offscreenCanvas.height = modelInputSize;
         const offscreenContext = offscreenCanvas.getContext('2d');
+
 
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
             navigator.mediaDevices.getUserMedia({ audio: false,  video: { facingMode: { ideal: "environment" }}}).then(function (stream) {
@@ -71,6 +88,24 @@
                 requestAnimationFrame(processFrame);
                 return;
             }
+
+            if (!lastCalledTime) {
+                lastCalledTime = performance.now();
+                fps = 0;
+            } else {
+                const now = performance.now();
+                delta = (now - lastCalledTime)/1000.0;
+                lastCalledTime = now;
+                accumFps += 1/delta;
+
+                if (frameCounter++ == 10) {
+                    fps = accumFps/frameCounter;
+                    frameCounter = 0;
+                    accumFps = 0;
+                    fpsMeter.innerText = `FPS: ${fps.toFixed(1)}`
+                }
+            }
+
             const videoAspectRatio = video.videoWidth / video.videoHeight;
             let targetWidth, targetHeight;
 
