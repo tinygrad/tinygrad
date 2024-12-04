@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Any
-import contextlib, decimal, statistics, random, json, atexit, time, ctypes
+import contextlib, decimal, statistics, random, json, atexit, time, ctypes, array
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv, to_mv
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator
@@ -227,6 +227,21 @@ class HCQArgsState(Generic[ProgramType]):
   def __init__(self, ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()): self.ptr, self.prg = ptr, prg
   def update_buffer(self, index:int, buf:HCQBuffer): raise NotImplementedError("need update_buffer")
   def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
+
+class CLikeArgsState(HCQArgsState[ProgramType]):
+  def __init__(self, ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), prefix:Optional[List[int]]=None):
+    super().__init__(ptr, prg, bufs, vals=vals)
+
+    if prefix is not None: to_mv(self.ptr, len(prefix) * 4).cast('I')[:] = array.array('I', prefix)
+
+    self.bufs = to_mv(self.ptr + len(prefix or []) * 4, len(bufs) * 8).cast('Q')
+    self.vals = to_mv(self.ptr + len(prefix or []) * 4 + len(bufs) * 8, len(vals) * 4).cast('I')
+
+    self.bufs[:] = array.array('Q', [b.va_addr for b in bufs])
+    self.vals[:] = array.array('I', vals)
+
+  def update_buffer(self, index:int, buf:HCQBuffer): self.bufs[index] = buf.va_addr
+  def update_var(self, index:int, val:int): self.vals[index] = val
 
 class HCQProgram(Generic[DeviceType]):
   def __init__(self, args_state_t:Type[HCQArgsState], dev:DeviceType, name:str, kernargs_alloc_size:int):

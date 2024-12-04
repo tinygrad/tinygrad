@@ -3,7 +3,7 @@ import unittest, math
 import numpy as np
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import CI, DEBUG, getenv, Context
+from tinygrad.helpers import CI, DEBUG, getenv, Context, Timing
 from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu, spec # noqa F401
@@ -252,7 +252,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (), ('gidx0', 4))
     idx = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem, gidx0 * UOp.const(dtypes.int, 2)))
     val = UOp.const(dtypes.float, 42.0)
-    gate = gidx0.lt(UOp.const(dtypes.int, 1))
+    gate = gidx0<UOp.const(dtypes.int, 1)
     store = UOp(Ops.STORE, dtypes.void, (idx, val, gate))
     uops = to_uops_list([store])
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
@@ -271,7 +271,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx))
     idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx))
     val = UOp.const(dtypes.float, 42.0)
-    gate = gidx0.lt(UOp.const(dtypes.int, 1))
+    gate = gidx0<UOp.const(dtypes.int, 1)
     stores = [UOp.store(idx0, val, gate), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
@@ -291,7 +291,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx))
     idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx))
     val = UOp.const(dtypes.float, 42.0)
-    gate = gidx0.lt(UOp.const(dtypes.int, 1))
+    gate = gidx0<UOp.const(dtypes.int, 1)
     stores = [UOp.store(idx0, val, gate), UOp.store(idx1, val, gate)]
     uops = to_uops_list(stores)
     if DEBUG >= 4: print(Device[Device.DEFAULT].renderer.render("test", uops))
@@ -462,6 +462,20 @@ class TestUPatHelpers(unittest.TestCase):
     with self.assertRaises(AssertionError): # TODO: location UPat files created in test/*?
       test_upat = UPat(Ops.CONST, dtypes.bool)
       self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])
+
+class TestUopsObject(unittest.TestCase):
+  # LOL, running this test breaks all instances of "4"
+  """
+  @unittest.expectedFailure
+  def test_immutable(self):
+    const_4 = UOp.const(dtypes.int, 4)
+    with self.assertRaises(Exception):
+      const_4.arg = 5
+  """
+
+  def test_timing(self):
+    with Timing("create 10k uops:"): ret = [UOp(Ops.CONST, dtypes.int, arg=10000000+i) for i in range(10000)]
+    assert len(ret) == 10000
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
