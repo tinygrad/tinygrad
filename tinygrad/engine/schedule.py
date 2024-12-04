@@ -226,7 +226,7 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 def uval(u:UOp) -> UOp:
   assert is_scheduled(u), f"must be a scheduled op {u}"
-  return to_store.src[0] if (to_store:=u.src[1]).is_contiguous_base else to_store
+  return r.src[0] if (r:=u.src[1]).op is Ops.CONTIGUOUS and not (r.src[0].base.op is Ops.VIEW and len(r.src[0].base.src) == 2) else r
 
 def recursive_group(tr:UOp, st:ShapeTracker, r:UOp, children:DefaultDict[UOp, Dict[UOp, None]], allbufs:Dict[UOp, UOp], realizes:Dict[UOp, UOp],
                      reduce_for_op:Dict[UOp, UOp], group:Dict[UOp, None], cache:Dict[Tuple[UOp, ShapeTracker], None]) -> None:
@@ -313,7 +313,7 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
   # maybe fuse arange with its children
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
-    if any(ctx.allbufs[tr].src[1].is_contiguous_base for tr in group): continue
+    if any(ctx.lazybufs[tr].forced_realize for tr in group): continue
     kernel_children = {c for tr in group for c in ctx.children[tr] if uval(ctx.allbufs[c]).op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group: del ctx.realizes[tr]
