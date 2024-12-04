@@ -82,13 +82,13 @@ def block_merge(ctx, x:UOp):
     if len([y for y in ctx[x.arg.end] if y not in in_this_block]) == 0:
       # find the parent block that has the BLOCKSTART in the ctx
       parent_blocks = [y for y in x.src if y.op is Ops.BLOCK and UOp(Ops.BLOCKSTART, src=(x.arg.end,)) in y.arg.ctx]
+      assert len(parent_blocks) <= 1, "should never have two parent blocks"
       if len(parent_blocks) == 1:
         parent_block = parent_blocks[0]
         # range needs DEFINE_ACC to be before the range (never in DEFINE_ACC for if)
         early_ops, late_ops = partition(x.arg.lst, lambda y: y.op is Ops.DEFINE_ACC and x.arg.end in y.src)
         return UOp(Ops.BLOCK, dtypes.void, tuple(y for y in x.src if y is not parent_block)+parent_block.src,
                   BasicBlock(tuple(y for y in x.arg.ctx if y is not x.arg.end), tuple(early_ops)+parent_block.arg.lst+tuple(late_ops)))
-      assert not len(parent_blocks)
 
   new_srcs: List[UOp] = []
   to_append: List[UOp] = []
@@ -97,18 +97,18 @@ def block_merge(ctx, x:UOp):
   for u in x.src:
     if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(x.arg.ctx) or (x.arg.end is not None and x.arg.end in u.arg.ctx)):
       # NOTE: this can't appear in srcs twice or it would be a BLOCKFORK
-      new_ctx += u.arg.ctx
+      new_ctx += tuple(y for y in u.arg.ctx if y not in x.arg.ctx)
       new_srcs.extend(u.src)
       to_append.extend(u.arg.lst)
     elif u.op is Ops.BLOCKFORK and x.src.count(u) == u.arg: # block fork appears # of times in srcs
       if u not in placed:
-        new_srcs += list(u.src)
+        new_srcs.extend(u.src)
         placed.add(u)
     else:
       # keep it in srcs
       new_srcs.append(u)
   if len(to_append) == 0 and len(placed) == 0: return None
-  return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(tuple(dedup(new_ctx)), tuple(to_append)+x.arg.lst, x.arg.end))
+  return UOp(x.op, dtypes.void, tuple(new_srcs), BasicBlock(tuple(sorted(new_ctx, key=lambda x: x.tuplize)), tuple(to_append)+x.arg.lst, x.arg.end))
 
 pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
 
@@ -173,7 +173,7 @@ def linearize_uop(sink:UOp, skip_check:bool=not __debug__) -> List[UOp]:
       else:
         # flow though everything else
         this_block_ctx += temp_block_ctxs[s]
-    temp_block_ctxs[u] = dedup(sorted(this_block_ctx, key=lambda x: x.tuplize))
+    temp_block_ctxs[u] = sorted(dedup(this_block_ctx), key=lambda x: x.tuplize)
 
   # make final block_ctxs, add BLOCKSTART to block_ctxs for IF and RANGE
   block_ctxs: Dict[UOp, Tuple[UOp, ...]] = {}
