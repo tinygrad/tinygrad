@@ -116,32 +116,22 @@ def block_reorder(ctx, in_block:UOp):
   if in_block in ctx: return None
   ctx[in_block] = None
 
-  # get local children
   in_this_block = set(in_block.arg.lst)
   local_children: DefaultDict[UOp, List[UOp]] = collections.defaultdict(list)
   in_degree: DefaultDict[UOp, int] = collections.defaultdict(int)
-  for u in in_block.arg.lst:
+  priorities:Dict[UOp, int] = {}
+
+  # get local children and assign priorities
+  for u in reversed(in_block.arg.lst):
     for s in u.src:
       if s in in_this_block:
         local_children[s].append(u)
         in_degree[u] += 1
-
-  # assign priorities
-  priorities:Dict[UOp, int] = {}
-  def get_priority(u:UOp):
-    # put loads in the beginning of the block
-    priority = -1000 if u.op is Ops.LOAD else 0
-    # prevent priority inversion
-    return min([priority] + [priorities[x] for x in local_children[u]])
-  for u in in_block.arg.lst[::-1]: priorities[u] = get_priority(u)
+    priorities[u] = min([-1000 if u.op is Ops.LOAD else 0] + [priorities[x] for x in local_children[u]])
 
   # placement queue
-  queue:List[Tuple[int, Tuple, UOp]] = []
-  def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
-
-  # place the first ones that don't have deps
-  for u in in_block.arg.lst:
-    if u not in in_degree: push(u)
+  queue:List[Tuple[int, Tuple, UOp]] = [(priorities[u], u.tuplize, u) for u in in_block.arg.lst if u not in in_degree]
+  heapq.heapify(queue)
 
   newlst = []
   while queue:
@@ -149,7 +139,8 @@ def block_reorder(ctx, in_block:UOp):
     newlst.append(x)
     for u in local_children[x]:
       in_degree[u] -= 1
-      if in_degree[u] == 0: push(u)
+      if in_degree[u] == 0: heapq.heappush(queue, (priorities[u], u.tuplize, u))
+
   assert len(newlst) == len(in_block.arg.lst), f"len mismatch {len(newlst)} != {len(in_block.arg.lst)}"
   return in_block.replace(arg=BasicBlock(in_block.arg.ctx, tuple(newlst)))
 
