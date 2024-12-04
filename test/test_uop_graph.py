@@ -355,7 +355,7 @@ class TestUOpGraph(unittest.TestCase):
     d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=1)
     idx = UOp.const(dtypes.int, 0)
     ld = UOp(Ops.LOAD, dtypes.int, (d1.index(idx),))
-    alu = ld.lt(1).cast(dtypes.bool)
+    alu = (ld<1).cast(dtypes.bool)
     out = UOp(Ops.STORE, dtypes.void, (d0.index(idx), alu))
     uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 0)
@@ -662,7 +662,7 @@ class TestIFUOps(unittest.TestCase):
   def test_create_ifs(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(local=True), (), ("smem", 4))
-    valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
+    valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 10))<5
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 4))
     gate = valid&(lidx.ne(2))
     idx = UOp.const(dtypes.int, 0)
@@ -681,7 +681,7 @@ class TestIFUOps(unittest.TestCase):
   def test_expand_ifs_one_gate(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     sbuf = UOp(Ops.DEFINE_LOCAL, dtypes.float.ptr(local=True), (), ("smem", 16))
-    valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 4)).lt(1)
+    valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 4))<1
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 16))
     gate = valid&(lidx.ne(2))
     st = UOp(Ops.STORE, dtypes.void, (sbuf, lidx, UOp.const(dtypes.float, 42)))
@@ -700,7 +700,7 @@ class TestIFUOps(unittest.TestCase):
   @unittest.expectedFailure
   def test_expand_ifs_dumb(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
-    valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 10)).lt(5)
+    valid = UOp(Ops.SPECIAL, dtypes.int, (), ("gidx0", 10))<5
     lidx = UOp(Ops.SPECIAL, dtypes.int, (), ("lidx0", 4))
     gate = valid&(lidx.ne(2))
     stores = [UOp(Ops.STORE, dtypes.void, (buf, UOp.const(dtypes.int, i), UOp.const(dtypes.float, i), gate)) for i in range(4)]
