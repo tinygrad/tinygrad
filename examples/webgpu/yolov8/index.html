@@ -51,8 +51,9 @@
         const canvas = document.getElementById('canvas');
         const context = canvas.getContext('2d');
         const offscreenCanvas = document.createElement('canvas');
-        offscreenCanvas.width = 640;
-        offscreenCanvas.height = 640;
+        const modelInputSize = 320
+        offscreenCanvas.width = modelInputSize;
+        offscreenCanvas.height = modelInputSize;
         const offscreenContext = offscreenCanvas.getContext('2d');
 
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -74,16 +75,16 @@
             let targetWidth, targetHeight;
 
             if (videoAspectRatio > 1) {
-                targetWidth = 640;
-                targetHeight = 640 / videoAspectRatio;
+                targetWidth = modelInputSize;
+                targetHeight = modelInputSize / videoAspectRatio;
             } else {
-                targetHeight = 640;
-                targetWidth = 640 * videoAspectRatio;
+                targetHeight = modelInputSize;
+                targetWidth = modelInputSize * videoAspectRatio;
             }
 
-            const offsetX = (640 - targetWidth) / 2;
-            const offsetY = (640 - targetHeight) / 2;
-            offscreenContext.clearRect(0, 0, 640, 640);
+            const offsetX = (modelInputSize - targetWidth) / 2;
+            const offsetY = (modelInputSize - targetHeight) / 2;
+            offscreenContext.clearRect(0, 0, modelInputSize, modelInputSize);
             offscreenContext.drawImage(video, offsetX, offsetY, targetWidth, targetHeight);
             const boxes = await detectObjectsOnFrame(offscreenContext);
             drawBoxes(offscreenCanvas, boxes, targetWidth, targetHeight, offsetX, offsetY);
@@ -135,8 +136,8 @@
 
         async function prepareInput(offscreenContext) {
             return new Promise(resolve => {
-                const [img_width,img_height] = [640, 640]
-                const imgData = offscreenContext.getImageData(0,0,640,640);
+                const [img_width,img_height] = [modelInputSize, modelInputSize]
+                const imgData = offscreenContext.getImageData(0,0,modelInputSize,modelInputSize);
                 const pixels = imgData.data;
                 const red = [], green = [], blue = [];
 
@@ -158,21 +159,22 @@
         
         function processOutput(output, img_width, img_height) {
             let boxes = [];
-            for (let index=0;index<8400;index++) {
+            const numPredictions = Math.pow(modelInputSize/32, 2) * 21;
+            for (let index=0;index<numPredictions;index++) {
                 const [class_id,prob] = [...Array(80).keys()]
-                    .map(col => [col, output[8400*(col+4)+index]])
+                    .map(col => [col, output[numPredictions*(col+4)+index]])
                     .reduce((accum, item) => item[1]>accum[1] ? item : accum,[0,0]);
 
                 if (prob < 0.25) continue;
                 const label = yolo_classes[class_id];
                 const xc = output[index];
-                const yc = output[8400+index];
-                const w = output[2*8400+index];
-                const h = output[3*8400+index];
-                const x1 = (xc-w/2)/640*img_width;
-                const y1 = (yc-h/2)/640*img_height;
-                const x2 = (xc+w/2)/640*img_width;
-                const y2 = (yc+h/2)/640*img_height;
+                const yc = output[numPredictions+index];
+                const w = output[2*numPredictions+index];
+                const h = output[3*numPredictions+index];
+                const x1 = (xc-w/2)/modelInputSize*img_width;
+                const y1 = (yc-h/2)/modelInputSize*img_height;
+                const x2 = (xc+w/2)/modelInputSize*img_width;
+                const y2 = (yc+h/2)/modelInputSize*img_height;
                 boxes.push([x1,y1,x2,y2,label,prob]);
             }
 
