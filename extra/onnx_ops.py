@@ -519,17 +519,17 @@ from tinygrad.nn.optim import Adam as TinyAdam
 from tinygrad.nn.optim import SGD
 
 def onnx_training(input_group_size):
-  def decorator(fxn):
-    def wrap(R, T, *inputs, **kwargs):
+  def _decorator(func):
+    def __wrapper(R, T, *inputs, **kwargs):
       old_training = Tensor.training
       Tensor.training = True
       T, R = to_python_const(T), R.detach()
       groups = len(inputs) // input_group_size
-      ret = [fxn(R, T, *inps, **kwargs) for inps in (inputs[i::groups] for i in range(groups))]
+      ret = [func(R, T, *inps, **kwargs) for inps in (inputs[i::groups] for i in range(groups))]
       Tensor.training = old_training
       return tuple(flatten(zip(*ret)))
-    return wrap
-  return decorator
+    return __wrapper
+  return _decorator
 
 @onnx_training(3)
 def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
