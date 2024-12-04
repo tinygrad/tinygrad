@@ -871,6 +871,7 @@ def split_uop(x:UOp, sep:Ops):
 def div_and_mod_folding(x: UOp, c: int, which: Literal[Ops.MOD, Ops.IDIV], split_rem: bool=False) -> Optional[UOp]:
   # simplify x // c or x % c, None means no change, c must be > 0
   assert c > 0
+  if x.dtype.count > 1: return None
   # simple cancel div/mod case
   if (q:=x.vmin//c) == (x.vmax//c):
     if which is Ops.MOD: return x - q*c
