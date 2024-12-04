@@ -468,8 +468,7 @@ def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
   depth = int(to_python_const(depth))
   indices, rank = (indices < 0).where(indices+depth, indices), indices.ndim
   if axis < 0: axis += rank + 1
-  ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
-  cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
+  cond = indices[:,None]._one_hot_along_dim(depth, dim=rank-axis)
   return cond.where(values[1], values[0])
 
 def Compress(inp: Tensor, condition: Tensor, axis=None):
