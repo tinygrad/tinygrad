@@ -363,8 +363,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   buffer_num = itertools.count(0)
   @staticmethod
   def new_buffer(device:str, size:int, dtype:DType) -> UOp: return UOp(Ops.BUFFER, dtype.ptr(), (), (next(UOp.buffer_num), (device, size, dtype)))
+  @property
+  def device(self) -> str: return unwrap(self._device)
   @functools.cached_property
-  def device(self) -> str: return self.arg[1][0] if self.op is Ops.BUFFER else self.src[0].device
+  def _device(self) -> Optional[str]:
+    return self.arg[1][0] if self.op is Ops.BUFFER else dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
