@@ -120,7 +120,7 @@ def get_run_onnx(onnx_model: ModelProto):
           input_tensors[name] = inputs[name]
         elif isinstance(inputs[name], list):
           input_tensors[name] = [Tensor(i, requires_grad=False) for i in inputs[name]]
-        # this is just to make training tests pass, need a principled way to control training vs non-training
+        # TODO: this is just to make training tests pass, need a principled way to handle training vs non-training
         elif domain == "ai.onnx.preview.training":
           input_tensors[name] = Tensor(inputs[name], requires_grad=True)
         else:

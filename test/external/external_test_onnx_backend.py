@@ -40,10 +40,10 @@ class TinygradBackend(Backend):
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
-# TODO: there isn't a AttributeProto for `epsilon` in the NodeProto for 'test_adam_multiple_cpu'
+# TODO: there isn't an AttributeProto for `epsilon` in the NodeProto for 'test_adam_multiple_cpu'
 # [x.name for x in n.attribute] -> ['alpha', 'beta', 'norm_coefficient']
-# but in their documentation (https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-176) it states there being an `epsilon = 1e-2`
-# with hard coded in epsilon = 1e-2, test passes
+# but in their documentation https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-176, it states there being an epsilon of 1e-2
+# test passes with epsilon = 1e-2
 backend_test.exclude('test_adam_multiple_cpu')
 
 # about different dtypes
