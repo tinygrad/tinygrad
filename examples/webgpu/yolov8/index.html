@@ -1,12 +1,12 @@
-<!-- Pre and post-processing functions from: https://github.com/AndreyGermanov/yolov8_onnx_javascript -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YOLOv8 tinygrad WebGPU</title>
     <script src="./net.js"></script>
     <style>
-       body {
+        body {
             text-align: center;
             font-family: Arial, sans-serif;
             margin: 0;
@@ -17,7 +17,11 @@
         .video-container {
             position: relative;
             width: 100%;
+            height: 100vh;
             margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         #video, #canvas {
@@ -26,6 +30,26 @@
             left: 0;
             width: 100%;
             height: auto;
+        }
+
+        .loader {
+            width: 48px;
+            height: 48px;
+            border: 5px solid #FFF;
+            border-bottom-color: transparent;
+            border-radius: 50%;
+            display: inline-block;
+            box-sizing: border-box;
+            animation: rotation 1s linear infinite;
+        }
+
+        @keyframes rotation {
+            0% {
+                transform: rotate(0deg);
+            }
+            100% {
+                transform: rotate(360deg);
+            }
         }
 
         #canvas {
@@ -47,6 +71,26 @@
         h1 {
             margin-top: 20px;
         }
+
+        .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            z-index: 10;
+        }
+
+        .loading-text {
+            font-size: 24px;
+            color: white;
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
@@ -55,8 +99,12 @@
         <video id="video" muted autoplay playsinline></video>
         <canvas id="canvas"></canvas>
         <div id="fps-meter"></div>
+
+        <div id="div-loading" class="loading-container">
+            <p class="loading-text">Loading model</p>
+            <span class="loader"></span>
+        </div>
     </div>
-    
     <script>
         let net = null;
         const modelInputSize = 256
@@ -68,6 +116,7 @@
         const context = canvas.getContext('2d');
         const offscreenCanvas = document.createElement('canvas');
         const fpsMeter = document.getElementById('fps-meter');
+        const loadingContainer = document.getElementById('div-loading');
         offscreenCanvas.width = modelInputSize;
         offscreenCanvas.height = modelInputSize;
         const offscreenContext = offscreenCanvas.getContext('2d');
@@ -98,7 +147,7 @@
                 lastCalledTime = now;
                 accumFps += 1/delta;
 
-                if (frameCounter++ == 10) {
+                if (frameCounter++ >= 30) {
                     fps = accumFps/frameCounter;
                     frameCounter = 0;
                     accumFps = 0;
@@ -156,7 +205,10 @@
         }
 
         async function detectObjectsOnFrame(offscreenContext) {
-            if (!net) net = await loadNet(await getDevice());
+            if (!net) {
+                net = await loadNet(await getDevice());
+                loadingContainer.style.display = "none";
+            }
             let start = performance.now();
             const [input,img_width,img_height] = await prepareInput(offscreenContext);
             console.log("Preprocess took: " + (performance.now() - start) + " ms");
