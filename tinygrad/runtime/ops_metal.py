@@ -91,7 +91,7 @@ class MetalCompiler(Compiler):
     # source blob has to be padded to multiple of 4 but at least one 'b\x00' should be added, params blob just has to be null terminated
     src_padded, params_padded = src.encode() + b'\x00'*(round_up(len(src) + 1, 4) - len(src)), params.encode() + b'\x00'
     request = struct.pack('<QQ', len(src_padded), len(params_padded)) + src_padded + params_padded
-    # The callback is actually not a callback but a block which is apple's non-standart extension to add closures to C.
+    # The callback is actually not a callback but a block which is apple's non-standard extension to add closures to C.
     # See https://clang.llvm.org/docs/Block-ABI-Apple.html#high-level for struct layout.
     # Fields other than invoke are unused in this case so we can just use ctypes.byref with negative offset to invoke field, add blockptr as a first
     # argument and pretend it's a normal callback
