@@ -278,10 +278,10 @@ class Tensor(SimpleMathTrait):
     print(np.frombuffer(t.data(), dtype=np.int32))
     ```
     """
-    assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
+    assert self.dtype.base.fmt is not None, f"no fmt dtype for {self.dtype.base}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    if TYPE_CHECKING or sys.version_info < (3, 12): assert self.dtype.fmt != "e"
-    return self._data().cast(self.dtype.fmt) if 0 in self.shape else self._data().cast(self.dtype.fmt, self.shape)
+    if TYPE_CHECKING or sys.version_info < (3, 12): assert self.dtype.base.fmt != "e"
+    return self._data().cast(self.dtype.base.fmt) if 0 in self.shape else self._data().cast(self.dtype.base.fmt, self.shape)
 
   def item(self) -> ConstType:
     """
@@ -318,10 +318,10 @@ class Tensor(SimpleMathTrait):
     ```
     """
     import numpy as np
-    if self.dtype == dtypes.bfloat16: return self.float().numpy()
-    assert _to_np_dtype(self.dtype) is not None, f"no np dtype for {self.dtype}"
+    if self.dtype.base == dtypes.bfloat16: return self.float().numpy()
+    assert _to_np_dtype(self.dtype.base) is not None, f"no np dtype for {self.dtype.base}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype)).reshape(self.shape)
+    return np.frombuffer(self._data(), dtype=_to_np_dtype(self.dtype.base)).reshape(self.shape)
 
   def clone(self) -> Tensor:
     """
@@ -3206,7 +3206,7 @@ class Tensor(SimpleMathTrait):
     """
     return -((-self).maximum(-x))
 
-  def where(self:Tensor, x:Union[Tensor, ConstType], y:Union[Tensor, ConstType]):
+  def where(self:Tensor, x:Union[Tensor, ConstType, sint], y:Union[Tensor, ConstType, sint]):
     """
     Return a tensor of elements selected from either `x` or `y`, depending on `self`.
     `output_i = x_i if self_i else y_i`.
@@ -3258,8 +3258,8 @@ class Tensor(SimpleMathTrait):
   def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x))
   def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x))
 
-  def lt(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, False))
-  def gt(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, True))
+  def __lt__(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, False))
+  def __gt__(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, True))
   def ne(self, x) -> Tensor: return F.Neq.apply(*self._broadcasted(x))
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]

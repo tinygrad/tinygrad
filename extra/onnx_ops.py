@@ -522,7 +522,6 @@ def onnx_training(group_size):
   def decorator(fxn):
     def wrap(R, T, *inputs, **kwargs):
       groups = len(inputs) // group_size
-      print(groups)
       old_training = Tensor.training
       Tensor.training = True
       T, R = to_python_const(T), R.detach()
