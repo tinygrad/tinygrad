@@ -58,8 +58,8 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: f"mov {ctx[x]}, {ctx[x.src[0]]}\n.LOOP_{x.arg}:"),
   (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x: f"inc {ctx[x.src[0]]}\ncmp {ctx[x.src[0]]}, {x.src[0].src[1].arg}\njl .LOOP_{x.src[0].arg}"),
   # casting
-  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints)), name="x"), lambda ctx,x: f"movzx {ctx[x]}, {ctx[x.src[0]]}"),
-  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.sints)), name="x"),
+  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints),), name="x"), lambda ctx,x: f"movzx {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.sints),), name="x"),
    lambda ctx,x: f"movs{'x' if x.src[0].dtype.itemsize < 4 else 'xd'} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"{float_cast(x.dtype, x.src[0].dtype)} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"mov{'q' if x.dtype.itemsize == 8 else 'd'} {ctx[x]}, {ctx[x.src[0]]}"),
@@ -86,11 +86,14 @@ x86_rewrite = PatternMatcher([
 ])
 
 x86_matcher = PatternMatcher([
+  # TODO: casts from uint64 to float are complicated
   # can't cast from float to int8/16 directly and vice versa
   (UPat(Ops.CAST, dtype=(dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16), src=(UPat(dtype=dtypes.floats),), name="c"),
     lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
   (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=(dtypes.bool, dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16)),), name="c"),
     lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
+  # casting uint32 to float requires 64 bit register (float cast op assumes signed integers)
+  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint32),), name="c"), lambda c: c.src[0].cast(dtypes.uint64).cast(c.dtype)),
   # 2 operand imul and cmov don't work with 8bit registers
   (UPat(Ops.MUL, dtype=(dtypes.uint8, dtypes.int8), name="x"),
     lambda x: UOp(Ops.MUL, dtype=dtypes.int16, src=(x.src[0].cast(dtypes.int16), x.src[1].cast(dtypes.int16))).cast(x.dtype)),
