@@ -26,11 +26,14 @@ class BasicBlock:
 
 def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]], x:UOp):
   block_ctxs, children = ctx
+  in_this_block = set(x.arg.lst)
+
+  # collections to build
   new_srcs: List[UOp] = []
   to_append: List[UOp] = []
   old_blocks: Dict[Tuple[UOp, ...], UOp] = {}
   new_blocks: Dict[Tuple[UOp, ...], List[UOp]] = {}
-  in_this_block = set(x.arg.lst)
+
   for u in x.src:
     if u.op is Ops.BLOCK:
       # merge sibling blocks. NOTE: blocks must only have one output source
@@ -40,7 +43,7 @@ def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]],
       # if it can go in blocks and all its children are in the block, we add it to the block
       if (block_ctx:=block_ctxs[u]) == x.arg.ctx:
         # if it's the same context, we place the UOp in this block and append the parents to its srcs
-        new_srcs += list(u.src)
+        new_srcs.extend(u.src)
         to_append.append(u)
       else:
         # if it's a different context, we create a new block with this UOp
@@ -52,11 +55,10 @@ def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]],
 
   for rng,lst in new_blocks.items():
     srcs = flatten(y.src for y in lst)
-    if (old_block:=old_blocks.get(rng, None)) is not None:
+    if (old_block:=old_blocks.pop(rng, None)) is not None:
       # NOTE: order shouldn't matter here
-      srcs += list(old_block.src)
-      lst += list(old_block.arg.lst)
-      del old_blocks[rng]
+      srcs.extend(old_block.src)
+      lst.extend(old_block.arg.lst)
     new_block = UOp(Ops.BLOCK, dtypes.void, tuple(dedup(srcs)), BasicBlock(rng, tuple(lst)))
     lrng = list(rng)
     for r in rng[::-1]:
@@ -127,6 +129,7 @@ def block_reorder(ctx, in_block:UOp):
       if s in in_this_block:
         local_children[s].append(u)
         in_degree[u] += 1
+    # put loads in the beginning of the block and prevent priority inversion
     priorities[u] = min([-1000 if u.op is Ops.LOAD else 0] + [priorities[x] for x in local_children[u]])
 
   # placement queue
