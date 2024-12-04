@@ -5,10 +5,11 @@ from tinygrad.engine import jit
 from tinygrad.helpers import ceildiv
 from tinygrad.tensor import Tensor
 
-PAD, DEFAULT_LEN, PERMS = 66, 65, [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]
+PAD, DEFAULT_LEN, PERMUTATIONS = 66, 65, [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]
 
 @jit.TinyJit
 def permute_data(data: Tensor, perms: Tensor) -> Tensor: return data[perms]
+
 @jit.TinyJit
 def mix(states: Tensor, chunks: Tensor) -> Tensor:
   def rotr(x: Tensor, n: int) -> Tensor: return ((x << (32 - n)) | (x >> n))
@@ -20,7 +21,7 @@ def mix(states: Tensor, chunks: Tensor) -> Tensor:
       new_states[d] = rotr(new_states[d] ^ new_states[a], 16 if m is mx else 8)
       new_states[c] = new_states[c] + new_states[d]
       new_states[b] = rotr(new_states[b] ^ new_states[c], 12 if m is mx else 7)
-  return new_states.realize()
+  return new_states
 
 def compress_chunks(states: Tensor, data: Tensor, chain_vals: Tensor, info: Tensor) -> Tensor:
   last_state, results = states[0], Tensor.empty((16, 8, states.shape[-1]), dtype=dtypes.uint32)
@@ -33,13 +34,12 @@ def compress_chunks(states: Tensor, data: Tensor, chain_vals: Tensor, info: Tens
   return (states[-1, :] | end_block)[:8] # combine last block of each chunk with end block
 
 def compress_blocks(states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
-  perms = Tensor(PERMS, dtype=dtypes.uint32)
+  perms = Tensor(PERMUTATIONS, dtype=dtypes.uint32)
   for _ in range(6):
     states = mix(states, data).clone().realize()
     data = permute_data(data, perms).clone().realize()
   states = mix(states, data)
-  states = (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:])
-  return states.realize()
+  return (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:])
 
 def tensor_to_blake_data(tensor: Tensor, max_memory: int) -> Tuple[Tensor, Tensor]:
   assert max_memory % 1024 == 0, "max_memory must be divisible by 1024"
@@ -65,9 +65,8 @@ def pairwise_concat(chain_vals: Tensor) -> Tuple[Tensor, Tensor]:
 
 def create_state(iv: Tensor, counts: Tensor, info: Tensor, flags: Tensor) -> Tensor:
   counts = counts.cat(Tensor.zeros(iv.shape[0], 1, iv.shape[-1], dtype=dtypes.uint32), dim=1)
-  lengths = (info == DEFAULT_LEN).where(64, info) # set default lengths
-  states = iv.cat(iv[:, :4], counts, lengths, flags, dim=1) # create states
-  return states * (info < PAD).cast(dtypes.uint32) # zero out padding
+  lengths = (info == DEFAULT_LEN).where(64, info)
+  return (iv.cat(iv[:, :4], counts, lengths, flags, dim=1) * (info < PAD).cast(dtypes.uint32))
 
 def create_flags(info: Tensor, parents: bool, final_step: bool) -> Tensor:
   flags = Tensor.zeros((16, 1, info.shape[-1]), dtype=dtypes.uint32).contiguous()
@@ -82,21 +81,15 @@ def create_flags(info: Tensor, parents: bool, final_step: bool) -> Tensor:
 def compress(data: Tensor, compressor: Callable, counts: Tensor, info: Tensor, parents: bool, final_step: bool) -> Tensor:
   IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
   iv = IV.reshape(1, 8, 1).expand(16, 8, info.shape[-1]).contiguous()
-  states = create_state(iv, counts, info, create_flags(info, parents, final_step))
-  return compressor(states, data, iv, info)
-
-def compress_tree(states: Tensor, data: Tensor, iv: Tensor, _) -> Tensor: return compress_blocks(states[-1].contiguous(), data, iv[0])
+  return compressor(create_state(iv, counts, info, create_flags(info, parents, final_step)), data, iv, info)
 
 def blake3(tensor: Tensor, max_memory: int = 1024**3) -> str:
-  print(f"--- init compress ---")
-  start = time.time()
   data, info, n_steps = tensor_to_blake_data(tensor, max_memory)
   counts = Tensor.arange(0, data.shape[-1], dtype=dtypes.uint32).reshape(-1, 1).expand(-1, 16).reshape(-1, 16, 1).permute(1, 2, 0)
   chain_vals = compress(data, compress_chunks, counts, info, False, False)
   info = (info < DEFAULT_LEN).where(64, info)
   counts = Tensor.zeros((16, 1, data.shape[-1]), dtype=dtypes.uint32)
-  end = time.time()
-  print(f"--- init compress time: {end - start:.2f}s ---")
+  compress_tree = lambda states, data, iv, _: compress_blocks(states[-1].contiguous(), data, iv[0])
   for i in range(n_steps): # tree-hash chain value pairs ~halving them in each step
     chain_vals, leftover_chain_val = pairwise_concat(chain_vals)
     valid = chain_vals.any(0)
@@ -112,7 +105,7 @@ if __name__ == "__main__":
   import sys
 
   arg = sys.argv[1]
-  max_memory = (1024**3 * 4) - (1024**2 * 100)
+  max_memory = (1024**3 * 3)
 
   if arg == "warmup":
     # warmup the JIT
