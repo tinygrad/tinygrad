@@ -41,7 +41,6 @@ class TinygradBackend(Backend):
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
 backend_test.exclude('test_adam_multiple_cpu')
-backend_test.exclude('test_adagrad_*')
 
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):
