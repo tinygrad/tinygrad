@@ -57,18 +57,14 @@ class SimpleMathTrait:
   def __ror__(self, x): return self.bitwise_or(x, True)
   def __rxor__(self, x): return self.xor(x, True)
 
-  def lt(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
-  def gt(self, x): return self.ufix(x).alu(Ops.CMPLT, self)
-  def ne(self, x): return self.alu(Ops.CMPNE, self.ufix(x))
-  def ge(self, x): return self.lt(x).logical_not()
-  def le(self, x): return self.gt(x).logical_not()
-  def eq(self, x): return self.ne(x).logical_not()
+  def __lt__(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
+  def __gt__(self, x): return self.ufix(x).alu(Ops.CMPLT, self)
+  def __ge__(self, x): return (self < x).logical_not()
+  def __le__(self, x): return (self > x).logical_not()
 
-  def __lt__(self, x): return self.lt(x)
-  def __gt__(self, x): return self.gt(x)
+  def ne(self, x): return self.alu(Ops.CMPNE, self.ufix(x))
+  def eq(self, x): return self.ne(x).logical_not()
   def __ne__(self, x): return self.ne(x)
-  def __ge__(self, x): return self.ge(x)
-  def __le__(self, x): return self.le(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
 class MathTrait(SimpleMathTrait):
@@ -131,8 +127,12 @@ class Ops(FastEnum):
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 
-  # loads before math
+  # load/store before math
   LOAD = auto()
+  STORE = auto()
+
+  # early INDEX
+  INDEX = auto()
 
   # math ops
   WMMA = auto()
@@ -145,12 +145,8 @@ class Ops(FastEnum):
   WHERE = auto(); MULACC = auto() # noqa: E702
 
   # assignment ops
-  STORE = auto()
   ASSIGN = auto()
   BIND = auto()
-
-  # late INDEX
-  INDEX = auto()
 
   # control flow ops
   BARRIER = auto()
@@ -177,6 +173,7 @@ class GroupOp:
   # meta ops
   Meta = {Ops.COPY, Ops.EMPTY, Ops.BUFFER_VIEW}
   Buffer = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID}
+  Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKSTART}
 
   # BinaryOps that can be flipped
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.XOR, Ops.AND, Ops.OR}
@@ -951,7 +948,7 @@ def div_and_mod_folding(x: UOp, c: int, which: Literal[Ops.MOD, Ops.IDIV], split
 def lt_folding(x:UOp, c:int) -> Optional[UOp]:
   p, np = partition(split_uop(x, Ops.ADD), lambda u: u.const_factor() == 1)
   if np and (d:=math.gcd(*[u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
-    return cast(UOp, functools.reduce(operator.add, np).divides(d)).lt(c//d)
+    return cast(UOp, functools.reduce(operator.add, np).divides(d))<(c//d)
   return None
 
 def fold_unrolled_divs(divs:UOp):
@@ -1132,17 +1129,14 @@ symbolic = symbolic_simple+PatternMatcher([
   ((UPat.var("x") // UPat.cvar("c1")) // UPat.cvar("c2"), lambda x,c1,c2: x//(c1*c2)), # (x//c1)//c2 -> x//(c1*c2)
   # ** lt **
   # c0*x<c1 for positive int c0,c1
-  ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints)).lt(UPat.cvar("c1", vec=False)),
-   lambda x,c0,c1: x.lt(math.ceil(c1.arg/c0.arg)) if c0.arg > 0 and c1.arg > 0 else None),
+  ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints))<UPat.cvar("c1", vec=False),
+   lambda x,c0,c1: x<math.ceil(c1.arg/c0.arg) if c0.arg > 0 and c1.arg > 0 else None),
   # c0*x<c1 for negative int c0 and non-positive c1
-  ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints)).lt(UPat.cvar("c1", vec=False)),
-   lambda x,c0,c1: (-x).lt(-(math.floor(-c1.arg/-c0.arg))) if c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
+  ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints))<UPat.cvar("c1", vec=False),
+   lambda x,c0,c1: (-x)<(-(math.floor(-c1.arg/-c0.arg))) if c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
   # x//c0<c1 for positive int c0
-  ((UPat.var("x", dtype=dtypes.ints)//UPat.cvar("c0", vec=False)).lt(UPat.cvar("c1", vec=False)),
-   lambda x,c0,c1: x.lt(c1.arg*c0.arg) if c0.arg > 0 else None),
-  # mul add lt
-  (((UPat.cvar("c0", vec=False)*UPat.var("x"))+UPat.var("x2")).lt(UPat.cvar("c1", vec=False)),
-   lambda x,x2,c0,c1: x.lt(c1//c0) if c1.arg % c0.arg == 0 and c0.arg > x2.vmax and x2.vmin >= 0 else None),
+  ((UPat.var("x", dtype=dtypes.ints)//UPat.cvar("c0", vec=False))<UPat.cvar("c1", vec=False),
+   lambda x,c0,c1: x<(c1.arg*c0.arg) if c0.arg > 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
   (UPat(Ops.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
   (UPat(Ops.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
@@ -1150,10 +1144,10 @@ symbolic = symbolic_simple+PatternMatcher([
   # unrolled arange div folding
   (UPat(Ops.ADD, name="divs", src=[UPat(), UPat(Ops.IDIV)]), fold_unrolled_divs),
   # generic lt folding
-  (UPat.var("x", dtypes.sints).lt(UPat.cvar("c", vec=False)), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
+  (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   # canonicalize a simplex with positive coefficients > 0
   # not x < 1 -> X > 0
-  (UPat.var("x", dtypes.ints).lt(1).ne(True), lambda x: newx.lt(1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
+  ((UPat.var("x", dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # ** div **
   # # div folding
   (UPat.var("x", dtypes.sints) // UPat.cvar("c", vec=False), lambda x,c: div_and_mod_folding(x,c.arg,Ops.IDIV) if 0 < c.arg else None),
