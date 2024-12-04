@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Dict, Tuple, Optional, DefaultDict
-import collections, heapq
+import collections, heapq, functools
 from dataclasses import dataclass
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite, GroupOp
 from tinygrad.dtype import dtypes, PtrDType
@@ -126,13 +126,16 @@ def block_reorder(ctx, in_block:UOp):
         local_children[s].append(u)
         in_degree[u] += 1
 
+  @functools.lru_cache(None)
+  def get_depth(x:UOp): return max([0]+[get_depth(u)+1 for u in x.src if u in in_this_block])
+
   # assign priorities
   priorities:Dict[UOp, int] = {}
   def get_priority(u:UOp):
-    # put loads in the beginning of the block
-    priority = -1000 if u.op is Ops.LOAD else 0
-    # prevent priority inversion, prefer more local children
-    return min([priority] + [priorities[x]+1 for x in local_children[u]])
+    # put loads in the beginning of the block. prefer lower depth loads
+    priority = (-1000+get_depth(u)) if u.op is Ops.LOAD else 0
+    # prevent priority inversion
+    return min([priority] + [priorities[x] for x in local_children[u]])
   for u in in_block.arg.lst[::-1]: priorities[u] = get_priority(u)
 
   # placement queue
