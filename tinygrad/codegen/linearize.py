@@ -98,9 +98,9 @@ def block_merge(ctx, x:UOp):
     if u.op is Ops.BLOCK and (tuple(u.arg.ctx) == tuple(x.arg.ctx) or (x.arg.end is not None and x.arg.end in u.arg.ctx)):
       # NOTE: this can't appear in srcs twice or it would be a BLOCKFORK
       new_ctx += u.arg.ctx
-      new_srcs += list(u.src)
-      to_append += u.arg.lst
-    elif u.op is Ops.BLOCKFORK and len([y for y in x.src if y is u]) == u.arg: # block fork appears # of times in srcs
+      new_srcs.extend(u.src)
+      to_append.extend(u.arg.lst)
+    elif u.op is Ops.BLOCKFORK and x.src.count(u) == u.arg: # block fork appears # of times in srcs
       if u not in placed:
         new_srcs += list(u.src)
         placed.add(u)
