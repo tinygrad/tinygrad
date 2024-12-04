@@ -512,6 +512,7 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
   return out, present
 
 # **************** ai.onnx.preview.training Ops ****************
+# NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
 
 from tinygrad.nn.optim import Adam as TinyAdam
 from tinygrad.nn.optim import SGD
@@ -556,32 +557,24 @@ def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0
   old_training = Tensor.training
   Tensor.training = True
   T, R = to_python_const(T), R.detach()
+  alpha, beta, norm_coefficient = (round(val, 7) for val in (alpha, beta, norm_coefficient))
   ret = []
   for X, G, V, H in _group_inputs(inputs, 4):
-    G, V, H = G.detach(), V.detach(), H.detach()  # TODO we shouldn't have to do these detachs
+    G, V, H = G.detach(), V.detach(), H.detach()  # TODO we shouldn't have to do these detach
     X.grad = norm_coefficient * X.detach() + G
     opt = TinyAdam([X], b1=alpha, b2=beta, eps=epsilon)
     opt.m, opt.v, opt.lr = [V], [H], R
     # need no-op for m_hat and v_hat if T == 0
     if T == 0: opt.b1_t, opt.b2_t = opt.b1_t.zeros_like(), opt.b2_t.zeros_like()
+    else:
+      # `T-1` since it's applied again at the start of `_step`
+      opt.b1_t = Tensor([alpha**(T-1)], dtype=dtypes.float32, device=X.device, requires_grad=False)
+      opt.b2_t = Tensor([beta**(T-1)], dtype=dtypes.float32, device=X.device, requires_grad=False)
     opt.step()
     X = (1 - norm_coefficient_post) * X
     ret.extend([X, V, H])
   Tensor.training = old_training
   return _unpack_outputs(ret, 3)
-
-  # ret = []
-  # for X, G, V, H in grouped_inputs:
-  #   X.grad = (norm_coefficient * X + G).realize()
-  #   # V.requires_grad, H.requires_grad, X.grad.requires_grad = False, False, False
-  #   V.assign(alpha * V + (1.0 - alpha) * X.grad).realize()
-  #   H.assign(beta * H + (1.0 - beta) * (X.grad * X.grad)).realize()
-  #   up = (V / (1.0 - alpha**T)) / ((H / (1.0 - beta**T)).sqrt() + epsilon) if T > 0 else V / (H.sqrt() + epsilon)
-  #   X.assign(X.detach() - R * up).realize()
-  #   X = (1 - norm_coefficient_post) * X
-  #   ret.extend([X, V, H])
-  # ret = ret[::3] + ret[1::3] + ret[2::3]
-  # return tuple(ret)
 
 def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
   old_training = Tensor.training
