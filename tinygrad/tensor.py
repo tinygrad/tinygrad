@@ -2070,9 +2070,6 @@ class Tensor(SimpleMathTrait):
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.max_pool2d(padding=1).numpy())
     ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.max_pool2d(padding=1).numpy())
-    ```
     """
     k_ = make_tuple(kernel_size, 2)
     pads = self._ceil_mode_padding2d(k_, stride if stride is not None else k_, dilation, padding) if ceil_mode else self._padding2d(padding, len(k_))
