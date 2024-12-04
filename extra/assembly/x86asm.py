@@ -44,7 +44,7 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.INDEX, name="x"), lambda ctx,x: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx.r[x.src[1]]}*{x.src[0].dtype.itemsize}]"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
    f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}\ntest {ctx[mask]}, 1\n"
-   f"jz .L{ctx.uop_i[x]}\n{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uop_i[x]}:"),
+   f"jz .L{ctx.uops.index(x)}\n{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
   (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x:
    f"{x86op[x.src[1].dtype][x.op]}{size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ''} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
@@ -65,7 +65,7 @@ x86_rewrite = PatternMatcher([
   # ternary ops (no cmov for floats)
   (UPat(Ops.WHERE, dtype=dtypes.floats, name="x"),
    lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[1]]}\ntest {ctx[x.src[0]]}, 1\n"
-   f"jnz .L{ctx.uop_i[x]}\n{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[2]]}\n.L{ctx.uop_i[x]}:"),
+   f"jnz .L{ctx.uops.index(x)}\n{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[2]]}\n.L{ctx.uops.index(x)}:"),
   (UPat(Ops.WHERE, name="x"),
    lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[1]]}\ntest {ctx[x.src[0]]}, 1\ncmovz {ctx[x]}, {ctx[x.src[2]]}"),
   # binary ops
@@ -80,8 +80,8 @@ x86_rewrite = PatternMatcher([
   # unary ops
   (UPat(Ops.SQRT, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
   # if
-  (UPat(Ops.IF, name="x"), lambda ctx,x: f"test {ctx[x.src[0]]}, 1\njz .L{ctx.uop_i[x]}"),
-  (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f".L{ctx.uop_i[x.src[0]]}:"),
+  (UPat(Ops.IF, name="x"), lambda ctx,x: f"test {ctx[x.src[0]]}, 1\njz .L{ctx.uops.index(x)}"),
+  (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f".L{ctx.uops.index(x.src[0])}:"),
 ])
 
 x86_matcher = PatternMatcher([
@@ -161,8 +161,8 @@ class X86Renderer(Renderer):
     mem: Dict[UOp, str] = {}
     stack_size: int = 8
     kernel: List[str] = []
+    self.uops = uops
 
-    self.uop_i = {u:i for i,u in enumerate(uops)}
     last_use: Dict[UOp, int] = {var: i for i,u in enumerate(uops) for var in (v for v in (u,) + u.src if v.dtype != dtypes.void)}
 
     def is_imm(u:UOp) -> bool: return u.op is Ops.CONST and not dtypes.is_float(u.dtype) and abs(u.arg) <= dtypes.max(dtypes.int32)
