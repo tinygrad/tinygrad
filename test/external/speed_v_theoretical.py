@@ -1,6 +1,6 @@
-import unittest, time
+import unittest
 from tinygrad import Tensor, TinyJit, Device
-from tinygrad.helpers import Context, DEBUG
+from tinygrad.helpers import Context, DEBUG, GlobalCounters
 from tinygrad.nn import Conv2d
 from tinygrad.nn.state import get_parameters
 
@@ -44,11 +44,9 @@ class TestKernelSpeed(unittest.TestCase):
       for _ in range(10):
         a = self._get_tensor(M, K)
         b = self._get_tensor(K, N)
-        Device.default.synchronize()
-        st = time.perf_counter()
-        c = f(a, b)
-        Device.default.synchronize()
-        tms.append(time.perf_counter() - st)
+        GlobalCounters.time_sum_s = 0
+        with Context(DEBUG=max(DEBUG, 2)): c = f(a, b)
+        tms.append(GlobalCounters.time_sum_s)
 
     ops = 2 * M * N * K
     mems = a.dtype.itemsize * M * K + b.dtype.itemsize * K * N + c.dtype.itemsize * M * N
@@ -69,11 +67,9 @@ class TestKernelSpeed(unittest.TestCase):
     with Context(BEAM=2):
       for _ in range(10):
         x = self._get_tensor(BS, CIN, H, W)
-        Device.default.synchronize()
-        st = time.perf_counter()
-        _c = f(conv, x)
-        Device.default.synchronize()
-        tms.append(time.perf_counter() - st)
+        GlobalCounters.time_sum_s = 0
+        with Context(DEBUG=max(DEBUG, 2)): _c = f(conv, x)
+        tms.append(GlobalCounters.time_sum_s)
 
     # naive algo
     ops = 2 * BS * CIN * COUT * K * K * H * W
