@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, DefaultDict
 import collections, heapq
 from dataclasses import dataclass
 from tinygrad.ops import type_verify, UOp, Ops, PatternMatcher, UPat, graph_rewrite, GroupOp
@@ -110,22 +110,33 @@ def block_merge(ctx, x:UOp):
 
 pm_block_merge = PatternMatcher([(UPat((Ops.BLOCKEND, Ops.BLOCK), name="x"), block_merge),])
 
-# NOTE: any toposort should be valid here
+# NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
 def block_reorder(ctx, in_block:UOp):
+  # only visit each block once
   if in_block in ctx: return None
   ctx[in_block] = None
 
+  # get local children
   in_this_block = set(in_block.arg.lst)
-  local_children = collections.defaultdict(list)
-  in_degree = collections.defaultdict(int)
+  local_children: DefaultDict[UOp, List[UOp]] = collections.defaultdict(list)
+  in_degree: DefaultDict[UOp, int] = collections.defaultdict(int)
   for u in in_block.arg.lst:
     for s in u.src:
       if s in in_this_block:
         local_children[s].append(u)
         in_degree[u] += 1
 
+  # assign priorities
+  priorities:Dict[UOp, int] = {}
+  def get_priority(u:UOp):
+    # put loads in the beginning of the block
+    priority = -100 if u.op is Ops.LOAD else 0
+    # prevent priority inversion
+    return min([priority] + [priorities[x] for x in local_children[u]])
+  for u in in_block.arg.lst[::-1]: priorities[u] = get_priority(u)
+
   queue:List[Tuple[int, Tuple, UOp]] = []
-  def push(u:UOp): heapq.heappush(queue, (u.tuplize, u))
+  def push(u:UOp): heapq.heappush(queue, (priorities[u], u.tuplize, u))
 
   # first
   for u in in_block.arg.lst:
@@ -133,7 +144,7 @@ def block_reorder(ctx, in_block:UOp):
 
   newlst = []
   while queue:
-    _,x = heapq.heappop(queue)
+    _,_,x = heapq.heappop(queue)
     newlst.append(x)
     for u in local_children[x]:
       in_degree[u] -= 1
