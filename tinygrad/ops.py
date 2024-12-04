@@ -57,18 +57,14 @@ class SimpleMathTrait:
   def __ror__(self, x): return self.bitwise_or(x, True)
   def __rxor__(self, x): return self.xor(x, True)
 
-  def lt(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
-  def gt(self, x): return self.ufix(x).alu(Ops.CMPLT, self)
-  def ne(self, x): return self.alu(Ops.CMPNE, self.ufix(x))
-  def ge(self, x): return self.lt(x).logical_not()
-  def le(self, x): return self.gt(x).logical_not()
-  def eq(self, x): return self.ne(x).logical_not()
+  def __lt__(self, x): return self.alu(Ops.CMPLT, self.ufix(x))
+  def __gt__(self, x): return self.ufix(x).alu(Ops.CMPLT, self)
+  def __ge__(self, x): return (self < x).logical_not()
+  def __le__(self, x): return (self > x).logical_not()
 
-  def __lt__(self, x): return self.lt(x)
-  def __gt__(self, x): return self.gt(x)
+  def ne(self, x): return self.alu(Ops.CMPNE, self.ufix(x))
+  def eq(self, x): return self.ne(x).logical_not()
   def __ne__(self, x): return self.ne(x)
-  def __ge__(self, x): return self.ge(x)
-  def __le__(self, x): return self.le(x)
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
 class MathTrait(SimpleMathTrait):

@@ -3206,7 +3206,7 @@ class Tensor(SimpleMathTrait):
     """
     return -((-self).maximum(-x))
 
-  def where(self:Tensor, x:Union[Tensor, ConstType], y:Union[Tensor, ConstType]):
+  def where(self:Tensor, x:Union[Tensor, ConstType, sint], y:Union[Tensor, ConstType, sint]):
     """
     Return a tensor of elements selected from either `x` or `y`, depending on `self`.
     `output_i = x_i if self_i else y_i`.
@@ -3258,8 +3258,8 @@ class Tensor(SimpleMathTrait):
   def __ilshift__(self, x) -> Tensor: return self.assign(self.lshift(x))
   def __irshift__(self, x) -> Tensor: return self.assign(self.rshift(x))
 
-  def lt(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, False))
-  def gt(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, True))
+  def __lt__(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, False))
+  def __gt__(self, x) -> Tensor: return F.Less.apply(*self._broadcasted(x, True))
   def ne(self, x) -> Tensor: return F.Neq.apply(*self._broadcasted(x))
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
