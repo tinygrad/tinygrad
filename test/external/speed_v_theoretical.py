@@ -85,17 +85,17 @@ class TestKernelSpeed(unittest.TestCase):
     gbs = mems / tm / 1e9
     self._compare(tm, tflops, gbs, nv_tflops, nv_gbs, amd_tflops, amd_gbs)
 
-  # TODO: smaller ones has other overhead in synchronize
-  # def test_gemm_1024(self): self._test_matmul(1024, nv_tflops=8, amd_tflops=7)
-  # def test_gemm_2048(self): self._test_matmul(2048, nv_tflops=50, amd_tflops=30)
-  def test_gemm_4096(self): self._test_matmul(4096, nv_tflops=95, amd_tflops=70)
-  def test_gemm_8192(self): self._test_matmul(8192, nv_tflops=125, amd_tflops=70)
+  # NOTE: tiny7 was slower than tiny12. still true?
+  # TODO: why are convs so slow?!?
+  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=36, amd_tflops=24)
 
-  def test_gemv_16384_4096(self): self._test_matmul(16384, 4096, 1, nv_gbs=430, amd_gbs=380)   # AMD was flaky at 400
-  def test_gemv_4096_16384(self): self._test_matmul(4096, 16384, 1, nv_gbs=430, amd_gbs=380)   # AMD was flaky at 400
+  # theoretical is nv_tflops=165, amd_tflops=123
+  def test_gemm_4096(self): self._test_matmul(4096, nv_tflops=120, amd_tflops=80)
+  def test_gemm_8192(self): self._test_matmul(8192, nv_tflops=130, amd_tflops=75)
 
-  # TODO: tiny7 is slower than tiny12
-  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=18)
+  # theoretical is nv_gbs=1008, amd_gbs=960
+  def test_gemv_16384_4096(self): self._test_matmul(16384, 4096, 1, nv_gbs=840, amd_gbs=880)
+  def test_gemv_4096_16384(self): self._test_matmul(4096, 16384, 1, nv_gbs=830, amd_gbs=850)
 
 if __name__ == '__main__':
   unittest.main()
