@@ -33,16 +33,18 @@ def append_to_block(ctx:Tuple[Dict[UOp, Tuple[UOp, ...]], Dict[UOp, List[UOp]]],
   bb: BasicBlock = x.arg
   in_this_block = set(bb.lst)
   for u in x.src:
-    if u.op in DONT_PLACE_IN_BLOCK or len([y for y in children[u] if y not in in_this_block]) > 0:
-      # if it's a fork or not placed, we don't place it
-      new_srcs.append(u)
-    elif (block_ctx:=block_ctxs[u]) == bb.ctx:
-      # if it's the same context, we place the UOp in this block and append the parents to it's srcs
-      new_srcs += list(u.src)
-      to_append.append(u)
+    if u.op not in DONT_PLACE_IN_BLOCK and set(children[u]).issubset(in_this_block):
+      # if it can go in blocks and all its children are in the block, we add it to the block
+      if (block_ctx:=block_ctxs[u]) == bb.ctx:
+        # if it's the same context, we place the UOp in this block and append the parents to its srcs
+        new_srcs += list(u.src)
+        to_append.append(u)
+      else:
+        # if it's a different context, we create a new block with this UOp
+        new_blocks.setdefault(block_ctx, []).append(u)
     else:
-      # otherwise, we create a new block with this UOp
-      new_blocks.setdefault(block_ctx, []).append(u)
+      # otherwise, we keep it in the srcs
+      new_srcs.append(u)
   if len(to_append) == 0 and len(new_blocks) == 0: return None
 
   for rng,lst in new_blocks.items():
