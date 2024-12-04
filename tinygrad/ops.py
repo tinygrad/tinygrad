@@ -330,8 +330,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def r(self, op:Ops, axis:Tuple[int, ...]): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
   def contiguous(self): return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
-  @property
-  def is_contiguous_base(self): return self.op is Ops.CONTIGUOUS and not (self.src[0].base.op is Ops.VIEW and len(self.src[0].base.src) == 2)
 
   # *** from LazyBuffer ***
 
@@ -363,8 +361,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   buffer_num = itertools.count(0)
   @staticmethod
   def new_buffer(device:str, size:int, dtype:DType) -> UOp: return UOp(Ops.BUFFER, dtype.ptr(), (), (next(UOp.buffer_num), (device, size, dtype)))
+  @property
+  def device(self) -> str: return unwrap(self._device)
   @functools.cached_property
-  def device(self) -> str: return self.arg[1][0] if self.op is Ops.BUFFER else self.src[0].device
+  def _device(self) -> Optional[str]:
+    return self.arg[1][0] if self.op is Ops.BUFFER else dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
@@ -870,6 +871,7 @@ def split_uop(x:UOp, sep:Ops):
 def div_and_mod_folding(x: UOp, c: int, which: Literal[Ops.MOD, Ops.IDIV], split_rem: bool=False) -> Optional[UOp]:
   # simplify x // c or x % c, None means no change, c must be > 0
   assert c > 0
+  if x.dtype.count > 1: return None
   # simple cancel div/mod case
   if (q:=x.vmin//c) == (x.vmax//c):
     if which is Ops.MOD: return x - q*c
@@ -1129,7 +1131,8 @@ symbolic = symbolic_simple+PatternMatcher([
   # not x < 1 -> X > 0
   ((UPat.var("x", dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # ** div **
-  # # div folding
+  # div folding
+  ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)),  # (x//c+a)//d -> (x+a*c)//(c*d)
   (UPat.var("x", dtypes.sints) // UPat.cvar("c", vec=False), lambda x,c: div_and_mod_folding(x,c.arg,Ops.IDIV) if 0 < c.arg else None),
   # ** mod **
   # mod folding

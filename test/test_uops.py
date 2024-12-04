@@ -396,6 +396,15 @@ class TestUOpMethod(unittest.TestCase):
     self.assertIs(x.replace(arg=None).arg, None)
     with self.assertRaises(AssertionError): x.replace(field="a")
 
+  def test_device(self):
+    x = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 1, dtypes.int), UOp.const(dtypes.int, 1)), ShapeTracker.from_shape(()))
+    self.assertEqual(x.device, Device.DEFAULT)
+    # NOTE: CONST doesn't have device
+    buffer, const = x.src
+    self.assertEqual(buffer.device, Device.DEFAULT)
+    self.assertEqual(const._device, None)
+    with self.assertRaises(AssertionError): const.device
+
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
     a = UOp(Ops.CONST, dtypes.float, (), 2.0) + UOp(Ops.CONST, dtypes.float, (), 3.0)
