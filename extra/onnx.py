@@ -1,11 +1,10 @@
 from __future__ import annotations
 from typing import List, Dict, Union
-import importlib
-from functools import lru_cache
+import importlib, functools
 import numpy as np
-from tinygrad import Tensor, dtypes, Device
+from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv, DEBUG
-from tinygrad.dtype import ConstType, DType
+from tinygrad.dtype import DType, ConstType
 from tinygrad.device import is_dtype_supported
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, ValueInfoProto
 try:
@@ -16,7 +15,7 @@ except ImportError:
   def tensor_dtype_to_np_dtype(tensor_dtype:int) -> np.dtype: return TENSOR_TYPE_TO_NP_TYPE[tensor_dtype]
 
 cache_misses = 0
-@lru_cache(None)
+@functools.lru_cache(None)
 def _cached_to_python_const(t:Tensor, tobytes): return t.data().tobytes() if tobytes else t.tolist()
 
 # Tensor -> python value cache for parameters
@@ -79,23 +78,15 @@ def buffer_parse(inp: TensorProto) -> Tensor:
   raise NotImplementedError(f"buffer with data type {TensorProto.DataType.Name(inp.data_type)} is not supported")
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
-
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
-  tensors: Dict[str, Tensor] = {}
+  # initialization data
+  model_parameters = {inp.name:buffer_parse(inp) for inp in onnx_model.graph.initializer}
+  model_attributes = {num:{x.name:attribute_parse(x) for x in n.attribute} for num,n in enumerate(onnx_model.graph.node)}
 
-  # get weights and biases
-  for inp in onnx_model.graph.initializer:
-    tensors[inp.name] = buffer_parse(inp)
-
-  # preparse the attributes
-  attribute_dict = {}
-  domain = ""
-  for num,n in enumerate(onnx_model.graph.node):
-    attribute_dict[num] = {x.name:attribute_parse(x) for x in n.attribute}
-    if n.domain: domain = n.domain
-
+  # model specs
+  is_onnx_preview_training = any(n.HasField("domain") and n.domain == "ai.onnx.preview.training" for n in onnx_model.graph.node)
   onnx_model_version = onnx_model.opset_import[0].version
 
   def run_onnx(inputs={}, debug=0):
@@ -107,7 +98,7 @@ def get_run_onnx(onnx_model: ModelProto):
     # get inputs
     for model_input in onnx_model.graph.input:
       name = model_input.name
-      if name in tensors: continue
+      if name in model_parameters: continue
       shape = type_parse(model_input.type)
       if name in inputs:
         if isinstance(inputs[name], Tensor):
@@ -115,7 +106,7 @@ def get_run_onnx(onnx_model: ModelProto):
         elif isinstance(inputs[name], list):
           input_tensors[name] = [Tensor(i, requires_grad=False) for i in inputs[name]]
         # TODO: this is just to make training tests pass, need a principled way to handle training vs non-training
-        elif domain == "ai.onnx.preview.training":
+        elif is_onnx_preview_training:
           input_tensors[name] = Tensor(inputs[name], requires_grad=True)
         else:
           input_tensors[name] = Tensor(inputs[name], requires_grad=False)
@@ -127,37 +118,27 @@ def get_run_onnx(onnx_model: ModelProto):
         raise RuntimeError(f"no data for {name} with shape {shape}")
 
     def fetch_tensor(x: str):
-      if x in tensors: return tensors[x]
+      if x in model_parameters: return model_parameters[x]
       if x in intermediate_tensors: return intermediate_tensors[x]
       if x != "": return input_tensors[x]
       return None
 
     for num,n in enumerate(onnx_model.graph.node):
-      inp: List[Tensor] = []
-      if debug >= 3: print("inputs:")
-      for x in n.input:
-        t = fetch_tensor(x)
-        if debug >= 3: print(f"\t{x} - {t}")
-        inp.append(t)
-      opt: Dict = attribute_dict[num]
-      if debug >= 1: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
+      inp = [fetch_tensor(x) for x in n.input]
+      opt = model_attributes[num]
 
-      # NOTE some ops live here because they require access to some local variables
+      if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
+      if debug >= 3: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {t}" for i,(x,t) in enumerate(zip(n.input, inp))))
+
       if n.op_type in onnx_ops.tensor_methods:
         ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
 
+      # NOTE some ops live here because they require access to some local variables
       elif n.op_type == "Split":
         axis, n_outputs  = opt.get('axis', 0), opt.get('num_outputs') or len(n.output)
         sz = inp[0].shape[axis]
         sizes = to_python_const(inp[1]) if len(inp) == 2 else [sz // n_outputs + (1 if i < sz % n_outputs else 0) for i in range(n_outputs)]
         ret = inp[0].split(sizes, axis)
-      elif n.op_type == "Slice":
-        inp += [list(v) for v in reversed(opt.values())] # axes, ends, starts -> starts, ends, axes
-        starts, ends, axes, steps = inp[1], inp[2], inp[3] if len(inp)>=4 else list(range(inp[0].ndim)), inp[4] if len(inp)>=5 else [1]*inp[0].ndim
-        starts, ends, axes, steps = (to_python_const(x) for x in (starts, ends, axes, steps))
-        slices = [slice(0,x,1) for x in inp[0].shape]
-        for i, axis in enumerate(axes): slices[axis] = slice(starts[i], ends[i], steps[i])
-        ret = inp[0][tuple(slices)]
       elif n.op_type == "Gradient":
         assert len(opt["xs"]) == len(inp), f"len(opt['xs']):{len(opt['xs'])}, len(inp):{len(inp)} output and input has to match"
         y = opt["y"]
@@ -178,16 +159,12 @@ def get_run_onnx(onnx_model: ModelProto):
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise NotImplementedError(f"op_type {n.op_type} not supported")
 
+      # finalization after running the op
       if not isinstance(ret, tuple): ret = (ret, )
-      assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
-      if debug >= 2: print([x.shape if isinstance(x, Tensor) else None for x in ret])
-      if debug >= 2: print("outputs:")
-      for i in range(len(n.output)):
-        if debug >= 2: print(f"\t{n.output[i]} - {ret[i]}")
-        intermediate_tensors[n.output[i]] = ret[i]
-      if num == ONNXLIMIT:
-        output_tensor_names = n.output
-        break
+      if len(n.output) > len(ret): raise RuntimeError(f"expected output size must be less than {len(ret)}, it's {n.output}")
+      for i in range(len(n.output)): intermediate_tensors[n.output[i]] = ret[i]
+      if debug >= 2: print("\toutputs:\n" + "\n".join(f"\t\t{n.output[i]} - {ret[i]}" for i in range(len(n.output))))
 
-    return {outp:intermediate_tensors[outp] for outp in output_tensor_names}
+      if num == ONNXLIMIT: return {name:intermediate_tensors[name] for name in n.output}
+    return {x.name:intermediate_tensors[x.name] for x in onnx_model.graph.output}
   return run_onnx

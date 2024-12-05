@@ -91,6 +91,14 @@ def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
   k = to_python_const(k) if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
   return x.triu(k) if upper else x.tril(k)
 
+def Slice(data: Tensor, starts:Tensor, ends:Tensor, axes:Optional[Tensor]=None, steps:Optional[Tensor]=None):
+  if axes is None: axes = list(range(data.ndim))
+  if steps is None: steps = [1] * data.ndim
+  starts, ends, axes, steps = (to_python_const(x) for x in (starts, ends, axes, steps))
+  slices = [slice(0,x,1) for x in data.shape]
+  for i, axis in enumerate(axes): slices[axis] = slice(starts[i], ends[i], steps[i])
+  return data[tuple(slices)]
+
 def Squeeze(data: Tensor, axes):
   if isinstance(axes, Tensor): axes = to_python_const(axes)
   axes = [data._resolve_dim(x) for x in axes]
