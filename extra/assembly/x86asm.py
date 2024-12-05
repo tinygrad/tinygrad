@@ -159,7 +159,7 @@ class X86Renderer(Renderer):
     r: Dict[UOp, str] = {}
     self.r = r
     mem: Dict[UOp, str] = {}
-    stack_size: int = 8
+    stack_size: int = 16
     kernel: List[str] = []
     self.uops = uops
 
@@ -196,16 +196,16 @@ class X86Renderer(Renderer):
       return reg
 
     for i,u in enumerate(uops):
-      if u.op is Ops.CONST:
-        r[u] = to_hex(u.arg, u.dtype)
-        if not is_imm(u):
-          mov_to_reg(u, "r15")
-          mov_to_stack(u)
-      elif u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
+      if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         if i < 6: r[u] = assign_reg(i, u.dtype)
         else: # value is in stack instead of register, TODO: fix this
           r[u] = mem[u] = f"[rbp + {stack_size}]"
           stack_size += 8
+      elif u.op is Ops.CONST:
+        r[u] = to_hex(u.arg, u.dtype)
+        if not is_imm(u):
+          mov_to_reg(u, "r15")
+          mov_to_stack(u)
       # casting to <= int or src is uint32 (already zero extended) is a noop
       elif u.op is Ops.CAST and dtypes.is_int(u.dtype) and u.src[0].dtype in (dtypes.bool,) + dtypes.ints \
             and (u.dtype.itemsize <= u.src[0].dtype.itemsize or u.src[0].dtype is dtypes.uint32): r[u] = r[u.src[0]]
