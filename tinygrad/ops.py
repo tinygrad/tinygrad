@@ -359,7 +359,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self if len(axis) == 0 else UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x), None if self.st is None or self.st.contiguous else self.st)
   def contiguous(self, allow_buffer_view=True):
-    if allow_buffer_view and self.can_view(): return UOp.metaop(Ops.BUFFER_VIEW, self.shape, self.dtype, self.device, None, (self,))
+    #if allow_buffer_view and self.can_view(): return UOp.metaop(Ops.BUFFER_VIEW, self.shape, self.dtype, self.device, None, (self,))
     return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
 
   # *** from LazyBuffer ***
