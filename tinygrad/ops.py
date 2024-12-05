@@ -329,6 +329,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       shape = shape[:-1] + ((shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
       return UOp.metaop(Ops.BUFFER_VIEW, unwrap(shape), dtype, self.device, None, (self,))
     if self._device is not None and self.device.startswith("DISK"):
+      if not bitcast: raise RuntimeError("can only bitcast disk")
       return UOp.metaop(Ops.BUFFER_VIEW, unwrap(shape), dtype, self.device, None, (self,))
     return UOp(Ops.BITCAST if bitcast else Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType): return self.cast(dtype, bitcast=True)

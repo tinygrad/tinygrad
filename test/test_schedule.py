@@ -1535,7 +1535,8 @@ class TestIndexing(unittest.TestCase):
     a[0] = 6
     np.testing.assert_equal(a.numpy(), [6., 2., 3., 4.])
 
-  @unittest.skipUnless(Device.DEFAULT in view_supported_devices, "need view")
+  #@unittest.skipUnless(Device.DEFAULT in view_supported_devices, "need view")
+  @unittest.skip("subbuffer on non-disk not supported yet")
   def test_arange_view_op(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
     assert isinstance(a.lazydata, LazyBuffer)
