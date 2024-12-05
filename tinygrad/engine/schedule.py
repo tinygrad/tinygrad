@@ -350,11 +350,15 @@ def simplify_reduceop(ctx, b:UOp, to_store:UOp, base:UOp, x:UOp) -> Optional[UOp
     return _as_const(base, ret)
   return None
 
+
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
   # maybe fold reduce ops (TODO: this can be multiple upats)
   (UPatScheduled(Ops.REDUCE_AXIS, src=(UPat.var("x"),)), simplify_reduceop),
+  # const doesn't have to be copied
+  (UPatScheduled(Ops.COPY, src=(UPat(Ops.VIEW, name="x", src=(UPat(), UPat(Ops.CONST))), )),
+   lambda ctx,b,x,to_store,base: _as_const(base, x.const_arg) if x.is_unrealized_unmasked_const() else None)
 ])
 
 # ** this decides which ops get realized

@@ -371,8 +371,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def copy_to_device(self, device:str, force:bool=False, clone:bool=False) -> UOp:
     # no COPY
     if self.device == device and not clone: return self
-    # const doesn't have to be copied (issues with disk tensor)
-    if self.is_unrealized_const(): return UOp.metaop(Ops.CONST, (), self.dtype, device, self.const_arg).view(unwrap(self.st))
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     # TODO: where is this tested?
     if prod(self.shape) < prod(self.base.shape): return self.contiguous()._copy(device)
