@@ -220,7 +220,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   dtype:DType = dtypes.void
   src:Tuple[UOp, ...] = tuple()
   arg:Any = None
-  def __del__(self): del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg)]
+  def __del__(self):
+    if self.op is Ops.BUFFER: self.buffer.ref(-1)
+    del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg)]
   def __reduce__(self): return UOp, (self.op, self.dtype, self.src, self.arg)
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg))
