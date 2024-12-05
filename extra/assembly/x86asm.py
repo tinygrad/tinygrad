@@ -33,9 +33,10 @@ x86_reg_map = {"rdi": {4: "edi", 2: "di", 1: "dil"}, "rsi": {4: "esi", 2: "si", 
 size_prefix = {1: " byte ptr", 2: " word ptr", 4: " dword ptr", 8: " qword ptr"}
 
 def to_hex(x, dt:DType) -> str:
-  if not dtypes.is_float(dt): return hex(x)
   if dt is dtypes.float64: return hex(struct.unpack('<Q', struct.pack('<d', x))[0])
-  return hex(struct.unpack('<I', struct.pack('<f', x))[0])
+  if dt is dtypes.float32: return hex(struct.unpack('<I', struct.pack('<f', x))[0])
+  if dt is dtypes.float16: return hex(struct.unpack('<H', struct.pack('<e', x))[0])
+  return hex(x)
 
 def cflag(x:UOp) -> str:
   if x.op is Ops.CMPNE: return "setne"
