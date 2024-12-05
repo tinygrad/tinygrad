@@ -3,7 +3,7 @@ from typing import Tuple, List, Any, Optional
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram
 from tinygrad.ops import sint
 from tinygrad.device import LRUAllocator, BufferSpec
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, from_mv, lo32, hi32
@@ -84,10 +84,15 @@ class AMDComputeQueue(HWQueue):
     self.acquire_mem()
     return self
 
-  def exec(self, prg:AMDProgram, args_state:AMDArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
+  def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
     self.acquire_mem(gli=0, gl2=0)
 
-    user_regs = [*data64_le(prg.dev.scratch.va_addr), 0xffffffff, 0xc00000] if prg.enable_private_segment_sgpr else []
+    if prg.enable_private_segment_sgpr:
+      scratch_hilo = data64_le(prg.dev.scratch.va_addr)
+      # sgpr word1 bit31 enables swizzle
+      # sgpr word3 = 0x14 << 12 | 2 << 28 | 2 << 21 | 1 << 23
+      user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000] if prg.enable_private_segment_sgpr else []
+    else: user_regs = []
     if prg.enable_dispatch_ptr:
       dp = hsa.hsa_kernel_dispatch_packet_t.from_address(dp_addr:=args_state.ptr + prg.kernargs_segment_size)
 
@@ -226,23 +231,6 @@ class AMDCopyQueue(HWQueue):
     dev.sdma_queue.write_ptr[0] = dev.sdma_queue.put_value
     dev.sdma_queue.doorbell[0] = dev.sdma_queue.put_value
 
-    # import time
-    # time.sleep(1)
-    # print(dev.sdma_queue.write_ptr[0], dev.sdma_queue.read_ptr[0])
-
-class AMDArgsState(HCQArgsState):
-  def __init__(self, ptr:Tuple[int, int], prg:AMDProgram, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=()):
-    super().__init__(ptr, prg, bufs, vals=vals)
-
-    self.bufs = to_mv(self.cpu_ptr, len(bufs) * 8).cast('Q')
-    self.vals = to_mv(self.cpu_ptr + len(bufs) * 8, len(vals) * 4).cast('I')
-
-    self.bufs[:] = array.array('Q', [b.va_addr for b in bufs])
-    self.vals[:] = array.array('I', vals)
-
-  def update_buffer(self, index:int, buf:HCQBuffer): self.bufs[index] = buf.va_addr
-  def update_var(self, index:int, val:int): self.vals[index] = val
-
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
     # TODO; this API needs the type signature of the function and global_size/local_size
@@ -275,7 +263,7 @@ class AMDProgram(HCQProgram):
     self.enable_private_segment_sgpr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
     additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
 
-    super().__init__(AMDArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
+    super().__init__(CLikeArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz)
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))
@@ -288,7 +276,7 @@ class AMDDriverAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice): super().__init__(dev, batch_size=SDMA_MAX_COPY_SIZE)
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    if options.host: return self.dev._gpu_alloc(size, host=True, cpu_access=True)
+    if options.host: return self.dev._gpu_alloc(size, host=True)
     if options.cpu_access and options.uncached: return self.dev._gpu_alloc(size, uncached=True)
     return self.dev._gpu_alloc(size, cpu_access=options.cpu_access)
 
@@ -351,6 +339,7 @@ class AMDDevice(HCQCompiled):
 
     if AMDDevice.event_page is None:
       AMDDevice.signals_page = self._gpu_alloc(16 * 65536, uncached=True)
+      AMDDevice.event_page = self._gpu_alloc(0x8000, uncached=True)
       AMDDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
       # if not AMDDevice.driverless: 
       #   AMDDevice.event_page = self._gpu_alloc(0x8000, uncached=True)  
@@ -363,12 +352,16 @@ class AMDDevice(HCQCompiled):
     max_cu_id = self.properties['simd_count'] // self.properties['simd_per_cu'] - 1
     max_wave_id = self.properties['max_waves_per_simd'] * self.properties['simd_per_cu'] - 1
     self.max_private_segment_size = 4096
-    wave_scratch_len = round_up(((max_wave_id + 1) * self.max_private_segment_size), 256) # gfx11 requires alignment of 256
+    # <gfx103 requires alignment of 1024, >=gfx11 requires 256
+    wave_scratch_len = round_up(((max_wave_id + 1) * self.max_private_segment_size), 256 if self.target >= 110000 else 1024)
     self.scratch_len = (max_cu_id + 1) * self.properties['max_slots_scratch_cu'] * wave_scratch_len
     self.scratch = self._gpu_alloc(self.scratch_len)
     self.has_scratch_base_registers = self.target >= 110000
     engines = self.properties['array_count'] // self.properties['simd_arrays_per_engine']
-    self.tmpring_size = (wave_scratch_len // 256) << 12 | (self.scratch_len // (wave_scratch_len * engines))
+    waves = wave_scratch_len // (256 if self.target >= 110000 else 1024)
+    # >=gfx11 wavesize is per SE
+    wavesize = self.scratch_len // ((wave_scratch_len * engines) if self.target >= 110000 else wave_scratch_len)
+    self.tmpring_size = waves << 12 | wavesize
 
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
     sgrp_size_per_cu, lds_size_per_cu, hwreg_size_per_cu = 0x4000, 0x10000, 0x1000
@@ -470,15 +463,14 @@ class AMDDevice(HCQCompiled):
 
   def _driver_gpu_alloc(self, size:int, host=True, uncached=False, cpu_access=False):
     flags = kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE
-    # if uncached: flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_COHERENT | kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED | (kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT if host else kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
-    # else: flags |= (kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR if host else kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
 
-    # host = True
-    flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM | kfd.KFD_IOC_ALLOC_MEM_FLAGS_COHERENT | kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED
-    if cpu_access: flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC
+    if uncached: flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_COHERENT | kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED | kfd.KFD_IOC_ALLOC_MEM_FLAGS_GTT
+    else: flags |= (kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR if host else kfd.KFD_IOC_ALLOC_MEM_FLAGS_VRAM)
 
-    if host: buf = addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, -1, 0)
-    else: buf, addr = 0, libc.mmap(0, size, 0, mmap.MAP_PRIVATE|mmap.MAP_ANONYMOUS|MAP_NORESERVE, -1, 0)
+    if cpu_access or host: flags |= kfd.KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC
+
+    if host: buf = addr = libc.mmap(0, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS, -1, 0)
+    else: buf, addr = 0, libc.mmap(0, size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE, -1, 0)
     assert addr != 0xffffffffffffffff
 
     try: mem = kfd.AMDKFD_IOC_ALLOC_MEMORY_OF_GPU(self.kfd, va_addr=addr, size=size, base=addr, length=size, gpu_id=self.gpu_id,
@@ -489,15 +481,11 @@ class AMDDevice(HCQCompiled):
       if e.errno == errno.ENOMEM: raise MemoryError("Cannot allocate memory: no memory is available.") from e
       raise
 
-    if not (flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_USERPTR):
-      buf = libc.mmap(mem.va_addr, mem.size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|MAP_FIXED, self.drm_fd, mem.mmap_offset)
+    if not host:
+      buf = libc.mmap(mem.va_addr, mem.size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_FIXED, self.drm_fd, mem.mmap_offset)
       assert addr == buf == mem.va_addr
-    self._driver_gpu_map(mem)
 
-    if host:
-      print("HOST ALLOC", hex(addr), hex(size))
-      print("\tPHYS", read_pagemap(addr))
-
+    self._gpu_map(mem)
     return mem
 
   def _driver_gpu_free(self, mem):
