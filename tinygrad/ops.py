@@ -347,7 +347,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def r(self, op:Ops, axis:Tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     return self if len(axis) == 0 else UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
-  def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
+  def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x), None if self.st is None or self.st.contiguous else self.st)
   # TOOD: allow_buffer_view doesn't do anything
   def contiguous(self, allow_buffer_view=True): return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
 
