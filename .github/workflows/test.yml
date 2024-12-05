@@ -387,7 +387,7 @@ jobs:
           WEBGPU=1 WGPU_BACKEND_TYPE=Vulkan python3 -m pytest -n=auto test/test_assign.py test/test_arange.py test/test_const_folding.py test/test_dtype.py \
           test/test_dtype_alu.py test/test_conv.py test/test_conv_shapetracker.py test/test_nn.py test/test_ops.py test/test_optim.py \
           test/test_jit.py test/test_randomness.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_uops_stats.py test/test_uops.py \
-          --durations=20
+          test/testextra/test_export_model.py --durations=20
     - name: Run process replay tests
       run: |
         export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
