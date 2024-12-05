@@ -362,6 +362,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.device.startswith("DISK"): return UOp.metaop(Ops.BUFFER_VIEW, self.shape, self.dtype, self.device, None, (self,))
     #if allow_buffer_view and self.can_view(): return UOp.metaop(Ops.BUFFER_VIEW, self.shape, self.dtype, self.device, None, (self,))
     return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
+  @staticmethod
   def range(dtype:DType, start:sint, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(start), sint_to_uop(end)), arg=idx)
 
   # *** from LazyBuffer ***
