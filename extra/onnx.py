@@ -92,6 +92,13 @@ def get_run_onnx(onnx_model: ModelProto):
   is_onnx_preview_training = any(n.HasField("domain") and n.domain == "ai.onnx.preview.training" for n in onnx_model.graph.node)
   onnx_model_version = onnx_model.opset_import[0].version
 
+  # mapping from onnx ops to tensor.py ops
+  tensor_methods = {
+    op:op.lower() for op in ("Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Asin", "Acos", "Atan",
+    "Relu", "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh",
+    "Softsign", "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf")
+  }
+
   def run_onnx(inputs={}, debug=0):
     debug = getenv("DEBUGONNX") or debug
     input_tensors: Dict[str,Tensor|List[Tensor]] = {}
@@ -132,8 +139,8 @@ def get_run_onnx(onnx_model: ModelProto):
       if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
       if debug >= 3: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {t}" for i,(x,t) in enumerate(zip(n.input, inp))))
 
-      if n.op_type in onnx_ops.tensor_methods:
-        ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
+      if n.op_type in tensor_methods:
+        ret = getattr(Tensor, tensor_methods[n.op_type])(*inp, **opt)
 
       # NOTE some ops live here because they require access to some local variables
       elif n.op_type == "Split":
