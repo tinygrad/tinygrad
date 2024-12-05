@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import realized, identity_element
+from tinygrad.ops import realized, identity_element, buffers
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -57,7 +57,6 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
     cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
     return ret
   assert buf.op is not None, f"base must be base itself {buf}"
-  if buf.op is Ops.BUFFER_VIEW: raise Exception("todo!")
   # make things that can't be images not images
   dtype = ubuf.dtype.base if (ubuf:=realized.get(buf)) is not None else buf.dtype
   if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
@@ -68,6 +67,8 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   elif is_scheduled(buf):
     ubuf = buf.buf_uop
     op = buf.src[1].replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src[1].src))
+    # BUFFER_VIEW overrides shape the actual buffer
+    if op.op is Ops.BUFFER_VIEW: buffers[ubuf] = (src:=op.src[0]).base.buffer.view(buf.st.size, dtype, unwrap(src.st).views[0].offset*src.dtype.itemsize)
   elif buf.op is Ops.ASSIGN:
     target, new_val = [to_uop(x, ctx, cache) for x in buf.srcs]
     ctx.assigns.add(ubuf:=target.base.buf_uop)

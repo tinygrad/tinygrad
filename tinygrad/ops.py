@@ -5,10 +5,12 @@ from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix
+from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer
+
+view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM", "DSP", "DISK"}
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
@@ -317,9 +319,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.dtype.count == 1
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
-  # TOOD: allow_buffer_view doesn't do anything
-  def cast(self, dtype:DType, bitcast=False, allow_buffer_view=True): return UOp(Ops.BITCAST if bitcast else Ops.CAST, dtype, (self,))
-  def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
+  def cast(self, dtype:DType, bitcast=False, allow_buffer_view=True):
+    shape = self.st.shape if self.st is not None else None
+    if bitcast and self.dtype.itemsize != dtype.itemsize:
+      if shape is None or not all_int(shape) or not self.device.startswith("DISK"): raise RuntimeError(f"shape changing bitcast not supported on {self}")
+      # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
+      if (shape[-1]*self.dtype.itemsize) % dtype.itemsize != 0: raise RuntimeError("unsupported size in bitcast")
+      shape = shape[:-1] + ((shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
+    if self.can_view() and allow_buffer_view: return UOp.metaop(Ops.BUFFER_VIEW, unwrap(shape), dtype, self.device, None, (self,))
+    return UOp(Ops.BITCAST if bitcast else Ops.CAST, dtype, (self,))
+  def bitcast(self, dtype:DType): return self.cast(dtype, bitcast=True)
   def gep(self, i:Union[Tuple[int, ...], int]):
     if isinstance(i, int):
       # NOTE: these are just shortcuts to not have to create and fold later
@@ -348,8 +357,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     return self if len(axis) == 0 else UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x), None if self.st is None or self.st.contiguous else self.st)
-  # TOOD: allow_buffer_view doesn't do anything
-  def contiguous(self, allow_buffer_view=True): return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
+  def contiguous(self, allow_buffer_view=True):
+    return UOp.metaop(Ops.BUFFER_VIEW, self.shape, self.dtype, self.device, None, (self,)) if allow_buffer_view and self.can_view() else self.alu(Ops.CONTIGUOUS)
 
   # *** from LazyBuffer ***
 
@@ -380,6 +389,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def is_unrealized_const(self):
     return (s:=self.base).op is Ops.VIEW and len(s.src) == 2 and s.realized is None and s.src[1].op is Ops.CONST and not isinstance(s.src[1].arg, UOp)
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in unwrap(self.st).views)
+  def can_view(self):
+    return (self.st is not None and self.st.consecutive and not self.is_unrealized_const() and not isinstance(self.dtype, ImageDType) and
+            self.device.split(":")[0] in view_supported_devices)
   @property
   def srcs(self): return self.src
   @srcs.deleter
