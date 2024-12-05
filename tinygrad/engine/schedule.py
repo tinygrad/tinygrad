@@ -114,10 +114,9 @@ def push_swizzle_down_through_reduce(r:UOp, v:UOp, src:UOp) -> UOp:
   return src.r(r.arg[0], new_axis).view(ShapeTracker.from_shape(output_shape))
 
 def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
-  swizzles = [x for x in root.src if x.base is not x]
-  if len(swizzles) == 0: return None
+  if not (swizzles := [x for x in root.src if x.base is not x]): return None
   swizzle_shapes = [(unwrap(x.st).shape, unwrap(x.src[0].st).shape) for x in swizzles]
-  assert all_same([(x, prod(x), prod(y)) for x,y in swizzle_shapes]), f"swizzles must have the same size {swizzle_shapes}"
+  assert all_same([(x, prod(y)) for x,y in swizzle_shapes]), f"swizzles must have the same size {swizzle_shapes}"
   new_shape, new_input_shape = swizzle_shapes[0]
   new_src = tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x, ShapeTracker.from_shape(new_input_shape)) for x in root.src)
   ret = root.replace(src=new_src)

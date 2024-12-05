@@ -134,14 +134,22 @@ class TestSafetensors(unittest.TestCase):
       for k in f.keys():
         np.testing.assert_array_equal(f.get_tensor(k).numpy(), state_dict[k].numpy())
 
-  def test_huggingface_enet_safetensors(self):
-    # test a real file
-    fn = fetch("https://huggingface.co/timm/mobilenetv3_small_075.lamb_in1k/resolve/main/model.safetensors")
+  def _test_huggingface_enet_safetensors(self, fn):
     state_dict = safe_load(fn)
     assert len(state_dict.keys()) == 244
     assert 'blocks.2.2.se.conv_reduce.weight' in state_dict
     assert state_dict['blocks.0.0.bn1.num_batches_tracked'].numpy() == 276570
     assert state_dict['blocks.2.0.bn2.num_batches_tracked'].numpy() == 276570
+
+  def test_huggingface_enet_safetensors(self):
+    # test a real file
+    fn = fetch("https://huggingface.co/timm/mobilenetv3_small_075.lamb_in1k/resolve/main/model.safetensors")
+    self._test_huggingface_enet_safetensors(fn)
+
+  def test_huggingface_enet_safetensors_fromurl(self):
+    # test tensor input
+    t = Tensor.from_url("https://huggingface.co/timm/mobilenetv3_small_075.lamb_in1k/resolve/main/model.safetensors")
+    self._test_huggingface_enet_safetensors(t)
 
   def test_metadata(self):
     metadata = {"hello": "world"}
