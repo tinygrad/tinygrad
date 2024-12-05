@@ -1,4 +1,4 @@
-from tinygrad.ops import UOp, view_supported_devices # noqa
+from tinygrad.ops import UOp
 
 # LazyBuffer is UOp! This is fundamental
 LazyBuffer = UOp

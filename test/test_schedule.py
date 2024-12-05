@@ -13,12 +13,12 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import UOp, Ops, graph_rewrite, track_rewrites
+from tinygrad.ops import UOp, Ops, graph_rewrite, track_rewrites, view_supported_devices
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule, view_right, view_left, do_realize
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
-from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
+from tinygrad.engine.lazy import LazyBuffer
 from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
