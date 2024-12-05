@@ -340,7 +340,7 @@ def simplify_reduceop(ctx, b:UOp, to_store:UOp, base:UOp, x:UOp) -> Optional[UOp
   # reduce of size 0 is just CONST
   if x.size == 0 and base.size != 0: return _as_const(base, identity_element(to_store.arg[0], base.dtype))
   # remove reduce on unmasked const
-  if x.is_unrealized_unmasked_const():
+  if all_int(x.shape) and x.is_unrealized_unmasked_const():
     prshape = prod(unwrap(x.st).shape[i] for i in to_store.arg[1])
     match to_store.arg[0]:
       case Ops.ADD: ret = x.const_arg*prshape
