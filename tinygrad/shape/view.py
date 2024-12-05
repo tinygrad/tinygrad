@@ -198,16 +198,25 @@ class View:
     if vm2.mask:
       # Try to project vm2's mask on to vm1.
       newb, newe, bad = [0] * len(vm1.shape), list(vm1.shape), False
-      for (b, e), o, term, (_, t) in zip(vm2.mask, origin, terms, reversed(extents)):
+      for d2, ((b, e), o, term, (_, t)) in enumerate(zip(vm2.mask, origin, terms, reversed(extents))):
         if resolve(b <= t.vmin and t.vmax < e, False): continue
         if not all_int([o, b, e]):
           bad = True
           continue
-        if len(term) != 1:
-          if not term and newe: newe[0] = 0
-          else: bad = True
-          continue
-        d1, s1 = term[0]
+        idx = 0
+        if len(term) == 0:
+          if newe: newe[0] = 0
+          bad = True
+          break
+        elif len(term) > 1:
+          idx = max(range(len(term)), key=functools.partial(lambda t,i: abs(cast(int, t[i][1])), term))
+          d1, s1 = term[idx]
+          next_s1 = vm1.shape[d1] * s1
+          if (not isinstance(next_s1, int) or abs(next_s1) < vm2.shape[d2] or vm2.shape[d2] % next_s1 != 0
+              or b % s1 != 0 or e % s1 != 0):
+            bad = True
+            continue
+        d1, s1 = term[idx]
         if not isinstance(s1, int) or not isinstance(newe[d1], int):
           bad = True
           continue
