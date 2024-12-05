@@ -6,7 +6,7 @@ from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv, DEBUG
 from tinygrad.dtype import DType, ConstType
 from tinygrad.device import is_dtype_supported
-from onnx import AttributeProto, ModelProto, TensorProto, TypeProto, ValueInfoProto
+from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -52,26 +52,6 @@ def attribute_parse(onnx_attribute: AttributeProto):
     raise NotImplementedError(f"attribute with type {AttributeProto.AttributeType.Name(onnx_attribute.type)} is not supported")
   return ATTRIBUTE_MAP[onnx_attribute.type](onnx_attribute)
 
-def type_parse(type_proto: TypeProto):
-  ret = []
-  while True:
-    attr = type_proto.WhichOneof('value')
-    if attr == 'tensor_type':
-      if "dim_value" not in type_proto.tensor_type.shape.dim.__dir__(): return () # variable type, unable to determine shape
-      elif not ret:
-        return tuple([x.dim_value for x in type_proto.tensor_type.shape.dim])
-      else:
-        ret.extend([(x.dim_value,) for x in type_proto.tensor_type.shape.dim])
-        return tuple(ret)
-    elif attr == 'sequence_type':
-      type_proto = getattr(type_proto, attr).elem_type
-      ret.append(1)
-    elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
-    elif attr == 'map_type': raise NotImplementedError(f"map_type is not implemented: {type_proto}")
-    elif attr == 'opaque_type': raise NotImplementedError(f"opaque_type is not implemented: {type_proto}")
-    elif attr == 'sparse_tensor_type': raise NotImplementedError(f"sparse_tensor_type is not implemented: {type_proto}")
-    else: raise AttributeError(f"unknown attr: {attr}, {type_proto}")
-
 def buffer_parse(inp: TensorProto) -> Tensor:
   if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
     return Tensor(dat, dtype=dtype_parse(inp.data_type), requires_grad=False).reshape(tuple(inp.dims))
@@ -84,6 +64,26 @@ onnx_ops = importlib.import_module('extra.onnx_ops')
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 
 def get_run_onnx(onnx_model: ModelProto):
+  def type_parse(type_proto: TypeProto):
+    ret = []
+    while True:
+      attr = type_proto.WhichOneof('value')
+      if attr == 'tensor_type':
+        if "dim_value" not in type_proto.tensor_type.shape.dim.__dir__(): return () # variable type, unable to determine shape
+        elif not ret:
+          return tuple([x.dim_value for x in type_proto.tensor_type.shape.dim])
+        else:
+          ret.extend([(x.dim_value,) for x in type_proto.tensor_type.shape.dim])
+          return tuple(ret)
+      elif attr == 'sequence_type':
+        type_proto = getattr(type_proto, attr).elem_type
+        ret.append(1)
+      elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
+      elif attr == 'map_type': raise NotImplementedError(f"map_type is not implemented: {type_proto}")
+      elif attr == 'opaque_type': raise NotImplementedError(f"opaque_type is not implemented: {type_proto}")
+      elif attr == 'sparse_tensor_type': raise NotImplementedError(f"sparse_tensor_type is not implemented: {type_proto}")
+      else: raise AttributeError(f"unknown attr: {attr}, {type_proto}")
+
   # initialization data
   model_parameters = {inp.name:buffer_parse(inp) for inp in onnx_model.graph.initializer}
   model_attributes = {num:{x.name:attribute_parse(x) for x in n.attribute} for num,n in enumerate(onnx_model.graph.node)}
@@ -96,7 +96,6 @@ def get_run_onnx(onnx_model: ModelProto):
     debug = getenv("DEBUGONNX") or debug
     input_tensors: Dict[str,Tensor|List[Tensor]] = {}
     intermediate_tensors: Dict[str,Tensor] = {}
-    output_tensor_names = [x.name for x in onnx_model.graph.output]
 
     # get inputs
     for model_input in onnx_model.graph.input:
