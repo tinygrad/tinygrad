@@ -8,6 +8,8 @@ from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, trunc
 from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
+  from tinygrad.engine.lazy import LazyBuffer
+  from tinygrad.device import Buffer
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
@@ -204,6 +206,9 @@ class UOpMetaClass(type):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
     return created
+
+buffers: weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary()
+realized: weakref.WeakKeyDictionary[LazyBuffer, UOp] = weakref.WeakKeyDictionary()
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
