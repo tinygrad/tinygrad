@@ -24,7 +24,7 @@ vec_imm = {0: "0x00", 1: "0x10", 2:"0x20", 3:"0x30"}
 
 x86_reg_map = {"rdi": {4: "edi", 2: "di", 1: "dil"}, "rsi": {4: "esi", 2: "si", 1: "sil"}, "rdx": {4: "edx", 2: "dx", 1: "dl"},
                "rcx": {4: "ecx", 2: "cx", 1: "cl"},  "rax": {4: "eax", 2: "ax", 1: "al"},  "rbx": {4: "ebx", 2: "bx", 1: "bl"},
-               **{{f"r{i}": {4: f"r{i}d", 2: f"r{i}w", 1: f"r{i}b"}} for i in range(8,15)}}
+               **{f"r{i}": {4: f"r{i}d", 2: f"r{i}w", 1: f"r{i}b"} for i in range(8,15)}}
 
 size_prefix = {1: " byte ptr", 2: " word ptr", 4: " dword ptr", 8: " qword ptr"}
 
