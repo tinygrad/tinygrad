@@ -22,6 +22,10 @@ x86op = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86_s
 gep_imm = {0: "0x00", 1: "0x40", 2:"0x80", 3:"0xC0"}
 vec_imm = {0: "0x00", 1: "0x10", 2:"0x20", 3:"0x30"}
 
+x86_reg_map = {"rdi": {4: "edi", 2: "di", 1: "dil"}, "rsi": {4: "esi", 2: "si", 1: "sil"}, "rdx": {4: "edx", 2: "dx", 1: "dl"},
+               "rcx": {4: "ecx", 2: "cx", 1: "cl"},  "rax": {4: "eax", 2: "ax", 1: "al"},  "rbx": {4: "ebx", 2: "bx", 1: "bl"},
+               **{{f"r{i}": {4: f"r{i}d", 2: f"r{i}w", 1: f"r{i}b"}} for i in range(8,15)}}
+
 size_prefix = {1: " byte ptr", 2: " word ptr", 4: " dword ptr", 8: " qword ptr"}
 
 def to_hex(x, dt:DType) -> str:
@@ -86,7 +90,6 @@ x86_rewrite = PatternMatcher([
 
 x86_matcher = PatternMatcher([
   # TODO: casts from uint64 to float are complicated
-  # TODO: bitcast from uint64 to uint8 is broken
   # can't cast from float to int8/16 directly and vice versa
   (UPat(Ops.CAST, dtype=(dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16), src=(UPat(dtype=dtypes.floats),), name="c"),
     lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
@@ -141,13 +144,9 @@ class X86Renderer(Renderer):
     if self.r[x] != "rax" and "rax" in self.r.values(): l += "\npop rax"
     return l
 
-  # 64 bit reg to lower bit reg
   def regt(self, reg:str, dt:DType) -> str:
     if dt.itemsize == 8 or dtypes.is_float(dt) or isinstance(dt, PtrDType): return reg
-    if dt.itemsize == 4: return reg+'d' if reg[-1].isdigit() else 'e'+reg[1:]
-    if dt.itemsize == 2: return reg+'w' if reg[-1].isdigit() else reg[1:]
-    if dt.itemsize == 1: return reg+'b' if reg[-1].isdigit() else reg[1:]+'l' if reg[-1] == 'i' else reg[1:-1]+'l'
-    raise RuntimeError(f"invalid dtype for register: {dt}")
+    return x86_reg_map[reg][dt.itemsize]
 
   def __getitem__(self, key:UOp): return self.regt(self.r[key], key.dtype) if self.r[key] in self.all_regs else self.r[key]  # hacky helper
   def render(self, name:str, uops:List[UOp]) -> str:
@@ -159,7 +158,7 @@ class X86Renderer(Renderer):
     r: Dict[UOp, str] = {}
     self.r = r
     mem: Dict[UOp, str] = {}
-    stack_size: int = 16
+    stack_size: int = 8
     kernel: List[str] = []
     self.uops = uops
 
@@ -198,9 +197,9 @@ class X86Renderer(Renderer):
     for i,u in enumerate(uops):
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         if i < 6: r[u] = assign_reg(i, u.dtype)
-        else: # value is in stack instead of register, TODO: fix this
-          r[u] = mem[u] = f"[rbp + {stack_size}]"
-          stack_size += 8
+        else: # value is in stack instead of register, rbp + 8 is return address
+          # TODO: fix this
+          r[u] = mem[u] = f"[rbp + {16 + (i-6)*8}]"
       elif u.op is Ops.CONST:
         r[u] = to_hex(u.arg, u.dtype)
         if not is_imm(u):
