@@ -1,4 +1,4 @@
-import sys, atexit, functools
+import atexit, functools
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
@@ -10,9 +10,6 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.device import Buffer
-
-# creation can recurse a lot
-sys.setrecursionlimit(10000)
 
 BUF_LIMIT = {"METAL":32}
 
@@ -338,7 +335,7 @@ def _as_const(u:UOp, val:ConstType) -> UOp:
   st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
   return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
 
-ops_folding = merge_views+PatternMatcher([
+ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
 ])
