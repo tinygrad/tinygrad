@@ -230,7 +230,7 @@ def torch_load(t:Tensor) -> Dict[str, Tensor]:
       return intercept[name] if module_root == "torch" else super().find_class(module, name)
     def persistent_load(self, pid): return deserialized_objects.get(pid, pid)
 
-  if passthrough_reset(zipfile.is_zipfile(fobj)):
+  if passthrough_reset(zipfile.is_zipfile(fobj)): # NOTE: passthrough_reset required to support python < 3.14
     myzip = zipfile.ZipFile(fobj, 'r')
     base_name = myzip.namelist()[0].split('/', 1)[0]
     for n in myzip.namelist():
@@ -239,7 +239,7 @@ def torch_load(t:Tensor) -> Dict[str, Tensor]:
           offsets[n.split("/")[-1]] = myfile._orig_compress_start # type: ignore
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       return TorchPickle(myfile).load()
-  elif passthrough_reset(tarfile.is_tarfile(fobj)):
+  elif passthrough_reset(tarfile.is_tarfile(fobj)): # NOTE: passthrough_reset required to support python < 3.11
     with tarfile.open(fileobj=fobj, mode="r") as tar:
       storages_offset = tar.getmember('storages').offset_data
       f = unwrap(tar.extractfile('storages'))
