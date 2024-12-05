@@ -21,17 +21,17 @@ MODELS = {
 }
 
 def download_weights(total_num_weights:int) -> Path:
-  model = fetch("https://huggingface.co/Qwen/QwQ-32B-Preview/resolve/main/model.safetensors.index.json?download=true", "model.safetensors.index.json", subdir="qwq_32b_preview")
+  model = fetch("https://huggingface.co/Qwen/QwQ-32B-Preview/resolve/main/model.safetensors.index.json?download=true", "model.safetensors.index.json", subdir=(subdir:="qwq_32b_preview"))
 
   for i in range(1, total_num_weights + 1):
     filename = f"model-{i:05d}-of-{total_num_weights:05d}.safetensors"
-    fetch(f"https://huggingface.co/Qwen/QwQ-32B-Preview/resolve/main/{filename}?download=true", filename, subdir="qwq_32b_preview")
+    fetch(f"https://huggingface.co/Qwen/QwQ-32B-Preview/resolve/main/{filename}?download=true", filename, subdir=subdir)
 
   return Path(os.path.dirname(model))
 
 def load_model(model_path:Path, model_params:Dict[str, Union[int, float]]) -> Transformer:
   # build model
-  model = Transformer(**model_params, linear=nn.Linear, max_context=32000)
+  model = Transformer(**model_params, linear=nn.Linear)
 
   # update layers to add bias
   updated_layers = []
@@ -73,11 +73,6 @@ if __name__ == "__main__":
   outputted = args.prompt
   start_pos, toks = 0, tokenizer(outputted)["input_ids"]
   print(outputted, end="", flush=True)
-
-  new_toks = tokenizer(outputted)["input_ids"]
-  assert toks == new_toks[:len(toks)]
-  toks = new_toks
-  assert outputted == tokenizer.decode(toks)
 
   tok_tensor = None
   for i in range(args.count):
