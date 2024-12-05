@@ -2,7 +2,7 @@ from __future__ import annotations
 import ctypes
 from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Any
 from tinygrad.runtime.autogen.am import am
-from tinygrad.helpers import to_mv, round_up, getenv
+from tinygrad.helpers import to_mv, round_up, getenv, mv_address
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
@@ -17,7 +17,7 @@ class GPUPhysicalMemoryBlock(PhysicalMemoryBlock):
     self.adev = adev
 
   def mc_addr(self): return self.adev.gmc.mc_base + self.paddr
-  def cpu_addr(self): return self.adev.vram_cpu_addr + self.paddr
+  def cpu_addr(self): return mv_address(self.adev.vram) + self.paddr
   def cpu_view(self): return to_mv(self.cpu_addr(), self.size)
 
 class ScatterList(Generic[PhysicalMemoryBlockType]):

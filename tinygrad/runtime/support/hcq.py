@@ -230,13 +230,13 @@ class HCQArgsState(Generic[ProgramType]):
   def update_var(self, index:int, val:int): raise NotImplementedError("need update_var")
 
 class CLikeArgsState(HCQArgsState[ProgramType]):
-  def __init__(self, ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), prefix:Optional[List[int]]=None):
+  def __init__(self, ptr:Tuple[int, int], prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[int, ...]=(), prefix:Optional[List[int]]=None):
     super().__init__(ptr, prg, bufs, vals=vals)
 
-    if prefix is not None: to_mv(self.ptr, len(prefix) * 4).cast('I')[:] = array.array('I', prefix)
+    if prefix is not None: to_mv(self.cpu_ptr, len(prefix) * 4).cast('I')[:] = array.array('I', prefix)
 
-    self.bufs = to_mv(self.ptr + len(prefix or []) * 4, len(bufs) * 8).cast('Q')
-    self.vals = to_mv(self.ptr + len(prefix or []) * 4 + len(bufs) * 8, len(vals) * 4).cast('I')
+    self.bufs = to_mv(self.cpu_ptr + len(prefix or []) * 4, len(bufs) * 8).cast('Q')
+    self.vals = to_mv(self.cpu_ptr + len(prefix or []) * 4 + len(bufs) * 8, len(vals) * 4).cast('I')
 
     self.bufs[:] = array.array('Q', [b.va_addr for b in bufs])
     self.vals[:] = array.array('I', vals)

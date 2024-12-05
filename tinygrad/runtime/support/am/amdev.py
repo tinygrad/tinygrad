@@ -6,7 +6,7 @@ from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhu
 from tinygrad.runtime.support.am.mm import MM, GPUPhysicalMemoryBlock
 from tinygrad.runtime.support.am.firmware import Firmware
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
-from tinygrad.runtime.support.am.hal import HAL, PCIHAL, VFIOHAL, read_pagemap
+# from tinygrad.runtime.support.am.hal import HAL, PCIHAL, VFIOHAL, read_pagemap
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
@@ -37,10 +37,10 @@ class AMRegister:
 class AMDev:
   # hal:Optional[HAL] = None
 
-  def __init__(self, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
+  def __init__(self, pcidev, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
     # if AMDev.hal is None: AMDev.hal = VFIOHAL()
     # self.hal_dev = AMDev.hal.open_device(dev_idx)
-
+    self.pcidev = pcidev
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
 
     # self.vram_cpu_addr, self.vram = AMDev.hal.map_pci_range(self.hal_dev, bar=0, cast='B')

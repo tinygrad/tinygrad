@@ -1,5 +1,6 @@
 from __future__ import annotations
 import ctypes, time
+from tinygrad.runtime.support.pci import pci_set_master
 from tinygrad.runtime.autogen.am import am, gc_11_0_0, smu_v13_0_0
 from tinygrad.helpers import to_mv, lo32, hi32
 
@@ -247,8 +248,7 @@ class AM_IH(AM_IP):
     # self.adev.regIH_RING1_CLIENT_CFG_INDEX.update(index=0)
     # self.adev.regIH_RING1_CLIENT_CFG_DATA.update(client_id=0xa, source_id=0x0, source_id_match_enable=1)
 
-    # set master
-    self.adev.hal.pci_set_master(self.adev.hal_dev)
+    pci_set_master(self.adev.pcidev)
 
     # toggle interrupts
     for addr_vm, rwptr_vm, suf, ring_id in self.rings:
