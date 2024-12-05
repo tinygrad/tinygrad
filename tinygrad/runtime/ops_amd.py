@@ -317,7 +317,7 @@ class AMDDevice(HCQCompiled):
       if e.errno == errno.ENOMEM: raise MemoryError("Cannot allocate memory: no memory is available.") from e
       raise
 
-    if host:
+    if not host:
       buf = libc.mmap(mem.va_addr, mem.size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_FIXED, self.drm_fd, mem.mmap_offset)
       assert addr == buf == mem.va_addr
 
