@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal
+from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal, get_args
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -8,6 +8,7 @@ from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, trunc
 from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
+  from tinygrad.device import Buffer
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
@@ -206,6 +207,10 @@ class UOpMetaClass(type):
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
     return created
 
+# some uops map to other stuff
+buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
+realized:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary() # this maps realized ops to a BUFFER uop
+
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
 class UOp(MathTrait, metaclass=UOpMetaClass):
@@ -259,6 +264,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def shape(self) -> Tuple[sint, ...]: return unwrap(self.st).shape
   @property
   def size(self) -> int: return self.arg[1][1] if self.op is Ops.BUFFER else unwrap(self.st).size
+  @property
+  def nbytes(self) -> int: return self.size*self.dtype.itemsize
 
   # *** uop evaluation ***
 
@@ -288,6 +295,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert ret.op is Ops.VIEW, f"st_arg trying to return {ret}"
     return ret.arg
   @property
+  def const_arg(self) -> ConstType:
+    if self.op is Ops.CONST:
+      assert isinstance(self.arg, get_args(ConstType)), f"const_arg trying to return {self}"
+      return self.arg
+    if self is not self.base: return self.base.const_arg
+    if self.op is Ops.VIEW and len(self.src) == 2: return self.src[1].const_arg
+    raise AssertionError(f"const_arg called on {self}")
+  @property
   def axis_arg(self) -> Tuple[int, ...]:
     assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
     ret = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
@@ -295,12 +310,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   def sink(self, *srcs:UOp): return UOp(Ops.SINK, dtypes.void, (self,)+srcs)
   def index(self, idx:UOp, valid:Optional[UOp]=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
-  def const_like(self, b:ConstLike): return UOp.const(self.dtype, b) if self.st is None else UOp.const_with_shape(self.dtype, b, self.shape)
+  def const_like(self, b:ConstLike):
+    if self._device is not None: return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
+    return UOp.const(self.dtype, b) if self.st is None else UOp.const_with_shape(self.dtype, b, self.shape)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
-  def cast(self, dtype:DType): return UOp(Ops.CAST, dtype, (self,))
+  # TOOD: allow_buffer_view doesn't do anything
+  def cast(self, dtype:DType, bitcast=False, allow_buffer_view=True): return UOp(Ops.BITCAST if bitcast else Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType): return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:Union[Tuple[int, ...], int]):
     if isinstance(i, int):
@@ -326,9 +344,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(dtype:DType, start:ConstType|UOp, end:ConstType|UOp, idx:int):
     return UOp(Ops.RANGE, dtype=dtype, src=(UOp.const(dtype, start) if not isinstance(start, UOp) else start,
                                              UOp.const(dtype, end) if not isinstance(end, UOp) else end), arg=idx)
-  def r(self, op:Ops, axis:Tuple[int, ...]): return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
+  def r(self, op:Ops, axis:Tuple[int, ...]):
+    axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
+    return self if len(axis) == 0 else UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x))
-  def contiguous(self): return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
+  # TOOD: allow_buffer_view doesn't do anything
+  def contiguous(self, allow_buffer_view=True): return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
 
   # *** from LazyBuffer ***
 
@@ -336,6 +357,39 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const_with_shape(dtype:DType, val:ConstLike, shape:Tuple[sint,...]) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
     return UOp(Ops.VALID, dtypes.bool, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)).where(UOp.const(dtype, val), 0)
+  @staticmethod
+  def metaop(op:Ops, shape:Tuple[sint, ...], dtype:DType, device:str, arg:Any=None, src:Tuple[UOp, ...]=()) -> UOp:
+    from tinygrad.shape.shapetracker import ShapeTracker
+    if op is Ops.CONST:
+      st = ShapeTracker.from_shape(())
+      arg = arg if isinstance(arg, UOp) else dtypes.as_const(unwrap(arg), dtype)
+      return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, 1, dtype), UOp(op, dtype, src, arg)), st).reshape((1,)*len(shape)).expand(shape)
+    return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), UOp(op, dtype, src, arg)), st)
+  def _copy(self, device:str) -> UOp:
+    assert unwrap(self.st).contiguous and self.size == self.base.size, f"can only copy contig {self} {self.base}"
+    return UOp.metaop(Ops.COPY, self.shape, self.dtype, device, self.nbytes, (self,))
+  def copy_to_device(self, device:str, force:bool=False, clone:bool=False) -> UOp:
+    # no COPY
+    if self.device == device and not clone: return self
+    # if it's a shrink, do the shrink before the copy with CONTIGUOUS
+    # TODO: where is this tested?
+    if prod(self.shape) < prod(self.base.shape): return self.contiguous()._copy(device)
+    # copy the base and apply the shapetracker on the new device
+    return self.base._copy(device).view(unwrap(self.st))
+  def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
+  def is_unrealized_const(self):
+    return (s:=self.base).op is Ops.VIEW and len(s.src) == 2 and s.realized is None and s.src[1].op is Ops.CONST and not isinstance(s.src[1].arg, UOp)
+  def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in unwrap(self.st).views)
+  @property
+  def srcs(self): return self.src
+  @srcs.deleter
+  def srcs(self): realized[self] = self.buf_uop
+  @property
+  def lbs(self): return [self]
+  @property
+  def metadata(self): return None
+  @property
+  def forced_realize(self): return False
 
   # *** uop movement ops ***
 
@@ -370,6 +424,21 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return self
     assert self.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
     return self.src[0]
+  @property
+  def buffer(self) -> Buffer:
+    if self.base.realized is not None: return self.base.realized
+    if (ret:=buffers.get(self)) is not None: return ret
+    if self.op is Ops.VIEW:
+      assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
+      return self.src[0].buffer
+    assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
+    from tinygrad.device import Buffer
+    buffers[self] = ret = Buffer(*self.arg[1])
+    return ret
+  @property
+  def realized(self) -> Optional[Buffer]: return real_buf_uop.buffer if (real_buf_uop:=realized.get(self)) is not None else None
+  @property
+  def is_realized(self) -> bool: return self.base.realized is not None
 
   # *** uop Variable stuff ***
 

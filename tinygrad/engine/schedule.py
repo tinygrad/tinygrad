@@ -3,6 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
+from tinygrad.ops import realized, identity_element
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -49,36 +50,33 @@ class ScheduleContext:
 
 def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2
 
-def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache:Dict[LazyBuffer, UOp]) -> UOp:
+def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> UOp:
+  assert buf.st is not None, f"must have shape to schedule {buf}"
   if (r:=cache.get(buf)) is not None: return r
   if buf is not buf.base:
-    cache[buf] = ret = to_uop(buf.base, ctx, buffers, cache).view(buf.st)
+    cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
     return ret
   assert buf.op is not None, f"base must be base itself {buf}"
   # make things that can't be images not images
-  dtype = buf.buffer.dtype
+  dtype = ubuf.dtype.base if (ubuf:=realized.get(buf)) is not None else buf.dtype
   if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
     assert buf.realized is None, "can't fixup allocated buffer"
     if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
     dtype = buf.dtype.base
-    # hack the underlying buffer too
-    buf.buffer.dtype = dtype
-    buf.buffer.options = None
-  if buf.is_realized:
-    ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
-    buffers[ubuf] = buf.buffer
-    op = None
+  if ubuf is not None: op = None
+  elif is_scheduled(buf):
+    ubuf = buf.buf_uop
+    op = buf.src[1].replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src[1].src))
   elif buf.op is Ops.ASSIGN:
-    target, new_val = [to_uop(x, ctx, buffers, cache) for x in buf.srcs]
+    target, new_val = [to_uop(x, ctx, cache) for x in buf.srcs]
     ctx.assigns.add(ubuf:=target.base.buf_uop)
     op = UOp(Ops.ASSIGN, dtype.base, (ubuf, new_val), buf.arg)
   else:
     ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
-    buffers[ubuf] = buf.buffer
-    op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
-  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
+    op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, tuple(to_uop(x, ctx, cache) for x in buf.srcs), buf.arg)
+  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op), buf.st)
   if op is not None:
-    buf.buffer.ref(1)
+    ubuf.buffer.ref(1)
     ctx.lazybufs[ubuf] = buf
     ctx.allbufs[ubuf] = ret
     for x in op.src:
@@ -338,9 +336,25 @@ def _as_const(u:UOp, val:ConstType) -> UOp:
   st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
   return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
 
+def simplify_reduceop(ctx, b:UOp, to_store:UOp, base:UOp, x:UOp) -> Optional[UOp]:
+  # reduce of size 0 is just CONST
+  if x.size == 0 and base.size != 0: return _as_const(base, identity_element(to_store.arg[0], base.dtype))
+  # remove reduce on unmasked const
+  if x.is_unrealized_unmasked_const():
+    prshape = prod(unwrap(x.st).shape[i] for i in to_store.arg[1])
+    match to_store.arg[0]:
+      case Ops.ADD: ret = x.const_arg*prshape
+      case Ops.MUL: ret = x.const_arg**prshape
+      case Ops.MAX: ret = x.const_arg
+      case op: raise RuntimeError(f"unhandled reduce alu {op}")
+    return _as_const(base, ret)
+  return None
+
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+  # maybe fold reduce ops (TODO: this can be multiple upats)
+  (UPatScheduled(Ops.REDUCE_AXIS, src=(UPat.var("x"),)), simplify_reduceop),
 ])
 
 # ** this decides which ops get realized
@@ -411,8 +425,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   # create the big graph
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
-  buffers: Dict[UOp, Buffer] = {}
-  for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, buffers, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
+  for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
   big_graph = graph_rewrite(big_graph, ops_folding+do_realize, ctx.realizes)
   # group realizes into kernels
   store_groups = group_realizes(ctx)
@@ -422,16 +435,16 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   for store_uops in store_groups:
     if len(stores:=[ctx.realizes[u] for u in store_uops if ctx.realizes[u].op is Ops.STORE]) != 0:
       ast, ast_ctx = full_ast_rewrite(UOp.sink(*stores), ctx)
-      prescheduled.append(ScheduleItem(ast, tuple(buffers[u] for u in ast_ctx.bufs if u.size != 0), tuple(ast_ctx.metadata),
+      prescheduled.append(ScheduleItem(ast, tuple(u.buffer for u in ast_ctx.bufs if u.size != 0), tuple(ast_ctx.metadata),
                                        frozenset(ubuf for ubuf,ops in ast_ctx.assign_adj.items() if any(x.op is Ops.PRELOAD for x in ops))))
-      for u in ast_ctx.sinked: del ast_ctx.lazybufs[u].srcs  # can only schedule once
+      for u in ast_ctx.sinked: realized[ast_ctx.lazybufs[u]] = u  # can only schedule once
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
   in_degree: DefaultDict[ScheduleItem, int] = defaultdict(int)
   for si in prescheduled:
     # realize outputs before a parent is assigned to
-    parents_assigns = dedup(xsi for x in si.assign_preloads if (xsi:=schedule_targets.get(buffers[x])) and xsi is not si)
+    parents_assigns = dedup(xsi for x in si.assign_preloads if (xsi:=schedule_targets.get(x.buffer)) and xsi is not si)
     for assign in parents_assigns:
       graph[si].append(assign)
       in_degree[assign] += 1
