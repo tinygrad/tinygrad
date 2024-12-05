@@ -338,7 +338,7 @@ def _as_const(u:UOp, val:ConstType) -> UOp:
   st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
   return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
 
-ops_folding = PatternMatcher([
+ops_folding = merge_views+PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
 ])
