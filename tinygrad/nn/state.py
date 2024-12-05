@@ -1,5 +1,5 @@
 import os, json, pathlib, zipfile, pickle, tarfile, struct, functools, io
-from typing import Dict, Union, List, Optional, Any, Tuple, Callable, BinaryIO, Iterable
+from typing import Dict, Union, List, Optional, Any, Tuple, Callable, BinaryIO, Iterable, TypeVar
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm
@@ -35,16 +35,22 @@ safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dt
                "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
-def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
+R = TypeVar('R')
+def accept_filename(func: Callable[[Tensor], R]) -> Callable[[Union[Tensor, str, pathlib.Path]], R]:
+  @functools.wraps(func)
+  def wrapper(fn: Union[Tensor, str, pathlib.Path]) -> R: return func(Tensor(pathlib.Path(fn)) if not isinstance(fn, Tensor) else fn)
+  return wrapper
+
+@accept_filename
+def safe_load_metadata(t:Tensor) -> Tuple[Tensor, int, Any]:
   """
   Loads a .safetensor file from disk, returning the data, metadata length, and metadata.
   """
-  t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
   json_len = t[0:8].bitcast(dtypes.int64).item()
   assert isinstance(json_len, int)
   return t, json_len, json.loads(t[8:8+json_len].data().tobytes())
 
-def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
+def safe_load(fn:Union[Tensor, str, pathlib.Path]) -> Dict[str, Tensor]:
   """
   Loads a .safetensor file from disk, returning the state_dict.
 
@@ -157,6 +163,7 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
       else: v.replace(state_dict[k].to(v.device)).realize()
       if consume: del state_dict[k]
 
+@accept_filename
 def tar_extract(t: Tensor) -> Dict[str, Tensor]:
   """
   Extracts files from a tar archive and returns them as dictionary of names (keys) and tensors (values).
@@ -287,6 +294,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
+@accept_filename
 def gguf_load(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
   """
   Loads a gguf file from a tensor.
