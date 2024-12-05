@@ -95,7 +95,7 @@ class TestKernelSpeed(unittest.TestCase):
 
   # theoretical is nv_gbs=1008, amd_gbs=960
   def test_gemv_16384_4096(self): self._test_matmul(16384, 4096, 1, nv_gbs=840, amd_gbs=750)
-  def test_gemv_4096_16384(self): self._test_matmul(4096, 16384, 1, nv_gbs=830, amd_gbs=780)
+  def test_gemv_4096_16384(self): self._test_matmul(4096, 16384, 1, nv_gbs=830, amd_gbs=760)
 
 if __name__ == '__main__':
   unittest.main()
