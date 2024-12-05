@@ -2,8 +2,8 @@ from __future__ import annotations
 from typing import Optional, Any, Tuple, List, get_args
 from tinygrad.dtype import dtypes, DType, ConstType, to_dtype, ImageDType
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, SPLIT_REDUCEOP, LAZYCACHE
-from tinygrad.ops import exec_alu, python_alu
-from tinygrad.ops import identity_element, MathTrait, resolve, UOp, sint, GroupOp, Ops
+from tinygrad.ops import exec_alu, python_alu, buffers
+from tinygrad.ops import identity_element, MathTrait, resolve, UOp, sint, GroupOp, Ops, realized
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
@@ -30,7 +30,7 @@ class LazyBuffer(MathTrait):
     self._base: Optional[LazyBuffer] = None
     if base is None:
       # properties on base
-      self.op, self.arg, self.srcs = op, arg, srcs  # this is a UOp, except the src is LazyBuffers and not UOps
+      self.op, self.arg, self._srcs = op, arg, srcs  # this is a UOp, except the src is LazyBuffers and not UOps
       assert self.op is not Ops.ASSIGN or srcs[0].base.realized is not None, "assign target must be realized"
       assert all_same([x.st.shape for x in self.srcs]), f"src shape mismatch! {self.srcs}"
 
@@ -48,6 +48,14 @@ class LazyBuffer(MathTrait):
 
   def __del__(self):
     if hasattr(self, 'buffer'): self.buffer.ref(-1)
+
+  @property
+  def srcs(self): return self._srcs
+  @srcs.deleter
+  def srcs(self):
+    realized[self] = ubuf = UOp.new_buffer(self.device, self.size, self.dtype)
+    buffers[ubuf] = self.buffer
+    del self._srcs
 
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} {str(self.dtype)[7:]} {self.st if self.base is not self else (self.op, self.realized)}>"
