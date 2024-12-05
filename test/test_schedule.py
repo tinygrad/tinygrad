@@ -1547,7 +1547,7 @@ class TestIndexing(unittest.TestCase):
   def test_arange_shrink_copy(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).to("CLANG")
     assert isinstance(a.lazydata, LazyBuffer)
-    self.assertIs(a.lazydata.base.op, Ops.COPY)
+    self.assertIs(a.lazydata.base.src[1].op, Ops.COPY)
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
@@ -1555,8 +1555,8 @@ class TestIndexing(unittest.TestCase):
   def test_arange_expand_copy(self):
     a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).to("CLANG")
     assert isinstance(a.lazydata, LazyBuffer)
-    self.assertIs(a.lazydata.base.op, Ops.COPY)
-    self.assertIs(a.lazydata.base.srcs[0].base.op, Ops.ADD)
+    self.assertIs(a.lazydata.base.src[1].op, Ops.COPY)
+    self.assertIs(a.lazydata.base.src[1].src[0].base.op, Ops.ADD)
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), [[[0, 0], [1, 1]], [[2, 2], [3, 3]]])
 
@@ -1924,7 +1924,7 @@ class TestView(unittest.TestCase):
     a = UOp(Ops.VIEW, dtypes.float, (UOp.new_buffer(Device.DEFAULT, 121, dtypes.float), UOp(Ops.EMPTY, dtypes.float)), st)
     b = a.pad(pad_arg:=((0, 0), (0, 0), (18, 0)))
     self.assertEqual(b.st, st.pad(pad_arg))
-    self.assertIs(b, b.const_like(0))
+    self.assertIs(b.base.src[1], UOp.const(dtypes.float, 0))
 
   def test_partial_mask(self):
     # partial masked out does not degrade into CONST
