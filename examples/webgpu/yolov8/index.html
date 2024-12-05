@@ -95,6 +95,7 @@
 </head>
 <body>
     <h2>YOLOv8 tinygrad WebGPU</h2>
+    <h2 id="wgpu-error" style="display: none; color: red;">Error: WebGPU is not supported in this browser</h2>
     <div class="video-container">
         <video id="video" muted autoplay playsinline></video>
         <canvas id="canvas"></canvas>
@@ -107,7 +108,7 @@
     </div>
     <script>
         let net = null;
-        const modelInputSize = 256
+        const modelInputSize = 416;
         let lastCalledTime;
         let fps = 0, accumFps = 0, frameCounter = 0;
 
@@ -117,6 +118,7 @@
         const offscreenCanvas = document.createElement('canvas');
         const fpsMeter = document.getElementById('fps-meter');
         const loadingContainer = document.getElementById('div-loading');
+        const wgpuError = document.getElementById('wgpu-error');
         offscreenCanvas.width = modelInputSize;
         offscreenCanvas.height = modelInputSize;
         const offscreenContext = offscreenCanvas.getContext('2d');
@@ -147,7 +149,7 @@
                 lastCalledTime = now;
                 accumFps += 1/delta;
 
-                if (frameCounter++ >= 30) {
+                if (frameCounter++ >= 10) {
                     fps = accumFps/frameCounter;
                     frameCounter = 0;
                     accumFps = 0;
@@ -206,7 +208,12 @@
 
         async function detectObjectsOnFrame(offscreenContext) {
             if (!net) {
-                net = await loadNet(await getDevice());
+                let device = await getDevice();
+                if (!device) {
+                    wgpuError.style.display = "block";
+                    loadingContainer.style.display = "none";
+                }
+                net = await loadNet(device);
                 loadingContainer.style.display = "none";
             }
             let start = performance.now();
@@ -239,7 +246,7 @@
         }
 
         const getDevice = async () => {
-            if (!navigator.gpu) error("WebGPU not supported.");
+            if (!navigator.gpu) return false;
             const adapter = await navigator.gpu.requestAdapter();
             return await adapter.requestDevice();
         };
