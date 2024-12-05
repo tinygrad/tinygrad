@@ -1,7 +1,4 @@
-from tinygrad.ops import UOp
-
-# NOTE: this is imported by scheduler test
-view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM", "DSP", "DISK"}
+from tinygrad.ops import UOp, view_supported_devices # noqa
 
 # LazyBuffer is UOp! This is fundamental
 LazyBuffer = UOp
