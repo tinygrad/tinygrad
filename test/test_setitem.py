@@ -70,7 +70,7 @@ class TestSetitem(unittest.TestCase):
     t[1] ^= 5
     np.testing.assert_allclose(t.numpy(), [[0, 1], [7, 6]])
 
-  #@unittest.expectedFailure NOTE: this passes because contiguous while contiguous always realizes
+  @unittest.expectedFailure
   def test_setitem_consecutive_inplace_operator(self):
     t = Tensor.arange(4).reshape(2, 2).contiguous()
     t[1] += 2

@@ -65,6 +65,7 @@ class TestPickle(unittest.TestCase):
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t.numpy(), t2.numpy())
 
+  @unittest.skip("no longer supported, there's no Buffer on LazyBuffer (uop)")
   def test_pickle_jit(self):
     @TinyJit
     def add(a, b): return a.sum()+b+1
