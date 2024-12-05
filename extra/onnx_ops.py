@@ -393,7 +393,7 @@ def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
   # Scalar or Rank 1 tensor containing exactly one element
   depth, indices = depth[0] if isinstance(depth, list) else depth, (indices < 0).where(indices+depth, indices),
   if axis < 0: axis += indices.ndim + 1
-  return indices[:, None]._one_hot_along_dim(depth, dim=(indices.ndim-axis)).where(values[1], values[0])
+  return indices[:, None]._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
 
 def Compress(inp: Tensor, condition: Tensor, axis=None):
   if axis is None:

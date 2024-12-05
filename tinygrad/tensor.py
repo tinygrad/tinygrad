@@ -1162,7 +1162,7 @@ class Tensor(SimpleMathTrait):
       for dim, tensor in zip(dims, tensors):
         try: i = tensor.reshape(tensor.shape + (1,)*(x.ndim - dims[0])).expand(pre_reduce_shape)
         except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
-        masks.append(i._one_hot_along_dim(num_classes=x.shape[dim], dim=(x.ndim - dim - 1)))
+        masks.append(i._one_hot_along_dim(num_classes=x.shape[dim], dim=(dim - x.ndim)))
 
       # reduce masks to 1 mask
       mask: Tensor = functools.reduce(lambda x,y: x.mul(y), masks)
@@ -3358,8 +3358,9 @@ class Tensor(SimpleMathTrait):
     return (Tensor.rand_like(self, requires_grad=False, dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
 
   # helper function commonly used for indexing
-  def _one_hot_along_dim(self:Tensor, num_classes:sint, dim:int=0):
-    return self == Tensor.arange(num_classes, device=self.device, requires_grad=False).reshape((num_classes,) + (1,) * dim)
+  def _one_hot_along_dim(self:Tensor, num_classes:sint, dim:int=-1):
+    offset = self.ndim - self._resolve_dim(dim) - 1
+    return self == Tensor.arange(num_classes, device=self.device, requires_grad=False).reshape((num_classes,) + (1,) * offset)
 
   def one_hot(self, num_classes:int=-1) -> Tensor:
     """
