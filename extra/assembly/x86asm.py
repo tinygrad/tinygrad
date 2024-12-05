@@ -9,15 +9,19 @@ x86_mov_ops = {Ops.STORE: "mov", Ops.LOAD: "mov", Ops.ASSIGN: "mov", Ops.DEFINE_
 x86_unsigned_ops = {**x86_mov_ops, Ops.ADD: "add", Ops.SUB: "sub", Ops.MUL: "imul", Ops.IDIV: "div", Ops.MOD: "div", Ops.CMPNE: "cmp",
                     Ops.CMPLT: "cmp", Ops.AND: "and", Ops.OR: "or", Ops.XOR: "xor"}
 x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv"}
-x86_float_ops = {Ops.ADD: "addss", Ops.SUB: "subss", Ops.MUL: "mulss", Ops.FDIV: "divss", Ops.CMPLT: "ucomiss", Ops.CMPNE: "ucomiss",
+x86_float32_ops = {Ops.ADD: "addss", Ops.SUB: "subss", Ops.MUL: "mulss", Ops.FDIV: "divss", Ops.CMPLT: "ucomiss", Ops.CMPNE: "ucomiss",
                  Ops.SQRT: "sqrtss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
-x86_double_ops = {**{k:v[:-1]+'d' for k,v in x86_float_ops.items()}}
+x86_float64_ops = {**{k:v[:-1]+'d' for k,v in x86_float32_ops.items()}}
+# NOTE: half dtype only supported in load/store, load can be zero extend followed by bitcast to float reg
+#x86_float16_ops = {Ops.STORE: "", Ops.LOAD: "vmovdqu16"}
+x86_float16_ops = {Ops.STORE: "movd", Ops.LOAD: "movd"}
 # NOTE: are doubles vectorized? 2 doubles is "ups" not "lps", use a instead of u
 x86_vec2_ops = {**{k:v+"lps" for k,v in x86_mov_ops.items()}}
 x86_vec4_ops = {**{k:v+"ups" for k,v in x86_mov_ops.items()}}
 #TODO: add float16 support?
 x86op = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86_signed_ops for x in dtypes.sints},
-         dtypes.float32:x86_float_ops, dtypes.float64:x86_double_ops, dtypes.float32.vec(2):x86_vec2_ops, dtypes.float32.vec(4):x86_vec4_ops}
+          dtypes.float32:x86_float32_ops, dtypes.float64:x86_float64_ops, dtypes.float16:x86_float16_ops,
+          dtypes.float32.vec(2):x86_vec2_ops, dtypes.float32.vec(4):x86_vec4_ops}
 
 gep_imm = {0: "0x00", 1: "0x40", 2:"0x80", 3:"0xC0"}
 vec_imm = {0: "0x00", 1: "0x10", 2:"0x20", 3:"0x30"}
@@ -38,6 +42,8 @@ def cflag(x:UOp) -> str:
   return "setl" if x.src[0].dtype in dtypes.sints else "setb"
 
 def float_cast(x:DType, s:DType) -> str:
+  if s is dtypes.float16: return "vcvtph2ps"
+  if x is dtypes.float16: return "vcvtps2ph"
   cfrom = "si" if not dtypes.is_float(s) else "sd" if s.itemsize == 8 else "ss"
   cto = "si" if not dtypes.is_float(x) else "sd" if x.itemsize == 8 else "ss"
   if cto == "si": cfrom = "t" + cfrom
@@ -64,6 +70,7 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints),), name="x"), lambda ctx,x: f"movzx {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.sints),), name="x"),
    lambda ctx,x: f"movs{'x' if x.src[0].dtype.itemsize < 4 else 'xd'} {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.CAST, dtype=dtypes.float16, name="x"), lambda ctx,x: f"{float_cast(x.dtype, x.src[0].dtype)} {ctx[x]}, {ctx[x.src[0]]}, 0x4"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"{float_cast(x.dtype, x.src[0].dtype)} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"mov{'q' if x.dtype.itemsize == 8 else 'd'} {ctx[x]}, {ctx[x.src[0]]}"),
   # ternary ops (no cmov for floats)
@@ -78,6 +85,7 @@ x86_rewrite = PatternMatcher([
    lambda ctx,x: f"{x86op[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{cflag(x)} {ctx[x]}\nsetp r15b\nxor {ctx[x]}, r15b"),
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"), lambda ctx,x: f"{x86op[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{cflag(x)} {ctx[x]}"),
   # requires rax/rdx
+  #TODO: prealloc rax to idiv
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{ctx.idiv(x, x.src[1])}"),
   (UPat(GroupOp.Binary, name="x"),
    lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
@@ -89,7 +97,20 @@ x86_rewrite = PatternMatcher([
 ])
 
 x86_matcher = PatternMatcher([
+  # value to store is float32 if it came from an alu
+  (UPat(Ops.STORE, src=(UPat(dtype=dtypes.float16.ptr()), UPat(dtype=dtypes.float32)),
+        name="x"), lambda x: x.src[0].store(x.src[1].cast(dtypes.float16))),
+  # we use general register to store the 2 bytes of float16 (casting to int16 is a noop but means we use the correct register)
+  (UPat(Ops.STORE, src=(UPat(dtype=dtypes.float16.ptr()), UPat(dtype=dtypes.float16)), name="x"),
+   lambda x: x.src[0].store(x.src[1].bitcast(dtypes.int32).cast(dtypes.int16))),
+  # float16 alus become float32
+  (UPat(GroupOp.ALU, dtype=dtypes.float16, name="x"),
+   lambda x: UOp(x.op, dtype=dtypes.float32, src=(s.cast(dtypes.float32) if s.dtype != dtypes.bool else s for s in x.src))),
   # TODO: casts from uint64 to float are complicated
+  # TODO: remove extra casts by casting to max(c.dtype, float32)
+  # can't cast from float16 to ints directly and vice versa
+  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.float16),), name="c"), lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
+  (UPat(Ops.CAST, dtype=dtypes.float16, src=(UPat(dtype=dtypes.ints),), name="c"), lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
   # can't cast from float to int8/16 directly and vice versa
   (UPat(Ops.CAST, dtype=(dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16), src=(UPat(dtype=dtypes.floats),), name="c"),
     lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
