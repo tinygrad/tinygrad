@@ -1,8 +1,8 @@
-import os, pathlib, tempfile, unittest, tarfile
+import pathlib, tempfile, unittest
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
-from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load, tar_extract
+from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
 from tinygrad.helpers import Timing, fetch, temp, CI
 from tinygrad.device import is_dtype_supported
 
@@ -134,14 +134,22 @@ class TestSafetensors(unittest.TestCase):
       for k in f.keys():
         np.testing.assert_array_equal(f.get_tensor(k).numpy(), state_dict[k].numpy())
 
-  def test_huggingface_enet_safetensors(self):
-    # test a real file
-    fn = fetch("https://huggingface.co/timm/mobilenetv3_small_075.lamb_in1k/resolve/main/model.safetensors")
+  def _test_huggingface_enet_safetensors(self, fn):
     state_dict = safe_load(fn)
     assert len(state_dict.keys()) == 244
     assert 'blocks.2.2.se.conv_reduce.weight' in state_dict
     assert state_dict['blocks.0.0.bn1.num_batches_tracked'].numpy() == 276570
     assert state_dict['blocks.2.0.bn2.num_batches_tracked'].numpy() == 276570
+
+  def test_huggingface_enet_safetensors(self):
+    # test a real file
+    fn = fetch("https://huggingface.co/timm/mobilenetv3_small_075.lamb_in1k/resolve/main/model.safetensors")
+    self._test_huggingface_enet_safetensors(fn)
+
+  def test_huggingface_enet_safetensors_fromurl(self):
+    # test tensor input
+    t = Tensor.from_url("https://huggingface.co/timm/mobilenetv3_small_075.lamb_in1k/resolve/main/model.safetensors")
+    self._test_huggingface_enet_safetensors(t)
 
   def test_metadata(self):
     metadata = {"hello": "world"}
@@ -333,63 +341,6 @@ class TestDiskTensor(unittest.TestCase):
       on_dev = t.to(Device.DEFAULT).realize()
       np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
-class TestTarExtract(unittest.TestCase):
-  def setUp(self):
-    self.test_dir = tempfile.mkdtemp()
-    self.test_files = {
-      'file1.txt': b'Hello, World!',
-      'file2.bin': b'\x00\x01\x02\x03\x04',
-      'empty_file.txt': b''
-    }
-    self.tar_path = os.path.join(self.test_dir, 'test.tar')
-    with tarfile.open(self.tar_path, 'w') as tar:
-      for filename, content in self.test_files.items():
-        file_path = os.path.join(self.test_dir, filename)
-        with open(file_path, 'wb') as f:
-          f.write(content)
-        tar.add(file_path, arcname=filename)
-
-    # Create invalid tar file
-    self.invalid_tar_path = os.path.join(self.test_dir, 'invalid.tar')
-    with open(self.invalid_tar_path, 'wb') as f:
-      f.write(b'This is not a valid tar file')
-
-  def tearDown(self):
-    for filename in self.test_files:
-      os.remove(os.path.join(self.test_dir, filename))
-    os.remove(self.tar_path)
-    os.remove(self.invalid_tar_path)
-    os.rmdir(self.test_dir)
-
-  def test_tar_extract_returns_dict(self):
-    result = tar_extract(self.tar_path)
-    self.assertIsInstance(result, dict)
-
-  def test_tar_extract_correct_keys(self):
-    result = tar_extract(self.tar_path)
-    self.assertEqual(set(result.keys()), set(self.test_files.keys()))
-
-  def test_tar_extract_content_size(self):
-    result = tar_extract(self.tar_path)
-    for filename, content in self.test_files.items():
-      self.assertEqual(len(result[filename]), len(content))
-
-  def test_tar_extract_content_values(self):
-    result = tar_extract(self.tar_path)
-    for filename, content in self.test_files.items():
-      np.testing.assert_array_equal(result[filename].numpy(), np.frombuffer(content, dtype=np.uint8))
-
-  def test_tar_extract_empty_file(self):
-    result = tar_extract(self.tar_path)
-    self.assertEqual(len(result['empty_file.txt']), 0)
-
-  def test_tar_extract_non_existent_file(self):
-    with self.assertRaises(FileNotFoundError):
-      tar_extract('non_existent_file.tar')
-
-  def test_tar_extract_invalid_file(self):
-    with self.assertRaises(tarfile.ReadError):
-      tar_extract(self.invalid_tar_path)
 
 class TestPathTensor(unittest.TestCase):
   def setUp(self):

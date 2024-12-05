@@ -95,14 +95,14 @@ class View:
                  for x in self.shape+self.strides+(self.offset,)+(tuple(flatten(self.mask)) if self.mask is not None else tuple()))
   def __lt__(self, o:View): return self.t < o.t
 
-  def to_indexed_uops(self:View, _idxs:Optional[List[UOp]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> Tuple[UOp, UOp]:
+  def to_indexed_uops(self:View, _idxs:Optional[List[UOp]|Tuple[UOp, ...]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> Tuple[UOp, UOp]:
     idxs = [UOp.range(dtypes.int, 0, s, i) for i,s in enumerate(self.shape)] if _idxs is None else _idxs
     iexpr = sint_to_uop(self.offset)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else [None]*len(self.shape)):
       if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
       if m is not None:
-        if resolve(m[0] != 0): vexpr = vexpr * idx.ge(m[0])
-        if resolve(m[1] != sh): vexpr = vexpr * idx.lt(m[1])
+        if resolve(m[0] != 0): vexpr = vexpr * (idx >= m[0])
+        if resolve(m[1] != sh): vexpr = vexpr * (idx < m[1])
     return iexpr, vexpr
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
