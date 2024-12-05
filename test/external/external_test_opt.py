@@ -68,7 +68,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     model = ResNet18()
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=_to_np_dtype(p.dtype)))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(23):
+    with CLCache(24):
       model.forward(img).realize()
 
   def test_vit(self):

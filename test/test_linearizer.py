@@ -64,7 +64,7 @@ def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, d
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
-    a, b = Tensor.randn(4), Tensor.randn(4)
+    a, b = Tensor.randn(4).contiguous(), Tensor.randn(4).contiguous()
     np_a, np_b = a.numpy(), b.numpy()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
     lowered = list(lower_schedule(create_schedule([c.lazydata])))

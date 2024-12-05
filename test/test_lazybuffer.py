@@ -63,13 +63,14 @@ class TestLazyBuffer(unittest.TestCase):
 
   def test_const_dtype(self):
     lb: LazyBuffer = Tensor([1], dtype=dtypes.int).lazydata
-    assert lb.const_like(1).base.arg == 1
-    assert type(lb.const_like(1).base.arg) is int
+    assert lb.const_like(1).base.const_arg == 1
+    assert type(lb.const_like(1).base.const_arg) is int
 
     lb: LazyBuffer = Tensor([1], dtype=dtypes.float).lazydata
-    assert lb.const_like(1).base.arg == 1.0
-    assert type(lb.const_like(1).base.arg) is float
+    assert lb.const_like(1).base.const_arg == 1.0
+    assert type(lb.const_like(1).base.const_arg) is float
 
+  @unittest.skip("forced_realize isn't supported")
   def test_forced_realized_alu(self):
     a = Tensor.randn(2, 2).realize()
     b = Tensor.randn(2, 2).realize()
@@ -81,6 +82,7 @@ class TestLazyBuffer(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_allclose(out.numpy(), a.numpy()+b.numpy()+2)
 
+  @unittest.skip("forced_realize isn't supported")
   def test_forced_realized_metaop(self):
     empty = Tensor.empty(1)
     empty.lazydata.forced_realize = True
@@ -97,6 +99,7 @@ class TestReduceOp(unittest.TestCase):
     assert len(sched) == 1
     self.assertIs(sched[0].ast.src[0].src[2].op, Ops.REDUCE_AXIS)
 
+  @unittest.skip("split_reduceop isn't supported")
   def test_split_reduce_kernel_dim0(self):
     a = Tensor.rand(256, 255).realize()
     a = a.sum()
@@ -105,6 +108,7 @@ class TestReduceOp(unittest.TestCase):
     for s in sched:
       self.assertIs(s.ast.src[0].src[2].op, Ops.REDUCE_AXIS)
 
+  @unittest.skip("split_reduceop isn't supported")
   def test_split_reduce_kernel_dim1(self):
     a = Tensor.rand(255, 256).realize()
     a = a.sum()

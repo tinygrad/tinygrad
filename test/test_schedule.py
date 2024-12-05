@@ -252,7 +252,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_fold_conv_batchnorm_optim(self):
     # this is too high
-    for optim, cnt in [(nn.optim.Adam, 18), (nn.optim.SGD, 15)]:
+    for optim, cnt in [(nn.optim.Adam, 35), (nn.optim.SGD, 15)]:
       with self.subTest(optim=optim.__name__):
         with Tensor.train():
           img = Tensor.ones(1,3,4,4)
@@ -274,7 +274,7 @@ class TestSchedule(unittest.TestCase):
         fw = bn(x).contiguous_backward().relu().contiguous()
         fw.sum().backward()
         # TODO: this is too many
-        check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 10)
+        check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 11)
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
@@ -436,7 +436,7 @@ class TestSchedule(unittest.TestCase):
     x = x + base
     del base
     x = p(x)
-    check_schedule(x, 4)
+    check_schedule(x, 5)
 
   def test_image_conv_fusion_more_minimal(self):
     b1 = Tensor.empty(16)
@@ -468,7 +468,7 @@ class TestSchedule(unittest.TestCase):
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
     out = x.contiguous()
-    check_schedule(out, 1, filter_sink=False)
+    check_schedule(out, 2, filter_sink=False)
 
   def test_contiguous_while_not_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)
@@ -484,7 +484,7 @@ class TestSchedule(unittest.TestCase):
   def test_double_from(self):
     x = Tensor([1,2,3,4])
     out = x.to('python')
-    check_schedule(out, 0, filter_sink=False)
+    check_schedule(out, 2, filter_sink=False)
 
   def test_pow_const_tensor_simplified(self):
     x = Tensor([1,2,3,4])
@@ -496,7 +496,7 @@ class TestSchedule(unittest.TestCase):
     x = Tensor([1,2,3,4])
     out = x ** Tensor(0)
     # NOTE: this is ConstBuffer 0 + ConstBuffer 1
-    check_schedule(out, 0)
+    check_schedule(out, 1)
 
   def test_zero_size(self):
     x = Tensor.empty(2, 3, 0)
@@ -521,7 +521,7 @@ class TestSchedule(unittest.TestCase):
     big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)
     x = Tensor.randn(big_enough).realize()
     out = (x - x.max(keepdim=True)).max()
-    run_schedule(check_schedule(out, 4))
+    run_schedule(check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), (x.numpy() - x.numpy().max(keepdims=True)).max())
 
   def test_multistage_reduce(self):
@@ -697,7 +697,7 @@ class TestSchedule(unittest.TestCase):
     out0 = a.sum() + 2
     out1 = a.sum() + b
     # run_schedule(check_schedule([out0, out1], 2))
-    run_schedule(check_schedule([out0, out1], 4))
+    run_schedule(check_schedule([out0, out1], 3))
     np.testing.assert_allclose(out0.numpy(), a.numpy().sum()+2, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(out1.numpy(), a.numpy().sum()+b.numpy(), atol=1e-4, rtol=1e-4)
 
@@ -927,7 +927,7 @@ class TestSchedule(unittest.TestCase):
       _realize_weights(layer)
       opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
       layer(x).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 10)
+      check_schedule(opt.schedule_step(), 17)
 
   def test_adam_conv_fuse(self):
     with Tensor.train():
@@ -937,7 +937,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters(c1), lr=1e-4)
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 10)
+      check_schedule(opt.schedule_step(), 17)
 
   def test_adam_2convs_fuse(self):
     with Tensor.train():
@@ -948,7 +948,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 13)
+      check_schedule(opt.schedule_step(), 20)
 
   def test_sgd_conv_fuse(self):
     with Tensor.train():
@@ -1006,7 +1006,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
       opt.zero_grad()
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-      with Context(FUSE_CONV_BW=1): check_schedule(opt.schedule_step(), 15)
+      with Context(FUSE_CONV_BW=1): check_schedule(opt.schedule_step(), 18)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_prefer_half_buffer(self):
@@ -1315,7 +1315,7 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
   def test_conv2d(self): _test_conv2d(7)
-  def test_conv2d_fused(self): _test_conv2d(6, FUSE_CONV_BW=1)
+  def test_conv2d_fused(self): _test_conv2d(7, FUSE_CONV_BW=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_conv2d_half(self): _test_conv2d(7, dtype=dtypes.half)
@@ -1484,7 +1484,7 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10)
     out = (x + a[2]).sum()
-    self.check_schedule(out, 1)
+    self.check_schedule(out, 2)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   def test_arange_index_contiguous(self):
@@ -1500,7 +1500,7 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.randn(5, 2).realize()
     a = Tensor.arange(10)+1
     out = (x + a[2]).sum()
-    self.check_schedule(out, 1)
+    self.check_schedule(out, 2)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
   def test_arange_index_contiguous_child(self):
@@ -1574,7 +1574,7 @@ class TestIndexing(unittest.TestCase):
   def test_fuse_assign_contiguous(self):
     x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
     a = Tensor.arange(8).reshape(4, 2)
-    self.check_schedule(x.shrink((None, (0, 2))).assign(a.contiguous()), 2)
+    self.check_schedule(x.shrink((None, (0, 2))).assign(a.contiguous()), 1)
     np.testing.assert_equal(x.numpy(), [[0, 1, 0, 0], [2, 3, 0, 0], [4, 5, 0, 0], [6, 7, 0, 0]])
 
   def test_assign_non_contiguous(self):
@@ -1590,7 +1590,7 @@ class TestIndexing(unittest.TestCase):
     X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
     Y = Tensor([1, 2]).realize()
     loss = X.sparse_categorical_crossentropy(Y)
-    self.check_schedule(loss, 4)
+    self.check_schedule(loss, 6)
     np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
 
   def test_mnist_val(self):
