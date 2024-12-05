@@ -442,6 +442,30 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(layer.bias.grad.numpy(), torch_layer.bias.grad.detach().numpy(), atol=1e-3, rtol=1e-3)
 
   def test_rmsnorm(self):
+    N, C, H, W = 20, 5, 10, 10
+
+    # create in torch
+    torch_layer = torch.nn.RMSNorm([H, W], elementwise_affine=True, eps=1e-6).eval()
+
+    # create in tinygrad
+    layer = RMSNorm([H, W], elementwise_affine=True, eps=1e-6)
+    layer.weight = Tensor(torch_layer.weight.detach().numpy(), requires_grad=True)
+
+    for _ in range(10):
+      # forward
+      x = Tensor.randn(N, C, H, W, requires_grad=True)
+      z = layer(x)
+      torch_x = torch.tensor(x.numpy(), requires_grad=True)
+      torch_z = torch_layer(torch_x)
+      np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
+
+      # backward
+      z.sum().backward()
+      torch_z.sum().backward(retain_graph=True)
+      np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
+      np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
+
+  def test_rmsnorm_llama(self):
     class TorchRMSNorm(torch.nn.Module):
       # https://github.com/meta-llama/llama/blob/be327c427cc5e89cc1d3ab3d3fec4484df771245/llama/model.py#L34C1-L77C36
       def __init__(self, dim: int, eps: float = 1e-6):
@@ -458,7 +482,7 @@ class TestNN(unittest.TestCase):
 
     B, T, embed_size = 4, 10, 20
     torch_layer = TorchRMSNorm(embed_size)
-    layer = RMSNorm(embed_size)
+    layer = RMSNorm(embed_size, elementwise_affine=True, eps=1e-6)
     layer.weight.requires_grad = True
 
     for _ in range(10):
