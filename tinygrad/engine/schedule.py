@@ -350,7 +350,7 @@ def simplify_const_reduce(ctx, src:UOp, to_store:UOp, **kwargs) -> Optional[UOp]
     case Ops.MAX: ret = val
   return _as_const(src, ret)
 
-ops_folding = PatternMatcher([
+ops_folding = merge_views+PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
   # reduce of unmasked CONST is CONST
