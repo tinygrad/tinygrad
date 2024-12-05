@@ -3,13 +3,15 @@ from collections import defaultdict
 import numpy as np
 from dataclasses import replace
 from typing import DefaultDict, Dict, List, Tuple
-from tinygrad.ops import END_FOR_UOP, UOp, print_uops
+from tinygrad.ops import UOp, print_uops, Ops
 from tinygrad.device import Buffer, Device
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import DEBUG, colored
 from tinygrad.ops import Variable
 from tinygrad.tensor import _to_np_dtype
 from test.external.fuzz_schedule import FUZZ_SCHEDULE_MAX_PATHS, find_all_toposorts
+
+END_FOR_UOP = {Ops.IF:(Ops.STORE, Ops.ENDIF), Ops.RANGE:(Ops.ASSIGN, Ops.ENDRANGE)}
 
 def fuzz_uops(uops:List[UOp]) -> List[Tuple[UOp, ...]]:
   blocks: List[List[UOp]] = [[]]

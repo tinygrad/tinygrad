@@ -1,10 +1,35 @@
-import os, json, pathlib, zipfile, pickle, tarfile, struct, functools
-from typing import Dict, Union, List, Optional, Any, Tuple, Callable
+import os, json, pathlib, zipfile, pickle, tarfile, struct, functools, io
+from typing import Dict, Union, List, Optional, Any, Tuple, Callable, BinaryIO, Iterable
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.multi import MultiLazyBuffer
+
+class TensorIO(io.RawIOBase, BinaryIO):
+  def __init__(self, t: Tensor):
+    if len(t.shape) != 1 or t.dtype != dtypes.uint8: raise ValueError("Tensor must be 1d and of dtype uint8!")
+    self._position, self._tensor = 0, t
+
+  def readable(self) -> bool: return True
+  def read(self, size: int = -1) -> bytes:
+    if (buf:=super().read(size)) is None: raise ValueError("io.RawIOBase.read returned None") # only happens, if readinto returns None (never)
+    return buf
+  def readinto(self, buffer: Any) -> int:
+    data = self._tensor[self._position:self._position+len(buffer)].data()
+    buffer[:len(data)] = data
+    self._position += len(data)
+    return len(data)
+
+  def seekable(self) -> bool: return True
+  def seek(self, offset: int, whence: int = 0) -> int:
+    self._position = min(len(self._tensor), max(0, [offset, self._position+offset, len(self._tensor)+offset][whence]))
+    return self._position
+
+  # required to correctly implement BinaryIO
+  def __enter__(self): return self
+  def write(self, s: Any): raise io.UnsupportedOperation("TensorIO.write not supported")
+  def writelines(self, lines: Iterable[Any]): raise io.UnsupportedOperation("TensorIO.writelines not supported")
 
 safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dtypes.int16, "U16":dtypes.uint16, "I32":dtypes.int, "U32":dtypes.uint,
                "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
@@ -132,16 +157,15 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
       else: v.replace(state_dict[k].to(v.device)).realize()
       if consume: del state_dict[k]
 
-def tar_extract(fn:os.PathLike) -> Dict[str, Tensor]:
+def tar_extract(t: Tensor) -> Dict[str, Tensor]:
   """
   Extracts files from a tar archive and returns them as dictionary of names (keys) and tensors (values).
 
   ```python
-  tensors = nn.state.tar_extract("archive.tar")
+  tensors = nn.state.tar_extract(Tensor(pathlib.Path("archive.tar")))
   ```
   """
-  t = Tensor(pathlib.Path(fn))
-  with tarfile.open(fn, "r") as tar:
+  with tarfile.open(fileobj=TensorIO(t), mode="r") as tar:
     return {member.name:t[member.offset_data:member.offset_data+member.size] for member in tar if member.type == tarfile.REGTYPE}
 
 # torch support!
@@ -273,14 +297,9 @@ def gguf_load(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
   kv_data, state_dict = gguf_load(gguf_tensor)
   ```
   """
-  if tensor.dtype != dtypes.uint8 or len(tensor.shape) != 1: raise ValueError("GGUF tensor must be 1d and of dtype uint8!")
-  pos, read_buffer, rb_start, kv_data, state_dict = 0, memoryview(bytes()), 0, {}, {}
-  def read_bytes(n: int):
-    nonlocal pos, read_buffer, rb_start
-    if rb_start + len(read_buffer) < pos + n: rb_start, read_buffer = pos, tensor[pos:(pos+max(n, 1000_000))].data()
-    return read_buffer[pos-rb_start:(pos:=pos+n)-rb_start]
-  def read_unpack(fmt: str, n: int): return struct.unpack(fmt, read_bytes(n))[0]
-  def read_str(): return str(read_bytes(read_uint64()), "utf-8")
+  reader, kv_data, state_dict = io.BufferedReader(TensorIO(tensor), 1000_000), {}, {}
+  def read_unpack(fmt: str, n: int): return struct.unpack(fmt, reader.read(n))[0]
+  def read_str(): return str(reader.read(read_uint64()), "utf-8")
   def read_arr():
     reader, n = readers[read_int32()], read_uint64()
     return [ reader() for _ in range(n) ]
@@ -289,15 +308,15 @@ def gguf_load(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
     (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
   read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
-  magic, version, n_tensors, n_kv = read_bytes(4), read_int32(), read_int64(), read_int64()
+  magic, version, n_tensors, n_kv = reader.read(4), read_int32(), read_int64(), read_int64()
   if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
   for _ in range(n_kv):
     k, typ = read_str(), read_int32()
     kv_data[k] = readers[typ]()
 
   t_infos = [ (read_str(), tuple(read_uint64() for _ in range(read_uint32())), read_int32(), read_uint64()) for _ in range(n_tensors) ]
-  alignment = kv_data.get("general.alignment", 32)
-  data_start = pos = pos + (alignment - pos % alignment if pos % alignment != 0 else 0)
+  alignment, pos = kv_data.get("general.alignment", 32), reader.tell()
+  data_start = pos + (alignment - pos % alignment if pos % alignment != 0 else 0)
 
   for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
 

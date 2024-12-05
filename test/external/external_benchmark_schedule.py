@@ -31,13 +31,14 @@ if __name__ == "__main__":
         if (restrict_kernel := getenv("RESTRICT_KERNEL", -1)) != -1: asts = asts[restrict_kernel:restrict_kernel+1]
         kernels: List[Kernel] = []
         with Timing(f"***** model opts({len(asts):2d}) in  "):
-          for ast in asts:
-            k = Kernel(ast)
-            if BEAM:
-              with Context(DEBUG=max(2, DEBUG.value)): k = beam_search(k, bufs_from_lin(k), BEAM.value)
-            elif NOOPT: pass
-            else: k.hand_coded_optimizations()
-            kernels.append(k)
+          with Profiling(PROFILE >= 3):
+            for ast in asts:
+              k = Kernel(ast)
+              if BEAM:
+                with Context(DEBUG=max(2, DEBUG.value)): k = beam_search(k, bufs_from_lin(k), BEAM.value)
+              elif NOOPT: pass
+              else: k.hand_coded_optimizations()
+              kernels.append(k)
 
         with Timing("***** model lower in     "): uops = [rewrite_shapetracker_with_index(k.get_optimized_ast(), k.opts) for k in kernels]
         with Profiling(PROFILE, fn="/tmp/rewrite.prof"):
