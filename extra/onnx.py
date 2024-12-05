@@ -16,15 +16,18 @@ except ImportError:
 
 cache_misses = 0
 @functools.lru_cache(None)
-def _cached_to_python_const(t:Tensor, tobytes): return t.data().tobytes() if tobytes else t.tolist()
+def _cached_to_python_const(t:Tensor):
+  if t.dtype is dtypes.uint8: return t.data().tobytes()
+  if 0 in t.shape: return []
+  return t.tolist()
 
 # Tensor -> python value cache for parameters
-def to_python_const(t, tobytes=False) -> Union[List[ConstType], List[bytes], Union[ConstType, bytes]]:
+def to_python_const(t) -> Union[List[ConstType], List[bytes], Union[ConstType, bytes]]:
   if not isinstance(t, Tensor): return t
   global cache_misses
-  ret = _cached_to_python_const(t, tobytes)
+  ret = _cached_to_python_const(t)
   if (info := _cached_to_python_const.cache_info()).misses > cache_misses and DEBUG >= 3:
-    print(f"Cache miss for {t}, {tobytes=}")
+    print(f"Cache miss for {t}")
     cache_misses = info.misses
   return ret
 

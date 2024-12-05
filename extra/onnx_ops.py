@@ -432,7 +432,7 @@ def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int
 def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
   try: import PIL.Image
   except ImportError as e: raise ImportError("Pillow must be installed to use the reference implementation of the ImageDecoder operator") from e
-  img = PIL.Image.open(io.BytesIO(to_python_const(encoded_stream, True)))
+  img = PIL.Image.open(io.BytesIO(to_python_const(encoded_stream)))
   if pixel_format == "BGR": return Tensor(np.array(img))[:, :, ::-1]
   if pixel_format == "RGB": return Tensor(np.array(img))
   if pixel_format == "Grayscale": return Tensor(np.array(img.convert("L"))).unsqueeze(-1) # (H, W) to (H, W, 1)
