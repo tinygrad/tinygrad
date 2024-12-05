@@ -57,6 +57,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
     cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
     return ret
   assert buf.op is not None, f"base must be base itself {buf}"
+  if buf.op is Ops.BUFFER_VIEW: raise Exception("todo!")
   # make things that can't be images not images
   dtype = ubuf.dtype.base if (ubuf:=realized.get(buf)) is not None else buf.dtype
   if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
