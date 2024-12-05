@@ -14,7 +14,7 @@ x86_float32_ops = {Ops.ADD: "addss", Ops.SUB: "subss", Ops.MUL: "mulss", Ops.FDI
 x86_float64_ops = {**{k:v[:-1]+'d' for k,v in x86_float32_ops.items()}}
 # NOTE: half dtype only supported in load/store, load can be zero extend followed by bitcast to float reg
 #x86_float16_ops = {Ops.STORE: "", Ops.LOAD: "vmovdqu16"}
-x86_float16_ops = {Ops.STORE: "mov", Ops.LOAD: "movd"}
+x86_float16_ops = {Ops.STORE: "movd", Ops.LOAD: "movd"}
 # NOTE: are doubles vectorized? 2 doubles is "ups" not "lps", use a instead of u
 x86_vec2_ops = {**{k:v+"lps" for k,v in x86_mov_ops.items()}}
 x86_vec4_ops = {**{k:v+"ups" for k,v in x86_mov_ops.items()}}
