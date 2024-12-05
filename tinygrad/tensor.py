@@ -2340,7 +2340,7 @@ class Tensor(SimpleMathTrait):
     # shrink src to index shape to shrink away the unused values
     src = src.shrink(tuple((0,s) for s in index.shape))
     # prepare src and mask for reduce with respect to dim
-    src = src.unsqueeze(-1).expand(src.shape + (self.shape[dim],)).transpose(-1, dim)
+    src = src.unsqueeze(-1).expand(*src.shape, self.shape[dim]).transpose(-1, dim)
     mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
     # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
     src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
@@ -3358,7 +3358,7 @@ class Tensor(SimpleMathTrait):
     return (Tensor.rand_like(self, requires_grad=False, dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
 
   # helper function commonly used for indexing
-  def _one_hot_along_dim(self:Tensor, num_classes:sint, dim:sint=0):
+  def _one_hot_along_dim(self:Tensor, num_classes:sint, dim:int=0):
     return self == Tensor.arange(num_classes, device=self.device, requires_grad=False).reshape((num_classes,) + (1,) * dim)
 
   def one_hot(self, num_classes:int=-1) -> Tensor:
