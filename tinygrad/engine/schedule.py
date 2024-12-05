@@ -359,8 +359,7 @@ ops_folding = PatternMatcher([
   # maybe fold reduce ops (TODO: this can be multiple upats)
   (UPat(Ops.REDUCE_AXIS, name="root", src=(UPat.var("x"),)), simplify_reduceop),
   # const doesn't have to be copied
-  (UPatScheduled(Ops.COPY, src=(UPat(Ops.VIEW, name="x", src=(UPat(), UPat(Ops.CONST))), )),
-   lambda ctx,b,x,to_store,base: _as_const(base, x.const_arg) if x.is_unrealized_unmasked_const() else None)
+  (UPat(Ops.COPY, src=(UPat.var("x"),)), lambda ctx,x: UOp.const(x.dtype, x.const_arg) if x.is_unrealized_unmasked_const() else None)
 ])
 
 # ** this decides which ops get realized
