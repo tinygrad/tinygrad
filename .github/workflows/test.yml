@@ -528,7 +528,7 @@ jobs:
         if: matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv'
         run: |
           cd ${{ github.workspace }}/gpuocelot/ocelot/build
-          sudo ninja install -d explain
+          sudo cp libgpuocelot.so /usr/lib/libgpuocelot.so
       - name: Install packages (amd)
         if: matrix.backend == 'amd'
         run: |
