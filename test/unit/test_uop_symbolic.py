@@ -444,6 +444,8 @@ class TestSymbolic(unittest.TestCase):
 
   def test_div_mod_recombine_with_gcd(self):
     b = Variable("b", 0, 100)
+    exp = (16 * b + 2) % 18 + ((16 * b + 2) // 18) * 18
+    self.helper_test_variable(exp, 2, 1602, "((b*16)+2)")
     with self.assertRaises(AssertionError):
       self.helper_test_variable((30 * b + 1) % 18 + ((30 * b + 1) // 18) * 18, 1, 3001, "((b*30)+1)")
 
