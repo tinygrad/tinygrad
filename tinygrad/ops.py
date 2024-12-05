@@ -211,6 +211,7 @@ class UOpMetaClass(type):
 # some uops map to other stuff
 buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
 realized:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary() # this maps realized ops to a BUFFER uop
+forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
@@ -360,8 +361,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self,x), None if self.st is None or self.st.contiguous else self.st)
   def contiguous(self, allow_buffer_view=True):
     if self.device.startswith("DISK"): return UOp.metaop(Ops.BUFFER_VIEW, self.shape, self.dtype, self.device, None, (self,))
-    #if allow_buffer_view and self.can_view(): return UOp.metaop(Ops.BUFFER_VIEW, self.shape, self.dtype, self.device, None, (self,))
-    return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
+    if not unwrap(self.st).contiguous or self.size != self.base.size or self.is_unrealized_const():
+      return UOp(Ops.CONTIGUOUS, self.dtype, (self,))
+    forced_realize.add(self.base)
+    return self
   @staticmethod
   def range(dtype:DType, start:sint, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(start), sint_to_uop(end)), arg=idx)
 
@@ -406,7 +409,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def metadata(self): return None
   @property
-  def forced_realize(self): return False
+  def forced_realize(self): return self in forced_realize
 
   # *** uop movement ops ***
 

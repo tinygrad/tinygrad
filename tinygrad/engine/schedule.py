@@ -76,7 +76,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   else:
     ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
     op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, tuple(to_uop(x, ctx, cache) for x in buf.srcs), buf.arg)
-  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op), buf.st)
+  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
   if op is not None:
     ubuf.buffer.ref(1)
     ctx.lazybufs[ubuf] = buf
@@ -338,18 +338,18 @@ def _as_const(u:UOp, val:ConstType) -> UOp:
   st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
   return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
 
-def simplify_reduceop(ctx, b:UOp, to_store:UOp, base:UOp, x:UOp) -> Optional[UOp]:
+def simplify_reduceop(ctx, root:UOp, x:UOp) -> Optional[UOp]:
   # reduce of size 0 is just CONST
-  if x.size == 0 and base.size != 0: return _as_const(base, identity_element(to_store.arg[0], base.dtype))
+  if x.size == 0 and root.size != 0: return UOp.const(root.dtype, identity_element(root.arg[0], root.dtype))
   # remove reduce on unmasked const
   if all_int(x.shape) and x.is_unrealized_unmasked_const():
-    prshape = prod(unwrap(x.st).shape[i] for i in to_store.arg[1])
-    match to_store.arg[0]:
+    prshape = prod(unwrap(x.st).shape[i] for i in root.arg[1])
+    match root.arg[0]:
       case Ops.ADD: ret = x.const_arg*prshape
       case Ops.MUL: ret = x.const_arg**prshape
       case Ops.MAX: ret = x.const_arg
       case op: raise RuntimeError(f"unhandled reduce alu {op}")
-    return _as_const(base, ret)
+    return UOp.const(root.dtype, ret)
   return None
 
 
@@ -357,7 +357,7 @@ ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
   # maybe fold reduce ops (TODO: this can be multiple upats)
-  (UPatScheduled(Ops.REDUCE_AXIS, src=(UPat.var("x"),)), simplify_reduceop),
+  (UPat(Ops.REDUCE_AXIS, name="root", src=(UPat.var("x"),)), simplify_reduceop),
   # const doesn't have to be copied
   (UPatScheduled(Ops.COPY, src=(UPat(Ops.VIEW, name="x", src=(UPat(), UPat(Ops.CONST))), )),
    lambda ctx,b,x,to_store,base: _as_const(base, x.const_arg) if x.is_unrealized_unmasked_const() else None)
