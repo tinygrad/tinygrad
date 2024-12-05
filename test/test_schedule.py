@@ -1024,7 +1024,7 @@ class TestSchedule(unittest.TestCase):
     shared = x.sum().half().float()
     a = shared * 2
     b = shared * 3
-    sched = check_schedule([a, b], 1)
+    sched = check_schedule([a, b], 2)
     for si in sched[:-2]: assert all(out.dtype == dtypes.half for out in si.outputs)
 
     # reduce
