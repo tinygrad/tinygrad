@@ -327,7 +327,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
       if (shape[-1]*self.dtype.itemsize) % dtype.itemsize != 0: raise RuntimeError("unsupported size in bitcast")
       shape = shape[:-1] + ((shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
-    if self.can_view() and allow_buffer_view: return UOp.metaop(Ops.BUFFER_VIEW, unwrap(shape), dtype, self.device, None, (self,))
+      return UOp.metaop(Ops.BUFFER_VIEW, unwrap(shape), dtype, self.device, None, (self,))
+    if self._device is not None and self.device.startswith("DISK"):
+      return UOp.metaop(Ops.BUFFER_VIEW, unwrap(shape), dtype, self.device, None, (self,))
     return UOp(Ops.BITCAST if bitcast else Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType): return self.cast(dtype, bitcast=True)
   def gep(self, i:Union[Tuple[int, ...], int]):
