@@ -52,11 +52,14 @@ class TextModelExportWebGPU(unittest.TestCase):
     class MyModel:
       def forward(self, *inputs): return tuple([inp+2 for inp in inputs])
     model = MyModel()
+    # [:-1] because "ulong" and "long" is not supported
     inputs = [Tensor.randn(2, dtype=dt) for dt in dtypes.uints[:-1] + dtypes.sints[:-1] + (dtypes.bool, dtypes.float)]
     prg, _, _, _ = export_model(model, "webgpu", *inputs)
     expected_buffer_types = ["Uint"]*len(dtypes.uints[:-1]) + ["Int"]*len(dtypes.sints[:-1]) + ["Int", "Float"]
     for i, expected_buffer_type in enumerate(expected_buffer_types):
+      # test input buffers
       self.assertIn(f"new {expected_buffer_type}32Array(gpuWriteBuffer{i}.getMappedRange()).set(_input{i});", prg)
+      # test output buffers
       self.assertIn(f"const resultBuffer{i} = new {expected_buffer_type}32Array(gpuReadBuffer{i}.size/4);", prg)
       self.assertIn(f"resultBuffer{i}.set(new {expected_buffer_type}32Array(gpuReadBuffer{i}.getMappedRange()));", prg)
 
