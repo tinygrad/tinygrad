@@ -120,8 +120,9 @@ def get_run_onnx(onnx_model: ModelProto):
           input_tensors[name] = inputs[name]
         elif isinstance(inputs[name], list):
           input_tensors[name] = [Tensor(i, requires_grad=False) for i in inputs[name]]
-        elif domain == "ai.onnx.preview.training": # not sure if in real use the domain is "ai.onnx.preview.training"
-          input_tensors[name] = Tensor(inputs[name], requires_grad=True) # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
+        # TODO: this is just to make training tests pass, need a principled way to handle training vs non-training
+        elif domain == "ai.onnx.preview.training":
+          input_tensors[name] = Tensor(inputs[name], requires_grad=True)
         else:
           input_tensors[name] = Tensor(inputs[name], requires_grad=False)
         if shape: # if only input_tensor is not variable type
