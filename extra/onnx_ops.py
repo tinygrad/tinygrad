@@ -3,12 +3,8 @@ from typing import Union, Tuple, Optional, List, Any, cast
 from tinygrad.tensor import Tensor, _broadcast_shape
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten
-from extra.onnx import DTYPE_MAP, to_python_const
+from extra.onnx import dtype_parse, to_python_const
 import numpy as np
-
-tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Asin", "Acos", "Atan","Relu",
-                  "Sigmoid", "MatMul", "Floor", "Ceil", "IsInf", "IsNaN", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign",
-                  "Asinh", "Acosh", "Atanh",  "Elu", "Celu", "Selu", "Xor", "Round", "Erf"}
 
 # **************** Free Ops ****************
 
@@ -26,7 +22,7 @@ def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
 def Mean(*data_0): return Sum(*data_0) / len(data_0)
 # NOTE: does not support saturate
-def Cast(x: Tensor, to: int, saturate=1): return x.cast(DTYPE_MAP[to])
+def Cast(x: Tensor, to: int, saturate=1): return x.cast(dtype_parse(to))
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
 # **************** Simple Ops ****************
@@ -90,6 +86,14 @@ def Not(x:Tensor): return x.logical_not()
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
   k = to_python_const(k) if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
   return x.triu(k) if upper else x.tril(k)
+
+def Slice(data: Tensor, starts:Tensor, ends:Tensor, axes:Optional[Tensor]=None, steps:Optional[Tensor]=None):
+  if axes is None: axes = list(range(data.ndim))
+  if steps is None: steps = [1] * data.ndim
+  starts, ends, axes, steps = (to_python_const(x) for x in (starts, ends, axes, steps))
+  slices = [slice(0,x,1) for x in data.shape]
+  for i, axis in enumerate(axes): slices[axis] = slice(starts[i], ends[i], steps[i])
+  return data[tuple(slices)]
 
 def Squeeze(data: Tensor, axes):
   if isinstance(axes, Tensor): axes = to_python_const(axes)
@@ -389,11 +393,10 @@ def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
   return t.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
 def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
-  depth = to_python_const(depth)
+  depth = int(to_python_const(depth))
   # Scalar or Rank 1 tensor containing exactly one element
   depth, indices = depth[0] if isinstance(depth, list) else depth, (indices < 0).where(indices+depth, indices),
-  if axis < 0: axis += indices.ndim + 1
-  return (indices[:,None] == Tensor.arange(int(depth)).reshape((int(depth),) + (1,)*(indices.ndim-axis))).where(values[1], values[0])
+  return indices[:, None]._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
 
 def Compress(inp: Tensor, condition: Tensor, axis=None):
   if axis is None:
@@ -405,7 +408,7 @@ def Compress(inp: Tensor, condition: Tensor, axis=None):
   return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
 def EyeLike(x: Tensor, dtype=None, k=0):
-  ret = Tensor.eye(cast(int, min(x.shape)), dtype=DTYPE_MAP[dtype] if dtype else x.dtype)
+  ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_parse(dtype) if dtype else x.dtype)
   return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.size(0)-k) for d in x.shape))
 
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
@@ -424,7 +427,7 @@ def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int
 def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
   try: import PIL.Image
   except ImportError as e: raise ImportError("Pillow must be installed to use the reference implementation of the ImageDecoder operator") from e
-  img = PIL.Image.open(io.BytesIO(to_python_const(encoded_stream, True)))
+  img = PIL.Image.open(io.BytesIO(to_python_const(encoded_stream)))
   if pixel_format == "BGR": return Tensor(np.array(img))[:, :, ::-1]
   if pixel_format == "RGB": return Tensor(np.array(img))
   if pixel_format == "Grayscale": return Tensor(np.array(img.convert("L"))).unsqueeze(-1) # (H, W) to (H, W, 1)
@@ -461,8 +464,7 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
 
   def embedding(x:Tensor, vocab_size, weight:Tensor) -> Tensor:
-    vocab_counter = Tensor.arange(vocab_size, dtype=x.dtype, requires_grad=False).expand(*x.shape, vocab_size)
-    return (vocab_counter == x.unsqueeze(-1).expand(*x.shape, vocab_size)) @ weight
+    return x.unsqueeze(-1).expand(*x.shape, vocab_size)._one_hot_along_dim(vocab_size) @ weight
 
   # bert embedding layer
   if epsilon is None: epsilon = 1e-12
