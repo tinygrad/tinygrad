@@ -35,15 +35,17 @@ class AMRegister:
   def read(self, **kwargs): return self.adev.rreg(self.reg_off) & self._parse_kwargs(**kwargs)[0]
 
 class AMDev:
-  hal:Optional[HAL] = None
+  # hal:Optional[HAL] = None
 
-  def __init__(self, dev_idx:int):
-    if AMDev.hal is None: AMDev.hal = VFIOHAL()
-    self.hal_dev = AMDev.hal.open_device(dev_idx)
+  def __init__(self, vram_bar:memoryview, doorbell_bar:memoryview, mmio_bar:memoryview):
+    # if AMDev.hal is None: AMDev.hal = VFIOHAL()
+    # self.hal_dev = AMDev.hal.open_device(dev_idx)
 
-    self.vram_cpu_addr, self.vram = AMDev.hal.map_pci_range(self.hal_dev, bar=0, cast='B')
-    self.doorbell_cpu_addr, self.doorbell64 = AMDev.hal.map_pci_range(self.hal_dev, bar=2, cast='Q')
-    self.mmio_cpu_addr, self.mmio = AMDev.hal.map_pci_range(self.hal_dev, bar=5, cast='I')
+    self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
+
+    # self.vram_cpu_addr, self.vram = AMDev.hal.map_pci_range(self.hal_dev, bar=0, cast='B')
+    # self.doorbell_cpu_addr, self.doorbell64 = AMDev.hal.map_pci_range(self.hal_dev, bar=2, cast='Q')
+    # self.mmio_cpu_addr, self.mmio = AMDev.hal.map_pci_range(self.hal_dev, bar=5, cast='I')
 
     self._run_discovery()
     self._build_regs()
@@ -68,7 +70,7 @@ class AMDev:
 
     self.soc21.init()
     self.gmc.init()
-    self.regRLC_SPM_MC_CNTL.write(0xf)
+    # self.regRLC_SPM_MC_CNTL.write(0xf)
     self.ih.init()
     self.psp.init()
     self.smu.init()
