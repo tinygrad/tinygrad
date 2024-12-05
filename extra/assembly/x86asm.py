@@ -14,7 +14,7 @@ x86_float32_ops = {Ops.ADD: "addss", Ops.SUB: "subss", Ops.MUL: "mulss", Ops.FDI
 x86_float64_ops = {**{k:v[:-1]+'d' for k,v in x86_float32_ops.items()}}
 # NOTE: half dtype only supported in load/store, load can be zero extend followed by bitcast to float reg
 #x86_float16_ops = {Ops.STORE: "", Ops.LOAD: "vmovdqu16"}
-x86_float16_ops = {Ops.STORE: "movd", Ops.LOAD: "movd"}
+x86_float16_ops = {Ops.STORE: "mov", Ops.LOAD: "movd"}
 # NOTE: are doubles vectorized? 2 doubles is "ups" not "lps", use a instead of u
 x86_vec2_ops = {**{k:v+"lps" for k,v in x86_mov_ops.items()}}
 x86_vec4_ops = {**{k:v+"ups" for k,v in x86_mov_ops.items()}}
@@ -106,6 +106,8 @@ x86_matcher = PatternMatcher([
   # float16 alus become float32
   (UPat(GroupOp.ALU, dtype=dtypes.float16, name="x"),
    lambda x: UOp(x.op, dtype=dtypes.float32, src=(s.cast(dtypes.float32) if s.dtype != dtypes.bool else s for s in x.src))),
+  (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
+   lambda x: UOp(x.op, dtype=x.dtype, src=(s.cast(dtypes.float32) for s in x.src)) if any(s.dtype is dtypes.float16 for s in x.src) else None),
   # TODO: casts from uint64 to float are complicated
   # TODO: remove extra casts by casting to max(c.dtype, float32)
   # can't cast from float16 to ints directly and vice versa
