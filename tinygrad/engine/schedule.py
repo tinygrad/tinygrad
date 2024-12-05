@@ -351,8 +351,6 @@ def simplify_const_reduce(ctx, src:UOp, to_store:UOp, **kwargs) -> Optional[UOp]
   return _as_const(src, ret)
 
 ops_folding = PatternMatcher([
-  # view on view is view
-  (UPat(Ops.VIEW, src=UPat(Ops.VIEW, name="parent"), name="child"), lambda parent, child: parent.replace(arg=parent.st+child.st)),
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
   # reduce of unmasked CONST is CONST
