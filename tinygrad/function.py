@@ -45,7 +45,7 @@ class Relu(Function):
     self.ret = x.maximum(0)
     return self.ret
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.gt(0).cast(grad_output.dtype) * grad_output
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return (self.ret>0).cast(grad_output.dtype) * grad_output
 
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
@@ -80,14 +80,14 @@ class Sigmoid(Function):
     return (self.ret * (1 - self.ret)) * grad_output
 
 class Sign(Function):
-  def forward(self, x:LazyBuffer) -> LazyBuffer: return x.ne(0).where(x.lt(0).where(x.const_like(-1), x.const_like(1)), x.const_like(0))
+  def forward(self, x:LazyBuffer) -> LazyBuffer: return x.ne(0).where((x<0).where(x.const_like(-1), x.const_like(1)), x.const_like(0))
   # backward always return 0 to match torch
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.const_like(0)
 
 # ************* binary ops *************
 
 class Less(Function):
-  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x.lt(y)
+  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer: return x<y
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]: return None, None
 
 class Neq(Function):

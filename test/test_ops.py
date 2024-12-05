@@ -378,6 +378,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.round(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
     helper_test_op(None, lambda x: x.round(), vals=[[2.5, -1.5]], forward_only=True)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "isinf check of 'nan' fails on CI software-based vulkan")
   def test_isinf(self):
     val = [float('-inf'), 0., float('inf'), float('nan'), 1.1]
     helper_test_op(None, torch.isinf, Tensor.isinf, vals=[val], forward_only=True)
@@ -1494,7 +1495,6 @@ class TestOps(unittest.TestCase):
                    lambda x: torch.nn.functional.pad(x, (0, 4, 2, 2, 1, 2, 0, 2)).reshape((4, 3, 6, 5)),
                    lambda x: x.pad(((0, 2), (1, 2), (2, 2), (0, 4))).reshape((4, 3, 6, 5)), forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGL", "incorrect result")
   def test_pad_slice(self):
     for value in 0., 3.456:
       helper_test_op([(1)], lambda x: torch.nn.functional.pad(x,(1,0), value=value)[0], lambda x: x.pad(((1,0),), value=value)[0])

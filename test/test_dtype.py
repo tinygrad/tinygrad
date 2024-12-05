@@ -99,7 +99,6 @@ class TestDType(unittest.TestCase):
       get_available_cast_dtypes(self.DTYPE)
   ))
   def test_bitcast(self):
-    if Device.DEFAULT == "WEBGL": raise unittest.SkipTest("no bitcast in WebGL GLSL")
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
     list(map(
       lambda dtype:
