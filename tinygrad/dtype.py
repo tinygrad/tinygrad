@@ -99,7 +99,7 @@ class dtypes:
   @staticmethod
   @functools.lru_cache(None)
   def max(dtype:DType):
-    if dtypes.is_int(dtype): return (2**(dtype.itemsize*8-(0 if dtypes.is_unsigned(dtype) else 1)))-1
+    if dtypes.is_int(dtype): return 2**(dtype.itemsize*8)-1+dtypes.min(dtype)
     return float("inf") if dtypes.is_float(dtype) else True
   @staticmethod
   def finfo(dtype:DType) -> Tuple[int, int]:
