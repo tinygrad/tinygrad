@@ -147,7 +147,7 @@ class TestSafetensors(unittest.TestCase):
     self._test_huggingface_enet_safetensors(fn)
 
   def test_huggingface_enet_safetensors_fromurl(self):
-    # test a real file
+    # test tensor input
     t = Tensor.from_url("https://huggingface.co/timm/mobilenetv3_small_075.lamb_in1k/resolve/main/model.safetensors")
     self._test_huggingface_enet_safetensors(t)
 
