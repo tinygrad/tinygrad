@@ -34,13 +34,12 @@ def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int
   ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
   if limited != dims:
     ret = []
-    # cast for mypy, get_contraction won't be None
-    for idx, contraction in zip(raw_idxs, cast(List[List[int]], get_contraction(dims, limited))):
-      if len(contraction) == 1: ret.append(idx)
-      else:
-        for c in contraction:
-          ret.append(idx % dims[c])
-          idx //= dims[c]
+    if (contraction:=get_contraction(dims, limited)) is None: raise AssertionError(f"get_contraction should not be None {dims=} {limited=}")
+    for idx, contraction_group in zip(raw_idxs, contraction):
+      for c in contraction_group[:-1]:
+        ret.append(idx % dims[c])
+        idx //= dims[c]
+      ret.append(idx)
   return ret[::-1] if reverse else ret
 
 @dataclass
