@@ -3,8 +3,8 @@ import os, ctypes, functools, mmap, struct, array, math, sys
 assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Tuple, List, Any, cast, Optional
-from tinygrad.device import BufferSpec, LRUAllocator
-from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQSignal, HCQArgsState
+from tinygrad.device import BufferSpec
+from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
@@ -276,11 +276,7 @@ class QCOMBuffer(HCQBuffer):
     # Texture specific definitions
     self.desc, self.ibo, self.pitch, self.real_stride = [0] * 16, [0] * 16, pitch, real_stride
 
-class QCOMAllocator(LRUAllocator):
-  def __init__(self, dev:QCOMDevice):
-    self.dev:QCOMDevice = dev
-    super().__init__()
-
+class QCOMAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     if options.image is not None:
       imgw, imgh, itemsize_log = options.image.shape[1], options.image.shape[0], int(math.log2(options.image.itemsize))
@@ -328,9 +324,6 @@ class QCOMAllocator(LRUAllocator):
   def _free(self, opaque, options:BufferSpec):
     self.dev.synchronize()
     self.dev._gpu_free(opaque)
-
-  def _offset(self, buf, size:int, offset:int) -> HCQBuffer:
-    return QCOMBuffer(va_addr=buf.va_addr+offset, size=size, info=buf.info, mapped=buf.mapped)
 
 class QCOMDevice(HCQCompiled):
   signals_page: Any = None
