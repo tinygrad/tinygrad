@@ -1,7 +1,6 @@
 import unittest, pickle, types
 import numpy as np
 from tinygrad import Tensor, TinyJit, Variable, dtypes
-from tinygrad.device import is_dtype_supported
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.ops import PatternMatcher, UPat, UOp
 

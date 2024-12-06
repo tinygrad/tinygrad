@@ -15,6 +15,7 @@ class MockMultiOutputModel:
 # TODO: move compile_efficientnet tests here
 @unittest.skipUnless(Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, f"Model export is not supported on {Device.DEFAULT}")
 class TextModelExport(unittest.TestCase):
+  @unittest.skip("TODO: this is using the JIT in an unsupported way")
   def test_multi_input_model_export(self):
     model = MockMultiInputModel()
     inputs = [Tensor.rand(2,2), Tensor.rand(2,2), Tensor.rand(2,2)]

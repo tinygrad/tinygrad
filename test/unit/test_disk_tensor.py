@@ -361,10 +361,10 @@ class TestPathTensor(unittest.TestCase):
     np.testing.assert_array_equal(t.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
   def test_path_tensor_with_device(self):
-    t = Tensor(self.test_file, device="CLANG")
+    t = Tensor(self.test_file, device="CPU")
     self.assertEqual(t.shape, (100,))
     self.assertEqual(t.dtype, dtypes.uint8)
-    self.assertEqual(t.device, "CLANG")
+    self.assertEqual(t.device, "CPU")
     np.testing.assert_array_equal(t.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
   def test_path_tensor_empty_file(self):
@@ -389,8 +389,8 @@ class TestPathTensor(unittest.TestCase):
 
   def test_path_tensor_copy_to_device(self):
     t = Tensor(self.test_file)
-    t_cpu = t.to("CLANG")
-    self.assertEqual(t_cpu.device, "CLANG")
+    t_cpu = t.to("CPU")
+    self.assertEqual(t_cpu.device, "CPU")
     np.testing.assert_array_equal(t_cpu.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
 if __name__ == "__main__":
