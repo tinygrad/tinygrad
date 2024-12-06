@@ -65,21 +65,18 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     # hack the underlying buffer too
     buf.buffer.dtype = dtype
     buf.buffer.options = None
-  # base has a (BUFFER, optional Op) wrapped around a VIEW
-  if buf.is_realized:
+  # base is a VIEW of (BUFFER, (optional) op)
+  if buf.realized:
     buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
     op = None
   else:
     src = tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs)
     match buf.op:
       # ASSIGN uses the target buffer
-      case Ops.ASSIGN:
-        buf_uop = src[0].base.buf_uop
-        op = UOp(Ops.ASSIGN, dtype.base, (buf_uop, src[1]), buf.arg)
+      case Ops.ASSIGN: buf_uop = src[0].base.buf_uop
       # otherwise we create a new buffer
-      case _:
-        buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
-        op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, src, buf.arg)
+      case _: buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
+    op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, src, buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.contiguous() if buf.forced_realize else op), buf.st)
   # keep track of ops outside the big graph
   buffers[buf_uop] = buf.buffer
@@ -185,7 +182,9 @@ to_si = PatternMatcher([
 # ** fusion
 
 lazy = PatternMatcher([
+  # gather the metadata for this kernel
   (UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.metadata.add(m) if (m:=ctx.ops_metadata.get(x)) is not None else None),
+  # don't need contiguous anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
 ])
 
@@ -382,6 +381,8 @@ do_realize = PatternMatcher([
   (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
   # realize before COPY or BUFFER_VIEW
   (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
+  # ASSIGN only needs the buffer
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, name="dest"), UPat.var("src")), name="root"), lambda ctx,dest,src,root: root.replace(src=(dest.base.buf_uop, src))),
 ])
 
 # ** this breaks down realized ops into STOREs and rewrites the ops to LOADs
