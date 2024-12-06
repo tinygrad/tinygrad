@@ -29,7 +29,7 @@ class _Device:
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
   def get_available_devices(self) -> Iterator[str]:
-    for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM"]:
+    for device in ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CLANG", "LLVM", "X86"]:
       with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
@@ -222,7 +222,7 @@ def is_dtype_supported(dtype:DType, device:Optional[str]=None) -> bool:
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
   if dtype == dtypes.half:
     if device == "GPU": return not CI and not OSX
-    if device in ["CUDA", "NV"]: return not CI
+    if device in ["CUDA", "NV", "X86"]: return not CI
     if device == "LLVM": return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
