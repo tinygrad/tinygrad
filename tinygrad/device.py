@@ -43,6 +43,7 @@ Device = _Device()
 
 # **************** Buffer + Allocators ****************
 
+
 @dataclass(frozen=True, eq=True)
 class BufferSpec:
   # TODO: move device, size, dtype here?
@@ -52,6 +53,8 @@ class BufferSpec:
   host: bool = False
   nolru: bool = False
   external_ptr: Optional[int] = None
+
+view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM", "DSP", "DISK"}
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None,

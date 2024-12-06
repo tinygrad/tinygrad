@@ -5,7 +5,7 @@ from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, 
 from tinygrad.ops import exec_alu, python_alu
 from tinygrad.ops import identity_element, MathTrait, resolve, UOp, sint, GroupOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, view_supported_devices
 from weakref import ref, ReferenceType, WeakValueDictionary
 
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
@@ -21,7 +21,6 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Ops]
   if enable_cache: lazycache[cache_key] = ret
   return ret
 
-view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM", "DSP", "DISK"}
 class LazyBuffer(MathTrait):
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Ops]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
