@@ -297,7 +297,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   def sink(self, *srcs:UOp): return UOp(Ops.SINK, dtypes.void, (self,)+srcs)
   def index(self, idx:UOp, valid:Optional[UOp]=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
-  def const_like(self, b:ConstLike): return UOp.const(self.dtype, b) if self.st is None else UOp.const_with_shape(self.dtype, b, self.shape)
+  def const_like(self, b:ConstLike):
+    # if it has a device, we wrap the CONST around a BUFFER op, TODO: remove this when tensor doesn't unwrap device on const
+    if self._device is not None:
+      from tinygrad.shape.shapetracker import ShapeTracker
+      return UOp(Ops.VIEW, self.dtype, (UOp.new_buffer(self.device, 1, self.dtype), UOp.const(self.dtype, b)),
+                 ShapeTracker.from_shape(())).reshape((1,)*len(self.shape)).expand(self.shape)
+    # otherwise if it has a shapetracker, we return VALID. TODO: remove this when kernel doesn't unwrap st on const
+    if self.st is not None: return UOp.const_with_shape(self.dtype, b, self.shape)
+    # everything else is a normal CONST
+    return UOp.const(self.dtype, b)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self

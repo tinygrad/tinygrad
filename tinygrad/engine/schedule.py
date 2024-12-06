@@ -335,14 +335,9 @@ class UPatScheduled(UPat):
 
 # ** this is schedule level const folding
 
-def _as_const(u:UOp, val:ConstType) -> UOp:
-  assert is_scheduled(u), f"must be scheduled to fold {u}"
-  st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
-  return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
-
 ops_folding = PatternMatcher([
   # op with size 0 is zero
-  (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+  (UPatScheduled(), lambda ctx,b,to_store,base: base.const_like(0) if base.size == 0 else None),
 ])
 
 # ** this decides which ops get realized
