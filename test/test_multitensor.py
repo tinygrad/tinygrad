@@ -670,8 +670,8 @@ class TestMultiTensor(unittest.TestCase):
   def test_shard_memory(self):
     devices = (d0, d1, d2, d3)
     t = Tensor.zeros(16, 16).contiguous()
-    t.shard_(devices, axis=0)
-    assert all([lb is lb.base and lb.buffer.base.size == 4 * 16 for lb in t.lazydata.lbs])
+    t.shard_(devices, axis=0).realize()
+    assert all([lb is lb.base and lb.realized.base.size == 4 * 16 for lb in t.lazydata.lbs])
 
   def test_clone(self):
     t = Tensor.rand(16, 16).shard(devices_2, axis=None)
