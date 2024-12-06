@@ -65,24 +65,24 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     buf.buffer.dtype = dtype
     buf.buffer.options = None
   if buf.is_realized:
-    ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
-    buffers[ubuf] = buf.buffer
+    buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
+    buffers[buf_uop] = buf.buffer
     op = None
   elif buf.op is Ops.ASSIGN:
     target, new_val = [to_uop(x, ctx, buffers, cache) for x in buf.srcs]
-    ctx.assigns.add(ubuf:=target.base.buf_uop)
-    op = UOp(Ops.ASSIGN, dtype.base, (ubuf, new_val), buf.arg)
+    ctx.assigns.add(buf_uop:=target.base.buf_uop)
+    op = UOp(Ops.ASSIGN, dtype.base, (buf_uop, new_val), buf.arg)
   else:
-    ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
-    buffers[ubuf] = buf.buffer
+    buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
+    buffers[buf_uop] = buf.buffer
     op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
-  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
+  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.contiguous() if buf.forced_realize else op), buf.st)
   if op is not None:
     buf.buffer.ref(1)
-    ctx.lazybufs[ubuf] = buf
-    ctx.allbufs[ubuf] = ret
+    ctx.lazybufs[buf_uop] = buf
+    ctx.allbufs[buf_uop] = ret
     for x in op.src:
-      if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[ubuf] = None
+      if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
   return ret
 
 # **** AST graph rewrite
