@@ -132,6 +132,8 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
     pat += [
       (UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << powers_of_two[c.arg] if c.arg in powers_of_two else None),
       (UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: x >> powers_of_two[c.arg] if c.arg in powers_of_two else None)
+      (UPat.var("x", dtypes.ints)//UPat.cvar("d", dtypes.ints), lambda x, d: fast_idiv(x, d.arg)),
+      (UPat.var("x", dtypes.ints)%UPat.cvar("d", dtypes.ints), lambda x, d: x - d*f if (f:=fast_idiv(x, d.arg)) is not None else None)
     ]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
@@ -139,6 +141,24 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   if Ops.MULACC in ops:
     pat += [(UPat.var('a')*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c))]
   return PatternMatcher(pat)
+
+@functools.lru_cache(None)
+def magicgu(vmax:int, d:int) -> Tuple[int,int]:
+  # calculate m,s such that x//d == (x*m) >> s for all 0 <= x <= vmax, d>0; adapted from Hacker's Delight, Chapter 10
+  nc = (vmax+1)//(d) * d - 1
+  nbits = vmax.bit_length()
+  for s in range(0, 2*nbits + 1):
+    if 2**s > nc*(d - 1 - (2**s - 1) % d):
+      m = (2**s + d - 1 - (2**s - 1) % d)//d
+      return m, s
+  assert False
+
+def fast_idiv(x: UOp, d: int) -> Optional[UOp]:
+  sign = d//abs(d)
+  m,s = magicgu((n:=max(abs(x.vmin), abs(x.vmax))), abs(d))
+  if abs(m * n) <= dtypes.max(x.dtype) or m==1: return sign*((x*m) >> s)
+  # TODO: promote intermediate calculation (x*m) if this can overflow
+  return None
 
 # ***** threefry *****
 
