@@ -175,8 +175,6 @@ class LazyBuffer(MathTrait):
 
   def _reduce_op(self, op:Ops, axis:Tuple[int, ...]) -> LazyBuffer:
     assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
-    axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
-    if len(axis) == 0: return self
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.st.reduce(axis)), self.dtype, Ops.REDUCE_AXIS, (op, axis), (self,))
 
   def r(self, op:Ops, axis:Tuple[int, ...]) -> LazyBuffer:
