@@ -1962,5 +1962,13 @@ class TestBigGraph(unittest.TestCase):
     self.assertIs(big_graph, out.sink())
     self.assertEqual(len(realizes), 1)
 
+  def test_valid_folding(self):
+    a = Tensor.arange(32)
+    ast = a.schedule()[-1].ast
+    assert len([x for x in ast.toposort if x.op is Ops.WHERE]) == 1
+    a = Tensor.empty(2, 2) + 1
+    ast = a.schedule()[-1].ast
+    assert len([x for x in ast.toposort if x.op is Ops.CONST]) == 1
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

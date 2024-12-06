@@ -181,7 +181,8 @@ def fold_valid(valid:UOp, x:UOp) -> Optional[UOp]:
 
 to_si = PatternMatcher([
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
-  (UPat(Ops.WHERE, src=(UPat(Ops.VALID, name="valid"), UPat.var("x"), UPat())), fold_valid),
+  (UPat(Ops.WHERE, src=(UPat(Ops.VALID, name="valid"), UPat.var("const"), UPat())),
+   lambda valid,const: const if all(v.mask is None for v in unwrap(valid.st).views) else None),
   (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,b,x: x.replace(src=(b, *x.src))),
   # don't need contiguous anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
