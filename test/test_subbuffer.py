@@ -1,6 +1,7 @@
 import unittest
 from tinygrad import Device, dtypes, Tensor
-from tinygrad.device import Buffer, view_supported_devices
+from tinygrad.device import Buffer
+from tinygrad.ops import view_supported_devices
 
 @unittest.skipIf(Device.DEFAULT not in view_supported_devices, "subbuffer not supported")
 class TestSubBuffer(unittest.TestCase):
