@@ -68,7 +68,7 @@ class TestLazyBuffer(unittest.TestCase):
 
     lb: LazyBuffer = Tensor([1], dtype=dtypes.float).lazydata
     assert lb.const_like(1).base.src[1].arg == 1.0
-    assert type(lb.const_like(1).base.src.[1].arg) is float
+    assert type(lb.const_like(1).base.src[1].arg) is float
 
   @unittest.skip("forced_realize isn't supported")
   def test_forced_realized_alu(self):
