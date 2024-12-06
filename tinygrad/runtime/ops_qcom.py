@@ -4,7 +4,7 @@ assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Tuple, List, Any, cast, Optional
 from tinygrad.device import BufferSpec
-from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAlloctor
+from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
@@ -342,7 +342,7 @@ class QCOMDevice(HCQCompiled):
     self.ctx = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=flags).drawctxt_id
 
     self.cmd_buf = self._gpu_alloc(16 << 20)
-    self.cmd_buf_allocator = BumpAlloctor(size=self.cmd_buf.size, start=self.cmd_buf.va_addr, wrap=True)
+    self.cmd_buf_allocator = BumpAllocator(size=self.cmd_buf.size, start=self.cmd_buf.va_addr, wrap=True)
 
     self.border_color_buf = self._gpu_alloc(0x1000, fill_zeroes=True)
 
