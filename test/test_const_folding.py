@@ -158,6 +158,37 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).exp().sum())
     np.testing.assert_allclose(Tensor.ones(4).pad(((1, 1),)).exp().sum().numpy(), 4 * math.e + 2)
 
+  def test_bool_zero_max(self):
+    _check_ast_count(0, Tensor.full((1, 2), True).shrink(((0, 1), (0, 0))).max((1, 0)))
+    np.testing.assert_equal(Tensor.full((1, 2), True).shrink(((0, 1), (0, 0))).max((1, 0)).numpy(), False)
+
+  def test_zero_size_ops(self):
+    for reduceop in [lambda x:x.prod(), lambda x:x.sum()]: # lambda x:x.max() NOTE: numpy gives "reduction operation maximum which has no identity"
+      _check_ast_count(0, reduceop(Tensor.empty(1, 0)))
+      np.testing.assert_equal(reduceop(Tensor.empty(shape:=(1, 0))).numpy(), reduceop(np.empty(shape)))
+
+  def test_zero_size_ops_view(self):
+    for reduceop in [lambda x:x.prod(), lambda x:x.sum()]:
+      _check_ast_count(0, reduceop(Tensor.empty(1, 0, 4).permute((1, 2, 0)).contiguous()))
+      np.testing.assert_equal(reduceop(Tensor.empty(shape:=(1, 0))).numpy(), reduceop(np.empty((shape))))
+
+  def test_zero_size_ops_realized(self):
+    for reduceop in [lambda x:x.prod(), lambda x:x.sum()]:
+      _check_ast_count(0, reduceop((Tensor.randn(0, 1)+1).realize()))
+      np.testing.assert_equal(reduceop((Tensor.randn(shape:=(0, 1))+1).realize()).numpy(), reduceop(np.empty(shape)))
+
+  def test_zero_size_realize_folded(self):
+    # non contiguous folded output doesn't realize
+    _check_ast_count(0, Tensor.empty(1, 0).sum())
+    # contiguous folded const can still schedule
+    a = Tensor.empty(1, 0).sum().contiguous()
+    _check_ast_count(2, a+2)
+    self.assertIsNotNone(a.lazydata.realized)
+    np.testing.assert_equal((Tensor.empty(1, 0).sum().contiguous()+2).numpy(), 2)
+    # otherwise we just fuse it
+    _check_ast_count(1, (Tensor.empty(1, 0).sum()+2).contiguous())
+    np.testing.assert_equal((Tensor.empty(1, 0).sum()+2).numpy(), 2)
+
   def test_const_prod(self):
     _check_ast_count(0, Tensor.full((2, 3), fill_value=2).prod())
     np.testing.assert_equal(Tensor.full((2, 3), fill_value=2).prod().numpy(), 2**(2*3))
