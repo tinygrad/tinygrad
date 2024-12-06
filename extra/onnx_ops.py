@@ -12,11 +12,6 @@ def Identity(x: Tensor): return x
 # TODO: fix buffer_parse
 def Add(x: Tensor, other: Tensor, broadcast=None, axis=None): return x + other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else (x + other).cast(x.dtype)
 def Sub(x: Union[Tensor, Any], other: Tensor): return x - other # some test has input as int
-def Less(x:Tensor,y:Tensor): return x < y
-def LessOrEqual(x:Tensor,y:Tensor): return x <= y
-def Greater(x:Tensor,y:Tensor): return x > y
-def GreaterOrEqual(x:Tensor,y:Tensor): return x >= y
-def Equal(x:Tensor,y:Tensor): return x == y
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
@@ -48,7 +43,6 @@ def ThresholdedRelu(X: Tensor, alpha=1.0): return (X > alpha).where(X, 0)
 def Softmax_1(x: Tensor, axis=1): return x.softmax(axis)
 def Softmax_13(x: Tensor, axis=-1): return x.softmax(axis)
 Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
-def LogSoftmax(x: Tensor, axis=-1): return x.log_softmax(axis)
 def Clip(x: Tensor, min=None, max=None): return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max).cast(x.dtype)
 
 def _axes(axes, noop_with_empty_axes):
@@ -81,7 +75,6 @@ def Expand(x: Tensor, shape:Tensor): return x.expand(_broadcast_shape(x.shape, t
 def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
 def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
-def Not(x:Tensor): return x.logical_not()
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
   k = to_python_const(k) if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
@@ -292,9 +285,6 @@ def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
   return x / (pooled_x.reshape(x.shape) * alpha + bias).pow(beta)
 
 def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)): return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
-
-def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_index=None, reduction="mean"):
-  return x.nll_loss(target, weight, ignore_index, reduction)
 
 def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore_index=None, reduction="mean"):
   log_probs = scores.log_softmax(1)
