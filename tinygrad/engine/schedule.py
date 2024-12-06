@@ -382,7 +382,7 @@ do_realize = PatternMatcher([
   # realize before COPY or BUFFER_VIEW
   (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
   # ASSIGN only needs the buffer
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, name="dest"), UPat.var("src")), name="root"), lambda ctx,dest,src,root: root.replace(src=(dest.base.buf_uop, src))),
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, name="dest"), UPat.var("src")), name="x"), lambda ctx,dest,src,x: x.replace(src=(dest.base.buf_uop, src))),
 ])
 
 # ** this breaks down realized ops into STOREs and rewrites the ops to LOADs
