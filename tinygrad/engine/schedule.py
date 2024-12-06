@@ -51,6 +51,7 @@ def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2
 
 def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache:Dict[LazyBuffer, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
+  # view is passthrough
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, buffers, cache).view(buf.st)
     return ret
@@ -64,23 +65,29 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     # hack the underlying buffer too
     buf.buffer.dtype = dtype
     buf.buffer.options = None
+  # base has a (BUFFER, optional Op) wrapped around a VIEW
   if buf.is_realized:
     buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
-    buffers[buf_uop] = buf.buffer
     op = None
-  elif buf.op is Ops.ASSIGN:
-    target, new_val = [to_uop(x, ctx, buffers, cache) for x in buf.srcs]
-    ctx.assigns.add(buf_uop:=target.base.buf_uop)
-    op = UOp(Ops.ASSIGN, dtype.base, (buf_uop, new_val), buf.arg)
   else:
-    buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
-    buffers[buf_uop] = buf.buffer
-    op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
+    src = tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs)
+    match buf.op:
+      # ASSIGN uses the target buffer
+      case Ops.ASSIGN:
+        buf_uop = src[0].base.buf_uop
+        op = UOp(Ops.ASSIGN, dtype.base, (buf_uop, src[1]), buf.arg)
+      # otherwise we create a new buffer
+      case _:
+        buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
+        op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, src, buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.contiguous() if buf.forced_realize else op), buf.st)
+  # keep track of ops outside the big graph
+  buffers[buf_uop] = buf.buffer
   if op is not None:
     buf.buffer.ref(1)
     ctx.lazybufs[buf_uop] = buf
     ctx.allbufs[buf_uop] = ret
+    if op.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
     for x in op.src:
       if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
   return ret
