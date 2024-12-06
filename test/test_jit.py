@@ -492,7 +492,43 @@ class TestCopyInsideJit(unittest.TestCase):
       a = Tensor.rand(16,16,device="CLANG").realize()
       b = Tensor.rand(16,16).realize()
       out = add(a,b)
-      self.assertListEqual(out.flatten().tolist(), [x+y for x,y in zip(a.flatten().tolist(), b.flatten().tolist())])
+      np.testing.assert_allclose(out.flatten().tolist(), [x+y for x,y in zip(a.flatten().tolist(), b.flatten().tolist())])
+
+class TestJitPrune(unittest.TestCase):
+  def test_simple_prune(self):
+    weights = Tensor.rand(16).realize()
+    def w2(x) -> Tensor: return (weights*2).contiguous() + x
+    w2_noprune = TinyJit(w2)
+    w2_prune = TinyJit(w2, prune=True)
+
+    for _ in range(3):
+      a = Tensor.rand(16).realize()
+      out = w2_noprune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+    assert len(w2_noprune.captured.jit_cache) == 2
+
+    for _ in range(3):
+      a = Tensor.rand(16).realize()
+      out = w2_prune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+    assert len(w2_prune.captured.jit_cache) == 1
+
+  def test_prune_w_copy_correct(self):
+    weights = Tensor.rand(16).realize()
+    def w2(x) -> Tensor: return (weights*2).contiguous() + x.to(Device.DEFAULT)
+    w2_noprune = TinyJit(w2)
+    w2_prune = TinyJit(w2, prune=True)
+
+    for _ in range(3):
+      a = Tensor.rand(16, device="CLANG").realize()
+      out = w2_noprune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+
+    for _ in range(3):
+      a = Tensor.rand(16, device="CLANG").realize()
+      out = w2_prune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+
 
 if __name__ == '__main__':
   unittest.main()
