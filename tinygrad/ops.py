@@ -387,7 +387,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # no COPY
     if self.device == device and not clone: return self
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
-    if prod(self.shape) < prod(self.base.shape): return self.contiguous()._copy(device)
+    if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
     # copy the base and apply the shapetracker on the new device
     assert unwrap(self.base.st).contiguous, f"can only copy contiguous {self}"
     return UOp.metaop(Ops.COPY, self.base.shape, self.base.dtype, device, self.base.nbytes, (self.base,)).view(unwrap(self.st))
