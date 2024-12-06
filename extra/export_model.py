@@ -81,7 +81,7 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
 
 def export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> Tuple[str,int,int]:
   def dtype_to_js_type(dtype: DType) -> str:
-    return "Uint32Array" if dtype in dtypes.uints else "Int32Array" if (dtype in dtypes.ints or dtype == dtypes.bool) else "Float32Array"
+    return "Uint32Array" if dtype in dtypes.uints else "Int32Array" if (dtype in dtypes.sints or dtype == dtypes.bool) else "Float32Array"
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
   kernel_names = ', '.join([name for (name, _args, _global_size, _local_size) in statements])
   create_bind_group_layouts = ",".join([
