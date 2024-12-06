@@ -3215,7 +3215,8 @@ class Tensor(SimpleMathTrait):
     # inject nan for negative base and non-integer exponent
     inject_nan = (negative_base * (exponent != exponent.trunc())).detach().where(math.nan, 1)
     # apply correct_sign inject_nan, and fix 0 ** 0 = 1
-    return ((base == 0) * (exponent == 0)).detach().where(1, ret * correct_sign * inject_nan)
+    ret = ((base == 0) * (exponent == 0)).detach().where(1, ret * correct_sign * inject_nan)
+    return ret.round().cast(self.dtype) if not dtypes.is_float(self.dtype) else ret
 
   def maximum(self, x:Union[Tensor, ConstType]) -> Tensor:
     """

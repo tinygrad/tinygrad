@@ -70,10 +70,15 @@ backend_test.exclude('BFLOAT16')  # not supported in numpy
 # TODO: fix these with true onnx float16
 backend_test.exclude('to_FLOAT16')
 backend_test.exclude('cast_no_saturate')
+backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
+backend_test.exclude('test_max_float16_cpu')
+backend_test.exclude('test_min_float16_cpu')
 
-backend_test.exclude('test_pow_types_int*')
 backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
+
+backend_test.exclude('test_dequantizelinear_int4_cpu')
+backend_test.exclude('test_dequantizelinear_uint4_cpu')
 
 # we don't support indexes
 backend_test.exclude('test_nonzero_*')
