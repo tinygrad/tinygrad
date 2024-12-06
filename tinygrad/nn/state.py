@@ -186,10 +186,6 @@ def torch_load(t:Tensor) -> Dict[str, Tensor]:
   state_dict = nn.state.torch_load("test.pth")
   ```
   """
-  fobj = io.BufferedReader(TensorIO(t))
-
-  def passthrough_reset(v: bool): return fobj.seek(0, 0) or v
-
   offsets: Dict[Union[str, int], int] = {}
   lens: Dict[Union[str, int], int] = {}
   def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad=None, backward_hooks=None, metadata=None):
@@ -229,6 +225,9 @@ def torch_load(t:Tensor) -> Dict[str, Tensor]:
         return Dummy
       return intercept[name] if module_root == "torch" else super().find_class(module, name)
     def persistent_load(self, pid): return deserialized_objects.get(pid, pid)
+
+  fobj = io.BufferedReader(TensorIO(t))
+  def passthrough_reset(v: bool): return fobj.seek(0, 0) or v
 
   if passthrough_reset(zipfile.is_zipfile(fobj)): # NOTE: passthrough_reset required to support python < 3.14
     myzip = zipfile.ZipFile(fobj, 'r')
