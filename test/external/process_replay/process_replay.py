@@ -60,7 +60,7 @@ def diff(offset:int, name:str, fxn:Callable) -> Union[Tuple[int, int], bool]:
       if ASSERT_DIFF: return True
       continue
     # diff kernels
-    try: assert args[-1] == good
+    try: assert args[-1] == good or good == False
     except AssertionError:
       logging.info("PROCESS REPLAY DETECTED CHANGE")
       for x in args[:-1]: logging.info(x)

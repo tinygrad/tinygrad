@@ -7,7 +7,7 @@ LOGOPS = os.getenv("LOGOPS", "/tmp/sops")
 
 def extract_ast(*args) -> bool:
   open(LOGOPS, "a").write(str(args[0]).replace("\n", "").replace(" ", "")+"\n")
-  return args[-1]
+  return False
 
 if __name__ == "__main__":
   _pmap("kernel", extract_ast)
