@@ -76,6 +76,9 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
     buffers[ubuf] = buf.buffer
     op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
+  if op is not None and op.op is Ops.COPY and len(op.src) == 2:
+    new_src = UOp(Ops.CONTIGUOUS, op.dtype, (op.src[0].buf_uop, op.src[0].src[1]))
+    op = op.replace(src=(new_src,))
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
   if op is not None:
     buf.buffer.ref(1)
