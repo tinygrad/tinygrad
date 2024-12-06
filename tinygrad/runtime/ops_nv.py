@@ -449,8 +449,8 @@ class NVDevice(HCQCompiled[NVSignal]):
     rmctrl.gpfifo_schedule(self.fd_ctl, self.root, channel_group, bEnable=1)
 
     self.cmdq_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x200000, cpu_access=True, tag="cmdq")
+    self.cmdq_allocator = BumpAlloctor(size=self.cmdq_page.size, start=self.cmdq_page.va_addr, wrap=True)
     self.cmdq: memoryview = to_mv(self.cmdq_page.va_addr, 0x200000).cast("I")
-    self.cmdq_allocator = BumpAlloctor(size=self.cmdq.size, start=self.cmdq.va_addr, wrap=True)
 
     self.num_gpcs, self.num_tpc_per_gpc, self.num_sm_per_tpc, self.max_warps_per_sm, self.sm_version = self._query_gpu_info('num_gpcs',
       'num_tpc_per_gpc', 'num_sm_per_tpc', 'max_warps_per_sm', 'sm_version')
