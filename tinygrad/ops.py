@@ -302,13 +302,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert ret.op is Ops.VIEW, f"st_arg trying to return {ret}"
     return ret.arg
   @property
-  def const_arg(self) -> ConstType:
-    if self.op is Ops.CONST:
-      assert isinstance(self.arg, get_args(ConstType)), f"const_arg trying to return {self}"
-      return self.arg
-    if self.base.op is Ops.VIEW and len(self.base.src) == 2: return self.base.src[1].const_arg
-    raise AssertionError(f"const_arg called on {self}")
-  @property
   def axis_arg(self) -> Tuple[int, ...]:
     assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
     ret = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]

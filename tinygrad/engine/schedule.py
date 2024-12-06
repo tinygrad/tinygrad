@@ -339,11 +339,12 @@ def simplify_reduceop(ctx, root:UOp, x:UOp) -> Optional[UOp]:
   # remove reduce on unmasked const
   if all_int(x.shape) and x.is_unrealized_unmasked_const():
     prshape = prod(unwrap(x.st).shape[i] for i in root.arg[1])
+    ret = x.base.src[1].arg
     match root.arg[0]:
-      case Ops.ADD: ret = x.const_arg*prshape
-      case Ops.MUL: ret = x.const_arg**prshape
-      case Ops.MAX: ret = x.const_arg
-      case op: raise RuntimeError(f"unhandled reduce alu {op}")
+      case Ops.ADD: ret *= prshape
+      case Ops.MUL: ret **= prshape
+      case Ops.MAX: pass # NOTE: Ops.MAX is passthrough
+      case _: return None
     return UOp.const(root.dtype, ret)
   return None
 
@@ -353,7 +354,7 @@ ops_folding = PatternMatcher([
   # maybe fold reduce ops (TODO: this can be multiple upats)
   (UPat(Ops.REDUCE_AXIS, name="root", src=(UPat.var("x"),)), simplify_reduceop),
   # const doesn't have to be copied
-  (UPat(Ops.COPY, src=(UPat.var("x"),)), lambda ctx,x: UOp.const(x.dtype, x.const_arg) if x.is_unrealized_unmasked_const() else None)
+  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.CONST, name="x"))),)), lambda ctx,x:x)
 ])
 
 # ** this decides which ops get realized
