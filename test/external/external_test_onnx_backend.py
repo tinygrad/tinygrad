@@ -74,7 +74,6 @@ backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 backend_test.exclude('test_max_float16_cpu')
 backend_test.exclude('test_min_float16_cpu')
 
-backend_test.exclude('test_pow_types_int*')
 backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
 
