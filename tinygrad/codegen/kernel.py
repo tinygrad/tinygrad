@@ -733,7 +733,8 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
     st = uop.arg
   # everything else inherits shape
   else:
-    st = (src_sts:=[sts[x] for x in uop.src if x.has_st])[0]
+    if len(src_sts:=[sts[x] for x in uop.src if x in sts]) == 0: return None
+    st = src_sts[0]
     if not all_same(shapes:=[x.shape for x in src_sts]):
       if all_same(sizes:=[prod(x) for x in shapes]): raise AssertionError(f"found implicit reshape {shapes}")
       raise AssertionError(f"found implicit expand {sizes} {shapes}")
