@@ -517,9 +517,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if self.op is Ops.ADD: return s0_vmin+s1_vmin, s0_vmax+s1_vmax
       if self.op is Ops.MUL: return min(vals:=(s0_vmin*s1_vmin, s0_vmin*s1_vmax, s0_vmax*s1_vmin, s0_vmax*s1_vmax)), max(vals)
       if self.op is Ops.MOD and s1_vmin > 0: return 0, s1_vmax-1
-      if self.op is Ops.IDIV and s1_vmin == s1_vmax:  # min/max are equal in a CONST
-        if s1_vmin > 0: return s0_vmin//s1_vmin, s0_vmax//s1_vmin
-        if s1_vmin < 0 and s0_vmin >= 0: return -(s0_vmax//-s1_vmin), -(s0_vmin//-s1_vmin)
+      if self.op is Ops.IDIV:
+        if s1_vmin == s1_vmax:  # min/max are equal in a CONST
+          if s1_vmin > 0: return s0_vmin//s1_vmin, s0_vmax//s1_vmin
+          if s1_vmin < 0 and s0_vmin >= 0: return -(s0_vmax//-s1_vmin), -(s0_vmin//-s1_vmin)
+        # don't know exact bounds, but know the sign
+        if (s0_vmax <= 0 and s1_vmin < 0) or (s0_vmin >= 0 and s1_vmin > 0): return 0, dtypes.max(self.dtype)
+        if (s0_vmax <= 0 and s1_vmin > 0) or (s0_vmin >= 0 and s1_vmin < 0): return dtypes.min(self.dtype), 0
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
       if self.op is Ops.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
       if self.op is Ops.CMPNE: return ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin), not (s0_vmin == s0_vmax == s1_vmin == s1_vmax))

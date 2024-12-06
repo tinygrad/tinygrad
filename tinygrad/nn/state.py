@@ -42,13 +42,12 @@ def accept_filename(func: Callable[[Tensor], R]) -> Callable[[Union[Tensor, str,
   return wrapper
 
 @accept_filename
-def safe_load_metadata(t:Tensor) -> Tuple[Tensor, int, Any]:
+def safe_load_metadata(t:Tensor) -> Tuple[Tensor, int, Dict[str, Any]]:
   """
   Loads a .safetensor file from disk, returning the data, metadata length, and metadata.
   """
-  json_len = t[0:8].bitcast(dtypes.int64).item()
-  assert isinstance(json_len, int)
-  return t, json_len, json.loads(t[8:8+json_len].data().tobytes())
+  data_start = int.from_bytes(t[0:8].data(), "little") + 8
+  return t, data_start, json.loads(t[8:data_start].data().tobytes())
 
 def safe_load(fn:Union[Tensor, str, pathlib.Path]) -> Dict[str, Tensor]:
   """
@@ -58,14 +57,10 @@ def safe_load(fn:Union[Tensor, str, pathlib.Path]) -> Dict[str, Tensor]:
   state_dict = nn.state.safe_load("test.safetensor")
   ```
   """
-  t, json_len, metadata = safe_load_metadata(fn)
-  ret = {}
-  for k,v in metadata.items():
-    if k == "__metadata__": continue
-    dtype = safe_dtypes[v['dtype']]
-    sz = (v['data_offsets'][1]-v['data_offsets'][0])
-    ret[k] = t[8+json_len+v['data_offsets'][0]:8+json_len+v['data_offsets'][0]+sz].bitcast(dtype).reshape(v['shape'])
-  return ret
+  t, data_start, metadata = safe_load_metadata(fn)
+  data = t[data_start:]
+  return { k: data[v['data_offsets'][0]:v['data_offsets'][1]].bitcast(safe_dtypes[v['dtype']]).reshape(v['shape'])
+          for k, v in metadata.items() if k != "__metadata__" }
 
 def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
   """
