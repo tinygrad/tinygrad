@@ -106,7 +106,7 @@ def get_run_onnx(onnx_model: ModelProto):
       # if dtype is not tensor.dtype: raise RuntimeError(f"{model_input.name} received dtype {inp.dtype}, expected {dtype}")
       for d,onnx_dim in enumerate(type_proto.tensor_type.shape.dim):
         # NOTE: `dim_value` is a variable when `dim_value` is not specified and `dim_param` is, e.g. dim {dim_param: "N"}
-        if onnx_dim.dim_value is not None and onnx_dim.dim_value != user_input.shape[d]:
+        if onnx_dim.dim_param is None and onnx_dim.dim_value != user_input.shape[d]:
           raise RuntimeError(f"{model_input.name} received value {user_input.shape[d]} on dim {d}, expected {onnx_dim.dim_value}")
       return tensor
     type_field_names = [field.name for field,_ in type_proto.ListFields()]
