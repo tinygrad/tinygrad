@@ -131,7 +131,7 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   if Ops.SHL in ops and Ops.SHR in ops:
     pat += [
       (UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << powers_of_two[c.arg] if c.arg in powers_of_two else None),
-      (UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: x >> powers_of_two[c.arg] if c.arg in powers_of_two else None)
+      (UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: x >> powers_of_two[c.arg] if c.arg in powers_of_two else None),
       (UPat.var("x", dtypes.ints)//UPat.cvar("d", dtypes.ints), lambda x, d: fast_idiv(x, d.arg)),
       (UPat.var("x", dtypes.ints)%UPat.cvar("d", dtypes.ints), lambda x, d: x - d*f if (f:=fast_idiv(x, d.arg)) is not None else None)
     ]
