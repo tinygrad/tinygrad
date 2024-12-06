@@ -92,21 +92,21 @@ def get_run_onnx(onnx_model: ModelProto):
       if user_input is None: return Tensor(None)
       type_proto = type_proto.optional_type.elem_type
     if type_proto.HasField("sequence_type"):
-      if not isinstance(user_input, Sequence): raise RuntimeError(f"{model_input.name} is {user_input} but should be a sequence type")
+      if not isinstance(user_input, Sequence): raise RuntimeError(f"{model_input.name} received {user_input}, expected sequence type")
       dtype = dtype_parse(type_proto.sequence_type.elem_type.tensor_type.elem_type)
       sequence = [Tensor(i, dtype=dtype, requires_grad=is_onnx_preview_training) if not isinstance(i, Tensor) else i for i in user_input]
       # TODO: need true float16 for dtype checking
-      # if not all(t.dtype is dtype for t in ret): raise RuntimeError(f"{model_input.name} has dtype {inp.dtype}, expected dtype {dtype}")
+      # if not all(t.dtype is dtype for t in sequence): raise RuntimeError(f"{model_input.name} received wrong dtype, expected {dtype}")
       return sequence
     if type_proto.HasField("tensor_type"):
       dtype = dtype_parse(type_proto.tensor_type.elem_type)
       tensor = Tensor(user_input, dtype=dtype, requires_grad=is_onnx_preview_training) if not isinstance(user_input, Tensor) else user_input
       # TODO: need true float16 for dtype checking
-      # if dtype is not inp.dtype: raise RuntimeError(f"{model_input.name} has dtype {inp.dtype}, expected dtype {dtype}")
+      # if dtype is not tensor.dtype: raise RuntimeError(f"{model_input.name} received dtype {inp.dtype}, expected {dtype}")
       for d,onnx_dim in enumerate(type_proto.tensor_type.shape.dim):
         # NOTE: `dim_value` is a variable when `dim_value` is not specified and `dim_param` is, e.g. dim {dim_param: "N"}
         if onnx_dim.dim_value is not None and onnx_dim.dim_value != user_input.shape[d]:
-          raise RuntimeError(f"{model_input.name} has value {user_input.shape[d]} on dim {d}, expected value {onnx_dim.dim_value}")
+          raise RuntimeError(f"{model_input.name} received value {user_input.shape[d]} on dim {d}, expected {onnx_dim.dim_value}")
       return tensor
     type_field_names = [field.name for field,_ in type_proto.ListFields()]
     raise NotImplementedError(f"{model_input.name} with {type_field_names=} is not supported")
