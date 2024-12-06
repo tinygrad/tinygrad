@@ -3,7 +3,7 @@ from typing import List, Dict, Union, Callable, Any, Sequence
 import importlib, functools
 import numpy as np
 from tinygrad import Tensor, dtypes
-from tinygrad.helpers import getenv, DEBUG
+from tinygrad.helpers import getenv, DEBUG, all_same
 from tinygrad.dtype import DType, ConstType
 from tinygrad.device import is_dtype_supported
 from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
@@ -95,6 +95,7 @@ def get_run_onnx(onnx_model: ModelProto):
       if not isinstance(user_input, Sequence): raise RuntimeError(f"{model_input.name} received {user_input}, expected sequence type")
       dtype = dtype_parse(type_proto.sequence_type.elem_type.tensor_type.elem_type)
       sequence = [Tensor(i, dtype=dtype, requires_grad=is_onnx_preview_training) if not isinstance(i, Tensor) else i for i in user_input]
+      if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"shapes for {model_input.name} must be homogeneous")
       # TODO: need true float16 for dtype checking
       # if not all(t.dtype is dtype for t in sequence): raise RuntimeError(f"{model_input.name} received wrong dtype, expected {dtype}")
       return sequence
