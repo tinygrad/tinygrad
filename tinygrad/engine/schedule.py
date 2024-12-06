@@ -335,7 +335,7 @@ class UPatScheduled(UPat):
 
 def simplify_stride0_reduce(reduce:UOp, src:UOp, **kwargs) -> Optional[UOp]:
   src_st = unwrap(src.st)
-  # must be unmasked (NOTE: can be relaxed)
+  # must be unmasked (NOTE: can be relaxed if not masked on stride 0 axis)
   if any(v.mask is not None for v in src_st.views): return None
   # must have all stride 0 in the relevant axis (NOTE: can do partial)
   if not all(src_st.views[-1].strides[axis] == 0 for axis in reduce.arg[1]): return None
@@ -344,6 +344,7 @@ def simplify_stride0_reduce(reduce:UOp, src:UOp, **kwargs) -> Optional[UOp]:
     case Ops.ADD: ret = ret*prod(src_st.shape[i] for i in reduce.arg[1])
     case Ops.MAX: pass  # NOTE: Ops.MAX is passthrough
     case Ops.MUL: return None   # pow is not supported on UOps, TODO: handle this case
+    case _: return None
   return ret
 
 def _as_const(u:UOp, val:ConstType) -> UOp:
