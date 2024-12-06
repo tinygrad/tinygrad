@@ -336,6 +336,9 @@ def _as_const(u:UOp, val:ConstType) -> UOp:
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+  # reduceop axis rewrite
+  (UPat(Ops.REDUCE_AXIS, name="r", src=(UPat.var("src"),)), lambda ctx,src,r: src if len(r.axis_arg) == 0 else None
+   if (new_axis:=tuple(sorted([x for x in r.arg[1] if resolve(src.shape[x] != 1)]))) == r.axis_arg else r.replace(arg=(r.arg[0], new_axis))),
 ])
 
 # ** this decides which ops get realized

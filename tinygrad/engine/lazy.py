@@ -3,7 +3,7 @@ from typing import Optional, Any, Tuple, List, get_args
 from tinygrad.dtype import dtypes, DType, ConstType, to_dtype, ImageDType
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, SPLIT_REDUCEOP, LAZYCACHE
 from tinygrad.ops import exec_alu, python_alu
-from tinygrad.ops import identity_element, MathTrait, resolve, UOp, sint, GroupOp, Ops
+from tinygrad.ops import identity_element, MathTrait, UOp, sint, GroupOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
@@ -174,7 +174,6 @@ class LazyBuffer(MathTrait):
   # *** reduce ops ***
 
   def _reduce_op(self, op:Ops, axis:Tuple[int, ...]) -> LazyBuffer:
-    assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.st.reduce(axis)), self.dtype, Ops.REDUCE_AXIS, (op, axis), (self,))
 
   def r(self, op:Ops, axis:Tuple[int, ...]) -> LazyBuffer:
