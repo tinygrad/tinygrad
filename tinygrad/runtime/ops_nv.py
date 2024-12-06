@@ -3,7 +3,7 @@ import os, ctypes, contextlib, re, fcntl, functools, mmap, struct, array, sys
 assert sys.platform != 'win32'
 from typing import Tuple, List, Any, cast, Union, Dict, Type, Optional
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAlloctor
 from tinygrad.ops import sint
 from tinygrad.device import BufferSpec
 from tinygrad.helpers import getenv, mv_address, init_c_struct_t, to_mv, round_up, data64, data64_le, DEBUG, prod
@@ -117,14 +117,9 @@ class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
   def _submit_to_gpfifo(self, dev:NVDevice, gpfifo:GPFifo):
     if dev == self.binded_device: cmdq_addr = self.hw_page.va_addr
     else:
-      if dev.cmdq_wptr + len(self._q) * 4 > dev.cmdq_page.size:
-        assert (gpfifo.ring[gpfifo.controls.GPGet] & 0xFFFFFFFFFC) >= dev.cmdq_page.va_addr + len(self._q) * 4 or \
-               gpfifo.controls.GPGet == gpfifo.controls.GPPut, "cmdq overrun"
-        dev.cmdq_wptr = 0
-
-      dev.cmdq[dev.cmdq_wptr//4:dev.cmdq_wptr//4+len(self._q)] = array.array('I', self._q)
-      cmdq_addr = dev.cmdq_page.va_addr+dev.cmdq_wptr
-      dev.cmdq_wptr += len(self._q) * 4
+      cmdq_addr = dev.cmdq_allocator.alloc(len(self._q) * 4)
+      cmdq_wptr = (cmdq_addr - dev.cmdq_page.va_addr) // 4
+      dev.cmdq[cmdq_wptr : cmdq_wptr + len(self._q)] = array.array('I', self._q)
 
     gpfifo.ring[gpfifo.put_value % gpfifo.entries_count] = (cmdq_addr//4 << 2) | (len(self._q) << 42) | (1 << 41)
     gpfifo.controls.GPPut = (gpfifo.put_value + 1) % gpfifo.entries_count
@@ -292,8 +287,12 @@ class NVDevice(HCQCompiled[NVSignal]):
   gpus_info: Union[List, ctypes.Array] = []
   signals_page: Any = None
   signals_pool: List[int] = []
-  low_uvm_vaddr: int = 0x1000000000 # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings
-  uvm_vaddr: int = 0x2000000000 # 0x2000000000+
+
+  # TODO: Need a proper allocator for va addresses
+  # 0x1000000000 - 0x2000000000, reserved for system/cpu mappings
+  # VA space is 48bits.
+  low_uvm_vaddr_allocator: BumpAlloctor = BumpAlloctor(size=0x1000000000, start=0x1000000000, wrap=False)
+  uvm_vaddr_allocator: BumpAlloctor = BumpAlloctor(size=(1 << 48) - 1, start=0x2000000000, wrap=False)
   host_object_enumerator: int = 0x1000
 
   def _new_gpu_fd(self):
@@ -374,11 +373,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     self._gpu_uvm_map(mem.va_addr, mem.size, mem.hMemory, create_range=False, tag="p2p mem")
 
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
-    if force_low:
-      NVDevice.low_uvm_vaddr = (res_va:=round_up(NVDevice.low_uvm_vaddr, alignment)) + size
-      assert NVDevice.low_uvm_vaddr < 0x2000000000, "Exceed low vm addresses"
-    else: NVDevice.uvm_vaddr = (res_va:=round_up(NVDevice.uvm_vaddr, alignment)) + size
-    return res_va
+    return NVDevice.low_uvm_vaddr_allocator.alloc(size, alignment) if force_low else NVDevice.uvm_vaddr_allocator.alloc(size, alignment)
 
   def _setup_nvclasses(self):
     classlist = memoryview(bytearray(100 * 4)).cast('I')
@@ -455,7 +450,7 @@ class NVDevice(HCQCompiled[NVSignal]):
 
     self.cmdq_page: nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS = self._gpu_alloc(0x200000, cpu_access=True, tag="cmdq")
     self.cmdq: memoryview = to_mv(self.cmdq_page.va_addr, 0x200000).cast("I")
-    self.cmdq_wptr: int = 0 # in bytes
+    self.cmdq_allocator = BumpAlloctor(size=self.cmdq.size, start=self.cmdq.va_addr, wrap=True)
 
     self.num_gpcs, self.num_tpc_per_gpc, self.num_sm_per_tpc, self.max_warps_per_sm, self.sm_version = self._query_gpu_info('num_gpcs',
       'num_tpc_per_gpc', 'num_sm_per_tpc', 'max_warps_per_sm', 'sm_version')
