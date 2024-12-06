@@ -64,6 +64,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 3, 8) < 4, 0, 1, "(a<4)")
     self.helper_test_variable(Variable("a", 3, 8) < 3, 0, 0, "False")
     self.helper_test_variable(Variable("a", 3, 8) < 2, 0, 0, "False")
+    self.helper_test_variable(Variable("a", 3, 4) < Variable("b", 5, 6), 1, 1, "True")
+    self.helper_test_variable(Variable("a", 3, 5) < Variable("b", 5, 6), 0, 1, "(a<b)")
+    self.helper_test_variable(Variable("a", 5, 6) < Variable("b", 3, 5), 0, 0, "False")
+    self.helper_test_variable(Variable("a", 3, 4) < Variable("a", 3, 4), 0, 0, "False")
 
   def test_lt_divides(self):
     expr = (Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512
@@ -251,6 +255,10 @@ class TestSymbolic(unittest.TestCase):
   def test_div_div(self):
     self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
 
+  def test_div_const_div(self):
+    a = Variable("a", 0, 124)
+    self.helper_test_variable((a//2+1)//2, 0, 31, "((a+2)//4)")
+
   def test_distribute_mul(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
     self.helper_test_variable((1+Variable("a", 0, 3))*(-2)+12, 4, 10, "((a*-2)+10)")
@@ -436,6 +444,8 @@ class TestSymbolic(unittest.TestCase):
 
   def test_div_mod_recombine_with_gcd(self):
     b = Variable("b", 0, 100)
+    exp = (16 * b + 2) % 18 + ((16 * b + 2) // 18) * 18
+    self.helper_test_variable(exp, 2, 1602, "((b*16)+2)")
     with self.assertRaises(AssertionError):
       self.helper_test_variable((30 * b + 1) % 18 + ((30 * b + 1) // 18) * 18, 1, 3001, "((b*30)+1)")
 
@@ -516,6 +526,15 @@ class TestSymbolic(unittest.TestCase):
 
     # not combining  # TODO: can combine if one is identity element const
     self.helper_test_variable(aa+ab, 0, 6, "((a if (x<2) else b)+(a if (x<2) else 0))")
+
+  def test_symbolic_div(self):
+    # from symbolic arange
+    a = Variable("a", 1, 10)
+    denominator = ((a*-2)+1)
+    numerator = (((((a*2)+-1)*2)+1)*a)
+    self.helper_test_variable(denominator, -19, -1, "((a*-2)+1)")
+    self.helper_test_variable(numerator, 3, 390, "(a*((a*4)+-1))")
+    self.helper_test_variable((numerator//denominator)<=0, 1, 1, "True")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):

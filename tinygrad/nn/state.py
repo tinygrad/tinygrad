@@ -1,5 +1,5 @@
 import os, json, pathlib, zipfile, pickle, tarfile, struct, functools, io
-from typing import Dict, Union, List, Optional, Any, Tuple, Callable, BinaryIO, Iterable
+from typing import Dict, Union, List, Optional, Any, Tuple, Callable, BinaryIO, Iterable, TypeVar
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm
@@ -35,16 +35,21 @@ safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dt
                "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
-def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
+R = TypeVar('R')
+def accept_filename(func: Callable[[Tensor], R]) -> Callable[[Union[Tensor, str, pathlib.Path]], R]:
+  @functools.wraps(func)
+  def wrapper(fn: Union[Tensor, str, pathlib.Path]) -> R: return func(Tensor(pathlib.Path(fn)) if not isinstance(fn, Tensor) else fn)
+  return wrapper
+
+@accept_filename
+def safe_load_metadata(t:Tensor) -> Tuple[Tensor, int, Dict[str, Any]]:
   """
   Loads a .safetensor file from disk, returning the data, metadata length, and metadata.
   """
-  t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
-  json_len = t[0:8].bitcast(dtypes.int64).item()
-  assert isinstance(json_len, int)
-  return t, json_len, json.loads(t[8:8+json_len].data().tobytes())
+  data_start = int.from_bytes(t[0:8].data(), "little") + 8
+  return t, data_start, json.loads(t[8:data_start].data().tobytes())
 
-def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
+def safe_load(fn:Union[Tensor, str, pathlib.Path]) -> Dict[str, Tensor]:
   """
   Loads a .safetensor file from disk, returning the state_dict.
 
@@ -52,14 +57,10 @@ def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   state_dict = nn.state.safe_load("test.safetensor")
   ```
   """
-  t, json_len, metadata = safe_load_metadata(fn)
-  ret = {}
-  for k,v in metadata.items():
-    if k == "__metadata__": continue
-    dtype = safe_dtypes[v['dtype']]
-    sz = (v['data_offsets'][1]-v['data_offsets'][0])
-    ret[k] = t[8+json_len+v['data_offsets'][0]:8+json_len+v['data_offsets'][0]+sz].bitcast(dtype).reshape(v['shape'])
-  return ret
+  t, data_start, metadata = safe_load_metadata(fn)
+  data = t[data_start:]
+  return { k: data[v['data_offsets'][0]:v['data_offsets'][1]].bitcast(safe_dtypes[v['dtype']]).reshape(v['shape'])
+          for k, v in metadata.items() if k != "__metadata__" }
 
 def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
   """
@@ -157,6 +158,7 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
       else: v.replace(state_dict[k].to(v.device)).realize()
       if consume: del state_dict[k]
 
+@accept_filename
 def tar_extract(t: Tensor) -> Dict[str, Tensor]:
   """
   Extracts files from a tar archive and returns them as dictionary of names (keys) and tensors (values).
@@ -287,6 +289,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
+@accept_filename
 def gguf_load(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
   """
   Loads a gguf file from a tensor.
@@ -297,14 +300,9 @@ def gguf_load(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
   kv_data, state_dict = gguf_load(gguf_tensor)
   ```
   """
-  if tensor.dtype != dtypes.uint8 or len(tensor.shape) != 1: raise ValueError("GGUF tensor must be 1d and of dtype uint8!")
-  pos, read_buffer, rb_start, kv_data, state_dict = 0, memoryview(bytes()), 0, {}, {}
-  def read_bytes(n: int):
-    nonlocal pos, read_buffer, rb_start
-    if rb_start + len(read_buffer) < pos + n: rb_start, read_buffer = pos, tensor[pos:(pos+max(n, 1000_000))].data()
-    return read_buffer[pos-rb_start:(pos:=pos+n)-rb_start]
-  def read_unpack(fmt: str, n: int): return struct.unpack(fmt, read_bytes(n))[0]
-  def read_str(): return str(read_bytes(read_uint64()), "utf-8")
+  reader, kv_data, state_dict = io.BufferedReader(TensorIO(tensor), 1000_000), {}, {}
+  def read_unpack(fmt: str, n: int): return struct.unpack(fmt, reader.read(n))[0]
+  def read_str(): return str(reader.read(read_uint64()), "utf-8")
   def read_arr():
     reader, n = readers[read_int32()], read_uint64()
     return [ reader() for _ in range(n) ]
@@ -313,15 +311,15 @@ def gguf_load(tensor: Tensor) -> Tuple[Dict, Dict[str, Tensor]]:
     (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
   read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
-  magic, version, n_tensors, n_kv = read_bytes(4), read_int32(), read_int64(), read_int64()
+  magic, version, n_tensors, n_kv = reader.read(4), read_int32(), read_int64(), read_int64()
   if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
   for _ in range(n_kv):
     k, typ = read_str(), read_int32()
     kv_data[k] = readers[typ]()
 
   t_infos = [ (read_str(), tuple(read_uint64() for _ in range(read_uint32())), read_int32(), read_uint64()) for _ in range(n_tensors) ]
-  alignment = kv_data.get("general.alignment", 32)
-  data_start = pos = pos + (alignment - pos % alignment if pos % alignment != 0 else 0)
+  alignment, pos = kv_data.get("general.alignment", 32), reader.tell()
+  data_start = pos + (alignment - pos % alignment if pos % alignment != 0 else 0)
 
   for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
 
