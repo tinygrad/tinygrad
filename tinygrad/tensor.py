@@ -89,11 +89,12 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
 
-def _pad_left(*shapes:Tuple[sint, ...]) -> Tuple[Tuple[sint, ...], ...]:
+def _align_left(*shapes:Tuple[sint, ...]) -> Tuple[Tuple[sint, ...], ...]:
+  # unsqueeze left to make every shape same length
   max_dim = max(len(shape) for shape in shapes)
   return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 def _broadcast_shape(*shapes:Tuple[sint, ...]) -> Tuple[sint, ...]:
-  return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_pad_left(*shapes)))
+  return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
 def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:Tuple[int, ...]):
   # apply mask to values (already broadcasted) and reduce such that if mask contains repeated indices the last one remains
@@ -281,7 +282,7 @@ class Tensor(SimpleMathTrait):
     assert self.dtype.base.fmt is not None, f"no fmt dtype for {self.dtype.base}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     if TYPE_CHECKING or sys.version_info < (3, 12): assert self.dtype.base.fmt != "e"
-    return self._data().cast(self.dtype.base.fmt) if 0 in self.shape else self._data().cast(self.dtype.base.fmt, self.shape)
+    return cast(memoryview, self._data().cast(self.dtype.base.fmt) if 0 in self.shape else self._data().cast(self.dtype.base.fmt, self.shape))
 
   def item(self) -> ConstType:
     """
@@ -947,7 +948,8 @@ class Tensor(SimpleMathTrait):
     print(t.expand(4, -1).numpy())
     ```
     """
-    return self._broadcast_to(tuple(from_ if to == -1 or to is None else to for from_, to in zip(*(_pad_left(self.shape, argfix(shape, *args))))))
+    new_shape = tuple(from_ if to == -1 or to is None else to for from_, to in zip(*(_align_left(self.shape, argfix(shape, *args)))))
+    return self._broadcast_to(new_shape)
 
   def permute(self, order, *args) -> Tensor:
     """
@@ -1288,7 +1290,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     repeats = argfix(repeats, *args)
-    base_shape = _pad_left(self.shape, repeats)[0]
+    base_shape = _align_left(self.shape, repeats)[0]
     unsqueezed_shape = flatten([[1, s] for s in base_shape])
     expanded_shape = flatten([[r, s] for r,s in zip(repeats, base_shape)])
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
@@ -2931,15 +2933,15 @@ class Tensor(SimpleMathTrait):
     return self / (1 + self.abs())
 
   # ***** broadcasted elementwise ops *****
-  def _broadcast_to(self, shape:Tuple[sint, ...]) -> Tensor:
-    if self.shape == shape: return self
-    if self.ndim > len(shape): raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={self.shape} to {shape=}")
-    # first pad left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
-    padded, _ = _pad_left(self.shape, shape)
-    # for each dimension, check either from_ is 1, or it does not change
-    if any(resolve(from_ != 1, False) and resolve(from_ != to, False) for from_,to in zip(padded, shape)):
-      raise ValueError(f"cannot broadcast from shape={self.shape} to {shape=}")
-    return F.Expand.apply(self.reshape(padded), shape=shape)
+  def _broadcast_to(self, new_shape:Tuple[sint, ...]) -> Tensor:
+    if self.shape == new_shape: return self
+    if self.ndim > len(new_shape): raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={self.shape} to {new_shape=}")
+    # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
+    shape, _ = _align_left(self.shape, new_shape)
+    # for each dimension, check either dim is 1, or it does not change
+    if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(shape, new_shape)):
+      raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
+    return F.Expand.apply(self.reshape(shape), shape=new_shape)
 
   def _broadcasted(self, y:Union[Tensor, UOp, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
@@ -2958,8 +2960,7 @@ class Tensor(SimpleMathTrait):
     if reverse: x, y = y, x
 
     # broadcast
-    out_shape = _broadcast_shape(x.shape, y.shape)
-    return x._broadcast_to(out_shape), y._broadcast_to(out_shape)
+    return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
 
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
     return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_unmasked_const() \
