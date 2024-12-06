@@ -347,7 +347,6 @@ def simplify_reduceop(ctx, root:UOp, x:UOp) -> Optional[UOp]:
     return UOp.const(root.dtype, ret)
   return None
 
-
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),

@@ -164,6 +164,9 @@ class GroupOp:
   # do not preserve f(0) = 0
   UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV}
 
+# some BUFFER ops can be processed with only a view
+view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM", "DSP", "DISK"}
+
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
@@ -303,8 +306,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.CONST:
       assert isinstance(self.arg, get_args(ConstType)), f"const_arg trying to return {self}"
       return self.arg
-    if self is not self.base: return self.base.const_arg
-    if self.op is Ops.VIEW and len(self.src) == 2: return self.src[1].const_arg
+    if self.base.op is Ops.VIEW and len(self.base.src) == 2: return self.base.src[1].const_arg
     raise AssertionError(f"const_arg called on {self}")
   @property
   def axis_arg(self) -> Tuple[int, ...]:
@@ -330,7 +332,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (shape[-1]*self.dtype.itemsize) % dtype.itemsize != 0: raise RuntimeError("unsupported size in bitcast")
       shape = shape[:-1] + ((shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
     if bitcast and self.can_view() and allow_buffer_view: return UOp.metaop(Ops.BUFFER_VIEW, unwrap(shape), dtype, self.device, None, (self,))
-    if self._device is not None and self._device.startswith("DISK"): raise RuntimeError("can only bitcast DISK")
+    if self._device is not None and self._device.startswith("DISK") and not bitcast: raise RuntimeError("can only bitcast DISK")
     return UOp(Ops.BITCAST if bitcast else Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType): return self.cast(dtype, bitcast=True)
   def gep(self, i:Union[Tuple[int, ...], int]):
@@ -375,22 +377,20 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @staticmethod
   def metaop(op:Ops, shape:Tuple[sint, ...], dtype:DType, device:str, arg:Any=None, src:Tuple[UOp, ...]=()) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
+    # CONST is always a VIEW of size 1 (NOTE: remove this when CONST doesn't need device)
     if op is Ops.CONST:
-      st = ShapeTracker.from_shape(())
-      arg = arg if isinstance(arg, UOp) else dtypes.as_const(unwrap(arg), dtype)
-      return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, 1, dtype), UOp(op, dtype, src, arg)), st).reshape((1,)*len(shape)).expand(shape)
+      return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, 1, dtype), UOp.const(dtype, arg)),
+                 st:=ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
+    # otherwise it's a contiguous st
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), UOp(op, dtype, src, arg)), st)
-  def _copy(self, device:str) -> UOp:
-    assert unwrap(self.st).contiguous and self.size == self.base.size, f"can only copy contig {self} {self.base}"
-    return UOp.metaop(Ops.COPY, self.shape, self.dtype, device, self.nbytes, (self,))
   def copy_to_device(self, device:str, force:bool=False, clone:bool=False) -> UOp:
     # no COPY
     if self.device == device and not clone: return self
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
-    # TODO: where is this tested?
     if prod(self.shape) < prod(self.base.shape): return self.contiguous()._copy(device)
     # copy the base and apply the shapetracker on the new device
-    return self.base._copy(device).view(unwrap(self.st))
+    assert unwrap(self.base.st).contiguous, f"can only copy contiguous {self}"
+    return UOp.metaop(Ops.COPY, self.base.shape, self.base.dtype, device, self.base.nbytes, (self.base,)).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   def is_unrealized_const(self):
     return (s:=self.base).op is Ops.VIEW and len(s.src) == 2 and s.realized is None and s.src[1].op is Ops.CONST and not isinstance(s.src[1].arg, UOp)

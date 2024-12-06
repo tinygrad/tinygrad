@@ -1062,8 +1062,7 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(a[0, one], a[zero, 1])
 
     # indexing by a scalar should slice (not copy)
-    # TODO: indexing folding no longer supported
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(AssertionError, msg="indexing folding no longer supported"):
       self.assertEqual(data_ptr(a[0, 1]), data_ptr(a[zero, one]))
       self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int32)]))
       self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int16)]))
