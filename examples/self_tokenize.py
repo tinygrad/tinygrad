@@ -28,7 +28,8 @@ if __name__ == "__main__":
 
   code_str = '\x00'.join(flatten(ret))
   print(f"code has {len(code_str)} chars")
-  print(f"code has {code_str.count("\n")} newlines")
+  newline_count = code_str.count('\n')
+  print(f"code has {newline_count} newlines")
 
   encoded = tokenizer.encode(code_str)
   print(f"code has {len(encoded)} tokens")
