@@ -53,36 +53,43 @@ def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2
 def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> UOp:
   assert buf.st is not None, f"must have shape to schedule {buf}"
   if (r:=cache.get(buf)) is not None: return r
+  # view
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
     return ret
+  # base
   assert buf.op is not None, f"base must be base itself {buf}"
   # make things that can't be images not images
-  dtype = ubuf.dtype.base if (ubuf:=realized.get(buf)) is not None else buf.dtype
+  dtype = buf_uop.dtype.base if (buf_uop:=realized.get(buf)) is not None else buf.dtype
   if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
     assert buf.realized is None, "can't fixup allocated buffer"
     if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
     dtype = buf.dtype.base
-  if ubuf is not None: op = None
+  # realized ops only have a BUFFER uop
+  if buf_uop is not None: op = None
+  # metaops already have a BUFFER uop
   elif is_scheduled(buf):
-    ubuf = buf.buf_uop
+    buf_uop = buf.buf_uop
     op = buf.src[1].replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src[1].src))
     # BUFFER_VIEW overrides the underlying buffer
-    if op.op is Ops.BUFFER_VIEW: buffers[ubuf] = (x:=op.src[0]).base.buffer.view(buf.st.size, dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
+    if op.op is Ops.BUFFER_VIEW: buffers[buf_uop] = (x:=op.src[0]).base.buffer.view(buf.st.size, dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
+  # ASSIGN reuses the target BUFFER
   elif buf.op is Ops.ASSIGN:
     target, new_val = [to_uop(x, ctx, cache) for x in buf.srcs]
-    ctx.assigns.add(ubuf:=target.base.buf_uop)
-    op = UOp(Ops.ASSIGN, dtype.base, (ubuf, new_val), buf.arg)
+    ctx.assigns.add(buf_uop:=target.base.buf_uop)
+    op = UOp(Ops.ASSIGN, dtype.base, (buf_uop, new_val), buf.arg)
+  # otherwise we give it a new BUFFER
   else:
-    ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
+    buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
     op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, tuple(to_uop(x, ctx, cache) for x in buf.srcs), buf.arg)
-  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
+  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
+  # keep track of uops outside of the big graph
   if op is not None:
-    ubuf.buffer.ref(1)
-    ctx.lazybufs[ubuf] = buf
-    ctx.allbufs[ubuf] = ret
+    buf_uop.buffer.ref(1)
+    ctx.lazybufs[buf_uop] = buf
+    ctx.allbufs[buf_uop] = ret
     for x in op.src:
-      if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[ubuf] = None
+      if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
   return ret
 
 # **** AST graph rewrite
