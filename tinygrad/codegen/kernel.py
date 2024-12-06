@@ -63,7 +63,7 @@ class Kernel:
       print(self.ast)
       raise e
 
-    self.reduceops = dedup([x for x in self.ast.toposort if x.op is Ops.REDUCE_AXIS])
+    self.reduceops = [x for x in self.ast.toposort if x.op is Ops.REDUCE_AXIS]
 
     self.vars: List[Variable] = self.ast.variables()
     # NOTE: this requires a specific order with the [::-1], this is likely a bug
