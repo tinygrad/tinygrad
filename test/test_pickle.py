@@ -58,7 +58,6 @@ class TestPickle(unittest.TestCase):
     assert hasattr(vt2.lazydata.buffer, 'base')
     assert ref_value == vt2.tolist()
 
-  @unittest.skipIf(not is_dtype_supported(dtypes.double), "needs double")
   def test_pickle_numpy(self):
     t = Tensor(np.array([1,2,3,4.]))
     st = pickle.dumps(t)
