@@ -527,6 +527,15 @@ class TestSymbolic(unittest.TestCase):
     # not combining  # TODO: can combine if one is identity element const
     self.helper_test_variable(aa+ab, 0, 6, "((a if (x<2) else b)+(a if (x<2) else 0))")
 
+  def test_symbolic_div(self):
+    # from symbolic arange
+    a = Variable("a", 1, 10)
+    denominator = ((a*-2)+1)
+    numerator = (((((a*2)+-1)*2)+1)*a)
+    self.helper_test_variable(denominator, -19, -1, "((a*-2)+1)")
+    self.helper_test_variable(numerator, 3, 390, "(a*((a*4)+-1))")
+    self.helper_test_variable((numerator//denominator)<=0, 1, 1, "True")
+
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
     MIN, MAX = 0, 10
