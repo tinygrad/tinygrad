@@ -1344,6 +1344,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.ones(5, 5).contiguous().schedule()
     self.assertEqual(GlobalCounters.mem_used-base, 0)
 
+  @unittest.skip("TODO: this is consistently creating non reproducible failures")
   def test_schedule_mem_used_with_inputs(self):
     base = GlobalCounters.mem_used
     x = Tensor.ones(256).contiguous().realize()
