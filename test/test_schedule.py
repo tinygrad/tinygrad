@@ -9,7 +9,7 @@ import functools
 from typing import List, Optional, Union, cast
 
 from tinygrad import nn, dtypes, Device, Tensor
-from tinygrad.device import is_dtype_supported
+from tinygrad.device import is_dtype_supported, view_supported_devices
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -18,7 +18,7 @@ from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, ge
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule, view_right, view_left, do_realize
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
-from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
+from tinygrad.engine.lazy import LazyBuffer
 from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
