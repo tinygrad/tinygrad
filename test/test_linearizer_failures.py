@@ -1045,7 +1045,7 @@ class TestLinearizerFailures(unittest.TestCase):
     ifs = [u for u in k.uops if u.op is Ops.IF]
     self.assertEqual(len(ifs), 3)
     #for st in k.uops.sink.src: self.assertEqual(len(st.src), 4)
-    self.assertLessEqual(len(ifs[0].src[0].sparents), 17)
+    self.assertLessEqual(len(ifs[0].src[0].toposort), 17)
 
   def test_failure_45(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(

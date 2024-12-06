@@ -11,7 +11,8 @@ from tinygrad.codegen.kernel import Kernel
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0",
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_ACC: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#e0ffc0", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
-               Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.BUFFER: "#B0BDFF",}
+               Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", **{x:"#ffffc0" for x in GroupOp.ALU},
+               Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF",}
 
 # ** API spec
 
@@ -59,7 +60,7 @@ def get_metadata(contexts:List[Tuple[Any, List[TrackedRewriteContext]]]) -> List
 def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
   assert isinstance(x, UOp)
   graph: Dict[int, Tuple[str, str, List[int], str, str]] = {}
-  for u in x.sparents:
+  for u in x.toposort:
     if u.op is Ops.CONST: continue
     label = f"{str(u.op).split('.')[1]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
@@ -91,7 +92,7 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
     # sanity check
     if new_sink is sink: raise AssertionError(f"rewritten sink wasn't rewritten! {i} {unwrap(upat).location}")
     # update ret data
-    g.changed_nodes.append([id(x) for x in u1.sparents if x.op is not Ops.CONST])
+    g.changed_nodes.append([id(x) for x in u1.toposort if x.op is not Ops.CONST])
     g.diffs.append(list(difflib.unified_diff(pcall(str, u0).splitlines(), pcall(str, u1).splitlines())))
     g.graphs.append(sink:=new_sink)
   return g

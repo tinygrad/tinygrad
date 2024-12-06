@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, operator, itertools, math
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast
+from typing import Tuple, List, Optional, Dict, Set, cast, Sequence
 from tinygrad.dtype import dtypes
 from tinygrad.ops import resolve, UOp, Variable, sint, sym_infer, smax, smin, sint_to_uop
 from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
@@ -95,14 +95,15 @@ class View:
                  for x in self.shape+self.strides+(self.offset,)+(tuple(flatten(self.mask)) if self.mask is not None else tuple()))
   def __lt__(self, o:View): return self.t < o.t
 
-  def to_indexed_uops(self:View, _idxs:Optional[List[UOp]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> Tuple[UOp, UOp]:
-    idxs = [UOp.range(dtypes.int, 0, s, i) for i,s in enumerate(self.shape)] if _idxs is None else _idxs
+  def to_indexed_uops(self:View, idxs:Optional[Sequence[UOp]]=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> Tuple[UOp, UOp]:
+    """(idx, valid)"""
+    if idxs is None: idxs = [UOp.range(dtypes.int, 0, s, i) for i,s in enumerate(self.shape)]
     iexpr = sint_to_uop(self.offset)
-    for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else [None]*len(self.shape)):
+    for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
       if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
       if m is not None:
-        if resolve(m[0] != 0): vexpr = vexpr * idx.ge(m[0])
-        if resolve(m[1] != sh): vexpr = vexpr * idx.lt(m[1])
+        if resolve(m[0] != 0): vexpr = vexpr * (idx >= m[0])
+        if resolve(m[1] != sh): vexpr = vexpr * (idx < m[1])
     return iexpr, vexpr
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
@@ -267,11 +268,9 @@ class View:
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def expand(self, new_shape: Tuple[sint, ...]) -> View:
     if len(new_shape) != len(self.shape): raise ValueError(f"expand arg {new_shape=} must have same number of dimensions as shape {self.shape=}")
-    if 0 in self.shape:
-      assert all((s == x == 0) or (s > 0 and (x % s) == 0) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
-      return View.create(new_shape)
-    # TODO: this resolve might be wrong
-    assert all((not resolve(s != x, False) or s == 1) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
+    # NOTE: does not check multiple of symbolic shape
+    assert all(resolve(s == ns) or s == 1 for s,ns in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
+    if 0 in self.shape: return View.create(new_shape)
     # NOTE: can the mask ever be (0,0)?
     # TODO: this resolve may not be needed, but it's hard because vars need to be sorted
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if resolve(s != ns, False) else m) \
@@ -330,14 +329,12 @@ class View:
       while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and resolve((new_dim := next(r_new_shape, 0)) > 0):
         strides.append(new_stride)
         if resolve(new_dim != 1): new_stride *= (new_dim if resolve((acc := acc * new_dim) < real_dim) else 0)
-      if resolve(acc != merged_dim): break
-    else:
-      strides += [0,] * (len(new_shape) - len(strides))
-      new_mask = _reshape_mask(self.mask, self.shape, new_shape)
-      if new_mask is not None:
-        new_strides = canonicalize_strides(tuple(e-b for b,e in new_mask), tuple(reversed(strides)))
-        extra_offset = (sum(m[0] * s for m,s in zip(self.mask, self.strides)) if self.mask else 0) - \
-                       (sum(m[0] * s for m,s in zip(new_mask, new_strides)))
-        return View.create(new_shape, new_strides, self.offset + extra_offset, new_mask)
+      if resolve(acc != merged_dim): return None
+
+    if (new_mask:=_reshape_mask(self.mask, self.shape, new_shape)) is not None:
+      new_strides = (0,) * (len(new_shape) - len(strides)) + tuple(strides[::-1])
+      extra_offset = (sum(m[0] * s for m,s in zip(self.mask, self.strides)) if self.mask else 0) - \
+                     (sum(m[0] * s for m,s in zip(new_mask, new_strides)))
+      return View.create(new_shape, new_strides, self.offset + extra_offset, new_mask)
 
     return None

@@ -1,7 +1,8 @@
-import unittest, time
+import unittest
 from tinygrad import Tensor, TinyJit, Device
-from tinygrad.helpers import Context, DEBUG
+from tinygrad.helpers import Context, DEBUG, GlobalCounters
 from tinygrad.nn import Conv2d
+from tinygrad.nn.state import get_parameters
 
 class TestKernelSpeed(unittest.TestCase):
   def _get_tensor(self, *shape:int):
@@ -40,14 +41,15 @@ class TestKernelSpeed(unittest.TestCase):
     if K is None: K = M
     tms = []
     with Context(BEAM=3):
-      for _ in range(10):
+      for i in range(10):
         a = self._get_tensor(M, K)
         b = self._get_tensor(K, N)
-        Device.default.synchronize()
-        st = time.perf_counter()
-        c = f(a, b)
-        Device.default.synchronize()
-        tms.append(time.perf_counter() - st)
+        if i >= 3:
+          GlobalCounters.time_sum_s = 0
+          with Context(DEBUG=max(DEBUG, 2)): c = f(a, b)
+          tms.append(GlobalCounters.time_sum_s)
+        else:
+          c = f(a, b)
 
     ops = 2 * M * N * K
     mems = a.dtype.itemsize * M * K + b.dtype.itemsize * K * N + c.dtype.itemsize * M * N
@@ -61,35 +63,39 @@ class TestKernelSpeed(unittest.TestCase):
     def f(conv, x) -> Tensor: return conv(x).realize()
     tms = []
     K = 3
-    with Context(BEAM=2):
+    with Context(BEAM=0, DEBUG=0):
       conv = Conv2d(CIN, COUT, K, padding=1)
-      for _ in range(10):
+      Tensor.realize(*get_parameters(conv))
+
+    with Context(BEAM=2):
+      for i in range(10):
         x = self._get_tensor(BS, CIN, H, W)
-        Device.default.synchronize()
-        st = time.perf_counter()
-        _c = f(conv, x)
-        Device.default.synchronize()
-        tms.append(time.perf_counter() - st)
+        if i >= 3:
+          GlobalCounters.time_sum_s = 0
+          with Context(DEBUG=max(DEBUG, 2)): _c = f(conv, x)
+          tms.append(GlobalCounters.time_sum_s)
+        else:
+          _c = f(conv, x)
 
     # naive algo
     ops = 2 * BS * CIN * COUT * K * K * H * W
-    # TODO: what should this be?
-    mems = 0
+    mems = x.nbytes() + conv.weight.nbytes() + conv.bias.nbytes() + _c.nbytes()
     tm = min(tms)
     tflops = ops / tm / 1e12
     gbs = mems / tm / 1e9
     self._compare(tm, tflops, gbs, nv_tflops, nv_gbs, amd_tflops, amd_gbs)
 
-  # TODO: smaller ones has other overhead in synchronize
-  # def test_gemm_1024(self): self._test_matmul(1024, nv_tflops=8, amd_tflops=7)
-  # def test_gemm_2048(self): self._test_matmul(2048, nv_tflops=50, amd_tflops=30)
-  def test_gemm_4096(self): self._test_matmul(4096, nv_tflops=95, amd_tflops=70)
-  def test_gemm_8192(self): self._test_matmul(8192, nv_tflops=130, amd_tflops=70)
+  # NOTE: tiny7 was slower than tiny12
+  # TODO: why are convs so slow?!?
+  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=24)
 
-  def test_gemv_16384_4096(self): self._test_matmul(16384, 4096, 1, nv_gbs=430, amd_gbs=400)
-  def test_gemv_4096_16384(self): self._test_matmul(4096, 16384, 1, nv_gbs=430, amd_gbs=400)
+  # theoretical is nv_tflops=165, amd_tflops=123
+  def test_gemm_4096(self): self._test_matmul(4096, nv_tflops=120, amd_tflops=80)
+  def test_gemm_8192(self): self._test_matmul(8192, nv_tflops=130, amd_tflops=75)
 
-  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=22)
+  # theoretical is nv_gbs=1008, amd_gbs=960
+  def test_gemv_16384_4096(self): self._test_matmul(16384, 4096, 1, nv_gbs=840, amd_gbs=750)
+  def test_gemv_4096_16384(self): self._test_matmul(4096, 16384, 1, nv_gbs=830, amd_gbs=760)
 
 if __name__ == '__main__':
   unittest.main()

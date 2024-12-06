@@ -191,7 +191,7 @@ def loop_collapse(compval, multconst, rng:UOp, acc:UOp, idx2=None,idx3=None,extr
 
 def index_collapse(idx:UOp,rng:UOp,buf:UOp,ld:UOp,acc:UOp,add=UOp.const(dtypes.int, 0),mul=UOp.const(dtypes.int, 1)):
   if rng not in acc.src: return None
-  new_load = UOp.load(buf.index(add+mul*idx, idx.ge(rng.src[0]) & idx.lt(rng.src[1])), dtype=ld.dtype)
+  new_load = UOp.load(buf.index(add+mul*idx, (idx >= rng.src[0]) & (idx < rng.src[1])), dtype=ld.dtype)
   new_acc = acc.replace(src=acc.src[0:1]+tuple(x for x in acc.src[1:] if x is not rng))
   return new_acc.assign(new_acc+new_load)
 
@@ -221,7 +221,7 @@ def no_vectorized_wmma(wmma:UOp):
   return UOp(Ops.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 def reduce_collapse(acc:UOp, ret:UOp, alu:UOp):
-  reduce_parented, reduce_unparented = partition(acc.src[1:], lambda x: x in ret.sparents)
+  reduce_parented, reduce_unparented = partition(acc.src[1:], lambda x: x in ret.toposort)
   if len(reduce_unparented) == 0: return None
   new_acc = acc.replace(src=acc.src[0:1]+tuple(reduce_parented))
   ret = new_acc.assign(new_acc.alu(alu.op, ret))
@@ -235,7 +235,7 @@ rng_aug = UPat.any(rng_pat, UPat.var("add")+rng_pat, UPat.var("mul")*rng_pat, UP
 index_load = UPat.var("buf").index(rng_aug).load(name="ld")
 
 arange_augrng = UPat.any(rng_aug, rng_aug+UPat.var("idx2"), rng_aug+UPat.var("idx2")+UPat.var("idx3"), UPat(Ops.VECTORIZE, name="vec", src=rng_aug))
-arange_m = arange_augrng.lt(UPat.cvar("compval")).ne(UPat(Ops.CONST, name="ne", arg=True)).where(UPat.cvar("multconst"), UPat.const(None, 0))
+arange_m = ((arange_augrng<UPat.cvar("compval"))!=UPat(Ops.CONST, name="ne", arg=True)).where(UPat.cvar("multconst"), UPat.const(None, 0))
 
 # this is symbolic 2.0
 sym = symbolic_flat+PatternMatcher([
@@ -288,14 +288,13 @@ sym = symbolic_flat+PatternMatcher([
   # indexing, with cast or where
   (acc_pat.assign(UPat.var("idx").eq(UPat(Ops.RANGE, name="rng")).cast()*index_load+acc_pat), index_collapse),
   (acc_pat.assign(UPat.var("idx").eq(UPat(Ops.RANGE, name="rng")).where(index_load, UPat.const(None, 0.0))+acc_pat), index_collapse),
-  # parentless reduce
-  (acc_pat.assign(UPat(Ops.ADD, src=[acc_pat, UPat.var("ret")], name="alu")), reduce_collapse),
-  (acc_pat.assign(UPat(Ops.MAX, src=[acc_pat, UPat.var("ret")], name="alu")), reduce_collapse),
+  # parentless reduce  # TODO: add MUL
+  (acc_pat.assign(UPat((Ops.ADD, Ops.MAX), src=[acc_pat, UPat.var("ret")], name="alu")), reduce_collapse),
   # ** self folding **
   (UPat(Ops.DEFINE_ACC, src=(UPat.var("x"),)), lambda x: x),            # a DEFINE_ACC without ranges is a CONST
   (UPat(Ops.ASSIGN, src=(UPat.cvar(),UPat.var("x"))), lambda x: x),     # an ASSIGN to a const is a NOOP
   # x!=0 -> (bool)x
-  (UPat.var("x").ne(0), lambda x: x.cast(dtypes.bool.vec(x.dtype.count))),
+  (UPat.var("x")!=0, lambda x: x.cast(dtypes.bool.vec(x.dtype.count))),
   # ** load/store folding **
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.load(UPat(Ops.INDEX, name="index"))), lambda index: UOp(Ops.NOOP)),
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"), UPat.load(UPat(Ops.INDEX, name="index")))),
@@ -447,7 +446,7 @@ devectorize = PatternMatcher([
 ])
 
 def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:Optional[UOp]=None) -> Optional[UOp]:
-  if store_gate not in [gate.src[0] for gate in val.sparents if gate.op is Ops.IF]: return None
+  if store_gate not in [gate.src[0] for gate in val.toposort if gate.op is Ops.IF]: return None
   # remove the gate from the index
   return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val)
 
@@ -483,6 +482,9 @@ pm_render = PatternMatcher([
   # move masks of loads/stores
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat.any(masked_index:=UPat(Ops.INDEX, src=(UPat(name="buf"), UPat(name="idx"), UPat(name="mask"))),
                                                masked_index.cast(None).named("cast")),), allow_any_len=True, name="x"), move_mask),
+  # gate any stores that aren't gated with ifs
+  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
+    lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
 ])
 
 # *** uop graph ***
