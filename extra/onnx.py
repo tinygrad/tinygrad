@@ -103,10 +103,10 @@ def get_run_onnx(onnx_model: ModelProto):
       tensor = Tensor(user_input, dtype=dtype, requires_grad=is_onnx_preview_training) if not isinstance(user_input, Tensor) else user_input
       # TODO: need true float16 for dtype checking
       # if dtype is not inp.dtype: raise RuntimeError(f"{model_input.name} has dtype {inp.dtype}, expected dtype {dtype}")
-      for d,dp in enumerate(type_proto.tensor_type.shape.dim):
+      for d,onnx_dim in enumerate(type_proto.tensor_type.shape.dim):
         # NOTE: `dim_value` is a variable when `dim_value` is not specified and `dim_param` is, e.g. dim {dim_param: "N"}
-        if dp.dim_value is not None and dp.dim_value != user_input.shape[d]:
-          raise RuntimeError(f"{model_input.name} has value {user_input.shape[d]} on dim {d}, expected value {dp.dim_value}")
+        if onnx_dim.dim_value is not None and onnx_dim.dim_value != user_input.shape[d]:
+          raise RuntimeError(f"{model_input.name} has value {user_input.shape[d]} on dim {d}, expected value {onnx_dim.dim_value}")
       return tensor
     type_field_names = [field.name for field,_ in type_proto.ListFields()]
     raise NotImplementedError(f"{model_input.name} with {type_field_names=} is not supported")
