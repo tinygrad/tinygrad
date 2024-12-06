@@ -180,7 +180,7 @@ to_si = PatternMatcher([
   (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,b,x: x.replace(src=(b, *x.src))),
   # don't need contiguous or assign anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
-  (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda ctx,x:x),
+  (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda ctx,x: x),
 ])
 
 # ** fusion
