@@ -548,6 +548,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x**1.2, low=-30, high=-27)
     a, b = Tensor([0.0], requires_grad=True), torch.tensor([0.0], requires_grad=True)
     helper_test_op([], lambda: b**1.1, lambda: a**1.1)
+
   def test_pow_const(self):
     helper_test_op([(45,65)], lambda x: x**1.0)
     helper_test_op([(45,65)], lambda x: x**-1.0)
@@ -560,6 +561,18 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]], forward_only=True)
     # TODO: fix backward, should be nan
     helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]], forward_only=True)
+
+  def test_pow_int(self):
+    # TODO: better infra for these, helper_test_op creates buffer in long first, so WEBGPU fails
+    def _test(base, exponent):
+      np.testing.assert_equal((Tensor(base) ** Tensor(exponent)).numpy(),
+                              (torch.tensor(base, dtype=torch.int) ** torch.tensor(exponent, dtype=torch.int)).numpy())
+
+    for base in ([1, 2, 3], [-1, -2, -3]):
+      for exponent in ([2, 3, 4], [-2, -3, -4]):
+        _test(base, exponent)
+    # NOTE: torch 0 ** -1 is 0
+    _test([0, 0, 0], [0, 1, 2])
 
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
