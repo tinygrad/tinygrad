@@ -329,9 +329,22 @@ class UPatRealized(UPat):
   def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),))
 class UPatScheduled(UPat):
   def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),
-                                                                       UPat(*args, **{**kwargs,"name":"to_store"})))
+                                                                       UPat(*args, **{"name":"to_store",**kwargs})))
 
 # ** this is schedule level const folding
+
+def simplify_stride0_reduce(reduce:UOp, src:UOp, **kwargs) -> Optional[UOp]:
+  src_st = unwrap(src.st)
+  # must be unmasked (NOTE: can be relaxed)
+  if any(v.mask is not None for v in src_st.views): return None
+  # must have all stride 0 in the relevant axis (NOTE: can do partial)
+  if not all(src_st.views[-1].strides[axis] == 0 for axis in reduce.arg[1]): return None
+  ret = src.shrink(tuple((0,s) if i not in reduce.arg[1] else (0,1) for i,s in enumerate(src_st.shape)))
+  match reduce.arg[0]:
+    case Ops.ADD: ret = ret*prod(src_st.shape[i] for i in reduce.arg[1])
+    case Ops.MAX: pass  # NOTE: Ops.MAX is passthrough
+    case Ops.MUL: return None   # pow is not supported on UOps, TODO: handle this case
+  return ret
 
 def _as_const(u:UOp, val:ConstType) -> UOp:
   assert is_scheduled(u), f"must be scheduled to fold {u}"
@@ -341,6 +354,8 @@ def _as_const(u:UOp, val:ConstType) -> UOp:
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+  # reduce on stride 0 is collapsed
+  (UPatScheduled(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, name="src"),), name="reduce"), simplify_stride0_reduce),
 ])
 
 # ** this decides which ops get realized

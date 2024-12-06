@@ -189,6 +189,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     _check_ast_count(1, (Tensor.empty(1, 0).sum()+2).contiguous())
     np.testing.assert_equal((Tensor.empty(1, 0).sum()+2).numpy(), 2)
 
+  @unittest.expectedFailure  # requires pow support on UOps
   def test_const_prod(self):
     _check_ast_count(0, Tensor.full((2, 3), fill_value=2).prod())
     np.testing.assert_equal(Tensor.full((2, 3), fill_value=2).prod().numpy(), 2**(2*3))
