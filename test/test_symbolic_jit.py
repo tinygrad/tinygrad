@@ -180,7 +180,7 @@ class TestSymbolicJit(unittest.TestCase):
     jf = TinyJit(f)
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
-      t = Tensor.ones(i)
+      t = Tensor.ones(i).contiguous()
       symbolic = jf(t.reshape(vi)).item()
       expected = f(t).item()
       np.testing.assert_equal(symbolic, expected)

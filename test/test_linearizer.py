@@ -1226,9 +1226,12 @@ class TestLinearizer(unittest.TestCase):
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
     sched = [si for si in create_schedule([t.lazydata]) if si.ast.op is Ops.SINK]
-    assert len(sched) == 1
-    lin = Kernel(sched[0].ast)
-    assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
+    assert len(sched) == 0
+    assert t.item() == 2*256*256
+    # sum_collapse is a full collapse now
+    #assert len(sched) == 1
+    #lin = Kernel(sched[0].ast)
+    #assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
 
   def test_assign_fold(self):
     a = Tensor.ones(4, 4).contiguous().realize()
