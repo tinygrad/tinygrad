@@ -333,7 +333,7 @@ class UPatScheduled(UPat):
 
 # ** this is schedule level const folding
 
-def simplify_stride0_reduce(reduce:UOp, src:UOp, **kwargs) -> Optional[UOp]:
+def simplify_stride0_reduce(reduce:UOp, src:UOp, base:UOp, b:UOp) -> Optional[UOp]:
   src_st = unwrap(src.st)
   # must be unmasked (NOTE: can be relaxed if not masked on stride 0 axis)
   if any(v.mask is not None for v in src_st.views): return None
@@ -345,7 +345,7 @@ def simplify_stride0_reduce(reduce:UOp, src:UOp, **kwargs) -> Optional[UOp]:
     case Ops.MAX: pass  # NOTE: Ops.MAX is passthrough
     case Ops.MUL: return None   # pow is not supported on UOps, TODO: handle this case
     case _: return None
-  return ret
+  return UOp(Ops.VIEW, ret.dtype, (b, ret), unwrap(base.st))
 
 def _as_const(u:UOp, val:ConstType) -> UOp:
   assert is_scheduled(u), f"must be scheduled to fold {u}"
