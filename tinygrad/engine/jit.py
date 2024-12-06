@@ -8,7 +8,7 @@ from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.ops import UOp, ssimplify, Variable, sint, sym_infer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer, CompiledRunner, Runner
+from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferCopy, BufferXfer, CompiledRunner, Runner
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from dataclasses import dataclass
@@ -268,6 +268,8 @@ class TinyJit(Generic[ReturnType]):
           if any(b in depends for b in ei.bufs):
             if isinstance(ei.prg, CompiledRunner):
               depends.update(cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs)
+            if isinstance(ei.prg, (BufferCopy, BufferXfer)):
+              depends.add(cast(Buffer, ei.bufs[0]))
         pruned, onetime = partition(jit_cache,
                                     lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
