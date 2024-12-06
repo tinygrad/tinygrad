@@ -3632,8 +3632,15 @@ class Tensor(SimpleMathTrait):
     t = t.cast(dtypes.int32)
     print(t.dtype, t.numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.cast(dtypes.uint8)
+    print(t.dtype, t.numpy())
+    ```
     """
-    return self if self.dtype == (dt:=to_dtype(dtype)) else F.Cast.apply(self, dtype=dt)
+    if (dt:=to_dtype(dtype)) in {dtypes.uint8, dtypes.uint16} and dtypes.is_float(self.dtype):
+      # NOTE: values within the int32 range and outside the unsigned dtype range will cause values to wrap around
+      return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int32), dtype=dt)
+    return self if self.dtype == dt else F.Cast.apply(self, dtype=dt)
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
