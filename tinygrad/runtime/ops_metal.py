@@ -174,7 +174,7 @@ class MetalAllocator(LRUAllocator):
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
-    return to_mv(cast(int, msg(src.buf, "contents", restype=objc_id).value), src.size)[src.offset:]
+    return to_mv(cast(int, msg(src.buf, "contents", restype=objc_id).value), src.size + src.offset)[src.offset:]
   def _copyin(self, dest:MetalBuffer, src:memoryview): self._as_buffer(dest)[:] = src
   def _copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self._as_buffer(src)
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
