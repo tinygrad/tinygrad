@@ -127,7 +127,7 @@ def get_late_rewrite_patterns(ops, force_transcendental=False):
   # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
   if Ops.AND in ops:
     pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
-  # rewrite MUL/IDIV to SHL+SHR: (2**y)*x -> shl(x,y) and x//(2**y) -> shr(x,y)
+  # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops and Ops.SHR in ops:
     pat += [
       (UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << powers_of_two[c.arg] if c.arg in powers_of_two else None),
