@@ -8,15 +8,17 @@ import numpy as np
 import functools
 from typing import List, Optional, Union, cast
 
+from torch import wait
+
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import UOp, Ops, graph_rewrite, track_rewrites, view_supported_devices
+from tinygrad.ops import GroupOp, UOp, Ops, graph_rewrite, track_rewrites, view_supported_devices
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule, view_right, view_left, do_realize
+from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, full_ast_rewrite, view_right, view_left, do_realize
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
 from tinygrad.engine.lazy import LazyBuffer
 from extra.models.llama import precompute_freqs_cis
@@ -1961,6 +1963,14 @@ class TestBigGraph(unittest.TestCase):
     big_graph = big_graph_rewrite(out.sink(), realizes:={})
     self.assertIs(big_graph, out.sink())
     self.assertEqual(len(realizes), 1)
+
+  def test_early_fold_const_ops(self):
+    st = ShapeTracker.from_shape((2925,)).to_uop()
+    load = UOp(Ops.LOAD, dtypes.float, arg=None, src=(UOp.new_buffer(Device.DEFAULT, st.size, dtypes.float), st,))
+    ast = UOp.store(UOp.new_buffer(Device.DEFAULT, st.size, dtypes.float), st, load*(UOp.const(dtypes.float, 11)*UOp.const(dtypes.float, 1)))
+    assert len([x for x in ast.toposort if x.op in GroupOp.ALU]) == 2
+    ast, _ = full_ast_rewrite(ast.sink(), ScheduleContext())
+    assert len([x for x in ast.toposort if x.op in GroupOp.ALU]) == 1
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
