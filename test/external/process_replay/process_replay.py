@@ -54,6 +54,7 @@ def diff(offset:int, name:str, fxn:Callable) -> Union[Tuple[int, int], bool]:
     # try recreate
     try:
       with Context(**{k:v for k,v in args[-2].items() if k in ContextVar._cache and k != "DEBUG"}): good = fxn(*args[:-2])
+      if good is None: continue
     except Exception as e:
       logging.warning(f"FAILED TO RECREATE KERNEL {e}")
       for x in args[:-1]: logging.info(x)
