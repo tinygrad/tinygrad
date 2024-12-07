@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Any
 import contextlib, decimal, statistics, random, json, atexit, time, ctypes, array
-from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv, to_mv
+from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator
 from tinygrad.ops import sym_infer, sint, Variable
@@ -13,6 +13,15 @@ DeviceType = TypeVar('DeviceType', bound='HCQCompiled')
 ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
+
+class BumpAllocator:
+  def __init__(self, size:int, start:int=0, wrap:bool=True): self.size, self.ptr, self.start_off, self.wrap = size, 0, start, wrap
+  def alloc(self, size:int, alignment:int=1) -> int:
+    if round_up(self.ptr, alignment) + size > self.size:
+      if not self.wrap: raise RuntimeError("Out of memory")
+      self.ptr = 0
+    self.ptr = (res:=round_up(self.ptr, alignment)) + size
+    return res + self.start_off
 
 class HWQueue(Generic[SignalType, DeviceType, ProgramType, ArgsStateType]):
   """
@@ -257,7 +266,7 @@ class HCQProgram(Generic[DeviceType]):
     Returns:
       Arguments state with the given buffers and values set for the program.
     """
-    return self.args_state_t(kernargs_ptr or self.dev._alloc_kernargs(self.kernargs_alloc_size), self, bufs, vals=vals)
+    return self.args_state_t(kernargs_ptr or self.dev.kernargs_alloctor.alloc(self.kernargs_alloc_size), self, bufs, vals=vals)
 
   def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
                vals:Tuple[int, ...]=(), wait:bool=False) -> Optional[float]:
@@ -333,7 +342,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   gpu2cpu_copy_time_diff: decimal.Decimal = decimal.Decimal('nan')
   gpu2cpu_compute_time_diff: decimal.Decimal = decimal.Decimal('nan')
 
-  def __init__(self, device:str, allocator:HCQAllocator, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
+  def __init__(self, device:str, allocator:HCQAllocatorBase, renderer:Renderer, compiler:Compiler, runtime, signal_t:Type[SignalType],
                comp_queue_t:Type[HWQueue], copy_queue_t:Optional[Type[HWQueue]]):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
@@ -349,7 +358,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
     self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferSpec(cpu_access=True))
-    self.kernargs_ptr:int = self.kernargs_page.va_addr
+    self.kernargs_alloctor = BumpAllocator(self.kernargs_page.size, start=self.kernargs_page.va_addr, wrap=True)
     self.devices.append(self)
 
   def synchronize(self):
@@ -362,14 +371,6 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     if PROFILE:
       self.raw_prof_records += [(st.timestamp, en.timestamp, name, is_cp, None) for st, en, name, is_cp in self.sig_prof_records]
       self.sig_prof_records = []
-
-  def _alloc_kernargs(self, alloc_size:int) -> int:
-    """
-    Allocates space for arguments passed to the kernel.
-    """
-    if self.kernargs_ptr >= (self.kernargs_page.va_addr + self.kernargs_page.size - alloc_size): self.kernargs_ptr = self.kernargs_page.va_addr
-    self.kernargs_ptr = (res:=self.kernargs_ptr) + alloc_size
-    return res
 
   def _ensure_shared_time_base(self):
     if not self.gpu2cpu_compute_time_diff.is_nan(): return
@@ -445,12 +446,12 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   def _wrap_timeline_signal(self):
     self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
     self.timeline_signal.value = 0
-    cast(HCQAllocator, self.allocator).b_timeline = [0] * len(cast(HCQAllocator, self.allocator).b)
+    cast(HCQAllocatorBase, self.allocator).b_timeline = [0] * len(cast(HCQAllocatorBase, self.allocator).b)
 
 # Protocol for hcq compatible allocators for allocated buffers to contain VA address and it's size.
 class HCQBuffer(Protocol): va_addr:int; size:int # noqa: E702
 
-class HCQAllocator(LRUAllocator, Generic[DeviceType]):
+class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):
   """
   A base allocator class compatible with the HCQ (Hardware Command Queue) API.
 
@@ -463,8 +464,13 @@ class HCQAllocator(LRUAllocator, Generic[DeviceType]):
     self.b_timeline, self.b_next = [0] * len(self.b), 0
     super().__init__()
 
-  def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer: raise NotImplementedError("need hcq compat alloc")
+  def map(self, buf:HCQBuffer): pass
 
+  def _offset(self, buf, size:int, offset:int) -> HCQBuffer:
+    return type(buf)(va_addr=buf.va_addr + offset, size=size, **{k:v for k,v in buf.__dict__.items() if k not in ['va_addr', 'size']},
+                     **{x[0]:getattr(buf, x[0]) for x in getattr(buf, '_fields_', []) if x[0] not in ['va_addr', 'size']}, _base=buf)
+
+class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
   def _copyin(self, dest:HCQBuffer, src:memoryview):
     assert self.dev.hw_copy_queue_t is not None
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"CPU -> {self.dev.device}", enabled=PROFILE):
@@ -525,9 +531,3 @@ class HCQAllocator(LRUAllocator, Generic[DeviceType]):
                                    .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
                                    .signal(dest_dev.timeline_signal, dest_dev.timeline_value).submit(dest_dev)
       dest_dev.timeline_value += 1
-
-  def map(self, buf:HCQBuffer): pass
-
-  def _offset(self, buf, size:int, offset:int) -> HCQBuffer:
-    return type(buf)(va_addr=buf.va_addr + offset, size=size, **{k:v for k,v in buf.__dict__.items() if k not in ['va_addr', 'size']},
-                     **{x[0]:getattr(buf, x[0]) for x in getattr(buf, '_fields_', []) if x[0] not in ['va_addr', 'size']}, _base=buf)

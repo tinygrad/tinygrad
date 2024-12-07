@@ -4,7 +4,7 @@ assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Tuple, List, Any, cast, Optional
 from tinygrad.device import BufferSpec
-from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQSignal, HCQAllocator, HCQArgsState
+from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
@@ -86,7 +86,7 @@ class QCOMComputeQueue(HWQueue):
     return self
 
   def _build_gpu_command(self, dev:QCOMDevice, hw_addr=None):
-    to_mv((hw_page_addr:=hw_addr or dev._alloc_cmd_buf(len(self._q) * 4)), len(self._q) * 4).cast('I')[:] = array.array('I', self._q)
+    to_mv((hw_page_addr:=hw_addr or dev.cmd_buf_allocator.alloc(len(self._q) * 4)), len(self._q) * 4).cast('I')[:] = array.array('I', self._q)
     obj = kgsl.struct_kgsl_command_object(gpuaddr=hw_page_addr, size=len(self._q) * 4, flags=kgsl.KGSL_CMDLIST_IB)
     submit_req = kgsl.struct_kgsl_gpu_command(cmdlist=ctypes.addressof(obj), numcmds=1, context_id=dev.ctx,
                                               cmdsize=ctypes.sizeof(kgsl.struct_kgsl_command_object))
@@ -147,7 +147,7 @@ class QCOMComputeQueue(HWQueue):
                                                                  state_block=adreno.SB6_CS_TEX, num_unit=args_state.prg.samp_cnt),
                *data64_le(args_state.ptr + args_state.prg.samp_off))
       self.reg(adreno.REG_A6XX_SP_CS_TEX_SAMP, *data64_le(args_state.ptr + args_state.prg.samp_off))
-      self.reg(adreno.REG_A6XX_SP_PS_TP_BORDER_COLOR_BASE_ADDR, *data64_le(prg.dev._border_color_base()))
+      self.reg(adreno.REG_A6XX_SP_PS_TP_BORDER_COLOR_BASE_ADDR, *data64_le(prg.dev.border_color_buf.va_addr))
 
     if args_state.prg.tex_cnt > 0:
       self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
@@ -276,7 +276,7 @@ class QCOMBuffer(HCQBuffer):
     # Texture specific definitions
     self.desc, self.ibo, self.pitch, self.real_stride = [0] * 16, [0] * 16, pitch, real_stride
 
-class QCOMAllocator(HCQAllocator):
+class QCOMAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     if options.image is not None:
       imgw, imgh, itemsize_log = options.image.shape[1], options.image.shape[0], int(math.log2(options.image.itemsize))
@@ -336,27 +336,30 @@ class QCOMDevice(HCQCompiled):
     QCOMDevice.dummy_addr = self._gpu_alloc(0x1000).va_addr
     QCOMDevice.signals_page = self._gpu_alloc(16 * 65536, uncached=True)
     QCOMDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, self.signals_page.size, 16)]
-    info, self.ctx, self.cmd_buf, self.cmd_buf_ptr, self.last_cmd = self._info(), self._ctx_create(), self._gpu_alloc(16 << 20), 0,0
+
+    flags = kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC \
+              | kgsl.KGSL_CONTEXT_PRIORITY(8) | kgsl.KGSL_CONTEXT_PREEMPT_STYLE(kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN)
+    self.ctx = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=flags).drawctxt_id
+
+    self.cmd_buf = self._gpu_alloc(16 << 20)
+    self.cmd_buf_allocator = BumpAllocator(size=self.cmd_buf.size, start=self.cmd_buf.va_addr, wrap=True)
+
+    self.border_color_buf = self._gpu_alloc(0x1000, fill_zeroes=True)
+
+    self.last_cmd:int = 0
+
+    # Set max power
+    struct.pack_into('IIQQ', pwr:=memoryview(bytearray(0x18)), 0, 1, self.ctx, mv_address(_:=memoryview(array.array('I', [1]))), 4)
+    kgsl.IOCTL_KGSL_SETPROPERTY(self.fd, type=kgsl.KGSL_PROP_PWR_CONSTRAINT, value=mv_address(pwr), sizebytes=pwr.nbytes)
+
+    # Load info about qcom device
+    info = kgsl.struct_kgsl_devinfo()
+    kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
     QCOMDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
     if QCOMDevice.gpu_id >= 700: raise RuntimeError(f"Unsupported GPU: {QCOMDevice.gpu_id}")
 
     super().__init__(device, QCOMAllocator(self), QCOMRenderer(), QCOMCompiler(device), functools.partial(QCOMProgram, self),
                      QCOMSignal, QCOMComputeQueue, None)
-
-  def _ctx_create(self):
-    cr = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=(kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT |
-          kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC | kgsl.KGSL_CONTEXT_PRIORITY(8) |
-          kgsl.KGSL_CONTEXT_PREEMPT_STYLE(kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN)))
-
-    # Set power to maximum.
-    struct.pack_into('IIQQ', pwr:=memoryview(bytearray(0x18)), 0, 1, cr.drawctxt_id, mv_address(_:=memoryview(array.array('I', [1]))), 4)
-    kgsl.IOCTL_KGSL_SETPROPERTY(self.fd, type=kgsl.KGSL_PROP_PWR_CONSTRAINT, value=mv_address(pwr), sizebytes=pwr.nbytes)
-    return cr.drawctxt_id
-
-  def _info(self):
-    info = kgsl.struct_kgsl_devinfo()
-    kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
-    return info
 
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False):
     flags |= kgsl.KGSL_MEMALIGN(alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP
@@ -371,14 +374,6 @@ class QCOMDevice(HCQCompiled):
   def _gpu_free(self, mem):
     kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.info.id)
     libc.munmap(mem.va_addr, mem.info.mmapsize)
-
-  def _alloc_cmd_buf(self, sz: int):
-    self.cmd_buf_ptr = (cur_ptr:=self.cmd_buf_ptr if self.cmd_buf_ptr + sz < self.cmd_buf.size else 0) + sz
-    return self.cmd_buf.va_addr + cur_ptr
-
-  def _border_color_base(self):
-    if not hasattr(self, '_border_color_gpu'): self._border_color_gpu = self._gpu_alloc(0x1000, fill_zeroes=True)
-    return self._border_color_gpu.va_addr
 
   def _ensure_stack_size(self, sz):
     if not hasattr(self, '_stack'): self._stack = self._gpu_alloc(sz)

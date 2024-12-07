@@ -387,7 +387,7 @@ jobs:
           WEBGPU=1 WGPU_BACKEND_TYPE=Vulkan python3 -m pytest -n=auto test/test_assign.py test/test_arange.py test/test_const_folding.py test/test_dtype.py \
           test/test_dtype_alu.py test/test_conv.py test/test_conv_shapetracker.py test/test_nn.py test/test_ops.py test/test_optim.py \
           test/test_jit.py test/test_randomness.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_uops_stats.py test/test_uops.py \
-          test/testextra/test_export_model.py --durations=20
+          test/testextra/test_export_model.py test/testextra/test_f16_decompress.py --durations=20
     - name: Run process replay tests
       run: |
         export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
@@ -439,7 +439,7 @@ jobs:
     - name: Test Beam Search
       run: PYTHONPATH="." METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
     - name: Fuzz Test linearizer
-      run: PYTHONPATH="." METAL=1 FUZZ_ALL_ACTIONS=1 DEPTH=2 FUZZ_N=24 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
+      run: PYTHONPATH="." METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
     # - name: Fuzz Test models schedule
     # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run TRANSCENDENTAL math

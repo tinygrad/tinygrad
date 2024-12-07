@@ -51,6 +51,7 @@ def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2
 
 def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache:Dict[LazyBuffer, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
+  # view is passthrough
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, buffers, cache).view(buf.st)
     return ret
@@ -64,25 +65,29 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     # hack the underlying buffer too
     buf.buffer.dtype = dtype
     buf.buffer.options = None
-  if buf.is_realized:
-    ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
-    buffers[ubuf] = buf.buffer
-    op = None
-  elif buf.op is Ops.ASSIGN:
-    target, new_val = [to_uop(x, ctx, buffers, cache) for x in buf.srcs]
-    ctx.assigns.add(ubuf:=target.base.buf_uop)
-    op = UOp(Ops.ASSIGN, dtype.base, (ubuf, new_val), buf.arg)
-  else:
-    ubuf = UOp.new_buffer(buf.device, buf.size, dtype)
-    buffers[ubuf] = buf.buffer
-    op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
-  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (ubuf,) if op is None else (ubuf, op.contiguous() if buf.forced_realize else op), buf.st)
+  # base is a VIEW of (BUFFER, (optional) op)
+  match buf.is_realized:
+    case True:
+      buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
+      op = None
+    case False:
+      src = tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs)
+      match buf.op:
+        # ASSIGN uses the target buffer
+        case Ops.ASSIGN: buf_uop = src[0].base.buf_uop
+        # otherwise we create a new buffer
+        case _: buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
+      op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, src, buf.arg)
+  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.contiguous() if buf.forced_realize else op), buf.st)
+  # keep track of ops outside the big graph
+  buffers[buf_uop] = buf.buffer
   if op is not None:
     buf.buffer.ref(1)
-    ctx.lazybufs[ubuf] = buf
-    ctx.allbufs[ubuf] = ret
+    ctx.lazybufs[buf_uop] = buf
+    ctx.allbufs[buf_uop] = ret
+    if op.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
     for x in op.src:
-      if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[ubuf] = None
+      if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
   return ret
 
 # **** AST graph rewrite
@@ -106,23 +111,18 @@ def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
   return apply_swizzle(src, new_input_st).r(r.arg[0], new_axis).view(ShapeTracker.from_shape(st.shape))
 
 def push_swizzle_down_through_reduce(r:UOp, v:UOp, src:UOp) -> UOp:
-  swizzle_st, src_st = unwrap(v.st), unwrap(src.st)
-  assert swizzle_st.contiguous, "can't push a non contiguous VIEW down to STORE"
-  assert prod(swizzle_st.shape) == prod(src_st.shape), "can't push expands down to STORE"
+  if not (swizzle_st:=unwrap(v.st)).contiguous or v.size != src.size: raise AssertionError(f"can't push {v} down through {src}")
   output_shape = swizzle_st.reduce(r.axis_arg)
-  new_axis = tuple(i for i,(s,u) in enumerate(zip(src_st.shape, output_shape)) if s != u)
-  return src.r(r.arg[0], new_axis).view(ShapeTracker.from_shape(output_shape))
+  return src.r(r.arg[0], tuple(i for i,(s,u) in enumerate(zip(src.shape, output_shape)) if s != u)).view(ShapeTracker.from_shape(output_shape))
 
 def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   if not (swizzles := [x for x in root.src if x.base is not x]): return None
-  swizzle_shapes = [(unwrap(x.st).shape, unwrap(x.src[0].st).shape) for x in swizzles]
-  assert all_same([(x, prod(y)) for x,y in swizzle_shapes]), f"swizzles must have the same size {swizzle_shapes}"
-  new_shape, new_input_shape = swizzle_shapes[0]
-  new_src = tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x, ShapeTracker.from_shape(new_input_shape)) for x in root.src)
-  ret = root.replace(src=new_src)
+  assert all_same([(x.shape, prod(x.src[0].shape)) for x in swizzles]), f"swizzles must have the same size {swizzles}"
+  new_input_st = ShapeTracker.from_shape(swizzles[0].src[0].shape)
+  ret = root.replace(src=tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x, new_input_st) for x in root.src))
   # update the ASSIGN offset to match the new shape
-  if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+ShapeTracker.from_shape(new_input_shape),)
-  return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(new_shape))
+  if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+new_input_st,)
+  return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(swizzles[0].shape))
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
@@ -183,7 +183,9 @@ to_si = PatternMatcher([
 # ** fusion
 
 lazy = PatternMatcher([
+  # gather the metadata for this kernel
   (UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.metadata.add(m) if (m:=ctx.ops_metadata.get(x)) is not None else None),
+  # don't need contiguous anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
 ])
 
@@ -380,6 +382,8 @@ do_realize = PatternMatcher([
   (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
   # realize before COPY or BUFFER_VIEW
   (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
+  # ASSIGN only needs the buffer
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, name="dest"), UPat.var("src")), name="x"), lambda ctx,dest,src,x: x.replace(src=(dest.base.buf_uop, src))),
 ])
 
 # ** this breaks down realized ops into STOREs and rewrites the ops to LOADs
