@@ -179,7 +179,7 @@ class QCOMArgsState(HCQArgsState):
     for cnst_val, cnst_off, cnst_sz in prg.consts_info: to_mv(self.ptr + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
     if prg.samp_cnt > 0: to_mv(self.ptr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
-    for i, b in enumerate(cast(List[QCOMBuffer], bufs)):
+    for i, b in enumerate(cast(List[HCQBuffer], bufs)):
       if prg.buf_info[i].type in {BUFTYPE_TEX, BUFTYPE_IBO}:
         obj = b.texture_info.desc if prg.buf_info[i].type is BUFTYPE_TEX else b.texture_info.ibo
         to_mv(self.ptr + prg.buf_info[i].offset, len(obj) * 4).cast('I')[:] = array.array('I', obj)
@@ -269,13 +269,6 @@ class QCOMProgram(HCQProgram):
 
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, options=BufferSpec(cpu_access=True, nolru=True))
-
-class QCOMBuffer(HCQBuffer):
-  def __init__(self, va_addr:int, size:int, info=None, mapped=False, desc=None, ibo=None, pitch=None, real_stride=None, **kwargs):
-    self.va_addr, self.size, self.info, self.mapped = va_addr, size, info, mapped
-
-    # Texture specific definitions
-    self.desc, self.ibo, self.pitch, self.real_stride = [0] * 16, [0] * 16, pitch, real_stride
 
 class QCOMTextureInfo:
   def __init__(self, pitch:int, real_stride:int, desc:List[int], ibo:List[int]):
