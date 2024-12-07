@@ -122,7 +122,6 @@ backend_test.exclude('test_affine_grid_3d_expanded_cpu')
 backend_test.exclude('test_range_int32_type_negative_delta_expanded_cpu')
 
 # unsupported (strange) ops
-backend_test.exclude('test_bitwise_*')
 backend_test.exclude('test_blackmanwindow_*')
 backend_test.exclude('test_bernoulli_*')
 backend_test.exclude('test_det_*')
