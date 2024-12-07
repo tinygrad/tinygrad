@@ -253,13 +253,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert all_same([x.shape for x in src_sts]), f"UOp parents must have the same shape {self} {[x.shape for x in src_sts]}"
     # all other ops have a contiguous shapetracker
     from tinygrad.shape.shapetracker import ShapeTracker
-  @functools.cached_property
-  def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
-    # NOTE: this sort of DEFINE_VAR shouldn't have to be here. only for PTX
-    if self.op is UOps.DEFINE_VAR: arg = self.arg[0]
-    elif self.op is UOps.ALU: arg = self.arg.value
-    else: arg = self.arg
-    return (self.op.value, arg, self.dtype, self.src)
+    return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg) if self.op in (Ops.REDUCE_AXIS, Ops.WMMA) else src_sts[0].shape)
+
   def __hash__(self): return hash(self.cmp_tuple)
   def __eq__(self, other):
     if not isinstance(other, UOp): return False
@@ -269,7 +264,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self.src == other.src
   def __ne__(self, other): return not (self == other)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
-    return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg) if self.op in (Ops.REDUCE_AXIS, Ops.WMMA) else src_sts[0].shape)
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
