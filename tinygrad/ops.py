@@ -164,6 +164,14 @@ class UOp(MathTrait):
     elif self.op is UOps.ALU: arg = self.arg.value
     else: arg = self.arg
     return (self.op.value, arg, self.dtype, self.src)
+  def __hash__(self): return hash(self.cmp_tuple)
+  def __eq__(self, other):
+    if not isinstance(other, UOp): return False
+    if not (self.op == other.op and self.dtype == other.dtype and self.arg == other.arg and len(self.src) == len(other.src)): return False
+    if self.op == UOps.ALU and self.arg in COMMUTATIVE:
+      return set(self.src) == set(other.src)
+    return self.src == other.src
+  def __ne__(self, other): return not (self == other)
   def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
   @functools.cached_property
   def key(self) -> bytes:
