@@ -5,10 +5,7 @@ if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
 if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
 if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
 
-<<<<<<< Updated upstream
 from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters, Device
-=======
-from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters
 >>>>>>> Stashed changes
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.tensor import _from_np_dtype
