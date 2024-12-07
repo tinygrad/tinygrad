@@ -156,8 +156,9 @@ class LazyBuffer(MathTrait):
     out_dtype = dtypes.bool if op in (Ops.CMPLT, Ops.CMPNE) else srcs[-1].dtype
 
     # const folding
-    if op in python_alu and all(s.is_unrealized_unmasked_const() for s in srcs):
-      return self.cast(out_dtype).const_like(exec_alu(op, out_dtype, [s.base.arg for s in srcs]))
+    # TODO: this is causing a bug in test_std_mean, why is the NAN folding?
+    # if op in python_alu and all(s.is_unrealized_unmasked_const() for s in srcs):
+    #  return self.cast(out_dtype).const_like(exec_alu(op, out_dtype, [s.base.arg for s in srcs]))
     if op in GroupOp.Binary:
       x, y = self, in_srcs[0]
       if op is Ops.ADD:
