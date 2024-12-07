@@ -3,6 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
+from tinygrad.ops import sint, identity_element
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -330,19 +331,38 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
 class UPatRealized(UPat):
   def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),))
 class UPatScheduled(UPat):
-  def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),
-                                                                       UPat(*args, **{**kwargs,"name":"to_store"})))
+  def __init__(self, *args, **kwargs):
+    super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),
+                                                 UPat.any(op:=UPat(*args, **{"name":"to_store",**kwargs}), UPat(Ops.CONTIGUOUS, src=(op,)))))
 
 # ** this is schedule level const folding
 
-def _as_const(u:UOp, val:ConstType) -> UOp:
+def _as_const(u:UOp, val:ConstType) -> Optional[UOp]:
   assert is_scheduled(u), f"must be scheduled to fold {u}"
   st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
-  return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
+  const_op = UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base)
+  if u.src[1].op is Ops.CONTIGUOUS: ret = UOp(Ops.VIEW, u.dtype, (u.buf_uop, const_op.view(st).contiguous()), ShapeTracker.from_shape(st.shape))
+  else: ret = const_op.view(st)
+  return None if ret is u else ret
+
+def collapse_reduceop(op:Ops, const:ConstType, prshape:int) -> ConstType:
+  match op:
+    case Ops.MAX: return const # max is passthrough
+    case Ops.ADD: return const*prshape
+    # TODO: support pow on UOp once symbolic shape matches too
+    case Ops.MUL: return const**prshape
+    case _: raise AssertionError(f"unhandled reduceop alu {op}")
 
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+  # reduce of size 0 is the identity element
+  (UPatScheduled(Ops.REDUCE_AXIS, src=(UPat.var("x"),), name="reduceop"), lambda ctx,b,reduceop,x,base:
+   _as_const(base, identity_element(reduceop.arg[0], base.dtype)) if 0 in x.shape and 0 not in reduceop.shape else None),
+  # reduce of unmasked const can collapse
+  (UPatScheduled(Ops.REDUCE_AXIS, src=(UPat.any(src:=UPat(Ops.VIEW, src=(UPat(), UPat.cvar("const"))), src.view(),)), name="reduceop"),
+   lambda ctx,b,reduceop,base,const: _as_const(base, collapse_reduceop(reduceop.arg[0], const.arg, prod(st.shape[i] for i in reduceop.arg[1]),))
+   if all_int((st:=reduceop.src[0].st).shape) and all(v.mask is None for v in st.views) else None),
 ])
 
 # ** this decides which ops get realized
