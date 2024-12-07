@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Optional, Dict, Tuple, cast, Protocol, Type, Union, TypeVar, Generic, Any
+from typing import List, Optional, Dict, Tuple, cast, Type, Union, TypeVar, Generic, Any
 import contextlib, decimal, statistics, random, json, atexit, time, ctypes, array
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv, to_mv, round_up
 from tinygrad.renderer import Renderer
@@ -448,8 +448,9 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.timeline_signal.value = 0
     cast(HCQAllocatorBase, self.allocator).b_timeline = [0] * len(cast(HCQAllocatorBase, self.allocator).b)
 
-# Protocol for hcq compatible allocators for allocated buffers to contain VA address and it's size.
-class HCQBuffer(Protocol): va_addr:int; size:int # noqa: E702
+class HCQBuffer:
+  def __init__(self, va_addr:int, size:int, texture_info:Any=None, _md:Any=None, _base:Optional[HCQBuffer]=None):
+    self.va_addr, self.size, self.texture_info, self._md, self._base = va_addr, size, texture_info, _md, _base
 
 class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):
   """
@@ -467,8 +468,7 @@ class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):
   def map(self, buf:HCQBuffer): pass
 
   def _offset(self, buf, size:int, offset:int) -> HCQBuffer:
-    return type(buf)(va_addr=buf.va_addr + offset, size=size, **{k:v for k,v in buf.__dict__.items() if k not in ['va_addr', 'size']},
-                     **{x[0]:getattr(buf, x[0]) for x in getattr(buf, '_fields_', []) if x[0] not in ['va_addr', 'size']}, _base=buf)
+    return HCQBuffer(va_addr=buf.va_addr + offset, size=size, texture_info=buf.texture_info, _md=buf._md, _base=buf._base or buf)
 
 class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
   def _copyin(self, dest:HCQBuffer, src:memoryview):

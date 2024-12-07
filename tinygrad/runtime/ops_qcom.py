@@ -276,8 +276,13 @@ class QCOMBuffer(HCQBuffer):
     # Texture specific definitions
     self.desc, self.ibo, self.pitch, self.real_stride = [0] * 16, [0] * 16, pitch, real_stride
 
+class QCOMTextureInfo:
+  def __init__(self, pitch:int, real_stride:int, desc:List[int], ibo:List[int]):
+    self.pitch, self.real_stride, self.desc, self.ibo = pitch, real_stride, desc, ibo
+
 class QCOMAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
+    # Recalculate real size for texture
     if options.image is not None:
       imgw, imgh, itemsize_log = options.image.shape[1], options.image.shape[0], int(math.log2(options.image.itemsize))
       pitchalign = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6
@@ -286,22 +291,17 @@ class QCOMAllocator(HCQAllocatorBase):
       granularity = 128 if options.image.itemsize == 4 else 256
       pitch_add = (1 << pitchalign) if min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2 else 0
       pitch = round_up((real_stride:=imgw * 4 * options.image.itemsize), 1 << pitchalign) + pitch_add
+      size = pitch * imgh
 
-      if options.external_ptr: texture = QCOMBuffer(options.external_ptr, size)
-      else: texture = self.dev._gpu_alloc(pitch * imgh, kgsl.KGSL_MEMTYPE_TEXTURE)
+    buf = HCQBuffer(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
 
-      texture.pitch, texture.real_stride = pitch, real_stride
+    if options.image is not None:
+      desc = [qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt), qreg.a6xx_tex_const_1(width=imgw, height=imgh),
+              qreg.a6xx_tex_const_2(type=adreno.A6XX_TEX_2D, pitch=pitch, pitchalign=pitchalign-6),
+              *data64_le(buf.va_addr), qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13)]
 
-      tex_fmt = adreno.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else adreno.FMT6_16_16_16_16_FLOAT
-      texture.desc[0] = qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt)
-      texture.desc[1] = qreg.a6xx_tex_const_1(width=imgw, height=imgh)
-      texture.desc[2] = qreg.a6xx_tex_const_2(type=adreno.A6XX_TEX_2D, pitch=texture.pitch, pitchalign=pitchalign-6)
-      texture.desc[4:8] = [*data64_le(texture.va_addr), qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13)]
-      texture.ibo = [texture.desc[0] & (~0xffff), *texture.desc[1:len(texture.desc)]]
-
-      return texture
-
-    return QCOMBuffer(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
+      buf.texture_info = QCOMTextureInfo(pitch, real_stride, desc, [desc[0] & (~0xffff), *desc[1:len(desc)]])
+    return buf
 
   def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, dest_off=0, src_off=0):
     while src_off < src_size:
@@ -309,13 +309,14 @@ class QCOMAllocator(HCQAllocatorBase):
       src_off, dest_off = src_off+src_stride, dest_off+dest_stride
 
   def _copyin(self, dest:HCQBuffer, src:memoryview):
-    if (qd:=cast(QCOMBuffer, dest)).pitch is not None: self._do_copy(mv_address(src), qd.va_addr, len(src), qd.real_stride, qd.real_stride, qd.pitch)
-    else: ctypes.memmove(dest.va_addr, mv_address(src), src.nbytes)
+    stride, pitch = (src.nbytes, src.nbytes) if (ti:=cast(QCOMTextureInfo, dest.texture_info)) is None else (ti.real_stride, ti.pitch)
+    self._do_copy(mv_address(src), dest.va_addr, src.nbytes, stride, stride, pitch)
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
-    if (qs:=cast(QCOMBuffer, src)).pitch is not None: self._do_copy(qs.va_addr, mv_address(dest), qs.size, qs.real_stride, qs.pitch, qs.real_stride)
-    else: ctypes.memmove(from_mv(dest), src.va_addr, dest.nbytes)
+
+    stride, pitch = (src.size, src.size) if (ti:=cast(QCOMTextureInfo, src.texture_info)) is None else (ti.real_stride, ti.pitch)
+    self._do_copy(src.va_addr, mv_address(dest), src.size, stride, pitch, stride)
 
   def _as_buffer(self, src:HCQBuffer) -> memoryview:
     self.dev.synchronize()
@@ -361,7 +362,7 @@ class QCOMDevice(HCQCompiled):
     super().__init__(device, QCOMAllocator(self), QCOMRenderer(), QCOMCompiler(device), functools.partial(QCOMProgram, self),
                      QCOMSignal, QCOMComputeQueue, None)
 
-  def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False):
+  def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> HCQBuffer:
     flags |= kgsl.KGSL_MEMALIGN(alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP
     if uncached: flags |= kgsl.KGSL_CACHEMODE(kgsl.KGSL_CACHEMODE_UNCACHED)
 
@@ -369,11 +370,11 @@ class QCOMDevice(HCQCompiled):
     va_addr = libc.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, self.fd, alloc.id * 0x1000)
 
     if fill_zeroes: ctypes.memset(va_addr, 0, size)
-    return QCOMBuffer(va_addr=va_addr, size=size, info=alloc)
+    return HCQBuffer(va_addr=va_addr, size=size, _md=alloc)
 
-  def _gpu_free(self, mem):
-    kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.info.id)
-    libc.munmap(mem.va_addr, mem.info.mmapsize)
+  def _gpu_free(self, mem:HCQBuffer):
+    kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem._md.id)
+    libc.munmap(mem.va_addr, mem._md.mmapsize)
 
   def _ensure_stack_size(self, sz):
     if not hasattr(self, '_stack'): self._stack = self._gpu_alloc(sz)
