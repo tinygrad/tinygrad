@@ -1340,7 +1340,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_schedule_mem_used(self):
     base = GlobalCounters.mem_used
-    Tensor.ones(256).contiguous().realize()
+    Tensor.randn(256).contiguous().realize()
     Tensor.ones(5, 5).contiguous().schedule()
     self.assertEqual(GlobalCounters.mem_used-base, 0)
 
@@ -1949,7 +1949,7 @@ class TestBigGraph(unittest.TestCase):
 
   def test_sink_childless_const_alt(self):
     x = UOp.const(dtypes.int, 0)
-    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
+    y = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 1, dtypes.int), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
     big_graph = big_graph_rewrite(UOp.sink(x, y), realizes:={})
     self.assertIs(big_graph, UOp(Ops.NOOP))
     self.assertEqual(len(realizes), 0)
