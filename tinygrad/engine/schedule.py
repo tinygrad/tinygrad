@@ -177,22 +177,9 @@ def _append_preload(ctx:ScheduleItemContext, x:UOp, b:UOp) -> UOp:
   return x.replace(op=Ops.LOAD)
 check_preload = PatternMatcher([(UPat(Ops.PRELOAD, src=(UPat.var("b"), UPat()), name="x"), _append_preload),])
 
-def collapse_reduceop(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
-  ret = x.arg
-  prshape = reduce.arg[2]
-  match reduce.arg[0]:
-    case Ops.ADD: ret *= prshape
-    case Ops.MUL: ret **= prshape
-    case Ops.MAX: pass
-    case _: return None
-  return UOp.const(x.dtype, ret)
-
 to_si = symbolic_flat+PatternMatcher([
-  # if we're loading something that ended up collapsing, just embed the CONST!
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat.cvar("x"))), lambda ctx,x:x),
   (UPat(Ops.VIEW, src=(UPat.cvar("x"),)), lambda ctx,x:x),
-  # can fold reduce of CONST
-  (UPat(Ops.REDUCE_AXIS, src=(UPat.cvar("x"),), name="reduce"), collapse_reduceop),
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
   (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,b,x: x.replace(src=(b, *x.src))),
   # unmasked VALID is just CONST
