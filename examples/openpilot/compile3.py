@@ -44,8 +44,8 @@ def compile(onnx_file):
   for i in range(3):
     GlobalCounters.reset()
     print(f"run {i}")
-    inputs = {**{k:v.clone() for k,v in new_inputs.items() if 'img' in k},
-              **{k:Tensor(v, device="NPY").realize() for k,v in new_inputs_numpy.items() if 'img' not in k}}
+    inputs = {**{k:v.clone() for k,v in new_inputs.items() if 'imgs' in k},
+              **{k:Tensor(v, device="NPY").realize() for k,v in new_inputs_numpy.items() if 'imgs' not in k}}
     with Context(DEBUG=max(DEBUG.value, 2 if i == 2 else 1)):
       ret = run_onnx_jit(**inputs).numpy()
     # copy i == 1 so use of JITBEAM is okay
@@ -84,8 +84,8 @@ def test_vs_compile(run, new_inputs, test_val=None):
   new_inputs_numpy = {k:v.numpy() for k,v in new_inputs.items()}
 
   # create fake "from_blob" tensors for the inputs, and wrapped NPY tensors for the numpy inputs (these have the same underlying memory)
-  inputs = {**{k:v for k,v in new_inputs.items() if 'img' in k},
-            **{k:Tensor(v, device="NPY").realize() for k,v in new_inputs_numpy.items() if 'img' not in k}}
+  inputs = {**{k:v for k,v in new_inputs.items() if 'imgs' in k},
+            **{k:Tensor(v, device="NPY").realize() for k,v in new_inputs_numpy.items() if 'imgs' not in k}}
 
   # run 20 times
   for _ in range(20):
