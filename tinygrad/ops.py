@@ -449,7 +449,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     buffers[self] = ret = Buffer(*self.arg[1])
     return ret
   @property
-  def realized(self) -> Optional[Buffer]: return real_buf_uop.buffer if (real_buf_uop:=realized.get(self)) is not None else None
+  def realized(self) -> Optional[Buffer]: return buffers[real_buf_uop] if (real_buf_uop:=realized.get(self)) is not None else None
   @property
   def is_realized(self) -> bool: return self.base.realized is not None
 
