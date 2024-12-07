@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQComp
 from tinygrad.runtime.autogen import kgsl, adreno, libc
 from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
-from tinygrad.helpers import getenv, from_mv, mv_address, to_mv, round_up, data64_le, prod, fromimport
+from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
