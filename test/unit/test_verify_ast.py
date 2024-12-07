@@ -78,9 +78,8 @@ class TestVerifyAST(unittest.TestCase):
     uop_sts = verify_ast(a.schedule()[-1].ast)
     store_st = [st for u,st in uop_sts.items() if u.op is Ops.STORE][0]
     self.assertEqual(store_st, ShapeTracker.from_shape((4, 4)))
-    with self.assertRaises(Exception, msg="unmasked valid folds"):
-      const_st = [st for u,st in uop_sts.items() if u.op is Ops.VALID][0]
-      self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
+    const_st = [st for u,st in uop_sts.items() if u.op is Ops.VALID][0]
+    self.assertEqual(const_st, ShapeTracker.from_shape((1, 1)).expand((4, 4)))
 
   def test_assert_swizzle(self):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)

@@ -1905,7 +1905,7 @@ class TestView(unittest.TestCase):
     b = a.pad(((0, 10), None))[10:]
     sched = check_schedule(b.contiguous(), 1)
     # TODO: this VALID can clean up, where do we need st?
-    self.assertIs(store_val(sched[-1]), UOp.const(b.dtype, 0))
+    self.assertIs(store_val(sched[-1]), UOp.const_with_shape(b.dtype, 0, b.lazydata.st.shape))
     run_schedule(sched)
     np.testing.assert_equal(b.numpy(), 0)
 
@@ -1916,7 +1916,7 @@ class TestView(unittest.TestCase):
     assert b.shape == (10, 10)
     sched = check_schedule(b.contiguous(), 1)
     self.assertEqual(sched[-1].ast.full_shape, (10, 10))
-    self.assertIs(store_val(sched[-1]), UOp.const(b.dtype, 0))
+    self.assertIs(store_val(sched[-1]), UOp.const_with_shape(b.dtype, 0, b.lazydata.st.shape))
     run_schedule(sched)
     np.testing.assert_equal(b.numpy(), 0)
 
