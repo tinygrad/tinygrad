@@ -440,7 +440,7 @@ class OpenClipEncoder:
       top = (h - SIZE) // 2
       image = image.crop((0, SIZE, top, top+SIZE))
 
-    x = Tensor(np.array(image.convert('RGB')))
+    x = Tensor(np.array(image.convert('RGB')), device=self.std.device)
     x = x.permute(2, 0, 1).cast(dtypes.float32) / 255.0
     return (x - self.mean) / self.std
 

@@ -117,11 +117,13 @@ generate_nv() {
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc56f.h \
+    $NVKERN_SRC/src/common/sdk/nvidia/inc/class/cl83de.h \
     $NVKERN_SRC/src/nvidia/generated/g_allclasses.h \
     $NVKERN_SRC/src/common/sdk/nvidia/inc/class/clc6c0.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/clc6b5.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_ioctl.h \
     $NVKERN_SRC/kernel-open/nvidia-uvm/uvm_linux_ioctl.h \
+    $NVKERN_SRC/kernel-open/nvidia-uvm/hwref/ampere/ga100/dev_fault.h \
     $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv_escape.h \
     $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl.h \
     $NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include/nv-ioctl-numbers.h \
@@ -160,6 +162,8 @@ generate_amd() {
   clang2py -k cdefstum \
     extra/hip_gpu_driver/sdma_registers.h \
     extra/hip_gpu_driver/nvd.h \
+    extra/hip_gpu_driver/kfd_pm4_headers_ai.h \
+    extra/hip_gpu_driver/soc21_enum.h \
     extra/hip_gpu_driver/sdma_v6_0_0_pkt_open.h \
     extra/hip_gpu_driver/gc_11_0_0_offset.h \
     extra/hip_gpu_driver/gc_10_3_0_offset.h \
@@ -209,7 +213,7 @@ generate_libc() {
 
   sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/libc.py
   sed -i "s\FIXME_STUB\libc\g" $BASE/libc.py
-  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(ctypes.util.find_library('c'))\g" $BASE/libc.py
+  sed -i "s\FunctionFactoryStub()\None if (libc_path := ctypes.util.find_library('c')) is None else ctypes.CDLL(libc_path)\g" $BASE/libc.py
 
   fixup $BASE/libc.py
 }

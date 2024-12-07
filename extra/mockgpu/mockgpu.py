@@ -178,7 +178,7 @@ class TrackedMemoryView:
   def __len__(self): return len(self.mv)
   def __repr__(self): return repr(self.mv)
 
-def _memoryview(mem):
+def _memoryview(cls, mem):
   if isinstance(mem, int) or isinstance(mem, ctypes.Array):
     addr = ctypes.addressof(mem) if isinstance(mem, ctypes.Array) else mem
     for d in drivers:
@@ -196,7 +196,7 @@ install_hook(libc.lseek64, _lseek64)
 install_hook(libc.stat64, _stat64)
 install_hook(libc.fstat64, _fstat64)
 install_hook(libc.getdents64, _getdents64)
-builtins.memoryview = _memoryview # type: ignore
+builtins.memoryview = type("memoryview", (), {'__new__': _memoryview}) # type: ignore
 
 # rewrite autogen's libc mmaps functions.
 import tinygrad.runtime.autogen.libc as autogen_libc

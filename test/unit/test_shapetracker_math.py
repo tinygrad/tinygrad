@@ -3,7 +3,7 @@ from typing import List
 from tinygrad.helpers import prod
 from tinygrad.shape.view import View
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable
+from tinygrad import Variable
 from test.unit.test_shapetracker import shapetracker_getitem
 
 class MultiShapeTracker:
@@ -109,7 +109,6 @@ class TestShapeTrackerAddVariable(unittest.TestCase):
     vm2 = View(shape=(var_i, var_j, 3), strides=(var_j*3, 3, 1), offset=0, mask=None, contiguous=True)
     ShapeTracker((vm1,)) + ShapeTracker((vm2,))
 
-  @unittest.skip("two vars not supported")
   def test_merge_symbolic_views_2(self):
     var_i = Variable('i', 1, 10)
     var_j = Variable('j', 1, 10)

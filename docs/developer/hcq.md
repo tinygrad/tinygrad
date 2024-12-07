@@ -6,57 +6,29 @@ The main aspect of HCQ-compatible runtimes is how they interact with devices. In
 
 ### Command Queues
 
-To interact with devices, there are 2 types of queues: `HWComputeQueue` and `HWCopyQueue`. Commands which are defined in a base `HWCommandQueue` class should be supported by both queues. These methods are timestamp and synchronization methods like [signal](#tinygrad.device.HWCommandQueue.signal) and [wait](#tinygrad.device.HWCommandQueue.wait).
+To interact with devices you create a `HWQueue`. Some methods are required, like timestamp and synchronization methods like [signal](#tinygrad.runtime.support.hcq.HWQueue.signal) and [wait](#tinygrad.runtime.support.hcq.HWQueue.wait), while others are dependent on it being a compute or copy queue.
 
 For example, the following Python code enqueues a wait, execute, and signal command on the HCQ-compatible device:
 ```python
-HWComputeQueue().wait(signal_to_wait, value_to_wait) \
-                .exec(program, args_state, global_dims, local_dims) \
-                .signal(signal_to_fire, value_to_fire) \
-                .submit(your_device)
+HWQueue().wait(signal_to_wait, value_to_wait) \
+         .exec(program, args_state, global_dims, local_dims) \
+         .signal(signal_to_fire, value_to_fire) \
+         .submit(your_device)
 ```
 
-Each runtime should implement the required functions that are defined in the `HWCommandQueue`, `HWComputeQueue`, and `HWCopyQueue` classes.
+Each runtime should implement the required functions that are defined in the `HWQueue` classes.
 
-::: tinygrad.device.HWCommandQueue
+::: tinygrad.runtime.support.hcq.HWQueue
     options:
         members: [
             "signal",
             "wait",
             "timestamp",
-            "update_signal",
-            "update_wait",
             "bind",
             "submit",
-        ]
-        show_source: false
-
-::: tinygrad.device.HWComputeQueue
-    options:
-        members: [
             "memory_barrier",
             "exec",
-            "update_exec",
-        ]
-        show_source: false
-
-::: tinygrad.device.HWCopyQueue
-    options:
-        members: [
             "copy",
-            "update_copy",
-        ]
-        show_source: false
-
-#### Implementing custom commands
-
-To implement custom commands in the queue, use the @hcq_command decorator for your command implementations.
-
-::: tinygrad.device.hcq_command
-    options:
-        members: [
-            "copy",
-            "update_copy",
         ]
         show_source: false
 
@@ -64,7 +36,7 @@ To implement custom commands in the queue, use the @hcq_command decorator for yo
 
 The `HCQCompiled` class defines the API for HCQ-compatible devices. This class serves as an abstract base class that device-specific implementations should inherit from and implement.
 
-::: tinygrad.device.HCQCompiled
+::: tinygrad.runtime.support.hcq.HCQCompiled
     options:
         show_source: false
 
@@ -72,7 +44,7 @@ The `HCQCompiled` class defines the API for HCQ-compatible devices. This class s
 
 Signals are device-dependent structures used for synchronization and timing in HCQ-compatible devices. They should be designed to record both a `value` and a `timestamp` within the same signal. HCQ-compatible backend implementations should use `HCQSignal` as a base class.
 
-::: tinygrad.device.HCQSignal
+::: tinygrad.runtime.support.hcq.HCQSignal
     options:
         members: [value, timestamp, wait]
         show_source: false
@@ -82,9 +54,9 @@ The following Python code demonstrates the usage of signals:
 ```python
 signal = your_device.signal_t()
 
-HWComputeQueue().timestamp(signal) \
-                .signal(signal, value_to_fire) \
-                .submit(your_device)
+HWQueue().timestamp(signal) \
+         .signal(signal, value_to_fire) \
+         .submit(your_device)
 
 signal.wait(value_to_fire)
 signaled_value = signal.value # should be the same as `value_to_fire`
@@ -99,7 +71,7 @@ Each HCQ-compatible device must allocate two signals for global synchronization 
 
 The `HCQAllocator` base class simplifies allocator logic by leveraging [command queues](#command-queues) abstractions. This class efficiently handles copy and transfer operations, leaving only the alloc and free functions to be implemented by individual backends.
 
-::: tinygrad.device.HCQAllocator
+::: tinygrad.runtime.support.hcq.HCQAllocator
     options:
         members: [
             "_alloc",
@@ -111,7 +83,7 @@ The `HCQAllocator` base class simplifies allocator logic by leveraging [command 
 
 Backends must adhere to the `HCQBuffer` protocol when returning allocation results.
 
-::: tinygrad.device.HCQBuffer
+::: tinygrad.runtime.support.hcq.HCQBuffer
     options:
         members: true
         show_source: false
@@ -120,7 +92,7 @@ Backends must adhere to the `HCQBuffer` protocol when returning allocation resul
 
 `HCQProgram` is a base class for defining programs compatible with HCQ-enabled devices. It provides a flexible framework for handling different argument layouts (see `HCQArgsState`).
 
-::: tinygrad.device.HCQProgram
+::: tinygrad.runtime.support.hcq.HCQProgram
     options:
         members: true
         show_source: false
@@ -129,22 +101,22 @@ Backends must adhere to the `HCQBuffer` protocol when returning allocation resul
 
 `HCQArgsState` is a base class for managing the argument state for HCQ programs. Backend implementations should create a subclass of `HCQArgsState` to manage arguments for the given program.
 
-::: tinygrad.device.HCQArgsState
+::: tinygrad.runtime.support.hcq.HCQArgsState
     options:
         members: true
         show_source: false
 
-**Lifetime**: The `HCQArgsState` is passed to `HWComputeQueue.exec` and is guaranteed not to be freed until `HWComputeQueue.submit` for the same queue is called.
+**Lifetime**: The `HCQArgsState` is passed to `HWQueue.exec` and is guaranteed not to be freed until `HWQueue.submit` for the same queue is called.
 
 ### Synchronization
 
 HCQ-compatible devices use a global timeline signal for synchronizing all operations. This mechanism ensures proper ordering and completion of tasks across the device. By convention, `self.timeline_value` points to the next value to signal. So, to wait for all previous operations on the device to complete, wait for `self.timeline_value - 1` value. The following Python code demonstrates the typical usage of signals to synchronize execution to other operations on the device:
 
 ```python
-HWComputeQueue().wait(your_device.timeline_signal, your_device.timeline_value - 1) \
-                .exec(...)
-                .signal(your_device.timeline_signal, your_device.timeline_value) \
-                .submit(your_device)
+HWQueue().wait(your_device.timeline_signal, your_device.timeline_value - 1) \
+         .exec(...)
+         .signal(your_device.timeline_signal, your_device.timeline_value) \
+         .submit(your_device)
 your_device.timeline_value += 1
 
 # Optionally wait for execution
@@ -153,5 +125,5 @@ your_device.timeline_signal.wait(your_device.timeline_value - 1)
 
 ## HCQGraph
 
-[HCQGraph](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/graph/hcq.py) is a core feature that implements `GraphRunner` for HCQ-compatible devices. `HCQGraph` builds a static `HWComputeQueue` and `HWCopyQueue` for all operations per device. To optimize enqueue time, only the necessary parts of the queues are updated for each run using the update APIs of the queues, avoiding a complete rebuild.
+[HCQGraph](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/graph/hcq.py) is a core feature that implements `GraphRunner` for HCQ-compatible devices. `HCQGraph` builds static `HWQueue` for all operations per device. To optimize enqueue time, only the necessary parts of the queues are updated for each run using the symbolic variables, avoiding a complete rebuild.
 Optionally, queues can implement a `bind` API, which allows further optimization by eliminating the need to copy the queues into the device ring.

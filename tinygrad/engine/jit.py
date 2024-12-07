@@ -1,14 +1,15 @@
 from __future__ import annotations
 from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional, Any
-import functools, itertools, collections
+import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, GRAPH, BEAM, getenv, colored, JIT, dedup, partition
+from tinygrad.engine.lazy import LazyBuffer
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
+from tinygrad.ops import UOp, ssimplify, Variable, sint, sym_infer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, sint, sym_infer
-from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer, CompiledRunner, Runner, _internal_memory_planner
+from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferCopy, BufferXfer, CompiledRunner, Runner
+from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from dataclasses import dataclass
 from weakref import WeakKeyDictionary
@@ -41,11 +42,11 @@ def apply_graph_to_jit(jit_cache: List[ExecItem], input_rawbuffers: List[Buffer]
   for ji in jit_cache:
     if ji.prg.__class__ in {EmptyOp, ViewOp}: continue
     ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
-    if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.device
+    if isinstance(ji.prg, CompiledRunner): ji_graph_dev = ji.prg.dev
     elif isinstance(ji.prg, BufferXfer) and ji.bufs[0] and ji.bufs[0].device.split(":", 1)[0] in {"CUDA", "NV", "AMD"}:
       ji_graph_dev = Device[ji.bufs[0].device]
 
-    graph_class = (ji_graph_dev.graph.func if isinstance(ji_graph_dev.graph, functools.partial) else ji_graph_dev.graph) if ji_graph_dev else None #type: ignore
+    graph_class = (ji_graph_dev.graph.func if isinstance(ji_graph_dev.graph, functools.partial) else ji_graph_dev.graph) if ji_graph_dev else None
     can_be_graphed = ji_graph_dev and ji_graph_dev.graph
     can_share_graph = (ji_graph_dev == current_device or (isinstance(graph_class, type) and issubclass(graph_class, MultiGraphRunner)) and
                        type(ji_graph_dev) is type(current_device))
@@ -68,12 +69,13 @@ def get_input_replace(jit_cache: List[ExecItem], input_rawbuffers:List[Buffer]) 
         input_replace[(j,i)] = input_rawbuffers.index(a)
   return input_replace
 
-class GraphRunner(Runner):  # pylint: disable=abstract-method
+class GraphRunner(Runner):
   def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
-    self.jit_cache = jit_cache
+    self.jit_cache = jit_cache  # NOTE: this is not used, but you have to keep these objects alive for the Graph
     self.input_replace:Dict[Tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
     self.var_vals_replace:Dict[int, List[int]] = {}
     self.launch_dims_replace:Dict[int, Tuple[Optional[int], Optional[int]]] = {}
+    self.launch_dims_base:Dict[int, Tuple[Tuple[int, ...], Tuple[int, ...]]] = {}
 
     op_estimate: sint = 0
     mem_estimate: sint = 0
@@ -94,39 +96,44 @@ class GraphRunner(Runner):  # pylint: disable=abstract-method
         if ji.prg.p.vars: self.var_vals_replace[j] = [self.vars.index(v) for v in ji.prg.p.vars]
 
         global_dim_idx, local_dim_idx = find_symbolic_dim(ji.prg.p.global_size), find_symbolic_dim(ji.prg.p.local_size)
-        if global_dim_idx is not None or local_dim_idx is not None: self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
+        if global_dim_idx is not None or local_dim_idx is not None:
+          self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
+          assert ji.prg.p.global_size is not None and ji.prg.p.local_size is not None
+          self.launch_dims_base[j] = (tuple(ji.prg.p.global_size), tuple(ji.prg.p.local_size))
 
-    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), jit_cache[0].prg.dname.split(":")[0],
-                     op_estimate, mem_estimate, lds_estimate)
+    # used in MultiGraphRunner. the ints are id() of _bufs
+    self.w_dependency_map: Dict[int, Any] = {}
+    self.r_dependency_map: Dict[int, List[Any]] = collections.defaultdict(list)
 
-  def updated_vars(self, var_vals):
+    super().__init__(colored(f"<batched {len(jit_cache)}>", "cyan"), jit_cache[0].prg.device.split(":")[0],
+                     ssimplify(op_estimate), ssimplify(mem_estimate), ssimplify(lds_estimate))
+
+  def updated_vars(self, var_vals: Dict[Variable, int]):
     vals = [var_vals[v] for v in self.vars]
     for j, vidxs in self.var_vals_replace.items():
       for i, v in enumerate(vidxs): yield j, i, vals[v]
 
-  def updated_launch_dims(self, var_vals):
+  def updated_launch_dims(self, var_vals: Dict[Variable, int]):
     dims = [tuple(sym_infer(s, var_vals) for s in dim) for dim in self.symbolic_dims]
-    for j, (gl, lc) in self.launch_dims_replace.items(): yield j, (dims[gl] if gl is not None else None), (dims[lc] if lc is not None else None)
+    for j, (gl, lc) in self.launch_dims_replace.items():
+      yield j, (dims[gl] if gl is not None else self.launch_dims_base[j][0]), (dims[lc] if lc is not None else self.launch_dims_base[j][1])
 
-class MultiGraphRunner(GraphRunner):  # pylint: disable=abstract-method
-  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
-    self.w_dependency_map: Dict[Any, Any] = {}
-    self.r_dependency_map: Dict[Any, List[Any]] = collections.defaultdict(list)
-    super().__init__(jit_cache, input_rawbuffers, var_vals)
-
-  def _access_resources(self, read, write, new_dependency:Any):
+  def _access_resources(self, rawbufs:List[Buffer], write:List[int], new_dependency:Any):
     # To synchronize access to resources, we monitor the necessary prerequisites for accessing each resource,
     # whether for write or read operations. A resource can be accessed by either a single writer or multiple readers.
     wait_nodes = []
 
-    for rawbuf in read + write:
+    for i,rawbuf in enumerate(rawbufs):
       if id(rawbuf.base._buf) in self.w_dependency_map: wait_nodes.append(self.w_dependency_map[id(rawbuf.base._buf)])
-    for rawbuf in write:
-      if id(rawbuf.base._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf.base._buf)))
+      if i in write:
+        if id(rawbuf.base._buf) in self.r_dependency_map: wait_nodes.extend(self.r_dependency_map.pop(id(rawbuf.base._buf)))
+        self.w_dependency_map[id(rawbuf.base._buf)] = new_dependency
+      else: self.r_dependency_map[id(rawbuf.base._buf)].append(new_dependency)
 
-    for rawbuf in read: self.r_dependency_map[id(rawbuf.base._buf)].append(new_dependency)
-    for rawbuf in write: self.w_dependency_map[id(rawbuf.base._buf)] = new_dependency
     return list({id(x):x for x in wait_nodes}.values())
+
+# a marker for your graph supporting multiple devices of the same type
+class MultiGraphRunner(GraphRunner): pass
 
 ReturnType = TypeVar('ReturnType')
 @dataclass
@@ -170,17 +177,15 @@ class CapturedJit(Generic[ReturnType]):
     return self.ret
 
 def _prepare_jit_inputs(args, kwargs):
-  input_tensors: List[Tuple[Union[int, str], Tensor]] = \
-    [(cast(Union[int, str], name),t) for name,t in itertools.chain(enumerate(args), sorted(kwargs.items())) if t.__class__ is Tensor]
-  if input_tensors: Tensor.realize(*[t for _,t in input_tensors])
-  names: List[Union[int, str]] = [name for name,_ in input_tensors]
-  lbs: List[LazyBuffer] = flatten([t.lazydata.lbs for _,t in input_tensors])
-  st_varvals_dtype_device = [(*lb.st.unbind(), lb.dtype, lb.device) for lb in lbs]
+  input_tensors: List[Tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
+  names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
+  if tensors: Tensor.realize(*tensors)
+  lbs: List[LazyBuffer] = flatten([t.lazydata.lbs for t in tensors])
   input_buffers: List[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
   assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
-  var_vals: Dict[Variable, int] = merge_dicts([varvals for _,varvals,_,_ in st_varvals_dtype_device] + \
-                                              [dict(v.unbind() for v in itertools.chain(args, kwargs.values()) if isinstance(v, Variable))])
-  st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varvals_dtype_device]
+  st_varval_dtype_device = [(*lb.st.unbind(), lb.dtype, lb.device) for lb in lbs]
+  var_vals = merge_dicts([x[1] for x in st_varval_dtype_device] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
+  st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varval_dtype_device]
   return input_buffers, var_vals, names, st_vars_dtype_device
 
 class TinyJit(Generic[ReturnType]):
@@ -235,7 +240,7 @@ class TinyJit(Generic[ReturnType]):
       self._jit_cache: List[ExecItem] = []
       self._buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
       # TODO: should we always disable the memory planner here? it must be off for prune
-      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value), BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=int(self.prune)):
+      with Context(BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=int(self.prune)):
         capturing.append(self)
         try:
           ret = self.fxn(*args, **kwargs)
@@ -262,7 +267,9 @@ class TinyJit(Generic[ReturnType]):
         for ei in jit_cache:
           if any(b in depends for b in ei.bufs):
             if isinstance(ei.prg, CompiledRunner):
-              for out in ei.prg.p.outs: depends.add(cast(Buffer, ei.bufs[out]))
+              depends.update(cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs)
+            if isinstance(ei.prg, (BufferCopy, BufferXfer)):
+              depends.add(cast(Buffer, ei.bufs[0]))
         pruned, onetime = partition(jit_cache,
                                     lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")

@@ -19,19 +19,8 @@ Install the p2p driver per [README](https://github.com/tinygrad/open-gpu-kernel-
 This is the default on production tinybox green.
 
 ### tinybox_red
-Disable cwsr
-This is the default on production tinybox red.
-```
-sudo vi /etc/modprobe.d/amdgpu.conf
-cat <<EOF > /etc/modprobe.d/amdgpu.conf
-options amdgpu cwsr_enable=0
-EOF
-sudo update-initramfs -u
-sudo reboot
-
-# validate
-sudo cat /sys/module/amdgpu/parameters/cwsr_enable #= 0
-```
+Disable cwsr + increase mes timeout.
+Install the custom amdgpu driver per [README](https://github.com/nimlgen/amdgpu_ubuntu_22_04/blob/v6.1.3/readme.md)
 
 # 2. Directions
 

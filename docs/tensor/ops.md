@@ -13,6 +13,7 @@
 ::: tinygrad.Tensor.softmax
 ::: tinygrad.Tensor.log_softmax
 ::: tinygrad.Tensor.logsumexp
+::: tinygrad.Tensor.logcumsumexp
 ::: tinygrad.Tensor.argmax
 ::: tinygrad.Tensor.argmin
 
@@ -26,9 +27,11 @@
 ::: tinygrad.Tensor.matmul
 ::: tinygrad.Tensor.einsum
 ::: tinygrad.Tensor.cumsum
+::: tinygrad.Tensor.cummax
 ::: tinygrad.Tensor.triu
 ::: tinygrad.Tensor.tril
 ::: tinygrad.Tensor.interpolate
+::: tinygrad.Tensor.scatter
 
 ## Neural Network (functional)
 
@@ -43,3 +46,4 @@
 ::: tinygrad.Tensor.binary_crossentropy_logits
 ::: tinygrad.Tensor.sparse_categorical_crossentropy
 ::: tinygrad.Tensor.cross_entropy
+::: tinygrad.Tensor.nll_loss

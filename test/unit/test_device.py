@@ -18,6 +18,12 @@ class TestDevice(unittest.TestCase):
     assert Device.canonicalize("gpu:1") == "GPU:1"
     assert Device.canonicalize("GPU:2") == "GPU:2"
     assert Device.canonicalize("disk:/dev/shm/test") == "DISK:/dev/shm/test"
+    # TODO: fix this
+    # assert Device.canonicalize("disk:000.txt") == "DISK:000.txt"
+
+  def test_getitem_not_exist(self):
+    with self.assertRaises(ModuleNotFoundError):
+      Device["TYPO"]
 
 class MockCompiler(Compiler):
   def __init__(self, key): super().__init__(key)

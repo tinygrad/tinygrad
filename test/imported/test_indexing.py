@@ -483,7 +483,7 @@ class TestIndexing(unittest.TestCase):
     def get_set_tensor(indexed: Tensor, indexer):
       set_size = indexed[indexer].shape
       set_count = indexed[indexer].numel()
-      set_tensor = Tensor.randint(set_count, high=set_count).reshape(set_size).cast(dtypes.float64)
+      set_tensor = Tensor.randint(set_count, high=set_count).reshape(set_size) #.cast(dtypes.float64)
       return set_tensor
 
     # Tensor is  0  1  2  3  4
@@ -1320,8 +1320,9 @@ class TestNumpy(unittest.TestCase):
     self.assertRaises(IndexError, lambda: a[0, 0, -1.4])
     self.assertRaises(IndexError, lambda: a[-1.4, 0, 0])
     self.assertRaises(IndexError, lambda: a[0, -1.4, 0])
-    self.assertRaises(IndexError, lambda: a[0.0:, 0.0])
-    self.assertRaises(IndexError, lambda: a[0.0:, 0.0,:])
+    # these two trigger slice internal type verification first
+    self.assertRaises(TypeError, lambda: a[0.0:, 0.0])
+    self.assertRaises(TypeError, lambda: a[0.0:, 0.0,:])
 
   def test_none_index(self):
     # `None` index adds newaxis

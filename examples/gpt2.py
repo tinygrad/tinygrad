@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
+import os, argparse
 from typing import Optional, Union
-import argparse
-import numpy as np
 import tiktoken
-from tinygrad import Tensor, TinyJit, Device, GlobalCounters, Variable
+from tinygrad import Tensor, TinyJit, Device, GlobalCounters, Variable, dtypes
+from tinygrad.ops import UOp
 from tinygrad.helpers import Timing, DEBUG, JIT, getenv, fetch, colored, trange
 from tinygrad.nn import Embedding, Linear, LayerNorm
-from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
+from tinygrad.nn.state import gguf_load, torch_load, load_state_dict, get_state_dict
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 HALF = getenv("HALF")
@@ -75,9 +75,9 @@ class Transformer:
     self.lm_head = Linear(dim, vocab_size, bias=False)
     self.forward_jit = TinyJit(self.forward)
 
-  def forward(self, tokens:Union[Tensor,Variable], start_pos:Variable, temperature:float=0.0):
+  def forward(self, tokens:Union[Tensor,UOp], start_pos:Variable, temperature:float=0.0):
     if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
-    if isinstance(tokens, Variable):
+    if isinstance(tokens, UOp):
       seqlen = 1
       tok_emb = self.wte.weight.shrink(((tokens, tokens+1), None))
     else:
@@ -107,8 +107,8 @@ class Transformer:
       ret = (logits / temperature).softmax().multinomial()
     return ret.flatten().realize()
 
-  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
-    forward = (self.forward_jit if JIT and (isinstance(tokens, Variable) or tokens.shape[1] == 1) else self.forward)
+  def __call__(self, tokens:Union[Tensor,UOp], start_pos:Variable, temperature:float=0.0) -> Tensor:
+    forward = (self.forward_jit if JIT and (isinstance(tokens, UOp) or tokens.shape[1] == 1) else self.forward)
     return forward(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
@@ -142,6 +142,34 @@ class GPT2:
 
     return GPT2(model, tokenizer)
 
+  @staticmethod
+  def build_gguf(model_size: str):
+    q_type = model_size[len("gpt2_gguf_"):].upper()
+    fn = fetch(f"https://huggingface.co/PrunaAI/gpt2-GGUF-smashed/resolve/main/gpt2.{q_type}.gguf?download=true")
+    gguf_tensor = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}").to(Device.DEFAULT)
+    kv_data, state_dict = gguf_load(gguf_tensor)
+
+    gpt2_params = {
+      "dim": kv_data["gpt2.embedding_length"], "n_heads": kv_data["gpt2.attention.head_count"],
+      "n_layers": kv_data["gpt2.block_count"], "norm_eps": kv_data["gpt2.attention.layer_norm_epsilon"],
+      "vocab_size": VOCAB_SIZE, "max_seq_len": kv_data["gpt2.context_length"],
+    }
+    def _remap_gguf_key(key: str):
+      replaces = [
+        ("blk.", "h."), (".attn_qkv.bias", ".attn.c_attn.bias"), (".attn_qkv.weight", ".attn.c_attn.weight"),
+        (".ffn_norm.bias", ".ln_2.bias"), (".ffn_norm.weight", ".ln_2.weight"), (".attn_norm.bias", ".ln_1.bias"),
+        (".attn_norm.weight", ".ln_1.weight"), (".attn_output.bias", ".attn.c_proj.bias"), (".attn_output.weight", ".attn.c_proj.weight"),
+        (".ffn_up.bias", ".mlp.c_fc.bias"), (".ffn_up.weight", ".mlp.c_fc.weight"), (".ffn_down.bias", ".mlp.c_proj.bias"),
+        (".ffn_down.weight", ".mlp.c_proj.weight"), ("token_embd.weight", "wte.weight"), ("output.weight", "lm_head.weight"),
+        ("output_norm.bias", "ln_f.bias"), ("output_norm.weight", "ln_f.weight"), ("position_embd.weight", "wpe.weight"),
+      ]
+      for ostr, ns in replaces: key = key.replace(ostr, ns)
+      return key
+    state_dict = { _remap_gguf_key(k): v for k, v in state_dict.items() }
+    model = Transformer(**gpt2_params)
+    load_state_dict(model, state_dict)
+    return GPT2(model, tiktoken.get_encoding("gpt2"))
+
   def __init__(self, model, tokenizer):
     self.model = model
     self.tokenizer = tokenizer
@@ -161,7 +189,7 @@ class GPT2:
           tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
         else:
           tokens = Tensor([x[start_pos:] for x in toks])
-        tok = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature).numpy().tolist()
+        tok = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature).tolist()
       start_pos = len(toks[0])
       for i,t in enumerate(tok): toks[i].append(t)
     return [self.tokenizer.decode(x) for x in toks]
@@ -187,10 +215,9 @@ if __name__ == "__main__":
 
   if args.seed is not None:
     Tensor.manual_seed(args.seed)
-    np.random.seed(args.seed)
 
   print(f"using {args.model_size}")
-  gpt2 = GPT2.build(args.model_size)
+  gpt2 = GPT2.build_gguf(args.model_size) if args.model_size.startswith("gpt2_gguf_") else GPT2.build(args.model_size)
 
   if args.benchmark != -1:
     gpt2.model(Tensor.rand(args.batch_size, args.benchmark), Variable("a", 0, MAX_CONTEXT).bind(0)).realize()
