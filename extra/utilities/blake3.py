@@ -78,44 +78,44 @@ class BLAKE3:
     return chain_vals[:, 0].flatten().bitcast(dtypes.uint8).data().tobytes().hex()
 
 if __name__ == "__main__":
-    import time
-    import sys
+  import time
+  import sys
 
-    arg = sys.argv[1]
-    max_memory = 2 ** math.ceil(math.log2(1024**3))
-    print(f"Using max_memory: {max_memory / 1024 / 1024:.1f} MB")
+  arg = sys.argv[1]
+  max_memory = 2 ** math.ceil(math.log2(1024**3))
+  print(f"Using max_memory: {max_memory / 1024 / 1024:.1f} MB")
 
-    if arg == "warmup":
-        # warmup the JIT
-        print("\nWarming up...")
-        def warmup(size):
-            print(f"Warming up {size / 1024 / 1024 :.1f} MB...")
-            warmup_data = Tensor.rand(size // 2, dtype=dtypes.float16)
-            print("First run...")
-            BLAKE3().hash(warmup_data, max_memory=max_memory)
-            print("Second run...")
-            BLAKE3().hash(warmup_data, max_memory=max_memory)
-        warmup(max_memory)
-    else:
-        def benchmark_size(size_bytes):
-            print(f"\nBenchmarking {size_bytes / 1024 / 1024 :.1f} MB...")
-            data = Tensor.rand(size_bytes // 2, dtype=dtypes.float16)
-            size = data.numel() * data.element_size()
+  if arg == "warmup":
+    # warmup the JIT
+    print("\nWarming up...")
+    def warmup(size):
+      print(f"Warming up {size / 1024 / 1024 :.1f} MB...")
+      warmup_data = Tensor.rand(size // 2, dtype=dtypes.float16)
+      print("First run...")
+      BLAKE3().hash(warmup_data, max_memory=max_memory)
+      print("Second run...")
+      BLAKE3().hash(warmup_data, max_memory=max_memory)
+    warmup(max_memory)
+  else:
+    def benchmark_size(size_bytes):
+      print(f"\nBenchmarking {size_bytes / 1024 / 1024 :.1f} MB...")
+      data = Tensor.rand(size_bytes // 2, dtype=dtypes.float16)
+      size = data.numel() * data.element_size()
 
-            start = time.time()
-            BLAKE3().hash(data, max_memory=max_memory)
-            end = time.time()
+      start = time.time()
+      BLAKE3().hash(data, max_memory=max_memory)
+      end = time.time()
 
-            elapsed = end - start
-            throughput = size / elapsed / 1e6  # MB/s
-            print(f"Time: {elapsed:.2f}s")
-            print(f"Throughput: {throughput:.1f} MB/s")
+      elapsed = end - start
+      throughput = size / elapsed / 1e6  # MB/s
+      print(f"Time: {elapsed:.2f}s")
+      print(f"Throughput: {throughput:.1f} MB/s")
 
-        size_mb = float(sys.argv[1])
-        size = int(size_mb * 1024 * 1024)
+    size_mb = float(sys.argv[1])
+    size = int(size_mb * 1024 * 1024)
 
-        for i in range(5):
-            randint = random.randint(0, 1024**2 * 20)
-            # if i == 4:
-            #     with Context(DEBUG=2):
-            benchmark_size(size - randint)
+    for i in range(5):
+      randint = random.randint(0, 1024**2 * 20)
+      # if i == 4:
+      #     with Context(DEBUG=2):
+      benchmark_size(size - randint)
