@@ -142,32 +142,8 @@ class LazyBuffer(MathTrait):
   def clone(self) -> LazyBuffer: return self.copy_to_device(self.device, clone=True)
 
   def alu(self, op:Ops, *in_srcs:LazyBuffer) -> LazyBuffer:
-    srcs: List[LazyBuffer] = []
-    for s in (self,)+in_srcs:
-      if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child[0]()) is not None:
-        srcs.append(root._view(s.base.contiguous_child[1]))
-      else:
-        srcs.append(s)
-    if not all_same(dts:=[x.dtype.base for x in (srcs[1:] if op is Ops.WHERE else srcs)]):
-      raise AssertionError(f"all dtypes must match {dts} on {op}")
-    assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
-    if op is Ops.WHERE: assert srcs[0].dtype == dtypes.bool, "Ops.WHERE must have the first arg be bool"
-
+    srcs: List[LazyBuffer] = [self, *in_srcs]
     out_dtype = dtypes.bool if op in (Ops.CMPLT, Ops.CMPNE) else srcs[-1].dtype
-
-    # const folding
-    if op in python_alu and all(s.is_unrealized_unmasked_const() for s in srcs):
-      return self.cast(out_dtype).const_like(exec_alu(op, out_dtype, [s.base.arg for s in srcs]))
-    if op in GroupOp.Binary:
-      x, y = self, in_srcs[0]
-      if op is Ops.ADD:
-        if y.is_unrealized_unmasked_const() and y.base.arg == 0: return x
-        if x.is_unrealized_unmasked_const() and x.base.arg == 0: return y
-      if op is Ops.MUL:
-        if x.is_unrealized_unmasked_const() and (val := x.base.arg) in (1, 0): return y if val == 1 else y.const_like(0)
-        if y.is_unrealized_unmasked_const() and (val := y.base.arg) in (1, 0): return x if val == 1 else x.const_like(0)
-      if op is Ops.IDIV and y.is_unrealized_unmasked_const() and y.base.arg == 1: return x
-
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, None, tuple(srcs))
 
   # *** reduce ops ***
