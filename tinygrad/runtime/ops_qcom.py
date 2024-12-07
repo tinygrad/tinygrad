@@ -179,7 +179,7 @@ class QCOMArgsState(HCQArgsState):
     for cnst_val, cnst_off, cnst_sz in prg.consts_info: to_mv(self.ptr + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
     if prg.samp_cnt > 0: to_mv(self.ptr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
-    for i, b in enumerate(cast(List[HCQBuffer], bufs)):
+    for i, b in enumerate(bufs):
       if prg.buf_info[i].type in {BUFTYPE_TEX, BUFTYPE_IBO}:
         obj = b.texture_info.desc if prg.buf_info[i].type is BUFTYPE_TEX else b.texture_info.ibo
         to_mv(self.ptr + prg.buf_info[i].offset, len(obj) * 4).cast('I')[:] = array.array('I', obj)
