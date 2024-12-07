@@ -358,7 +358,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
 
     self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferSpec(cpu_access=True))
-    self.kernargs_alloctor = BumpAllocator(self.kernargs_page.size, start=self.kernargs_page.va_addr, wrap=True)
+    self.kernargs_alloctor:BumpAllocator = BumpAllocator(self.kernargs_page.size, start=self.kernargs_page.va_addr, wrap=True)
     self.devices.append(self)
 
   def synchronize(self):
