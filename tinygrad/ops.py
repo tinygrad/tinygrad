@@ -155,8 +155,10 @@ class GroupOp:
   Buffer = {Ops.LOAD, Ops.PRELOAD, Ops.STORE, Ops.VALID}
   Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKFORK, Ops.BLOCKSTART}
 
-  # BinaryOps that can be flipped
+  # BinaryOps that can be flipped or reordered
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.XOR, Ops.AND, Ops.OR}
+  Associative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.XOR, Ops.AND, Ops.OR}
+  Albelian = set.intersection(Commutative, Associative)
 
   # do not preserve f(0) = 0
   UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV}
@@ -1081,9 +1083,10 @@ symbolic_simple = PatternMatcher([
 symbolic = symbolic_simple+PatternMatcher([
   # ** COMMUTATIVE flipping **
   (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
-  ((UPat.var("x1") + UPat.var("x2")) + UPat(Ops.ADD, name="x3"), lambda x1,x2,x3: (x1+x3)+x2 if x2.op is not Ops.ADD else
-    (x2+x3)+x1 if x1.op is not Ops.ADD else None),
-  # group like
+  # ** group stuff **
+  # flattening of ADD, MULL chains etc, generalization of (x1+x2) + (x3+x4) -> x1+x2+x3+x4
+  *((UPat.var("x1").alu(op, UPat.var("x2")).alu(op, UPat(op, name="x3")), lambda x1,x2,x3,op=op: x1.alu(op,x3).alu(op,x2)
+    if x2.op is not op else x2.alu(op,x3).alu(op,x1)) for op in GroupOp.Albelian),
   ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
