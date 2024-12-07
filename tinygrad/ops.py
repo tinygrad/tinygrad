@@ -781,6 +781,9 @@ spec = PatternMatcher([
   (UPat(Ops.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype and isinstance(rng.arg, int)),
   (UPat(Ops.SPECIAL, src=()), lambda: True),
 
+  # disallow explicit NaN and inf
+  (UPat(Ops.CONST, name="x"), lambda x: False if math.isnan(x.arg) or math.isinf(x.arg) else None),
+
   # TODO: confirm the args of both of these are shapetrackers
   (UPat(Ops.VIEW, dtypes.void, src=()), lambda: True),
   (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"), lambda x,src: src.op is not Ops.STORE and x.dtype == src.dtype),
