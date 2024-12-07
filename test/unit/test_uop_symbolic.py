@@ -259,6 +259,16 @@ class TestSymbolic(unittest.TestCase):
     a = Variable("a", 0, 124)
     self.helper_test_variable((a//2+1)//2, 0, 31, "((a+2)//4)")
 
+  def test_flatten_albelian_tree(self):
+    a,b,c,d = Variable("a", 0, 124), Variable("b", 0, 124), Variable("c", 0, 124), Variable("d", 0, 124)
+    e,f,g,h = Variable("e", 0, 124), Variable("f", 0, 124), Variable("g", 0, 124), Variable("h", 0, 124)
+    self.helper_test_variable((a+b)+(c+d), 0, 4*124, "(b+(a+(c+d)))")
+    self.helper_test_variable((a+b)+(c+d)+(e+f)+(g+h), 0, 8*124, "(b+(a+(d+(c+(f+(e+(g+h)))))))")
+    self.helper_test_variable((a+(c+d)+b)+((e+f)+g+h), 0, 8*124, "(b+(a+(d+(c+(h+(g+(e+f)))))))")
+    self.helper_test_variable((a*b)*(c*d), 0, 124**4, "(b*(a*(c*d)))")
+    self.helper_test_variable((a*b)*(c*d)*(e*f)*(g*h), 0, 124**8, "(b*(a*(d*(c*(f*(e*(g*h)))))))")
+    self.helper_test_variable((a*(c*d)*b)*((e*f)*g*h), 0, 124**8, "(b*(a*(d*(c*(h*(g*(e*f)))))))")
+
   def test_distribute_mul(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
     self.helper_test_variable((1+Variable("a", 0, 3))*(-2)+12, 4, 10, "((a*-2)+10)")
