@@ -1,14 +1,15 @@
 from __future__ import annotations
 from typing import Optional, Any, Tuple, List, get_args
 from tinygrad.dtype import dtypes, DType, ConstType, to_dtype, ImageDType
-from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, SPLIT_REDUCEOP, LAZYCACHE
+from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, SPLIT_REDUCEOP, LAZYCACHE, unwrap
 from tinygrad.ops import exec_alu, python_alu
 from tinygrad.ops import identity_element, MathTrait, resolve, UOp, sint, GroupOp, Ops, view_supported_devices
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
-from weakref import ref, ReferenceType, WeakValueDictionary
+from weakref import WeakKeyDictionary, ref, ReferenceType, WeakValueDictionary
 
 lazycache: WeakValueDictionary[Any, LazyBuffer] = WeakValueDictionary()
+buffers: WeakKeyDictionary[LazyBuffer, Buffer] = WeakKeyDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Ops]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(LAZYCACHE)):
   dtype = to_dtype(dtype)
@@ -32,12 +33,6 @@ class LazyBuffer(MathTrait):
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a UOp, except the src is LazyBuffers and not UOps
       assert self.op is not Ops.ASSIGN or srcs[0].base.realized is not None, "assign target must be realized"
       assert all_same([x.st.shape for x in self.srcs]), f"src shape mismatch! {self.srcs}"
-
-      if self.op is Ops.BUFFER_VIEW:
-        # some LazyBuffers can be processed with only a view, no AST required
-        self.buffer: Buffer = srcs[0].base.buffer.view(st.size, self.dtype, srcs[0].st.views[0].offset * srcs[0].dtype.itemsize)
-      else:
-        self.buffer = srcs[0].base.buffer if self.op is Ops.ASSIGN else Buffer(device, self.size, self.dtype)
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
     else:
@@ -45,8 +40,18 @@ class LazyBuffer(MathTrait):
       assert base.base == base, "base must be a base itself"
       self._base = base
 
+  @property
+  def buffer(self) -> Buffer:
+    if (cret:=buffers.get(self)) is not None: return cret
+    match self.op:
+      case Ops.BUFFER_VIEW: b = self.srcs[0].base.buffer.view(self.st.size, self.dtype, self.srcs[0].st.views[0].offset * self.srcs[0].dtype.itemsize)
+      case Ops.ASSIGN: b = self.srcs[0].base.buffer
+      case _: b = Buffer(self.device, self.size, self.dtype)
+    buffers[self] = b
+    return b
+
   def __del__(self):
-    if hasattr(self, 'buffer'): self.buffer.ref(-1)
+    if hasattr(self, 'buffer'): unwrap(self.buffer).ref(-1)
 
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} {str(self.dtype)[7:]} {self.st if self.base is not self else (self.op, self.realized)}>"
@@ -54,7 +59,7 @@ class LazyBuffer(MathTrait):
   @property
   def realized(self) -> Optional[Buffer]:
     # NOTE: we check for a lack of srcs instead of an allocated buffer to make unrealized assigns return None here
-    return self.buffer if self._base is None and not hasattr(self, 'srcs') else None
+    return self.buffer if self.buffer is not None and self._base is None and not hasattr(self, 'srcs') else None
 
   # NOTE: this has to be a function to prevent self reference
   @property
@@ -114,9 +119,12 @@ class LazyBuffer(MathTrait):
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is Ops.CONST and not isinstance(self.base.arg, UOp)
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
 
+  @property
+  def nbytes(self): return self.size*self.dtype.itemsize
+
   def _copy(self, device:str) -> LazyBuffer:
     assert self.st.contiguous and self.size == self.base.size, f"can only copy contig {self} {self.base}"
-    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, Ops.COPY, self.buffer.nbytes, (self,), enable_cache=False)
+    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, Ops.COPY, self.nbytes, (self,), enable_cache=False)
 
   def copy_to_device(self, device:str, force:bool=False, clone:bool=False) -> LazyBuffer:
     # no COPY
