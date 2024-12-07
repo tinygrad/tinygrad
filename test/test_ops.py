@@ -2117,6 +2117,7 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
 
+  # TODO: linearizer block error
   @unittest.expectedFailure
   def test_avg_pool3d_failure(self):
     helper_test_op([(1,1,16,16,16)],
