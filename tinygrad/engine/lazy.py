@@ -121,23 +121,7 @@ class LazyBuffer(MathTrait):
     assert self.st.contiguous and self.size == self.base.size, f"can only copy contig {self} {self.base}"
     return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, Ops.COPY, self.buffer.nbytes, (self,), enable_cache=False)
 
-  def copy_to_device(self, device:str, force:bool=False, clone:bool=False) -> LazyBuffer:
-    # no COPY
-    if self.device == device and not clone: return self
-
-    # double COPY = one COPY
-    if not force and self.st.contiguous and self.size == self.base.size and not self.base.realized and self.base.op is Ops.COPY:
-      return self.base.srcs[0].copy_to_device(device).reshape(self.st.shape)
-
-    # const doesn't have to be copied (issues with disk tensor)
-    if self.is_unrealized_const():
-      return LazyBuffer.metaop(Ops.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
-
-    # if it's a shrink, do the shrink before the copy with CONTIGUOUS
-    if prod(self.st.shape) < prod(self.base.st.shape): return self.contiguous()._copy(device)
-
-    # copy the base and apply the shapetracker on the new device
-    return self.base._copy(device)._view(self.st)
+  def copy_to_device(self, device:str, force:bool=False, clone:bool=False) -> LazyBuffer: return self.base._copy(device)._view(self.st)
 
   def clone(self) -> LazyBuffer: return self.copy_to_device(self.device, clone=True)
 
