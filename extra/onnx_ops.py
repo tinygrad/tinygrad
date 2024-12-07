@@ -17,6 +17,10 @@ def LessOrEqual(x:Tensor,y:Tensor): return x <= y
 def Greater(x:Tensor,y:Tensor): return x > y
 def GreaterOrEqual(x:Tensor,y:Tensor): return x >= y
 def Equal(x:Tensor,y:Tensor): return x == y
+def BitwiseNot(x:Tensor): return ~x
+def BitwiseOr(x:Tensor, y:Tensor): return x | y
+def BitwiseAnd(x:Tensor, y:Tensor): return x & y
+def BitwiseXor(x:Tensor, y:Tensor): return x ^ y
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
