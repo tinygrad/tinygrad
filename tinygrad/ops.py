@@ -265,11 +265,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __eq__(self, other):
     if not isinstance(other, UOp): return False
     if not (self.op == other.op and self.dtype == other.dtype and self.arg == other.arg and len(self.src) == len(other.src)): return False
-    if self.op == UOp.ALU and self.arg in COMMUTATIVE:
+    if self.op == GroupOp.ALU and self.arg in GroupOp.Commutative:
       return set(self.src) == set(other.src)
     return self.src == other.src
-  def __ne__(self, other): return not (self == other)
-  def __lt__(self, x:UOp): return self.cmp_tuple < x.cmp_tuple
+  def __lt__(self, x):
+    if not isinstance(x, UOp): return self.ssimplify() < x
+    return self.cmp_tuple < x.cmp_tuple
+
+  def __gt__(self, x):
+    if not isinstance(x, UOp): return self.ssimplify() > x
+    return self.cmp_tuple > x.cmp_tuple
   @functools.cached_property
   def full_shape(self) -> Tuple[sint, ...]:
     return self.shape if self.op is Ops.VIEW else tuple(smax(x) for x in zip(*[x.full_shape for x in self.src if x.has_st]))
