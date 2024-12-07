@@ -1340,7 +1340,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_schedule_mem_used(self):
     base = GlobalCounters.mem_used
-    Tensor.ones(256).contiguous().realize()
+    Tensor.ones(256).contiguous().schedule()
     Tensor.ones(5, 5).contiguous().schedule()
     self.assertEqual(GlobalCounters.mem_used-base, 0)
 
