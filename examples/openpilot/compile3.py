@@ -60,15 +60,20 @@ def compile():
 def test(test_val=None):
   with open(OUTPUT, "rb") as f:
     run = pickle.load(f)
+
+  # same randomness as above
   Tensor.manual_seed(100)
   new_inputs = {nm:Tensor.randn(*st.shape, dtype=dtype).mul(8).realize() for nm, (st, _, dtype, _) in
                 sorted(zip(run.captured.expected_names, run.captured.expected_st_vars_dtype_device))}
   new_inputs_numpy = {k:v.numpy() for k,v in new_inputs.items()}
+
+  # create fake "from_blob" tensors for the inputs, and wrapped NPY tensors for the numpy inputs (these have the same underlying memory)
+  inputs = {**{k:v for k,v in new_inputs.items() if 'img' in k},
+            **{k:Tensor(v, device="NPY").realize() for k,v in new_inputs_numpy.items() if 'img' not in k}}
+
+  # run 20 times
   for _ in range(20):
     st = time.perf_counter()
-    # Need to cast non-image inputs from numpy, this is only realistic way to run it
-    inputs = {**{k:v for k,v in new_inputs.items() if 'img' in k},
-              **{k:Tensor(v, device="NPY").realize() for k,v in new_inputs_numpy.items() if 'img' not in k}}
     out = run(**inputs)
     mt = time.perf_counter()
     val = out.numpy()
@@ -77,6 +82,12 @@ def test(test_val=None):
   print(out, val.shape, val.dtype)
   if test_val is not None: np.testing.assert_equal(test_val, val)
   print("**** test done ****")
+
+  # test that changing the numpy changes the model outputs
+  for v in new_inputs_numpy.values(): v *= 2
+  out = run(**inputs)
+  changed_val = out.numpy()
+  np.testing.assert_raises(AssertionError, np.testing.assert_array_equal, val, changed_val)
 
 if __name__ == "__main__":
   test_val = compile() if not getenv("RUN") else None
