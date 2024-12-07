@@ -5,7 +5,11 @@ if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
 if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
 if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
 
+<<<<<<< Updated upstream
 from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters, Device
+=======
+from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters
+>>>>>>> Stashed changes
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.tensor import _from_np_dtype
 from tinygrad.engine.realize import CompiledRunner
@@ -15,7 +19,7 @@ from onnx.helper import tensor_dtype_to_np_dtype
 from extra.onnx import get_run_onnx   # TODO: port to main tinygrad
 
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
-OUTPUT = "/tmp/openpilot.pkl"
+OUTPUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/openpilot.pkl"
 
 def compile(onnx_file):
   onnx_model = onnx.load(onnx_file)
@@ -28,6 +32,12 @@ def compile(onnx_file):
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
   input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input}
   if getenv("FLOAT16", 0) == 0: input_types = {k:(np.float32 if v==np.float16 else v) for k,v in input_types.items()}
+  input_types = {inp.name: np.float32 for inp in onnx_model.graph.input}
+  if 'input_img' in input_shapes:
+    input_types['input_img'] = np.uint8
+  else:
+    input_types['input_imgs'] = np.uint8
+    input_types['big_input_imgs'] = np.uint8
   Tensor.manual_seed(100)
   new_inputs = {k:Tensor.randn(*shp, dtype=_from_np_dtype(input_types[k])).mul(8).realize() for k,shp in sorted(input_shapes.items())}
   new_inputs_numpy = {k:v.numpy() for k,v in new_inputs.items()}
@@ -83,6 +93,7 @@ def test_vs_compile(run, new_inputs, test_val=None):
 
   # run 20 times
   for _ in range(20):
+    inputs_numpy = {k:v.numpy() for k,v in new_inputs.items()}
     st = time.perf_counter()
     out = run(**inputs)
     mt = time.perf_counter()
