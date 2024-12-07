@@ -105,6 +105,7 @@ class Buffer:
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
+    return
     if not self.is_allocated(): return
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
