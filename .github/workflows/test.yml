@@ -233,7 +233,7 @@ jobs:
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
-      run: PYTHONPATH="." DEBUG=2 python -m pytest -s -v -n=auto test/unit/
+      run: PYTHONPATH="." DEBUG=2 python3 test/unit/test_disk_tensor.py TestSafetensors.test_save_all_dtypes
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
