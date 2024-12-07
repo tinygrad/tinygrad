@@ -97,11 +97,11 @@ class TestSymbolic(unittest.TestCase):
   def test_div_reduction(self):
     self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
-  @unittest.expectedFailure
+  # @unittest.expectedFailure
   def test_var_becomes_num(self):
     self.helper_test_variable(Variable("a", 2, 2), 2, 2, "2")
 
-  @unittest.expectedFailure
+  # @unittest.expectedFailure
   def test_equality(self):
     idx1 = Variable("idx1", 0, 3)
     idx2 = Variable("idx2", 0, 3)
@@ -163,7 +163,7 @@ class TestSymbolic(unittest.TestCase):
   def test_mul_1(self):
     self.helper_test_variable(Variable("a", 0, 8)*1, 0, 8, "a")
 
-  @unittest.expectedFailure
+  # @unittest.expectedFailure
   def test_mul_neg_1(self):
     self.helper_test_variable((Variable("a", 0, 2)*-1)//3, -1, 0, "((((a*-1)+3)//3)+-1)")
 
@@ -185,7 +185,7 @@ class TestSymbolic(unittest.TestCase):
   def test_div_min_max(self):
     self.helper_test_variable(Variable("a", 0, 7) // 2, 0, 3, "(a//2)")
 
-  @unittest.expectedFailure
+  # @unittest.expectedFailure
   def test_div_neg_min_max(self):
     self.helper_test_variable(Variable("a", 0, 7) // -2, -4, 0, "((((a*-1)+8)//2)+-4)")
     self.helper_test_variable(Variable("a", 0, 6) // -2, -3, 0, "((((a*-1)+6)//2)+-3)")
@@ -349,7 +349,7 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_partial_remove(self):
     self.helper_test_variable(Node.sum([Variable("idx0", 0, 127)*4, Variable("idx2", 0, 3)])//4, 0, 127, "idx0")
 
-  @unittest.expectedFailure
+  # @unittest.expectedFailure
   def test_div_numerator_negative(self):
     self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "((((idx*-10)+99)//11)+-9)")
 
@@ -400,7 +400,7 @@ class TestSymbolic(unittest.TestCase):
     lidx3 = Variable("lidx3", 0, 1)
     self.helper_test_variable((gidx0+lidx2+lidx3)*4, 0, 80, "((gidx0*4)+(lidx2*4)+(lidx3*4))")
 
-  @unittest.expectedFailure
+  # @unittest.expectedFailure
   def test_variable_divmod(self):
     start_pos = Variable("start_pos", 0, 127)
     v = start_pos + 1
@@ -693,7 +693,7 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
 """
 
 class TestSymbolicRealWorld(unittest.TestCase):
-  @unittest.expectedFailure
+  # @unittest.expectedFailure
   def test_resnet_half(self):
     gidx0 = Variable("gidx0", 0, 3)
     gidx1 = Variable("gidx1", 0, 127)
