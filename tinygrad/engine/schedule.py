@@ -323,6 +323,7 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
     if len(kernel_children) == 0: continue
     for tr in group: del ctx.realizes[tr]
   # group BUFFER uops into kernels
+  reduce_for_op = {}
   output_groups: DefaultDict[UOp, List[UOp]] = defaultdict(list)
   for ubuf in ctx.realizes: output_groups[reduce_for_op.get(ubuf, ubuf)].append(ubuf)
   return list(output_groups.values())
