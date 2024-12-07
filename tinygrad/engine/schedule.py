@@ -85,6 +85,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
   # keep track of uops outside of the big graph
   if op is not None:
+    assert buf.device != "NPY", f"{buf} {id(buf)}"
     buf_uop.buffer.ref(1)
     ctx.lazybufs[buf_uop] = buf
     ctx.allbufs[buf_uop] = ret
@@ -431,6 +432,8 @@ break_sched = PatternMatcher([
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
+  for out in outs:
+    if out.device == "NPY": print(out)
   # create the big graph
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}

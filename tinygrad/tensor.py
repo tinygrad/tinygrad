@@ -53,6 +53,7 @@ def _fromnp(x: 'np.ndarray') -> LazyBuffer:  # type: ignore [name-defined] # noq
   # fake realize
   ret.buffer.allocate(x)
   del ret.srcs
+  if ret.buf_uop.arg[0] == 380: print(f"her {ret} {id(ret)}")
   return ret
 
 def get_shape(x) -> Tuple[int, ...]:
