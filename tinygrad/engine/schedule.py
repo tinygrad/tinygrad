@@ -179,7 +179,8 @@ to_si = PatternMatcher([
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
   (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,b,x: x.replace(src=(b, *x.src))),
   # unmasked VALID is just CONST
-  (UPat(Ops.VALID, name="valid").where(UPat.cvar("x"), UPat()), lambda ctx,valid,x: x if all(v.mask is None for v in valid.st.views) else None),
+  (UPat(Ops.VALID, name="valid").where(UPat.cvar("x"), UPat()),
+   lambda ctx,valid,x: x if all_int(valid.shape) and all(v.mask is None for v in valid.st.views) else None),
   # don't need contiguous or assign anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda ctx,x: x),
