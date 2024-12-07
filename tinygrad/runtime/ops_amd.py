@@ -80,6 +80,8 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
+    self.bind_args_state(args_state)
+
     self.acquire_mem(gli=0, gl2=0)
 
     if prg.enable_private_segment_sgpr:

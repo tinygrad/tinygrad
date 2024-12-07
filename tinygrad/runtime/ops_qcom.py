@@ -105,6 +105,8 @@ class QCOMComputeQueue(HWQueue):
     dev.last_cmd = kgsl.IOCTL_KGSL_GPU_COMMAND(dev.fd, __payload=submit_req).timestamp
 
   def exec(self, prg:QCOMProgram, args_state:QCOMArgsState, global_size, local_size):
+    self.bind_args_state(args_state)
+
     def cast_int(x, ceil=False): return (math.ceil(x) if ceil else int(x)) if isinstance(x, float) else x
     global_size_mp = [cast_int(g*l) for g,l in zip(global_size, local_size)]
 
@@ -183,17 +185,12 @@ class QCOMArgsState(HCQArgsState):
       if prg.buf_info[i].type in {BUFTYPE_TEX, BUFTYPE_IBO}:
         obj = b.texture_info.desc if prg.buf_info[i].type is BUFTYPE_TEX else b.texture_info.ibo
         to_mv(self.ptr + prg.buf_info[i].offset, len(obj) * 4).cast('I')[:] = array.array('I', obj)
-      else: self.update_buffer(i, b)
-    for i, v in enumerate(vals): self.update_var(i, v)
+      self.bind_sints_to_ptr(b.va_addr, ptr=ptr + self.buf_info[i].offset + (0 if self.buf_info[i].type is BUFTYPE_BUF else 16), fmt='Q')
 
-  def update_buffer(self, index:int, buf:HCQBuffer):
-    if self.buf_info[index].type is not BUFTYPE_BUF: self.args_view[self.buf_info[index].offset//8 + 2] = buf.va_addr
-    else: self.args_view[self.buf_info[index].offset//8] = buf.va_addr
-
-  def update_var(self, index:int, val:int): self.args_view[self.args_info[index].offset//8] = val
+    for i, v in enumerate(vals): self.bind_sints_to_ptr(v, ptr + self.args_info[i].offset, 'I')
 
 class QCOMProgram(HCQProgram):
-  def __init__(self, dev: QCOMDevice, name: str, lib: bytes):
+  def __init__(self, dev:QCOMDevice, name:str, lib:bytes):
     self.dev: QCOMDevice = dev
     self.name, self.lib = name, lib
     self._parse_lib()

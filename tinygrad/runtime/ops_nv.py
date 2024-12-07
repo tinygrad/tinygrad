@@ -132,6 +132,8 @@ class NVComputeQueue(NVCommandQueue):
     return self
 
   def exec(self, prg:NVProgram, args_state:NVArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
+    self.bind_args_state(args_state)
+
     ctypes.memmove(qmd_addr:=(args_state.ptr + round_up(prg.constbufs[0][1], 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
     assert qmd_addr < (1 << 40), f"large qmd addr {qmd_addr:x}"
 
@@ -264,7 +266,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
     if options.host: return self.dev._gpu_alloc(size, host=True, tag="user host memory")
     return self.dev._gpu_alloc(size, cpu_access=options.cpu_access, tag=f"user memory ({options})")
 
-  def _free(self, opaque, options:BufferSpec):
+  def _free(self, opaque:HCQBuffer, options:BufferSpec):
     self.dev.synchronize()
     self.dev._gpu_free(opaque)
 
