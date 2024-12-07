@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, cast, Generator, Tuple
 import time, pprint
 from dataclasses import dataclass, replace
-from tinygrad.helpers import colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA
+from tinygrad.helpers import ansistrip, colored, getenv, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, Context, TRACEMETA
 from tinygrad.ops import Ops, UOp, Variable, sym_infer, sint
 from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
@@ -215,3 +215,4 @@ def run_schedule(schedule:List[ScheduleItem], var_vals:Optional[Dict[Variable, i
   for ei in lower_schedule(schedule):
     if len(capturing) and CAPTURING: capturing[0].add(ei)
     ei.run(var_vals, do_update_stats=do_update_stats)
+    print(ansistrip(ei.prg.display_name))
