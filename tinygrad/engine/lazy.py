@@ -18,6 +18,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Ops]
   if enable_cache and (rret := lazycache.get(cache_key, None)) is not None: return rret
 
   ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, metadata=_METADATA.get())
+  enable_cache = False
   if enable_cache: lazycache[cache_key] = ret
   return ret
 
