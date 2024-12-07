@@ -1018,7 +1018,7 @@ class TestSchedule(unittest.TestCase):
     dummy = x.sum().half().float()
     check_schedule(dummy, 1)
     dummy = x.sum().half().float().contiguous() + 1
-    check_schedule(dummy, 2)
+    check_schedule(dummy, 1)
 
     # shared between two outputs
     shared = x.sum().half().float()
