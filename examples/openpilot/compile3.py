@@ -6,7 +6,6 @@ if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
 if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
 
 from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters, Device
->>>>>>> Stashed changes
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.tensor import _from_np_dtype
 from tinygrad.engine.realize import CompiledRunner
