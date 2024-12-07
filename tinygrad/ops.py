@@ -255,11 +255,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.shape.shapetracker import ShapeTracker
     return ShapeTracker.from_shape(src_sts[0].reduce(self.axis_arg) if self.op in (Ops.REDUCE_AXIS, Ops.WMMA) else src_sts[0].shape)
 
+  def cmp_tuple(self) -> Tuple[int, Any, Optional[DType], Tuple[UOp, ...]]:
+    # NOTE: DEFINE_VAR only here for PTX
+    if self.op is UOps.DEFINE_VAR: arg = self.arg[0]
+    elif self.op is UOps.ALU: arg = self.arg.value
+    else: arg = self.arg
+    return (self.op.value, arg, self.dtype, self.src)
   def __hash__(self): return hash(self.cmp_tuple)
   def __eq__(self, other):
     if not isinstance(other, UOp): return False
     if not (self.op == other.op and self.dtype == other.dtype and self.arg == other.arg and len(self.src) == len(other.src)): return False
-    if self.op == UOps.ALU and self.arg in COMMUTATIVE:
+    if self.op == UOp.ALU and self.arg in COMMUTATIVE:
       return set(self.src) == set(other.src)
     return self.src == other.src
   def __ne__(self, other): return not (self == other)

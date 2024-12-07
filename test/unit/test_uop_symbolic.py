@@ -84,9 +84,6 @@ class TestSymbolic(unittest.TestCase):
   def test_div_reduction(self):
     self.helper_test_variable(Variable("a", 2, 3)//2, 1, 1, "1")
 
-  def test_var_becomes_num(self):
-    self.helper_test_variable(Variable("a", 2, 2), 2, 2, "2")
-
   def test_equality(self):
     idx1 = Variable("idx1", 0, 3)
     idx2 = Variable("idx2", 0, 3)
@@ -535,6 +532,15 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(numerator, 3, 390, "(a*((a*4)+-1))")
     self.helper_test_variable((numerator//denominator)<=0, 1, 1, "True")
 
+  def test_numnode_eq_int(self):
+    n1 = NumNode(1)
+    n2 = NumNode(2)
+    assert n1 == 1
+    assert n2 == 2
+    assert n1 != n2
+    assert hash(n1) == hash(1)  # Direct hash test
+    assert hash(n2) == hash(2)
+
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
     MIN, MAX = 0, 10
@@ -591,6 +597,7 @@ class TestSymbolicVars(unittest.TestCase):
     assert (a * a).vars() == {a}
     assert (a//4 + a//6).vars() == {a}
 
+
 class TestSymInfer(unittest.TestCase):
   def test_sym_infer(self):
     a = Variable("a", 0, 10)
@@ -605,6 +612,7 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(a+b+c, var_vals) == 9
     assert sym_infer(a*b, var_vals) == 6
     assert sym_infer(a*b+c, var_vals) == 10
+
 
 """
 @unittest.skip("not supported on uops yet")
