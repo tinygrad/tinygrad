@@ -212,9 +212,9 @@ class UOpMetaClass(type):
     return created
 
 # some uops map to other stuff
-buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
-realized:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary() # this maps realized ops to a BUFFER uop
-forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
+buffers:Dict[UOp, Buffer] = {} # this maps BUFFER uops to their device Buffers
+realized:Dict[UOp, UOp] = {} # this maps realized ops to a BUFFER uop
+forced_realize:Set[UOp] = set()
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
