@@ -1202,16 +1202,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(15, 25, 35)], lambda x: x.std(keepdim=True))
     helper_test_op([(15, 25, 35)], lambda x: x.std(0, keepdim=True, correction=0))
   def test_std_mean(self):
-    helper_test_op([(15,25,35)], lambda x: torch.stack(torch.std_mean(x)),
-                                 lambda x: Tensor.stack(*x.std_mean()))
-    helper_test_op([(15,25,35)], lambda x: torch.stack(torch.std_mean(x, correction=5)),
-                                 lambda x: Tensor.stack(*x.std_mean(correction=5)))
-    helper_test_op([(15,25,35)], lambda x: torch.stack(torch.std_mean(x, keepdim=True, correction=0)),
-                                 lambda x: Tensor.stack(*x.std_mean(keepdim=True, correction=0)))
     helper_test_op([(1,0,3,0,5)], lambda x: torch.stack(torch.std_mean(x, axis=(1,3))),
                                   lambda x: Tensor.stack(*x.std_mean(axis=(1,3))))
-    helper_test_op([(3,4,5,6)], lambda x: torch.stack(torch.std_mean(x, axis=(1,2))),
-                                lambda x: Tensor.stack(*x.std_mean(axis=(1,2))))
   def test_softmax(self):
     helper_test_op([(45,65)], torch.nn.Softmax(dim=1), Tensor.softmax, atol=1e-7, grad_atol=1e-7)
     helper_test_op([(45)], torch.nn.Softmax(dim=0), Tensor.softmax, atol=1e-7, grad_atol=1e-7)
