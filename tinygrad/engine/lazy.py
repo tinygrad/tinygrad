@@ -97,22 +97,8 @@ class LazyBuffer(MathTrait):
 
   def bitcast(self, dtype:DType) -> LazyBuffer: return self.cast(dtype, bitcast=True)
   def cast(self, dtype:DType, bitcast:bool=False, allow_buffer_view=True) -> LazyBuffer:
-    if self.dtype == dtype: return self
-    if self.device.startswith("DISK") and not bitcast: raise RuntimeError("attempted to cast disk buffer (bitcast only)")
-    if self.is_unrealized_unmasked_const() and not bitcast:
-      return create_lazybuffer(self.device, self.st, dtype, Ops.CONST, dtypes.as_const(self.base.arg, dtype))
-    new_shape = self.shape
-    if bitcast and self.dtype.itemsize != dtype.itemsize:
-      if not self.device.startswith("DISK"): raise RuntimeError("shape changing bitcast only supported on DISK right now")
-      if not all_int(new_shape): raise RuntimeError("shape changing bitcast with symbolic shape isn't supported yet")
-      # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
-      if not (new_shape[-1]*self.dtype.itemsize) % dtype.itemsize == 0: raise RuntimeError("unsupported size in bitcast")
-      new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
-    elif getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self is not self.base:
-      # TODO: applying this makes gpt2 slower
-      return self.base.cast(dtype, bitcast)._view(self.st)
     cast_op: Ops = (Ops.BUFFER_VIEW if self.can_view() and allow_buffer_view else Ops.BITCAST) if bitcast else Ops.CAST
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, None, (self,))
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), dtype, cast_op, None, (self,))
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is Ops.CONST and not isinstance(self.base.arg, UOp)
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
