@@ -2119,12 +2119,9 @@ class TestOps(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_avg_pool3d_failure(self):
-    kernel_size = (24, 30, 29)
-    stride = (9, 8, 8)
-    padding = (10, 2, 2)
-    helper_test_op([(1, 1, 32, 48, 60)],
-      lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=kernel_size, stride=stride, padding=padding, count_include_pad=False),
-      lambda x: Tensor.avg_pool2d(x, kernel_size=kernel_size, stride=stride, padding=padding, count_include_pad=False), rtol=1e-5, forward_only=True)
+    helper_test_op([(1,1,16,16,16)],
+      lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
+      lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), rtol=1e-5, forward_only=True)
 
   def test_interpolate_linear(self):
     for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
