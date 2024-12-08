@@ -14,7 +14,7 @@ class HCQGraph(MultiGraphRunner):
     self.devices = list(set(cast(HCQCompiled, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
 
     # Replace input buffers with variables.
-    self.hcq_bufs = [[x._buf for x in ji.bufs] for ji in jit_cache]
+    self.hcq_bufs = [[cast(Buffer, x)._buf for x in ji.bufs] for ji in jit_cache]
     self.input_replace_to_var: Dict[Tuple[int, int], VariableT] = {}
 
     for (j,i), input_idx in self.input_replace.items():
@@ -31,7 +31,7 @@ class HCQGraph(MultiGraphRunner):
     # Fill initial arguments.
     self.ji_args: Dict[int, HCQArgsState] = {}
 
-    kargs_alloc: Dict[Compiled, BumpAllocator] = {dev:BumpAllocator(buf.size, start=buf.va_addr) for dev, buf in self.kernargs_bufs.items()}
+    kargs_alloc: Dict[Compiled, BumpAllocator] = {dev:BumpAllocator(buf.size, start=cast(int, buf.va_addr)) for dev,buf in self.kernargs_bufs.items()}
     for j,ji in enumerate(jit_cache):
       if not isinstance(ji.prg, CompiledRunner): continue
 

@@ -196,7 +196,7 @@ class QCOMProgram(HCQProgram):
     self._parse_lib()
 
     self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, options=BufferSpec(cpu_access=True, nolru=True))
-    to_mv(self.lib_gpu.va_addr, self.image_size)[:] = self.image
+    to_mv(cast(int, self.lib_gpu.va_addr), self.image_size)[:] = self.image
 
     self.pvtmem_size_per_item: int = round_up(self.pvtmem, 512) >> 9
     self.pvtmem_size_total: int = self.pvtmem_size_per_item * 128 * 2
@@ -312,7 +312,7 @@ class QCOMAllocator(HCQAllocatorBase):
 
   def _as_buffer(self, src:HCQBuffer) -> memoryview:
     self.dev.synchronize()
-    return to_mv(src.va_addr, src.size)
+    return to_mv(cast(int, src.va_addr), src.size)
 
   def _free(self, opaque, options:BufferSpec):
     self.dev.synchronize()
@@ -326,7 +326,7 @@ class QCOMDevice(HCQCompiled):
 
   def __init__(self, device:str=""):
     self.fd = os.open('/dev/kgsl-3d0', os.O_RDWR)
-    QCOMDevice.dummy_addr = self._gpu_alloc(0x1000).va_addr
+    QCOMDevice.dummy_addr = cast(int, self._gpu_alloc(0x1000).va_addr)
     QCOMDevice.signals_page = self._gpu_alloc(16 * 65536, uncached=True)
     QCOMDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, self.signals_page.size, 16)]
 
@@ -335,7 +335,7 @@ class QCOMDevice(HCQCompiled):
     self.ctx = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=flags).drawctxt_id
 
     self.cmd_buf = self._gpu_alloc(16 << 20)
-    self.cmd_buf_allocator = BumpAllocator(size=self.cmd_buf.size, start=self.cmd_buf.va_addr, wrap=True)
+    self.cmd_buf_allocator = BumpAllocator(size=self.cmd_buf.size, start=cast(int, self.cmd_buf.va_addr), wrap=True)
 
     self.border_color_buf = self._gpu_alloc(0x1000, fill_zeroes=True)
 
