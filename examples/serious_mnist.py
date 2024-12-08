@@ -45,7 +45,7 @@ class ConvBlock:
   def __call__(self, input):
     x = input.reshape(shape=(-1, self.inp, self.w, self.h))
     for cweight, cbias in zip(self.cweights, self.cbiases):
-      x = x.pad2d(padding=[1,1,1,1]).conv2d(cweight).add(cbias).relu()
+      x = x.pad(padding=[1,1,1,1]).conv2d(cweight).add(cbias).relu()
     x = self._bn(x)
     x = self._seb(x)
     return x

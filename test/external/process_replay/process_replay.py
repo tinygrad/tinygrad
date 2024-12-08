@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
 import os, multiprocessing, logging, pickle, sqlite3, difflib, functools
-from typing import Callable, List, Tuple, Union, cast
+from typing import Callable, List, Set, Tuple, Union, cast
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
-from tinygrad.engine.schedule import full_ast_rewrite
+from tinygrad.engine.schedule import ScheduleContext, full_ast_rewrite
 from tinygrad.codegen.kernel import Kernel, Opt
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp
@@ -28,7 +28,8 @@ if REF == "master": SKIP_PROCESS_REPLAY = True
 
 # *** recreators
 
-def recreate_sched(*args) -> UOp: return full_ast_rewrite(*args[0])[0]
+def recreate_sched(ast:UOp, assigns:Set[UOp]) -> UOp:
+  return full_ast_rewrite(ast, ScheduleContext(assigns=assigns))[0]
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str, _) -> str:
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)
@@ -53,6 +54,7 @@ def diff(offset:int, name:str, fxn:Callable) -> Union[Tuple[int, int], bool]:
     # try recreate
     try:
       with Context(**{k:v for k,v in args[-2].items() if k in ContextVar._cache and k != "DEBUG"}): good = fxn(*args[:-2])
+      if good is None: continue
     except Exception as e:
       logging.warning(f"FAILED TO RECREATE KERNEL {e}")
       for x in args[:-1]: logging.info(x)

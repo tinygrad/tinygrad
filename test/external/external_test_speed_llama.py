@@ -14,7 +14,7 @@ class FakeProgram:
 
 class FakeAllocator(Allocator):
   def _alloc(self, sz, options): return None
-  def copyin(self, dest, src:memoryview): pass
+  def _copyin(self, dest, src:memoryview): pass
 
 class TestLLaMASpeed(unittest.TestCase):
   def test_llama_compile(self):
