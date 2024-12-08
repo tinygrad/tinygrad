@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal
+from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal, get_args
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -369,11 +369,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def metaop(op:Ops, shape:Tuple[sint, ...], dtype:DType, device:str, arg=None, src:Tuple[UOp, ...]=()) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
     # NOTE: we embed device on CONST with a fake BUFFER uop
-    if op is Ops.CONST: return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, 1, dtype), UOp.const(dtype, unwrap(arg))),
-                                   ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
+    # NOTE: UOp.const unbinds, don't use it here
+    if op is Ops.CONST:
+      assert isinstance(arg, get_args(ConstLike))
+      return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, 1, dtype), UOp(op, dtype, (), arg) if isinstance(arg, UOp) else UOp.const(dtype, arg)),
+                 ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
     # otherwise it's a contiguous st
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), UOp(op, dtype, src, arg)), st)
-  def copy_to_device(self, device:str, clone:bool=False) -> UOp:
+  def copy_to_device(self, device:str, force=False, clone:bool=False) -> UOp:
     # no COPY
     if self.device == device and not clone: return self
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
