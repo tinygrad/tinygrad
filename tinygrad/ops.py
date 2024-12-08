@@ -366,17 +366,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.shape.shapetracker import ShapeTracker
     return UOp(Ops.VALID, dtypes.bool, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)).where(UOp.const(dtype, val), 0)
   @staticmethod
-  def metaop(op:Ops, shape:Tuple[sint, ...], dtype:DType, device:str, arg:Any=None, src:Tuple[UOp, ...]=()) -> UOp:
+  def metaop(op:Ops, shape:Tuple[sint, ...], dtype:DType, device:str, arg=None, src:Tuple[UOp, ...]=()) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
-    # CONST is always a VIEW of size 1 (NOTE: remove this when CONST doesn't need device)
-    if op is Ops.CONST:
-      st = ShapeTracker.from_shape(())
-      arg = arg if isinstance(arg, UOp) else dtypes.as_const(unwrap(arg), dtype)
-      # NOTE: CONST is hardcoded here because UOp.const unbinds
-      return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, 1, dtype), UOp(Ops.CONST, dtype, (), arg)), st).reshape((1,)*len(shape)).expand(shape)
+    # NOTE: we embed device on CONST with a fake BUFFER uop
+    if op is Ops.CONST: return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, 1, dtype), UOp.const(dtype, unwrap(arg))),
+                                   ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
     # otherwise it's a contiguous st
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), UOp(op, dtype, src, arg)), st)
-  def copy_to_device(self, device:str, force:bool=False, clone:bool=False) -> UOp:
+  def copy_to_device(self, device:str, clone:bool=False) -> UOp:
     # no COPY
     if self.device == device and not clone: return self
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
