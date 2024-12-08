@@ -18,7 +18,7 @@ class FastEnum(IntEnum):
 class SimpleMathTrait:
   # required to implement
   def alu(self:T, arg:Ops, *src) -> T: raise NotImplementedError
-  def const_like(self:T, b:ConstLike) -> T: raise NotImplementedError
+  def const_like(self:T, b:ConstLike)-> T: raise NotImplementedError
 
   # great functions you get!
   def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
