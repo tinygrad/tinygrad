@@ -1999,22 +1999,23 @@ class Tensor(SimpleMathTrait):
     x = x.shrink(tuple(noop + flatten(((0,o), (0,k)) for o,k in zip(o_,k_))))
     return x.permute(*range(len(noop)), *[len(noop)+i*2 for i in range(len(i_))], *[len(noop)+i*2+1 for i in range(len(i_))])
 
-  def _padding2d(self, padding:Union[int, Sequence[int]], dims:int) -> Sequence[int]:
+  def _resolve_pool_pads(self, padding:Union[int, Sequence[int]], dims:int) -> Sequence[int]:
     if not isinstance(padding, int) and not (len(padding) == 2*dims or len(padding) == dims):
       raise ValueError(f"Expected padding of length {2*dims} or {dims}, but got {len(padding)} for tensor of shape {self.shape}")
     return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
 
-  def _ceil_mode_padding2d(self, p_:List[int], k_:Tuple[sint, ...], s_:Union[Tuple[int, ...], int], d_:Union[Tuple[int, ...], int]) -> Sequence[int]:
+  def _apply_ceil_mode(self, p_:Sequence[int], k_:Tuple[sint, ...], s_:Union[Tuple[int, ...], int], d_:Union[Tuple[int, ...], int]) -> List[int]:
     (d_,s_), i_ = (make_tuple(x, len(k_)) for x in (d_,s_)), self.shape[-len(k_):]
-    grouped_pads = tuple(zip(p_[-2::-2], p_[::-2]))
+    pads, grouped_pads = list(p_), list(zip(p_[-2::-2], p_[::-2]))
     # https://arxiv.org/pdf/1603.07285 section 5.1, relationship 15.
     o_ = [ceildiv(i+pB+pA - (d*(k-1)+1), s) + 1 for i,d,k,s,(pB,pA) in zip(i_,d_,k_,s_,grouped_pads)]
-    # we have to do additional padding before `_pool` so that `o_` in `_pool` is calculated correctly
-    # `s*(o-1) + (d*(k-1)+1) - (i+2*p)` -> last_sliding_window_start + full_kernel_size - padded_input_shape
-    # we decrease padding in the case that a sliding window starts in the end padded region, thereby decreasing `o_` in `_pool`
-    # `smax(s*(o-1) - (p+i-1), 0)` -> last_sliding_window_start - (left_pad + input_size - zero_offset)
-    for dim,(o,i,s,p,k,d) in enumerate(zip(o_,i_,s_,p_,k_,d_)): p_[-1-dim*2] += s*(o-1) + (d*(k-1)+1) - (i+2*p) - smax(s*(o-1) - (p+i-1), 0)
-    return p_
+    for dim,(o,i,s,k,d,(pB,pA)) in enumerate(zip(o_,i_,s_,k_,d_,grouped_pads)):
+      # we have to do additional padding before `_pool` so that `o_` in `_pool` is calculated correctly
+      # `s*(o-1) + (d*(k-1)+1) - (i+pB+pA)` -> last_sliding_window_start + full_kernel_size - padded_input_shape
+      # we decrease padding in the case that a sliding window starts in the end padded region, thereby decreasing `o_` in `_pool`
+      # `smax(s*(o-1) - (pB+i-1), 0)` -> last_sliding_window_start - (pad_before + input_size - zero_offset)
+      pads[-1-dim*2] += s*(o-1) + (d*(k-1)+1) - (i+pB+pA) - smax(s*(o-1) - (pB+i-1), 0)
+    return pads
 
   # NOTE: these work for more than 2D
   def avg_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False, count_include_pad=True):
@@ -2043,9 +2044,9 @@ class Tensor(SimpleMathTrait):
     ```
     """
     axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
-    reg_pads = self._padding2d(padding, len(k_))
-    ceil_pads = self._ceil_mode_padding2d(list(reg_pads), k_, stride if stride is not None else k_, dilation)
     def pool(x:Tensor, padding_:Sequence[int]) -> Tensor: return x.pad(padding_)._pool(k_, stride if stride is not None else k_, dilation)
+    reg_pads = self._resolve_pool_pads(padding, len(k_))
+    ceil_pads = self._apply_ceil_mode(reg_pads, k_, stride if stride is not None else k_, dilation)
     if not count_include_pad:
       pads = ceil_pads if ceil_mode else reg_pads
       return pool(self, pads).sum(axis) / pool(self.ones_like(), pads).sum(axis)
@@ -2073,8 +2074,8 @@ class Tensor(SimpleMathTrait):
     print(t.max_pool2d(padding=1).numpy())
     ```
     """
-    pads = self._padding2d(padding, len(k_ := make_tuple(kernel_size, 2)))
-    if ceil_mode: pads = self._ceil_mode_padding2d(list(pads), k_, stride if stride is not None else k_, dilation)
+    pads = self._resolve_pool_pads(padding, len(k_ := make_tuple(kernel_size, 2)))
+    if ceil_mode: pads = self._apply_ceil_mode(pads, k_, stride if stride is not None else k_, dilation)
     return self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation).max(tuple(range(-len(k_), 0)))
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding:int|Tuple[int, ...]=0,
@@ -2094,8 +2095,8 @@ class Tensor(SimpleMathTrait):
     """
     if IMAGE: return self.image_conv2d(weight, bias, groups, stride, dilation, padding, acc_dtype)
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
+    padding_ = self._resolve_pool_pads(padding, len(HW))
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"  # noqa: E501
-    padding_ = self._padding2d(padding, len(HW))
 
     # conv2d is a pooling op (with padding)
     x = self.pad(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
@@ -2155,7 +2156,7 @@ class Tensor(SimpleMathTrait):
     """
     x, w = self, weight.unflatten(0, (groups, -1)).transpose(1, 2).flip(*range(3, len(weight.shape)+1))
     HW = weight.shape[2:]
-    padding = self._padding2d(padding, len(HW))
+    padding = self._resolve_pool_pads(padding, len(HW))
     padding = tuple(zip(padding[-2::-2], padding[::-2]))
     stride, dilation, output_padding = [make_tuple(x, len(HW)) for x in (stride, dilation, output_padding)]
     if any(s>1 for s in stride):
@@ -3790,7 +3791,7 @@ class Tensor(SimpleMathTrait):
     else: w = w.reshape(cout//4, H, rcin_hi, W, rcin_lo, 4).permute(0,1,2,3,5,4)
 
     # prepare input
-    x = x.permute(0,3,4,5,1,2).pad(self._padding2d(padding, 2))._pool((H, W), stride, dilation) # -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
+    x = x.permute(0,3,4,5,1,2).pad(self._resolve_pool_pads(padding,2))._pool((H,W), stride, dilation)# -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
     x = x.permute(0,4,5,1,2,3,6,7).reshape(bs, (oy := x.shape[4]), (ox := x.shape[5]), *cout_expand[0:2], 1, 1, rcin_hi, rcin_lo, H, W)
 
     # prepare weights

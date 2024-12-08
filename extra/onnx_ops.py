@@ -199,6 +199,7 @@ def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, cou
 def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, dilations=1, pads=0, storage_order=0, strides=1):
   pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
   ret = X.max_pool2d(kernel_shape, strides, dilations, pads, ceil_mode=ceil_mode)
+  # tests expect indices with int64 dtype
   indices = ((ret.reshape(-1, 1) == X.reshape(1, -1)) * Tensor.arange(X.numel(), dtype=dtypes.int64).unsqueeze(0)).sum(1).reshape(ret.shape)
   return ret.cast(X.dtype), indices.transpose(-2, -1) if storage_order else indices
 
