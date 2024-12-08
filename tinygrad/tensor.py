@@ -367,14 +367,13 @@ class Tensor(SimpleMathTrait):
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
     devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
     if axis is not None:
-      if axis < 0: axis += len(self.shape)
+      axis = self._resolve_dim(axis)
       if splits is None:
         if not isinstance(total:=self.shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {self.shape=}, {axis=}")
         sz = ceildiv(total, len(devices))
         splits = tuple([max(0, min(sz, total - sz*i)) for i in range(len(devices))])
       assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
-      boundaries = tuple(itertools.accumulate(splits))
-      bounds = tuple(zip((0,) + boundaries, boundaries))
+      bounds = tuple(itertools.pairwise(itertools.accumulate(splits, initial=0)))
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis, bounds), device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None, splits:Optional[Tuple[int, ...]]=None):
@@ -3215,7 +3214,8 @@ class Tensor(SimpleMathTrait):
     # inject nan for negative base and non-integer exponent
     inject_nan = (negative_base * (exponent != exponent.trunc())).detach().where(math.nan, 1)
     # apply correct_sign inject_nan, and fix 0 ** 0 = 1
-    return ((base == 0) * (exponent == 0)).detach().where(1, ret * correct_sign * inject_nan)
+    ret = ((base == 0) * (exponent == 0)).detach().where(1, ret * correct_sign * inject_nan)
+    return ret.round().cast(self.dtype) if not dtypes.is_float(self.dtype) else ret
 
   def maximum(self, x:Union[Tensor, ConstType]) -> Tensor:
     """

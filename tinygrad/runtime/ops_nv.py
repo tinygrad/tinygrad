@@ -71,8 +71,6 @@ def make_qmd_struct_type():
 qmd_struct_t = make_qmd_struct_type()
 assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 
-def nvmethod(subc, mthd, size, typ=2): return (typ << 28) | (size << 16) | (subc << 13) | (mthd >> 2)
-
 class NVSignal(HCQSignal):
   def __init__(self, base_addr:Optional[int]=None, **kwargs):
     super().__init__(NVDevice.signals_pool.pop() if base_addr is None else base_addr, **kwargs, timestamp_divider=1000, value_off=0, timestamp_off=8)
@@ -88,18 +86,19 @@ class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
   def __del__(self):
     if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True))
 
+  def nvm(self, subchannel, mthd, *args, typ=2): self.q((typ << 28) | (len(args) << 16) | (subchannel << 13) | (mthd >> 2), *args)
+
   def setup(self, compute_class=None, copy_class=None, local_mem_window=None, shared_mem_window=None, local_mem=None, local_mem_tpc_bytes=None):
-    if compute_class: self.q(nvmethod(1, nv_gpu.NVC6C0_SET_OBJECT, 1), compute_class)
-    if copy_class: self.q(nvmethod(4, nv_gpu.NVC6C0_SET_OBJECT, 1), copy_class)
-    if local_mem_window: self.q(nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, 2), *data64(local_mem_window))
-    if shared_mem_window: self.q(nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, 2), *data64(shared_mem_window))
-    if local_mem: self.q(nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, 2), *data64(local_mem))
-    if local_mem_tpc_bytes: self.q(nvmethod(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, 3), *data64(local_mem_tpc_bytes), 0xff)
+    if compute_class: self.nvm(1, nv_gpu.NVC6C0_SET_OBJECT, compute_class)
+    if copy_class: self.nvm(4, nv_gpu.NVC6C0_SET_OBJECT, copy_class)
+    if local_mem_window: self.nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_WINDOW_A, *data64(local_mem_window))
+    if shared_mem_window: self.nvm(1, nv_gpu.NVC6C0_SET_SHADER_SHARED_MEMORY_WINDOW_A, *data64(shared_mem_window))
+    if local_mem: self.nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_A, *data64(local_mem))
+    if local_mem_tpc_bytes: self.nvm(1, nv_gpu.NVC6C0_SET_SHADER_LOCAL_MEMORY_NON_THROTTLED_A, *data64(local_mem_tpc_bytes), 0xff)
     return self
 
   def wait(self, signal:NVSignal, value:sint=0):
-    self.q(nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(signal.value_addr), *data64_le(value),
-           (3 << 0) | (1 << 24)) # ACQUIRE | PAYLOAD_SIZE_64BIT
+    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(signal.value_addr), *data64_le(value), (3 << 0) | (1 << 24)) # ACQUIRE | PAYLOAD_SIZE_64BIT
     self.active_qmd = None
     return self
 
@@ -128,7 +127,7 @@ class NVCommandQueue(HWQueue[NVSignal, 'NVDevice', 'NVProgram', 'NVArgsState']):
 
 class NVComputeQueue(NVCommandQueue):
   def memory_barrier(self):
-    self.q(nvmethod(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, 1), (1 << 12) | (1 << 4) | (1 << 0))
+    self.nvm(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI, (1 << 12) | (1 << 4) | (1 << 0))
     self.active_qmd = None
     return self
 
@@ -143,8 +142,8 @@ class NVComputeQueue(NVCommandQueue):
     qmd.constant_buffer_addr_upper_0, qmd.constant_buffer_addr_lower_0 = data64(args_state.ptr)
 
     if self.active_qmd is None:
-      self.q(nvmethod(1, nv_gpu.NVC6C0_SEND_PCAS_A, 0x1), qmd_addr >> 8)
-      self.q(nvmethod(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 0x1), 9)
+      self.nvm(1, nv_gpu.NVC6C0_SEND_PCAS_A, qmd_addr >> 8)
+      self.nvm(1, nv_gpu.NVC6C0_SEND_SIGNALING_PCAS2_B, 9)
     else:
       self.active_qmd.dependent_qmd0_pointer = qmd_addr >> 8
       self.active_qmd.dependent_qmd0_action = 1
@@ -163,9 +162,9 @@ class NVComputeQueue(NVCommandQueue):
           self.bind_sints(value, struct=self.active_qmd, start_field=f'release{i}_payload', fmt='Q')
           return self
 
-    self.q(nvmethod(0, nv_gpu.NVC56F_SEM_ADDR_LO, 5), *data64_le(signal.value_addr), *data64_le(value),
-           (1 << 0) | (1 << 20) | (1 << 24) | (1 << 25)) # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
-    self.q(nvmethod(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 1), 0x0)
+    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(signal.value_addr), *data64_le(value),
+             (1 << 0) | (1 << 20) | (1 << 24) | (1 << 25)) # RELEASE | RELEASE_WFI | PAYLOAD_SIZE_64BIT | RELEASE_TIMESTAMP
+    self.nvm(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 0x0)
     self.active_qmd = None
     return self
 
@@ -173,14 +172,14 @@ class NVComputeQueue(NVCommandQueue):
 
 class NVCopyQueue(NVCommandQueue):
   def copy(self, dest:sint, src:sint, copy_size:int):
-    self.q(nvmethod(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, 4), *data64(src), *data64(dest))
-    self.q(nvmethod(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, 1), copy_size)
-    self.q(nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x182) # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
+    self.nvm(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, *data64(src), *data64(dest))
+    self.nvm(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, copy_size)
+    self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, 0x182) # TRANSFER_TYPE_NON_PIPELINED | DST_MEMORY_LAYOUT_PITCH | SRC_MEMORY_LAYOUT_PITCH
     return self
 
   def signal(self, signal:NVSignal, value:sint=0):
-    self.q(nvmethod(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, 3), *data64(signal.value_addr), value)
-    self.q(nvmethod(4, nv_gpu.NVC6B5_LAUNCH_DMA, 1), 0x14)
+    self.nvm(4, nv_gpu.NVC6B5_SET_SEMAPHORE_A, *data64(signal.value_addr), value)
+    self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA, 0x14)
     return self
 
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.dma_gpfifo)
