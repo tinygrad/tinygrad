@@ -446,6 +446,17 @@ def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:Optio
   # remove the gate from the index
   return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val)
 
+# Implementation of int64 indexing
+def int64_indexing(buf:UOp, idx:UOp):
+  def needs_int64(u:UOp) -> bool:
+    return hasattr(u, '_min_max') and max(abs(x) for x in u._min_max) > dtypes.max(u.dtype)
+  
+  def convert_to_int64(u:UOp) -> UOp:
+    return UOp(u.op, dtypes.int64, tuple(convert_to_int64(s) for s in u.src), u.arg) if u.op in GroupOp.ALU else \
+           u.cast(dtypes.int64) if u.dtype != dtypes.int64 and needs_int64(u) else u
+
+  return buf.index(convert_to_int64(idx)) if needs_int64(idx) else None
+
 load_store_indexing = PatternMatcher([
   # late fixup of unfoldable image loads
   (UPat(Ops.LOAD, src=(UPat.var("buf"), UPat()), allow_any_len=True, name="load"), fix_unfoldable_image_load),
@@ -456,6 +467,8 @@ load_store_indexing = PatternMatcher([
   # delete_redundant_gates (after expand)
   (UPat(Ops.STORE, src=(UPat.any(stidx:=UPat.var("buf").index(UPat.var("idx"), UPat.var("store_gate")), stidx.cast().named("cast")),
                                   UPat.var("val"))), delete_redundant_gates),
+  # int64 indexing
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))), int64_indexing),
 ])
 
 migrate_indexing = PatternMatcher([
