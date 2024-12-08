@@ -45,7 +45,6 @@ class TestPickle(unittest.TestCase):
     vt2 = pickle.loads(st)
     np.testing.assert_equal(vt2.numpy(), 20)
 
-  @unittest.skip("TODO: Buffer isn't on uop anymore")
   def test_pickle_buffer_view(self):
     t = Tensor.arange(10, device="CLANG").contiguous().realize()
     vt = t[3:5].contiguous().realize()
@@ -63,7 +62,8 @@ class TestPickle(unittest.TestCase):
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t.numpy(), t2.numpy())
 
-  @unittest.skip("no longer supported, there's no Buffer on LazyBuffer (uop)")
+  # TODO: captured JIT pickle
+  @unittest.expectedFailure
   def test_pickle_jit(self):
     @TinyJit
     def add(a, b): return a.sum()+b+1
