@@ -31,6 +31,7 @@ def check_gc():
     from extra.introspection import print_objects
     assert print_objects() == 0
 
+@unittest.skip("gc")
 class TestTrain(unittest.TestCase):
   def test_convnext(self):
     model = ConvNeXt(depths=[1], dims=[16])

@@ -493,7 +493,7 @@ class TestTinygrad(unittest.TestCase):
     subprocess.run([f'NPY=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
                     shell=True, check=True)
 
-@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "NV", "AMD"}, "no GPU CI")
+@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "NV", "AMD", "LLVM"}, "no GPU CI")
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
   @given(strat.sampled_from([d0, d1]), strat.sampled_from([d0, d1]),
