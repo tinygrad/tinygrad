@@ -711,6 +711,32 @@ class TestIFUOps(unittest.TestCase):
     for st in sink.src:
       self.assertEqual(len(st.src), 2)
 
+class TestInt64Indexing(unittest.TestCase):
+  def test_int64_range(self):
+    int32_rng = UOp.range(dtypes.int32, 0, dtypes.max(dtypes.int32) + 2, 0)
+    def_global = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), arg=0)
+    idx = def_global.index(int32_rng)
+    int64_rng = full_graph_rewrite(UOp.sink(idx)).src[0].src[1]
+    assert all(s.dtype is dtypes.int64 for s in (int64_rng,) + int64_rng.src)
+
+  def test_int64_alu(self):
+    rng = UOp.range(dtypes.int32, 0, dtypes.max(dtypes.int32), 0)
+    int32_alu = rng * UOp.const(dtypes.int32, 2)
+    def_global = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), arg=0)
+    idx = def_global.index(int32_alu)
+    int64_alu = full_graph_rewrite(UOp.sink(idx)).src[0].src[1]
+    assert all(s.dtype is dtypes.int64 for s in (int64_alu,) + int64_alu.src)
+    assert int64_alu.src[0].op is Ops.CAST
+
+  # NOTE: if the final indexing doesn't exceed int32 but a src in the middle does that src won't be casted
+  @unittest.expectedFailure
+  def test_int64_idx_const_cast(self):
+    int32_rng = UOp.range(dtypes.int32, 0, dtypes.max(dtypes.int32) + 2, 0)
+    alu = int32_rng // UOp.const(dtypes.int32, 2)
+    def_global = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), arg=0)
+    idx = def_global.index(alu)
+    int64_rng = full_graph_rewrite(UOp.sink(idx)).src[0].src[1].src[0]
+    assert all(s.dtype is dtypes.int64 for s in (int64_rng,) + int64_rng.src)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
