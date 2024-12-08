@@ -200,6 +200,7 @@ def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=False, dilatio
   pads = _resolve_pool_pads(X, pads, kernel_shape, dilations, strides, auto_pad)
   ret = X.max_pool2d(kernel_shape, strides, dilations, pads, ceil_mode=ceil_mode)
   # tests expect indices with int64 dtype
+  # TODO: if there are repeated values, this is wrong
   indices = ((ret.reshape(-1, 1) == X.reshape(1, -1)) * Tensor.arange(X.numel(), dtype=dtypes.int64).unsqueeze(0)).sum(1).reshape(ret.shape)
   return ret.cast(X.dtype), indices.transpose(-2, -1) if storage_order else indices
 
@@ -223,6 +224,8 @@ def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSE
   pads = _onnx_pads_to_tiny_pads(pads)
   return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads, output_padding=output_padding)
 
+# TODO: maybe add this to Tensor.py
+# TODO: this also might be wrong
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=(0,0,0,0), strides=None):
   outshape = to_python_const(outshape)
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
