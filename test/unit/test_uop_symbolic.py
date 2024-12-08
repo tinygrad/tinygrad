@@ -126,6 +126,12 @@ class TestSymbolic(unittest.TestCase):
     a = Variable("a", 0, 8)
     self.helper_test_variable(a+a, 0, 16, "(a*2)")
 
+  @unittest.expectedFailure
+  def test_add_self_in_chain(self):
+    a,b,c = Variable("a", 0, 8), Variable("b", 0, 8), Variable("c", 0, 8)
+    self.helper_test_variable((a+b)+(c+a), 0, 4*8, "(b+(c+(a*2)))")
+    self.helper_test_variable(a*10+b+c+a, 0, 13*8, "(b+(c+(a*11)))")
+
   def test_sub_self(self):
     a = Variable("a", 0, 8)
     self.helper_test_variable(a-a, 0, 0, "0")
@@ -468,6 +474,12 @@ class TestSymbolic(unittest.TestCase):
     gidx = Variable("gidx", 0, 2559)
     unrolled_div = ((gidx+2561)//4+(gidx+2562)//4)+((gidx+2560)//4+(gidx+2559)//4)
     self.helper_test_variable(unrolled_div, 2559, 5118, "(gidx+2559)")
+
+  @unittest.expectedFailure
+  def test_arange_add_split_unsorted(self):
+    gidx = Variable("gidx", 0, 2559)
+    unrolled_div = ((gidx+2561)//4+gidx+(gidx+2562)//4)+(gidx+2560)//4+(gidx+2559)//4
+    self.helper_test_variable(unrolled_div, 2559, 7677, "((gidx*2)+2559)")
 
   def test_arange_unrolled4_small(self):
     gidx = Variable("gidx", 0, 3)
