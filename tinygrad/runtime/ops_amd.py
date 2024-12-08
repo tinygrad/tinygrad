@@ -290,12 +290,12 @@ class AMDDevice(HCQCompiled):
   gpus:List[pathlib.Path] = []
 
   def _gpu_map(self, mem:HCQBuffer):
-    if self.gpu_id in getattr(mem._md, "mapped_gpu_ids", []): return
-    mem._md.__setattr__("mapped_gpu_ids", getattr(mem._md, "mapped_gpu_ids", []) + [self.gpu_id])
-    c_gpus = (ctypes.c_int32 * len(mem._md.mapped_gpu_ids))(*mem._md.mapped_gpu_ids)
-    stm = kfd.AMDKFD_IOC_MAP_MEMORY_TO_GPU(self.kfd, handle=mem._md.handle, device_ids_array_ptr=ctypes.addressof(c_gpus),
-                                           n_devices=len(mem._md.mapped_gpu_ids))
-    assert stm.n_success == len(mem._md.mapped_gpu_ids)
+    if self.gpu_id in getattr(mem.meta, "mapped_gpu_ids", []): return
+    mem.meta.__setattr__("mapped_gpu_ids", getattr(mem.meta, "mapped_gpu_ids", []) + [self.gpu_id])
+    c_gpus = (ctypes.c_int32 * len(mem.meta.mapped_gpu_ids))(*mem.meta.mapped_gpu_ids)
+    stm = kfd.AMDKFD_IOC_MAP_MEMORY_TO_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus),
+                                           n_devices=len(mem.meta.mapped_gpu_ids))
+    assert stm.n_success == len(mem.meta.mapped_gpu_ids)
 
   def _gpu_alloc(self, size:int, host=False, uncached=False, cpu_access=False) -> HCQBuffer:
     flags = kfd.KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE | kfd.KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE
@@ -321,16 +321,16 @@ class AMDDevice(HCQCompiled):
       buf = libc.mmap(mem.va_addr, mem.size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | MAP_FIXED, self.drm_fd, mem.mmap_offset)
       assert addr == buf == mem.va_addr
 
-    self._gpu_map(hcqbuf:=HCQBuffer(mem.va_addr, mem.size, _md=mem))
+    self._gpu_map(hcqbuf:=HCQBuffer(mem.va_addr, mem.size, meta=mem))
     return hcqbuf
 
   def _gpu_free(self, mem:HCQBuffer):
-    if len(gpus:=getattr(mem._md, "mapped_gpu_ids", [])):
+    if len(gpus:=getattr(mem.meta, "mapped_gpu_ids", [])):
       c_gpus = (ctypes.c_int32 * len(gpus))(*gpus)
-      stm = kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU(self.kfd, handle=mem._md.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(gpus))
+      stm = kfd.AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=len(gpus))
       assert stm.n_success == len(gpus)
     libc.munmap(mem.va_addr, mem.size)
-    kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem._md.handle)
+    kfd.AMDKFD_IOC_FREE_MEMORY_OF_GPU(self.kfd, handle=mem.meta.handle)
 
   def __init__(self, device:str=""):
     if AMDDevice.kfd == -1:
@@ -356,7 +356,7 @@ class AMDDevice(HCQCompiled):
       AMDDevice.signals_page = self._gpu_alloc(16 * 65536, uncached=True)
       AMDDevice.event_page = self._gpu_alloc(0x8000, uncached=True)
       AMDDevice.signals_pool = [self.signals_page.va_addr + off for off in range(0, AMDDevice.signals_page.size, 16)]
-      kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_page_offset=AMDDevice.event_page._md.handle)
+      kfd.AMDKFD_IOC_CREATE_EVENT(AMDDevice.kfd, event_page_offset=AMDDevice.event_page.meta.handle)
     else:
       self._gpu_map(AMDDevice.signals_page)
       self._gpu_map(AMDDevice.event_page)

@@ -365,11 +365,11 @@ class QCOMDevice(HCQCompiled):
     va_addr = libc.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, self.fd, alloc.id * 0x1000)
 
     if fill_zeroes: ctypes.memset(va_addr, 0, size)
-    return HCQBuffer(va_addr=va_addr, size=size, _md=alloc)
+    return HCQBuffer(va_addr=va_addr, size=size, meta=alloc)
 
   def _gpu_free(self, mem:HCQBuffer):
-    kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem._md.id)
-    libc.munmap(mem.va_addr, mem._md.mmapsize)
+    kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta.id)
+    libc.munmap(mem.va_addr, mem.meta.mmapsize)
 
   def _ensure_stack_size(self, sz):
     if not hasattr(self, '_stack'): self._stack = self._gpu_alloc(sz)

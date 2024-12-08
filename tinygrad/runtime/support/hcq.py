@@ -449,8 +449,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     cast(HCQAllocatorBase, self.allocator).b_timeline = [0] * len(cast(HCQAllocatorBase, self.allocator).b)
 
 class HCQBuffer:
-  def __init__(self, va_addr:int, size:int, texture_info:Any=None, _md:Any=None, _base:Optional[HCQBuffer]=None):
-    self.va_addr, self.size, self.texture_info, self._md, self._base = va_addr, size, texture_info, _md, _base
+  def __init__(self, va_addr:int, size:int, texture_info:Any=None, meta:Any=None, _base:Optional[HCQBuffer]=None):
+    self.va_addr, self.size, self.texture_info, self.meta, self._base = va_addr, size, texture_info, meta, _base
 
 class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):
   """
@@ -468,7 +468,7 @@ class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):
   def map(self, buf:HCQBuffer): pass
 
   def _offset(self, buf, size:int, offset:int) -> HCQBuffer:
-    return HCQBuffer(va_addr=buf.va_addr + offset, size=size, texture_info=buf.texture_info, _md=buf._md, _base=buf._base or buf)
+    return HCQBuffer(va_addr=buf.va_addr + offset, size=size, texture_info=buf.texture_info, meta=buf.meta, _base=buf._base or buf)
 
 class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
   def _copyin(self, dest:HCQBuffer, src:memoryview):
