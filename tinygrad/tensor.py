@@ -1885,7 +1885,7 @@ class Tensor(SimpleMathTrait):
     print(t.argmin(axis=1).numpy()) # Returns the indices of the minimum values along axis 1.
     ```
     """
-    return (-self).argmax(axis=axis, keepdim=keepdim)
+    return (-self if self.is_floating_point() else ~self).argmax(axis=axis, keepdim=keepdim)
 
   def rearrange(self, formula: str, **sizes) -> Tensor:
     """
