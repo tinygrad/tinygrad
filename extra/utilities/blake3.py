@@ -1,13 +1,10 @@
-import math
-import random
-import time
+from math import ceil, log2
 from typing import Tuple
-from tinygrad import Tensor, TinyJit, Variable
-from tinygrad.dtype import dtypes
+from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.helpers import ceildiv
-from tinygrad.tensor import Tensor
 
 class BLAKE3:
+  """BLAKE3 hashing algorithm. Paper: https://github.com/BLAKE3-team/BLAKE3."""
   IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
   PAD, DEFAULT_LEN, PERMUTATIONS = 66, 65, Tensor([2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8], dtype=dtypes.uint32)
 
@@ -58,9 +55,9 @@ class BLAKE3:
       chain_vals = ((self.compress_blocks(states, paired, iv) * pair_mask)[:8] + remainder).realize()
     return chain_vals.realize()
 
-  def tensor_to_blake_input(self, tensor: Tensor, max_memory: int) -> Tuple[Tensor, Tensor, Variable]:
-    assert max_memory % 1024 == 0 and max_memory & (max_memory - 1) == 0, "max_memory must be a power of two divisible by 1024"
-    data = tensor.flatten().pad(((0, (max_memory // tensor.element_size()) - tensor.shape[0],),), value=0)
+  def tensor_to_blake_input(self, tensor: Tensor, padded_input_size: int) -> Tuple[Tensor, Tensor, Variable]:
+    assert padded_input_size % 1024 == 0 and padded_input_size & (padded_input_size - 1) == 0, "padded_input_size must be a power of two divisible by 1024"
+    data = tensor.flatten().pad(((0, (padded_input_size // tensor.element_size()) - tensor.shape[0],),), value=0)
     data = data.bitcast(dtypes.uint32).reshape(-1, 16, 16).permute(1, 2, 0).contiguous()
     final_chunk_len = 0 if tensor.nbytes() == 0 else (tensor.nbytes() % 1024 or 1024)
     n_end_blocks = ceildiv(final_chunk_len, 64) or 1
@@ -68,54 +65,11 @@ class BLAKE3:
     info = Tensor.full((16, 1, data.shape[-1]), fill_value=self.DEFAULT_LEN, dtype=dtypes.uint32).contiguous()
     info[n_end_blocks - 1, :, n_chunks - 1] = 0 if tensor.nbytes() == 0 else (tensor.nbytes() % 64) or 64
     info[n_end_blocks:, :, n_chunks - 1:] = info[:, :, n_chunks:] = self.PAD
-    n_steps = Variable(min_val=0, max_val=math.log2(max_memory), name="n_steps").bind(math.ceil(math.log2(max(n_chunks, 1))))
+    n_steps = Variable(min_val=0, max_val=log2(padded_input_size), name="n_steps").bind(ceil(log2(max(n_chunks, 1))))
     return data, info, n_steps
 
-  def hash(self, tensor: Tensor, max_memory: int = 1024**3) -> str:
-    data, info, n_tree_steps = self.tensor_to_blake_input(tensor, max_memory)
+  def hash(self, tensor: Tensor, padded_input_size: int = 1024**3) -> str:
+    data, info, n_tree_steps = self.tensor_to_blake_input(tensor, padded_input_size)
     chain_vals = self.init_chain_vals(data, info)
     chain_vals = self.tree_hash(chain_vals, n_tree_steps)
     return chain_vals[:, 0].flatten().bitcast(dtypes.uint8).data().tobytes().hex()
-
-if __name__ == "__main__":
-  import time
-  import sys
-
-  arg = sys.argv[1]
-  max_memory = 2 ** math.ceil(math.log2(1024**3))
-  print(f"Using max_memory: {max_memory / 1024 / 1024:.1f} MB")
-
-  if arg == "warmup":
-    # warmup the JIT
-    print("\nWarming up...")
-    def warmup(size):
-      print(f"Warming up {size / 1024 / 1024 :.1f} MB...")
-      warmup_data = Tensor.rand(size // 2, dtype=dtypes.float16)
-      print("First run...")
-      BLAKE3().hash(warmup_data, max_memory=max_memory)
-      print("Second run...")
-      BLAKE3().hash(warmup_data, max_memory=max_memory)
-    warmup(max_memory)
-  else:
-    def benchmark_size(size_bytes):
-      print(f"\nBenchmarking {size_bytes / 1024 / 1024 :.1f} MB...")
-      data = Tensor.rand(size_bytes // 2, dtype=dtypes.float16)
-      size = data.numel() * data.element_size()
-
-      start = time.time()
-      BLAKE3().hash(data, max_memory=max_memory)
-      end = time.time()
-
-      elapsed = end - start
-      throughput = size / elapsed / 1e6  # MB/s
-      print(f"Time: {elapsed:.2f}s")
-      print(f"Throughput: {throughput:.1f} MB/s")
-
-    size_mb = float(sys.argv[1])
-    size = int(size_mb * 1024 * 1024)
-
-    for i in range(5):
-      randint = random.randint(0, 1024**2 * 20)
-      # if i == 4:
-      #     with Context(DEBUG=2):
-      benchmark_size(size - randint)

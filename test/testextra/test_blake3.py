@@ -7,7 +7,7 @@ class TestBLAKE3(unittest.TestCase):
 
   def _test(self, input_len: int, expected_hash: str):
     input_data = bytes(i % 251 for i in range(input_len))
-    actual = BLAKE3().hash(Tensor(input_data), max_memory=1024**2)
+    actual = BLAKE3().hash(Tensor(input_data), padded_input_size=1024**2)
     self.assertEqual(actual, expected_hash)
 
   def test_empty_input(self):
