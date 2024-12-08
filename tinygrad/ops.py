@@ -8,6 +8,7 @@ from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, trunc
 from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
+  from tinygrad.device import Buffer
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
@@ -208,6 +209,10 @@ class UOpMetaClass(type):
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
     return created
 
+buffers: Dict[UOp, Buffer] = {}
+realized: Dict[UOp, UOp] = {}
+forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
+
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
 class UOp(MathTrait, metaclass=UOpMetaClass):
@@ -261,6 +266,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def shape(self) -> Tuple[sint, ...]: return unwrap(self.st).shape
   @property
   def size(self) -> int: return self.arg[1][1] if self.op is Ops.BUFFER else unwrap(self.st).size
+  @property
+  def nbytes(self): return self.size*self.dtype.itemsize
 
   # *** uop evaluation ***
 
@@ -336,6 +343,25 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const_with_shape(dtype:DType, val:ConstLike, shape:Tuple[sint,...]) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
     return UOp(Ops.VALID, dtypes.bool, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)).where(UOp.const(dtype, val), 0)
+  @staticmethod
+  def metaop(op:Ops, shape:Tuple[sint, ...], dtype:DType, device:str, arg=None, src:Tuple[UOp, ...]=()):
+    from tinygrad.shape.shapetracker import ShapeTracker
+    # NOTE: we embed device on CONST with a fake BUFFER uop
+    if op is Ops.CONST: return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, 1, dtype), UOp.const(dtype, unwrap(arg))),
+                                   ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
+    return UOp(op, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), st.to_uop(), *src), arg)
+  def copy_to_device(self, device:str): return UOp.metaop(Ops.COPY, self.shape, self.dtype, device, self.nbytes, (self,))
+  @property
+  def srcs(self): return self.src
+  # this is how we realize ops and make parents go out of scope
+  @srcs.deleter
+  def srcs(self): pass
+  @property
+  def lbs(self): return [self]
+  @property
+  def metadata(self): return None
+  @property
+  def forced_realize(self): return self in forced_realize
 
   # *** uop movement ops ***
 
@@ -368,8 +394,23 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
-    assert self.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
+    assert self.op in {*GroupOp.Buffer, *GroupOp.Meta, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
     return self.src[0]
+  @property
+  def buffer(self) -> Buffer:
+    if (cret:=buffers.get(self)) is not None: return cret
+    if self.op is Ops.VIEW:
+      assert unwrap(self.st).contiguous, f"can only VIEW here if it's contiguous {self}"
+      return self.src[0].buffer
+    if self.op in GroupOp.Meta: return self.src[0].buffer
+    assert self.op is Ops.BUFFER
+    from tinygrad.device import Buffer
+    buffers[self] = ret = Buffer(*self.arg[1])
+    return ret
+  @property
+  def realized(self) -> Optional[Buffer]: return None if (r:=realized.get(self)) is None else r.buffer
+  @property
+  def is_realized(self) -> bool: return self.base.realized is not None
 
   # *** uop Variable stuff ***
 
