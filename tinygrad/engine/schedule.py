@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import symbolic_flat
+from tinygrad.ops import symbolic_flat, identity_element
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -166,13 +166,26 @@ def _append_preload(ctx:ScheduleItemContext, x:UOp, b:UOp) -> UOp:
   return x.replace(op=Ops.LOAD)
 check_preload = PatternMatcher([(UPat(Ops.PRELOAD, src=(UPat.var("b"), UPat()), name="x"), _append_preload),])
 
+def collapse_size0_reduceop(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
+  if x.st is None or 0 not in x.st.shape or x in reduce.shape: return None
+  return UOp.const(reduce.dtype, identity_element(reduce.arg[0], reduce.dtype))
+
+def collapse_const_reduceop(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
+  match reduce.arg[0]:
+    case Ops.MAX: return x # max is passthrough
+    case Ops.ADD: return x*reduce.arg[2]
+    case Ops.MUL: return UOp.const(x.dtype, x.arg**reduce.arg[2]) # TODO: support __pow__ on uop
+  return None
+
 to_si = symbolic_flat+PatternMatcher([
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
   # view of CONST is just CONST
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat.cvar("x"))), lambda ctx,x:x),
   (UPat(Ops.VIEW, src=(UPat.cvar("x"),)), lambda ctx,x:x),
-  # reduceop of unmasked const is folded
-  (UPat(Ops.REDUCE_AXIS, src=(UPat.cvar("x"),)), lambda ctx,x:x),
+  # reduceop of size 0 is collapsed
+  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("x"),), name="reduce"), collapse_size0_reduceop),
+  # reduceop of unmasked const is collapsed
+  (UPat(Ops.REDUCE_AXIS, src=(UPat.cvar("x"),), name="reduce"), collapse_const_reduceop),
   (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,b,x: x.replace(src=(b, *x.src))),
   # unmasked VALID is just CONST
   (UPat(Ops.VALID, name="valid").where(UPat.cvar("x"), UPat()),
