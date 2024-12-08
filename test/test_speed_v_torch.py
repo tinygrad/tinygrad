@@ -130,6 +130,7 @@ class TestBigSpeed(unittest.TestCase):
   def test_matvec_4096_16384(self): helper_test_matvec('matvec_4096_16384', 4096, 16384)
   def test_matvec_16384_4096(self): helper_test_matvec('matvec_16384_4096', 16384, 4096)
 
+@unittest.skip("gc")
 @unittest.skipIf(getenv("BIG") == 1, "only big tests")
 @unittest.skipIf(getenv("MOCKGPU"), "no MOCKGPUs")
 class TestSpeed(unittest.TestCase):

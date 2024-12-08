@@ -12,6 +12,7 @@ def _check_ast_count(desired_count:int, t:Tensor):
   asts = [s for s in schedule if s.ast.op is Ops.SINK]
   assert len(asts) == desired_count
 
+@unittest.skip("elementwise ops folding no longer supported")
 class TestUnaryOpsConstFolding(unittest.TestCase):
   def test_all_consts_ops(self):
     _check_ast_count(0, Tensor.ones(4).exp())
@@ -34,6 +35,7 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     x = x.clip(0, 1).realize()
     _check_ast_count(1, x.neg())
 
+@unittest.skip("elementwise ops folding no longer supported")
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + 0)
@@ -99,6 +101,7 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
 
 # folds advance indexing into basic indexing
+@unittest.skip("indexing ops folding no longer supported")
 class TestIndexingConstFolding(unittest.TestCase):
   def test_scalar_index(self):
     t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
@@ -114,6 +117,7 @@ class TestIndexingConstFolding(unittest.TestCase):
     _check_ast_count(0, t[:,:,Tensor.ones(1,2)+2,:])
     _check_ast_count(0, t[:,:,Tensor.ones(1,1),Tensor.zeros(2,1,2)])
 
+@unittest.skip("const movement ops folding no longer supported")
 class TestMovedConstFolding(unittest.TestCase):
   def test_add_shrunk_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(6).shrink(((1, 5),)))
@@ -211,6 +215,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
         assert t.sum().dtype == t.contiguous().sum().dtype
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+@unittest.skip("const COPY folding no longer supported")
 class TestMultiConstFolding(unittest.TestCase):
   def test_multi_const_folding_literal(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))

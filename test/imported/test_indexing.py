@@ -22,7 +22,7 @@ def consec(shape, start=1):
 def set_(reference: Tensor, shape, strides, offset):
   if reference.lazydata.base.realized is None: reference.realize()
   assert reference.lazydata.base.realized, "base has to be realized before setting it to strided's base"
-  strided = Tensor(reference.lazydata._view(ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),))))
+  strided = Tensor(reference.lazydata.view(ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),))))
   assert strided.lazydata.st.real_strides() == strides, "real_strides should equal strides for strided"
   return strided
 
@@ -1062,9 +1062,10 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(a[0, one], a[zero, 1])
 
     # indexing by a scalar should slice (not copy)
-    self.assertEqual(data_ptr(a[0, 1]), data_ptr(a[zero, one]))
-    self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int32)]))
-    self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int16)]))
+    with self.assertRaises(AssertionError, msg="indexing folding no longer supported"):
+      self.assertEqual(data_ptr(a[0, 1]), data_ptr(a[zero, one]))
+      self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int32)]))
+      self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int16)]))
 
     # scalar indexed with scalar
     r = Tensor.randn()

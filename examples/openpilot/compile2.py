@@ -149,7 +149,8 @@ if __name__ == "__main__":
         })
         if needs_load:
           t = Tensor.empty(b.dtype.shape, dtype=b.dtype)
-          t.lazydata.buffer = b
+          # TODO: what does this do? uop is immutable
+          #t.lazydata.buffer = b
           data = t.cast(dtypes.float32).pad(((0, row_pitch//(4*base_dtype.itemsize)-b.dtype.shape[0]), (0,0), (0,0))).contiguous().numpy()
           # NOTE: this cast must be done in numpy for platforms that don't support half
           if base_dtype == dtypes.float16: data = data.astype(np.float16)
