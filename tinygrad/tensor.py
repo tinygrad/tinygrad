@@ -2012,8 +2012,8 @@ class Tensor(SimpleMathTrait):
     # we have to do additional padding before `_pool` so that `o_` in `_pool` is calculated correctly
     # `s*(o-1) + (d*(k-1)+1) - (i+2*p)` -> last_sliding_window_start + full_kernel_size - padded_input_shape
     # we decrease padding in the case that a sliding window starts in the end padded region, thereby decreasing `o_` in `_pool`
-    # `max(s*(o-1) - (p+i-1), 0)` -> last_sliding_window_start - (left_pad + input_size - zero_offset)
-    for dim,(o,i,s,p,k,d) in enumerate(zip(o_,i_,s_,p_,k_,d_)): p_[-1-dim*2] += s*(o-1) + (d*(k-1)+1) - (i+2*p) - max(s*(o-1) - (p+i-1), 0)
+    # `smax(s*(o-1) - (p+i-1), 0)` -> last_sliding_window_start - (left_pad + input_size - zero_offset)
+    for dim,(o,i,s,p,k,d) in enumerate(zip(o_,i_,s_,p_,k_,d_)): p_[-1-dim*2] += s*(o-1) + (d*(k-1)+1) - (i+2*p) - smax(s*(o-1) - (p+i-1), 0)
     return p_
 
   # NOTE: these work for more than 2D
