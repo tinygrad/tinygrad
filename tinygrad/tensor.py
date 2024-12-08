@@ -89,11 +89,12 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
 
-def _pad_left(*shapes:Tuple[sint, ...]) -> Tuple[Tuple[sint, ...], ...]:
+def _align_left(*shapes:Tuple[sint, ...]) -> Tuple[Tuple[sint, ...], ...]:
+  # unsqueeze left to make every shape same length
   max_dim = max(len(shape) for shape in shapes)
   return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 def _broadcast_shape(*shapes:Tuple[sint, ...]) -> Tuple[sint, ...]:
-  return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_pad_left(*shapes)))
+  return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
 def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:Tuple[int, ...]):
   # apply mask to values (already broadcasted) and reduce such that if mask contains repeated indices the last one remains
@@ -281,7 +282,7 @@ class Tensor(SimpleMathTrait):
     assert self.dtype.base.fmt is not None, f"no fmt dtype for {self.dtype.base}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     if TYPE_CHECKING or sys.version_info < (3, 12): assert self.dtype.base.fmt != "e"
-    return self._data().cast(self.dtype.base.fmt) if 0 in self.shape else self._data().cast(self.dtype.base.fmt, self.shape)
+    return cast(memoryview, self._data().cast(self.dtype.base.fmt) if 0 in self.shape else self._data().cast(self.dtype.base.fmt, self.shape))
 
   def item(self) -> ConstType:
     """
@@ -366,14 +367,13 @@ class Tensor(SimpleMathTrait):
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
     devices, bounds = tuple(Device.canonicalize(x) for x in devices), None
     if axis is not None:
-      if axis < 0: axis += len(self.shape)
+      axis = self._resolve_dim(axis)
       if splits is None:
         if not isinstance(total:=self.shape[axis], int): raise RuntimeError(f"cannot shard symbolic shape {self.shape=}, {axis=}")
         sz = ceildiv(total, len(devices))
         splits = tuple([max(0, min(sz, total - sz*i)) for i in range(len(devices))])
       assert sum(splits) == self.shape[axis], "specified splits do not sum up to axis shape"
-      boundaries = tuple(itertools.accumulate(splits))
-      bounds = tuple(zip((0,) + boundaries, boundaries))
+      bounds = tuple(itertools.pairwise(itertools.accumulate(splits, initial=0)))
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis, bounds), device=devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None, splits:Optional[Tuple[int, ...]]=None):
@@ -947,7 +947,8 @@ class Tensor(SimpleMathTrait):
     print(t.expand(4, -1).numpy())
     ```
     """
-    return self._broadcast_to(tuple(from_ if to == -1 or to is None else to for from_, to in zip(*(_pad_left(self.shape, argfix(shape, *args))))))
+    new_shape = tuple(from_ if to == -1 or to is None else to for from_, to in zip(*(_align_left(self.shape, argfix(shape, *args)))))
+    return self._broadcast_to(new_shape)
 
   def permute(self, order, *args) -> Tensor:
     """
@@ -1117,7 +1118,7 @@ class Tensor(SimpleMathTrait):
         case list() | tuple() | Tensor():
           if not isinstance(index, Tensor): index = Tensor(index, self.device, requires_grad=False)
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-          index = (index < 0).where(size, 0) + index # treat negative index values
+          index = (index.to(self.device) < 0).where(size, 0) + index # treat negative index values
         case int() | UOp(): # sint
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
@@ -1162,8 +1163,7 @@ class Tensor(SimpleMathTrait):
       for dim, tensor in zip(dims, tensors):
         try: i = tensor.reshape(tensor.shape + (1,)*(x.ndim - dims[0])).expand(pre_reduce_shape)
         except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
-        a = Tensor.arange(x.shape[dim], device=self.device, requires_grad=False).reshape((x.shape[dim],) + (1,)*(x.ndim - dim - 1))
-        masks.append(i == a)
+        masks.append(i._one_hot_along_dim(num_classes=x.shape[dim], dim=(dim - x.ndim)))
 
       # reduce masks to 1 mask
       mask: Tensor = functools.reduce(lambda x,y: x.mul(y), masks)
@@ -1225,7 +1225,7 @@ class Tensor(SimpleMathTrait):
     assert all(s >= i for d,(s,i) in enumerate(zip(self.shape, index.shape)) if d != dim), "requires self.shape[d] >= index.shape[d] for all d != dim"
     index = index.to(self.device)
     x = self.shrink(tuple((0, i) if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
-    return ((index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * x).sum(-1, acc_dtype=self.dtype)
+    return (x * index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim])).sum(-1, acc_dtype=self.dtype)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
@@ -1289,7 +1289,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     repeats = argfix(repeats, *args)
-    base_shape = _pad_left(self.shape, repeats)[0]
+    base_shape = _align_left(self.shape, repeats)[0]
     unsqueezed_shape = flatten([[1, s] for s in base_shape])
     expanded_shape = flatten([[r, s] for r,s in zip(repeats, base_shape)])
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
@@ -2002,10 +2002,26 @@ class Tensor(SimpleMathTrait):
   def _padding2d(self, padding:Union[int, Sequence[int]], dims:int) -> Sequence[int]:
     return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
 
+  def _ceil_mode_padding2d(self,k_:Tuple[sint, ...], s_:Union[Tuple[int, ...], int], d_:Union[Tuple[int, ...], int],
+                           p_:Union[Tuple[int, ...], int]) -> Sequence[int]:
+    (d_,s_,p_), i_ = (make_tuple(x, len(k_)) for x in (d_,s_,p_)), self.shape[-len(k_):]
+    # https://arxiv.org/pdf/1603.07285 section 5.1, relationship 15.
+    o_ = [ceildiv(i+2*p - (d*(k-1)+1), s) + 1 for i,d,k,s,p in zip(i_,d_,k_,s_,p_)]
+    pads = list(self._padding2d(p_, len(k_)))
+    # we have to do additional padding before `_pool` so that `o_` in `_pool` is calculated correctly
+    # `s*(o-1) + (d*(k-1)+1) - (i+2*p)` -> last_sliding_window_start + full_kernel_size - padded_input_shape
+    # we decrease padding in the case that a sliding window starts in the end padded region, thereby decreasing `o_` in `_pool`
+    # `smax(s*(o-1) - (p+i-1), 0)` -> last_sliding_window_start - (left_pad + input_size - zero_offset)
+    for dim,(o,i,s,p,k,d) in enumerate(zip(o_,i_,s_,p_,k_,d_)): pads[-1-dim*2] += s*(o-1) + (d*(k-1)+1) - (i+2*p) - smax(s*(o-1) - (p+i-1), 0)
+    return pads
+
   # NOTE: these work for more than 2D
-  def avg_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, count_include_pad=True):
+  def avg_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False, count_include_pad=True):
     """
     Applies average pooling over a tensor.
+
+    When `ceil_mode` is set to True, output shape will be determined using ceil division.
+    When `count_include_pad` is set to False, zero padding will not be included in the averaging calculation.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
 
@@ -2016,16 +2032,29 @@ class Tensor(SimpleMathTrait):
     print(t.avg_pool2d().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
+    print(t.avg_pool2d(ceil_mode=True).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
     print(t.avg_pool2d(padding=1).numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.avg_pool2d(padding=1, count_include_pad=False).numpy())
+    ```
     """
-    padding_, axis = self._padding2d(padding, len(k_ := make_tuple(kernel_size, 2))), tuple(range(-len(k_), 0))
-    def pool(x:Tensor) -> Tensor: return x.pad(padding_)._pool(k_, stride if stride is not None else k_, dilation)
-    return pool(self).mean(axis=axis) if count_include_pad else pool(self).sum(axis=axis) / pool(self.ones_like()).sum(axis=axis)
+    axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
+    reg_pads, ceil_pads = self._padding2d(padding,len(k_)), self._ceil_mode_padding2d(k_, stride if stride is not None else k_, dilation, padding)
+    def pool(x:Tensor, padding_:Sequence[int]) -> Tensor: return x.pad(padding_)._pool(k_, stride if stride is not None else k_, dilation)
+    if not count_include_pad:
+      pads = ceil_pads if ceil_mode else reg_pads
+      return pool(self, pads).sum(axis) / pool(self.ones_like(), pads).sum(axis)
+    if not ceil_mode: return pool(self, reg_pads).mean(axis)
+    return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
 
-  def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0):
+  def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False):
     """
     Applies max pooling over a tensor.
+
+    When `ceil_mode` is set to True, output shape will be determined using ceil division.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
 
@@ -2036,11 +2065,15 @@ class Tensor(SimpleMathTrait):
     print(t.max_pool2d().numpy())
     ```
     ```python exec="true" source="above" session="tensor" result="python"
+    print(t.max_pool2d(ceil_mode=True).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
     print(t.max_pool2d(padding=1).numpy())
     ```
     """
-    padding_ = self._padding2d(padding, len(k_ := make_tuple(kernel_size, 2)))
-    return self.pad(padding_, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation).max(tuple(range(-len(k_), 0)))
+    k_ = make_tuple(kernel_size, 2)
+    pads = self._ceil_mode_padding2d(k_, stride if stride is not None else k_, dilation, padding) if ceil_mode else self._padding2d(padding, len(k_))
+    return self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation).max(tuple(range(-len(k_), 0)))
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding:int|Tuple[int, ...]=0,
              acc_dtype:Optional[DTypeLike]=None) -> Tensor:
@@ -2336,10 +2369,14 @@ class Tensor(SimpleMathTrait):
     index, dim = index.to(self.device), self._resolve_dim(dim)
     src = src.cast(self.dtype) if isinstance(src, Tensor) else Tensor(src, device=self.device, dtype=self.dtype)._broadcast_to(index.shape)
     assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.dim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
-    assert all((d == dim or se >= ind) and sr >= ind for d,(se,ind,sr) in enumerate(zip(self.shape, index.shape, src.shape))), \
+    assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
       f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
-    mask = (index.unsqueeze(-1) == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)).transpose(-1, dim)
-    src = src.unsqueeze(-1).expand((None,)*src.ndim + (self.shape[dim],)).transpose(-1, dim).shrink(tuple((0,s) for s in mask.shape))
+    # shrink src to index shape to shrink away the unused values
+    src = src.shrink(tuple((0,s) for s in index.shape))
+    # prepare src and mask for reduce with respect to dim
+    src = src.unsqueeze(-1).expand(*src.shape, self.shape[dim]).transpose(-1, dim)
+    mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
+    # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
     src, mask = (x.pad(tuple((0, self.shape[i] - x.shape[i]) if i != dim else None for i in range(self.ndim)) + (None,)) for x in (src, mask))
     if reduce == "add": return mask.where(src, 0).sum(-1, acc_dtype=self.dtype) + self
     if reduce == "multiply": return mask.where(src, 1).prod(-1, acc_dtype=self.dtype) * self
@@ -2928,15 +2965,15 @@ class Tensor(SimpleMathTrait):
     return self / (1 + self.abs())
 
   # ***** broadcasted elementwise ops *****
-  def _broadcast_to(self, shape:Tuple[sint, ...]) -> Tensor:
-    if self.shape == shape: return self
-    if self.ndim > len(shape): raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={self.shape} to {shape=}")
-    # first pad left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
-    padded, _ = _pad_left(self.shape, shape)
-    # for each dimension, check either from_ is 1, or it does not change
-    if any(resolve(from_ != 1, False) and resolve(from_ != to, False) for from_,to in zip(padded, shape)):
-      raise ValueError(f"cannot broadcast from shape={self.shape} to {shape=}")
-    return F.Expand.apply(self.reshape(padded), shape=shape)
+  def _broadcast_to(self, new_shape:Tuple[sint, ...]) -> Tensor:
+    if self.shape == new_shape: return self
+    if self.ndim > len(new_shape): raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={self.shape} to {new_shape=}")
+    # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
+    shape, _ = _align_left(self.shape, new_shape)
+    # for each dimension, check either dim is 1, or it does not change
+    if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(shape, new_shape)):
+      raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
+    return F.Expand.apply(self.reshape(shape), shape=new_shape)
 
   def _broadcasted(self, y:Union[Tensor, UOp, ConstType], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
@@ -2955,8 +2992,7 @@ class Tensor(SimpleMathTrait):
     if reverse: x, y = y, x
 
     # broadcast
-    out_shape = _broadcast_shape(x.shape, y.shape)
-    return x._broadcast_to(out_shape), y._broadcast_to(out_shape)
+    return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
 
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
     return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_unmasked_const() \
@@ -3178,7 +3214,8 @@ class Tensor(SimpleMathTrait):
     # inject nan for negative base and non-integer exponent
     inject_nan = (negative_base * (exponent != exponent.trunc())).detach().where(math.nan, 1)
     # apply correct_sign inject_nan, and fix 0 ** 0 = 1
-    return ((base == 0) * (exponent == 0)).detach().where(1, ret * correct_sign * inject_nan)
+    ret = ((base == 0) * (exponent == 0)).detach().where(1, ret * correct_sign * inject_nan)
+    return ret.round().cast(self.dtype) if not dtypes.is_float(self.dtype) else ret
 
   def maximum(self, x:Union[Tensor, ConstType]) -> Tensor:
     """
@@ -3354,6 +3391,11 @@ class Tensor(SimpleMathTrait):
     if not Tensor.training or p == 0: return self
     return (Tensor.rand_like(self, requires_grad=False, dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
 
+  # helper function commonly used for indexing
+  def _one_hot_along_dim(self:Tensor, num_classes:sint, dim:int=-1):
+    offset = self.ndim - self._resolve_dim(dim) - 1
+    return self == Tensor.arange(num_classes, device=self.device, requires_grad=False).reshape((num_classes,) + (1,) * offset)
+
   def one_hot(self, num_classes:int=-1) -> Tensor:
     """
     Converts `self` to a one-hot tensor.
@@ -3366,7 +3408,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if num_classes == -1: num_classes = (self.max()+1).item()
-    return (self[..., None] == Tensor.arange(num_classes, requires_grad=False, device=self.device)).where(1, 0)
+    return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Optional[Tensor]=None,
                                    dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
@@ -3442,8 +3484,8 @@ class Tensor(SimpleMathTrait):
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
     assert reduction in ("mean", "sum", "none"), "reduction must be one of ['mean', 'sum', 'none']"
     log_probs, loss_mask = self.log_softmax(), (Y != ignore_index) if ignore_index != -1 else Y.ones_like(dtype=dtypes.bool)
-    y_counter = Tensor.arange(self.shape[-1], requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
-    y = ((y_counter == Y.flatten().reshape(-1, 1)) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
+    y_counted = Y.to(self.device).flatten().reshape(-1, 1)._one_hot_along_dim(self.shape[-1])
+    y = (y_counted * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
     smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
     unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
     # NOTE: because of ignore_index, we can't use Tensor.mean (so can't use `_do_reduction` here)
@@ -3590,8 +3632,15 @@ class Tensor(SimpleMathTrait):
     t = t.cast(dtypes.int32)
     print(t.dtype, t.numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.cast(dtypes.uint8)
+    print(t.dtype, t.numpy())
+    ```
     """
-    return self if self.dtype == (dt:=to_dtype(dtype)) else F.Cast.apply(self, dtype=dt)
+    if (dt:=to_dtype(dtype)) in {dtypes.uint8, dtypes.uint16} and dtypes.is_float(self.dtype):
+      # NOTE: values within the int32 range and outside the unsigned dtype range will cause values to wrap around
+      return F.Cast.apply(F.Cast.apply(self, dtype=dtypes.int32), dtype=dt)
+    return self if self.dtype == dt else F.Cast.apply(self, dtype=dt)
 
   def bitcast(self, dtype:DTypeLike) -> Tensor:
     """
