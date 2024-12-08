@@ -175,12 +175,6 @@ class HCQGraph(MultiGraphRunner):
     # Update rawbuffers
     for (j,i),input_idx in self.input_replace.items(): hcq_var_vals[self.input_replace_to_var.get((j,i))] = input_rawbuffers[input_idx]._buf.va_addr
 
-      # if (var:=self.input_replace_to_var.get((j,i))) is not None: hcq_var_vals[var] = input_rawbuffers[input_idx]._buf.va_addr
-      # else: self.ji_args[j].update_buffer(i, input_rawbuffers[input_idx]._buf)
-
-    # Update var_vals
-    # for j, i, v in self.updated_vars(var_vals): self.ji_args[j].update_var(i, v)
-
     for dev in self.devices:
       self.comp_queues[dev].submit(dev, hcq_var_vals)
       if (copy_queue:=self.copy_queues.get(dev, None)) is not None: copy_queue.submit(dev, hcq_var_vals)
