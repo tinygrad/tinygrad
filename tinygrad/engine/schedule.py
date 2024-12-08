@@ -166,26 +166,34 @@ def _append_preload(ctx:ScheduleItemContext, x:UOp, b:UOp) -> UOp:
   return x.replace(op=Ops.LOAD)
 check_preload = PatternMatcher([(UPat(Ops.PRELOAD, src=(UPat.var("b"), UPat()), name="x"), _append_preload),])
 
-def collapse_size0_reduceop(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
-  if x.st is None or 0 not in x.st.shape or x in reduce.shape: return None
+def collapse_size0_reduce(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
+  if reduce.arg[2] != 0: return None
   return UOp.const(reduce.dtype, identity_element(reduce.arg[0], reduce.dtype))
 
-def collapse_const_reduceop(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
+def collapse_stride0_reduce(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
+  if x.st is not None and not all(unwrap(x.st).views[-1].strides[axis] == 0 for axis in reduce.axis_arg): return None
+  if x.st is not None: x = x.shrink(tuple((0,s) if i not in reduce.arg[1] else (0,1) for i,s in enumerate(x.shape)))
   match reduce.arg[0]:
     case Ops.MAX: return x # max is passthrough
     case Ops.ADD: return x*reduce.arg[2]
-    case Ops.MUL: return UOp.const(x.dtype, x.arg**reduce.arg[2]) # TODO: support __pow__ on uop
+    case Ops.MUL:
+      if x.op is Ops.CONST: return UOp.const(x.dtype, x.arg**reduce.arg[2]) # TODO: support __pow__ on uop
+      return None
   return None
 
-to_si = symbolic_flat+PatternMatcher([
-  (UPat(Ops.VIEW, name="x"), _append_st_vars),
+
+more_folding = view_left+symbolic_flat+PatternMatcher([
   # view of CONST is just CONST
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat.cvar("x"))), lambda ctx,x:x),
   (UPat(Ops.VIEW, src=(UPat.cvar("x"),)), lambda ctx,x:x),
   # reduceop of size 0 is collapsed
-  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("x"),), name="reduce"), collapse_size0_reduceop),
+  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("x"),), name="reduce"), collapse_size0_reduce),
   # reduceop of unmasked const is collapsed
-  (UPat(Ops.REDUCE_AXIS, src=(UPat.cvar("x"),), name="reduce"), collapse_const_reduceop),
+  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("x"),), name="reduce"), collapse_stride0_reduce),
+])
+
+to_si = PatternMatcher([
+  (UPat(Ops.VIEW, name="x"), _append_st_vars),
   (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,b,x: x.replace(src=(b, *x.src))),
   # unmasked VALID is just CONST
   (UPat(Ops.VALID, name="valid").where(UPat.cvar("x"), UPat()),

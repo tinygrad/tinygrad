@@ -368,6 +368,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def metadata(self): return None
   @property
   def forced_realize(self): return self in forced_realize
+  def is_unrealized_unmasked_const(self): return self.base.op is Ops.VIEW and self.base.src[1].op is Ops.CONST
 
   # *** uop movement ops ***
 
