@@ -799,7 +799,7 @@ class TestAutoCastType(unittest.TestCase):
     np.testing.assert_allclose(t.mean(axis=1).numpy(), np.array([x] * N, dtype=np.float16), rtol=1e-3)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
-  @unittest.skipIf(Device.DEFAULT=="CLANG" and CI, f"fails on clang CI")
+  @unittest.skipIf(Device.DEFAULT=="CLANG" and CI, "fails on clang CI")
   def test_mean_half_precision_overflow(self):
     N = 256
     t = Tensor([60000] * N*N, dtype=dtypes.half, requires_grad=True).reshape(N, N)
