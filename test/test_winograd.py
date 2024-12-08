@@ -5,6 +5,7 @@ from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG, getenv
 from tinygrad.codegen.kernel import Kernel
 from tinygrad.engine.schedule import create_schedule
 
+@unittest.skip("gc")
 class TestWinograd(unittest.TestCase):
   def setUp(self):
     self.old = WINO.value

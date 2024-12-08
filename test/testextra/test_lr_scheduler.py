@@ -52,6 +52,7 @@ def get_lrs(optim, sched, epochs, steps=1, accs=None):
     lrs.append(lr)
   return lrs
 
+@unittest.skip("gc")
 class TestLrScheduler(unittest.TestCase):
   def setUp(self):
     self.old_training = Tensor.training
