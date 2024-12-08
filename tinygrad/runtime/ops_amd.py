@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, Any, Optional
+from typing import Tuple, List, Any, Optional, cast
 import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys
 assert sys.platform != 'win32'
 from dataclasses import dataclass
@@ -80,6 +80,8 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
+    self.bind_args_state(args_state)
+
     self.acquire_mem(gli=0, gl2=0)
 
     if prg.enable_private_segment_sgpr:
@@ -413,7 +415,7 @@ class AMDDevice(HCQCompiled):
       self.doorbells_base = queue.doorbell_offset & (~0x1fff) # doorbell is two pages
       self.doorbells = libc.mmap(0, 0x2000, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, AMDDevice.kfd, self.doorbells_base)
 
-    return AMDQueueDesc(ring=to_mv(ring.va_addr, ring_size).cast("I"),
+    return AMDQueueDesc(ring=to_mv(cast(int, ring.va_addr), ring_size).cast("I"),
                         read_ptr=to_mv(queue.read_pointer_address, 8).cast("Q"), write_ptr=to_mv(queue.write_pointer_address, 8).cast("Q"),
                         doorbell=to_mv(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8).cast("Q"))
 

@@ -132,6 +132,8 @@ class NVComputeQueue(NVCommandQueue):
     return self
 
   def exec(self, prg:NVProgram, args_state:NVArgsState, global_size:Tuple[sint, ...], local_size:Tuple[sint, ...]):
+    self.bind_args_state(args_state)
+
     ctypes.memmove(qmd_addr:=(args_state.ptr + round_up(prg.constbufs[0][1], 1 << 8)), ctypes.addressof(prg.qmd), 0x40 * 4)
     assert qmd_addr < (1 << 40), f"large qmd addr {qmd_addr:x}"
 
@@ -264,7 +266,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
     if options.host: return self.dev._gpu_alloc(size, host=True, tag="user host memory")
     return self.dev._gpu_alloc(size, cpu_access=options.cpu_access, tag=f"user memory ({options})")
 
-  def _free(self, opaque, options:BufferSpec):
+  def _free(self, opaque:HCQBuffer, options:BufferSpec):
     self.dev.synchronize()
     self.dev._gpu_free(opaque)
 
@@ -353,9 +355,9 @@ class NVDevice(HCQCompiled[NVSignal]):
       nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made)
       if made.status != 0: raise RuntimeError(f"_gpu_free returned {get_error_str(made.status)}")
 
-    self._debug_mappings.pop((mem.va_addr, mem.size))
-    uvm.free(self.fd_uvm, base=mem.va_addr, length=mem.size)
-    if mem.meta.has_cpu_mapping: libc.munmap(mem.va_addr, mem.size)
+    self._debug_mappings.pop((cast(int, mem.va_addr), mem.size))
+    uvm.free(self.fd_uvm, base=cast(int, mem.va_addr), length=mem.size)
+    if mem.meta.has_cpu_mapping: libc.munmap(cast(int, mem.va_addr), mem.size)
 
   def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True, has_cpu_mapping=False, tag="") -> HCQBuffer:
     if create_range: uvm.create_external_range(self.fd_uvm, base=va_base, length=size)
@@ -448,8 +450,8 @@ class NVDevice(HCQCompiled[NVSignal]):
     rmctrl.gpfifo_schedule(self.fd_ctl, self.root, channel_group, bEnable=1)
 
     self.cmdq_page:HCQBuffer = self._gpu_alloc(0x200000, cpu_access=True, tag="cmdq")
-    self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, start=self.cmdq_page.va_addr, wrap=True)
-    self.cmdq: memoryview = to_mv(self.cmdq_page.va_addr, 0x200000).cast("I")
+    self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, start=cast(int, self.cmdq_page.va_addr), wrap=True)
+    self.cmdq: memoryview = to_mv(cast(int, self.cmdq_page.va_addr), 0x200000).cast("I")
 
     self.num_gpcs, self.num_tpc_per_gpc, self.num_sm_per_tpc, self.max_warps_per_sm, self.sm_version = self._query_gpu_info('num_gpcs',
       'num_tpc_per_gpc', 'num_sm_per_tpc', 'max_warps_per_sm', 'sm_version')
