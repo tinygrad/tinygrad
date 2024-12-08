@@ -2120,9 +2120,10 @@ class TestOps(unittest.TestCase):
   # TODO: linearizer block error
   @unittest.expectedFailure
   def test_avg_pool3d_failure(self):
-    helper_test_op([(1,1,16,16,16)],
-      lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
-      lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), rtol=1e-5, forward_only=True)
+    with Context(NOOPT=0):
+      helper_test_op([(1,1,16,16,16)],
+        lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
+        lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), rtol=1e-5, forward_only=True)
 
   def test_interpolate_linear(self):
     for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
