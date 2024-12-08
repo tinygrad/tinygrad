@@ -4,7 +4,7 @@ from tinygrad.helpers import round_up, PROFILE, memsize_to_str
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device
 from tinygrad import Variable, dtypes
-from tinygrad.ops import sint, Variable as VariableT
+from tinygrad.ops import Variable as VariableT
 from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner
 
@@ -203,10 +203,6 @@ class HCQGraph(MultiGraphRunner):
       for x in deps:
         (b_st,_), (b_en,_), b_dev, _, b_is_cp, _, _ = self.prof_records[x]
         dev.dep_prof_records += [(timestamps[b_st], timestamps[b_en], b_dev, b_is_cp, timestamps[st], timestamps[en], dev, is_cp)]
-
-  # def _buf_addr_as_sint(self, j:int, i:int, buf:HCQBuffer) -> sint:
-  #   if (j, i) not in self.input_replace: return buf.va_addr
-  #   return self.input_replace_to_var.setdefault((j, i), Variable(f"input_{self.input_replace[(i, j)]}", 0, 0xffffffffffffffff, dtype=dtypes.uint64))
 
   def __del__(self):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
