@@ -3,6 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
+from tinygrad.ops import realized, buf_uops
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -63,31 +64,21 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     assert buf.realized is None, "can't fixup allocated buffer"
     if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
     dtype = buf.dtype.base
-    # hack the underlying buffer too
-    buf.buffer.dtype = dtype
-    buf.buffer.options = None
   # base is a VIEW of (BUFFER, (optional) op)
   match buf.is_realized:
-    case True:
-      buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
-      op = None
+    case True: op = None
     case False:
       src = tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs)
-      match buf.op:
-        # meta ops already have a target buffer
-        case Ops.ASSIGN | Ops.COPY | Ops.EMPTY | Ops.BUFFER_VIEW | Ops.CONST: buf_uop = buf.buf_uop
-        # otherwise we create a new buffer
-        case _: buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
       op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, src, buf.arg)
-  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.contiguous() if buf.forced_realize else op), buf.st)
+  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf.buf_uop,) if op is None else (buf.buf_uop, op.contiguous() if buf.forced_realize else op), buf.st)
   # keep track of ops outside the big graph
   if op is not None:
-    buf_uop.buffer.ref(1)
-    ctx.lazybufs[buf_uop] = buf
-    ctx.allbufs[buf_uop] = ret
-    if op.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
+    buf.buf_uop.buffer.ref(1)
+    ctx.lazybufs[buf.buf_uop] = buf
+    ctx.allbufs[buf.buf_uop] = ret
+    if op.op is Ops.ASSIGN: ctx.assigns.add(buf.buf_uop)
     for x in op.src:
-      if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
+      if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf.buf_uop] = None
   return ret
 
 # **** AST graph rewrite
@@ -179,8 +170,8 @@ to_si = PatternMatcher([
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
   (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,b,x: x.replace(src=(b, *x.src))),
   # unmasked VALID is just CONST
-  (UPat(Ops.VALID, name="valid").where(UPat.cvar("x"), UPat()),
-   lambda ctx,valid,x: x if all_int(valid.shape) and all(v.mask is None for v in valid.st.views) else None),
+  # (UPat(Ops.VALID, name="valid").where(UPat.cvar("x"), UPat()),
+  # lambda ctx,valid,x: x if all_int(valid.shape) and all(v.mask is None for v in valid.st.views) else None),
   # don't need contiguous or assign anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda ctx,x: x),

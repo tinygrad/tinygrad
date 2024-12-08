@@ -210,7 +210,8 @@ class UOpMetaClass(type):
     return created
 
 buffers: Dict[UOp, Buffer] = {}
-realized: Dict[UOp, UOp] = {}
+realized: Set[UOp] = set()
+buf_uops: Dict[UOp, UOp] = {}
 forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
 
 # NOTE: this should be frozen, but frozen is slower
@@ -304,7 +305,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
   def sink(self, *srcs:UOp): return UOp(Ops.SINK, dtypes.void, (self,)+srcs)
   def index(self, idx:UOp, valid:Optional[UOp]=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
-  def const_like(self, b:ConstLike): return UOp.const(self.dtype, b) if self.st is None else UOp.const_with_shape(self.dtype, b, self.shape)
+  def const_like(self, b:ConstLike):
+    if self._device is not None: return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
+    return UOp.const(self.dtype, b) if self.st is None else UOp.const_with_shape(self.dtype, b, self.shape)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
@@ -349,13 +352,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # NOTE: we embed device on CONST with a fake BUFFER uop
     if op is Ops.CONST: return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, 1, dtype), UOp.const(dtype, unwrap(arg))),
                                    ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
-    return UOp(op, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), st.to_uop(), *src), arg)
+    ret = UOp(op, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), st.to_uop(), *src), arg)
+    buf_uops[ret] = ret.buf_uop
+    return ret
   def copy_to_device(self, device:str): return UOp.metaop(Ops.COPY, self.shape, self.dtype, device, self.nbytes, (self,))
   @property
   def srcs(self): return self.src
   # this is how we realize ops and make parents go out of scope
   @srcs.deleter
-  def srcs(self): pass
+  def srcs(self):
+    realized.add(self.buf_uop)
   @property
   def lbs(self): return [self]
   @property
@@ -393,9 +399,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self.arg[1][0] if self.op is Ops.BUFFER else dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
+    if (cret:=buf_uops.get(self)) is not None: return cret
     if self.op is Ops.BUFFER: return self
-    assert self.op in {*GroupOp.Buffer, *GroupOp.Meta, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
-    return self.src[0]
+    if self.op in {*GroupOp.Buffer, *GroupOp.Meta, Ops.ASSIGN, Ops.VIEW}: return self.src[0]
+    buf_uops[self] = new_buf = UOp.new_buffer(self.device, self.size, self.dtype)
+    return new_buf
   @property
   def buffer(self) -> Buffer:
     if (cret:=buffers.get(self)) is not None: return cret
@@ -408,7 +416,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     buffers[self] = ret = Buffer(*self.arg[1])
     return ret
   @property
-  def realized(self) -> Optional[Buffer]: return None if (r:=realized.get(self)) is None else r.buffer
+  def realized(self) -> Optional[Buffer]: return None if (r:=buf_uops.get(self)) is None or r not in realized else r.buffer
   @property
   def is_realized(self) -> bool: return self.base.realized is not None
 
