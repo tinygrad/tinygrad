@@ -129,9 +129,9 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_mul_folding_loaded_nan(self):
-    nan_ret = UOp.load(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1), ShapeTracker.from_shape((1,)).to_uop(), dtype=dtypes.float).reciprocal()
+    nan_ret = UOp.load(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1), ShapeTracker.from_shape((1,)).to_uop(), dtype=dtypes.float)
     store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0), ShapeTracker.from_shape((1,)).to_uop(), nan_ret*0)
-    helper_linearizer_ast(store.sink(), [Tensor.zeros((1,)).contiguous().realize()], wanna_output=[np.array([np.nan])], opts=[])
+    helper_linearizer_ast(store.sink(), [Tensor([np.nan]).realize()], wanna_output=[np.array([np.nan])], opts=[])
 
   @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI doesn't support multiple sync threads yet")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
