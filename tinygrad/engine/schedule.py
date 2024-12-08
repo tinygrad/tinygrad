@@ -336,12 +336,28 @@ def _as_const(u:UOp, val:ConstType) -> UOp:
   st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
   return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
 
+def simplify_stride0_reduce(ctx, reduce:UOp, src:UOp) -> Optional[UOp]:
+  src_st = unwrap(src.st)
+  # must be unmasked (NOTE: can be relaxed if not masked on stride 0 axis)
+  if any(v.mask is not None for v in src_st.views): return None
+  # must have all stride 0 in the relevant axis (NOTE: can do partial)
+  if not all(src_st.views[-1].strides[axis] == 0 for axis in reduce.arg[1]): return None
+  ret = src.shrink(tuple((0,s) if i not in reduce.arg[1] else (0,1) for i,s in enumerate(src_st.shape)))
+  match reduce.arg[0]:
+    case Ops.ADD: ret = ret*prod(src_st.shape[i] for i in reduce.arg[1])
+    case Ops.MAX: pass  # NOTE: Ops.MAX is passthrough
+    case Ops.MUL: return None   # pow is not supported on UOps, TODO: handle this case
+    case _: return None
+  return ret
+
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
   # reduce of size 0 is just the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda ctx,reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if 0 in x.shape and 0 not in reduce.shape else None),
+  # reduce on stride 0 is collapsed
+  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.VIEW, name="src"),), name="reduce"), simplify_stride0_reduce),
 ])
 
 # ** this decides which ops get realized
