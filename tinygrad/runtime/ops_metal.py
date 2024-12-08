@@ -1,7 +1,7 @@
 from __future__ import annotations
-import os, subprocess, pathlib, ctypes, tempfile, functools
-from typing import List, Any, Tuple, Optional, cast
-from tinygrad.helpers import prod, getenv, T
+import os, pathlib, struct, ctypes, tempfile, functools
+from typing import List, Any, Union, Tuple, cast
+from tinygrad.helpers import prod, to_mv, getenv, round_up, _cache_dir, T, init_c_struct_t
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -22,14 +22,19 @@ class MTLResourceOptions:
 class MTLPipelineOption:
   MTLPipelineOptionNone = 0
 
+# 13 is requestType that metal uses to compile source code into MTLB, there aren't any docs or symbols.
+REQUEST_TYPE_COMPILE = 13
+
 libobjc = ctypes.CDLL("/usr/lib/libobjc.dylib")
 libmetal = ctypes.CDLL("/System/Library/Frameworks/Metal.framework/Metal")
+compiler = ctypes.CDLL("/System/Library/PrivateFrameworks/MTLCompiler.framework/MTLCompiler")
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
 ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
 libdispatch = ctypes.CDLL("/usr/lib/libSystem.dylib") # libdispatch is part of libSystem on mac
 libobjc.objc_getClass.restype = objc_id
 libobjc.sel_registerName.restype = objc_id
 libmetal.MTLCreateSystemDefaultDevice.restype = objc_instance
+compiler.MTLCodeGenServiceCreate.restype = ctypes.c_void_p
 libdispatch.dispatch_data_create.restype = objc_instance
 
 # Ignore mypy error reporting incompatible default, because typevar default only works on python 3.12
@@ -40,10 +45,7 @@ def msg(ptr: objc_id, selector: str, /, *args: Any, restype: type[T] = objc_id) 
 
 def to_ns_str(s: str): return msg(libobjc.objc_getClass(b"NSString"), "stringWithUTF8String:", s.encode(), restype=objc_instance)
 
-def to_struct(*t: int, _type: type = ctypes.c_ulong):
-  class Struct(ctypes.Structure): pass
-  Struct._fields_ = [(f"field{i}", _type) for i in range(len(t))]
-  return Struct(*t)
+def to_struct(*t: int, _type: type = ctypes.c_ulong): return init_c_struct_t(tuple([(f"field{i}", _type) for i in range(len(t))]))(*t)
 
 def wait_check(cbuf: Any):
   msg(cbuf, "waitUntilCompleted")
@@ -65,20 +67,35 @@ def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   return library
 
 class MetalCompiler(Compiler):
-  def __init__(self, dev:Optional[MetalDevice]=None):
-    self.dev = dev
-    super().__init__("compile_metal_xcode" if self.dev is None else "compile_metal")
+  def __init__(self):
+    self.cgs = ctypes.c_void_p(compiler.MTLCodeGenServiceCreate(b"tinygrad"))
+    super().__init__("compile_metal_direct")
+  def __reduce__(self): return (MetalCompiler,()) # force pickle to create new instance for each multiprocessing fork
   def compile(self, src:str) -> bytes:
-    if self.dev is None:
-      # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
-      air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
-      lib = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-    else:
-      library = metal_src_to_library(self.dev, src)
-      library_contents = msg(library, "libraryDataContents", restype=objc_instance)
-      lib = ctypes.string_at(msg(library_contents, "bytes"), cast(int, msg(library_contents, "length", restype=ctypes.c_ulong)))
-    assert lib[:4] == b"MTLB", "Invalid Metal library. Using conda? Corrupt XCode?"
-    return lib
+    ret: Union[Exception, bytes] = CompileError("MTLCodeGenServiceBuildRequest returned without calling the callback")
+    @ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p)
+    def callback(blockptr, error, dataPtr, dataLen, errorMessage):
+      nonlocal ret
+      if error == 0:
+        reply = bytes(to_mv(dataPtr, dataLen))
+        # offset from beginning to data = header size + warning size
+        ret = reply[sum(struct.unpack('<LL', reply[8:16])):]
+      else:
+        ret = CompileError(errorMessage.decode())
+    # llvm will create modules.timestamp in cache path and cache compilation of metal stdlib (250ms => 8ms compilation time)
+    # note that llvm won't necessarily create anything else here as apple has prebuilt versions of many standard libraries
+    params = f'-fno-fast-math -std=metal3.1 --driver-mode=metal -x metal -fmodules-cache-path="{os.path.join(_cache_dir, "tinygrad")}"'
+    # source blob has to be padded to multiple of 4 but at least one 'b\x00' should be added, params blob just has to be null terminated
+    src_padded, params_padded = src.encode() + b'\x00'*(round_up(len(src) + 1, 4) - len(src)), params.encode() + b'\x00'
+    request = struct.pack('<QQ', len(src_padded), len(params_padded)) + src_padded + params_padded
+    # The callback is actually not a callback but a block which is apple's non-standard extension to add closures to C.
+    # See https://clang.llvm.org/docs/Block-ABI-Apple.html#high-level for struct layout.
+    # Fields other than invoke are unused in this case so we can just use ctypes.byref with negative offset to invoke field, add blockptr as a first
+    # argument and pretend it's a normal callback
+    compiler.MTLCodeGenServiceBuildRequest(self.cgs, None, REQUEST_TYPE_COMPILE, request, len(request), ctypes.byref(callback, -0x10))
+    if isinstance(ret, Exception): raise ret
+    assert ret[:4] == b"MTLB" and ret[-4:] == b"ENDT", f"Invalid Metal library. {ret!r}"
+    return ret
   def disassemble(self, lib:bytes):
     with tempfile.NamedTemporaryFile(delete=True) as shader:
       shader.write(lib)
@@ -92,9 +109,8 @@ class MetalProgram:
     if lib[:4] == b"MTLB":
       # binary metal library
       data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-      error_library_creation = objc_instance()
-      self.library = msg(self.dev.sysdevice, "newLibraryWithData:error:", data, ctypes.byref(error_library_creation), restype=objc_instance)
-      error_check(error_library_creation)
+      self.library = msg(self.dev.sysdevice, "newLibraryWithData:error:", data, ctypes.byref(error_lib:=objc_instance()), restype=objc_instance)
+      error_check(error_lib)
     else:
       # metal source. rely on OS caching
       try: self.library = metal_src_to_library(self.dev, lib.decode())
@@ -117,7 +133,7 @@ class MetalProgram:
     encoder = msg(command_buffer, "computeCommandEncoder", restype=objc_instance)
     msg(encoder, "setComputePipelineState:", self.pipeline_state)
     for i,a in enumerate(bufs): msg(encoder, "setBuffer:offset:atIndex:", a.buf, a.offset, i)
-    for i,a in enumerate(vals,start=len(bufs)): msg(encoder, "setBytes:length:atIndex:", bytes(ctypes.c_int(a)), 4, i)
+    for i,a in enumerate(vals, start=len(bufs)): msg(encoder, "setBytes:length:atIndex:", bytes(ctypes.c_int(a)), 4, i)
     msg(encoder, "dispatchThreadgroups:threadsPerThreadgroup:", to_struct(*global_size), to_struct(*local_size))
     msg(encoder, "endEncoding")
     msg(command_buffer, "commit")
@@ -135,7 +151,8 @@ class MetalAllocator(LRUAllocator):
     super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
     # Buffer is explicitly released in _free() rather than garbage collected via reference count
-    ret = msg(self.dev.sysdevice, "newBufferWithLength:options:", size, MTLResourceOptions.MTLResourceStorageModeShared, restype=objc_id)
+    ret = msg(self.dev.sysdevice, "newBufferWithLength:options:", ctypes.c_ulong(size), MTLResourceOptions.MTLResourceStorageModeShared,
+              restype=objc_id)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options): msg(opaque.buf, "release")
@@ -157,9 +174,7 @@ class MetalAllocator(LRUAllocator):
     src_dev.mtl_buffers_in_flight.append(src_command_buffer)
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
-    ptr = msg(src.buf, "contents", restype=objc_id) # Shared memory, do not release here
-    array = (ctypes.c_char * (src.offset + src.size)).from_address(ptr.value)
-    return memoryview(array).cast("B")[src.offset:]
+    return to_mv(cast(int, msg(src.buf, "contents", restype=objc_id).value), src.size + src.offset)[src.offset:]
   def _copyin(self, dest:MetalBuffer, src:memoryview): self._as_buffer(dest)[:] = src
   def _copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self._as_buffer(src)
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
@@ -175,7 +190,7 @@ class MetalDevice(Compiled):
     self.timeline_value = 0
 
     from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_XCODE") else Compiler(),
+    super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
                      functools.partial(MetalProgram, self), MetalGraph)
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)

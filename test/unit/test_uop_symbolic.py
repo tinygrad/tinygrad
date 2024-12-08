@@ -27,8 +27,6 @@ class Node:
   @staticmethod
   def ands(ops): return functools.reduce(lambda x,y: x*y, ops)
   def __floordiv__(a,b,unk): return a//b
-def create_lt_node(v, n): return v.lt(n)
-def create_ge_node(v, n): return v.ge(n)
 def SumNode(x): return Node.sum(x)
 def MulNode(x, y): return x*y
 
@@ -48,36 +46,40 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(nmax, m)
 
   def test_cmp_simple(self):
-    self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 4), 0, 1, "(a<4)")
-    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 8), 0, 1, "((a<8)!=True)")
+    self.helper_test_variable(Variable("a", 3, 8) < 4, 0, 1, "(a<4)")
+    self.helper_test_variable(Variable("a", 3, 8) >= 8, 0, 1, "((a<8)!=True)")
 
   def test_ge(self):
-    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 77), 0, 0, "False")
-    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 9), 0, 0, "False")
-    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 8), 0, 1, "((a<8)!=True)")
-    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 4), 0, 1, "((a<4)!=True)")
-    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 3), 1, 1, "True")
-    self.helper_test_variable(create_ge_node(Variable("a", 3, 8), 2), 1, 1, "True")
+    self.helper_test_variable(Variable("a", 3, 8) >= 77, 0, 0, "False")
+    self.helper_test_variable(Variable("a", 3, 8) >= 9, 0, 0, "False")
+    self.helper_test_variable(Variable("a", 3, 8) >= 8, 0, 1, "((a<8)!=True)")
+    self.helper_test_variable(Variable("a", 3, 8) >= 4, 0, 1, "((a<4)!=True)")
+    self.helper_test_variable(Variable("a", 3, 8) >= 3, 1, 1, "True")
+    self.helper_test_variable(Variable("a", 3, 8) >= 2, 1, 1, "True")
 
   def test_lt(self):
-    self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 77), 1, 1, "True")
-    self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 9), 1, 1, "True")
-    self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 8), 0, 1, "(a<8)")
-    self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 4), 0, 1, "(a<4)")
-    self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 3), 0, 0, "False")
-    self.helper_test_variable(create_lt_node(Variable("a", 3, 8), 2), 0, 0, "False")
+    self.helper_test_variable(Variable("a", 3, 8) < 77, 1, 1, "True")
+    self.helper_test_variable(Variable("a", 3, 8) < 9, 1, 1, "True")
+    self.helper_test_variable(Variable("a", 3, 8) < 8, 0, 1, "(a<8)")
+    self.helper_test_variable(Variable("a", 3, 8) < 4, 0, 1, "(a<4)")
+    self.helper_test_variable(Variable("a", 3, 8) < 3, 0, 0, "False")
+    self.helper_test_variable(Variable("a", 3, 8) < 2, 0, 0, "False")
+    self.helper_test_variable(Variable("a", 3, 4) < Variable("b", 5, 6), 1, 1, "True")
+    self.helper_test_variable(Variable("a", 3, 5) < Variable("b", 5, 6), 0, 1, "(a<b)")
+    self.helper_test_variable(Variable("a", 5, 6) < Variable("b", 3, 5), 0, 0, "False")
+    self.helper_test_variable(Variable("a", 3, 4) < Variable("a", 3, 4), 0, 0, "False")
 
-  def test_ge_divides(self):
-    expr = create_lt_node(Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512)
+  def test_lt_divides(self):
+    expr = (Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512
     self.helper_test_variable(expr, 0, 1, "(idx<128)")
 
-  def test_ge_divides_and(self):
-    expr = Node.ands([create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512),
-                      create_lt_node(Variable("idx2", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3), 512)])
+  def test_lt_divides_and(self):
+    expr = Node.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
+                      (Variable("idx2", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512])
     self.helper_test_variable(expr, 0, 1, "((idx1<128)&(idx2<128))")
 
   def test_lt_factors(self):
-    expr = create_lt_node(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256), 512)
+    expr = (Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256)) < 512
     self.helper_test_variable(expr, 0, 1, ("(((idx1*4)+FLOAT4_INDEX)<512)", "((FLOAT4_INDEX+(idx1*4))<512)"))
 
   def test_div_reduction(self):
@@ -187,10 +189,34 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
 
   def test_mod_factor(self):
-    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 99, "((b*50)%100)")
+    self.helper_test_variable(Node.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 50, "((b%2)*50)")
 
   def test_mod_to_sub(self):
     self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, "(a+-1)")
+
+  def test_mod_congruence(self):
+    self.helper_test_variable((3+3*Variable("a",0,3))%4, 0, 3, "((a*-1)+3)")
+    self.helper_test_variable((17+13*Variable("a",0,3))%18, 2, 17, "((a*-5)+17)")
+    self.helper_test_variable((2+9*Variable("a",0,3))%18, 2, 11, "(((a%2)*9)+2)")
+
+  def test_mod_congruence_mul_add(self):
+    self.helper_test_variable((6*(Variable("a", 0, 2)+1))%9, 0, 6, "((a*-3)+6)")
+
+  def test_mod_congruence_multiple_vars(self):
+    self.helper_test_variable((9+9*Variable("x",0,3)+9*Variable("y",0,3))%10, 3, 9, "(((x*-1)+(y*-1))+9)")
+    self.helper_test_variable((7+9*Variable("x",0,2)+9*Variable("y",0,2)+Variable("z",0,2))%10, 3, 9, "(((z+(x*-1))+(y*-1))+7)")
+    self.helper_test_variable((10+12*Variable("x",0,2)+Variable("y", 0, 4)%3)%13, 8, 12, "(((x*-1)+(y%3))+10)")
+
+  def test_div_congruence(self):
+    self.helper_test_variable((3+3*Variable("a",0,3))//4, 0, 3, "a")
+    self.helper_test_variable((18+17*Variable("a",0,2)+17)//18, 1, 3, "(a+1)")
+
+  def test_div_congruence_multiple_vars(self):
+    self.helper_test_variable((9+(9+10)*Variable("x",0,3)+(8+10)*Variable("y",0,2))//10, 0, 10, "((x*2)+(y*2))")
+
+  def test_mod_binary_expression(self):
+    self.helper_test_variable((3+Variable("a",0,1))%4, 0, 3, "((a*-3)+3)")
+    self.helper_test_variable((3+Variable("a",4,5))%4, 0, 3, "((a*-3)+15)")
 
   def test_sum_div_const(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 4, 0, 7, "a")
@@ -199,10 +225,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Node.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 16, 0, 1, "(a//4)")
 
   def test_sum_lt_fold(self):
-    self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 3)]), 16), 0, 1, "(a<4)")
-    self.helper_test_variable(create_lt_node(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]), 16), 0, 1,
+    self.helper_test_variable(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 3)]) < 16, 0, 1, "(a<4)")
+    self.helper_test_variable(Node.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]) < 16, 0, 1,
                               ("(((a*4)+b)<16)", "((b+(a*4))<16)"))
-    self.helper_test_variable(create_lt_node(Node.sum([Variable("uidx", 0, 3), Variable("a", 0, 1529) * 12]), (4 * 67)), 0, 1, "(a<23)")
+    self.helper_test_variable(Node.sum([Variable("uidx", 0, 3), Variable("a", 0, 1529) * 12]) < (4 * 67), 0, 1, "(a<23)")
 
   def test_mul_mod_large(self):
     self.helper_test_variable((Variable("a", 0, 20)*10)%9, 0, 8, "(a%9)")
@@ -220,14 +246,18 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("a", 0, 5)*10)*9, 0, 5*10*9, "(a*90)")
 
   def test_mul_lt(self):
-    self.helper_test_variable(create_lt_node(Variable("a", 0, 5)*4,13), 0, 1, "(a<4)")
-    self.helper_test_variable(create_lt_node(Variable("a", 0, 5)*4,16), 0, 1, "(a<4)")
-    self.helper_test_variable(create_lt_node(Variable("a", 0, 5)*(-2),0), 0, 1, "((a*-1)<0)")
-    self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,12), 0, 1, "((a<3)!=True)")
-    self.helper_test_variable(create_ge_node(Variable("a", 0, 5)*4,13), 0, 1, "((a<4)!=True)")
+    self.helper_test_variable(Variable("a", 0, 5)*4 < 13, 0, 1, "(a<4)")
+    self.helper_test_variable(Variable("a", 0, 5)*4 < 16, 0, 1, "(a<4)")
+    self.helper_test_variable(Variable("a", 0, 5)*(-2) < 0, 0, 1, "((a*-1)<0)")
+    self.helper_test_variable(Variable("a", 0, 5)*4 >= 12, 0, 1, "((a<3)!=True)")
+    self.helper_test_variable(Variable("a", 0, 5)*4 >= 13, 0, 1, "((a<4)!=True)")
 
   def test_div_div(self):
     self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
+
+  def test_div_const_div(self):
+    a = Variable("a", 0, 124)
+    self.helper_test_variable((a//2+1)//2, 0, 31, "((a+2)//4)")
 
   def test_distribute_mul(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
@@ -251,26 +281,25 @@ class TestSymbolic(unittest.TestCase):
     #self.helper_test_variable(Variable("a", -1, 20)%10, -1, 9, "(a%10)")
 
   def test_ge_remove(self):
-    self.helper_test_variable(create_ge_node(Variable("a", 0, 6), 25), 0, 0, "False")
+    self.helper_test_variable(Variable("a", 0, 6) >= 25, 0, 0, "False")
 
   def test_lt_remove(self):
-    self.helper_test_variable(create_lt_node(Variable("a", 0, 6), -3), 0, 0, "False")
-    self.helper_test_variable(create_lt_node(Variable("a", 0, 6), 3), 0, 1, "(a<3)")
-    self.helper_test_variable(create_lt_node(Variable("a", 0, 6), 8), 1, 1, "True")
+    self.helper_test_variable(Variable("a", 0, 6) < -3, 0, 0, "False")
+    self.helper_test_variable(Variable("a", 0, 6) < 3, 0, 1, "(a<3)")
+    self.helper_test_variable(Variable("a", 0, 6) < 8, 1, 1, "True")
 
   def test_lt_sum_remove(self):
-    self.helper_test_variable(create_lt_node(Variable("a", 0, 6) + 2, 3), 0, 1, "(a<1)")
+    self.helper_test_variable(Variable("a", 0, 6) + 2 < 3, 0, 1, "(a<1)")
 
   def test_lt_simple_factor(self):
-    self.helper_test_variable(create_lt_node(Variable("a", 0, 6)*6+Variable("b", 0, 6)*6, 8), 0, 1,
-                              "(((a*3)+(b*3))<4)")
+    self.helper_test_variable((Variable("a", 0, 6)*6+Variable("b", 0, 6)*6) < 8, 0, 1, "(((a*3)+(b*3))<4)")
 
   def test_lt_sum_factor_rhs_partial(self):
-    self.helper_test_variable(create_lt_node(Variable("a", 0, 6)*6 + Variable("b", 0, 6)*4 + Variable("c", 0, 6)*8, 4), 0, 1,
+    self.helper_test_variable((Variable("a", 0, 6)*6 + Variable("b", 0, 6)*4 + Variable("c", 0, 6)*8) < 4, 0, 1,
                               "((((a*3)+(b*2))+(c*4))<2)")
 
   def test_lt_sum_factor_rhs_all(self):
-    self.helper_test_variable(create_lt_node(Variable("a", 0, 6)*6 + Variable("b", 0, 6)*4 + Variable("c", 0, 6)*8, 2), 0, 1,
+    self.helper_test_variable((Variable("a", 0, 6)*6 + Variable("b", 0, 6)*4 + Variable("c", 0, 6)*8) < 2, 0, 1,
                               "((((a*3)+(b*2))+(c*4))<1)")
 
   def test_and_fold(self):
@@ -323,7 +352,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "((((idx*-10)+99)//11)+-9)")
 
   def test_div_into_mod(self):
-    self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(((idx*4)%8)//4)")
+    self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
 
   # TODO: simplify the expression
   def test_div_neg_cancel(self):
@@ -406,6 +435,20 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(gidx%4+(gidx//4)*4, 0, 124, "gidx")
     self.helper_test_variable((gidx//4)*4+gidx%4, 0, 124, "gidx")
 
+  def test_div_mod_recombine_folded_mod(self):
+    a = Variable("a", 0, 2)
+    b = Variable("b", 0, 100)
+    self.helper_test_variable((31 * a + 1) % 30 + ((31 * a + 1) // 30) * 30, 1, 63, "((a*31)+1)")
+    with self.assertRaises(AssertionError):
+      self.helper_test_variable((31 * b + 1) % 18 + ((31 * b + 1) // 18) * 18, 1, 3101, "((b*31)+1)")
+
+  def test_div_mod_recombine_with_gcd(self):
+    b = Variable("b", 0, 100)
+    exp = (16 * b + 2) % 18 + ((16 * b + 2) // 18) * 18
+    self.helper_test_variable(exp, 2, 1602, "((b*16)+2)")
+    with self.assertRaises(AssertionError):
+      self.helper_test_variable((30 * b + 1) % 18 + ((30 * b + 1) // 18) * 18, 1, 3001, "((b*30)+1)")
+
   def test_arange_unrolled4(self):
     gidx = Variable("gidx", 0, 2559)
     unrolled_div = (gidx+2561)//4+(gidx+2562)//4+(gidx+2560)//4+(gidx+2559)//4
@@ -420,11 +463,9 @@ class TestSymbolic(unittest.TestCase):
     unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
     self.helper_test_variable(unrolled_div, 0, 2, "gidx")
 
-    # TODO: fix this, it has only one term and is no longer an add chain
-    with self.assertRaises(AssertionError):
-      gidx = Variable("gidx", 0, 1)
-      unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
-      self.helper_test_variable(unrolled_div, 0, 1, "gidx")
+    gidx = Variable("gidx", 0, 1)
+    unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
+    self.helper_test_variable(unrolled_div, 0, 1, "gidx")
 
   def test_arange_unrolled2(self):
     gidx = Variable("gidx", 0, 2559)
@@ -435,32 +476,65 @@ class TestSymbolic(unittest.TestCase):
     idx = Variable("idx", 0, 24)
     self.helper_test_variable(idx//4, 0, 6, "(idx//4)")
     # TODO: simplify the true branch
-    self.helper_test_variable(idx.lt(4).where(idx//4, idx.const_like(-1)), -1, 6, "((idx//4) if (idx<4) else -1)")
+    self.helper_test_variable((idx<4).where(idx//4, idx.const_like(-1)), -1, 6, "((idx//4) if (idx<4) else -1)")
 
   def test_idiv_lt(self):
     idx = Variable("idx", 0, 24)
-    self.helper_test_variable((idx//4).lt(3), 0, 1, "(idx<12)")
-    self.helper_test_variable((idx//-4).lt(-3), 0, 1, "((idx//-4)<-3)")
+    self.helper_test_variable((idx//4<3), 0, 1, "(idx<12)")
+    self.helper_test_variable((idx//-4<-3), 0, 1, "((idx//-4)<-3)")
 
   def test_simplex_lt(self):
     a = Variable("a", 0, 3)
     b = Variable("b", 0, 3)
     c = Variable("c", 0, 3)
     d = Variable("d", -3, 3)
-    self.helper_test_variable((a).lt(1).ne(True), 0, 1, "((a<1)!=True)")
-    self.helper_test_variable((a+b).lt(1).ne(True), 0, 1, "(((a+b)<1)!=True)")
-    self.helper_test_variable((a*3+b*4).lt(1).ne(True), 0, 1, "(((a+b)<1)!=True)")
-    self.helper_test_variable((a*(-3)+b*4).lt(1).ne(True), 0, 1, "((((a*-3)+(b*4))<1)!=True)")  # negative coeff, should not be simplified
-    self.helper_test_variable((a*3+d*4).lt(1).ne(True), 0, 1, "((((a*3)+(d*4))<1)!=True)")  # var can be negative, should not be simplified
-    self.helper_test_variable((a+b+c*2).lt(1).ne(True), 0, 1, ("((((a+b)+c)<1)!=True)", "(((c+(a+b))<1)!=True)"))
-    self.helper_test_variable((a+b*2+c*4).lt(1).ne(True), 0, 1, ("((((a+b)+c)<1)!=True)", "(((c+(a+b))<1)!=True)"))
+    self.helper_test_variable((a<1).ne(True), 0, 1, "((a<1)!=True)")
+    self.helper_test_variable((a+b<1).ne(True), 0, 1, "(((a+b)<1)!=True)")
+    self.helper_test_variable((a*3+b*4<1).ne(True), 0, 1, "(((a+b)<1)!=True)")
+    self.helper_test_variable((a*(-3)+b*4<1).ne(True), 0, 1, "((((a*-3)+(b*4))<1)!=True)")  # negative coeff, should not be simplified
+    self.helper_test_variable((a*3+d*4<1).ne(True), 0, 1, "((((a*3)+(d*4))<1)!=True)")  # var can be negative, should not be simplified
+    self.helper_test_variable((a+b+c*2<1).ne(True), 0, 1, ("((((a+b)+c)<1)!=True)", "(((c+(a+b))<1)!=True)"))
+    self.helper_test_variable((a+b*2+c*4<1).ne(True), 0, 1, ("((((a+b)+c)<1)!=True)", "(((c+(a+b))<1)!=True)"))
 
   def test_where_removal(self):
-    cond = Variable("a", 0, 3).lt(2)
+    cond = Variable("a", 0, 3) < 2
     u1, u0 = cond.ufix(1), cond.ufix(0)
     self.helper_test_variable(cond, 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0), 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0).where(u1, u0), 0, 1, "(a<2)")
+
+  def test_where_combine(self):
+    cond = Variable("x", 0, 3) < 2
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    aa = cond.where(a, a.ufix(0))
+    bb = cond.where(b, b.ufix(1))
+    self.helper_test_variable(aa, 0, 3, "(a if (x<2) else 0)")
+    self.helper_test_variable(bb, 0, 3, "(b if (x<2) else 1)")
+    self.helper_test_variable(aa+bb, 0, 6, "((a+b) if (x<2) else 1)")
+    self.helper_test_variable(aa.maximum(bb), 0, 3, "(max(a, b) if (x<2) else 1)")
+
+    # not combining because it increased total ALU
+    c = Variable("c", 0, 3)
+    cc = cond.where(c, c+1)
+    self.helper_test_variable(bb+cc, 0, 7, "((b if (x<2) else 1)+(c if (x<2) else (c+1)))")
+
+    # not combining  # TODO: can combine if it can further simplify?
+    ab = cond.where(a, b)
+    ba = cond.where(b, a)
+    self.helper_test_variable(ab+ba, 0, 6, "((a if (x<2) else b)+(b if (x<2) else a))")
+
+    # not combining  # TODO: can combine if one is identity element const
+    self.helper_test_variable(aa+ab, 0, 6, "((a if (x<2) else b)+(a if (x<2) else 0))")
+
+  def test_symbolic_div(self):
+    # from symbolic arange
+    a = Variable("a", 1, 10)
+    denominator = ((a*-2)+1)
+    numerator = (((((a*2)+-1)*2)+1)*a)
+    self.helper_test_variable(denominator, -19, -1, "((a*-2)+1)")
+    self.helper_test_variable(numerator, 3, 390, "(a*((a*4)+-1))")
+    self.helper_test_variable((numerator//denominator)<=0, 1, 1, "True")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
@@ -615,33 +689,6 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     assert isinstance(mod, ModNode) and mod.a == gidx0 and mod.b == 8
     mod = gidx0 % 2
     assert isinstance(mod, ModNode) and mod.a == gidx0 and mod.b == 2
-
-  def test_node_lt_node(self):
-    a = Variable("a", 1, 5)
-    b = Variable("b", 6, 9)
-    c = Variable("c", 1, 10)
-    d = Variable("d", 5, 10)
-    # if the comparison output is always the same, it folds to num
-    assert create_lt_node(a, b) == NumNode(1)
-    assert create_lt_node(b, a) == NumNode(0)
-    assert create_lt_node(d, a) == NumNode(0)
-    assert create_lt_node(a, a) == NumNode(0)
-    assert create_lt_node(a, a) == NumNode(0)
-    # if it remains as a LtNode, bool is always true and (min, max) == (0, 1)
-    a_lt_c = create_lt_node(a, c)
-    assert isinstance(a_lt_c, LtNode) and a_lt_c.min == 0 and a_lt_c.max == 1
-    assert a_lt_c
-    # same when comparing with a constant
-    a_lt_3 = create_lt_node(a, 3)
-    assert a_lt_3 and a_lt_3.min == 0 and a_lt_3.max == 1
-
-  def test_sumnode_mulnode_lt(self):
-    a = Variable("a", 1, 2)
-    b = Variable("b", 1, 2)
-    c = Variable("c", 1, 2)
-    x = SumNode([MulNode(a, b), c])
-    with self.assertRaises(AssertionError):
-      create_lt_node(x, 3)
 
   def test_nested_variable_mod(self):
     i = Variable("i", 1, 5)

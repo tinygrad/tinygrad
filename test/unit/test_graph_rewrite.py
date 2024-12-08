@@ -118,7 +118,7 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
       UOp(Ops.VECTORIZE, dtypes.int.vec(4), arg=None, src=(UOp(Ops.SPECIAL, dtypes.int, arg=('lidx0', 32), src=()),)*4),
       UOp(Ops.VCONST, dtypes.int.vec(4), arg=(0, 256, 512, 768), src=())))
     rhs = UOp.const(dtypes.int.vec(4), 2)
-    unopt = lhs.lt(rhs)
+    unopt = lhs<rhs
     opt = apply_rewrite(unopt)
     print(unopt)
     print(opt)
@@ -201,6 +201,78 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
     optimized_uop = apply_rewrite(vectorized_uop)
     self.assertEqual([sub_uop.arg for sub_uop in optimized_uop.src], [5.0, 10.0, 15.0, 20.0])
 
+
+import inspect
+from tinygrad.ops import graph_rewrite, _substitute, track_rewrites, symbolic_simple
+
+class TestBottomUpRewrite(unittest.TestCase):
+  def test_const_folding(self):
+    a = UOp.const(dtypes.int, 5)
+    ret = (a*3) + (a*7)
+    gt = graph_rewrite(ret, symbolic_simple)
+    ret = graph_rewrite(ret, symbolic_simple, bottom_up=True)
+    self.assertIs(gt, ret)
+
+# normally .substitute would be fine, but it's not tracked
+@track_rewrites()
+def named_substitute(name:str, uop:UOp, rel:dict[UOp, UOp]): return graph_rewrite(uop, _substitute, rel, bottom_up=True)
+def substitute(uop:UOp, rel:dict[UOp, UOp]): return named_substitute(inspect.stack()[1].function, uop, rel)
+
+class TestSubstitute(unittest.TestCase):
+  # these work because the substituted things don't have parents
+  def test_simple(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    ret = a + 4
+    ret = substitute(ret, {a:b})
+    self.assertIs(ret, b+4)
+
+  def test_double(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    c = UOp.variable('c', 0, 10)
+    ret = (a + 4) + b
+    ret = substitute(ret, {a:c, b:c})
+    self.assertIs(ret, (c + 4) + c)
+
+  def test_diamond(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    ret = (a + 4) + (a + 5)
+    ret = substitute(ret, {a:b})
+    self.assertIs(ret, (b + 4) + (b + 5))
+
+  # this works because there's nothing above the substituted node
+  def test_sin(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    ret = a.sin().sin()
+    ret = substitute(ret, {a.sin():b})
+    self.assertIs(ret, b.sin())
+
+  # broken due to infinite recursion
+  # NOTE: VIZ hangs and doesn't recover if you click this one
+  def test_assert_inf_recurse(self):
+    a = UOp.variable('a', 0, 10)
+    n1 = a.sin()
+    ret = n1
+    with self.assertRaises(RecursionError):
+      ret = substitute(ret, {n1:n1.sqrt()})
+
+  def test_sin_to_sqrt(self):
+    a = UOp.variable('a', 0, 10)
+    n1 = a.sin()
+    ret = n1.sin()
+    ret = substitute(ret, {a.sin():a.sqrt()})
+    self.assertIs(ret, a.sqrt().sin())
+
+  def test_double_sin_to_sqrt(self):
+    a = UOp.variable('a', 0, 10)
+    n1 = a.sin()
+    ret = n1.sin()
+    # NOTE: this would work if it had gone in the opposite order
+    ret = substitute(ret, {a.sin():a.sqrt(), n1.sin():n1.sqrt()})
+    self.assertIs(ret, a.sqrt().sqrt())
 
 if __name__ == '__main__':
   unittest.main()

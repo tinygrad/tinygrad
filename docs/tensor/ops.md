@@ -27,9 +27,11 @@
 ::: tinygrad.Tensor.matmul
 ::: tinygrad.Tensor.einsum
 ::: tinygrad.Tensor.cumsum
+::: tinygrad.Tensor.cummax
 ::: tinygrad.Tensor.triu
 ::: tinygrad.Tensor.tril
 ::: tinygrad.Tensor.interpolate
+::: tinygrad.Tensor.scatter
 
 ## Neural Network (functional)
 

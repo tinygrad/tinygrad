@@ -56,7 +56,7 @@ class BatchNorm:
     # NOTE: wow, this is done all throughout training in most PyTorch models
     if self.track_running_stats and Tensor.training:
       self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
-      self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * prod(x.shape)/(prod(x.shape)-x.shape[1]) * batch_var.detach())
+      self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * x.numel()/(x.numel()-x.shape[1]) * batch_var.detach())
       self.num_batches_tracked += 1
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_var.add(self.eps).rsqrt())
 BatchNorm2d = BatchNorm3d = BatchNorm
@@ -108,8 +108,7 @@ class Conv2d:
     self.weight = Tensor.uniform(out_channels, in_channels//groups, *self.kernel_size, low=-scale, high=scale)
     self.bias: Optional[Tensor] = Tensor.uniform(out_channels, low=-scale, high=scale) if bias else None
 
-  def __call__(self, x:Tensor) -> Tensor:
-    return x.conv2d(self.weight, self.bias, padding=self.padding, stride=self.stride, dilation=self.dilation, groups=self.groups)
+  def __call__(self, x:Tensor) -> Tensor: return x.conv2d(self.weight, self.bias, self.groups, self.stride, self.dilation, self.padding)
 
 def ConvTranspose1d(in_channels:int, out_channels:int, kernel_size:int, stride=1, padding=0, output_padding=0, dilation=1,
                       groups=1, bias=True) -> ConvTranspose2d:
@@ -154,8 +153,7 @@ class ConvTranspose2d(Conv2d):
     self.output_padding = output_padding
 
   def __call__(self, x:Tensor) -> Tensor:
-    return x.conv_transpose2d(self.weight, self.bias, padding=self.padding, output_padding=self.output_padding, stride=self.stride,
-                              dilation=self.dilation, groups=self.groups)
+    return x.conv_transpose2d(self.weight, self.bias, self.groups, self.stride, self.dilation, self.padding, self.output_padding)
 
 class Linear:
   """
@@ -178,8 +176,7 @@ class Linear:
     self.weight = Tensor.uniform(out_features, in_features, low=-bound, high=bound)
     self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
 
-  def __call__(self, x:Tensor) -> Tensor:
-    return x.linear(self.weight.transpose(), self.bias)
+  def __call__(self, x:Tensor) -> Tensor: return x.linear(self.weight.transpose(), self.bias)
 
 class GroupNorm:
   """
@@ -210,7 +207,7 @@ class GroupNorm:
 
     if self.weight is None or self.bias is None: return x
     # elementwise_affine on channels
-    return x * self.weight.reshape(1, -1, *[1] * (len(x.shape)-2)) + self.bias.reshape(1, -1, *[1] * (len(x.shape)-2))
+    return x * self.weight.reshape(1, -1, *[1] * (x.ndim-2)) + self.bias.reshape(1, -1, *[1] * (x.ndim-2))
 
 class InstanceNorm:
   """
@@ -237,7 +234,7 @@ class InstanceNorm:
   def __call__(self, x:Tensor) -> Tensor:
     x = x.reshape(x.shape[0], self.num_features, -1).layernorm(eps=self.eps).reshape(x.shape)
     if self.weight is None or self.bias is None: return x
-    return x * self.weight.reshape(1, -1, *[1] * (len(x.shape)-2)) + self.bias.reshape(1, -1, *[1] * (len(x.shape)-2))
+    return x * self.weight.reshape(1, -1, *[1] * (x.ndim-2)) + self.bias.reshape(1, -1, *[1] * (x.ndim-2))
 
 class LayerNorm:
   """
@@ -257,9 +254,10 @@ class LayerNorm:
   ```
   """
   def __init__(self, normalized_shape:Union[int, Tuple[int, ...]], eps=1e-5, elementwise_affine=True):
-    self.normalized_shape: Tuple[int, ...] = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
+    self.normalized_shape: Tuple[int, ...] = make_tuple(normalized_shape, 1)
     self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(self.normalized_shape))), eps, elementwise_affine
-    self.weight, self.bias = (Tensor.ones(*self.normalized_shape), Tensor.zeros(*self.normalized_shape)) if elementwise_affine else (None, None)
+    self.weight: Optional[Tensor] = Tensor.ones(*self.normalized_shape) if elementwise_affine else None
+    self.bias: Optional[Tensor] = Tensor.zeros(*self.normalized_shape) if elementwise_affine else None
 
   def __call__(self, x:Tensor) -> Tensor:
     assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"last dimensions of {x.shape} must match {self.normalized_shape}"
@@ -322,10 +320,9 @@ class Embedding:
     self.vocab_sz, self.embed_sz, self.weight = vocab_size, embed_size, Tensor.glorot_uniform(vocab_size, embed_size)
 
   def __call__(self, idx:Tensor) -> Tensor:
-    if idx.numel() == 0: return Tensor.empty(idx.shape+(self.embed_sz,), device=self.weight.device)
-    arange_shp, weight_shp, big_shp = (self.vocab_sz, 1), (self.vocab_sz, self.embed_sz), idx.shape+(self.vocab_sz, self.embed_sz,)
-    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).reshape(arange_shp)
-    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1,)).expand(big_shp), self.weight.reshape(weight_shp).expand(big_shp)
+    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).unsqueeze(-1)
+    big_shp = idx.shape+(self.vocab_sz, self.embed_sz)
+    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), self.weight.expand(big_shp)
     return (arange == idx).mul(vals).sum(-2, acc_dtype=vals.dtype)
 
 class LSTMCell:
@@ -341,7 +338,8 @@ class LSTMCell:
     stdv = 1.0 / math.sqrt(hidden_size)
     self.weight_ih = Tensor.uniform(hidden_size*4, input_size, low=-stdv, high=stdv)
     self.weight_hh = Tensor.uniform(hidden_size*4, hidden_size, low=-stdv, high=stdv)
-    self.bias_ih, self.bias_hh = (Tensor.zeros(hidden_size*4), Tensor.zeros(hidden_size*4)) if bias else (None, None)
+    self.bias_ih: Optional[Tensor] = Tensor.zeros(hidden_size*4) if bias else None
+    self.bias_hh: Optional[Tensor] = Tensor.zeros(hidden_size*4) if bias else None
 
   def __call__(self, x:Tensor, hc:Optional[Tuple[Tensor, Tensor]]=None) -> Tuple[Tensor, Tensor]:
     if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, device=x.device),)*2

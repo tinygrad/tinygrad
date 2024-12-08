@@ -22,7 +22,7 @@ def shl(x:UOp, y:int) -> UOp: return x * (2**y)
 def rintk(d:UOp) -> UOp:
   """round d:float to int away from 0"""
   out_dtype = {dtypes.float64: dtypes.int64, dtypes.float32: dtypes.int32, dtypes.float16: dtypes.int16}[d.dtype]
-  return (d + d.lt(0.0).where(d.const_like(-0.5), d.const_like(0.5))).cast(out_dtype)
+  return (d + (d<0.0).where(d.const_like(-0.5), d.const_like(0.5))).cast(out_dtype)
 
 def pow2if(q:UOp, float_dtype:DType):
   """cast(2^q, float_dtype) where q is any integer in the range of [-126, 127]"""
@@ -110,7 +110,7 @@ def payne_hanek_reduction(d:UOp) -> Tuple[UOp, UOp]:
   r = (p.cast(intermediate_dtype) * (3.4061215800865545e-19)).cast(d.dtype)
 
   # if fraction >= 0.5, r -= pi/2, q += 1
-  return f.lt(0.5).where(r, r - math.pi/2), f.lt(0.5).where(q, q + 1)
+  return (f<0.5).where(r, r - math.pi/2), (f<0.5).where(q, q + 1)
 
 def cody_waite_reduction(d:UOp) -> Tuple[UOp, UOp]:
   """
@@ -177,14 +177,14 @@ def xsin(d:UOp, fast:bool=False, switch_over:float=30.0) -> UOp:
   # mask +-inf/nan as zero
   x = _lazy_map_numbers(d, d.const_like(0.0), d.const_like(0.0), d.const_like(0.0), d)
   # x_sign = sign(x)
-  x_sign = x.ne(0).where(x.lt(0).where(x.const_like(-1), x.const_like(1)), x.const_like(0))
+  x_sign = x.ne(0).where((x<0).where(x.const_like(-1), x.const_like(1)), x.const_like(0))
   x_abs = x * x_sign
   r, q = (cody_waite_reduction if fast else payne_hanek_reduction)(x_abs)
   if fast: result = sin_poly_small(r, q)
   else:
     # Payne Hanek Reduction assumes abs(x) >= pi/4, so for smaller values, use cody_waite_reduction.
     r_small, q_small = cody_waite_reduction(x_abs)
-    result = x_abs.lt(switch_over).where(sin_poly_small(r_small, q_small), sin_poly_large(r, q))
+    result = (x_abs<switch_over).where(sin_poly_small(r_small, q_small), sin_poly_large(r, q))
   # adjusts the sign for abs(x)
   result = result * x_sign
   # sin(Inf) = NaN, sin(-Inf) = NaN, sin(NaN) = NaN
@@ -210,9 +210,9 @@ def xexp2(d:UOp) -> UOp:
   u = ldexp2k(u, q) # u*2^q
   upper, lower = {dtypes.float64: (1024, -2000), dtypes.float32: (128, -150), dtypes.float16: (23, -22)}[d.dtype]
   # Replace x >= upper with +inf
-  u = d.ge(upper).where(d.const_like(math.inf), u)
-  # Replace x <= lower with zero.
-  u = d.lt(lower).where(d.const_like(0.0), u)
+  u = (d >= upper).where(d.const_like(math.inf), u)
+  # Replace x < lower with zero.
+  u = (d<lower).where(d.const_like(0.0), u)
   # exp2(NaN) = NaN
   return d.ne(d).where(d.const_like(math.nan), u)
 
@@ -225,7 +225,7 @@ def xlog2(d:UOp) -> UOp:
   # TODO: float16 denormal need float32 to achieve precision
   if d.dtype == dtypes.float16: return xlog2(d.cast(dtypes.float32)).cast(dtypes.float16)
   FLT_MIN = d.const_like(1e-6 if d.dtype == dtypes.float16 else 1e-4)
-  is_denormal = d.lt(FLT_MIN)
+  is_denormal = d<FLT_MIN
   a = is_denormal.where(d * (2 ** 64), d)
 
   e = ilogb2k(a * (1.0 / 0.75)).cast(a.dtype)
@@ -246,7 +246,7 @@ def xlog2(d:UOp) -> UOp:
   # log2(Inf) = Inf
   r = d.ne(math.inf).where(r, r.const_like(math.inf))
   # log2(x) = NaN for x < 0
-  r = d.lt(-0.0).where(r.const_like(math.nan), r)
+  r = (d<-0.0).where(r.const_like(math.nan), r)
   # log2(0) = -Inf, but we will compare using the value of y because 1e-200==0 is true.
   # log2_zero = the value of unmasked xlog2(0.0).
   log2_zero = {dtypes.float64: -1087, dtypes.float32: -191, dtypes.float16: -79}[d.dtype]

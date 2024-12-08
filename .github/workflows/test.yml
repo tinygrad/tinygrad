@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  DOWNLOAD_CACHE_VERSION: '7'
+  DOWNLOAD_CACHE_VERSION: '8'
   RUN_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: .
@@ -229,7 +229,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
-      run: python -m mypy --strict-equality
+      run: python -m mypy --strict-equality --lineprecision-report . && cat lineprecision.txt
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  PYTHONPATH=. python README.py
     - name: Run unit tests
@@ -351,46 +351,48 @@ jobs:
           export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
           cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
-  #testwebgpu:
-  #  name: WebGPU Tests
-  #  runs-on: macos-13
-  #  timeout-minutes: 20
-  #  steps:
-  #  - name: Checkout Code
-  #    uses: actions/checkout@v4
-  #  - name: Set up Python 3.11
-  #    uses: actions/setup-python@v5
-  #    with:
-  #      python-version: 3.11
-  #  - name: Cache python packages
-  #    uses: actions/cache@v4
-  #    with:
-  #      path: /Users/runner/Library/Python/3.11/lib/python/site-packages
-  #      key: webgpu-testing-user3-packages-${{ hashFiles('**/setup.py') }}
-  #  - name: Install Dependencies
-  #    run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-  #  - name: Cache downloads
-  #    uses: actions/cache@v4
-  #    with:
-  #      path: ~/Library/Caches/tinygrad/downloads/
-  #      key: downloads-cache-webgpu-${{ env.DOWNLOAD_CACHE_VERSION }}
-  #  - name: Check Device.DEFAULT (WEBGPU) and print some source
-  #    run: |
-  #      WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
-  #      WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-    #- name: Run webgpu pytest
-    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
-  #  - name: Run selected webgpu tests
-  #    run: |
-  #      WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_ops.py test/test_dtype.py \
-  #      test/test_jit.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_linearizer.py \
-  #      test/test_linearizer_failures.py test/test_nn.py
-  #  - name: Build WEBGPU Efficientnet
-  #    run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
-  #  - name: Install Puppeteer
-  #    run: npm install puppeteer
-  #  - name: Run WEBGPU Efficientnet
-  #    run: node test/web/test_webgpu.js
+  testwebgpu:
+    name: WebGPU Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.11
+    - name: Cache python packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.local/lib/python3.11/site-packages
+        key: webgpu-testing-user3-packages-${{ hashFiles('**/setup.py') }}
+    - name: Install Dependencies
+      run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Install dependencies for software-based vulkan
+      run: |
+        sudo apt update -y || true
+        sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
+    - name: Cache downloads
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/tinygrad/downloads/
+        key: downloads-cache-webgpu-${{ env.DOWNLOAD_CACHE_VERSION }}
+    - name: Check Device.DEFAULT (WEBGPU) and print some source
+      run: |
+        WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
+        WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+    - name: Run selected webgpu tests
+      run: |
+          WEBGPU=1 WGPU_BACKEND_TYPE=Vulkan python3 -m pytest -n=auto test/test_assign.py test/test_arange.py test/test_const_folding.py test/test_dtype.py \
+          test/test_dtype_alu.py test/test_conv.py test/test_conv_shapetracker.py test/test_nn.py test/test_ops.py test/test_optim.py \
+          test/test_jit.py test/test_randomness.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_uops_stats.py test/test_uops.py \
+          test/testextra/test_export_model.py test/testextra/test_f16_decompress.py --durations=20
+    - name: Run process replay tests
+      run: |
+        export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
+        export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
+        cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
 
   testmetal:
     name: Metal Tests
@@ -412,7 +414,7 @@ jobs:
         path: /Users/runner/Library/Python/3.11/lib/python/site-packages
         key: metal-m1-testing-user3-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
-      run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Cache downloads
       uses: actions/cache@v4
       with:
@@ -437,49 +439,23 @@ jobs:
     - name: Test Beam Search
       run: PYTHONPATH="." METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
     - name: Fuzz Test linearizer
-      run: PYTHONPATH="." METAL=1 FUZZ_ALL_ACTIONS=1 DEPTH=2 FUZZ_N=24 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
+      run: PYTHONPATH="." METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
     # - name: Fuzz Test models schedule
     # run: FUZZ_SCHEDULE=1 FUZZ_SCHEDULE_MAX_PATHS=5 python -m pytest test/models/test_train.py test/models/test_end2end.py
     - name: Run TRANSCENDENTAL math
       run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
+    # WebGPU e2e tests
+    - name: Build WEBGPU Efficientnet
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python3 -m examples.compile_efficientnet
+    - name: Install Puppeteer
+      run: npm install puppeteer
+    - name: Run WEBGPU Efficientnet
+      run: node test/web/test_webgpu.js
     - name: Run process replay tests
       run: |
         export PR_TITLE=$(jq -r .pull_request.title "$GITHUB_EVENT_PATH")
         export COMMIT_MESSAGE=$(git show -s --format=%B ${{ github.event.pull_request.head.sha }})
         cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
-
-#  testwebgl:
-#    name: WebGL Tests
-#    runs-on: ubuntu-latest
-#    timeout-minutes: 20
-#
-#    steps:
-#    - name: Checkout Code
-#      uses: actions/checkout@v3
-#    - name: Set up Python 3.11
-#      uses: actions/setup-python@v4
-#      with:
-#        python-version: 3.11
-#    - name: Cache python packages
-#      uses: actions/cache@v4
-#      with:
-#        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-#        key: webgl-testing-packages-${{ hashFiles('**/setup.py') }}
-#    - name: Install Dependencies
-#      run: pip install -e '.[webgl,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-#    - name: Cache downloads
-#      uses: actions/cache@v4
-#      with:
-#        path: ~/Library/Caches/tinygrad/downloads/
-#        key: downloads-cache-webgl-${{ env.DOWNLOAD_CACHE_VERSION }}
-#    - name: Prepare
-#      run: |
-#        sudo apt-get -y install xvfb
-#        sudo /usr/bin/Xvfb :0 -screen 0 4096x4096x24+32 &
-#    - name: Run selected webgl tests
-#      run: WEBGL=1 python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_jit.py
-#    - name: Build WebGL Efficientnet
-#      run: WEBGL=1 python -m examples.compile_efficientnet
 
   tests:
     strategy:
@@ -496,14 +472,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 2 # NOTE: this fetches the HEAD commit of the PR
-      - name: Set up Python 3.11
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: 3.11
+          python-version: 3.12
       - name: Cache python packages
         uses: actions/cache@v4
         with:
-          path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+          path: ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
           key: ${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
       - name: Cache downloads
         uses: actions/cache@v4
@@ -552,7 +528,7 @@ jobs:
         if: matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv'
         run: |
           cd ${{ github.workspace }}/gpuocelot/ocelot/build
-          sudo ninja install -d explain
+          sudo cp libgpuocelot.so /usr/lib/libgpuocelot.so
       - name: Install packages (amd)
         if: matrix.backend == 'amd'
         run: |
