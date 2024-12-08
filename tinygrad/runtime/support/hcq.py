@@ -447,7 +447,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     cast(HCQAllocatorBase, self.allocator).b_timeline = [0] * len(cast(HCQAllocatorBase, self.allocator).b)
 
 class HCQBuffer:
-  def __init__(self, va_addr:int, size:int, texture_info:Any=None, meta:Any=None, _base:Optional[HCQBuffer]=None):
+  def __init__(self, va_addr:sint, size:int, texture_info:Any=None, meta:Any=None, _base:Optional[HCQBuffer]=None):
     self.va_addr, self.size, self.texture_info, self.meta, self._base = va_addr, size, texture_info, meta, _base
 
 class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):

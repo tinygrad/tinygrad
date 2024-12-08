@@ -190,7 +190,7 @@ class QCOMArgsState(HCQArgsState):
     for i, v in enumerate(vals): self.bind_sints_to_ptr(v, ptr + self.args_info[i].offset, 'I')
 
 class QCOMProgram(HCQProgram):
-  def __init__(self, dev:QCOMDevice, name:str, lib:bytes):
+  def __init__(self, dev: QCOMDevice, name: str, lib: bytes):
     self.dev: QCOMDevice = dev
     self.name, self.lib = name, lib
     self._parse_lib()
