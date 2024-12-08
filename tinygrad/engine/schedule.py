@@ -73,6 +73,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
     op = buf.src[1].replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src[1].src))
     # BUFFER_VIEW overrides the underlying buffer
     if op.op is Ops.BUFFER_VIEW: buffers[buf_uop] = (x:=op.src[0]).base.buffer.view(buf.st.size, dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
+    if op.op is Ops.EMPTY: op = op.replace(arg=buf_uop.arg[0])
   # ASSIGN reuses the target BUFFER
   elif buf.op is Ops.ASSIGN:
     target, new_val = [to_uop(x, ctx, cache) for x in buf.srcs]

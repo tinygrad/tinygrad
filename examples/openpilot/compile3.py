@@ -80,7 +80,7 @@ def test(test_val=None):
     et = time.perf_counter()
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {(et-st)*1e3:6.2f} ms")
   # TODO: fix print tensor, this is printing the entire big graph
-  # print(out, val.shape, val.dtype)
+  #print(out, val.shape, val.dtype)
   if test_val is not None: np.testing.assert_equal(test_val, val)
   print("**** test done ****")
 
