@@ -76,7 +76,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   else:
     src = tuple(to_uop(x, ctx, cache) for x in buf.srcs)
     buf_uop = src[0].base.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
-    op = UOp(buf.op, dtype, src, buf.arg)
+    op = UOp(buf.op, dtype.base, src, buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
   # keep track of ops outside the big graph
   if op is not None:
