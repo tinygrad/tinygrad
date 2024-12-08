@@ -68,7 +68,7 @@ class BLAKE3:
     n_steps = Variable(min_val=0, max_val=log2(padded_input_size), name="n_steps").bind(ceil(log2(max(n_chunks, 1))))
     return data, info, n_steps
 
-  def hash(self, tensor: Tensor, padded_input_size: int = 1024**3) -> str:
+  def hash(self, tensor: Tensor, padded_input_size: int = 1024**2 * 512) -> str:
     data, info, n_tree_steps = self.tensor_to_blake_input(tensor, padded_input_size)
     chain_vals = self.init_chain_vals(data, info)
     chain_vals = self.tree_hash(chain_vals, n_tree_steps)
