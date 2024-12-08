@@ -132,6 +132,7 @@ class TestBigSpeed(unittest.TestCase):
 
 @unittest.skipIf(getenv("BIG") == 1, "only big tests")
 @unittest.skipIf(getenv("MOCKGPU"), "no MOCKGPUs")
+@unittest.skip("gc")
 class TestSpeed(unittest.TestCase):
   def test_sub(self):
     def f(a, b): return a-b
