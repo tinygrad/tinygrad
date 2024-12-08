@@ -10,8 +10,6 @@ if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer
 
-view_supported_devices = {"LLVM", "CLANG", "CUDA", "NV", "AMD", "METAL", "QCOM", "DSP", "DISK"}
-
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
   def __str__(self): return Enum.__str__(self)
@@ -348,6 +346,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     return UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
+  @staticmethod
+  def range(dtype:DType, start:sint, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(start), sint_to_uop(end)), arg=idx)
   def r(self, op:Ops, axis:Tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
     return self if len(axis) == 0 else UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
@@ -358,8 +358,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return self.alu(Ops.CONTIGUOUS)
     forced_realize.add(self.base)
     return self
-  @staticmethod
-  def range(dtype:DType, start:sint, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(start), sint_to_uop(end)), arg=idx)
 
   # *** from LazyBuffer ***
 
