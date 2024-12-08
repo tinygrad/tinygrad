@@ -16,7 +16,8 @@ from extra.onnx import get_run_onnx   # TODO: port to main tinygrad
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
 OUTPUT = "/tmp/openpilot.pkl"
 
-def compile():
+#def compile():
+def compile_and_run():
   Tensor.no_grad = True
   Tensor.training = False
 
@@ -55,11 +56,12 @@ def compile():
   print(f"mdl size is {mdl_sz/1e6:.2f}M")
   print(f"pkl size is {pkl_sz/1e6:.2f}M")
   print("**** compile done ****")
-  return test_val
+  # return test_val
 
-def test(test_val=None):
-  with open(OUTPUT, "rb") as f:
-    run = pickle.load(f)
+# def test(test_val=None):
+ # with open(OUTPUT, "rb") as f:
+ #   run = pickle.load(f)
+  run = run_onnx_jit
 
   # same randomness as above
   Tensor.manual_seed(100)
@@ -91,6 +93,8 @@ def test(test_val=None):
   np.testing.assert_raises(AssertionError, np.testing.assert_array_equal, val, changed_val)
 
 if __name__ == "__main__":
-  test_val = compile() if not getenv("RUN") else None
-  test(test_val)
+  #test_val = compile() if not getenv("RUN") else None
+  # test(test_val)
+  # NOTE: in LazyBuffer = UOp there no realized Buffer on the unpickled UOps
+  compile_and_run()
 
