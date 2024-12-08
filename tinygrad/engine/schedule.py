@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import realized, buf_uops
+from tinygrad.ops import identity_element
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -169,6 +169,7 @@ check_preload = PatternMatcher([(UPat(Ops.PRELOAD, src=(UPat.var("b"), UPat()), 
 to_si = PatternMatcher([
   (UPat(Ops.VIEW, name="x"), _append_st_vars),
   (UPat(Ops.SINK, src=(UPat.store(UPat.var("b"), UPat(), UPat(GroupOp.Meta, name="x")),)), lambda ctx,b,x: x.replace(src=(b, *x.src))),
+  # TODO: bring this back
   # unmasked VALID is just CONST
   # (UPat(Ops.VALID, name="valid").where(UPat.cvar("x"), UPat()),
   # lambda ctx,valid,x: x if all_int(valid.shape) and all(v.mask is None for v in valid.st.views) else None),
@@ -338,6 +339,9 @@ def _as_const(u:UOp, val:ConstType) -> UOp:
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+  # reduce of size 0 is just the identity element
+  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
+   lambda ctx,reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if 0 in x.shape and 0 not in reduce.shape else None),
 ])
 
 # ** this decides which ops get realized
