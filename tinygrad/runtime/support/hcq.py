@@ -236,20 +236,20 @@ def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Optional[Type[HWQueue
     if enabled and PROFILE: dev.sig_prof_records.append((cast(HCQSignal, st), cast(HCQSignal, en), desc, queue_type is dev.hw_copy_queue_t))
 
 class HCQArgsState(Generic[ProgramType]):
-  def __init__(self, ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[sint, ...]=()):
-    self.ptr, self.prg = ptr, prg
+  def __init__(self, gpu_ptr:int, cpu_ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[sint, ...]=()):
+    self.gpu_ptr, self.cpu_ptr, self.prg = gpu_ptr, cpu_ptr, prg
     self.bind_data:List[Tuple[Tuple[sint, ...], int, str]] = []
 
   def bind_sints_to_ptr(self, *vals:sint, ptr:int, fmt): self.bind_data.append((vals, ptr, fmt))
 
 class CLikeArgsState(HCQArgsState[ProgramType]):
-  def __init__(self, ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[sint, ...]=(), prefix:Optional[List[int]]=None):
-    super().__init__(ptr, prg, bufs, vals=vals)
+  def __init__(self, gpu_ptr:int, cpu_ptr:int, prg:ProgramType, bufs:Tuple[HCQBuffer, ...], vals:Tuple[sint, ...]=(), prefix:Optional[List[int]]=None):
+    super().__init__(gpu_ptr, cpu_ptr, prg, bufs, vals=vals)
 
     if prefix is not None: to_mv(self.cpu_ptr, len(prefix) * 4).cast('I')[:] = array.array('I', prefix)
 
-    self.bind_sints_to_ptr(*[b.va_addr for b in bufs], ptr=self.ptr + len(prefix or []) * 4, fmt='Q')
-    self.bind_sints_to_ptr(*vals, ptr=self.ptr + len(prefix or []) * 4 + len(bufs) * 8, fmt='I')
+    self.bind_sints_to_ptr(*[b.va_addr for b in bufs], ptr=self.cpu_ptr + len(prefix or []) * 4, fmt='Q')
+    self.bind_sints_to_ptr(*vals, ptr=self.cpu_ptr + len(prefix or []) * 4 + len(bufs) * 8, fmt='I')
 
 class HCQProgram(Generic[DeviceType]):
   def __init__(self, args_state_t:Type[HCQArgsState], dev:DeviceType, name:str, kernargs_alloc_size:int):
@@ -265,7 +265,10 @@ class HCQProgram(Generic[DeviceType]):
     Returns:
       Arguments state with the given buffers and values set for the program.
     """
-    return self.args_state_t(kernargs_ptr or self.dev.kernargs_alloctor.alloc(self.kernargs_alloc_size), self, bufs, vals=vals)
+    if kernargs_ptr is None:
+      gpu_ptr, cpu_ptr = (x:=self.dev.kernargs_alloctor.alloc(self.kernargs_alloc_size)), x - self.dev.kernargs_page.va_addr + self.dev.kernargs_page.cpu_addr
+    else: gpu_ptr, cpu_ptr = kernargs_ptr
+    return self.args_state_t(gpu_ptr, cpu_ptr, self, bufs, vals=vals)
 
   def __call__(self, *bufs:HCQBuffer, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1),
                vals:Tuple[int, ...]=(), wait:bool=False) -> Optional[float]:

@@ -25,8 +25,9 @@ class ScatterList(Generic[PhysicalMemoryBlockType]):
   def __iter__(self): return iter(self.blocks)
 
 class VirtualMapping(GPUPhysicalMemoryBlock):
-  def __init__(self, adev, ptable_vaddr, paddr, size):
+  def __init__(self, adev, ptable_vaddr, paddr, size, uncached=False, system=False, snooped=False):
     self.vaddr, self.ptable_vaddr = ptable_vaddr + adev.gmc.vm_base, ptable_vaddr
+    self.uncached, self.system, self.snooped = uncached, system, snooped
     super().__init__(adev, paddr, size)
 
 # TODO: Complete + tests
@@ -65,10 +66,11 @@ class AMPageTableEntry:
   def get_entry(self, entry_id): return self.view[entry_id]
 
 class MM:
+  next_vaddr:int = 0
+
   def __init__(self, adev, vram_size:int):
     self.adev, self.vram_size = adev, vram_size
     self.phys_allocator = PhysicalAllocator(adev, vram_size)
-    self.next_vaddr = 0
     self.root_page_table = AMPageTableEntry(self.palloc(0x1000, zero=True), lv=am.AMDGPU_VM_PDB1)
 
   def page_table_walker(self, page_table, vaddr, size, offset=0, free_pt=False) -> Generator[Tuple[int, int, int, int], None, None]:
@@ -129,7 +131,7 @@ class MM:
 
     self.adev.gmc.flush_tlb(ip="GC", vmid=0)
     self.adev.gmc.flush_tlb(ip="MM", vmid=0)
-    return VirtualMapping(self.adev, vaddr, paddr, size)
+    return VirtualMapping(self.adev, vaddr, paddr, size, uncached=uncached, system=system, snooped=snooped)
 
   def unmap_range(self, vaddr:int, size:int):
     for va, off, pte_st_idx, n_ptes, pte_covers, page_table in self.page_table_walker(self.root_page_table, vaddr, size, free_pt=True):
@@ -139,15 +141,15 @@ class MM:
 
   def alloc_vaddr(self, size:int, align=0x1000) -> int:
     size = round_up(size, 0x1000)
+    align = (1 << size.bit_length())
 
-    # TODO: need for here?
-    for i in range(31):
-      if (1 << i) <= size: align = (1 << i)
+    # for i in range(31):
+    #   if (1 << i) <= size: align = (1 << i)
 
-    addr = round_up(self.next_vaddr, align)
-    self.next_vaddr = addr + size
+    addr = round_up(MM.next_vaddr, align)
+    MM.next_vaddr = addr + size
 
-    assert self.next_vaddr <= self.adev.gmc.vm_end
+    assert MM.next_vaddr <= self.adev.gmc.vm_end
     return addr
 
   def valloc(self, size:int, align=0x1000, uncached=False) -> VirtualMapping:

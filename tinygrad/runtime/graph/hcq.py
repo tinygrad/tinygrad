@@ -35,7 +35,9 @@ class HCQGraph(MultiGraphRunner):
     for j,ji in enumerate(jit_cache):
       if not isinstance(ji.prg, CompiledRunner): continue
 
-      self.ji_args[j] = ji.prg._prg.fill_kernargs(self.hcq_bufs[j], ji.prg.p.vars, kargs_alloc[ji.prg.dev].alloc(ji.prg._prg.kernargs_alloc_size, 16))
+      gpu_addr = kargs_alloc[ji.prg.dev].alloc(ji.prg._prg.kernargs_alloc_size, 16)
+      cpu_addr = gpu_addr - self.kernargs_bufs[ji.prg.dev].va_addr + self.kernargs_bufs[ji.prg.dev].cpu_addr
+      self.ji_args[j] = ji.prg._prg.fill_kernargs(self.hcq_bufs[j], ji.prg.p.vars, (gpu_addr, cpu_addr))
 
     # Schedule Dependencies.
     # There are two types of queues on each device: copy and compute. Both must synchronize with all external operations before launching any
