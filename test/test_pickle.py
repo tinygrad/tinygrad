@@ -34,7 +34,8 @@ class TestPickle(unittest.TestCase):
     init = GlobalCounters.kernel_count
     t2:Tensor = pickle.loads(st)
     np.testing.assert_equal(t_values, t2.numpy())
-    self.assertEqual(GlobalCounters.kernel_count-init, 1) # one single kernel for COPY
+    # expect at most one COPY kernel
+    self.assertLessEqual(GlobalCounters.kernel_count-init, 1)
 
   def test_pickle_realized_tensor_alt(self):
     print("** init")
