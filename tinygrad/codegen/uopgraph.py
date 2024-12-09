@@ -448,9 +448,10 @@ def delete_redundant_gates(buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:Optio
 
 # Implementation of int64 indexing
 def int64_indexing(buf:UOp, idx:UOp):
-  def needs_int64(u:UOp) -> bool:
-    return hasattr(u, '_min_max') and max(abs(x) for x in u._min_max) > dtypes.max(u.dtype)
-  
+
+  def needs_int64(u: UOp) -> bool:
+    return hasattr(u, '_min_max') and (u._min_max[0] < dtypes.min(u.dtype) or u._min_max[1] > dtypes.max(u.dtype))
+
   def convert_to_int64(u:UOp) -> UOp:
     return UOp(u.op, dtypes.int64, tuple(convert_to_int64(s) for s in u.src), u.arg) if u.op in GroupOp.ALU else \
            u.cast(dtypes.int64) if u.dtype != dtypes.int64 and needs_int64(u) else u

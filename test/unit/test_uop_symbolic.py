@@ -757,14 +757,15 @@ class TestBounds(unittest.TestCase):
 
 class TestInt64Indexing(unittest.TestCase):
     def test_int64_indexing_comprehensive(self):
+        """Test comprehensive int64 indexing scenarios"""
         # Helper function to create int64 constants and operations
         def make_int64(val):
             const = UOp.const(dtypes.int32, val)
             return UOp(Ops.CAST, dtypes.int64, (const,))
 
         # Test basic overflow cases
-        idx = make_int64(0x7fffffff) + make_int64(1)  # Overflows int32
-        buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), arg=0x100000000)
+        idx = make_int64(dtypes.max(dtypes.int32)) + make_int64(1)  # Overflows int32
+        buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), arg=dtypes.max(dtypes.int32) + 1)
         load = UOp.load(buf.index(idx))
         simplified = load.simplify()
         assert simplified.src[0].src[1].dtype == dtypes.int64
@@ -776,15 +777,15 @@ class TestInt64Indexing(unittest.TestCase):
         assert simplified2.src[0].src[1].dtype == dtypes.int64
 
         # Test complex indexing expressions
-        base_idx = make_int64(0x40000000)
-        offset = make_int64(0x40000000)
+        base_idx = make_int64(dtypes.max(dtypes.int32) // 2)
+        offset = make_int64(dtypes.max(dtypes.int32) // 2)
         complex_idx = base_idx + offset  # Should need int64
         load3 = UOp.load(buf.index(complex_idx))
         simplified3 = load3.simplify()
         assert simplified3.src[0].src[1].dtype == dtypes.int64
 
         # Test negative indices
-        neg_idx = make_int64(-0x80000000) - make_int64(1)
+        neg_idx = make_int64(dtypes.min(dtypes.int32)) - make_int64(1)
         load4 = UOp.load(buf.index(neg_idx))
         simplified4 = load4.simplify()
         assert simplified4.src[0].src[1].dtype == dtypes.int64
@@ -813,7 +814,7 @@ class TestInt64Indexing(unittest.TestCase):
         assert simplified7.src[0].src[1].dtype == dtypes.int64
 
         # Test boundary conditions
-        boundary_idx = UOp.const(dtypes.int32, 0x7fffffff)  # Max int32
+        boundary_idx = UOp.const(dtypes.int32, dtypes.max(dtypes.int32))  # Max int32
         load8 = UOp.load(buf.index(boundary_idx))
         simplified8 = load8.simplify()
         assert simplified8.src[0].src[1].dtype == dtypes.int32  # Should still be int32
@@ -825,39 +826,147 @@ class TestInt64Indexing(unittest.TestCase):
         assert simplified9.src[0].src[1].dtype == dtypes.int64
 
     def test_int64_conversion_from_int32(self):
-        # Create int32 indices that will overflow
-        idx = UOp.const(dtypes.int32, 0x7fffffff)  # Max int32
-        idx._min_max = (0x7fffffff, 0x7fffffff)  # Set min/max values
-        idx2 = UOp.const(dtypes.int32, 1)
-        idx2._min_max = (1, 1)
-        
-        # Operation that will overflow int32
-        overflow_idx = idx + idx2  # Should become 0x80000000 which needs int64
-        overflow_idx._min_max = (0x80000000, 0x80000000)  # This value exceeds int32
-        
+        """Test conversion from int32 to int64 for large values"""
         # Create a buffer with a large enough size to require int64 indexing
         buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), arg=0x100000000)
         
-        # Create load operation that should trigger int64 conversion
-        load = UOp.load(buf.index(overflow_idx))
+        # Test cases for edge points
+        test_cases = [
+            # Edge cases for int32
+            (dtypes.min(dtypes.int32), "min int32"),
+            (dtypes.max(dtypes.int32), "max int32"),
+            (0, "zero"),
+            (-1, "negative one"),
+            (1, "positive one"),
+            
+            # Values that should force int64
+            (dtypes.max(dtypes.int32) + 1, "overflow max int32"),
+            (dtypes.min(dtypes.int32) - 1, "underflow min int32"),
+            
+            # Mixed operations
+            (dtypes.max(dtypes.int32) + dtypes.max(dtypes.int32), "double max"),
+            (dtypes.min(dtypes.int32) + dtypes.min(dtypes.int32), "double min"),
+            
+            # Large positive and negative values
+            (0x100000000, "large positive"),
+            (-0x100000000, "large negative"),
+            
+            # Zero-adjacent values in int64 range
+            (-1, "negative one"),
+            (0, "zero"),
+            (1, "positive one"),
+        ]
         
-        # Before simplification, the index should still be int32
-        assert load.src[0].src[1].dtype == dtypes.int32
-        
-        # After simplification with pattern matcher, should be converted to int64
+        for value, desc in test_cases:
+            # Create index with the test value
+            idx = UOp.const(dtypes.int32, value)
+            idx._min_max = (value, value)
+            
+            # Create load operation
+            load = UOp.load(buf.index(idx))
+            
+            # Simplify with pattern matcher
+            from tinygrad.codegen.uopgraph import load_store_indexing
+            simplified = graph_rewrite(load, load_store_indexing)
+            
+            # Check if dtype is appropriate based on value
+            expected_dtype = dtypes.int64 if (
+                value > dtypes.max(dtypes.int32) or 
+                value < dtypes.min(dtypes.int32)
+            ) else dtypes.int32
+            
+            self.assertEqual(
+                simplified.src[0].src[1].dtype,
+                expected_dtype,
+                f"Failed for {desc}: value {value} should use {expected_dtype}"
+            )
+
+    def test_int64_array_bounds(self):
+        """Test array bounds checking with int64 indices"""
         from tinygrad.codegen.uopgraph import load_store_indexing
-        simplified = graph_rewrite(load, load_store_indexing)
-        assert simplified.src[0].src[1].dtype == dtypes.int64
-        assert simplified.src[0].src[1]._min_max[0] == 0x80000000
         
-        # Test multiple operations that should all preserve int64
-        idx3 = UOp.const(dtypes.int32, 0x10000000)
-        idx3._min_max = (0x10000000, 0x10000000)
-        complex_idx = overflow_idx + (idx3 * UOp.const(dtypes.int32, 8))
-        complex_idx._min_max = (0x90000000, 0x90000000)  # This will definitely need int64
-        load2 = UOp.load(buf.index(complex_idx))
-        simplified2 = graph_rewrite(load2, load_store_indexing)
-        assert simplified2.src[0].src[1].dtype == dtypes.int64  # or dtypes.long
+        # Test various array sizes that might need int64 indexing
+        sizes = [
+            dtypes.max(dtypes.int32),  # max int32
+            dtypes.max(dtypes.int32) + 1,  # just over max int32
+            dtypes.max(dtypes.int32) * 2,  # large power of 2
+            dtypes.max(dtypes.uint32),  # max uint32
+        ]
+        
+        for size in sizes:
+            buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), arg=size)
+            
+            # Test indices at various positions
+            indices = [
+                (0, "start of array"),
+                (size-1, "end of array"),
+                (size//2, "middle of array"),
+                (42, "small positive index"),
+                (-1, "negative index"),
+            ]
+            
+            for idx_val, desc in indices:
+                idx = UOp.const(dtypes.int32, idx_val)
+                idx._min_max = (idx_val, idx_val)
+                
+                load = UOp.load(buf.index(idx))
+                simplified = graph_rewrite(load, load_store_indexing)
+                
+                # Only use int64 if the index value requires it
+                expected_dtype = dtypes.int64 if (
+                    idx_val > dtypes.max(dtypes.int32) or 
+                    idx_val < dtypes.min(dtypes.int32)
+                ) else dtypes.int32
+                
+                self.assertEqual(
+                    simplified.src[0].src[1].dtype,
+                    expected_dtype,
+                    f"Failed for array size {size}, {desc}: value {idx_val}"
+                )
+
+    def test_int64_mixed_operations(self):
+        """Test mixing int32 and int64 operations"""
+        from tinygrad.codegen.uopgraph import load_store_indexing
+        buf = UOp(Ops.DEFINE_GLOBAL, dtypes.float32.ptr(), arg=0x100000000)
+        
+        def create_op(val, dtype=dtypes.int32):
+            op = UOp.const(dtype, val)
+            op._min_max = (val, val)
+            return op
+        
+        test_cases = [
+            # Mix int32 and int64 in addition
+            (lambda: create_op(dtypes.max(dtypes.int32)) + create_op(1), dtypes.int64),
+            
+            # Multiplication leading to overflow
+            (lambda: create_op(0x40000000) * create_op(2), dtypes.int64),
+            
+            # Division that should stay in int32
+            (lambda: create_op(42) // create_op(2), dtypes.int32),
+            
+            # Negative numbers
+            (lambda: create_op(-dtypes.max(dtypes.int32)) - create_op(2), dtypes.int64),
+            
+            # Zero mixing
+            (lambda: create_op(0) + create_op(dtypes.max(dtypes.int32) + 1), dtypes.int64),
+            
+            # Complex expressions
+            (lambda: (create_op(0x40000000) * create_op(2)) + create_op(42), dtypes.int64),
+            
+            # Operations that should stay in int32
+            (lambda: create_op(100) + create_op(42), dtypes.int32),
+        ]
+        
+        for op_creator, expected_dtype in test_cases:
+            idx = op_creator()
+            load = UOp.load(buf.index(idx))
+            simplified = graph_rewrite(load, load_store_indexing)
+            
+            self.assertEqual(
+                simplified.src[0].src[1].dtype,
+                expected_dtype,
+                f"Failed for operation {op_creator.__name__}: expected {expected_dtype}"
+            )
 
 if __name__ == '__main__':
   unittest.main()
