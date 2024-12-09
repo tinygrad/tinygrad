@@ -986,6 +986,7 @@ def fold_unrolled_divs(chain:UOp):
     elif chain.op is Ops.IDIV: chain, u = None, chain
   if denominator is None: return None
   # the first (denominator-len(seen_const)) terms may have been folded to 0 already
+  if ans.vmax >= denominator and len(seen_const) != denominator: return None
   for i in range(denominator-len(seen_const)):
     if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
   return (chain+ans if chain is not None else ans) if ans is not None and sorted(seen_const)==list(range(denominator)) else None
