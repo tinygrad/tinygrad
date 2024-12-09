@@ -165,10 +165,6 @@
         import ClipTokenizer from './clip_tokenizer.js';
         window.clipTokenizer = new ClipTokenizer();
     </script>
-    <script type="module">
-        import { f16tof32GPU } from 'https://unpkg.com/f16-to-f32-gpu@0.1.0/src/index.js';
-        window.f16tof32GPU = f16tof32GPU;
-    </script>
     <script src="./net.js"></script>
 </head>
 <body>
@@ -214,6 +210,8 @@
     <canvas id="canvas" width="512" height="512"></canvas>
 
 <script>
+    let f16decomp = null;
+
     function initDb() {
         return new Promise((resolve, reject) => {
             let db;
@@ -416,7 +414,7 @@
             const metadata = JSON.parse(new TextDecoder("utf8").decode(combinedBuffer.subarray(8, 8 + metadataLength)));
 
             const allToDecomp = combinedBuffer.byteLength - (8 + metadataLength);
-            const decodeChunkSize = 67107840;
+            const decodeChunkSize = 8388480;
             const numChunks = Math.ceil(allToDecomp/decodeChunkSize);
 
             console.log(allToDecomp + " bytes to decompress");
@@ -440,7 +438,8 @@
                 let chunkStartF16 = 8 + metadataLength + (decodeChunkSize * i);
                 let chunkEndF16 = chunkStartF16 + decodeChunkSize;
                 let chunk = combinedBuffer.subarray(chunkStartF16, chunkEndF16);
-                let result = await f16tof32GPU(chunk);
+                let uint32Chunk = new Uint32Array(chunk.buffer, chunk.byteOffset, chunk.byteLength / 4);
+                let result = await f16decomp(new Uint32Array(uint32Chunk));
                 let resultUint8 = new Uint8Array(result.buffer);
                 let chunkStartF32 = 8 + metadataLength + (decodeChunkSize * i * 2);
                 let chunkEndF32 = chunkStartF32 + resultUint8.byteLength;
@@ -483,6 +482,7 @@
             }
 
             const device = await getDevice();
+            f16decomp =  await f16tof32().setup(device, safetensorParts),
             safetensorParts = await getAndDecompressF16Safetensors(device, progress);
 
             modelDlTitle.innerHTML = "Compiling model"
