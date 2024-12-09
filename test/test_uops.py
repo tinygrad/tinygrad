@@ -3,7 +3,7 @@ import unittest, math
 import numpy as np
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import CI, DEBUG, getenv, Context, Timing
+from tinygrad.helpers import CI, DEBUG, all_same, getenv, Context, Timing
 from tinygrad.dtype import dtypes, DType
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import Ops, UOp, UPat, KernelInfo, exec_alu, spec # noqa F401
@@ -404,6 +404,15 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual(buffer.device, Device.DEFAULT)
     self.assertEqual(const._device, None)
     with self.assertRaises(AssertionError): const.device
+
+  def test_const_like(self):
+    x = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 1, dtypes.int), UOp.const(dtypes.int, 1)), ShapeTracker.from_shape(()))
+    add = x+2
+    assert all_same([x.device for x in add.src])
+    x = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0),), ShapeTracker.from_shape((32, 32)))
+    assert x._device is None
+    add = x+2
+    assert all_same([x.shape for x in add.src])
 
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
