@@ -96,11 +96,11 @@ def test_vs_compile(run, new_inputs, test_val=None):
 
 def test_vs_onnx(new_inputs, test_val, onnx_file):
   new_inputs_numpy = {k:v.numpy() for k,v in new_inputs.items()}
+  onnx_model = onnx.load(onnx_file)
 
   if getenv("ORT"):
     # test with onnxruntime
     import onnxruntime as ort
-    onnx_model = onnx.load(onnx_file)
     onnx_session = ort.InferenceSession(onnx_file)
     onnx_output = onnx_session.run([onnx_model.graph.output[0].name], {k:v.astype(np.float16) for k,v in new_inputs_numpy.items()})
     new_torch_out = onnx_output[0]
@@ -108,8 +108,8 @@ def test_vs_onnx(new_inputs, test_val, onnx_file):
   else:
     # test with torch
     from test.models.test_onnx import run_onnx_torch
-    onnx_model = onnx.load(onnx_file)
-    new_torch_out = run_onnx_torch(onnx_model, new_inputs_numpy).numpy()
+    # NOTE: we have to correct the order here
+    new_torch_out = run_onnx_torch(onnx_model, {k.name:new_inputs_numpy[k.name] for k in onnx_model.graph.input}).numpy()
     print("got torch outputs")
 
   np.testing.assert_allclose(new_torch_out.reshape(test_val.shape), test_val, atol=1e-4, rtol=1e-2)
