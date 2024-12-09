@@ -8,6 +8,7 @@ if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
 from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters, Device
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.tensor import _from_np_dtype
+from tinygrad.engine.realize import CompiledRunner
 
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
@@ -47,6 +48,18 @@ def compile():
   print(f"captured {len(run_onnx_jit.captured.jit_cache)} kernels")
   np.testing.assert_equal(test_val, ret, "JIT run failed")
   print("jit run validated")
+
+  # checks from compile2
+  kernel_count = 0
+  gated_read_image_count = 0
+  for ei in run_onnx_jit.captured.jit_cache:
+    if isinstance(ei.prg, CompiledRunner):
+      kernel_count += 1
+      gated_read_image_count += ei.prg.p.src.count("?read_image")
+  assert kernel_count <= getenv("ALLOWED_KERNEL_COUNT", 0) or getenv("ALLOWED_KERNEL_COUNT", 0) == 0, "too many kernels!"
+  if (allowed_gated_read_image:=getenv("ALLOWED_GATED_READ_IMAGE", -1)) != -1:
+    assert gated_read_image_count <= allowed_gated_read_image, \
+      f"too many gated read_image! {gated_read_image_count=}, {allowed_gated_read_image=}"
 
   with open(OUTPUT, "wb") as f:
     pickle.dump(run_onnx_jit, f)
