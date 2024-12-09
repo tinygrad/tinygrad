@@ -8,6 +8,7 @@ from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, trunc
 from tinygrad.helpers import ContextVar, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
+  ConstLike=Union[ConstType, 'Variable', Tuple[ConstType, ...]]
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
@@ -1174,8 +1175,6 @@ renderer = PatternMatcher([
 
 sint = Union[int, UOp]
 Variable = UOp
-
-ConstLike = Union[ConstType, Variable, Tuple[ConstType, ...]]
 
 # *** uop swizzling ***
 

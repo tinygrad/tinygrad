@@ -13,6 +13,8 @@ from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
+if TYPE_CHECKING:
+  import numpy as np
 
 # **** start with two base classes, Tensor and Function ****
 
