@@ -184,6 +184,7 @@ to_si = PatternMatcher([
 # ** fusion
 
 lazy = PatternMatcher([
+  # gather the metadata for this kernel
   (UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.metadata.add(m) if (m:=ctx.ops_metadata.get(x)) is not None else None),
 ])
 
