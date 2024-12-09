@@ -731,7 +731,7 @@ class TestInt64Indexing(unittest.TestCase):
 
   # NOTE: if the final indexing doesn't exceed int32 but a src in the middle does that src won't be casted
   @unittest.expectedFailure
-  def test_int64_idx_const_cast(self):
+  def test_int64_intermediate(self):
     int32_rng = UOp.range(dtypes.int32, 0, dtypes.max(dtypes.int32) + 2, 0)
     alu = int32_rng // UOp.const(dtypes.int32, 2)
     def_global = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), arg=0)
