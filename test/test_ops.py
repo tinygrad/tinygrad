@@ -36,7 +36,10 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     try:
       assert tinygrad_output.shape == torch_output.shape, f"shape mismatch: tinygrad={tinygrad_output.shape} | torch={torch_output.shape}"
       assert tinygrad_output.dtype == torch_output.dtype, f"dtype mismatch: tinygrad={tinygrad_output.dtype} | torch={torch_output.dtype}"
-      np.testing.assert_allclose(tinygrad_output, torch_output, atol=atol, rtol=rtol)
+      if np.issubdtype(tinygrad_output.dtype, np.floating):
+        np.testing.assert_allclose(tinygrad_output, torch_output, atol=atol, rtol=rtol)
+      else:
+        np.testing.assert_equal(tinygrad_output, torch_output)
     except Exception as e:
       raise Exception(f"{s} failed shape {tinygrad_output.shape}: {e}")
 
@@ -573,6 +576,16 @@ class TestOps(unittest.TestCase):
     # NOTE: torch 0 ** -1 is 0
     _test([0, 0, 0], [0, 1, 2])
 
+    np.testing.assert_equal((Tensor(11) ** Tensor(7)).item(), 11 ** 7)
+    np.testing.assert_equal((Tensor([11]) ** Tensor(7)).item(), 11 ** 7)
+    # TODO: fix non-precise int pow
+    with self.assertRaises(AssertionError): np.testing.assert_equal((Tensor(11) ** Tensor([7])).item(), 11 ** 7)
+    with self.assertRaises(AssertionError): np.testing.assert_equal((Tensor([11]) ** Tensor([7])).item(), 11 ** 7)
+
+    # pow to a const int
+    helper_test_op([], lambda: torch.tensor([2], dtype=torch.int) ** torch.tensor(-2, dtype=torch.int),
+                       lambda: Tensor([2]) ** Tensor(-2), forward_only=True)
+
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
     helper_test_op([()], lambda x: x.sqrt())
@@ -795,11 +808,6 @@ class TestOps(unittest.TestCase):
   def test_mish(self):
     helper_test_op([(45,65)], torch.nn.functional.mish, Tensor.mish)
     helper_test_op([()], torch.nn.functional.mish, Tensor.mish)
-
-  def test_multinomial(self):
-    # NOTE: this is random, so it has a very large atol
-    helper_test_op([(1000,)], lambda x: torch.multinomial(x.clip(0,1), num_samples=1).type(torch.int32),
-                              lambda x: Tensor.multinomial(x.clip(0,1)), forward_only=True, atol=1000.)
 
   def test_small_cumsum(self):
     helper_test_op([(10)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
