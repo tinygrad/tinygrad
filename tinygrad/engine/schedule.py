@@ -51,13 +51,13 @@ class ScheduleContext:
 def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2
 
 def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> UOp:
-  assert buf.st is not None, f"must have shape to schedule {buf}"
   if (r:=cache.get(buf)) is not None: return r
+  # shapeless op is passthrough
+  if buf.st is None: return buf
   # view is passthrough
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
     return ret
-  assert buf.op is not None, f"base must be base itself {buf}"
   # make things that can't be images not images
   dtype = buf_uop.dtype.base if (buf_uop:=realized.get(buf)) is not None else buf.dtype
   if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
@@ -406,8 +406,8 @@ do_realize = PatternMatcher([
 # ** this breaks down realized ops into STOREs and rewrites the ops to LOADs
 
 def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
-  if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
-  return UOp.const_with_shape(base.dtype, val, unwrap(base.st).shape)
+  if to_store.op is Ops.BIND: ctx.var_vals.update([to_store.unbind()])
+  return UOp.const_with_shape(base.dtype, to_store if to_store.op is Ops.BIND else to_store.arg, unwrap(base.st).shape)
 
 def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape((st:=unwrap(base.st)).shape).to_uop(), append_op(ctx, b, to_store))
