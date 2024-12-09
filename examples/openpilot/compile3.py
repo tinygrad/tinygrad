@@ -55,6 +55,7 @@ def compile(onnx_file):
     if isinstance(ei.prg, CompiledRunner):
       kernel_count += 1
       gated_read_image_count += ei.prg.p.src.count("?read_image")
+  print(f"kernel_count: {kernel_count}  gated_read_image_count: {gated_read_image_count}")
   assert kernel_count <= getenv("ALLOWED_KERNEL_COUNT", 0) or getenv("ALLOWED_KERNEL_COUNT", 0) == 0, "too many kernels!"
   if (allowed_gated_read_image:=getenv("ALLOWED_GATED_READ_IMAGE", -1)) != -1:
     assert gated_read_image_count <= allowed_gated_read_image, \
@@ -93,6 +94,7 @@ def test_vs_compile(run, new_inputs, test_val=None):
   out = run(**inputs)
   changed_val = out.numpy()
   np.testing.assert_raises(AssertionError, np.testing.assert_array_equal, val, changed_val)
+  return val
 
 def test_vs_onnx(new_inputs, test_val, onnx_file):
   new_inputs_numpy = {k:v.numpy() for k,v in new_inputs.items()}
@@ -126,5 +128,5 @@ if __name__ == "__main__":
   new_inputs = {nm:Tensor.randn(*st.shape, dtype=dtype).mul(8).realize() for nm, (st, _, dtype, _) in
                 sorted(zip(pickle_loaded.captured.expected_names, pickle_loaded.captured.expected_st_vars_dtype_device))}
 
-  test_vs_compile(pickle_loaded, new_inputs, test_val)
+  test_val = test_vs_compile(pickle_loaded, new_inputs, test_val)
   if not getenv("FLOAT16"): test_vs_onnx(new_inputs, test_val, onnx_file)
