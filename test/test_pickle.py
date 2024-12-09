@@ -2,6 +2,7 @@ import unittest, pickle, types
 import numpy as np
 from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.engine.schedule import create_schedule
+from tinygrad.helpers import GlobalCounters
 from tinygrad.ops import PatternMatcher, UPat, UOp
 
 class TestPickle(unittest.TestCase):
@@ -24,10 +25,29 @@ class TestPickle(unittest.TestCase):
     pickle.dumps(sym)
 
   def test_pickle_realized_tensor(self):
+    print("** init")
     t = Tensor.rand(10, 10).realize()
     st = pickle.dumps(t)
+    t_values = t.numpy()
+    del t # free buffers
+    print("** post pickle")
+    init = GlobalCounters.kernel_count
     t2:Tensor = pickle.loads(st)
-    np.testing.assert_equal(t.numpy(), t2.numpy())
+    np.testing.assert_equal(t_values, t2.numpy())
+    # expect at most one COPY kernel
+    self.assertLessEqual(GlobalCounters.kernel_count-init, 1)
+
+  def test_pickle_realized_tensor_alt(self):
+    print("** init")
+    t = Tensor.rand(10, 10).to("CLANG").realize()
+    st = pickle.dumps(t)
+    t_values = t.numpy()
+    del t # free buffers
+    print("** post pickle")
+    init = GlobalCounters.kernel_count
+    t2:Tensor = pickle.loads(st)
+    np.testing.assert_equal(t_values, t2.numpy())
+    self.assertEqual(GlobalCounters.kernel_count-init, 0)
 
   def test_pickle_unrealized_tensor(self):
     t = Tensor.ones(10, 10)
