@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import realized, identity_element, buffers
+from tinygrad.ops import identity_element, realized, buffers
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -338,28 +338,29 @@ def _as_const(u:UOp, val:ConstType) -> UOp:
   st = (base:=ShapeTracker.from_shape(())).reshape((1,)*len(u.shape)).expand(u.shape)
   return UOp(Ops.VIEW, u.dtype, (u.buf_uop, UOp.const(u.dtype, val)), base).view(st)
 
-def simplify_reduceop(ctx, root:UOp, x:UOp) -> Optional[UOp]:
-  # reduce of size 0 is just CONST
-  if x.size == 0 and root.size != 0: return UOp.const(root.dtype, identity_element(root.arg[0], root.dtype))
+def simplify_reduceop(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
   # remove reduce on unmasked const
   if all_int(x.shape) and x.is_unrealized_unmasked_const():
-    prshape = prod(unwrap(x.st).shape[i] for i in root.arg[1])
+    prshape = prod(unwrap(x.st).shape[i] for i in reduce.arg[1])
     ret = x.base.src[1].arg
-    match root.arg[0]:
+    match reduce.arg[0]:
       case Ops.ADD: ret *= prshape
       case Ops.MUL: ret **= prshape
       case Ops.MAX: pass # NOTE: Ops.MAX is passthrough
       case _: return None
-    return UOp.const(root.dtype, ret)
+    return UOp.const(reduce.dtype, ret)
   return None
 
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
-  # maybe fold reduce ops (TODO: this can be multiple upats)
-  (UPat(Ops.REDUCE_AXIS, name="root", src=(UPat.var("x"),)), simplify_reduceop),
-  # const doesn't have to be copied
-  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.CONST, name="x"))),)), lambda ctx,x:x)
+  # reduce of size 0 is the identity element
+  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
+   lambda ctx,reduce,x:UOp.const(reduce.dtype, identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
+  # reduce of const is collapsed (TODO: make this a generic rule for stride0)
+  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), simplify_reduceop),
+  # CONST doesn't need COPY
+  (UPat(Ops.COPY, src=(UPat.var("x"),)), lambda ctx,x:x if x.is_unrealized_const() else None),
 ])
 
 # ** this decides which ops get realized
