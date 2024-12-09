@@ -360,6 +360,8 @@ ops_folding = PatternMatcher([
    lambda ctx,reduce,x:UOp.const(reduce.dtype, identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
   # reduce of const is collapsed (TODO: make this a generic rule for stride0)
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), simplify_reduceop),
+  # CONST doesn't need COPY
+  (UPat(Ops.COPY, src=(UPat.var("x"),)), lambda ctx,x:x if x.is_unrealized_const() else None),
 ])
 
 # ** this decides which ops get realized
