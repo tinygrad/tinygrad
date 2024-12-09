@@ -126,6 +126,11 @@ class TestSymbolic(unittest.TestCase):
     a = Variable("a", 0, 8)
     self.helper_test_variable(a+a, 0, 16, "(a*2)")
 
+  def test_add_self_in_chain(self):
+    a,b,c = Variable("a", 0, 8), Variable("b", 0, 8), Variable("c", 0, 8)
+    self.helper_test_variable((a+b)+(c+a), 0, 4*8, "((b+(a*2))+c)")
+    self.helper_test_variable(a*10+b+c+a, 0, 13*8, "(((b+(a*10))+a)+c)")
+
   def test_sub_self(self):
     a = Variable("a", 0, 8)
     self.helper_test_variable(a-a, 0, 0, "0")
@@ -204,7 +209,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_mod_congruence_multiple_vars(self):
     self.helper_test_variable((9+9*Variable("x",0,3)+9*Variable("y",0,3))%10, 3, 9, "(((x*-1)+(y*-1))+9)")
-    self.helper_test_variable((7+9*Variable("x",0,2)+9*Variable("y",0,2)+Variable("z",0,2))%10, 3, 9, "(((z+(x*-1))+(y*-1))+7)")
+    self.helper_test_variable((7+9*Variable("x",0,2)+9*Variable("y",0,2)+Variable("z",0,2))%10, 3, 9, "((((x*-1)+(y*-1))+z)+7)")
     self.helper_test_variable((10+12*Variable("x",0,2)+Variable("y", 0, 4)%3)%13, 8, 12, "(((x*-1)+(y%3))+10)")
 
   def test_div_congruence(self):
@@ -258,6 +263,16 @@ class TestSymbolic(unittest.TestCase):
   def test_div_const_div(self):
     a = Variable("a", 0, 124)
     self.helper_test_variable((a//2+1)//2, 0, 31, "((a+2)//4)")
+
+  def test_flatten_tree(self):
+    a,b,c,d = Variable("a", 0, 124), Variable("b", 0, 124), Variable("c", 0, 124), Variable("d", 0, 124)
+    e,f,g,h = Variable("e", 0, 124), Variable("f", 0, 124), Variable("g", 0, 124), Variable("h", 0, 124)
+    self.helper_test_variable((a+b)+(c+d), 0, 4*124, "(((a+b)+c)+d)")
+    self.helper_test_variable((a+b)+(c+d)+(e+f)+(g+h), 0, 8*124, "(((((((a+b)+c)+d)+e)+f)+g)+h)")
+    self.helper_test_variable((a+(c+d)+b)+((e+f)+g+h), 0, 8*124, "(((((((a+b)+c)+d)+e)+f)+g)+h)")
+    self.helper_test_variable((a*b)*(c*d), 0, 124**4, "(((a*b)*c)*d)")
+    self.helper_test_variable((a*b)*(c*d)*(e*f)*(g*h), 0, 124**8, "(((((((a*b)*c)*d)*e)*f)*g)*h)")
+    self.helper_test_variable((a*(c*d)*b)*((e*f)*g*h), 0, 124**8, "(((((((a*b)*c)*d)*e)*f)*g)*h)")
 
   def test_distribute_mul(self):
     self.helper_test_variable(Node.sum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
@@ -466,6 +481,16 @@ class TestSymbolic(unittest.TestCase):
     gidx = Variable("gidx", 0, 1)
     unrolled_div = (gidx)//4+(gidx+2)//4+(gidx+3)//4+(gidx+1)//4
     self.helper_test_variable(unrolled_div, 0, 1, "gidx")
+
+  def test_arange_add_chain_split(self):
+    gidx = Variable("gidx", 0, 2559)
+    unrolled_div = ((gidx+2561)//4+(gidx+2562)//4)+((gidx+2560)//4+(gidx+2559)//4)
+    self.helper_test_variable(unrolled_div, 2559, 5118, "(gidx+2559)")
+
+  def test_arange_add_split_unsorted(self):
+    gidx = Variable("gidx", 0, 2559)
+    unrolled_div = ((gidx+2561)//4+gidx+(gidx+2562)//4)+(gidx+2560)//4+(gidx+2559)//4
+    self.helper_test_variable(unrolled_div, 2559, 7677, "((gidx*2)+2559)")
 
   def test_arange_unrolled2(self):
     gidx = Variable("gidx", 0, 2559)
@@ -730,7 +755,8 @@ class TestSymbolicRealWorld(unittest.TestCase):
     # NOTE: this used to have 13,151,129,600 in the output which is out of int32 range.
     self.assertIn(idx.render(),
       ("((((((((((lidx5+1)//16)*802816)+(((lidx5+1)%16)*49))+(gidx0*3211264))+(gidx1*784))+(gidx2*8))+(lidx4*100352))+lidx3)+2207744)",
-       '((lidx3+((((((((lidx5+1)//16)*802816)+(((lidx5+1)%16)*49))+(gidx0*3211264))+(gidx1*784))+(gidx2*8))+(lidx4*100352)))+2207744)',
+       "((lidx3+((((((((lidx5+1)//16)*802816)+(((lidx5+1)%16)*49))+(gidx0*3211264))+(gidx1*784))+(gidx2*8))+(lidx4*100352)))+2207744)",
+       "((((((((gidx0*3211264)+(gidx1*784))+(gidx2*8))+lidx3)+(lidx4*100352))+(((lidx5+1)//16)*802816))+(((lidx5+1)%16)*49))+2207744)"
       ))
 
 class TestBounds(unittest.TestCase):
