@@ -41,23 +41,29 @@ class BLAKE3:
     return (states[-1, :] | end_block)[:8].realize()
 
   @TinyJit
+  def tree_step(self, chain_vals: Tensor) -> Tensor:
+    stacked = chain_vals.transpose().reshape(-1, 16).transpose().reshape(2, 8, -1)
+    stacked_mask = stacked.any(1)
+    final_step = (stacked_mask.sum() <= 2)
+    pair_mask, remainder_mask = (stacked_mask[0] * stacked_mask[1]), (stacked_mask[0] ^ stacked_mask[1])
+    paired, remainder = (stacked * pair_mask).reshape(16, -1), (stacked * remainder_mask).reshape(16, -1)[:8]
+    flags = final_step.where(12, Tensor.full((1, paired.shape[-1]), 4, dtype=dtypes.uint32))
+    iv = self.IV.reshape(8, 1).expand(8, paired.shape[-1])
+    counts = Tensor.zeros((2, paired.shape[-1]), dtype=dtypes.uint32)
+    lengths = Tensor.full((1, paired.shape[-1]), 64, dtype=dtypes.uint32)
+    states = iv.cat(iv[:4], counts, lengths, flags, dim=0)
+    chain_vals = ((self.compress_blocks(states, paired, iv) * pair_mask)[:8] + remainder).realize()
+    chain_vals = chain_vals.pad((None, (0, chain_vals.shape[1])))
+    return chain_vals.realize()
+
   def tree_hash(self, chain_vals: Tensor, n_tree_steps: Variable) -> Tensor:
     for _ in range(n_tree_steps.val):
-      stacked = chain_vals.transpose().reshape(-1, 16).transpose().reshape(2, 8, -1)
-      stacked_mask = stacked.any(1)
-      final_step = (stacked_mask.sum() <= 2)
-      pair_mask, remainder_mask = (stacked_mask[0] * stacked_mask[1]), (stacked_mask[0] ^ stacked_mask[1])
-      paired, remainder = (stacked * pair_mask).reshape(16, -1), (stacked * remainder_mask).reshape(16, -1)[:8]
-      flags = final_step.where(12, Tensor.full((1, paired.shape[-1]), 4, dtype=dtypes.uint32))
-      iv = self.IV.reshape(8, 1).expand(8, paired.shape[-1])
-      counts = Tensor.zeros((2, paired.shape[-1]), dtype=dtypes.uint32)
-      lengths = Tensor.full((1, paired.shape[-1]), 64, dtype=dtypes.uint32)
-      states = iv.cat(iv[:4], counts, lengths, flags, dim=0)
-      chain_vals = ((self.compress_blocks(states, paired, iv) * pair_mask)[:8] + remainder).realize()
+      chain_vals = self.tree_step(chain_vals.contiguous())
     return chain_vals.realize()
 
   def tensor_to_blake_input(self, tensor: Tensor, padded_input_size: int) -> Tuple[Tensor, Tensor, Variable]:
     assert padded_input_size % 1024 == 0 and padded_input_size & (padded_input_size - 1) == 0, "padded_input_size must be a power of two divisible by 1024"
+    # blake_input = tensor.flatten().cat(Tensor([0] * ((padded_input_size // tensor.element_size()) - tensor.shape[0]), dtype=tensor.dtype))
     blake_input = tensor.flatten().pad((0, (padded_input_size // tensor.element_size()) - tensor.shape[0]))
     blake_input = blake_input.bitcast(dtypes.uint32).reshape(-1, 16, 16).permute(1, 2, 0).contiguous()
     final_chunk_len = 0 if tensor.nbytes() == 0 else (tensor.nbytes() % 1024 or 1024)
