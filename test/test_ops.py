@@ -582,6 +582,10 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(AssertionError): np.testing.assert_equal((Tensor(11) ** Tensor([7])).item(), 11 ** 7)
     with self.assertRaises(AssertionError): np.testing.assert_equal((Tensor([11]) ** Tensor([7])).item(), 11 ** 7)
 
+    # pow to a const int
+    helper_test_op([], lambda: torch.tensor([2], dtype=torch.int) ** torch.tensor(-2, dtype=torch.int),
+                       lambda: Tensor([2]) ** Tensor(-2), forward_only=True)
+
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
     helper_test_op([()], lambda x: x.sqrt())
