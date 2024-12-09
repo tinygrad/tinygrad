@@ -104,7 +104,7 @@ class Ops(FastEnum):
   # misc ops
   EXPAND = auto(); CONTRACT = auto() # noqa: E702
   VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
-  WHERE = auto();
+  WHERE = auto()
   DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
 
@@ -970,6 +970,7 @@ def lt_folding(x:UOp, c:int) -> Optional[UOp]:
 def fold_unrolled_divs(chain:UOp):
   # div pattern in unrolled arange
   # example: x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
+  print(chain)
   denominator, seen_const, ans = None, [], None
   chain, u = chain.src[0], chain.src[1]
   while True:
