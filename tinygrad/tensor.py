@@ -3196,8 +3196,9 @@ class Tensor(SimpleMathTrait):
     x = self._to_const_val(x)
     if not isinstance(x, Tensor) and not reverse:
       # simple pow identities
-      if x < 0: return self.reciprocal().pow(-x)
+      if x < 0: return self.reciprocal().pow(-x).cast(self.dtype)
       if x == 0: return 1 + self * 0
+      # rewrite pow 0.5 to sqrt
       if int(x - 0.5) + 0.5 == x: return self.pow(int(x - 0.5)) * self.sqrt()
       if int(x) == x: return self.pow(x // 2).square() * (1 if x % 2 == 0 else self)
 
