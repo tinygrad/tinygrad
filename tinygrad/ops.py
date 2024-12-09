@@ -104,6 +104,7 @@ class Ops(FastEnum):
   # misc ops
   EXPAND = auto(); CONTRACT = auto() # noqa: E702
   VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
+  WHERE = auto();
   DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
 
@@ -130,7 +131,7 @@ class Ops(FastEnum):
   SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto() # noqa: E702
 
   # TernaryOps
-  WHERE = auto(); MULACC = auto() # noqa: E702
+  MULACC = auto() # noqa: E702
 
   # assignment ops
   ASSIGN = auto()
