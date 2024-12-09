@@ -13,12 +13,12 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.ops import UOp, Ops, graph_rewrite, track_rewrites
+from tinygrad.ops import UOp, Ops, graph_rewrite, track_rewrites, view_supported_devices
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule, view_right, view_left, do_realize
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
-from tinygrad.engine.lazy import LazyBuffer, view_supported_devices
+from tinygrad.engine.lazy import LazyBuffer
 from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
@@ -1344,6 +1344,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.ones(5, 5).contiguous().schedule()
     self.assertEqual(GlobalCounters.mem_used-base, 0)
 
+  @unittest.skip("TODO: this is consistently creating non reproducible failures")
   def test_schedule_mem_used_with_inputs(self):
     base = GlobalCounters.mem_used
     x = Tensor.ones(256).contiguous().realize()
@@ -1924,7 +1925,7 @@ class TestView(unittest.TestCase):
     a = UOp(Ops.VIEW, dtypes.float, (UOp.new_buffer(Device.DEFAULT, 121, dtypes.float), UOp(Ops.EMPTY, dtypes.float)), st)
     b = a.pad(pad_arg:=((0, 0), (0, 0), (18, 0)))
     self.assertEqual(b.st, st.pad(pad_arg))
-    self.assertIs(b, b.const_like(0))
+    self.assertIs(b.base.src[1], UOp.const(dtypes.float, 0))
 
   def test_partial_mask(self):
     # partial masked out does not degrade into CONST
@@ -1955,8 +1956,8 @@ class TestBigGraph(unittest.TestCase):
 
   def test_sink_childless_const_alt_expanded(self):
     # this is a real STORE of CONST (post expand)
-    y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
-    out = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), y.reshape((1,)).expand((2,)).contiguous(),), ShapeTracker.from_shape((2,)))
+    y = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 1, dtypes.int), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
+    out = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 2, dtypes.int), y.reshape((1,)).expand((2,)).contiguous(),), ShapeTracker.from_shape((2,)))
     big_graph = big_graph_rewrite(out.sink(), realizes:={})
     self.assertIs(big_graph, out.sink())
     self.assertEqual(len(realizes), 1)

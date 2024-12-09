@@ -17,6 +17,10 @@ def LessOrEqual(x:Tensor,y:Tensor): return x <= y
 def Greater(x:Tensor,y:Tensor): return x > y
 def GreaterOrEqual(x:Tensor,y:Tensor): return x >= y
 def Equal(x:Tensor,y:Tensor): return x == y
+def BitwiseNot(x:Tensor): return ~x
+def BitwiseOr(x:Tensor, y:Tensor): return x | y
+def BitwiseAnd(x:Tensor, y:Tensor): return x & y
+def BitwiseXor(x:Tensor, y:Tensor): return x ^ y
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
@@ -393,11 +397,10 @@ def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
   return t.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
 def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
-  depth = to_python_const(depth)
+  depth = int(to_python_const(depth))
   # Scalar or Rank 1 tensor containing exactly one element
   depth, indices = depth[0] if isinstance(depth, list) else depth, (indices < 0).where(indices+depth, indices),
-  if axis < 0: axis += indices.ndim + 1
-  return (indices[:,None] == Tensor.arange(int(depth)).reshape((int(depth),) + (1,)*(indices.ndim-axis))).where(values[1], values[0])
+  return indices[:, None]._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
 
 def Compress(inp: Tensor, condition: Tensor, axis=None):
   if axis is None:
@@ -465,8 +468,7 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
 
   def embedding(x:Tensor, vocab_size, weight:Tensor) -> Tensor:
-    vocab_counter = Tensor.arange(vocab_size, dtype=x.dtype, requires_grad=False).expand(*x.shape, vocab_size)
-    return (vocab_counter == x.unsqueeze(-1).expand(*x.shape, vocab_size)) @ weight
+    return x.unsqueeze(-1).expand(*x.shape, vocab_size)._one_hot_along_dim(vocab_size) @ weight
 
   # bert embedding layer
   if epsilon is None: epsilon = 1e-12

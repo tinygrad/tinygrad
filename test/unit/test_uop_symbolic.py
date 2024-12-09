@@ -444,6 +444,8 @@ class TestSymbolic(unittest.TestCase):
 
   def test_div_mod_recombine_with_gcd(self):
     b = Variable("b", 0, 100)
+    exp = (16 * b + 2) % 18 + ((16 * b + 2) // 18) * 18
+    self.helper_test_variable(exp, 2, 1602, "((b*16)+2)")
     with self.assertRaises(AssertionError):
       self.helper_test_variable((30 * b + 1) % 18 + ((30 * b + 1) // 18) * 18, 1, 3001, "((b*30)+1)")
 
@@ -524,6 +526,15 @@ class TestSymbolic(unittest.TestCase):
 
     # not combining  # TODO: can combine if one is identity element const
     self.helper_test_variable(aa+ab, 0, 6, "((a if (x<2) else b)+(a if (x<2) else 0))")
+
+  def test_symbolic_div(self):
+    # from symbolic arange
+    a = Variable("a", 1, 10)
+    denominator = ((a*-2)+1)
+    numerator = (((((a*2)+-1)*2)+1)*a)
+    self.helper_test_variable(denominator, -19, -1, "((a*-2)+1)")
+    self.helper_test_variable(numerator, 3, 390, "(a*((a*4)+-1))")
+    self.helper_test_variable((numerator//denominator)<=0, 1, 1, "True")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
