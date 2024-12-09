@@ -1078,7 +1078,7 @@ def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, 
 def order_commutative(x: UOp):
   if (a:=x.src[0]).op is x.op: return None
   if (b:=x.src[1]).op is x.op: return x.replace(src=(b, a))
-  if a.tuplize > b.tuplize: return x.replace(src=(b, a))
+  if a.order(x.op) > b.order(x.op): return x.replace(src=(b, a))
 
 symbolic_simple = PatternMatcher([
   # ** self folding **
