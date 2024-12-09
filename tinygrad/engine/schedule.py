@@ -142,7 +142,6 @@ view_right = view_right_elementwise+PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").view(name="v"), lambda v,r,src: None if v.st.contiguous else swizzle_r(r, src, v.st)),
   # push a VIEW down to STORE, through a reduce (ONLY reshapes)
   (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src").view(name="v"),), name="r"), push_swizzle_down_through_reduce),
-  # push VIEW(s) down to STORE, through an elementwise op
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
