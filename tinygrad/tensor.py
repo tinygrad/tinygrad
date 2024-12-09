@@ -3207,6 +3207,14 @@ class Tensor(SimpleMathTrait):
     if not isinstance(x, Tensor) and reverse and x > 0: return self.mul(math.log(x)).exp()
 
     base, exponent = self._broadcasted(x, reverse=reverse)
+
+    # pow to int
+    if dtypes.is_int(exponent.dtype):
+      # TODO: something about _min_max takes very long time with range(31)
+      def step(r,b,e): return (r * (e & 1).where(b, 1), b * b, e // 2)
+      ret = functools.reduce(lambda rbe, _: step(*rbe), range(10), (Tensor.ones_like(self), base, exponent))[0]
+      return (exponent < 0).where(1//ret, ret)
+
     # start with b ** e = exp(e * log(b))
     ret = base.abs().log().mul(exponent).exp()
     # correct sign of negative base with odd exponent (cos has a period of 2pi so we use it here to get the oddness of the exponent)
