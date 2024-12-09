@@ -104,7 +104,6 @@ class Ops(FastEnum):
   # misc ops
   EXPAND = auto(); CONTRACT = auto() # noqa: E702
   VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
-  WHERE = auto()
   DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
 
@@ -131,7 +130,7 @@ class Ops(FastEnum):
   SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto() # noqa: E702
 
   # TernaryOps
-  MULACC = auto() # noqa: E702
+  WHERE = auto(); MULACC = auto() # noqa: E702
 
   # assignment ops
   ASSIGN = auto()
@@ -151,6 +150,7 @@ class GroupOp:
   ALU = set.union(Unary, Binary, Ternary)
 
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
+  Symbolic = set.union(ALU, Irreducible, {Ops.BIND})
 
   # meta ops
   Meta = {Ops.COPY, Ops.EMPTY, Ops.BUFFER_VIEW}
@@ -970,7 +970,6 @@ def lt_folding(x:UOp, c:int) -> Optional[UOp]:
 def fold_unrolled_divs(chain:UOp):
   # div pattern in unrolled arange
   # example: x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  print(chain)
   denominator, seen_const, ans = None, [], None
   chain, u = chain.src[0], chain.src[1]
   while True:
@@ -989,6 +988,7 @@ def fold_unrolled_divs(chain:UOp):
     elif chain.op is Ops.IDIV: chain, u = None, chain
   if denominator is None: return None
   # the first (denominator-len(seen_const)) terms may have been folded to 0 already
+  if ans is None: return None
   if ans.vmax >= denominator and len(seen_const) != denominator: return None
   for i in range(denominator-len(seen_const)):
     if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
@@ -1170,7 +1170,7 @@ symbolic = symbolic_simple+PatternMatcher([
   ((UPat.var("x", dtype=dtypes.ints)//UPat.cvar("c0", vec=False))<UPat.cvar("c1", vec=False),
    lambda x,c0,c1: x<(c1.arg*c0.arg) if c0.arg > 0 else None),
   # swap terms if they are out of order (a+c)+b -> (a+b)+c
-  (UPat(GroupOp.CommAssoc, name='x', src=(UPat(GroupOp.CommAssoc, name="chain"), UPat.var("b"))), lambda x,chain,b:
+  (UPat(GroupOp.CommAssoc, name='x', src=(UPat(GroupOp.CommAssoc, name="chain"), UPat(GroupOp.Symbolic, name="b"))), lambda x,chain,b:
     chain.src[0].alu(x.op, b).alu(x.op, chain.src[1]) if x.op is chain.op and chain.src[1].order(x.op) > b.order(x.op) else None),
   # merge two commutative+associative chains, generelization of (a+c)+(b+d) -> a+b+c+d
   *((UPat(op, src=(UPat(op, name='a'),UPat(op, name='b'))), lambda a,b,op=op:
