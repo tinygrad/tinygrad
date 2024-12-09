@@ -12,15 +12,17 @@ class BLAKE3:
 
   def compress_blocks(self, states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
     def rotr(x: Tensor, n: int) -> Tensor: return ((x << (32 - n)) | (x >> n))
+    xs = [states[i] for i in range(16)]
     for i in range(7):
       for j, (a,b,c,d) in enumerate([(0,4,8,12), (1,5,9,13), (2,6,10,14), (3,7,11,15), (0,5,10,15), (1,6,11,12), (2,7,8,13), (3,4,9,14)]):
         mx, my = data[j * 2], data[j * 2 + 1]
         for m in (mx, my):
-          states[a] = (states[a] + states[b] + m)
-          states[d] = rotr(states[d] ^ states[a], 16 if m is mx else 8)
-          states[c] = states[c] + states[d]
-          states[b] = rotr(states[b] ^ states[c], 12 if m is mx else 7)
+          xs[a] = (xs[a] + xs[b] + m)
+          xs[d] = rotr(xs[d] ^ xs[a], 16 if m is mx else 8)
+          xs[c] = xs[c] + xs[d]
+          xs[b] = rotr(xs[b] ^ xs[c], 12 if m is mx else 7)
       if i < 6: data = data[self.PERMUTATIONS]
+    states = Tensor.cat(*xs).reshape(16, states.shape[1])
     return (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:])
 
   @TinyJit 
