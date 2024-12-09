@@ -185,9 +185,9 @@ class Tensor(SimpleMathTrait):
     def __exit__(self, exc_type, exc_value, traceback): Tensor.no_grad = self.prev
 
   def __repr__(self):
-    if isinstance(l:=self.lazydata, UOp): lrepr = f"<UOp {l.device} {l.shape} {str(l.dtype)[7:]} {l.st if l.base is not l else (l.op, l.realized)}>"
-    else: lrepr = f"{self.lazydata!r}"
-    return f"<Tensor {lrepr} on {self.device} with grad {(self.grad.lazydata if self.grad is not None else None)!r}>"
+    if isinstance(ld:=self.lazydata, MultiLazyBuffer): ld_repr = f"{self.lazydata!r}"
+    else: ld_repr = f"<UOp {ld.device} {ld.shape} {str(ld.dtype)[7:]} {ld.st if ld.base is not ld else (ld.op, ld.realized)}>"
+    return f"<Tensor {ld_repr} on {self.device} with grad {(self.grad.lazydata if self.grad is not None else None)!r}>"
 
   # Python has a non moving GC, so this should be okay
   def __hash__(self): return id(self)
