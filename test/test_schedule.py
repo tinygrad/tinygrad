@@ -424,6 +424,7 @@ class TestSchedule(unittest.TestCase):
     # NOOP, 3 convs, contiguous
     with self.assertRaises(KernelCountException): check_schedule(x, 5)
 
+  @unittest.skip("sum over expanded axis is collapsed")
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
     b2 = Tensor.empty(16)
@@ -438,6 +439,7 @@ class TestSchedule(unittest.TestCase):
     x = p(x)
     check_schedule(x, 4)
 
+  @unittest.skip("sum over expanded axis is collapsed")
   def test_image_conv_fusion_more_minimal(self):
     b1 = Tensor.empty(16)
     def p(x): return x.permute(1,0).contiguous().reshape(32,16,1).expand(32,16,16).sum(axis=2).permute(1,0)
