@@ -63,8 +63,7 @@ class BLAKE3:
 
   def tensor_to_blake_input(self, tensor: Tensor, padded_input_size: int) -> Tuple[Tensor, Tensor, Variable]:
     assert padded_input_size % 1024 == 0 and padded_input_size & (padded_input_size - 1) == 0, "padded_input_size must be a power of two divisible by 1024"
-    # blake_input = tensor.flatten().cat(Tensor([0] * ((padded_input_size // tensor.element_size()) - tensor.shape[0]), dtype=tensor.dtype))
-    blake_input = tensor.flatten().pad((0, (padded_input_size // tensor.element_size()) - tensor.shape[0]))
+    blake_input = tensor.flatten().cat(Tensor([0] * ((padded_input_size // tensor.element_size()) - tensor.shape[0]), dtype=tensor.dtype))
     blake_input = blake_input.bitcast(dtypes.uint32).reshape(-1, 16, 16).permute(1, 2, 0).contiguous()
     final_chunk_len = 0 if tensor.nbytes() == 0 else (tensor.nbytes() % 1024 or 1024)
     n_end_blocks = ceildiv(final_chunk_len, 64) or 1
