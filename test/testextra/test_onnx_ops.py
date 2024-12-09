@@ -1,4 +1,4 @@
-import unittest, onnx
+import unittest
 import numpy as np
 from extra.onnx import get_run_onnx
 from test.external.external_model_benchmark import assert_allclose
@@ -6,11 +6,11 @@ import onnxruntime as ort
 ort_options = ort.SessionOptions()
 ort_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 ort_options.log_severity_level = 3  # no warnings
-from onnx.helper import np_dtype_to_tensor_dtype, make_empty_tensor_value_info, make_tensor_value_info, make_graph, make_model
+from onnx.helper import np_dtype_to_tensor_dtype, make_empty_tensor_value_info, make_tensor_value_info, make_graph, make_model, make_node
 
 def helper_test_onnx_op(op:str, name:str, inputs:dict[str, np.ndarray], outputs:list[str], atol=1e-6, rtol=1e-3, **opts):
   # create model
-  node = onnx.helper.make_node(op, list(inputs), outputs, name=f"test_{op}", **opts)
+  node = make_node(op, list(inputs), outputs, name=f"test_{op}", **opts)
   inputs_info = [make_tensor_value_info(name, np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inputs.items()]
   outputs_info = [make_empty_tensor_value_info(name) for name in outputs]    # dummy outputs
   graph = make_graph([node], name, inputs_info, outputs_info)
@@ -37,7 +37,7 @@ class TestOnnxOps(unittest.TestCase):
   # example test
   def test_simple_Add(self):
     op = "Add"
-    inputs = {"x": np.ones([3,3]), "y": np.ones([3,3])}
+    inputs = {"x": np.random.randn(3,3,3), "y": np.random.randn(3,3,3)}
     outputs = ["sum"]
     helper_test_onnx_op(op, "test_simple_Add", inputs, outputs)
 
