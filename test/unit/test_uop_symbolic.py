@@ -497,6 +497,16 @@ class TestSymbolic(unittest.TestCase):
     unrolled_div = (gidx+2559)//2+(gidx+2560)//2+3
     self.helper_test_variable(unrolled_div, 2562, 5121, "(gidx+2562)")
 
+  def test_big_div(self):
+    a = Variable("a", 0, 4294967296+1)
+    b = Variable("b", 0, 4294967296+1)
+    ((a//4294967296)+(a+b)).render()
+
+  def test_arange_unsorted_unrolled2(self):
+    gidx = Variable("gidx", 0, 2559)
+    unrolled_div = (gidx+(gidx+2559)//2+(gidx+2560)//3)+(gidx+2560)//2+3
+    self.helper_test_variable(unrolled_div, 3415, 9386, "(((gidx*2)+((gidx+1)//3))+3415)")
+
   def test_gated_load(self):
     idx = Variable("idx", 0, 24)
     self.helper_test_variable(idx//4, 0, 6, "(idx//4)")
