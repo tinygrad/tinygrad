@@ -3,7 +3,7 @@ from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Optional, Dict, Tuple, Any, Iterator
 import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys
-from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
+from tinygrad.helpers import CI, OSX, colored, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
 
@@ -77,7 +77,8 @@ class Buffer:
   def base(self) -> Buffer: return self._base if self._base is not None else self
   @property
   def lb_refcount(self): return self.base._lb_refcount
-  def ref(self, cnt): self.base._lb_refcount += cnt
+  def ref(self, cnt):
+    self.base._lb_refcount += cnt
   def is_allocated(self) -> bool: return hasattr(self, '_buf')
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_allocated() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
@@ -105,6 +106,7 @@ class Buffer:
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
+    if getenv("DEBUG_GC"): print(colored(self, "red"))
     if not self.is_allocated(): return
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes

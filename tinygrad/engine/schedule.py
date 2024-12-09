@@ -1,4 +1,4 @@
-import sys, atexit, functools
+import sys, atexit, functools, weakref
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
@@ -59,7 +59,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
     return ret
   assert buf.op is not None, f"base must be base itself {buf}"
   # make things that can't be images not images
-  dtype = buf_uop.dtype.base if (buf_uop:=realized.get(buf)) is not None else buf.dtype
+  dtype = buf_uop.dtype.base if (buf_uop:=realized.get(weakref.ref(buf))) is not None else buf.dtype
   if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
     assert buf.realized is None, "can't fixup allocated buffer"
     if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
@@ -71,7 +71,8 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
     buf_uop = buf.buf_uop
     op = buf.src[1].replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src[1].src))
     # BUFFER_VIEW overrides the underlying buffer
-    if op.op is Ops.BUFFER_VIEW: buffers[buf_uop] = (x:=op.src[0]).base.buffer.view(buf.st.size, dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
+    if op.op is Ops.BUFFER_VIEW:
+      buffers[weakref.ref(buf_uop)] = (x:=op.src[0]).base.buffer.view(buf.st.size, dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
   # ASSIGN uses the target buffer, otherwise we create a new buffer
   else:
     src = tuple(to_uop(x, ctx, cache) for x in buf.srcs)
@@ -444,7 +445,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       ast, ast_ctx = full_ast_rewrite(UOp.sink(*stores), ctx)
       prescheduled.append(ScheduleItem(ast, tuple(u.buffer for u in ast_ctx.bufs if u.size != 0), tuple(ast_ctx.metadata),
                                        frozenset(ubuf for ubuf,ops in ast_ctx.assign_adj.items() if any(x.op is Ops.PRELOAD for x in ops))))
-      for u in ast_ctx.sinked: realized[ast_ctx.lazybufs[u]] = u  # can only schedule once
+      for u in ast_ctx.sinked: realized[weakref.ref(ast_ctx.lazybufs[u])] = u  # can only schedule once
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
