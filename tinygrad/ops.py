@@ -341,6 +341,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const_with_shape(dtype:DType, val:ConstLike, shape:Tuple[sint,...]) -> UOp:
     from tinygrad.shape.shapetracker import ShapeTracker
     return UOp(Ops.VALID, dtypes.bool, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)).where(UOp.const(dtype, val), 0)
+  def is_unrealized_const(self): return (s:=self.base).op is Ops.VIEW and len(s.src) == 2 and s.src[1].op is Ops.CONST
+  def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in unwrap(self.st).views)
 
   # *** uop movement ops ***
 
