@@ -240,7 +240,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       for s, o in zip((self.uop.op.value, self.uop.arg, self.uop.dtype), (other.uop.op.value, other.uop.arg, other.uop.dtype)):
         if s != o: return s < o
       if self.uop is other.uop: return False
-      for s, o in zip(self.uop.src, other.uop.src):
+      step = -1 if self.uop.op is Ops.IDIV else 1
+      for s, o in zip(self.uop.src[::step], other.uop.src[::step]):
         if s is not o: return s.order(self.order) < o.order(self.order)
       assert False, f"UOps are equal but not identical {self.uop} {other.uop}"
 
