@@ -204,7 +204,7 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemCon
   ops_folding = lazy if len(si_ctx.sinked) == 1 else lazy+multioutput
   sink = graph_rewrite(pre, ops_folding if len(si_ctx.assigns) == 0 else ops_folding+append_load, si_ctx)
   # do movement ops
-  sink = graph_rewrite(graph_rewrite(sink, view_left), view_right_through_reduce)
+  sink = graph_rewrite(graph_rewrite(sink, view_left), view_right)
   # convert to AST
   sink = graph_rewrite(graph_rewrite(sink, to_si+check_preload if len(si_ctx.assigns) != 0 else to_si, si_ctx), append_bufs, si_ctx)
   # assert buffer count limit
