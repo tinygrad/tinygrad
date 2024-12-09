@@ -31,7 +31,9 @@ class Function:
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
     ctx = fxn(x[0].device, *x, metadata=_METADATA.get())
     ret = Tensor.__new__(Tensor)
-    ret.lazydata = ctx.forward(*[r if (r:=realized.get(t.lazydata, None)) is not None else t.lazydata for t in x], **kwargs)
+    # TODO: wrong for multi
+    ret.lazydata = ctx.forward(*[
+      UOp(Ops.VIEW, t.dtype, (r,), t.lazydata.st) if (r:=realized.get(t.lazydata, None)) is not None else t.lazydata for t in x], **kwargs)
     ret.requires_grad, ret.grad = ctx.requires_grad, None
     ret._ctx = ctx if ctx.requires_grad and not Tensor.no_grad else None  # used by autograd engine
     return ret
