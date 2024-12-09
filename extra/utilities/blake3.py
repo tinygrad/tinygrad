@@ -43,7 +43,6 @@ class BLAKE3:
     end_block = (states * (info < self.DEFAULT_LEN)).sum(0)
     return (states[-1, :] | end_block)[:8].realize()
 
-  @TinyJit
   def init_chain_vals(self, data: Tensor, info: Tensor) -> Tuple[Tensor, Tensor]:
     states, chain_vals = self.init_states(data, info)
     for i in range(16):
