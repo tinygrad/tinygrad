@@ -439,7 +439,7 @@
                 let chunkEndF16 = chunkStartF16 + decodeChunkSize;
                 let chunk = combinedBuffer.subarray(chunkStartF16, chunkEndF16);
                 let uint32Chunk = new Uint32Array(chunk.buffer, chunk.byteOffset, chunk.byteLength / 4);
-                let result = await f16decomp(new Uint32Array(uint32Chunk));
+                let result = await f16decomp(uint32Chunk);
                 let resultUint8 = new Uint8Array(result.buffer);
                 let chunkStartF32 = 8 + metadataLength + (decodeChunkSize * i * 2);
                 let chunkEndF32 = chunkStartF32 + resultUint8.byteLength;
