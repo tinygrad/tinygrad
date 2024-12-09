@@ -128,8 +128,13 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert not any(x.op is Ops.REDUCE_AXIS for x in first_reduce.src[0].toposort), "can't merge more than two reduceops at a time"
   return first_reduce.src[0].r(first_reduce.arg[0], root.axis_arg+first_reduce.axis_arg)
 
-# push VIEW to stores
-view_right = merge_views+PatternMatcher([
+# push VIEW(s) down to STORE, through an elementwise op
+view_right_elementwise = merge_views+PatternMatcher([
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
+])
+
+# push VIEW to stores through reduce
+view_right = view_right_elementwise+PatternMatcher([
   # ASSIGN with offset swizzles STORE
   (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.ASSIGN, name="a"))),
    lambda a,b,st: None if a.arg is None else apply_swizzle(UOp.store(b, st, a.replace(arg=None)), a.arg)),
@@ -138,7 +143,6 @@ view_right = merge_views+PatternMatcher([
   # push a VIEW down to STORE, through a reduce (ONLY reshapes)
   (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src").view(name="v"),), name="r"), push_swizzle_down_through_reduce),
   # push VIEW(s) down to STORE, through an elementwise op
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
@@ -201,7 +205,7 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemCon
   ops_folding = lazy if len(si_ctx.sinked) == 1 else lazy+multioutput
   sink = graph_rewrite(pre, ops_folding if len(si_ctx.assigns) == 0 else ops_folding+append_load, si_ctx)
   # do movement ops
-  sink = graph_rewrite(graph_rewrite(sink, view_left), view_right)
+  sink = graph_rewrite(graph_rewrite(sink, view_left), view_right_through_reduce)
   # convert to AST
   sink = graph_rewrite(graph_rewrite(sink, to_si+check_preload if len(si_ctx.assigns) != 0 else to_si, si_ctx), append_bufs, si_ctx)
   # assert buffer count limit

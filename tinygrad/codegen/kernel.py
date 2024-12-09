@@ -6,7 +6,7 @@ from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict, Callab
 from enum import Enum, auto
 
 from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, type_verify, resolve, Variable, sint, \
-  graph_rewrite, track_rewrites, view_left, merge_views, PatternMatcher, UPat
+  graph_rewrite, track_rewrites, view_left
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
 from tinygrad.dtype import ImageDType
@@ -14,7 +14,7 @@ from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, ro
 from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
-from tinygrad.engine.schedule import push_swizzle_down_through_elementwise
+from tinygrad.engine.schedule import view_right_elementwise
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
@@ -683,8 +683,7 @@ class Kernel:
 
       return ret
 
-    return graph_rewrite(graph_rewrite(fixup_ast(self.ast), view_left), merge_views + PatternMatcher([
-      (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise)]))
+    return graph_rewrite(graph_rewrite(fixup_ast(self.ast), view_left), view_right_elementwise)
 
   # **** this is the lowerer ****
 
