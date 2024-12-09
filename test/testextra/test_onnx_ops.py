@@ -1,9 +1,6 @@
-import unittest, io, onnx
+import unittest, onnx
 import numpy as np
-from tinygrad import Tensor, Device, dtypes
 from extra.onnx import get_run_onnx
-from tinygrad.tensor import _to_np_dtype
-from tinygrad.device import is_dtype_supported
 from test.external.external_model_benchmark import assert_allclose
 import onnxruntime as ort
 ort_options = ort.SessionOptions()
