@@ -77,9 +77,7 @@ class Firmware:
     self.sos_fw = {}
 
     blob, sos_hdr = load_fw(self.SOS_PATH, am.struct_psp_firmware_header_v2_0)
-    fw_bin = sos_hdr.psp_fw_bin
-
     for fw_i in range(sos_hdr.psp_fw_bin_count):
-      fw_bin_desc = am.struct_psp_fw_bin_desc.from_address(ctypes.addressof(fw_bin) + fw_i * ctypes.sizeof(am.struct_psp_fw_bin_desc))
+      fw_bin_desc = am.struct_psp_fw_bin_desc.from_address(ctypes.addressof(sos_hdr.psp_fw_bin) + fw_i * ctypes.sizeof(am.struct_psp_fw_bin_desc))
       ucode_start_offset = fw_bin_desc.offset_bytes + sos_hdr.header.ucode_array_offset_bytes
       self.sos_fw[fw_bin_desc.fw_type] = blob[ucode_start_offset:ucode_start_offset+fw_bin_desc.size_bytes]
