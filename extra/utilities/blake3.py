@@ -7,6 +7,8 @@ class BLAKE3:
   """BLAKE3 hashing algorithm. Paper: https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf."""
   IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
   PAD, DEFAULT_LEN, PERMUTATIONS = 66, 65, Tensor([2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8], dtype=dtypes.uint32)
+  
+  def __init__(self): self.compress_blocks_jit = TinyJit(self.compress_blocks)
 
   def compress_blocks(self, states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
     def rotr(x: Tensor, n: int) -> Tensor: return ((x << (32 - n)) | (x >> n))
@@ -20,9 +22,9 @@ class BLAKE3:
           states[b] = rotr(states[b] ^ states[c], 12 if m is mx else 7)
       if i < 6: data = data[self.PERMUTATIONS]
     return (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:])
-  
-  @TinyJit
-  def init_chain_vals(self, data: Tensor, info: Tensor) -> Tuple[Tensor, Tensor]:
+
+  @TinyJit 
+  def init_states(self, data: Tensor, info: Tensor) -> Tuple[Tensor, Tensor]:
     chain_vals = self.IV.reshape(1, 8, 1).expand(16, 8, info.shape[-1]).contiguous()
     counts = Tensor.arange(0, data.shape[-1], dtype=dtypes.uint32).reshape(-1, 1).expand(-1, 16).reshape(-1, 16, 1).permute(1, 2, 0)
     counts = counts.cat(Tensor.zeros(chain_vals.shape[0], 1, chain_vals.shape[-1], dtype=dtypes.uint32), dim=1)
@@ -33,12 +35,20 @@ class BLAKE3:
     flags[0] = flags[0] + 1 # chunk start flag
     flags = (flags + (8 * (((info < self.PAD).sum() <= 16) * (info < self.DEFAULT_LEN)))).cast(dtypes.uint32) # root flag
     states = (chain_vals.cat(chain_vals[:, :4], counts, lengths, flags, dim=1) * (info < self.PAD).cast(dtypes.uint32))
-    for i in range(16):
-      next_state = states[i] if i == 0 else states[i-1, :8].cat(states[i, 8:])
-      states[i] = self.compress_blocks(next_state, data[i], chain_vals[i])
+    return states.realize(), chain_vals.realize()
+
+  @TinyJit
+  def finalize_states(self, states: Tensor, info: Tensor) -> Tensor:
     states = states * (info < self.PAD)
     end_block = (states * (info < self.DEFAULT_LEN)).sum(0)
     return (states[-1, :] | end_block)[:8].realize()
+
+  def init_chain_vals(self, data: Tensor, info: Tensor) -> Tuple[Tensor, Tensor]:
+    states, chain_vals = self.init_states(data, info)
+    for i in range(16):
+      next_state = states[i] if i == 0 else states[i-1, :8].cat(states[i, 8:])
+      states[i] = self.compress_blocks_jit(next_state.contiguous(), data[i].contiguous(), chain_vals[i].contiguous())
+    return self.finalize_states(states, info)
 
   @TinyJit
   def tree_step(self, chain_vals: Tensor) -> Tensor:
@@ -63,7 +73,7 @@ class BLAKE3:
 
   def tensor_to_blake_input(self, tensor: Tensor, padded_input_size: int) -> Tuple[Tensor, Tensor, Variable]:
     assert padded_input_size % 1024 == 0 and padded_input_size & (padded_input_size - 1) == 0, "padded_input_size must be a power of two divisible by 1024"
-    blake_input = tensor.flatten().cat(Tensor([0] * ((padded_input_size // tensor.element_size()) - tensor.shape[0]), dtype=tensor.dtype))
+    blake_input = tensor.flatten().pad((0, (padded_input_size // tensor.element_size()) - tensor.shape[0]))
     blake_input = blake_input.bitcast(dtypes.uint32).reshape(-1, 16, 16).permute(1, 2, 0).contiguous()
     final_chunk_len = 0 if tensor.nbytes() == 0 else (tensor.nbytes() % 1024 or 1024)
     n_end_blocks = ceildiv(final_chunk_len, 64) or 1
