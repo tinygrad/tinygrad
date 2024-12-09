@@ -75,7 +75,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
   else:
     src = tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs)
     buf_uop = src[0].base.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
-    if buf.op in GroupOp.Meta: op = UOp.metaop(buf.op, buf.shape, buf.dtype, buf.device, buf.arg, src).src[1]
+    if buf.op in {*GroupOp.Meta, Ops.CONST}: op = UOp.metaop(buf.op, buf.shape, buf.dtype, buf.device, buf.arg, src).src[1]
     else: op = UOp(buf.op, dtype.base, src, buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.contiguous() if buf.forced_realize else op), buf.st)
   # keep track of ops outside the big graph
@@ -409,8 +409,8 @@ do_realize = PatternMatcher([
 # ** this breaks down realized ops into STOREs and rewrites the ops to LOADs
 
 def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
-  if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
-  return UOp.const_with_shape(base.dtype, val, unwrap(base.st).shape)
+  if to_store.op is Ops.BIND: ctx.var_vals.update([to_store.unbind()])
+  return UOp.const_with_shape(base.dtype, to_store if to_store.op is Ops.BIND else to_store.arg, unwrap(base.st).shape)
 
 def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape((st:=unwrap(base.st)).shape).to_uop(), append_op(ctx, b, to_store))
