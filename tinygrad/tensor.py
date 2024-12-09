@@ -7,7 +7,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.multi import MultiLazyBuffer
-from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
+from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element, realized
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.realize import run_schedule
@@ -31,7 +31,8 @@ class Function:
   def apply(fxn:Type[Function], *x:Tensor, **kwargs) -> Tensor:
     ctx = fxn(x[0].device, *x, metadata=_METADATA.get())
     ret = Tensor.__new__(Tensor)
-    ret.lazydata, ret.requires_grad, ret.grad = ctx.forward(*[t.lazydata for t in x], **kwargs), ctx.requires_grad, None
+    ret.lazydata = ctx.forward(*[r if (r:=realized.get(t.lazydata, None)) is not None else t.lazydata for t in x], **kwargs)
+    ret.requires_grad, ret.grad = ctx.requires_grad, None
     ret._ctx = ctx if ctx.requires_grad and not Tensor.no_grad else None  # used by autograd engine
     return ret
 
