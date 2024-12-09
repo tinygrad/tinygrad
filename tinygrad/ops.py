@@ -323,17 +323,18 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
   def cast(self, dtype:DType, bitcast=False, allow_buffer_view=True):
-    shape = self.st.shape if self.st is not None else None
-    if bitcast and self.dtype.itemsize != dtype.itemsize:
-      if shape is None or not all_int(shape) or not self.device.startswith("DISK"):
-        raise RuntimeError(f"shape changing bitcast not supported on {self}")
-      # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
-      if (shape[-1]*self.dtype.itemsize) % dtype.itemsize != 0: raise RuntimeError("unsupported size in bitcast")
-      shape = shape[:-1] + ((shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
-    if bitcast and self.can_view() and allow_buffer_view: return UOp.metaop(Ops.BUFFER_VIEW, unwrap(shape), dtype, self.device, None, (self,))
-    if self._device is not None and self._device.startswith("DISK") and not bitcast: raise RuntimeError("can only bitcast DISK")
-    return UOp(Ops.BITCAST if bitcast else Ops.CAST, dtype, (self,))
-  def bitcast(self, dtype:DType): return self.cast(dtype, bitcast=True)
+    if bitcast: return self.bitcast(dtype, allow_buffer_view)
+    if self._device is not None and self._device.startswith("DISK"): raise RuntimeError("CAST isn't supported on DISK")
+    return UOp(Ops.CAST, dtype, (self,))
+  def bitcast(self, dtype:DType, allow_buffer_view=True):
+    if self.can_view() and allow_buffer_view:
+      if self.dtype.itemsize == dtype.itemsize: output_shape = self.shape
+      else:
+        if not self.device.startswith("DISK") or not all_int(self.shape): raise RuntimeError(f"shape changing bitcast not supported on {self}")
+        if (self.shape[-1]*self.dtype.itemsize) % dtype.itemsize != 0: raise RuntimeError("unsupported size in bitcast")
+        output_shape = self.shape[:-1]+((self.shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
+      return UOp.metaop(Ops.BUFFER_VIEW, output_shape, dtype, self.device, None, (self,))
+    return UOp(Ops.BITCAST, dtype, (self,))
   def gep(self, i:Union[Tuple[int, ...], int]):
     if isinstance(i, int):
       # NOTE: these are just shortcuts to not have to create and fold later
