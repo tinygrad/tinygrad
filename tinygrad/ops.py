@@ -5,7 +5,7 @@ from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
 from collections import defaultdict
 from tinygrad.dtype import ConstType, ImageDType, PtrDType, dtypes, DType, truncate
-from tinygrad.helpers import ContextVar, all_int, colored, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix
+from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer
@@ -210,8 +210,8 @@ class UOpMetaClass(type):
     return created
 
 # some uops map to other stuff
-buffers:Dict[weakref.ReferenceType[UOp], Buffer] = {} # this maps BUFFER uops to their device Buffers
-realized:Dict[weakref.ReferenceType[UOp], UOp] = {} # this maps realized ops to a BUFFER uop
+buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
+realized:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary()  # this maps realized ops to a BUFFER uop
 forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
 
 # NOTE: this should be frozen, but frozen is slower
@@ -222,15 +222,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   src:Tuple[UOp, ...] = tuple()
   arg:Any = None
   def __del__(self):
-    if getenv("DEBUG_GC"): print(colored(self, "red"))
-    wr = weakref.ref(cast(UOp, self))
-    assert wr() is not None, f"killing twice? {self}"
-    if (realized_ubuf:=realized.get(wr)) is not None:
-      del realized[wr]
-      del realized_ubuf
-    if (device_buffer:=buffers.get(wr)) is not None:
-      del buffers[wr]
-      device_buffer.ref(-1)
+    if self.op is Ops.BUFFER: self.buffer.ref(-1)
     del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg)]
   def __reduce__(self): return UOp, (self.op, self.dtype, self.src, self.arg)
   def replace(self, **kwargs) -> UOp:
@@ -446,22 +438,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def buffer(self) -> Buffer:
     if self.base.realized is not None: return self.base.realized
-    wrr = weakref.ref(cast(UOp, self))
-    if wrr() is None: raise RuntimeError(f"dead ref? {self}")
-    if (ret:=buffers.get(wrr)) is not None: return ret
+    if (ret:=buffers.get(self)) is not None: return ret
     if self.op is Ops.VIEW:
       assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
       return self.src[0].buffer
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
     from tinygrad.device import Buffer
-    buffers[wrr] = ret = Buffer(*self.arg[1])
+    buffers[self] = ret = Buffer(*self.arg[1])
     return ret
   @property
-  def realized(self) -> Optional[Buffer]:
-    wr = weakref.ref(cast(UOp, self))
-    if wr() is None: raise RuntimeError(f"dead ref? {self}")
-    if (real_buf_uop:=realized.get(wr)) is None: return None
-    return buffers[weakref.ref(real_buf_uop)]
+  def realized(self) -> Optional[Buffer]: return buffers[real_buf_uop] if (real_buf_uop:=realized.get(self)) is not None else None
   @property
   def is_realized(self) -> bool: return self.base.realized is not None
 
