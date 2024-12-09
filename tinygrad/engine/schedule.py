@@ -75,7 +75,8 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
   else:
     src = tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs)
     buf_uop = src[0].base.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
-    op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, src, buf.arg)
+    if buf.op in GroupOp.Meta: op = UOp.metaop(buf.op, buf.shape, buf.dtype, buf.device, buf.arg, src).src[1]
+    else: op = UOp(buf.op, dtype.base, src, buf.arg)
   cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.contiguous() if buf.forced_realize else op), buf.st)
   # keep track of ops outside the big graph
   buffers[buf_uop] = buf.buffer
