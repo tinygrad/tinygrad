@@ -10,7 +10,7 @@ from onnx.helper import np_dtype_to_tensor_dtype, make_empty_tensor_value_info, 
 
 def helper_test_onnx_op(op:str, name:str, inputs:dict[str, np.ndarray], outputs:list[str], atol=1e-6, rtol=1e-3, **opts):
   # create model
-  node = onnx.helper.make_node(op, list(inputs), list(outputs), name=f"test_{op}", **opts)
+  node = onnx.helper.make_node(op, list(inputs), outputs, name=f"test_{op}", **opts)
   inputs_info = [make_tensor_value_info(name, np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inputs.items()]
   outputs_info = [make_empty_tensor_value_info(name) for name in outputs]    # dummy outputs
   graph = make_graph([node], name, inputs_info, outputs_info)
