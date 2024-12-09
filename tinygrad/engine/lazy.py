@@ -3,7 +3,7 @@ from typing import Optional, Any, Tuple, List, get_args
 from tinygrad.dtype import dtypes, DType, ConstType, to_dtype, ImageDType
 from tinygrad.helpers import prod, getenv, all_int, all_same, DEBUG, _METADATA, Metadata, SPLIT_REDUCEOP, LAZYCACHE
 from tinygrad.ops import exec_alu, python_alu
-from tinygrad.ops import identity_element, MathTrait, resolve, UOp, sint, GroupOp, Ops, view_supported_devices
+from tinygrad.ops import MathTrait, resolve, UOp, sint, GroupOp, Ops, view_supported_devices
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from weakref import ref, ReferenceType, WeakValueDictionary
@@ -180,15 +180,6 @@ class LazyBuffer(MathTrait):
 
   def r(self, op:Ops, axis:Tuple[int, ...]) -> LazyBuffer:
     new_shape = self.st.reduce(axis)
-    # TODO: this logic should move to the scheduler
-    if 0 in self.shape and 0 not in new_shape: return self.const_with_shape(identity_element(op, self.dtype), new_shape)
-
-    # const folding
-    # TODO: fold this for symbolic?
-    if self.is_unrealized_unmasked_const() and all_int(self.shape):
-      if op is Ops.ADD: return self.const_with_shape(self.base.arg * prod(self.shape[i] for i in axis), new_shape)
-      if op is Ops.MUL: return self.const_with_shape(self.base.arg ** prod(self.shape[i] for i in axis), new_shape)
-      if op is Ops.MAX: return self.const_with_shape(self.base.arg, new_shape)
 
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not SPLIT_REDUCEOP or not all_int(self.shape) or (0 in self.shape) or \
