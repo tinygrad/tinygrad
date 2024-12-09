@@ -393,8 +393,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert unwrap(self.base.st).contiguous, f"can only copy contiguous {self}"
     return UOp.metaop(Ops.COPY, self.base.shape, self.base.dtype, device, self.base.nbytes, (self.base,)).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
-  def is_unrealized_const(self):
-    return (s:=self.base).op is Ops.VIEW and len(s.src) == 2 and s.realized is None and s.src[1].op is Ops.CONST and not isinstance(s.src[1].arg, UOp)
+  def is_unrealized_const(self): return (s:=self.base).op is Ops.VIEW and len(s.src) == 2 and s.realized is None and s.src[1].op is Ops.CONST
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in unwrap(self.st).views)
   def can_view(self):
     return (self.st is not None and self._device is not None and self.st.consecutive and not self.is_unrealized_const() and
