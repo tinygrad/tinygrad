@@ -440,7 +440,7 @@ jobs:
     # WebGPU e2e tests
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python3 -m examples.compile_efficientnet
-    - name: Install Puppeteer
+    - name: Install Puppeteer if needed
       run: npm list puppeteer || npm install puppeteer
     - name: Run WEBGPU Efficientnet
       run: node test/web/test_webgpu.js
