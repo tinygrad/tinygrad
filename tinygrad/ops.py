@@ -356,7 +356,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
   def view(self, new_st:ShapeTracker) -> UOp:
-    if self.st is None: return UOp(Ops.VIEW, self.dtype.base, (self.base,), new_st)
+    if self.st is None: return UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
     ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
     # instant folding rules
     if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)): return ret.const_like(0)
