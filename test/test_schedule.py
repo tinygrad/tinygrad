@@ -1339,7 +1339,6 @@ class TestSchedule(unittest.TestCase):
   @unittest.expectedFailure
   def test_buf_cnt_over_limit_alt(self): self._test_buf_cnt(63, allowed=3)
 
-  @unittest.skip("gc")
   def test_schedule_mem_used(self):
     base = GlobalCounters.mem_used
     Tensor.ones(256).contiguous().realize()
