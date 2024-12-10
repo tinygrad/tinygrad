@@ -1,4 +1,4 @@
-import sys, functools
+import sys, atexit, functools, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
@@ -216,8 +216,14 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemCon
         and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in ops):
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  if getenv("RUN_PROCESS_REPLAY"): diskcache_put("schedule_process_replay", str(pre.key), (pre, si_ctx.assigns, {}, sink))
+  if getenv("RUN_PROCESS_REPLAY"): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, {}, sink))
   return sink, si_ctx
+
+PROCESS_REPLAY_CAPTURE: Dict[str, bytes] = {}
+if getenv("RUN_PROCESS_REPLAY"):
+  @atexit.register
+  def save_process_replay() -> None:
+    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
 
 # **** Schedule grouping
 
