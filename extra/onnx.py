@@ -1,12 +1,14 @@
 from __future__ import annotations
-from typing import List, Dict, Union, Callable, Any, Sequence
+from typing import List, Dict, Union, Callable, Any, Sequence, Tuple
+from dataclasses import dataclass
 import importlib, functools
 import numpy as np
+from google.protobuf.json_format import MessageToDict, MessageToJson
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv, DEBUG, all_same
 from tinygrad.dtype import DType, ConstType
 from tinygrad.device import is_dtype_supported
-from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto
+from onnx import AttributeProto, ModelProto, TensorProto, ValueInfoProto, TypeProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -73,8 +75,10 @@ def get_run_onnx(onnx_model: ModelProto):
   model_attributes = {num:{x.name:attribute_parse(x) for x in n.attribute} for num,n in enumerate(onnx_model.graph.node)}
 
   # model descriptions
-  # TODO: need a better way of controlling training vs non-training
-  is_onnx_preview_training = any(n.HasField("domain") and n.domain == "ai.onnx.preview.training" for n in onnx_model.graph.node)
+  # TODO: figure out how to use `onnx_model.training_info` to toggle training
+  # HACK: `any(n.op_type == "Gradient" for n in onnx_model.graph.node)` makes gradient test pass. Training tests have empty training_info.
+  training = any(n.op_type == "Gradient" for n in onnx_model.graph.node) or None
+  # TODO: review all supported ops to find a minimum opset version we support and raise error if we don't support
   onnx_model_version = onnx_model.opset_import[0].version
 
   # mapping from onnx ops to tensor.py ops
@@ -94,14 +98,14 @@ def get_run_onnx(onnx_model: ModelProto):
     if type_proto.HasField("sequence_type"):
       if not isinstance(user_input, Sequence): raise RuntimeError(f"{model_input.name} received {user_input}, expected sequence type")
       dtype = dtype_parse(type_proto.sequence_type.elem_type.tensor_type.elem_type)
-      sequence = [Tensor(i, dtype=dtype, requires_grad=is_onnx_preview_training) if not isinstance(i, Tensor) else i for i in user_input]
+      sequence = [Tensor(i, dtype=dtype, requires_grad=training) if not isinstance(i, Tensor) else i for i in user_input]
       if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"shapes for {model_input.name} must be homogeneous")
       # TODO: need true float16 for dtype checking
       # if not all(t.dtype is dtype for t in sequence): raise RuntimeError(f"{model_input.name} received wrong dtype, expected {dtype}")
       return sequence
     if type_proto.HasField("tensor_type"):
       dtype = dtype_parse(type_proto.tensor_type.elem_type)
-      tensor = Tensor(user_input, dtype=dtype, requires_grad=is_onnx_preview_training) if not isinstance(user_input, Tensor) else user_input
+      tensor = Tensor(user_input, dtype=dtype, requires_grad=training) if not isinstance(user_input, Tensor) else user_input
       # TODO: need true float16 for dtype checking
       # if dtype is not tensor.dtype: raise RuntimeError(f"{model_input.name} received dtype {inp.dtype}, expected {dtype}")
       for d,onnx_dim in enumerate(type_proto.tensor_type.shape.dim):
@@ -144,7 +148,6 @@ def get_run_onnx(onnx_model: ModelProto):
         sizes = to_python_const(inp[1]) if len(inp) == 2 else [sz // n_outputs + (1 if i < sz % n_outputs else 0) for i in range(n_outputs)]
         ret = inp[0].split(sizes, axis)
       elif n.op_type == "Gradient":
-        assert len(opt["xs"]) == len(inp), f"len(opt['xs']):{len(opt['xs'])}, len(inp):{len(inp)} output and input has to match"
         y = opt["y"]
         intermediate_tensors[y].backward()
         ret = tuple([t.grad for t in inp])

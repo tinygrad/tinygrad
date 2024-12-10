@@ -539,7 +539,7 @@ def onnx_training(input_group_size):
 
 @onnx_training(3)
 def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
-  X, G, H = (i.detach() for i in inputs)
+  X, G, H = inputs
   grad = norm_coefficient * X + G
   H.assign(H + grad.square())
   up = grad / (H.sqrt() + epsilon)
@@ -550,7 +550,7 @@ def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
 @onnx_training(4)
 def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
   X, G, V, H = inputs
-  G, V, H = G.detach(), V.detach(), H.detach()  # TODO we shouldn't need these detaches
+  X.requires_grad = True
   X.grad = norm_coefficient * X.detach() + G
   opt = TinyAdam([X], b1=alpha, b2=beta, eps=epsilon)
   opt.m, opt.v, opt.lr = [V], [H], R
@@ -567,7 +567,7 @@ def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0
 @onnx_training(3)
 def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
   X, G, V = inputs
-  G, V = G.detach(), V.detach()
+  X.requires_grad = True
   X.grad = (norm_coefficient * X.detach() + G) * (beta if T > 0 else 1)
   opt = SGD([X], momentum=alpha, nesterov=(mode=="nesterov"))
   opt.b, opt.lr = [V], R
