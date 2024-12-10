@@ -728,7 +728,6 @@ class TestInferenceMode(unittest.TestCase):
       assert W.grad is None
     f(x, m, W)
 
-@unittest.skip("metadata isn't supported")
 class TestTensorMetadata(unittest.TestCase):
   def setUp(self) -> None: _METADATA.set(None)
   def test_matmul(self):
@@ -770,7 +769,7 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(y.grad.lazydata.metadata.name, "sigmoid")
     self.assertTrue(y.grad.lazydata.metadata.backward)
     si = create_schedule([out.lazydata, x.grad.lazydata, y.grad.lazydata])[-1]
-    self.assertEqual(len(si.metadata), 3)
+    self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
     self.assertEqual(set(m.name for m in si.metadata), {"sigmoid", "sigmoid", "relu"})
     bw = [m for m in si.metadata if m.backward]
     self.assertEqual(len(bw), 1)
