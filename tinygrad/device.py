@@ -97,7 +97,7 @@ class Buffer:
     return self
   def __reduce__(self):
     buf = None
-    if len(uop_refs:=[u for u,v in buffers.items() if self is v]) != 1: raise RuntimeError("double ref to buffer?")
+    if len(uop_refs:=[u for u,v in buffers.items() if self is v]) > 1: raise RuntimeError(f"double ref to buffer? {len(uop_refs)}")
     uop_ref = None if len(uop_refs) == 0 else uop_refs[0]
     if self._base is not None:
       return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, uop_ref, self.base, self.offset, self.is_allocated())
