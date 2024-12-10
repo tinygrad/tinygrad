@@ -369,13 +369,12 @@ def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> None:
 
 def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, to_store:UOp, b:UOp) -> None:
   if to_store.op in {Ops.CONST, Ops.BIND}: return None
-  base_shape = unwrap(base.st).shape
   st = unwrap(view.st)
   # fold simple pads
-  if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(base_shape) and resolve(prod(base_shape) >= prod([y-x for x,y in m])):
+  if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(st.shape) and resolve(to_store.size >= prod([y-x for x,y in m])):
     return None if can_pad(base, ctx, set()) else realize(ctx, b, to_store, base)
   # early realize before expand
-  if resolve(prod(base_shape) < prod(st.shape)): return realize(ctx, b, to_store, base)
+  if to_store.size < st.size: return realize(ctx, b, to_store, base)
   # otherwise safety check pads
   return None if (all(v.mask is None for v in st.views) or can_pad(base, ctx, set())) else realize(ctx, b, to_store, base)
 
