@@ -161,7 +161,6 @@ class TestSafetensors(unittest.TestCase):
     import json
     assert json.loads(dat[8:8+sz])['__metadata__']['hello'] == 'world'
 
-  @unittest.skipIf(CI, "fails in CI after delete_lazy")
   def test_save_all_dtypes(self):
     for dtype in dtypes.fields().values():
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
