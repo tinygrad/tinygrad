@@ -248,6 +248,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def order(self, order) -> UOp.UOpOrder: return UOp.UOpOrder(self, order)
 
+  @property
   def toposort(self) -> Dict[UOp, None]:
     @functools.lru_cache(None)
     def _toposort(u:UOp):
