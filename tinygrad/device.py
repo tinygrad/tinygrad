@@ -6,6 +6,7 @@ import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, cont
 from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
+from tinygrad.ops import UOp, buffers
 
 # **************** Device ****************
 
@@ -56,7 +57,7 @@ class BufferSpec:
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None,
-               initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
+               initial_value:Optional[bytes]=None, lb_refcount=0, uop_ref:Optional[UOp]=None, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
     if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
     self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
@@ -73,6 +74,7 @@ class Buffer:
       assert device == base.device, "base must have the same device"
       self._base = base
     if preallocate: self.allocate()
+    if uop_ref is not None: buffers[uop_ref] = self
   @property
   def base(self) -> Buffer: return self._base if self._base is not None else self
   @property
@@ -101,7 +103,9 @@ class Buffer:
     if self.is_allocated():
       buf = bytearray(self.nbytes)
       self.copyout(memoryview(buf))
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
+    uop_ref = [u for u,v in buffers.items() if self is v]
+    assert len(uop_ref) == 1, "double ref to buffer??"
+    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount, uop_ref[0])
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
