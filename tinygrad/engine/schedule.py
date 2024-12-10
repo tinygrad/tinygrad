@@ -365,15 +365,15 @@ ops_folding = PatternMatcher([
 def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, **kwargs) -> None:
   if to_store.op not in {Ops.CONST, Ops.BIND}: ctx.update([(b, to_store)])
 
-def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, to_store:UOp, b:UOp) -> None:
+def realize_view(ctx:Dict[UOp, UOp], b:UOp, src:UOp, view:UOp) -> None:
   st = unwrap(view.st)
   # fold simple pads
-  if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(base.shape) and resolve(base.size >= prod([y-x for x,y in m])):
-    return None if can_pad(base, ctx, set()) else realize(ctx, b, to_store)
+  if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
+    return None if can_pad(src, ctx, set()) else realize(ctx, b, src)
   # early realize before expand
-  if base.size < st.size: return realize(ctx, b, to_store)
+  if resolve(prod(src.shape) < prod(st.shape)): return realize(ctx, b, src)
   # otherwise safety check pads
-  return None if (all(v.mask is None for v in st.views) or can_pad(base, ctx, set())) else realize(ctx, b, to_store)
+  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx, set())) else realize(ctx, b, src)
 
 def fold_img_cast(ctx:Dict[UOp, UOp], xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> Optional[UOp]:
   if not isinstance(xb.dtype, ImageDType) or b not in ctx or xb not in ctx or uval(to_cast).op in GroupOp.Meta: return None
@@ -390,7 +390,7 @@ do_realize = PatternMatcher([
   # always realize meta ops
   (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
   # realize before expand or unsafe pad ops
-  (UPatScheduled().view(name="view"), realize_view),
+  (UPatScheduled().view(name="view"), lambda ctx,b,to_store,base,view: None if to_store.st is None else realize_view(ctx, b, to_store, view)),
   # don't realize image to image casts
   (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
   # realize before COPY or BUFFER_VIEW
@@ -406,8 +406,8 @@ def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   return UOp.const_with_shape(base.dtype, val, unwrap(base.st).shape)
 
 def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
-  ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape((st:=unwrap(base.st)).shape).to_uop(), append_op(ctx, b, to_store))
-  return UOp(Ops.LOAD, base.dtype, (b, st.to_uop()))
+  ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(base.shape).to_uop(), append_op(ctx, b, to_store))
+  return UOp(Ops.LOAD, base.dtype, (b, unwrap(base.st).to_uop()))
 
 def append_op(ctx:ScheduleContext, b:UOp, to_store:UOp) -> UOp:
   if (m:=ctx.lazybufs[b].metadata) is not None: ctx.ops_metadata[to_store] = m
