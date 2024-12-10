@@ -1609,6 +1609,7 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
 
   @unittest.expectedFailure
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Validation error on WebGPU")
   def test_mnist_val(self):
     from tinygrad.nn.datasets import mnist
     import torch

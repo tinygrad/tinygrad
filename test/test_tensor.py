@@ -499,6 +499,8 @@ class TestMoveTensor(unittest.TestCase):
   @given(strat.sampled_from([d0, d1]), strat.sampled_from([d0, d1]),
          strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
   def test_to_preserves(self, src, dest, dtype, requires_grad):
+    if not is_dtype_supported(dtype):
+      return
     s = Tensor([1, 2, 3], device=src, dtype=dtype, requires_grad=requires_grad)
     if requires_grad: s.sum().backward()
     t = s.to(dest)
