@@ -168,8 +168,8 @@ class ExecItem:
     et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
     if do_update_stats:
       GlobalCounters.kernel_count += 1
-      GlobalCounters.global_ops += (op_est:=sym_infer(self.prg.op_estimate, var_vals))
-      GlobalCounters.global_mem += (mem_est:=sym_infer(self.prg.mem_estimate, var_vals))
+      GlobalCounters.global_ops += int(op_est:=sym_infer(self.prg.op_estimate, var_vals))
+      GlobalCounters.global_mem += int(mem_est:=sym_infer(self.prg.mem_estimate, var_vals))
       if et is not None: GlobalCounters.time_sum_s += et
       if DEBUG >= 2:
         lds_est = sym_infer(self.prg.lds_estimate, var_vals)
