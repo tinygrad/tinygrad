@@ -97,15 +97,15 @@ class Buffer:
     return self
   def __reduce__(self):
     buf = None
+    if len(uop_refs:=[u for u,v in buffers.items() if self is v]) != 1: raise RuntimeError("double ref to buffer?")
+    uop_ref = None if len(uop_refs) == 0 else uop_refs[0]
     if self._base is not None:
-      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
-    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
+      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, uop_ref, self.base, self.offset, self.is_allocated())
+    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount, uop_ref)
     if self.is_allocated():
       buf = bytearray(self.nbytes)
       self.copyout(memoryview(buf))
-    uop_ref = [u for u,v in buffers.items() if self is v]
-    assert len(uop_ref) == 1, "double ref to buffer??"
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount, uop_ref[0])
+    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount, uop_ref)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
