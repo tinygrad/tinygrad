@@ -378,6 +378,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def device(self) -> str: return unwrap(self._device)
   @functools.cached_property
   def _device(self) -> Optional[str]:
+    # COPY is the only op that can change device
+    if self.op is Ops.COPY: return self.arg[1]
+    # everything else inherits device from the source BUFFER
     return self.arg[1][0] if self.op is Ops.BUFFER else dsrcs[0]._device if len(dsrcs:=[x for x in self.src if x._device is not None]) != 0 else None
   @property
   def buf_uop(self) -> UOp:
