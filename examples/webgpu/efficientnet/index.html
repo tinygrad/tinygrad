@@ -17,7 +17,7 @@ canvas {  display: none; }
 * {  text-align: center;  font-family: monospace; }
 </style>
 <title>tinygrad has WebGPU</title>
-<script src="./net.js"></script>
+<script src="../../net.js"></script>
 <link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/logo.png">
 </head>
 <body>
@@ -61,7 +61,7 @@ canvas {  display: none; }
 
 	const getLabels = async () => (await fetch("https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json")).json();
 
-	const getSavetensorBuffer = async () => new Uint8Array(await (await fetch("./net.safetensors")).arrayBuffer());
+	const getSavetensorBuffer = async () => new Uint8Array(await (await fetch("../../net.safetensors")).arrayBuffer());
 
 	const reorderChannelsAndRemoveAlpha = (data) => {
 		const out = [];

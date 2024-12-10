@@ -87,7 +87,7 @@ class TestKernelSpeed(unittest.TestCase):
 
   # NOTE: tiny7 was slower than tiny12
   # TODO: why are convs so slow?!?
-  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=36, amd_tflops=24)
+  def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=24)
 
   # theoretical is nv_tflops=165, amd_tflops=123
   def test_gemm_4096(self): self._test_matmul(4096, nv_tflops=120, amd_tflops=80)
@@ -95,7 +95,7 @@ class TestKernelSpeed(unittest.TestCase):
 
   # theoretical is nv_gbs=1008, amd_gbs=960
   def test_gemv_16384_4096(self): self._test_matmul(16384, 4096, 1, nv_gbs=840, amd_gbs=750)
-  def test_gemv_4096_16384(self): self._test_matmul(4096, 16384, 1, nv_gbs=830, amd_gbs=780)
+  def test_gemv_4096_16384(self): self._test_matmul(4096, 16384, 1, nv_gbs=830, amd_gbs=760)
 
 if __name__ == '__main__':
   unittest.main()

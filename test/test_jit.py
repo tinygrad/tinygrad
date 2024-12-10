@@ -398,6 +398,14 @@ class TestJit(unittest.TestCase):
     for i in range(5):
       np.testing.assert_equal(g(Tensor([i]*3), Tensor.ones(3), Tensor.zeros(3)).numpy(), np.array([i+1]*3))
 
+  def test_jitted_clone(self):
+    def f(a): return a.clone().realize()
+    jf = TinyJit(f)
+    for _ in range(5):
+      a = Tensor.randn(10, 10, device=Device.DEFAULT).realize()
+      ja = jf(a)
+      np.testing.assert_allclose(a.numpy(), ja.numpy(), atol=1e-4, rtol=1e-5)
+
   @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "NV", "AMD"}, "no GPU CI")
   def test_jitted_transfers(self):
     d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
@@ -482,6 +490,53 @@ class TestJitInsideJit(unittest.TestCase):
     g(Tensor([1])).realize()
     with self.assertRaisesRegex(RuntimeError, "having TinyJit inside another TinyJit is not supported"):
       g(Tensor([1])).realize()
+
+class TestCopyInsideJit(unittest.TestCase):
+  def test_copy_inside_jit(self):
+    @TinyJit
+    def add(x,y) -> Tensor: return x.to(Device.DEFAULT)+y
+    for _ in range(5):
+      # create a Tensor in CLANG
+      a = Tensor.rand(16,16,device="CLANG").realize()
+      b = Tensor.rand(16,16).realize()
+      out = add(a,b)
+      np.testing.assert_allclose(out.flatten().tolist(), [x+y for x,y in zip(a.flatten().tolist(), b.flatten().tolist())])
+
+class TestJitPrune(unittest.TestCase):
+  def test_simple_prune(self):
+    weights = Tensor.rand(16).realize()
+    def w2(x) -> Tensor: return (weights*2).contiguous() + x
+    w2_noprune = TinyJit(w2)
+    w2_prune = TinyJit(w2, prune=True)
+
+    for _ in range(3):
+      a = Tensor.rand(16).realize()
+      out = w2_noprune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+    assert len(w2_noprune.captured.jit_cache) == 2
+
+    for _ in range(3):
+      a = Tensor.rand(16).realize()
+      out = w2_prune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+    assert len(w2_prune.captured.jit_cache) == 1
+
+  def test_prune_w_copy_correct(self):
+    weights = Tensor.rand(16).realize()
+    def w2(x) -> Tensor: return (weights*2).contiguous() + x.to(Device.DEFAULT)
+    w2_noprune = TinyJit(w2)
+    w2_prune = TinyJit(w2, prune=True)
+
+    for _ in range(3):
+      a = Tensor.rand(16, device="CLANG").realize()
+      out = w2_noprune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+
+    for _ in range(3):
+      a = Tensor.rand(16, device="CLANG").realize()
+      out = w2_prune(a)
+      np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
+
 
 if __name__ == '__main__':
   unittest.main()

@@ -63,9 +63,7 @@ class Kernel:
       print(self.ast)
       raise e
 
-    @functools.lru_cache(None)
-    def ordered_parents(op:UOp) -> List[UOp]: return dedup([item for x in op.src for item in ordered_parents(x)] + [op])
-    self.reduceops = dedup([x for x in ordered_parents(self.ast) if x.op is Ops.REDUCE_AXIS])
+    self.reduceops = [x for x in self.ast.toposort if x.op is Ops.REDUCE_AXIS]
 
     self.vars: List[Variable] = self.ast.variables()
     # NOTE: this requires a specific order with the [::-1], this is likely a bug
@@ -735,7 +733,8 @@ def _assert_valid_uop(uop:UOp, st:ShapeTracker, sts:Dict[UOp, ShapeTracker]) -> 
     st = uop.arg
   # everything else inherits shape
   else:
-    st = (src_sts:=[sts[x] for x in uop.src if x.has_st])[0]
+    if len(src_sts:=[sts[x] for x in uop.src if x in sts]) == 0: return None
+    st = src_sts[0]
     if not all_same(shapes:=[x.shape for x in src_sts]):
       if all_same(sizes:=[prod(x) for x in shapes]): raise AssertionError(f"found implicit reshape {shapes}")
       raise AssertionError(f"found implicit expand {sizes} {shapes}")
