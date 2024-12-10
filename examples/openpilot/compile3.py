@@ -8,6 +8,7 @@ if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
 from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters, Device
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.tensor import _from_np_dtype
+from tinygrad.engine.realize import CompiledRunner
 
 import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
@@ -16,12 +17,11 @@ from extra.onnx import get_run_onnx   # TODO: port to main tinygrad
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
 OUTPUT = "/tmp/openpilot.pkl"
 
-def compile():
+def compile(onnx_file):
+  onnx_model = onnx.load(onnx_file)
   Tensor.no_grad = True
   Tensor.training = False
 
-  onnx_bytes = fetch(OPENPILOT_MODEL)
-  onnx_model = onnx.load(onnx_bytes)
   run_onnx = get_run_onnx(onnx_model)
   print("loaded model")
 
@@ -48,23 +48,29 @@ def compile():
   np.testing.assert_equal(test_val, ret, "JIT run failed")
   print("jit run validated")
 
+  # checks from compile2
+  kernel_count = 0
+  gated_read_image_count = 0
+  for ei in run_onnx_jit.captured.jit_cache:
+    if isinstance(ei.prg, CompiledRunner):
+      kernel_count += 1
+      gated_read_image_count += ei.prg.p.src.count("?read_image")
+  print(f"kernel_count: {kernel_count}  gated_read_image_count: {gated_read_image_count}")
+  assert kernel_count <= getenv("ALLOWED_KERNEL_COUNT", 0) or getenv("ALLOWED_KERNEL_COUNT", 0) == 0, "too many kernels!"
+  if (allowed_gated_read_image:=getenv("ALLOWED_GATED_READ_IMAGE", -1)) != -1:
+    assert gated_read_image_count <= allowed_gated_read_image, \
+      f"too many gated read_image! {gated_read_image_count=}, {allowed_gated_read_image=}"
+
   with open(OUTPUT, "wb") as f:
     pickle.dump(run_onnx_jit, f)
-  mdl_sz = os.path.getsize(onnx_bytes)
+  mdl_sz = os.path.getsize(onnx_file)
   pkl_sz = os.path.getsize(OUTPUT)
   print(f"mdl size is {mdl_sz/1e6:.2f}M")
   print(f"pkl size is {pkl_sz/1e6:.2f}M")
   print("**** compile done ****")
   return test_val
 
-def test(test_val=None):
-  with open(OUTPUT, "rb") as f:
-    run = pickle.load(f)
-
-  # same randomness as above
-  Tensor.manual_seed(100)
-  new_inputs = {nm:Tensor.randn(*st.shape, dtype=dtype).mul(8).realize() for nm, (st, _, dtype, _) in
-                sorted(zip(run.captured.expected_names, run.captured.expected_st_vars_dtype_device))}
+def test_vs_compile(run, new_inputs, test_val=None):
   new_inputs_numpy = {k:v.numpy() for k,v in new_inputs.items()}
 
   # create fake "from_blob" tensors for the inputs, and wrapped NPY tensors for the numpy inputs (these have the same underlying memory)
@@ -88,8 +94,39 @@ def test(test_val=None):
   out = run(**inputs)
   changed_val = out.numpy()
   np.testing.assert_raises(AssertionError, np.testing.assert_array_equal, val, changed_val)
+  return val
+
+def test_vs_onnx(new_inputs, test_val, onnx_file):
+  new_inputs_numpy = {k:v.numpy() for k,v in new_inputs.items()}
+  onnx_model = onnx.load(onnx_file)
+
+  if getenv("ORT"):
+    # test with onnxruntime
+    import onnxruntime as ort
+    onnx_session = ort.InferenceSession(onnx_file)
+    onnx_output = onnx_session.run([onnx_model.graph.output[0].name], {k:v.astype(np.float16) for k,v in new_inputs_numpy.items()})
+    new_torch_out = onnx_output[0]
+    print("got ort outputs")
+  else:
+    # test with torch
+    from test.models.test_onnx import run_onnx_torch
+    # NOTE: we have to correct the order here
+    new_torch_out = run_onnx_torch(onnx_model, {k.name:new_inputs_numpy[k.name] for k in onnx_model.graph.input}).numpy()
+    print("got torch outputs")
+
+  np.testing.assert_allclose(new_torch_out.reshape(test_val.shape), test_val, atol=1e-4, rtol=1e-2)
+  print("test vs onnx passed")
 
 if __name__ == "__main__":
-  test_val = compile() if not getenv("RUN") else None
-  test(test_val)
+  onnx_file = fetch(OPENPILOT_MODEL)
+  test_val = compile(onnx_file) if not getenv("RUN") else None
 
+  with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
+
+  # same randomness as compile
+  Tensor.manual_seed(100)
+  new_inputs = {nm:Tensor.randn(*st.shape, dtype=dtype).mul(8).realize() for nm, (st, _, dtype, _) in
+                sorted(zip(pickle_loaded.captured.expected_names, pickle_loaded.captured.expected_st_vars_dtype_device))}
+
+  test_val = test_vs_compile(pickle_loaded, new_inputs, test_val)
+  if not getenv("FLOAT16"): test_vs_onnx(new_inputs, test_val, onnx_file)
