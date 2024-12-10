@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import identity_element, buffers
+from tinygrad.ops import identity_element, buffers, exec_alu
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -353,6 +353,27 @@ def simplify_reduceop(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
     return UOp.const(reduce.dtype, ret)
   return None
 
+def simplify_binop(binop:UOp, x:UOp, y:UOp):
+  if all_int(x.shape) and x.is_unrealized_unmasked_const(): other, const = y, x
+  elif all_int(y.shape) and y.is_unrealized_unmasked_const():
+    if binop.op is Ops.IDIV and y.const_arg == 1: return x
+    other, const = x, y
+  else: return None
+  if binop.op is Ops.ADD and const.const_arg == 0: return other
+  if binop.op is Ops.MUL and const.const_arg == 1: return other
+  if binop.op is Ops.MUL and const.const_arg == 0: return UOp.const(binop.dtype, 0)
+
+def simplify_alu(alu:UOp):
+  if not all(x.is_unrealized_unmasked_const() for x in alu.src): return None
+  const_val = exec_alu(alu.op, alu.dtype, [s.const_arg for s in alu.src])
+  # this needs to have a VIEW next
+  return UOp.const(alu.dtype, const_val)
+
+def merge_identical_buffers(base:UOp, b:UOp, to_store:UOp):
+  if to_store.arg != base.arg: return None
+  buffers[b] = buffers[to_store.src[0]]
+  return to_store
+
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
@@ -361,8 +382,14 @@ ops_folding = PatternMatcher([
    lambda ctx,reduce,x:UOp.const(reduce.dtype, identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
   # reduce of const is collapsed (TODO: make this a generic rule for stride0)
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), simplify_reduceop),
+  # alu
+  (UPat(GroupOp.ALU, name="alu"), simplify_alu),
+  # binop of const
+  (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, name="binop", src=(UPat.var("x"), UPat.var("y"))), simplify_binop),
   # CONST doesn't need COPY
   (UPat(Ops.COPY, src=(UPat.var("x"),)), lambda ctx,x:x if x.is_unrealized_const() else None),
+  # merge identical copies
+  (UPatScheduled(Ops.VIEW), merge_identical_buffers),
 ])
 
 # ** this decides which ops get realized

@@ -10,9 +10,8 @@ def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
   schedule = create_schedule(t.lazydata.lbs)
   asts = [s for s in schedule if s.ast.op is Ops.SINK]
-  assert len(asts) == desired_count
+  assert len(asts) == desired_count, f"got {len(asts)} ast count, expected {desired_count}"
 
-@unittest.skip("elementwise ops folding no longer supported")
 class TestUnaryOpsConstFolding(unittest.TestCase):
   def test_all_consts_ops(self):
     _check_ast_count(0, Tensor.ones(4).exp())
@@ -20,6 +19,7 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor.ones(4) + Tensor.ones(4))
     _check_ast_count(0, Tensor.ones(4) / Tensor.ones(4))
 
+  @unittest.expectedFailure
   def test_cast(self):
     _check_ast_count(0, Tensor.ones(4).cast(dtypes.int16))
     _check_ast_count(0, Tensor.full(4, fill_value=-1).cast(dtypes.uint16))
@@ -35,7 +35,6 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     x = x.clip(0, 1).realize()
     _check_ast_count(1, x.neg())
 
-@unittest.skip("elementwise ops folding no longer supported")
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + 0)
@@ -97,6 +96,7 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) ** Tensor.ones(4))
   def test_literal_one_pow(self):
     _check_ast_count(0, 1 ** Tensor([1.0, 2, 3, 4]))
+  @unittest.expectedFailure
   def test_tensor_one_pow(self):
     _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
 
