@@ -370,7 +370,7 @@ def train_retinanet():
 
   def _data_get(it):
     x, y_boxes, y_labels, matches, cookie = next(it)
-    return x.shard(GPUS, axis=0).realize(), y_boxes, y_labels, matches.shard(GPUS, axis=0), cookie
+    return x.shard(GPUS, axis=0).realize(), y_boxes, y_labels.shard(GPUS, axis=0), matches.shard(GPUS, axis=0), cookie
   
   def _create_lr_scheduler(optim, start_iter, warmup_iters, warmup_factor):
     # TODO: refactor this a bit more so we don't have to recreate it, unlike what MLPerf script is doing
@@ -381,10 +381,11 @@ def train_retinanet():
       return warmup_factor * (1 - alpha) + alpha
     return LambdaLR(optim, _lr_lambda)
 
-  def _train_step(model, optim, lr_scheduler, x, matches):
+  @Tensor.train()
+  def _train_step(model, optim, lr_scheduler, x, y, matches):
     optim.zero_grad()
 
-    y_hat = model(normalize(x, GPUS))
+    y_hat = model(normalize(x, GPUS), y=y, matches=matches)
 
   # ** hyperparameters **
   # using https://github.com/mlcommons/logging/blob/96d0acee011ba97702532dcc39e6eeaa99ebef24/mlperf_logging/rcp_checker/training_4.1.0/rcps_ssd.json#L3
@@ -435,7 +436,7 @@ def train_retinanet():
 
     while proc is not None:
       x, y_boxes, y_labels, matches, proc = proc
-      _train_step(model, optim, lr_scheduler, x, matches) # TODO: enable once full model has been integrated
+      _train_step(model, optim, lr_scheduler, x, y_labels, matches) # TODO: enable once full model has been integrated
 
       if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:

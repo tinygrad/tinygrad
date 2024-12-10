@@ -1,8 +1,11 @@
+from typing import Optional
+
 import math
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import flatten, get_child
 import tinygrad.nn as nn
 from examples.mlperf.initializers import Conv2dNormal, Conv2dKaimingUniform
+from examples.mlperf.losses import sigmoid_focal_loss
 from extra.models.helpers import meshgrid, nms
 from extra.models.resnet import ResNet
 import numpy as np
@@ -47,10 +50,11 @@ class RetinaNet:
     self.head = RetinaHead(self.backbone.out_channels, num_anchors=num_anchors, num_classes=num_classes)
     self.anchor_gen = lambda input_size: generate_anchors(input_size, self.backbone.compute_grid_sizes(input_size), scales, aspect_ratios)
 
-  def __call__(self, x):
-    return self.forward(x)
-  def forward(self, x):
-    return self.head(self.backbone(x))
+  def __call__(self, x:Tensor, y:Optional[Tensor] = None, matches:Optional[Tensor] = None):
+    return self.forward(x, y=y, matches=matches)
+
+  def forward(self, x:Tensor, y:Optional[Tensor] = None, matches:Optional[Tensor] = None):
+    return self.head(self.backbone(x), y=y, matches=matches)
 
   def load_from_pretrained(self):
     model_urls = {
@@ -136,9 +140,26 @@ class ClassificationHead:
     self.num_classes = num_classes
     self.conv = flatten([(Conv2dNormal(in_channels, in_channels, kernel_size=3, padding=1), lambda x: x.relu()) for _ in range(4)])
     self.cls_logits = Conv2dNormal(in_channels, num_anchors * num_classes, kernel_size=3, padding=1, prior_prob=prior_prob)
-  def __call__(self, x):
+
+  def __call__(self, x:Tensor, y:Optional[Tensor] = None, matches:Optional[Tensor] = None):
     out = [self.cls_logits(feat.sequential(self.conv)).permute(0, 2, 3, 1).reshape(feat.shape[0], -1, self.num_classes) for feat in x]
-    return out[0].cat(*out[1:], dim=1).sigmoid()
+    out = out[0].cat(*out[1:], dim=1).sigmoid()
+
+    if Tensor.training:
+      assert y is not None and matches is not None, "y and matches should be passed in when training"
+      return self._compute_loss(out, y, matches)
+    else:
+      return out
+  
+  def _compute_loss(self, x:Tensor, y:Tensor, matches:Tensor) -> Tensor:
+    y = ((y + 1) * matches - 1).one_hot(num_classes=x.shape[-1])
+
+    # find indices for which anchors should be ignored
+    valid_idxs = (matches != -2).reshape(matches.shape[0], -1, 1)
+
+    import pdb; pdb.set_trace()
+    loss = sigmoid_focal_loss(x, y, mask=valid_idxs, reduction="sum")
+    
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
@@ -152,8 +173,9 @@ class RetinaHead:
   def __init__(self, in_channels, num_anchors, num_classes):
     self.classification_head = ClassificationHead(in_channels, num_anchors, num_classes)
     self.regression_head = RegressionHead(in_channels, num_anchors)
-  def __call__(self, x):
-    pred_bbox, pred_class = self.regression_head(x), self.classification_head(x)
+
+  def __call__(self, x:Tensor, y:Optional[Tensor] = None, matches:Optional[Tensor] = None):
+    pred_bbox, pred_class = self.regression_head(x), self.classification_head(x, y=y, matches=matches)
     out = pred_bbox.cat(pred_class, dim=-1)
     return out
 
