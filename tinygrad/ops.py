@@ -239,13 +239,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else self.arg
 
-  @functools.cached_property
+  @property
   def toposort(self) -> Dict[UOp, None]:
-    nodes: Dict[UOp, None] = {}
-    # NOTE: this is a lot faster than the comprehension in parents
-    for parent in self.src: nodes.update(parent.toposort)
-    nodes[self] = None
-    return nodes
+    @functools.lru_cache(None)
+    def _toposort(u:UOp):
+      nodes: Dict[UOp, None] = {}
+      # NOTE: this is a lot faster than the comprehension in parents
+      for parent in u.src: nodes.update(_toposort(parent))
+      nodes[u] = None
+      return nodes
+    return _toposort(self)
 
   @functools.cached_property
   def tuplize(self:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
