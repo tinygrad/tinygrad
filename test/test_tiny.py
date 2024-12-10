@@ -17,6 +17,10 @@ class TestTiny(unittest.TestCase):
     out2 = out + Tensor([1.,1,1])
     self.assertListEqual(out2.tolist(), [6.0, 8.0, 10.0])
 
+  def test_plus_consts(self):
+    out = (Tensor([1.,2,3]) + 4) + 5
+    self.assertListEqual(out.tolist(), [10.0, 11.0, 12.0])
+
   def test_plus_big(self):
     out = Tensor.ones(16).contiguous() + Tensor.ones(16).contiguous()
     self.assertListEqual(out.tolist(), [2]*16)
