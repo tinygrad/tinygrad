@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.realize import run_schedule
-from tinygrad.ops import Ops
+from tinygrad.ops import Ops, forced_realize
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.schedule import create_schedule
 
@@ -63,29 +63,27 @@ class TestLazyBuffer(unittest.TestCase):
 
   def test_const_dtype(self):
     lb: LazyBuffer = Tensor([1], dtype=dtypes.int).lazydata
-    assert lb.const_like(1).base.src[1].arg == 1
-    assert type(lb.const_like(1).base.src[1].arg) is int
+    assert lb.const_like(1).const_arg == 1
+    assert type(lb.const_like(1).const_arg) is int
 
     lb: LazyBuffer = Tensor([1], dtype=dtypes.float).lazydata
-    assert lb.const_like(1).base.src[1].arg == 1.0
-    assert type(lb.const_like(1).base.src[1].arg) is float
+    assert lb.const_like(1).const_arg == 1.0
+    assert type(lb.const_like(1).const_arg) is float
 
-  @unittest.skip("forced_realize isn't supported")
   def test_forced_realized_alu(self):
     a = Tensor.randn(2, 2).realize()
     b = Tensor.randn(2, 2).realize()
     add = a + b
-    add.lazydata.forced_realize = True
+    forced_realize.add(add.lazydata)
     out = add+2
     sched = create_schedule([out.lazydata])
     self.assertEqual(len(sched), 2)
     run_schedule(sched)
     np.testing.assert_allclose(out.numpy(), a.numpy()+b.numpy()+2)
 
-  @unittest.skip("forced_realize isn't supported")
   def test_forced_realized_metaop(self):
     empty = Tensor.empty(1)
-    empty.lazydata.forced_realize = True
+    forced_realize.add(empty.lazydata)
     sched = create_schedule([empty.lazydata])
     self.assertEqual(len(sched), 1)
     self.assertIs(sched[0].ast.op, Ops.EMPTY)

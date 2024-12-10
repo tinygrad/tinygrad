@@ -77,7 +77,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
     src = tuple(to_uop(x, ctx, cache) for x in buf.srcs)
     buf_uop = src[0].base.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
     op = UOp(buf.op, dtype.base, src, buf.arg)
-  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
+  ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
   # keep track of ops outside the big graph
   if op is not None:
     buf_uop.buffer.ref(1)
@@ -86,6 +86,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
     if op.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
     for x in op.src:
       if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
+  cache[buf] = ret
   return ret
 
 # **** AST graph rewrite
@@ -343,7 +344,7 @@ def simplify_reduceop(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
   # remove reduce on unmasked const
   if all_int(x.shape) and x.is_unrealized_unmasked_const():
     prshape = prod(unwrap(x.st).shape[i] for i in reduce.arg[1])
-    ret = x.base.src[1].arg
+    ret = x.const_arg
     match reduce.arg[0]:
       case Ops.ADD: ret *= prshape
       case Ops.MUL: ret **= prshape

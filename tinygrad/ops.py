@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal
+from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal, get_args
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -277,8 +277,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def shape(self) -> Tuple[sint, ...]: return unwrap(self.st).shape
   @property
   def size(self) -> int: return self.arg[1][1] if self.op is Ops.BUFFER else unwrap(self.st).size
-  @property
-  def nbytes(self) -> int: return self.size*self.dtype.itemsize
 
   # *** uop evaluation ***
 
@@ -307,6 +305,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ret = self.src[0 if self.op is Ops.VALID else 1]
     assert ret.op is Ops.VIEW, f"st_arg trying to return {ret}"
     return ret.arg
+  @property
+  def const_arg(self) -> ConstType:
+    match self.base.op:
+      case Ops.CONST: ret = self.base.arg
+      case Ops.VIEW: ret = self.base.src[1].const_arg
+      case op: raise AssertionError(f"const_arg called on {op}")
+    assert isinstance(ret, get_args(ConstType)), f"const_arg trying to return {ret}"
+    return ret
   @property
   def axis_arg(self) -> Tuple[int, ...]:
     assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
@@ -391,7 +397,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
     # copy the base and apply the shapetracker on the new device
     if not unwrap((src:=self.base).st).contiguous: raise RuntimeError(f"can only copy contiguous {self}")
-    return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, src.nbytes, (src,)).view(unwrap(self.st))
+    return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, None, (src,)).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   def is_unrealized_const(self): return (s:=self.base).op is Ops.VIEW and len(s.src) == 2 and s.realized is None and s.src[1].op is Ops.CONST
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in unwrap(self.st).views)
@@ -414,11 +420,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
   def view(self, new_st:ShapeTracker) -> UOp:
-    assert self.st is not None and self.base.st is not None, f"must have shape {self}"
+    if self.st is None: return UOp(Ops.VIEW, self.dtype, (self,), new_st)
     ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
     # instant folding rules
     if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)): return ret.const_like(0)
-    if new_st.contiguous and self.base.st.shape == new_st.shape: return self.base
+    if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return ret
   def reshape(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).reshape(arg))
   def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self.view(unwrap(self.st).pad(arg))
@@ -574,7 +580,7 @@ python_alu: Dict[Ops, Callable]  = {
   Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan,
   Ops.NEG: operator.neg, Ops.ADD: operator.add, Ops.SUB: operator.sub, Ops.MUL: operator.mul, Ops.CMPNE: operator.ne, Ops.CMPLT: operator.lt,
   Ops.XOR: operator.xor, Ops.OR: operator.or_, Ops.AND: operator.and_, Ops.SHR: operator.rshift, Ops.SHL: operator.lshift, Ops.MAX: max,
-  Ops.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], Ops.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else x*math.inf,
+  Ops.MOD: lambda x,y: abs(int(x))%abs(int(y))*(1,-1)[x<0], Ops.IDIV: lambda x,y: abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else 0,
   Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z}
 
 def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):

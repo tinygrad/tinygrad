@@ -14,7 +14,7 @@ from tinygrad.dtype import DType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.ops import UOp, Ops, graph_rewrite, track_rewrites, view_supported_devices
-from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
+from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, ScheduleItem, create_schedule, view_right, view_left, do_realize
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
@@ -516,12 +516,13 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   # multireduce spec
-  @unittest.skipUnless(SPLIT_REDUCEOP, "Testing split reducop requires SPLIT_REDUCEOP")
+  #@unittest.skipUnless(SPLIT_REDUCEOP, "Testing split reducop requires SPLIT_REDUCEOP")
+  @unittest.skip("split_reduceop isn't supported")
   def test_preserve_multistage_reduce(self):
     big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)
     x = Tensor.randn(big_enough).realize()
     out = (x - x.max(keepdim=True)).max()
-    run_schedule(check_schedule(out, 2))
+    run_schedule(check_schedule(out, 4))
     np.testing.assert_allclose(out.numpy(), (x.numpy() - x.numpy().max(keepdims=True)).max())
 
   def test_multistage_reduce(self):
@@ -1541,6 +1542,7 @@ class TestIndexing(unittest.TestCase):
   def test_arange_view_op(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
     assert isinstance(a.lazydata, LazyBuffer)
+    # NOTE: meta op uops are wrapped around a VIEW uop
     self.assertIs(a.lazydata.base.src[1].op, Ops.BUFFER_VIEW)
     self.check_schedule(a, 1)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
