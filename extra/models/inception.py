@@ -3,7 +3,7 @@ from tinygrad.nn import Conv2d, BatchNorm2d, Linear
 from tinygrad.nn.state import load_state_dict, torch_load
 from tinygrad.helpers import fetch
 
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 import numpy as np
 from scipy import linalg
 
@@ -307,16 +307,21 @@ class FidInceptionV3:
     ])
     return x
 
+
   def compute_score(self, inception_activations:Tensor, val_stats_path:str) -> float:
     if self.m1 is None and self.s1 is None:
       with np.load(val_stats_path) as f:
         self.m1, self.s1 = f['mu'][:], f['sigma'][:]
     assert self.m1 is not None and self.s1 is not None
 
-    m2 = inception_activations.mean(axis=0).numpy()
-    s2 = np.cov(inception_activations.numpy(), rowvar=False)
-
+    m2, s2 = compute_mu_and_sigma(inception_activations)
     return calculate_frechet_distance(self.m1, self.s1, m2, s2)
+
+def compute_mu_and_sigma(inception_activations:Tensor) -> Tuple[np.ndarray,np.ndarray]:
+  return (
+    inception_activations.mean(axis=0).numpy(),
+    np.cov(inception_activations.numpy(), rowvar=False),
+  )
 
 def calculate_frechet_distance(mu1:np.ndarray, sigma1:np.ndarray, mu2:np.ndarray, sigma2:np.ndarray, eps:float=1e-6) -> float:
   mu1 = np.atleast_1d(mu1)
