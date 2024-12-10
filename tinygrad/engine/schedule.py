@@ -364,19 +364,18 @@ ops_folding = PatternMatcher([
 
 # ** this decides which ops get realized
 
-def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> None:
+def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, **kwargs) -> None:
   if to_store.op not in {Ops.CONST, Ops.BIND}: ctx.update([(b, to_store)])
 
 def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, to_store:UOp, b:UOp) -> None:
-  if to_store.op in {Ops.CONST, Ops.BIND}: return None
   st = unwrap(view.st)
   # fold simple pads
-  if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(st.shape) and resolve(to_store.size >= prod([y-x for x,y in m])):
-    return None if can_pad(base, ctx, set()) else realize(ctx, b, to_store, base)
+  if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(base.shape) and resolve(base.size >= prod([y-x for x,y in m])):
+    return None if can_pad(base, ctx, set()) else realize(ctx, b, to_store)
   # early realize before expand
-  if to_store.size < st.size: return realize(ctx, b, to_store, base)
+  if base.size < st.size: return realize(ctx, b, to_store)
   # otherwise safety check pads
-  return None if (all(v.mask is None for v in st.views) or can_pad(base, ctx, set())) else realize(ctx, b, to_store, base)
+  return None if (all(v.mask is None for v in st.views) or can_pad(base, ctx, set())) else realize(ctx, b, to_store)
 
 def fold_img_cast(ctx:Dict[UOp, UOp], xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> Optional[UOp]:
   if not isinstance(xb.dtype, ImageDType) or b not in ctx or xb not in ctx or uval(to_cast).op in GroupOp.Meta: return None
@@ -387,11 +386,17 @@ def init_big_graph(ctx:ScheduleContext, sink:UOp) -> Optional[UOp]:
   new_src = tuple(x.base for x in sink.src if is_scheduled(x.base) and x.base.src[1].op is not Ops.CONST)
   return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
 
+def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
+  if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
+  return UOp.const_with_shape(base.dtype, val, unwrap(base.st).shape)
+
 do_realize = PatternMatcher([
   # always realize sinked ops
   (UPat(Ops.SINK, name="sink"), init_big_graph),
   # always realize meta ops
   (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
+  # consts are always fused and generated
+  (UPatScheduled({Ops.CONST, Ops.BIND}), generate_valid),
   # realize before expand or unsafe pad ops
   (UPatScheduled().view(name="view"), realize_view),
   # don't realize image to image casts
@@ -404,10 +409,6 @@ do_realize = PatternMatcher([
 
 # ** this breaks down realized ops into STOREs and rewrites the ops to LOADs
 
-def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
-  if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
-  return UOp.const_with_shape(base.dtype, val, unwrap(base.st).shape)
-
 def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape((st:=unwrap(base.st)).shape).to_uop(), append_op(ctx, b, to_store))
   return UOp(Ops.LOAD, base.dtype, (b, st.to_uop()))
@@ -417,8 +418,6 @@ def append_op(ctx:ScheduleContext, b:UOp, to_store:UOp) -> UOp:
   return to_store
 
 break_sched = PatternMatcher([
-  # consts are always fused and generated
-  (UPatScheduled({Ops.CONST, Ops.BIND}), generate_valid),
   # everything else is a VIEW of BUFFER that either realizes or fuses
   (UPatScheduled(), lambda ctx,b,to_store,base: append_realize(ctx, b, to_store, base) if b in ctx.realizes else append_op(ctx, b, to_store)),
   # just load realized buffers
