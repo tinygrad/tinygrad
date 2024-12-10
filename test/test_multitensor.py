@@ -284,6 +284,7 @@ class TestMultiTensor(unittest.TestCase):
     lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
     lr_sched.step()
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), f"long dtype not supported on {Device.DEFAULT}")
   def test_embedding(self):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
 
