@@ -382,6 +382,7 @@ class KFDIface:
 
 class VFIOIface:
   vfio_fd:int = -1
+  iommu_set:bool = False
 
   def __init__(self, dev, dev_id):
     self.dev = dev
@@ -402,6 +403,8 @@ class VFIOIface:
     self.pcidev = VFIOIface.gpus[dev_id]
     self.pcibus = f"{self.pcidev.domain_16:04x}:{self.pcidev.bus:02x}:{self.pcidev.dev:02x}.{self.pcidev.func:d}"
 
+    print(self.pcibus)
+
     # if not os.path.exists(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group"):
     if os.path.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       with open(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", 'w') as f: f.write(self.pcibus)
@@ -418,8 +421,9 @@ class VFIOIface:
       self.vfio_group = os.open(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
       vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(VFIOIface.vfio_fd))
 
-      if dev_id == 0:
+      if not VFIOIface.iommu_set:
         vfio.VFIO_SET_IOMMU(VFIOIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
+        VFIOIface.iommu_set = True
       self.vfio_dev = vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, (ctypes.c_char * (len(self.pcibus) + 1))(*bytearray(self.pcibus.encode() + b'\0')))
 
       self.irq_fd = os.eventfd(0, 0)
@@ -437,7 +441,7 @@ class VFIOIface:
     # TODO: think of a way to handle this
     self.properties = {'simd_count': 192, 'simd_per_cu': 2, 'max_waves_per_simd': 16, 'gfx_target_version': 110000, 'max_slots_scratch_cu': 32,
                        'array_count': 12, 'simd_arrays_per_engine': 2, 'lds_size_in_kb': 64}
-  
+
   def _map_pci_range(self, bar):
     if not getenv("VFIO", 1):
       libpciaccess.pci_device_map_range(ctypes.byref(self.pcidev), self.pcidev.regions[bar].base_addr, size:=self.pcidev.regions[bar].size,
@@ -469,6 +473,7 @@ class VFIOIface:
   def map(self, mem):
     if mem.meta[0] == self.dev or self.dev in mem.meta[1]: return
     mem.meta[1].append(self.dev)
+    # print("Map", hex(mem.va_addr), hex(mem.size), mem.meta[1])
     self.adev.mm.map_from(mem.va_addr, mem.size, mem.meta[0].dev_iface.adev)
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, debug_memory_size=0):
@@ -522,7 +527,7 @@ class AMDDevice(HCQCompiled):
   def __init__(self, device:str=""):
     AMDDevice.driverless = not os.path.isdir('/sys/module/amdgpu/') or bool(getenv("AMD_DRIVERLESS", 0))
 
-    self.device_id = int(device.split(":")[1]) if ":" in device else 1
+    self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.dev_iface = VFIOIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self.device_id)
 
     self.target = int(self.dev_iface.properties['gfx_target_version'])
@@ -557,10 +562,10 @@ class AMDDevice(HCQCompiled):
     ctl_stack_size = round_up(12 * (max_cu_id + 1) * (max_wave_id + 1) + 8 + 40, mmap.PAGESIZE)
     debug_memory_size = round_up((max_cu_id + 1) * (max_wave_id + 1) * 32, 64)
 
-    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x100000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
+    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE, 0x800000, ctx_save_restore_size=wg_data_size + ctl_stack_size,
                                            eop_buffer_size=0x1000, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
-    self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x100000)
+    self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x800000)
 
     super().__init__(device, AMDDriverAllocator(self), AMDRenderer(), AMDCompiler(self.arch), functools.partial(AMDProgram, self),
                      AMDSignal, AMDComputeQueue, AMDCopyQueue)
