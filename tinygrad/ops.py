@@ -277,8 +277,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def shape(self) -> Tuple[sint, ...]: return unwrap(self.st).shape
   @property
   def size(self) -> int: return self.arg[1][1] if self.op is Ops.BUFFER else unwrap(self.st).size
-  @property
-  def nbytes(self) -> int: return self.size*self.dtype.itemsize
 
   # *** uop evaluation ***
 
@@ -399,7 +397,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if prod(self.shape) < prod(self.base.shape): return self.contiguous().copy_to_device(device)
     # copy the base and apply the shapetracker on the new device
     if not unwrap((src:=self.base).st).contiguous: raise RuntimeError(f"can only copy contiguous {self}")
-    return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, src.nbytes, (src,)).view(unwrap(self.st))
+    return UOp.metaop(Ops.COPY, src.shape, src.dtype, device, None, (src,)).view(unwrap(self.st))
   def clone(self) -> UOp: return self.copy_to_device(self.device, clone=True)
   def is_unrealized_const(self): return (s:=self.base).op is Ops.VIEW and len(s.src) == 2 and s.realized is None and s.src[1].op is Ops.CONST
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in unwrap(self.st).views)
