@@ -234,12 +234,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   class UOpOrder:
     def __init__(self, uop: UOp, order=None) -> None: self.uop, self.order = uop, order
     def __lt__(self, other: UOp.UOpOrder):
+      const_s, const_o = 0,0
       if self.order is Ops.ADD:
-        if self.uop.op is Ops.MUL and self.uop.src[1].op in (Ops.CONST, Ops.VCONST): self.uop = self.uop.src[0]
-        if other.uop.op is Ops.MUL and other.uop.src[1].op in (Ops.CONST, Ops.VCONST): other.uop = other.uop.src[0]
+        if self.uop.op in (Ops.MUL, Ops.ADD) and self.uop.src[1].op is Ops.CONST:
+          const_s = self.uop.src[1].arg
+          self.uop = self.uop.src[0]
+        if other.uop.op in (Ops.MUL, Ops.ADD) and other.uop.src[1].op is Ops.CONST:
+          const_o = other.uop.src[1].arg
+          other.uop = other.uop.src[0]
+      if self.uop is other.uop: return const_s < const_o
       for s, o in zip((self.uop.op.value, self.uop.arg, self.uop.dtype), (other.uop.op.value, other.uop.arg, other.uop.dtype)):
         if s != o: return s < o
-      if self.uop is other.uop: return False
       step = -1 if self.uop.op is Ops.IDIV else 1
       for s, o in zip(self.uop.src[::step], other.uop.src[::step]):
         if s is not o: return s.order(self.order) < o.order(self.order)
