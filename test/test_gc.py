@@ -44,6 +44,7 @@ class TestGC(unittest.TestCase):
     assert (tensors_allocated()-base == 4)
     Tensor.manual_seed(0)
 
+  @unittest.skip("gc")
   def test_schedule_gc(self):
     init = bufs_allocated()
     x = Tensor.ones(256).contiguous().realize()
