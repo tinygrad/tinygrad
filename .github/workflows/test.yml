@@ -441,13 +441,7 @@ jobs:
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python3 -m examples.compile_efficientnet
     - name: Install Puppeteer
-      run: |
-        if [ ! -d "node_modules/puppeteer" ]; then
-          echo "Installing Puppeteer..."
-          npm install puppeteer
-        else
-          echo "Puppeteer is already installed."
-        fi
+      run: npm list puppeteer || npm install puppeteer
     - name: Run WEBGPU Efficientnet
       run: node test/web/test_webgpu.js
     - name: Run process replay tests
