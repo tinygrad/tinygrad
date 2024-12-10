@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import identity_element, realized, buffers
+from tinygrad.ops import identity_element, buffers
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -59,13 +59,15 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
     cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
     return ret
   # make things that can't be images not images
-  dtype = buf_uop.dtype.base if (buf_uop:=realized.get(buf)) is not None else buf.dtype
+  dtype = buf.buf_uop.dtype.base if buf.is_realized else buf.dtype
   if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
     assert buf.realized is None, "can't fixup allocated buffer"
     if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
     dtype = buf.dtype.base
   # base is a VIEW of (BUFFER, (optional) op)
-  if buf_uop is not None: op = None
+  if buf.is_realized:
+    buf_uop = buf.buf_uop
+    op = None
   # metaops already have a BUFFER uop
   elif is_scheduled(buf):
     buf_uop = buf.buf_uop
@@ -447,7 +449,13 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       ast, ast_ctx = full_ast_rewrite(UOp.sink(*stores), ctx)
       prescheduled.append(ScheduleItem(ast, tuple(u.buffer for u in ast_ctx.bufs if u.size != 0), tuple(ast_ctx.metadata),
                                        frozenset(ubuf for ubuf,ops in ast_ctx.assign_adj.items() if any(x.op is Ops.PRELOAD for x in ops))))
-      for u in ast_ctx.sinked: realized[ast_ctx.lazybufs[u]] = u  # can only schedule once
+      for u in ast_ctx.sinked:
+       # can only schedule once
+       lazy = ast_ctx.lazybufs[u]
+       st = unwrap(lazy.st)
+       lazy.op = Ops.VIEW
+       lazy.arg = st
+       lazy.src = (u,)
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)

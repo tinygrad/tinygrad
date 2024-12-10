@@ -211,12 +211,10 @@ class UOpMetaClass(type):
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
     if _device_buffer is not None:
       buffers[unwrap(_buf_uop)] = _device_buffer
-      realized[created] = unwrap(_buf_uop)
     return created
 
 # some uops map to other stuff
 buffers:weakref.WeakKeyDictionary[UOp, Buffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
-realized:weakref.WeakKeyDictionary[UOp, UOp] = weakref.WeakKeyDictionary()  # this maps realized ops to a BUFFER uop
 forced_realize:weakref.WeakSet[UOp] = weakref.WeakSet()
 
 # NOTE: this should be frozen, but frozen is slower
@@ -228,10 +226,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   arg:Any = None
   def __del__(self):
     if self.op is Ops.BUFFER: self.buffer.ref(-1)
-    del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg)]
+    if (k:=(self.op, self.dtype, self.src, self.arg)) in UOpMetaClass.ucache:
+      del UOpMetaClass.ucache[k]
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg]
-    if (_device_buffer:=self.realized) is not None: args.extend([_device_buffer, realized[self]])
+    if (_device_buffer:=self.realized) is not None: args.extend([_device_buffer])
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), kwargs.pop("arg", self.arg))
@@ -407,7 +406,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def srcs(self): return self.src
   @srcs.deleter
-  def srcs(self): realized[self] = self.buf_uop
+  def srcs(self): self.src = (self.buf_uop, )
   @property
   def lbs(self): return [self]
   @property
@@ -460,7 +459,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     buffers[self] = ret = Buffer(*self.arg[1])
     return ret
   @property
-  def realized(self) -> Optional[Buffer]: return buffers[real_buf_uop] if (real_buf_uop:=realized.get(self)) is not None else None
+  def realized(self) -> Optional[Buffer]:
+    if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is Ops.BUFFER: return buffers[self.src[0]]
+    return None
   @property
   def is_realized(self) -> bool: return self.base.realized is not None
 
