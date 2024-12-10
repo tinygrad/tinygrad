@@ -383,7 +383,7 @@ def train_retinanet():
 
   @Tensor.train()
   def _train_step(model, optim, lr_scheduler, x, y, matches):
-    optim.zero_grad()
+    # optim.zero_grad()
 
     y_hat = model(normalize(x, GPUS), y=y, matches=matches)
 
@@ -410,7 +410,7 @@ def train_retinanet():
   for p in params: p.realize().to_(GPUS)
 
   # ** optimizer **
-  optim = Adam(params, lr=LR)
+  # optim = Adam(params, lr=LR)
 
   # ** dataset **
   anchors = np.concatenate(model.anchor_gen((800, 800)), axis=0)
@@ -436,7 +436,7 @@ def train_retinanet():
 
     while proc is not None:
       x, y_boxes, y_labels, matches, proc = proc
-      _train_step(model, optim, lr_scheduler, x, y_labels, matches) # TODO: enable once full model has been integrated
+      _train_step(model, None, lr_scheduler, x, y_labels, matches) # TODO: enable once full model has been integrated
 
       if len(prev_cookies) == getenv("STORE_COOKIES", 1): prev_cookies = []  # free previous cookies after gpu work has been enqueued
       try:

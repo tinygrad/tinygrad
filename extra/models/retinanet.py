@@ -157,9 +157,7 @@ class ClassificationHead:
     # find indices for which anchors should be ignored
     valid_idxs = (matches != -2).reshape(matches.shape[0], -1, 1)
 
-    import pdb; pdb.set_trace()
-    loss = sigmoid_focal_loss(x, y, mask=valid_idxs, reduction="sum")
-    
+    loss = sigmoid_focal_loss(x, y, reduction="sum")
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
@@ -175,9 +173,10 @@ class RetinaHead:
     self.regression_head = RegressionHead(in_channels, num_anchors)
 
   def __call__(self, x:Tensor, y:Optional[Tensor] = None, matches:Optional[Tensor] = None):
-    pred_bbox, pred_class = self.regression_head(x), self.classification_head(x, y=y, matches=matches)
-    out = pred_bbox.cat(pred_class, dim=-1)
-    return out
+    return self.classification_head(x, y=y, matches=matches)
+    # pred_bbox, pred_class = self.regression_head(x), self.classification_head(x, y=y, matches=matches)
+    # out = pred_bbox.cat(pred_class, dim=-1)
+    # return out
 
 class ResNetFPN:
   def __init__(self, resnet, out_channels=256, returned_layers=[2, 3, 4]):
