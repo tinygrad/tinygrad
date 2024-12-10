@@ -191,7 +191,7 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
     kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, '_transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       kernel_type = BufferXfer
-    return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
+    return ExecItem(kernel_type(si.inputs[0].nbytes, out.device, si.inputs[0].device), list(si.bufs))
   if si.ast.op is Ops.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
   if si.ast.op is Ops.BUFFER_VIEW: return ExecItem(ViewOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {si.ast}")

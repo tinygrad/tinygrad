@@ -123,7 +123,7 @@ class LazyBuffer(MathTrait):
 
   def _copy(self, device:str) -> LazyBuffer:
     assert self.st.contiguous and self.size == self.base.size, f"can only copy contig {self} {self.base}"
-    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, Ops.COPY, self.buffer.nbytes, (self,), enable_cache=False)
+    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, Ops.COPY, srcs=(self,), enable_cache=False)
 
   def copy_to_device(self, device:str, force:bool=False, clone:bool=False) -> LazyBuffer:
     # no COPY
