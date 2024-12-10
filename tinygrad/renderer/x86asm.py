@@ -117,7 +117,7 @@ x86_matcher = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint32),), name="c"), lambda c: c.src[0].cast(dtypes.uint64).cast(c.dtype)),
   # casting uint64 to float requires special handling if msb is 1
   (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(dtype=dtypes.uint64),), name="c"),
-   lambda c: ((c.src[0] >> 63) != False).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
+   lambda c: ((c.src[0] >> 63) != 0).where((c.src[0] & 0x7FFFFFFFFFFFFFFF).cast(dtypes.int64).cast(c.dtype) * 2, \
                                                c.src[0].cast(dtypes.int64).cast(c.dtype))),
   # 2 operand imul and cmov don't work with 8bit registers
   (UPat(Ops.MUL, dtype=(dtypes.uint8, dtypes.int8), name="x"),
@@ -182,6 +182,7 @@ class X86Renderer(Renderer):
     mem: Dict[UOp, str] = {}
     stack_size: int = 8
     kernel: List[str] = []
+    self.uops = uops
 
     last_use: Dict[UOp, int] = {var: i for i,u in enumerate(uops) for var in (v for v in (u,) + u.src if v.dtype != dtypes.void)}
 
