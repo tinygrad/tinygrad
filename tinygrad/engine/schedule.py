@@ -67,25 +67,23 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     buf.buffer.dtype = dtype
     buf.buffer.options = None
   # base is a VIEW of (BUFFER, (optional) op)
-  if buf.is_realized:
-    # TODO: this is the same underlying Buffer in all schedules
-    buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
-    op = None
+  # TODO: this is the same underlying Buffer in all schedules
+  if buf.is_realized: ret = UOp.new_buffer(buf.device, buf.size, dtype).view(buf.st)
   # ASSIGN uses the target buffer, otherwise we create a new buffer
   else:
     src = tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs)
     buf_uop = src[0].base.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
     op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, src, buf.arg)
-  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.contiguous() if buf.forced_realize else op), buf.st)
-  # keep track of ops outside the big graph
-  buffers[buf_uop] = buf.buffer
-  if op is not None:
+    ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
+    # keep track of scheduled ops
     buf.buffer.ref(1)
     ctx.lazybufs[buf_uop] = buf
     ctx.allbufs[buf_uop] = ret
-    if op.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
+    if buf.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
     for x in op.src:
       if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
+  cache[buf] = ret
+  buffers[ret.buf_uop] = buf.buffer
   return ret
 
 # **** AST graph rewrite
