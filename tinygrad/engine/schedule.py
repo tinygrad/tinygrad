@@ -371,7 +371,8 @@ def simplify_alu(alu:UOp):
 
 def merge_identical_buffers(base:UOp, b:UOp, to_store:UOp):
   if to_store.arg != base.arg: return None
-  buffers[b] = buffers[to_store.src[0]]
+  # TODO: is this needed?
+  #buffers[b] = buffers[to_store.src[0]]
   return to_store
 
 ops_folding = PatternMatcher([
