@@ -326,7 +326,7 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
 
 class UPatScheduled(UPat):
   def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),
-                                                                       UPat(*args, **{**kwargs,"name":"to_store"})))
+                                                                       UPat(*args, **{"name":"to_store",**kwargs})))
 
 # ** this is schedule level const folding
 
@@ -365,7 +365,8 @@ ops_folding = PatternMatcher([
 def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, **kwargs) -> None:
   if to_store.op not in {Ops.CONST, Ops.BIND}: ctx.update([(b, to_store)])
 
-def realize_view(ctx:Dict[UOp, UOp], b:UOp, src:UOp, view:UOp) -> None:
+def realize_view(ctx:Dict[UOp, UOp], view:UOp, src:UOp, b:UOp, **kwargs) -> None:
+  if src.st is None: return None
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
@@ -390,7 +391,7 @@ do_realize = PatternMatcher([
   # always realize meta ops
   (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
   # realize before expand or unsafe pad ops
-  (UPatScheduled().view(name="view"), lambda ctx,b,to_store,base,view: None if to_store.st is None else realize_view(ctx, b, to_store, view)),
+  (UPatScheduled(name="src").view(name="view"), realize_view),
   # don't realize image to image casts
   (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
   # realize before COPY or BUFFER_VIEW
