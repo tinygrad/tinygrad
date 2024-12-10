@@ -324,8 +324,6 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
 
 # ** ops in the big graph can either be pre-realized or scheduled (fused/realized)
 
-class UPatRealized(UPat):
-  def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),))
 class UPatScheduled(UPat):
   def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),
                                                                        UPat(*args, **{**kwargs,"name":"to_store"})))
@@ -386,17 +384,11 @@ def init_big_graph(ctx:ScheduleContext, sink:UOp) -> Optional[UOp]:
   new_src = tuple(x.base for x in sink.src if is_scheduled(x.base) and x.base.src[1].op is not Ops.CONST)
   return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
 
-def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
-  if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
-  return UOp.const_with_shape(base.dtype, val, unwrap(base.st).shape)
-
 do_realize = PatternMatcher([
   # always realize sinked ops
   (UPat(Ops.SINK, name="sink"), init_big_graph),
   # always realize meta ops
   (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
-  # consts are always fused and generated
-  (UPatScheduled({Ops.CONST, Ops.BIND}), generate_valid),
   # realize before expand or unsafe pad ops
   (UPatScheduled().view(name="view"), realize_view),
   # don't realize image to image casts
@@ -409,6 +401,10 @@ do_realize = PatternMatcher([
 
 # ** this breaks down realized ops into STOREs and rewrites the ops to LOADs
 
+def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
+  if isinstance((val:=to_store.arg), UOp): ctx.var_vals.update([val.unbind()])
+  return UOp.const_with_shape(base.dtype, val, unwrap(base.st).shape)
+
 def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape((st:=unwrap(base.st)).shape).to_uop(), append_op(ctx, b, to_store))
   return UOp(Ops.LOAD, base.dtype, (b, st.to_uop()))
@@ -418,10 +414,12 @@ def append_op(ctx:ScheduleContext, b:UOp, to_store:UOp) -> UOp:
   return to_store
 
 break_sched = PatternMatcher([
-  # everything else is a VIEW of BUFFER that either realizes or fuses
+  # consts are always fused and generated
+  (UPatScheduled({Ops.CONST, Ops.BIND}), generate_valid),
+  # view of realized buffer just loads
+  (UPat(Ops.BUFFER, name="b").view(name="v"), lambda ctx,b,v: UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, v.st.to_uop()))),
+  # all other views either fold or realize with a store
   (UPatScheduled(), lambda ctx,b,to_store,base: append_realize(ctx, b, to_store, base) if b in ctx.realizes else append_op(ctx, b, to_store)),
-  # just load realized buffers
-  (UPatRealized(), lambda ctx,b,base: UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, base.st.to_uop()))),
 ])
 
 @track_rewrites(named=True)

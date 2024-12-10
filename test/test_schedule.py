@@ -1957,9 +1957,9 @@ class TestBigGraph(unittest.TestCase):
   def test_sink_childless_const_alt_expanded(self):
     # this is a real STORE of CONST (post expand)
     y = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 1, dtypes.int), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
-    out = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 2, dtypes.int), (output:=y.reshape((1,)).expand((2,))).contiguous(),), ShapeTracker.from_shape((2,)))
+    out = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 2, dtypes.int), y.reshape((1,)).expand((2,)).contiguous(),), ShapeTracker.from_shape((2,)))
     big_graph = big_graph_rewrite(out.sink(), realizes:={})
-    self.assertIs(big_graph, out.replace(src=(out.src[0], UOp.const_with_shape(dtypes.int, 0, ()).view(output.st).contiguous())).sink().sink())
+    self.assertIs(big_graph, out.sink())
     self.assertEqual(len(realizes), 1)
 
 if __name__ == '__main__':
