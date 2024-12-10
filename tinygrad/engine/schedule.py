@@ -428,20 +428,26 @@ break_sched = PatternMatcher([
   (UPatScheduled(), lambda ctx,b,to_store,base: append_realize(ctx, b, to_store, base) if b in ctx.realizes else append_op(ctx, b, to_store)),
 ])
 
-prune = PatternMatcher([
-  (UPatScheduled(Ops.CONST).view(name="st").cast(name="cast"), lambda b,base,to_store,st,cast:
-   base.replace(dtype=cast.dtype, src=(b.replace(dtype=cast.dtype.ptr()), UOp.const(cast.dtype, to_store.const_arg))).view(st.st)),
+
+from tinygrad.ops import symbolic_flat
+prune = symbolic_flat+PatternMatcher([
+  (UPatScheduled(Ops.CONST).view(name="st"), lambda b,base,to_store,st: to_store if all(v.mask is None for v in st.st.views) else None),
+  (UPatScheduled(Ops.CAST, src=(UPat.var("x"),)), lambda b,base,to_store,x: x if x.dtype == to_store.dtype else None),
+  (UPat(Ops.SINK, name="s"),
+   lambda s: None if (src:=tuple(x.base for x in s.src if x.base.op is not Ops.CONST))==s.src else UOp(Ops.NOOP) if len(src) == 0 else UOp.sink(*src))
 ])
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
   # init and do a first prune pass on the big graph
-  big_graph = graph_rewrite(UOp.sink(*outs), prune)
+  big_graph = UOp.sink(*outs)
+  big_graph = graph_rewrite(big_graph, prune)
+  if big_graph.op is Ops.NOOP: return [], {}
   # rewrite it as something we can schedule
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
-  for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache).base for x in big_graph.src))).src: ctx.realizes[u.buf_uop] = u
+  for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in big_graph.src))).src: ctx.realizes[u.buf_uop] = u
   big_graph = graph_rewrite(big_graph, ops_folding+do_realize, ctx.realizes)
   # group realizes into kernels
   store_groups = group_realizes(ctx)
