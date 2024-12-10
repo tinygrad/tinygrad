@@ -67,7 +67,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     buf.buffer.dtype = dtype
     buf.buffer.options = None
   # base is a VIEW of (BUFFER, (optional) op)
-  # TODO: this is the same underlying Buffer in all schedules
+  # TODO: this is the same underlying Buffer in all schedules, delete_lazy fixes this
   if buf.is_realized: ret = UOp.new_buffer(buf.device, buf.size, dtype).view(buf.st)
   # ASSIGN uses the target buffer, otherwise we create a new buffer
   else:
@@ -79,7 +79,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     buf.buffer.ref(1)
     ctx.lazybufs[buf_uop] = buf
     ctx.allbufs[buf_uop] = ret
-    if buf.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
+    if op.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
     for x in op.src:
       if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
   cache[buf] = ret
