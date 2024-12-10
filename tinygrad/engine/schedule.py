@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import identity_element
+from tinygrad.ops import identity_element, symbolic_flat
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -50,14 +50,12 @@ class ScheduleContext:
 
 def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2
 
+# NOTE: everything is passthrough!
+# TODO: delete this after delete_lazy
 def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache:Dict[LazyBuffer, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
-  # view is passthrough
-  if buf is not buf.base:
-    cache[buf] = ret = to_uop(buf.base, ctx, buffers, cache).view(buf.st)
-    return ret
-  assert buf.op is not None, f"base must be base itself {buf}"
-  # make things that can't be images not images
+  if buf is not buf.base: return cache.setdefault(buf, to_uop(buf.base, ctx, buffers, cache).view(buf.st))
+  # make things that can't be images not images. TODO: this is a rewrite rule
   dtype = buf.buffer.dtype
   if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
     assert buf.realized is None, "can't fixup allocated buffer"
@@ -66,26 +64,12 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     # hack the underlying buffer too
     buf.buffer.dtype = dtype
     buf.buffer.options = None
-  # base is a VIEW of (BUFFER, (optional) op)
-  if buf.is_realized:
-    # TODO: this is the same underlying Buffer in all schedules
-    buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
-    op = None
-  # ASSIGN uses the target buffer, otherwise we create a new buffer
-  else:
-    src = tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs)
-    buf_uop = src[0].base.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
-    op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, src, buf.arg)
-  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.contiguous() if buf.forced_realize else op), buf.st)
-  # keep track of ops outside the big graph
-  buffers[buf_uop] = buf.buffer
-  if op is not None:
-    buf.buffer.ref(1)
-    ctx.lazybufs[buf_uop] = buf
-    ctx.allbufs[buf_uop] = ret
-    if op.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
-    for x in op.src:
-      if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
+  # realized is just BUFFER
+  if buf.is_realized: uop = UOp.new_buffer(buf.device, buf.size, dtype)
+  # otherwise it has a real graph
+  else: uop = UOp(unwrap(buf.op), dtype if buf.op in GroupOp.Meta else dtype.base, tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs), buf.arg)
+  cache[buf] = ret = uop.view(buf.st)
+  buffers[ret] = buf.buffer
   return ret
 
 # **** AST graph rewrite
@@ -352,7 +336,7 @@ def simplify_reduceop(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
     return UOp.const(reduce.dtype, ret)
   return None
 
-ops_folding = PatternMatcher([
+ops_folding = symbolic_flat+PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
   # reduce of size 0 is the identity element
@@ -387,22 +371,27 @@ def fold_img_cast(ctx:Dict[UOp, UOp], xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kw
   return to_cast.view(unwrap(view.st))
 
 def init_big_graph(ctx:ScheduleContext, sink:UOp) -> Optional[UOp]:
-  new_src = tuple(x.base for x in sink.src if is_scheduled(x.base) and x.base.src[1].op is not Ops.CONST)
-  return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
+  if all(x.op is Ops.VIEW for x in sink.src): return None
+  new_src: List[UOp] = []
+  for x in sink.src:
+    buf_uop = UOp.new_buffer(x.device, x.size, x.dtype)
+    new_src.append(UOp(Ops.VIEW, x.dtype, (buf_uop, x), ShapeTracker.from_shape(x.shape)))
+    ctx.realizes[buf_uop] = buf_uop
+  return UOp.sink(*new_src)
 
 do_realize = PatternMatcher([
   # always realize sinked ops
   (UPat(Ops.SINK, name="sink"), init_big_graph),
   # always realize meta ops
-  (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
+  #(UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
   # realize before expand or unsafe pad ops
-  (UPatScheduled().view(name="view"), realize_view),
+  #(UPatScheduled().view(name="view"), realize_view),
   # don't realize image to image casts
-  (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
+  #(UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
   # realize before COPY or BUFFER_VIEW
-  (UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
+  #(UPat((Ops.COPY, Ops.BUFFER_VIEW), src=(UPat.any(UPatScheduled(), UPatScheduled().view()),)), realize),
   # ASSIGN only needs the buffer
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, name="dest"), UPat.var("src")), name="x"), lambda ctx,dest,src,x: x.replace(src=(dest.base.buf_uop, src))),
+  #(UPat(Ops.ASSIGN, src=(UPat(Ops.VIEW, name="dest"), UPat.var("src")), name="x"), lambda ctx,dest,src,x: x.replace(src=(dest.base.buf_uop, src))),
 ])
 
 # ** this breaks down realized ops into STOREs and rewrites the ops to LOADs
@@ -430,13 +419,12 @@ break_sched = PatternMatcher([
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
   # create the big graph
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
-  buffers: Dict[UOp, Buffer] = {}
-  for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, buffers, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
-  big_graph = graph_rewrite(big_graph, ops_folding+do_realize, ctx.realizes)
+  buffers: Dict[UOp, Buffer] = {} # TODO: delete this after delete_lazy
+  big_graph = UOp.sink(*[to_uop(x, ctx, buffers, cache) for x in outs])
+  big_graph = graph_rewrite(big_graph, merge_views+do_realize+ops_folding, ctx)
   # group realizes into kernels
   store_groups = group_realizes(ctx)
   graph_rewrite(big_graph, break_sched, ctx)
