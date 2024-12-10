@@ -101,6 +101,9 @@ class Ops(FastEnum):
   # blocks in linearizer
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto() # noqa: E702
 
+  # TernaryOps
+  WHERE = auto(); MULACC = auto() # noqa: E702
+
   # misc ops
   EXPAND = auto(); CONTRACT = auto() # noqa: E702
   VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
@@ -128,9 +131,6 @@ class Ops(FastEnum):
   # BinaryOps
   ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
   SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto() # noqa: E702
-
-  # TernaryOps
-  WHERE = auto(); MULACC = auto() # noqa: E702
 
   # assignment ops
   ASSIGN = auto()
@@ -243,6 +243,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       step = -1 if self.uop.op is Ops.IDIV else 1
       for s, o in zip(self.uop.src[::step], other.uop.src[::step]):
         if s is not o: return s.order(self.order) < o.order(self.order)
+      return False
       assert False, f"UOps are equal but not identical {self.uop} {other.uop}"
 
   def order(self, order) -> UOp.UOpOrder: return UOp.UOpOrder(self, order)
@@ -966,24 +967,22 @@ def lt_folding(x:UOp, c:int) -> Optional[UOp]:
     return cast(UOp, functools.reduce(operator.add, np).divides(d))<(c//d)
   return None
 
-def fold_unrolled_divs(chain, x, u, denominator):
+def fold_unrolled_divs(chain, x, denominator):
   # div pattern in unrolled arange
   # example: x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  assert chain.op in (Ops.IDIV, Ops.ADD)
   offset = 0
+  # TODO: this might start a bad loop
   for c in range(denominator.arg-1,-1,-1):
     # check if (x+c)//d would have been folded
     if (q:=(x.vmin+c)//denominator.arg)==(x.vmax+c)//denominator.arg:
       offset -= q
       continue
+    if chain is None: return None
+    chain, u = chain.src if chain.op is Ops.ADD else (None, chain)
     # assumed the chain is sorted and CONST is the last of an ADD
-    if u is None: return None
-    # print(u.render())
-    if u.op is Ops.IDIV and u.src[1] is denominator and (n:=u.src[0]).op is Ops.ADD \
-      and n.src[0] is x and n.src[1].op is Ops.CONST and n.src[1].arg == c:
-      chain, u = chain.src if chain is not None and chain.op is Ops.ADD else (None, chain)
-    elif c==0 and u.op is Ops.IDIV and u.src[1] is denominator and u.src[0] is x: break
-    else: return None
+    if u is None or u.op is not Ops.IDIV or u.src[1] is not denominator: return None
+    if ((n:=u.src[0]).op is not Ops.ADD or n.src[0] is not x or n.src[1].op is not Ops.CONST or n.src[1].arg != c) and \
+      (c!=0 or n is not x): return None
   return chain+x-offset if chain is not None else x-offset
 
 def canonicalize_simplex(X:UOp) -> Optional[UOp]:
@@ -1169,7 +1168,7 @@ symbolic = symbolic_simple+PatternMatcher([
     functools.reduce(lambda t,s: t.alu(op,s), merge(split_uop(a, op), split_uop(b, op), key=lambda k: k.order(op)))) for op in GroupOp.CommAssoc),
   # *** rules from symbolic ***
   # unrolled arange div folding
-  (UPat(Ops.ADD, src=(UPat((Ops.ADD, Ops.IDIV), name="chain"), ((UPat.var("x")+UPat(Ops.CONST))//UPat.cvar("denominator")).named("u"))), fold_unrolled_divs),
+  (UPat(Ops.ADD, name="chain", src=(UPat((Ops.ADD, Ops.IDIV)), ((UPat.var("x")+UPat(Ops.CONST))//UPat.cvar("denominator")))), fold_unrolled_divs),
   # generic lt folding
   (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   # canonicalize a simplex with positive coefficients > 0
