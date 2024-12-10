@@ -1572,6 +1572,8 @@ class Tensor(SimpleMathTrait):
     """
     return self._reduce(F.Max, axis, keepdim)
 
+  def _inverse(self): return -self if self.is_floating_point() else ~self if dtypes.is_int(self.dtype) else self.logical_not()
+
   def min(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
     Returns the minimum value of the tensor along the specified axis or axes.
@@ -1593,8 +1595,7 @@ class Tensor(SimpleMathTrait):
     print(t.min(axis=1, keepdim=True).numpy())
     ```
     """
-    if dtypes.is_int(self.dtype) or self.dtype == dtypes.bool: return ~((~self).max(axis=axis, keepdim=keepdim))
-    return -((-self).max(axis=axis, keepdim=keepdim))
+    return self._inverse().max(axis=axis, keepdim=keepdim)._inverse()
 
   def any(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
@@ -1887,7 +1888,7 @@ class Tensor(SimpleMathTrait):
     print(t.argmin(axis=1).numpy()) # Returns the indices of the minimum values along axis 1.
     ```
     """
-    return (-self if self.is_floating_point() else ~self).argmax(axis=axis, keepdim=keepdim)
+    return self._inverse().argmax(axis=axis, keepdim=keepdim)
 
   def rearrange(self, formula: str, **sizes) -> Tensor:
     """
@@ -3231,7 +3232,9 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
     ```
     """
-    return (self<x).detach().where(x, (self==x).detach().where(((self * 0.5 + x * 0.5).cast(self.dtype)), self))
+    # NOTE: the mid-point is for backward, revisit after new gradient API
+    if self.is_floating_point(): return (self<x).detach().where(x, (self==x).detach().where(((self * 0.5 + x * 0.5).cast(self.dtype)), self))
+    return (self<x).detach().where(x, self)
 
   def minimum(self, x:Union[Tensor, ConstType]) -> Tensor:
     """
@@ -3244,7 +3247,8 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
     ```
     """
-    return -((-self).maximum(-x))
+    t, x = self._broadcasted(x)
+    return t._inverse().maximum(x._inverse())._inverse()
 
   def where(self:Tensor, x:Union[Tensor, ConstType, sint], y:Union[Tensor, ConstType, sint]):
     """
