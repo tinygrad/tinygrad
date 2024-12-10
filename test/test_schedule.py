@@ -520,8 +520,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 2)
 
   # multireduce spec
-  #@unittest.skipUnless(SPLIT_REDUCEOP, "Testing split reducop requires SPLIT_REDUCEOP")
-  @unittest.skip("TOOD: SPLIT_REDUCEOP")
+  @unittest.skipUnless(SPLIT_REDUCEOP, "Testing split reducop requires SPLIT_REDUCEOP")
   def test_preserve_multistage_reduce(self):
     big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)
     x = Tensor.randn(big_enough).realize()
