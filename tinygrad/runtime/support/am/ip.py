@@ -1,5 +1,6 @@
 from __future__ import annotations
 import ctypes, time
+from typing import Literal
 from tinygrad.runtime.support.pci import pci_set_master
 from tinygrad.runtime.autogen.am import am, gc_11_0_0, smu_v13_0_0
 from tinygrad.helpers import to_mv, lo32, hi32
@@ -22,8 +23,8 @@ class AM_GMC(AM_IP):
     self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
 
     # VM aperture
-    self.vm_base = 0x7F0000000000
-    self.vm_end = self.vm_base + (512 * (1 << 30)) - 1
+    self.vm_base = self.adev.mm.va_allocator.base
+    self.vm_end = self.vm_base + self.adev.mm.va_allocator.size - 1
 
     self.memscratch_pm = self.adev.mm.palloc(0x1000)
     self.dummy_page_pm = self.adev.mm.palloc(0x1000)
@@ -32,7 +33,7 @@ class AM_GMC(AM_IP):
   def init(self): self.init_hub("MM")
 
   def flush_hdp(self): self.adev.regBIF_BX_PF0_GPU_HDP_FLUSH_REQ.write(0xffffffff)
-  def flush_tlb(self, ip:Union["MM", "GC"], vmid, flush_type=0):
+  def flush_tlb(self, ip:Literal["MM", "GC"], vmid, flush_type=0):
     self.flush_hdp()
 
     # Can't issue TLB invalidation if the hub isn't initialized.
@@ -52,11 +53,11 @@ class AM_GMC(AM_IP):
       # Read back the register to ensure the invalidation is complete
       self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.read()
 
-  def enable_vm_addressing(self, page_table, ip:Union["MM", "GC"], vmid):
+  def enable_vm_addressing(self, page_table, ip:Literal["MM", "GC"], vmid):
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_BASE_ADDR", "_LO32", "_HI32", page_table.pm.paddr | 1)
     self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(0x1fffe00, enable_context=1, page_table_depth=(3 - page_table.lv))
 
-  def init_hub(self, ip:Union["MM", "GC"]):
+  def init_hub(self, ip:Literal["MM", "GC"]):
     # Init system apertures
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT0_PAGE_TABLE_START_ADDR", "_LO32", "_HI32", self.vm_base >> 12)
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT0_PAGE_TABLE_END_ADDR", "_LO32", "_HI32", self.vm_end >> 12)
@@ -93,11 +94,12 @@ class AM_GMC(AM_IP):
     for eng_i in range(18): self.adev.wreg_pair(f"reg{ip}VM_INVALIDATE_ENG{eng_i}_ADDR_RANGE", "_LO32", "_HI32", 0x1fffffffff)
     self.hub_initted[ip] = True
 
-  def check_page_faults(self):
-    if self.adev.regMMVM_L2_PROTECTION_FAULT_STATUS.read():
-      raise RuntimeError(f"MMVM_L2_PROTECTION_FAULT_STATUS: {self.adev.regMMVM_L2_PROTECTION_FAULT_STATUS.read()} {self.adev.regMMVM_L2_PROTECTION_FAULT_DEFAULT_ADDR.read()}")
-    if self.adev.regGCVM_L2_PROTECTION_FAULT_STATUS.read():
-      raise RuntimeError(f"GCVM_L2_PROTECTION_FAULT_STATUS: {self.adev.regGCVM_L2_PROTECTION_FAULT_STATUS.read()} {self.adev.regGCVM_L2_PROTECTION_FAULT_DEFAULT_ADDR.read()}")
+  def on_interrupt(self):
+    for ip in ["MM", "GC"]:
+      st, addr = self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_STATUS').read(), self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR_LO32').read()
+      addr |= (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR_HI32').read()) << 32
+      addr <<= 12
+      if self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS").read(): raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {st:#x} {addr:#x}")
 
 class AM_SMU(AM_IP):
   def init(self):
@@ -206,7 +208,7 @@ class AM_IH(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
 
-    self.rings = [(self.adev.mm.valloc(262144, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), suf, i) for i,suf in enumerate(["", "_RING1"])]
+    # self.rings = [(self.adev.mm.valloc(262144, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), suf, i) for i,suf in enumerate(["", "_RING1"])]
     self.rptr = 0
 
   def interrupt_handler(self):
@@ -240,19 +242,17 @@ class AM_IH(AM_IP):
     self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write(((self.AMDGPU_NAVI10_DOORBELL_IH + ring_id) * 2), enable=1)
 
   def init(self):
-    for ring in self.rings: self.enable_ring(*ring)
+    # for ring in self.rings: self.enable_ring(*ring)
 
-    self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
-    self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
-    self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
-    # self.adev.regIH_RING1_CLIENT_CFG_INDEX.update(index=0)
-    # self.adev.regIH_RING1_CLIENT_CFG_DATA.update(client_id=0xa, source_id=0x0, source_id_match_enable=1)
+    # self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
+    # self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
+    # self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
 
     pci_set_master(self.adev.pcidev)
 
     # toggle interrupts
-    for addr_vm, rwptr_vm, suf, ring_id in self.rings:
-      self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
+    # for addr_vm, rwptr_vm, suf, ring_id in self.rings:
+    #   self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
 
 class AM_SDMA(AM_IP):
   def load_mqd(self, mqd:am.struct_v11_sdma_mqd, pipe:int, queue:int):

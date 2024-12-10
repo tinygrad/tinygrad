@@ -259,10 +259,6 @@ class AMDProgram(HCQProgram):
   def __del__(self):
     if hasattr(self, 'lib_gpu'): self.dev.allocator.free(self.lib_gpu, self.lib_gpu.size, BufferSpec(cpu_access=True, nolru=True))
 
-# class AMDPciBuffer(HCQBuffer):
-#   def __init__(self, va_addr, size, cpu_addr, owner, vm=None):
-#     self.adev, self.va_addr, self.size, self.cpu_addr, self.vm = owner, va_addr, size, cpu_addr, vm
-
 class AMDDriverAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice): super().__init__(dev, batch_size=SDMA_MAX_COPY_SIZE)
 
@@ -459,27 +455,21 @@ class VFIOIface:
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False):
     if host:
       va = libc.mmap(0, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED, -1, 0)
-      vaddr = self.adev.mm.alloc_vaddr(size)
+      vaddr = self.adev.mm.alloc_vaddr(size, align=mmap.PAGESIZE)
       for off in range(0, size, mmap.PAGESIZE):
-        self.adev.mm.map_range(vaddr=vaddr + off, paddr=read_pagemap(va + off), size=0x1000, system=True, snooped=True, uncached=True)
+        self.adev.mm.map_range(vaddr=vaddr + off, size=mmap.PAGESIZE, paddr=read_pagemap(va + off), system=True, snooped=True, uncached=True)
+      return HCQBuffer(vaddr, size, cpu_addr=va, meta=(self.dev, [self.dev], None))
 
-      return HCQBuffer(vaddr + self.adev.gmc.vm_base, size, cpu_addr=va, meta=(self.dev, None))
+    vm = self.adev.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contigous=cpu_access)
+    return HCQBuffer(vm.va_addr, size, cpu_addr=vm.cpu_addr, meta=(self.dev, [self.dev], vm))
 
-    vm = self.adev.mm.valloc(round_up(size, 0x1000), uncached=uncached)
-    # print(cpu_access, vm.cpu_addr())
-    return HCQBuffer(vm.vaddr, vm.size, cpu_addr=vm.cpu_addr() if cpu_access else None, meta=(self.dev, vm))
-
-  def free(self, mem): pass
+  def free(self, mem):
+    if mem.meta[2] is not None: self.adev.mm.vfree(mem.meta[2])
 
   def map(self, mem):
-    owner, vm = mem.meta
-
-    # print(self.dev, owner, owner.dev_iface.pcidev.regions[0].base_addr, self.pcidev.regions[0].base_addr)
-    if owner == self.dev or self.dev in getattr(mem.meta[1], "mapped_gpu_ids", []): return
-    mem.meta[1].__setattr__("mapped_gpu_ids", getattr(mem.meta[1], "mapped_gpu_ids", []) + [self.dev])
-
-    peer_address = vm.paddr + owner.dev_iface.pcidev.regions[0].base_addr
-    self.adev.mm.map_range(vaddr=vm.ptable_vaddr, paddr=peer_address, size=vm.size, system=True, snooped=vm.snooped, uncached=vm.uncached)
+    if mem.meta[0] == self.dev or self.dev in mem.meta[1]: return
+    mem.meta[1].append(self.dev)
+    self.adev.mm.map_from(mem.va_addr, mem.size, mem.meta[0].dev_iface.adev)
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, debug_memory_size=0):
     mqd = self.alloc(0x1000, uncached=True, cpu_access=True)
@@ -532,7 +522,7 @@ class AMDDevice(HCQCompiled):
   def __init__(self, device:str=""):
     AMDDevice.driverless = not os.path.isdir('/sys/module/amdgpu/') or bool(getenv("AMD_DRIVERLESS", 0))
 
-    self.device_id = int(device.split(":")[1]) if ":" in device else 0
+    self.device_id = int(device.split(":")[1]) if ":" in device else 1
     self.dev_iface = VFIOIface(self, self.device_id) if AMDDevice.driverless else KFDIface(self.device_id)
 
     self.target = int(self.dev_iface.properties['gfx_target_version'])
@@ -588,17 +578,19 @@ class AMDDevice(HCQCompiled):
     self.synchronize()
 
   def on_device_hang(self):
-    report = []
+    self.dev_iface.adev.gmc.on_interrupt()
 
-    ev = (kfd.struct_kfd_event_data)(event_id=self.mem_fault_event.event_id)
-    kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(ev), num_events=1, wait_for_all=1)
-    if ev.memory_exception_data.gpu_id:
-      pfstatus = ' '.join(f'{k[0]}={getattr(ev.memory_exception_data.failure, k[0])}' for k in ev.memory_exception_data.failure._fields_)
-      report += [f"MMU fault: 0x{ev.memory_exception_data.va:X} | {pfstatus}"]
+    # report = []
 
-    ev = (kfd.struct_kfd_event_data)(event_id=self.hw_fault_event.event_id)
-    kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(ev), num_events=1, wait_for_all=1)
-    if ev.hw_exception_data.gpu_id:
-      report += [f"HW fault: {' '.join(f'{k[0]}={getattr(ev.hw_exception_data, k[0])}' for k in ev.hw_exception_data._fields_)}"]
+    # ev = (kfd.struct_kfd_event_data)(event_id=self.mem_fault_event.event_id)
+    # kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(ev), num_events=1, wait_for_all=1)
+    # if ev.memory_exception_data.gpu_id:
+    #   pfstatus = ' '.join(f'{k[0]}={getattr(ev.memory_exception_data.failure, k[0])}' for k in ev.memory_exception_data.failure._fields_)
+    #   report += [f"MMU fault: 0x{ev.memory_exception_data.va:X} | {pfstatus}"]
 
-    raise RuntimeError("\n".join(report))
+    # ev = (kfd.struct_kfd_event_data)(event_id=self.hw_fault_event.event_id)
+    # kfd.AMDKFD_IOC_WAIT_EVENTS(AMDDevice.kfd, events_ptr=ctypes.addressof(ev), num_events=1, wait_for_all=1)
+    # if ev.hw_exception_data.gpu_id:
+    #   report += [f"HW fault: {' '.join(f'{k[0]}={getattr(ev.hw_exception_data, k[0])}' for k in ev.hw_exception_data._fields_)}"]
+
+    # raise RuntimeError("\n".join(report))

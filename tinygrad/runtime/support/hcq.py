@@ -489,6 +489,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
   def copy_from_disk(self, dest:HCQBuffer, src, size):
     def _get_temp_buf():
       # Check if the next buffer is safe to be used (its signal has passed) and reserve it.
+      self.dev.dev_iface.adev.gmc.on_interrupt()
       if self.b_timeline[(self.b_next + 1) % len(self.b)] <= self.dev.timeline_signal.value:
         self.b_timeline[(self.b_next + 1) % len(self.b)], self.b_next = (1 << 64), (self.b_next + 1) % len(self.b)
         return (self.b[self.b_next].cpu_addr, self.b[self.b_next].va_addr, self.b_next)
