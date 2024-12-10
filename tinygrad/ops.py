@@ -204,13 +204,9 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
 
 class UOpMetaClass(type):
   ucache:Dict[Tuple, weakref.ReferenceType[UOp]] = {}
-  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None,
-               # NOTE: these don't live on the UOp class, they're internal state a pickled uop can map to
-               _device_buffer:Optional[Buffer]=None, _buf_uop:Optional[UOp]=None):
+  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:Tuple[UOp,...]=tuple(), arg:Any=None, _buffer=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
-    if _device_buffer is not None:
-      buffers[unwrap(_buf_uop)] = _device_buffer
     return created
 
 # some uops map to other stuff
