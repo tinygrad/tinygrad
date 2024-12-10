@@ -966,32 +966,25 @@ def lt_folding(x:UOp, c:int) -> Optional[UOp]:
     return cast(UOp, functools.reduce(operator.add, np).divides(d))<(c//d)
   return None
 
-def fold_unrolled_divs(chain:UOp):
+def fold_unrolled_divs(chain, x, u, denominator):
   # div pattern in unrolled arange
   # example: x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  denominator, seen_const, ans = None, [], None
-  chain, u = chain.src[0], chain.src[1]
-  while True:
-    if not (u.op is Ops.IDIV and u.src[1].op is Ops.CONST): break
-    if denominator is None: denominator = u.src[1].arg
-    if denominator != u.src[1].arg: break
-    # assumed CONST is the last of an ADD
-    if (s0:=u.src[0]).op is Ops.ADD and s0.src[1].op is Ops.CONST:
-      seen_const.append(s0.src[1].arg)
-      s0 = s0.src[0]
-    else: seen_const.append(0)
-    if ans is None: ans = s0
-    if ans is not s0: return None
-    if chain is None or chain.op not in (Ops.ADD, Ops.IDIV): break
-    if chain.op is Ops.ADD: chain, u = chain.src[0], chain.src[1]
-    elif chain.op is Ops.IDIV: chain, u = None, chain
-  if denominator is None: return None
-  # the first (denominator-len(seen_const)) terms may have been folded to 0 already
-  if ans is None: return None
-  if ans.vmax >= denominator and len(seen_const) != denominator: return None
-  for i in range(denominator-len(seen_const)):
-    if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
-  return (chain+ans if chain is not None else ans) if ans is not None and sorted(seen_const)==list(range(denominator)) else None
+  assert chain.op in (Ops.IDIV, Ops.ADD)
+  offset = 0
+  for c in range(denominator.arg-1,-1,-1):
+    # check if (x+c)//d would have been folded
+    if (q:=(x.vmin+c)//denominator.arg)==(x.vmax+c)//denominator.arg:
+      offset -= q
+      continue
+    # assumed the chain is sorted and CONST is the last of an ADD
+    if u is None: return None
+    # print(u.render())
+    if u.op is Ops.IDIV and u.src[1] is denominator and (n:=u.src[0]).op is Ops.ADD \
+      and n.src[0] is x and n.src[1].op is Ops.CONST and n.src[1].arg == c:
+      chain, u = chain.src if chain is not None and chain.op is Ops.ADD else (None, chain)
+    elif c==0 and u.op is Ops.IDIV and u.src[1] is denominator and u.src[0] is x: break
+    else: return None
+  return chain+x-offset if chain is not None else x-offset
 
 def canonicalize_simplex(X:UOp) -> Optional[UOp]:
   # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
@@ -1176,7 +1169,7 @@ symbolic = symbolic_simple+PatternMatcher([
     functools.reduce(lambda t,s: t.alu(op,s), merge(split_uop(a, op), split_uop(b, op), key=lambda k: k.order(op)))) for op in GroupOp.CommAssoc),
   # *** rules from symbolic ***
   # unrolled arange div folding
-  (UPat(Ops.ADD, name="chain", src=(UPat((Ops.ADD, Ops.IDIV)), UPat(Ops.IDIV))), fold_unrolled_divs),
+  (UPat(Ops.ADD, src=(UPat((Ops.ADD, Ops.IDIV), name="chain"), ((UPat.var("x")+UPat(Ops.CONST))//UPat.cvar("denominator")).named("u"))), fold_unrolled_divs),
   # generic lt folding
   (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   # canonicalize a simplex with positive coefficients > 0
