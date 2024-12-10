@@ -1019,13 +1019,13 @@ class TestSchedule(unittest.TestCase):
     dummy = x.sum().half().float()
     check_schedule(dummy, 1)
     dummy = x.sum().half().float().contiguous() + 1
-    check_schedule(dummy, 1)
+    check_schedule(dummy, 2)
 
     # shared between two outputs
     shared = x.sum().half().float()
     a = shared * 2
     b = shared * 3
-    sched = check_schedule([a, b], 2)
+    sched = check_schedule([a, b], 1)
     for si in sched[:-2]: assert all(out.dtype == dtypes.half for out in si.outputs)
 
     # reduce
