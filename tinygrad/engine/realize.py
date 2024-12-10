@@ -186,12 +186,12 @@ def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   if si.ast.op is Ops.SINK:
     runner = get_runner(si.outputs[0].device, si.ast)
     return ExecItem(runner, [si.bufs[x] for x in runner.p.globals], si.metadata)
-  out, arg = si.outputs[0], si.ast.arg
+  out = si.outputs[0]
   if si.ast.op is Ops.COPY:
     kernel_type = BufferCopy
     if hasattr(Device[out.device].allocator, '_transfer') and out.device.split(":")[0] == si.inputs[0].device.split(":")[0]:
       kernel_type = BufferXfer
-    return ExecItem(kernel_type(arg, out.device, si.inputs[0].device), list(si.bufs))
+    return ExecItem(kernel_type(out.nbytes, out.device, si.inputs[0].device), list(si.bufs))
   if si.ast.op is Ops.EMPTY: return ExecItem(EmptyOp(out), list(si.bufs))
   if si.ast.op is Ops.BUFFER_VIEW: return ExecItem(ViewOp(out), list(si.bufs))
   raise RuntimeError(f"don't know how to lower {si.ast}")
