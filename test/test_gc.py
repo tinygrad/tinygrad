@@ -54,7 +54,6 @@ class TestGC(unittest.TestCase):
     del y
     self.assertEqual(bufs_allocated()-init, 0)
 
-  @unittest.skip("gc")
   def test_schedule_gc_with_inputs(self):
     init = bufs_allocated()
     x = Tensor.ones(256).contiguous().realize()
