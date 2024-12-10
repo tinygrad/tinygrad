@@ -116,6 +116,10 @@ class LazyBuffer(MathTrait):
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is Ops.CONST and not isinstance(self.base.arg, UOp)
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
+  @property
+  def const_arg(self) -> ConstType:
+    assert self.base.op is Ops.CONST and isinstance(self.arg, get_args(ConstType))
+    return self.arg
 
   def _copy(self, device:str) -> LazyBuffer:
     assert self.st.contiguous and self.size == self.base.size, f"can only copy contig {self} {self.base}"
