@@ -2050,11 +2050,12 @@ class Tensor(SimpleMathTrait):
     if not ceil_mode: return pool(self, reg_pads).mean(axis)
     return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
 
-  def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False):
+  def max_pool2d(self, kernel_size=(2,2), stride=None, dilation=1, padding=0, ceil_mode=False, return_indices=False):
     """
     Applies max pooling over a tensor.
 
     When `ceil_mode` is set to True, output shape will be determined using ceil division.
+    When `return_indices` is set to True, the max values along with their corresponding indices will be returned.
 
     NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
 
@@ -2073,7 +2074,27 @@ class Tensor(SimpleMathTrait):
     """
     k_ = make_tuple(kernel_size, 2)
     pads = self._ceil_mode_padding2d(k_, stride if stride is not None else k_, dilation, padding) if ceil_mode else self._padding2d(padding, len(k_))
-    return self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation).max(tuple(range(-len(k_), 0)))
+    pooled = self.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation)
+    ret = pooled.max(tuple(range(-len(k_), 0)))
+    if not return_indices: return ret
+    # HACK: add +1 offset to indices for `masked = (ret == flat_pool).where(flat_indices, 0)` to work with no 0's in `flat_indices`
+    indices = Tensor.arange(1, self.numel() + 1, dtype=self.dtype, device=self.device, requires_grad=False).reshape(self.shape)
+    indices = indices.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation)
+    flat_indices, flat_pool = indices.flatten(-len(k_)), pooled.flatten(-len(k_))
+    # TODO: this contiguous before reduce-where chain changes the result, without it the results are wrong
+    masked = (ret.unsqueeze(-1) == flat_pool).where(flat_indices, 0).contiguous()
+    # remove the +1 offset with `-1`
+    indices = functools.reduce(lambda x,y: x.where(x, y), masked.split(1, -1)) - 1
+    return ret, indices.reshape(ret.shape)
+
+  def max_unpool2d(self, indices, kernel_size, stride=None, padding=0, output_size=None):
+    """
+    Computes the partial inverse of MaxPool2d
+    """
+    (k_,s_,p_), i_ = (make_tuple(x, 2) for x in (kernel_size, stride or kernel_size, padding)), self.shape[2:]
+    output_size = output_size or [self.shape[0], self.shape[1]] + [(i-1)*s-2*p+k for i,p,s,k in zip(i_,p_,s_,k_)]
+    ret = Tensor.zeros(self.shape[0], self.shape[1], prod(output_size))
+    return ret.scatter(2, indices.reshape(None, None, -1), self.reshape(None, None, -1)).reshape(output_size)
 
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding:int|Tuple[int, ...]=0,
              acc_dtype:Optional[DTypeLike]=None) -> Tensor:

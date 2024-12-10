@@ -2055,6 +2055,34 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True),
       lambda x: Tensor.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True))
 
+  def test_max_pool2d_return_indices(self):
+    y = torch.arange(36).view(1,1,6,6)
+    x = Tensor.arange(36).reshape(1,1,6,6)
+    _, torch_indices = torch.nn.functional.max_pool2d(y, kernel_size=(3,3), stride=3, padding=1, return_indices=True)
+    _, tiny_indices = Tensor.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, return_indices=True)
+    np.testing.assert_allclose(tiny_indices.numpy(), torch_indices.numpy())
+
+  def test_max_pool2d_return_indices_repeated_values(self):
+    # repeated values selects first occurence as index
+    y = torch.tensor([[0,1,1,0],[0,0,0,1],[1,1,1,0],[0,1,1,0]]).reshape(1,1,4,4)
+    x = Tensor([[0,1,1,0],[0,0,0,1],[1,1,1,0],[0,1,1,0]]).reshape(1,1,4,4)
+    _, torch_indices = torch.nn.functional.max_pool2d(y, kernel_size=(3,3), stride=3, padding=1, return_indices=True)
+    _, tiny_indices = Tensor.max_pool2d(x, kernel_size=(3,3), stride=3, padding=1, return_indices=True)
+    np.testing.assert_allclose(tiny_indices.numpy(), torch_indices.numpy())
+
+  def _test_max_unpool2d(self, shape, ksz, stride, output_size=None, padding=0):
+    y = torch.arange(math.prod(shape)).view(shape)
+    x = Tensor.arange(math.prod(shape)).reshape(shape)
+    torch_pooled, torch_indices = torch.nn.functional.max_pool2d(y, kernel_size=ksz, stride=stride, padding=padding, return_indices=True)
+    tiny_pooled, tiny_indices = Tensor.max_pool2d(x, kernel_size=ksz, stride=stride, padding=padding, return_indices=True)
+    torch_unpooled = torch.nn.functional.max_unpool2d(torch_pooled.float(), torch_indices, kernel_size=ksz, stride=stride, output_size=output_size,
+                                                      padding=padding),
+    tiny_unpooled = tiny_pooled.max_unpool2d(tiny_indices, kernel_size=ksz, stride=stride, output_size=output_size, padding=padding)
+    np.testing.assert_allclose(tiny_unpooled.numpy(), torch_unpooled[0].numpy())
+  def test_max_unpool2d(self): self._test_max_unpool2d((1,1,4,4), (2,2), 2)
+  def test_max_unpool2d_output_size(self): self._test_max_unpool2d((1,1,4,5), (2,2), 2, (1,1,5,5))
+  def test_max_unpool2d_pads(self): self._test_max_unpool2d((1,1,6,6), (2,2), 2, None, 1)
+
   def test_avg_pool2d(self):
     shape = (32,2,111,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
