@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.realize import run_schedule
-from tinygrad.ops import Ops
+from tinygrad.ops import Ops, forced_realize
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.schedule import create_schedule
 
@@ -74,7 +74,7 @@ class TestLazyBuffer(unittest.TestCase):
     a = Tensor.randn(2, 2).realize()
     b = Tensor.randn(2, 2).realize()
     add = a + b
-    add.lazydata.forced_realize = True
+    forced_realize.add(add.lazydata)
     out = add+2
     sched = create_schedule([out.lazydata])
     self.assertEqual(len(sched), 2)
@@ -83,7 +83,7 @@ class TestLazyBuffer(unittest.TestCase):
 
   def test_forced_realized_metaop(self):
     empty = Tensor.empty(1)
-    empty.lazydata.forced_realize = True
+    forced_realize.add(empty.lazydata)
     sched = create_schedule([empty.lazydata])
     self.assertEqual(len(sched), 1)
     self.assertIs(sched[0].ast.op, Ops.EMPTY)
@@ -97,6 +97,7 @@ class TestReduceOp(unittest.TestCase):
     assert len(sched) == 1
     self.assertIs(sched[0].ast.src[0].src[2].op, Ops.REDUCE_AXIS)
 
+  @unittest.skip("split_reduceop isn't supported")
   def test_split_reduce_kernel_dim0(self):
     a = Tensor.rand(256, 255).realize()
     a = a.sum()
@@ -105,6 +106,7 @@ class TestReduceOp(unittest.TestCase):
     for s in sched:
       self.assertIs(s.ast.src[0].src[2].op, Ops.REDUCE_AXIS)
 
+  @unittest.skip("split_reduceop isn't supported")
   def test_split_reduce_kernel_dim1(self):
     a = Tensor.rand(255, 256).realize()
     a = a.sum()

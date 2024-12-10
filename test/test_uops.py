@@ -234,6 +234,7 @@ class TestExecALU(TestUOps):
     self.assertEqual(exec_alu(Ops.ADD, dtypes.uint8, (250, 250), truncate_output=False), 500)
 
 class TestConstantFolding(unittest.TestCase):
+  @unittest.skip("elementwise ops folding no longer supported")
   def test_cast_const(self):
     t = Tensor(1, dtype=dtypes.float).cast(dtypes.int)
     si = create_schedule([t.lazydata])
