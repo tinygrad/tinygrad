@@ -439,6 +439,8 @@ jobs:
     # WebGPU e2e tests
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python3 -m examples.compile_efficientnet
+    - name: Clean npm cache
+      run: npm cache clean --force
     - name: Install Puppeteer
       run: npm install puppeteer
     - name: Run WEBGPU Efficientnet
