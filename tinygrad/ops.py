@@ -244,7 +244,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       for s, o in zip(self.uop.src[::step], other.uop.src[::step]):
         if s is not o: return s.order(self.order) < o.order(self.order)
       return False
-      assert False, f"UOps are equal but not identical {self.uop} {other.uop}"
 
   def order(self, order) -> UOp.UOpOrder: return UOp.UOpOrder(self, order)
 
