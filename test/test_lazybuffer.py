@@ -97,7 +97,6 @@ class TestReduceOp(unittest.TestCase):
     assert len(sched) == 1
     self.assertIs(sched[0].ast.src[0].src[2].op, Ops.REDUCE_AXIS)
 
-  @unittest.skip("split_reduceop isn't supported")
   def test_split_reduce_kernel_dim0(self):
     a = Tensor.rand(256, 255).realize()
     a = a.sum()
@@ -106,7 +105,6 @@ class TestReduceOp(unittest.TestCase):
     for s in sched:
       self.assertIs(s.ast.src[0].src[2].op, Ops.REDUCE_AXIS)
 
-  @unittest.skip("split_reduceop isn't supported")
   def test_split_reduce_kernel_dim1(self):
     a = Tensor.rand(255, 256).realize()
     a = a.sum()
