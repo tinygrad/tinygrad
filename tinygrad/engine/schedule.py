@@ -343,7 +343,7 @@ def simplify_reduceop(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
   # remove reduce on unmasked const
   if all_int(x.shape) and x.is_unrealized_unmasked_const():
     prshape = prod(unwrap(x.st).shape[i] for i in reduce.arg[1])
-    ret = x.base.src[1].arg
+    ret = x.const_arg
     match reduce.arg[0]:
       case Ops.ADD: ret *= prshape
       case Ops.MUL: ret **= prshape

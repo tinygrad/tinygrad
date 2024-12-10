@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal
+from typing import Any, List, Optional, Set, Union, Tuple, Dict, Callable, cast, TYPE_CHECKING, Type, DefaultDict, Literal, get_args
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref
 from enum import auto, IntEnum, Enum
 from dataclasses import dataclass, field
@@ -291,6 +291,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ret = self.src[0 if self.op is Ops.VALID else 1]
     assert ret.op is Ops.VIEW, f"st_arg trying to return {ret}"
     return ret.arg
+  @property
+  def const_arg(self) -> ConstType:
+    match self.base.op:
+      case Ops.CONST: ret = self.base.arg
+      case Ops.VIEW: ret = self.base.src[1].const_arg
+      case op: raise AssertionError(f"const_arg called on {op}")
+    assert isinstance(ret, get_args(ConstType)), f"const_arg trying to return {ret}"
+    return ret
   @property
   def axis_arg(self) -> Tuple[int, ...]:
     assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
