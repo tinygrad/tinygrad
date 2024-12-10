@@ -406,7 +406,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def srcs(self): return self.src
   @srcs.deleter
-  def srcs(self): self.src = (self.buf_uop, )
+  def srcs(self): self.become(self.buf_uop.view(unwrap(self.st)))
   @property
   def lbs(self): return [self]
   @property
@@ -414,12 +414,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def forced_realize(self): return self in forced_realize
 
+  # *** danger zone ***
+
+  # CAUTION: MUTABILITY!
+  def become(self, u:UOp): self.op, self.dtype, self.src, self.arg = u.op, u.dtype, u.src, u.arg
+
   # *** uop movement ops ***
 
   @property
   def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
   def view(self, new_st:ShapeTracker) -> UOp:
-    if self.st is None: return UOp(Ops.VIEW, self.dtype, (self,), new_st)
+    if self.st is None: return UOp(Ops.VIEW, self.dtype.base, (self,), new_st)
     ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
     # instant folding rules
     if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)): return ret.const_like(0)

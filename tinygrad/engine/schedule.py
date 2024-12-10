@@ -449,13 +449,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       ast, ast_ctx = full_ast_rewrite(UOp.sink(*stores), ctx)
       prescheduled.append(ScheduleItem(ast, tuple(u.buffer for u in ast_ctx.bufs if u.size != 0), tuple(ast_ctx.metadata),
                                        frozenset(ubuf for ubuf,ops in ast_ctx.assign_adj.items() if any(x.op is Ops.PRELOAD for x in ops))))
-      for u in ast_ctx.sinked:
-       # can only schedule once
-       lazy = ast_ctx.lazybufs[u]
-       st = unwrap(lazy.st)
-       lazy.op = Ops.VIEW
-       lazy.arg = st
-       lazy.src = (u,)
+      for buf_uop in ast_ctx.sinked: (luop:=ast_ctx.lazybufs[buf_uop]).become(buf_uop.view(unwrap(luop.st))) # can only schedule once
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
