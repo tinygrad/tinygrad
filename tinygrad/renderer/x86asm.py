@@ -101,9 +101,9 @@ x86_matcher = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.float16)), name="x"), lambda x: x.src[0].store(x.src[1].bitcast(dtypes.int32).cast(dtypes.int16))),
   # float16 alus perform instruction in float32
   (UPat(GroupOp.ALU, dtype=dtypes.float16, name="x"),
-   lambda x: UOp(x.op, dtype=dtypes.float32, src=(s.cast(dtypes.float32) if s.dtype != dtypes.bool else s for s in x.src)).cast(dtypes.float16)),
+   lambda x: UOp(x.op, dtypes.float32, tuple(s.cast(dtypes.float32) if s.dtype != dtypes.bool else s for s in x.src)).cast(dtypes.float16)),
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
-   lambda x: UOp(x.op, dtype=x.dtype, src=(s.cast(dtypes.float32) for s in x.src)) if any(s.dtype is dtypes.float16 for s in x.src) else None),
+   lambda x: UOp(x.op, x.dtype, tuple(s.cast(dtypes.float32) for s in x.src)) if any(s.dtype is dtypes.float16 for s in x.src) else None),
   # TODO: remove extra casts by casting to max(c.dtype, float32)
   # can't cast from float16 to ints directly and vice versa
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.float16),), name="c"), lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
