@@ -4,6 +4,7 @@ import unittest, random, copy, warnings
 import numpy as np
 
 from tinygrad import Tensor, dtypes, Device, TinyJit
+from tinygrad.device import is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.helpers import CI, all_same, prod
@@ -810,6 +811,7 @@ class TestIndexing(unittest.TestCase):
       numpy_testing_assert_equal_helper(output, input_list)
   '''
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), f"long dtype not supported on {Device.DEFAULT}")
   def test_index_ind_dtype(self):
     x = Tensor.randn(4, 4)
     # ind_long = torch.randint(4, (4,), dtype=torch.long)
