@@ -398,6 +398,7 @@ def merge_mv(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, mv:UOp):
 merge_bufs = PatternMatcher([
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat())))), merge),
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat())).view(name="mv"))), merge_mv),
+  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"),)).view(name="mv"))), merge_mv),
 ])
 
 # ** this decides which ops get realized
