@@ -34,7 +34,6 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     x = x.clip(0, 1).realize()
     _check_ast_count(1, x.neg())
 
-@unittest.skip("elementwise ops folding no longer supported")
 class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_add_literal_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + 0)

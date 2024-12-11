@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import identity_element, buffers, exec_alu
+from tinygrad.ops import identity_element, buffers, exec_alu, forced_realize
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -40,7 +40,7 @@ class ScheduleItem:
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  lazybufs: Dict[UOp, LazyBuffer] = field(default_factory=dict)      # this maps BUFFER uops of this schedule to the underlying lazybuffer
+  lazybufs: Dict[UOp, List[LazyBuffer]] = field(default_factory=dict)      # this maps BUFFER uops of this schedule to the underlying lazybuffer
   var_vals: Dict[Variable, int] = field(default_factory=dict)        # this maps a BIND's DEFINE_VAR to its value
   assigns: Set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: Dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
@@ -83,7 +83,7 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   # keep track of ops outside the big graph
   if op is not None:
     buf_uop.buffer.ref(1)
-    ctx.lazybufs[buf_uop] = buf
+    ctx.lazybufs[buf_uop] = [buf]
     ctx.allbufs[buf_uop] = ret
     if op.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
     for x in op.src:
@@ -148,7 +148,7 @@ view_right = merge_views+PatternMatcher([
 
 @dataclass(frozen=True)
 class ScheduleItemContext:
-  lazybufs: Dict[UOp, LazyBuffer]
+  lazybufs: Dict[UOp, List[LazyBuffer]]
   ops_metadata: Dict[UOp, Metadata]
   assigns: Set[UOp]
   var_vals: Dict[Variable, int]
@@ -198,7 +198,8 @@ append_load = PatternMatcher([(UPat.load(UPat.var("b"), UPat(), name="x"), lambd
 
 def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemContext]:
   si_ctx = ScheduleItemContext(ctx.lazybufs, ctx.ops_metadata, ctx.assigns, ctx.var_vals, {x.buf_uop:x.src[2] for x in pre.src},
-                               metadata={l.metadata for x in pre.src if (l:=ctx.lazybufs.get(x.buf_uop)) is not None and l.metadata is not None})
+                               # TODO: what do we do if it's folded to another uop?
+                               metadata={l[0].metadata for x in pre.src if (l:=ctx.lazybufs.get(x.buf_uop)) is not None and l[0].metadata is not None})
   # fuse and fold store -> loads
   ops_folding = lazy if len(si_ctx.sinked) == 1 else lazy+multioutput
   sink = graph_rewrite(pre, ops_folding if len(si_ctx.assigns) == 0 else ops_folding+append_load, si_ctx)
@@ -316,7 +317,7 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
   # maybe fuse arange with its children
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
-    if any(ctx.lazybufs[tr].forced_realize for tr in group): continue
+    if any(l.forced_realize for tr in group for l in ctx.lazybufs[tr]): continue
     kernel_children = {c for tr in group for c in ctx.children[tr] if uval(ctx.allbufs[c]).op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group: del ctx.realizes[tr]
@@ -436,7 +437,7 @@ def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   return UOp(Ops.LOAD, base.dtype, (b, unwrap(base.st).to_uop()))
 
 def append_op(ctx:ScheduleContext, b:UOp, to_store:UOp) -> UOp:
-  if (m:=ctx.lazybufs[b].metadata) is not None: ctx.ops_metadata[to_store] = m
+  if (m:=ctx.lazybufs[b][0].metadata) is not None: ctx.ops_metadata[to_store] = m
   return to_store
 
 break_sched = PatternMatcher([
@@ -448,14 +449,31 @@ break_sched = PatternMatcher([
   (UPatScheduled(), lambda ctx,b,to_store,base: append_realize(ctx, b, to_store, base) if b in ctx.realizes else append_op(ctx, b, to_store)),
 ])
 
+def merge_buffers(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, src:UOp) -> UOp:
+  assert v1.st is not None and v2.st is not None and v1.st == v2.st, f"implicit movementop {v1.st} {v2.st}"
+  # if b2 is realized also realize b1
+  if b2 in ctx.realizes:
+    ctx.realizes[b1] = b1
+    del ctx.realizes[b2]
+  # ops referring to b2 now ref to b1
+  ctx.lazybufs[b1] += ctx.lazybufs[b2]
+  del ctx.lazybufs[b2]
+  # merge
+  return v1
+merge_bufs = PatternMatcher([
+  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat(Ops.BUFFER, name="b1"), UPat.var("src"))))), merge_buffers),
+])
+
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
+  if len(outs:=dedup(x.base for x in outs if x.base.realized is None and not (is_scheduled(x.base) and x.base.src[1].op is Ops.CONST))) == 0: return [], {}
   # create the big graph
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
-  for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
+  big_graph = UOp.sink(*(to_uop(x, ctx, cache) for x in outs))
+  for out in big_graph.src: ctx.realizes[out.buf_uop] = out
   big_graph = graph_rewrite(big_graph, ops_folding+do_realize, ctx.realizes)
+  big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
   # group realizes into kernels
   store_groups = group_realizes(ctx)
   graph_rewrite(big_graph, break_sched, ctx)
@@ -466,7 +484,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       ast, ast_ctx = full_ast_rewrite(UOp.sink(*stores), ctx)
       prescheduled.append(ScheduleItem(ast, tuple(u.buffer for u in ast_ctx.bufs if u.size != 0), tuple(ast_ctx.metadata),
                                        frozenset(ubuf for ubuf,ops in ast_ctx.assign_adj.items() if any(x.op is Ops.PRELOAD for x in ops))))
-      for buf_uop in ast_ctx.sinked: (luop:=ast_ctx.lazybufs[buf_uop]).become(buf_uop.view(unwrap(luop.st))) # can only schedule once
+      for buf_uop in ast_ctx.sinked:
+        for luop in ast_ctx.lazybufs[buf_uop]: luop.become(buf_uop.view(unwrap(luop.st)))
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
