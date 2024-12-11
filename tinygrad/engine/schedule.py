@@ -444,7 +444,7 @@ break_sched = PatternMatcher([
   (UPatScheduled(), lambda ctx,b,to_store,base: append_realize(ctx, b, to_store, base) if b in ctx.realizes else append_op(ctx, b, to_store)),
 ])
 
-def merge_buffers(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, src:UOp) -> UOp:
+def merge_buffers(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
   assert v1.st is not None and v2.st is not None and v1.st == v2.st, f"implicit movementop {v1.st} {v2.st}"
   # if b2 is realized also realize b1
   if b2 in ctx.realizes:
@@ -456,19 +456,8 @@ def merge_buffers(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, src:UOp) 
   # merge
   return v1
 
-def rebase_buffers(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, src:UOp, midpoint:UOp) -> UOp:
-  # nothing refers to b2 in this schedule
-  del ctx.lazybufs[b2]
-  if b2 in ctx.realizes: del ctx.realizes[b2]
-  rebased = v1.view(unwrap(midpoint.st))
-  ret = rebased
-  return ret
-
 merge_bufs = PatternMatcher([
-  # buffer1 + buffer2 = buffer1
-  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat.var("src"))))), merge_buffers),
-  # buffer1 + view + buffer2 = buffer1+view
-  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat.var("src"))).view(name="midpoint"))), rebase_buffers),
+  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat())))), merge_buffers),
 ])
 
 # **** Schedule context builder
@@ -476,7 +465,7 @@ merge_bufs = PatternMatcher([
 def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   ctx.allbufs[buf_uop] = view
   buf_uop.buffer.ref(1)
-  if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
+  if (op:=uval(view).base).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
   for x in op.src:
     if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
@@ -504,9 +493,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       prescheduled.append(ScheduleItem(ast, tuple(u.buffer for u in ast_ctx.bufs if u.size != 0), tuple(ast_ctx.metadata),
                                        frozenset(ubuf for ubuf,ops in ast_ctx.assign_adj.items() if any(x.op is Ops.PRELOAD for x in ops))))
       for buf_uop in ast_ctx.sinked:
-        for luop in ast_ctx.lazybufs[buf_uop]:
-          assert buf_uop.size == luop.size, f"implicit movementop while becoming? {luop.size} {buf_uop.size}"
-          luop.become(buf_uop.view(unwrap(luop.st)))
+        for luop in ast_ctx.lazybufs[buf_uop]: luop.become(buf_uop.view(unwrap(luop.st)))
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
