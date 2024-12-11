@@ -12,7 +12,7 @@ x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR
 x86_float32_ops = {Ops.ADD: "addss", Ops.SUB: "subss", Ops.MUL: "mulss", Ops.FDIV: "divss", Ops.CMPLT: "ucomiss", Ops.CMPNE: "ucomiss",
                  Ops.SQRT: "sqrtss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
 x86_float64_ops = {**{k:v[:-1]+'d' for k,v in x86_float32_ops.items()}}
-x86_float16_ops = {Ops.STORE: "pextrw", Ops.LOAD: "pinsrw"}
+x86_float16_ops = {Ops.STORE: "pextrw", Ops.LOAD: "pinsrw", Ops.ASSIGN: "pextrw", Ops.DEFINE_ACC: "pinsrw"}
 #x86_float16_ops = {Ops.STORE: "movd", Ops.LOAD: "movd"}
 # NOTE: are doubles vectorized? 2 doubles is "ups" not "lps", use a instead of u
 x86_vec2_ops = {**{k:v+"lps" for k,v in x86_mov_ops.items()}}
@@ -58,8 +58,8 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]{', 0' if x.dtype is dtypes.float16 else ''}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x:
    f"{x86op[x.src[1].dtype][x.op]}{size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ''} [{ctx[x.src[0]]}], {ctx[x.src[1]]}{', 0' if x.src[1].dtype is dtypes.float16 else ''}"),
-  (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
-  (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}" if ctx[x] != ctx[x.src[1]] else None),
+  (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}{', 0' if x.dtype is dtypes.float16 else ''}"),
+  (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}{', 0' if x.dtype is dtypes.float16 else ''}" if ctx[x] != ctx[x.src[1]] else None),
   # devectorize/vectorize
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"insertps {ctx[x]}, {ctx[x.src[0]]}, {gep_imm[x.arg[0]]}"),
   (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {vec_imm[i]}" for i,s in enumerate(x.src))),
@@ -232,7 +232,7 @@ class X86Renderer(Renderer):
         for s in u.src: # mov srcs
           # these can't take imm values
           if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD): mov_to_reg(s, assign_reg(i, s.dtype))
-          elif is_mem(s) and not (u.op is Ops.LOAD and s.op is Ops.CONST): mov_to_reg(s, assign_reg(i, s.dtype))
+          elif is_mem(s) and not (u.op in (Ops.LOAD,Ops.DEFINE_ACC) and s.op is Ops.CONST): mov_to_reg(s, assign_reg(i, s.dtype))
         if u.dtype != dtypes.void: # assign destination
           if u.op is Ops.ASSIGN:
             # define acc was already spilled here
