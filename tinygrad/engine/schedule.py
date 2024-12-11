@@ -455,8 +455,16 @@ def merge_buffers(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, src:UOp) 
   del ctx.lazybufs[b2]
   # merge
   return v1
+
+
+def rebase(v2:UOp, b:UOp, src:UOp, v1:UOp) -> UOp:
+  raise Exception(b)
+
 merge_bufs = PatternMatcher([
-  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat(Ops.BUFFER, name="b1"), UPat.var("src"))))), merge_buffers),
+  # fold the buffer
+  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat.var("src"))))), merge_buffers),
+  # jump the view out of base
+  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b"), UPat(Ops.VIEW, name="v1", src=(UPat.var("src"),)))), rebase),
 ])
 
 # **** Schedule context builder
