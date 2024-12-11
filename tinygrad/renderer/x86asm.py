@@ -12,7 +12,8 @@ x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR
 x86_float32_ops = {Ops.ADD: "addss", Ops.SUB: "subss", Ops.MUL: "mulss", Ops.FDIV: "divss", Ops.CMPLT: "ucomiss", Ops.CMPNE: "ucomiss",
                  Ops.SQRT: "sqrtss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
 x86_float64_ops = {**{k:v[:-1]+'d' for k,v in x86_float32_ops.items()}}
-x86_float16_ops = {Ops.STORE: "movd", Ops.LOAD: "movd"}
+x86_float16_ops = {Ops.STORE: "pextrw", Ops.LOAD: "pinsrw"}
+#x86_float16_ops = {Ops.STORE: "movd", Ops.LOAD: "movd"}
 # NOTE: are doubles vectorized? 2 doubles is "ups" not "lps", use a instead of u
 x86_vec2_ops = {**{k:v+"lps" for k,v in x86_mov_ops.items()}}
 x86_vec4_ops = {**{k:v+"ups" for k,v in x86_mov_ops.items()}}
@@ -52,11 +53,11 @@ x86_rewrite = PatternMatcher([
   # loads/stores/movs
   (UPat(Ops.INDEX, name="x"), lambda ctx,x: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx.r[x.src[1]]}*{x.src[0].dtype.itemsize}]"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
-   f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}\ntest {ctx[mask]}, 1\n"
-   f"jz .L{ctx.uops.index(x)}\n{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
-  (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]"),
+   f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}{', 0' if x.dtype is dtypes.float16 else ''}\ntest {ctx[mask]}, 1\n"
+   f"jz .L{ctx.uops.index(x)}\n{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]{', 0' if x.dtype is dtypes.float16 else ''}\n.L{ctx.uops.index(x)}:"),
+  (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]{', 0' if x.dtype is dtypes.float16 else ''}"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x:
-   f"{x86op[x.src[1].dtype][x.op]}{size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ''} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
+   f"{x86op[x.src[1].dtype][x.op]}{size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ''} [{ctx[x.src[0]]}], {ctx[x.src[1]]}{', 0' if x.src[1].dtype is dtypes.float16 else ''}"),
   (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}" if ctx[x] != ctx[x.src[1]] else None),
   # devectorize/vectorize
@@ -97,13 +98,14 @@ x86_rewrite = PatternMatcher([
 
 x86_matcher = PatternMatcher([
   # we use general registers to load/store the 2 bytes of float16
-  (UPat(Ops.LOAD, dtype=dtypes.float16, name="x"), lambda x: UOp(Ops.LOAD, dtypes.int16, x.src).cast(dtypes.uint32).bitcast(dtypes.float16)),
-  (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.float16)), name="x"), lambda x: x.src[0].store(x.src[1].bitcast(dtypes.int32).cast(dtypes.int16))),
+  #(UPat(Ops.LOAD, dtype=dtypes.float16, name="x"), lambda x: UOp(Ops.LOAD, dtypes.int16, x.src).cast(dtypes.uint32).bitcast(dtypes.float16)),
+  #(UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.float16)), name="x"), lambda x: x.src[0].store(x.src[1].bitcast(dtypes.int32).cast(dtypes.int16))),
   # float16 alus perform instruction in float32
   (UPat(GroupOp.ALU, dtype=dtypes.float16, name="x"),
    lambda x: UOp(x.op, dtypes.float32, tuple(s.cast(dtypes.float32) if s.dtype != dtypes.bool else s for s in x.src)).cast(dtypes.float16)),
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
    lambda x: UOp(x.op, x.dtype, tuple(s.cast(dtypes.float32) for s in x.src)) if any(s.dtype is dtypes.float16 for s in x.src) else None),
+  (UPat(Ops.BITCAST, dtypes.uint16, src=(UPat(dtype=dtypes.float16)), name="c"), lambda c: c.src[0].bitcast(dtypes.int32).cast(dtypes.uint16)),
   # TODO: remove extra casts by casting to max(c.dtype, float32)
   # can't cast from float16 to ints directly and vice versa
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.float16),), name="c"), lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
@@ -132,10 +134,6 @@ x86_matcher = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
   # rewrite RECIP to FDIV
   (UPat(Ops.RECIP, name="x"), lambda x: UOp(Ops.FDIV, x.dtype, (x.const_like(1), x.src[0]))),
-  # *** also in cstyle ***
-  # gate any stores that aren't gated with ifs
-  (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="store"),
-    lambda store: UOp(Ops.STORE, src=store.src[:2]+(UOp(Ops.IF, src=(store.src[2],)),))),
   # rewrite MAX to CMPLT + WHERE
   (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
 ])
@@ -193,7 +191,7 @@ class X86Renderer(Renderer):
 
     def mov_to_reg(u:UOp, reg:str):
       dt = dtypes.int64 if isinstance(u.dtype, PtrDType) or reg == "r15" else u.dtype
-      kernel.append(f"{x86op[dt][Ops.LOAD]} {reg}, {r[u]}")
+      kernel.append(f"{x86op[dt][Ops.LOAD]} {reg}, {r[u]}{', 0' if dt is dtypes.float16 else ''}")
       r[u] = reg
 
     def mov_to_stack(u:UOp):
@@ -202,7 +200,7 @@ class X86Renderer(Renderer):
         mem[u] = f"[rbp - {stack_size}]"
         stack_size += 8
       dt = dtypes.int64 if isinstance(u.dtype, PtrDType) or r[u] == "r15" else u.dtype
-      kernel.append(f"{x86op[dt][Ops.STORE]} {mem[u]}, {r[u]}")
+      kernel.append(f"{x86op[dt][Ops.STORE]} {mem[u]}, {r[u]}{', 0' if dt is dtypes.float16 else ''}")
       r[u] = mem[u]
 
     def assign_reg(i:int, dt:DType) -> str:
@@ -234,7 +232,7 @@ class X86Renderer(Renderer):
         for s in u.src: # mov srcs
           # these can't take imm values
           if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD): mov_to_reg(s, assign_reg(i, s.dtype))
-          elif is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
+          elif is_mem(s) and not (u.op is Ops.LOAD and s.op is Ops.CONST): mov_to_reg(s, assign_reg(i, s.dtype))
         if u.dtype != dtypes.void: # assign destination
           if u.op is Ops.ASSIGN:
             # define acc was already spilled here
