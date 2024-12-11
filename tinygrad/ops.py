@@ -331,6 +331,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
   def cast(self, dtype:DType, bitcast=False, allow_buffer_view=True):
+    if self.dtype == dtype: return self # TODO: move this to the scheduler
     if bitcast: return self.bitcast(dtype, allow_buffer_view)
     if self._device is not None and self._device.startswith("DISK"): raise RuntimeError("CAST isn't supported on DISK")
     return UOp(Ops.CAST, dtype, (self,))

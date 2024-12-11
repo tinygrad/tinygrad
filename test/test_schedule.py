@@ -1324,7 +1324,6 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 3)) # TODO: push a reduceop through a reshape
 
   def test_conv2d(self): _test_conv2d(7)
-  @unittest.expectedFailure
   def test_conv2d_fused(self): _test_conv2d(6, FUSE_CONV_BW=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
