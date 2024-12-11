@@ -358,23 +358,23 @@ ops_folding = PatternMatcher([
 
 # ** this decides which ops get realized
 
-def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, **kwargs) -> None:
-  if to_store.op not in {Ops.CONST, Ops.BIND}: ctx.update([(b, to_store)])
+def realize(ctx:ScheduleContext, b:UOp, to_store:UOp, **kwargs) -> None:
+  if to_store.op not in {Ops.CONST, Ops.BIND}: ctx.realizes.update([(b, to_store)])
 
-def realize_view(ctx:Dict[UOp, UOp], view:UOp, src:UOp, b:UOp, **kwargs) -> None:
+def realize_view(ctx:ScheduleContext, view:UOp, src:UOp, b:UOp, **kwargs) -> None:
   if src.st is None: return None
   st = unwrap(view.st)
   # fold simple pads
   if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
-    return None if can_pad(src, ctx, set()) else realize(ctx, b, src)
+    return None if can_pad(src, ctx.realizes, set()) else realize(ctx, b, src)
   # early realize before expand
   if resolve(prod(src.shape) < prod(st.shape)): return realize(ctx, b, src)
   # otherwise safety check pads
-  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx, set())) else realize(ctx, b, src)
+  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx.realizes, set())) else realize(ctx, b, src)
 
-def fold_img_cast(ctx:Dict[UOp, UOp], xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> Optional[UOp]:
-  if not isinstance(xb.dtype, ImageDType) or b not in ctx or xb not in ctx or uval(to_cast).op in GroupOp.Meta: return None
-  del ctx[b]
+def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> Optional[UOp]:
+  if not isinstance(xb.dtype, ImageDType) or b not in ctx.realizes or xb not in ctx.realizes or uval(to_cast).op in GroupOp.Meta: return None
+  del ctx.realizes[b]
   return to_cast.view(unwrap(view.st))
 
 def init_big_graph(ctx:ScheduleContext, sink:UOp) -> Optional[UOp]:
@@ -436,7 +436,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   cache: Dict[LazyBuffer, UOp] = {}
   buffers: Dict[UOp, Buffer] = {}
   for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, buffers, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
-  big_graph = graph_rewrite(big_graph, ops_folding+do_realize, ctx.realizes)
+  big_graph = graph_rewrite(big_graph, ops_folding+do_realize, ctx)
   # create the scheduler context
   graph_rewrite(big_graph, create_ctx, ctx)
   # group realizes into kernels
