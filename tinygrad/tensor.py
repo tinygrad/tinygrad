@@ -2082,7 +2082,7 @@ class Tensor(SimpleMathTrait):
     indices = indices.pad(pads, value=dtypes.min(self.dtype))._pool(k_, stride if stride is not None else k_, dilation)
     flat_indices, flat_pool = indices.flatten(-len(k_)), pooled.flatten(-len(k_))
     # TODO: this contiguous before reduce-where chain changes the result, without it the results are wrong
-    masked = (ret.unsqueeze(-1) == flat_pool).where(flat_indices, 0).contiguous()
+    masked = (ret.unsqueeze(-1) == flat_pool).where(flat_indices, 0)
     # remove the +1 offset with `-1`
     indices = functools.reduce(lambda x,y: x.where(x, y), masked.split(1, -1)) - 1
     return ret, indices.reshape(ret.shape)
