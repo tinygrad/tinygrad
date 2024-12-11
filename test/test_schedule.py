@@ -1407,8 +1407,9 @@ class TestIndexing(unittest.TestCase):
       s = Tensor.schedule(*lst)
       kernels = [si for si in s if si.ast.op is Ops.SINK]
       for si in kernels: verify_ast(si.ast)
-      run_schedule(s)
+      run_schedule(s.copy())
       if FUSE_ARANGE: self.assertEqual(len(kernels), cnt)
+    return s
 
   def test_simple_indexing(self):
     X = Tensor.randn(10, 10).realize()
@@ -1551,26 +1552,23 @@ class TestIndexing(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT in view_supported_devices, "need view")
   def test_arange_view_op(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
-    assert isinstance(a.lazydata, LazyBuffer)
-    self.assertIs(a.lazydata.base.src[1].op, Ops.BUFFER_VIEW)
-    self.check_schedule(a, 1)
+    sched = self.check_schedule(a, 1)
+    self.assertIs(sched[1].ast.op, Ops.BUFFER_VIEW)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
   @unittest.skipIf(Device.DEFAULT == "CLANG", "tests copy from ext device")
   def test_arange_shrink_copy(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).to("CLANG")
-    assert isinstance(a.lazydata, LazyBuffer)
-    self.assertIs(a.lazydata.base.src[1].op, Ops.COPY)
-    self.check_schedule(a, 1)
+    sched = self.check_schedule(a, 1)
+    self.assertIs(sched[-1].ast.op, Ops.COPY)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
   @unittest.skipIf(Device.DEFAULT == "CLANG", "tests copy from ext device")
   def test_arange_expand_copy(self):
-    a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).to("CLANG")
-    assert isinstance(a.lazydata, LazyBuffer)
-    self.assertIs(a.lazydata.base.src[1].op, Ops.COPY)
-    self.assertIs(a.lazydata.base.src[1].src[0].base.op, Ops.ADD)
-    self.check_schedule(a, 1)
+    a = Tensor.arange(4).reshape(2, 2, 1).expand(2, 2, 2).contiguous().to("CLANG")
+    sched = self.check_schedule(a, 1)
+    self.assertIs(sched[1].ast.op, Ops.COPY)
+    self.assertIs(sched[0].ast.src[0].src[2].op, Ops.ADD)
     np.testing.assert_equal(a.numpy(), [[[0, 0], [1, 1]], [[2, 2], [3, 3]]])
 
   @unittest.skip("TODO: support pads in graph_rewrite")
