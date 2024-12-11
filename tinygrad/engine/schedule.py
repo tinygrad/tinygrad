@@ -5,7 +5,7 @@ from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
 from tinygrad.ops import identity_element, buffers, exec_alu
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
-from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
+from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, ContextVar
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
@@ -210,7 +210,8 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemCon
         and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in ops):
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  if getenv("RUN_PROCESS_REPLAY"): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, {}, sink))
+  if getenv("RUN_PROCESS_REPLAY"):
+    PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, {k:v.value for k,v in ContextVar._cache.items()}, sink))
   return sink, si_ctx
 
 PROCESS_REPLAY_CAPTURE: Dict[str, bytes] = {}
