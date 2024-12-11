@@ -1,18 +1,17 @@
 from __future__ import annotations
 from typing import Tuple, List, Any, Optional, cast
-import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys, subprocess, select
+import os, ctypes, ctypes.util, functools, pathlib, mmap, errno, array, contextlib, sys, subprocess, select, struct
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram
 from tinygrad.ops import sint
-from tinygrad.device import LRUAllocator, BufferSpec
+from tinygrad.device import BufferSpec
 from tinygrad.helpers import getenv, to_mv, round_up, data64_le, mv_address, from_mv, lo32, hi32
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.runtime.autogen import kfd, hsa, amd_gpu, libc, libpciaccess, vfio
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_hip import AMDCompiler
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.runtime.support.pci import pci_scan_bus, read_pagemap
 from tinygrad.runtime.support.am.amdev import AMDev
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 if getenv("MOCKGPU"): import extra.mockgpu.mockgpu # noqa: F401 # pylint: disable=unused-import
@@ -383,6 +382,7 @@ class KFDIface:
 class VFIOIface:
   vfio_fd:int = -1
   iommu_set:bool = False
+  gpus:List[Any] = []
 
   def __init__(self, dev, dev_id):
     self.dev = dev
@@ -394,7 +394,10 @@ class VFIOIface:
       VFIOIface.vfio_fd = os.open("/dev/vfio/vfio", os.O_RDWR)
       assert vfio.VFIO_CHECK_EXTENSION(VFIOIface.vfio_fd, vfio.VFIO_NOIOMMU_IOMMU), "VFIO does not support IOMMU"
 
-      VFIOIface.gpus = pci_scan_bus(vendor_id=0x1002, device_id=0x744c)
+      libpciaccess.pci_system_init()
+      pci_iter = libpciaccess.pci_id_match_iterator_create(None)
+      while pcidev:=libpciaccess.pci_device_next(pci_iter):
+        if pcidev.contents.vendor_id == 0x1002 and pcidev.contents.device_id == 0x744c: VFIOIface.gpus.append(pcidev.contents)
 
       # TODO: visible_devices should be handled layer above this?
       visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
@@ -403,7 +406,6 @@ class VFIOIface:
     self.pcidev = VFIOIface.gpus[dev_id]
     self.pcibus = f"{self.pcidev.domain_16:04x}:{self.pcidev.bus:02x}:{self.pcidev.dev:02x}.{self.pcidev.func:d}"
 
-    # if not os.path.exists(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group"):
     if os.path.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
       with open(f"/sys/bus/pci/devices/{self.pcibus}/driver/unbind", 'w') as f: f.write(self.pcibus)
     with open(f"/sys/bus/pci/devices/{self.pcibus}/resource0_resize", 'w') as f: f.write("15")
@@ -453,8 +455,13 @@ class VFIOIface:
     if host:
       vaddr = self.adev.mm.alloc_vaddr(size, align=mmap.PAGESIZE)
       va = libc.mmap(vaddr, size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS | MAP_LOCKED | MAP_FIXED, -1, 0)
-      for off in range(0, size, mmap.PAGESIZE):
-        self.adev.mm.map_range(vaddr=vaddr + off, size=mmap.PAGESIZE, paddr=read_pagemap(va + off), system=True, snooped=True, uncached=True)
+
+      # Read pagemap to get the physical address of each page. The pages are locked.
+      with open("/proc/self/pagemap", "rb") as f:
+        for off in range(0, size, mmap.PAGESIZE):
+          f.seek(((va + off) // mmap.PAGESIZE) * 8)
+          pt_entry = struct.unpack("Q", f.read(8))[0] & ((1 << 55) - 1)
+          self.adev.mm.map_range(vaddr=vaddr + off, size=mmap.PAGESIZE, paddr=pt_entry * mmap.PAGESIZE, system=True, snooped=True, uncached=True)
       return HCQBuffer(vaddr, size, meta=(self.dev, [self.dev], None))
 
     vm = self.adev.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contigous=cpu_access)

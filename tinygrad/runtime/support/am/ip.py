@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, time
 from typing import Literal
-from tinygrad.runtime.support.pci import pci_set_master
+from tinygrad.runtime.autogen import libpciaccess
 from tinygrad.runtime.autogen.am import am, gc_11_0_0, smu_v13_0_0
 from tinygrad.helpers import to_mv, data64
 
@@ -249,7 +249,9 @@ class AM_IH(AM_IP):
     self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
     self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
 
-    pci_set_master(self.adev.pcidev)
+    # TODO: parse from linux/include/uapi/linux/pci_regs.h
+    libpciaccess.pci_device_cfg_read_u16(self.adev.pcidev, ctypes.byref(val:=ctypes.c_uint16()), 0x4)
+    libpciaccess.pci_device_cfg_write_u16(self.adev.pcidev, val.value | 0x4, 0x4)
 
     # toggle interrupts
     for addr_vm, rwptr_vm, suf, ring_id in self.rings:
