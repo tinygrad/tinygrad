@@ -456,13 +456,19 @@ def merge_buffers(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, src:UOp) 
   # merge
   return v1
 
+def rebase_buffers(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, src:UOp, midpoint:UOp) -> UOp:
+  # nothing refers to b2 in this schedule
+  del ctx.lazybufs[b2]
+  if b2 in ctx.realizes: del ctx.realizes[b2]
+  rebased = v1.view(unwrap(midpoint.st))
+  ret = rebased
+  return ret
 
-def rebase(v2:UOp, b:UOp, src:UOp, v1:UOp) -> UOp: return src
 merge_bufs = PatternMatcher([
-  # fold the buffer
+  # buffer1 + buffer2 = buffer1
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat.var("src"))))), merge_buffers),
-  # jump the view out of base
-  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b"), UPat(Ops.VIEW, name="v1", src=(UPat.var("src"),)))), rebase),
+  # buffer1 + view + buffer2 = buffer1+view
+  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat.var("src"))).view(name="midpoint"))), rebase_buffers),
 ])
 
 # **** Schedule context builder
@@ -498,7 +504,9 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
       prescheduled.append(ScheduleItem(ast, tuple(u.buffer for u in ast_ctx.bufs if u.size != 0), tuple(ast_ctx.metadata),
                                        frozenset(ubuf for ubuf,ops in ast_ctx.assign_adj.items() if any(x.op is Ops.PRELOAD for x in ops))))
       for buf_uop in ast_ctx.sinked:
-        for luop in ast_ctx.lazybufs[buf_uop]: luop.become(buf_uop.view(unwrap(luop.st)))
+        for luop in ast_ctx.lazybufs[buf_uop]:
+          assert buf_uop.size == luop.size, f"implicit movementop while becoming? {luop.size} {buf_uop.size}"
+          luop.become(buf_uop.view(unwrap(luop.st)))
   # do BFS
   schedule_targets = {out:si for si in prescheduled for out in si.outputs}
   graph: DefaultDict[ScheduleItem, List[ScheduleItem]] = defaultdict(list)
