@@ -4,6 +4,7 @@ import unittest, random, copy, warnings
 import numpy as np
 
 from tinygrad import Tensor, dtypes, Device, TinyJit
+from tinygrad.device import is_dtype_supported
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.helpers import CI, all_same, prod
@@ -22,7 +23,7 @@ def consec(shape, start=1):
 def set_(reference: Tensor, shape, strides, offset):
   if reference.lazydata.base.realized is None: reference.realize()
   assert reference.lazydata.base.realized, "base has to be realized before setting it to strided's base"
-  strided = Tensor(reference.lazydata._view(ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),))))
+  strided = Tensor(reference.lazydata.view(ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),))))
   assert strided.lazydata.st.real_strides() == strides, "real_strides should equal strides for strided"
   return strided
 
@@ -810,6 +811,7 @@ class TestIndexing(unittest.TestCase):
       numpy_testing_assert_equal_helper(output, input_list)
   '''
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.long), f"long dtype not supported on {Device.DEFAULT}")
   def test_index_ind_dtype(self):
     x = Tensor.randn(4, 4)
     # ind_long = torch.randint(4, (4,), dtype=torch.long)
@@ -1062,9 +1064,9 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(a[0, one], a[zero, 1])
 
     # indexing by a scalar should slice (not copy)
-    self.assertEqual(data_ptr(a[0, 1]), data_ptr(a[zero, one]))
-    self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int32)]))
-    self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int16)]))
+    numpy_testing_assert_equal_helper(a[0, 1], a[zero, one])
+    numpy_testing_assert_equal_helper(a[1], a[one.cast(dtypes.int32)])
+    numpy_testing_assert_equal_helper(a[1], a[one.cast(dtypes.int16)])
 
     # scalar indexed with scalar
     r = Tensor.randn()
@@ -1104,6 +1106,20 @@ class TestIndexing(unittest.TestCase):
     # numpy_testing_assert_equal_helper(9.9, r)
     np.testing.assert_allclose(9.9, r, rtol=1e-7)
   '''
+
+  def test_getitem_casted_scalars_folding(self):
+    Tensor.manual_seed(0)
+    # cast of const is just another const, don't need extra kernels for this
+    a = Tensor.randn(2, 3)
+    one = Tensor(1, dtype=dtypes.int64)
+    self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int32)]))
+    self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int16)]))
+
+  def test_getitem_scalars_simple_folding(self):
+    a = Tensor.randn(2, 3)
+    zero = Tensor(0, dtype=dtypes.int64)
+    one = Tensor(1, dtype=dtypes.int64)
+    self.assertEqual(data_ptr(a[0, 1]), data_ptr(a[zero, one]))
 
   def test_basic_advanced_combined(self):
     # From the NumPy indexing example

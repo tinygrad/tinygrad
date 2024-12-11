@@ -1,4 +1,4 @@
-import sys, atexit, functools
+import sys, atexit, functools, pickle
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
@@ -67,25 +67,23 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, buffers:Dict[UOp, Buffer], cache
     buf.buffer.dtype = dtype
     buf.buffer.options = None
   # base is a VIEW of (BUFFER, (optional) op)
-  if buf.is_realized:
-    # TODO: this is the same underlying Buffer in all schedules
-    buf_uop = UOp.new_buffer(buf.device, buf.size, dtype)
-    op = None
+  # TODO: this is the same underlying Buffer in all schedules, delete_lazy fixes this
+  if buf.is_realized: ret = UOp.new_buffer(buf.device, buf.size, dtype).view(buf.st)
   # ASSIGN uses the target buffer, otherwise we create a new buffer
   else:
     src = tuple(to_uop(x, ctx, buffers, cache) for x in buf.srcs)
     buf_uop = src[0].base.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
     op = UOp(buf.op, dtype if buf.op in GroupOp.Meta else dtype.base, src, buf.arg)
-  cache[buf] = ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.contiguous() if buf.forced_realize else op), buf.st)
-  # keep track of ops outside the big graph
-  buffers[buf_uop] = buf.buffer
-  if op is not None:
+    ret = UOp(Ops.VIEW, dtype.base, (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
+    # keep track of scheduled ops
     buf.buffer.ref(1)
     ctx.lazybufs[buf_uop] = buf
     ctx.allbufs[buf_uop] = ret
     if op.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
     for x in op.src:
       if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
+  cache[buf] = ret
+  buffers[ret.buf_uop] = buf.buffer
   return ret
 
 # **** AST graph rewrite
@@ -213,14 +211,14 @@ def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemCon
         and ShapeTracker.from_shape(s.shape).shrink(m) == s.shrink(m)) for x in ops):
       raise RuntimeError("self operand of augmented assign must be contiguous.\nhelp: consider using .contiguous():\n"
                          +colored("   - a += a.T\n", "red")+colored("   + a += a.T.contiguous()", "green"))
-  if getenv("RUN_PROCESS_REPLAY"): PROCESS_REPLAY_CAPTURE.append(((pre, ctx.assigns), sink))
+  if getenv("RUN_PROCESS_REPLAY"): PROCESS_REPLAY_CAPTURE[str(pre.key)] = pickle.dumps((pre, si_ctx.assigns, {}, sink))
   return sink, si_ctx
 
-PROCESS_REPLAY_CAPTURE: List[Tuple[Tuple[UOp, Set[UOp]], UOp]] = []
+PROCESS_REPLAY_CAPTURE: Dict[str, bytes] = {}
 if getenv("RUN_PROCESS_REPLAY"):
   @atexit.register
   def save_process_replay() -> None:
-    for x,ret in PROCESS_REPLAY_CAPTURE: diskcache_put("schedule_process_replay", str(x[0].key), (*x, {}, ret))
+    for k,v in PROCESS_REPLAY_CAPTURE.items(): diskcache_put("schedule_process_replay", k, v, prepickled=True)
 
 # **** Schedule grouping
 
@@ -326,11 +324,9 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
 
 # ** ops in the big graph can either be pre-realized or scheduled (fused/realized)
 
-class UPatRealized(UPat):
-  def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),))
 class UPatScheduled(UPat):
   def __init__(self, *args, **kwargs): super().__init__(Ops.VIEW, name="base", src=(UPat(Ops.BUFFER, name="b"),
-                                                                       UPat(*args, **{**kwargs,"name":"to_store"})))
+                                                                       UPat(*args, **{"name":"to_store",**kwargs})))
 
 # ** this is schedule level const folding
 
@@ -343,7 +339,7 @@ def simplify_reduceop(ctx, reduce:UOp, x:UOp) -> Optional[UOp]:
   # remove reduce on unmasked const
   if all_int(x.shape) and x.is_unrealized_unmasked_const():
     prshape = prod(unwrap(x.st).shape[i] for i in reduce.arg[1])
-    ret = x.base.src[1].arg
+    ret = x.const_arg
     match reduce.arg[0]:
       case Ops.ADD: ret *= prshape
       case Ops.MUL: ret **= prshape
@@ -366,20 +362,19 @@ ops_folding = PatternMatcher([
 
 # ** this decides which ops get realized
 
-def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, base:UOp) -> None:
+def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, **kwargs) -> None:
   if to_store.op not in {Ops.CONST, Ops.BIND}: ctx.update([(b, to_store)])
 
-def realize_view(ctx:Dict[UOp, UOp], base:UOp, view:UOp, to_store:UOp, b:UOp) -> None:
-  if to_store.op in {Ops.CONST, Ops.BIND}: return None
-  base_shape = unwrap(base.st).shape
+def realize_view(ctx:Dict[UOp, UOp], view:UOp, src:UOp, b:UOp, **kwargs) -> None:
+  if src.st is None: return None
   st = unwrap(view.st)
   # fold simple pads
-  if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(base_shape) and resolve(prod(base_shape) >= prod([y-x for x,y in m])):
-    return None if can_pad(base, ctx, set()) else realize(ctx, b, to_store, base)
+  if len(st.views) == 1 and (m:=st.views[-1].mask) is not None and all_int(src.shape) and resolve(prod(src.shape) >= prod([y-x for x,y in m])):
+    return None if can_pad(src, ctx, set()) else realize(ctx, b, src)
   # early realize before expand
-  if resolve(prod(base_shape) < prod(st.shape)): return realize(ctx, b, to_store, base)
+  if resolve(prod(src.shape) < prod(st.shape)): return realize(ctx, b, src)
   # otherwise safety check pads
-  return None if (all(v.mask is None for v in st.views) or can_pad(base, ctx, set())) else realize(ctx, b, to_store, base)
+  return None if (all(v.mask is None for v in st.views) or can_pad(src, ctx, set())) else realize(ctx, b, src)
 
 def fold_img_cast(ctx:Dict[UOp, UOp], xb:UOp, view:UOp, b:UOp, to_cast:UOp, **kwargs) -> Optional[UOp]:
   if not isinstance(xb.dtype, ImageDType) or b not in ctx or xb not in ctx or uval(to_cast).op in GroupOp.Meta: return None
@@ -396,7 +391,7 @@ do_realize = PatternMatcher([
   # always realize meta ops
   (UPatScheduled({Ops.ASSIGN, Ops.CONTIGUOUS, *GroupOp.Meta}), realize),
   # realize before expand or unsafe pad ops
-  (UPatScheduled().view(name="view"), realize_view),
+  (UPatScheduled(name="src").view(name="view"), realize_view),
   # don't realize image to image casts
   (UPatScheduled(Ops.CAST, src=(UPat(Ops.VIEW, src=(UPat.var("xb"), UPat()), name="to_cast"),), dtype=dtypes.float).view(name="view"), fold_img_cast),
   # realize before COPY or BUFFER_VIEW
@@ -412,8 +407,8 @@ def generate_valid(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   return UOp.const_with_shape(base.dtype, val, unwrap(base.st).shape)
 
 def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
-  ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape((st:=unwrap(base.st)).shape).to_uop(), append_op(ctx, b, to_store))
-  return UOp(Ops.LOAD, base.dtype, (b, st.to_uop()))
+  ctx.realizes[b] = UOp.store(b, ShapeTracker.from_shape(base.shape).to_uop(), append_op(ctx, b, to_store))
+  return UOp(Ops.LOAD, base.dtype, (b, unwrap(base.st).to_uop()))
 
 def append_op(ctx:ScheduleContext, b:UOp, to_store:UOp) -> UOp:
   if (m:=ctx.lazybufs[b].metadata) is not None: ctx.ops_metadata[to_store] = m
@@ -422,10 +417,10 @@ def append_op(ctx:ScheduleContext, b:UOp, to_store:UOp) -> UOp:
 break_sched = PatternMatcher([
   # consts are always fused and generated
   (UPatScheduled({Ops.CONST, Ops.BIND}), generate_valid),
-  # everything else is a VIEW of BUFFER that either realizes or fuses
+  # view of realized buffer just loads
+  (UPat(Ops.BUFFER, name="b").view(name="v"), lambda ctx,b,v: UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, b.dtype.base, (b, v.st.to_uop()))),
+  # all other views either fold or realize with a store
   (UPatScheduled(), lambda ctx,b,to_store,base: append_realize(ctx, b, to_store, base) if b in ctx.realizes else append_op(ctx, b, to_store)),
-  # just load realized buffers
-  (UPatRealized(), lambda ctx,b,base: UOp(Ops.PRELOAD if b in ctx.assigns else Ops.LOAD, base.dtype, (b, base.st.to_uop()))),
 ])
 
 @track_rewrites(named=True)

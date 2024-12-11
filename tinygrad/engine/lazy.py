@@ -110,16 +110,20 @@ class LazyBuffer(MathTrait):
       new_shape = new_shape[:-1] + ((new_shape[-1]*self.dtype.itemsize) // dtype.itemsize,)
     elif getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self is not self.base:
       # TODO: applying this makes gpt2 slower
-      return self.base.cast(dtype, bitcast)._view(self.st)
+      return self.base.cast(dtype, bitcast).view(self.st)
     cast_op: Ops = (Ops.BUFFER_VIEW if self.can_view() and allow_buffer_view else Ops.BITCAST) if bitcast else Ops.CAST
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), dtype, cast_op, None, (self,))
 
   def is_unrealized_const(self): return self.base.realized is None and self.base.op is Ops.CONST and not isinstance(self.base.arg, UOp)
   def is_unrealized_unmasked_const(self): return self.is_unrealized_const() and all(v.mask is None for v in self.st.views)
+  @property
+  def const_arg(self) -> ConstType:
+    assert self.base.op is Ops.CONST and isinstance(self.base.arg, get_args(ConstType)), f"const_arg called on {self}"
+    return self.base.arg
 
   def _copy(self, device:str) -> LazyBuffer:
     assert self.st.contiguous and self.size == self.base.size, f"can only copy contig {self} {self.base}"
-    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, Ops.COPY, self.buffer.nbytes, (self,), enable_cache=False)
+    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, Ops.COPY, srcs=(self,), enable_cache=False)
 
   def copy_to_device(self, device:str, force:bool=False, clone:bool=False) -> LazyBuffer:
     # no COPY
@@ -131,13 +135,13 @@ class LazyBuffer(MathTrait):
 
     # const doesn't have to be copied (issues with disk tensor)
     if self.is_unrealized_const():
-      return LazyBuffer.metaop(Ops.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
+      return LazyBuffer.metaop(Ops.CONST, tuple(), self.dtype, device, arg=self.base.arg).view(self.st)
 
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.st.shape) < prod(self.base.st.shape): return self.contiguous()._copy(device)
 
     # copy the base and apply the shapetracker on the new device
-    return self.base._copy(device)._view(self.st)
+    return self.base._copy(device).view(self.st)
 
   def clone(self) -> LazyBuffer: return self.copy_to_device(self.device, clone=True)
 
@@ -145,7 +149,7 @@ class LazyBuffer(MathTrait):
     srcs: List[LazyBuffer] = []
     for s in (self,)+in_srcs:
       if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child[0]()) is not None:
-        srcs.append(root._view(s.base.contiguous_child[1]))
+        srcs.append(root.view(s.base.contiguous_child[1]))
       else:
         srcs.append(s)
     if not all_same(dts:=[x.dtype.base for x in (srcs[1:] if op is Ops.WHERE else srcs)]):
@@ -203,15 +207,15 @@ class LazyBuffer(MathTrait):
 
   # *** movement ops ***
 
-  def _view(self, new_st:ShapeTracker) -> LazyBuffer:
+  def view(self, new_st:ShapeTracker) -> LazyBuffer:
     if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)):
       return self.const_with_shape(0, new_st.shape)
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 
-  def reshape(self, arg:Tuple[sint, ...]): return self._view(self.st.reshape(arg))
-  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.pad(arg))
-  def expand(self, arg:Tuple[sint, ...]): return self._view(self.st.expand(arg))
-  def permute(self, arg:Tuple[int, ...]): return self._view(self.st.permute(arg))
-  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.shrink(arg))
-  def stride(self, arg:Tuple[int, ...]): return self._view(self.st.stride(arg))
+  def reshape(self, arg:Tuple[sint, ...]): return self.view(self.st.reshape(arg))
+  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self.view(self.st.pad(arg))
+  def expand(self, arg:Tuple[sint, ...]): return self.view(self.st.expand(arg))
+  def permute(self, arg:Tuple[int, ...]): return self.view(self.st.permute(arg))
+  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self.view(self.st.shrink(arg))
+  def stride(self, arg:Tuple[int, ...]): return self.view(self.st.stride(arg))
