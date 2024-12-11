@@ -63,18 +63,17 @@ class TestLazyBuffer(unittest.TestCase):
 
   def test_const_dtype(self):
     lb: LazyBuffer = Tensor([1], dtype=dtypes.int).lazydata
-    assert lb.const_like(1).base.arg == 1
-    assert type(lb.const_like(1).base.arg) is int
+    assert lb.const_like(1).const_arg == 1
+    assert type(lb.const_like(1).const_arg) is int
 
     lb: LazyBuffer = Tensor([1], dtype=dtypes.float).lazydata
-    assert lb.const_like(1).base.arg == 1.0
-    assert type(lb.const_like(1).base.arg) is float
+    assert lb.const_like(1).const_arg == 1.0
+    assert type(lb.const_like(1).const_arg) is float
 
   def test_forced_realized_alu(self):
     a = Tensor.randn(2, 2).realize()
     b = Tensor.randn(2, 2).realize()
-    add = a + b
-    add.lazydata.forced_realize = True
+    add = (a+b).contiguous()
     out = add+2
     sched = create_schedule([out.lazydata])
     self.assertEqual(len(sched), 2)
@@ -82,8 +81,7 @@ class TestLazyBuffer(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), a.numpy()+b.numpy()+2)
 
   def test_forced_realized_metaop(self):
-    empty = Tensor.empty(1)
-    empty.lazydata.forced_realize = True
+    empty = Tensor.empty(1).contiguous()
     sched = create_schedule([empty.lazydata])
     self.assertEqual(len(sched), 1)
     self.assertIs(sched[0].ast.op, Ops.EMPTY)

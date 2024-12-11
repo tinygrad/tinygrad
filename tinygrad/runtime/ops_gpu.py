@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, Optional, List, cast
-import ctypes, functools, hashlib
+import ctypes, functools, hashlib, contextlib
 from tinygrad.runtime.autogen import opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG, getenv, mv_address
 from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
@@ -41,8 +41,9 @@ class CLProgram:
     self.kernel = checked(cl.clCreateKernel(self.program, name.encode(), status := ctypes.c_int32()), status)
 
   def __del__(self):
-    if hasattr(self, 'kernel'): check(cl.clReleaseKernel(self.kernel))
-    if hasattr(self, 'program'): check(cl.clReleaseProgram(self.program))
+    with contextlib.suppress(TypeError):
+      with contextlib.suppress(AttributeError): check(cl.clReleaseKernel(self.kernel))
+      with contextlib.suppress(AttributeError): check(cl.clReleaseProgram(self.program))
 
   def __call__(self, *bufs:Tuple[ctypes._CData, BufferSpec], global_size:Tuple[int,int,int]=(1,1,1), local_size:Optional[Tuple[int,int,int]]=None, vals:Tuple[int, ...]=(), wait=False) -> Optional[float]:  # noqa: E501
     for i,(b,_) in enumerate(bufs): cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b))

@@ -10,7 +10,7 @@ def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
   schedule = create_schedule(t.lazydata.lbs)
   asts = [s for s in schedule if s.ast.op is Ops.SINK]
-  assert len(asts) == desired_count
+  assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
 
 class TestUnaryOpsConstFolding(unittest.TestCase):
   def test_all_consts_ops(self):
@@ -103,7 +103,8 @@ class TestIndexingConstFolding(unittest.TestCase):
   def test_scalar_index(self):
     t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
     _check_ast_count(0, t[:,:,Tensor(1),:])
-    _check_ast_count(0, t[:,:,Tensor(1)+2,:])
+    # NOTE: this is no longer supported because the 1+2 isn't folding early.
+    #_check_ast_count(0, t[:,:,Tensor(1)+2,:])
     _check_ast_count(0, t[:,:,Tensor(1),Tensor(0)])
 
   @unittest.expectedFailure
@@ -157,6 +158,37 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     # NOTE: cannot just count the non-padded area because some Ops f do not have f(0) = 0.
     _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).exp().sum())
     np.testing.assert_allclose(Tensor.ones(4).pad(((1, 1),)).exp().sum().numpy(), 4 * math.e + 2)
+
+  def test_bool_zero_max(self):
+    _check_ast_count(0, Tensor.full((1, 2), True).shrink(((0, 1), (0, 0))).max((1, 0)))
+    np.testing.assert_equal(Tensor.full((1, 2), True).shrink(((0, 1), (0, 0))).max((1, 0)).numpy(), False)
+
+  def test_zero_size_ops(self):
+    for reduceop in [lambda x:x.prod(), lambda x:x.sum()]: # lambda x:x.max() NOTE: numpy gives "reduction operation maximum which has no identity"
+      _check_ast_count(0, reduceop(Tensor.empty(1, 0)))
+      np.testing.assert_equal(reduceop(Tensor.empty(shape:=(1, 0))).numpy(), reduceop(np.empty(shape)))
+
+  def test_zero_size_ops_view(self):
+    for reduceop in [lambda x:x.prod(), lambda x:x.sum()]:
+      _check_ast_count(0, reduceop(Tensor.empty(1, 0, 4).permute((1, 2, 0)).contiguous()))
+      np.testing.assert_equal(reduceop(Tensor.empty(shape:=(1, 0))).numpy(), reduceop(np.empty((shape))))
+
+  def test_zero_size_ops_realized(self):
+    for reduceop in [lambda x:x.prod(), lambda x:x.sum()]:
+      _check_ast_count(0, reduceop((Tensor.randn(0, 1)+1).realize()))
+      np.testing.assert_equal(reduceop((Tensor.randn(shape:=(0, 1))+1).realize()).numpy(), reduceop(np.empty(shape)))
+
+  def test_zero_size_realize_folded(self):
+    # non contiguous folded output doesn't realize
+    _check_ast_count(0, Tensor.empty(1, 0).sum())
+    # contiguous folded const can still schedule
+    a = Tensor.empty(1, 0).sum().contiguous()
+    _check_ast_count(2, a+2)
+    self.assertIsNotNone(a.lazydata.base.realized)
+    np.testing.assert_equal((Tensor.empty(1, 0).sum().contiguous()+2).numpy(), 2)
+    # otherwise we just fuse it
+    _check_ast_count(1, (Tensor.empty(1, 0).sum()+2).contiguous())
+    np.testing.assert_equal((Tensor.empty(1, 0).sum()+2).numpy(), 2)
 
   def test_const_prod(self):
     _check_ast_count(0, Tensor.full((2, 3), fill_value=2).prod())

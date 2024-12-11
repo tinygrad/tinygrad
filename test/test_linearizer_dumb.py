@@ -5,6 +5,7 @@
 import unittest
 from test.helpers import ast_const
 from tinygrad import Device, dtypes
+from tinygrad.device import is_dtype_supported
 from tinygrad.ops import UOp, Ops
 from tinygrad.helpers import getenv
 from tinygrad.shape.shapetracker import ShapeTracker, View
@@ -95,10 +96,11 @@ class TestLinearizerDumb(unittest.TestCase):
     print(prg.src)
     if_uops = [u for u in k.uops if u.op is Ops.IF]
     self.assertIn(len(if_uops), {1,2,3})
-    conditions = if_uops[0].src[0].sparents
+    conditions = if_uops[0].src[0].toposort
     self.assertLessEqual(len(conditions), 9)
 
   # this was a bug in embedding, someday we should fold this anyway
+  @unittest.skipUnless(is_dtype_supported(dtypes.half), f"half dtype not supported on {Device.DEFAULT}")
   def test_llama_embedding(self):
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(
       UOp(Ops.STORE, dtypes.void, arg=None, src=(
