@@ -42,8 +42,8 @@ class TinygradBackend(Backend):
 # extend BackendTest to support in-memory tests
 class TinygradBackendTestRunner(onnx.backend.test.BackendTest):
   def _add_model_test(self, model_test, kind):
+    # if .model and .pb are in memory
     if model_test.model is not None and model_test.data_sets is not None:
-      # Handle in-memory model and data
       model_marker = [model_test.model]
       def run(test_self, device='CPU', **kwargs):
         model = model_test.model
@@ -53,13 +53,20 @@ class TinygradBackendTestRunner(onnx.backend.test.BackendTest):
         for inputs, ref_outputs in model_test.data_sets:
           outputs = prepared.run(inputs)
           self.assert_similar_outputs(ref_outputs, outputs, model_test.rtol, model_test.atol)
-      self._add_test(kind + "Model", model_test.name, run, model_marker)
+      self._add_test(kind + "Node", model_test.name, run, model_marker)
     else:
-      # Delegate to the original logic for file-based tests
+      # parent logic is for file-based tests
       super()._add_model_test(model_test, kind)
 
-
 backend_test = TinygradBackendTestRunner(TinygradBackend, __name__)
+# def run(test:TestCase, device='CPU', **kwargs):
+#   model = test.model
+#   if hasattr(backend_test.backend, "is_compatible") and not backend_test.backend.is_compatible(model):
+#     raise unittest.SkipTest("Not compatible with backend")
+#   prepared = backend_test.backend.prepare(model, device, **kwargs)
+#   for inputs, ref_outputs in test.data_sets:
+#     outputs = prepared.run(inputs)
+#     backend_test.assert_similar_outputs(ref_outputs, outputs, test.rtol, test.atol)
 
 from test.external.external_test_onnx_superset import adam_test_case, adagrad_test_case, momentum_test_case
 backend_test._add_model_test(adam_test_case, "Tinygrad")

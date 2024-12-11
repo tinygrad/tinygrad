@@ -29,7 +29,7 @@ def test_adam_large_t():
   outputs = dict([*list(zip(outputs, onnx_out))])
   # NOTE: fix x_new since np.sqrt turns float32 into float64
   outputs["x_new"] = outputs["x_new"].astype(np.float32)
-  adam_test_case = create_testcase(op, "test_Adam_internal", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
+  adam_test_case = create_testcase(op, "test_adam_internal", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
   return adam_test_case
 
 def test_adagrad_large_t():
@@ -48,7 +48,7 @@ def test_adagrad_large_t():
   outputs = dict([*list(zip(outputs, onnx_out))])
   # NOTE: fix x_new since np.sqrt turns float32 into float64
   outputs["x_new"] = outputs["x_new"].astype(np.float32)
-  adagrad_test_case = create_testcase(op, "test_Adagrad_internal", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
+  adagrad_test_case = create_testcase(op, "test_adagrad_internal", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
   return adagrad_test_case
 
 def test_momentum_large_t():
@@ -65,7 +65,7 @@ def test_momentum_large_t():
   opts = { "norm_coefficient": 0.001, "alpha": 0.95, "beta": 0.1, "mode": "standard" }
   onnx_out = apply_momentum(**inputs, **{"norm_coefficient": 0.001, "alpha": 0.95, "beta": 0.1})
   outputs = dict([*list(zip(outputs, onnx_out))])
-  momentum_test_case = create_testcase(op, "test_Momentum_internal", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
+  momentum_test_case = create_testcase(op, "test_momentum_internal", inputs, outputs, AI_ONNX_PREVIEW_TRAINING_DOMAIN, **opts)
   return momentum_test_case
 
 momentum_test_case = test_momentum_large_t()
