@@ -30,7 +30,7 @@ class TestSigmoidFocalLoss(unittest.TestCase):
       ref_metrics_res = ref_metrics(torch.from_numpy(pred), torch.from_numpy(tgt), **kwargs)
 
     # NOTE: since boolean indexing is not supported in tinygrad, compare the sum instead.
-    np.testing.assert_allclose(tinygrad_metrics_res.sum().numpy(), ref_metrics_res.sum().numpy(), atol=1e-5)
+    np.testing.assert_allclose(tinygrad_metrics_res.sum().numpy(), ref_metrics_res.sum().numpy(), rtol=1e-6)
 
   def _generate_samples(self, generate_mask=False):
     def _apply_logit(p): return np.log(p / (1 - p))
@@ -50,6 +50,11 @@ class TestSigmoidFocalLoss(unittest.TestCase):
     for reduction in ["mean", "sum", "none"]:
       pred, tgt, _ = self._generate_samples()
       self._test_loss(pred, tgt, sigmoid_focal_loss, ref_sigmoid_focal_loss, alpha=0.58, gamma=2, reduction=reduction)
+
+  def test_loss_correct_ratio_mask(self):
+    for reduction in ["mean", "sum", "none"]:
+      pred, tgt, mask = self._generate_samples(generate_mask=True)
+      self._test_loss(pred, tgt, sigmoid_focal_loss, ref_sigmoid_focal_loss, mask=mask, alpha=0.58, gamma=2, reduction=reduction)
 
 if __name__ == '__main__':
   unittest.main()

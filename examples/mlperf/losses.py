@@ -22,9 +22,9 @@ def sigmoid_focal_loss(pred:Tensor, tgt:Tensor, mask:Optional[Tensor] = None, al
 
   if reduction == "mean":
     if mask is not None:
-      loss = (avg_loss := loss.sum(0).mean()) / (Tensor.ones_like(avg_loss) if mask is None else mask.sum())
+      loss = loss.sum(axis=0).mean() / mask.sum()
     else:
       loss = loss.mean()
-  elif reduction == "sum": loss = loss.sum(0).sum()
+  elif reduction == "sum": loss = loss.sum(axis=0).sum()
 
   return loss
