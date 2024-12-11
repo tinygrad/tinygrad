@@ -391,8 +391,13 @@ def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
   del ctx.lazybufs[b2]
   # merge
   return v1
+
 merge_bufs = PatternMatcher([
+  # merge base
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat())))), merge),
+  # collapse view
+  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat())).view(name="mv"))), lambda mv:mv),
+  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).view(name="mv"))), lambda mv:mv),
 ])
 
 # ** this decides which ops get realized
@@ -463,9 +468,7 @@ break_sched = PatternMatcher([
 
 def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   ctx.allbufs[buf_uop] = view
-  # TODO: this is base because const folding sometimes leaves VIEW around
-  # this is fine but it increases kernel count, fix that!
-  if (op:=uval(view).base).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
+  if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
   for x in op.src:
     if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
   # BUFFER_VIEW overrides the underlying buffer
