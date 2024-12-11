@@ -568,14 +568,35 @@ class TestMultiTensor(unittest.TestCase):
       # don't allow assigns that change axes
       t_none.assign(t_zero)
 
-  def test_rand_with_multiple_devices(self):
+  def test_init_rand_with_multiple_devices_fail(self):
+    # init rand with multi device is not allowed
     with self.assertRaises(ValueError):
       Tensor.rand(256, device=devices_2)
 
   def test_rand_on_multiple_devices(self):
+    # different devices generate different rand
     d0_rand = Tensor.rand(256, device=d0).realize()
     d1_rand = Tensor.rand(256, device=d1).realize()
     assert not np.allclose(d0_rand.numpy(), d1_rand.numpy())
+
+  def test_rand_on_multiple_devices_manual_seed(self):
+    Tensor.manual_seed(123)
+    d0_rand = Tensor.rand(2, device=d0).tolist()
+    d1_rand = Tensor.rand(2, device=d1).tolist()
+
+    # manual_seed again gives the same values
+    Tensor.manual_seed(123)
+    d0_rand2 = Tensor.rand(2, device=d0).tolist()
+    d1_rand2 = Tensor.rand(2, device=d1).tolist()
+    self.assertEqual(d0_rand, d0_rand2)
+    self.assertEqual(d1_rand, d1_rand2)
+
+    # device seed is only determined by init order, so flipping init order flips rands
+    Tensor.manual_seed(123)
+    d1_rand_flip = Tensor.rand(2, device=d1).tolist()
+    d0_rand_flip = Tensor.rand(2, device=d0).tolist()
+    self.assertEqual(d0_rand, d1_rand_flip)
+    self.assertEqual(d1_rand, d0_rand_flip)
 
   def test_rand_like_on_shard(self):
     t = Tensor.empty((16, 16)).shard(devices_2)
