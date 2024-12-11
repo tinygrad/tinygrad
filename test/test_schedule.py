@@ -250,7 +250,6 @@ class TestSchedule(unittest.TestCase):
       out = bn(c1(img)).relu()
       check_schedule(out, 4, [c1.weight, c1.bias])
 
-  @unittest.expectedFailure
   def test_fold_conv_batchnorm_optim(self):
     # this is too high
     for optim, cnt in [(nn.optim.Adam, 18), (nn.optim.SGD, 15)]:
@@ -584,11 +583,12 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), a.numpy().sum(axis=1)[:16] + b.numpy().sum(axis=1)[:16] + c.numpy(), atol=1e-4, rtol=1e-4)
 
   # broken due to const folding and two contiguous are different kernels
+  # NOTE: passes after delete_lazy
   def test_const_no_recompute(self):
     x = Tensor(2) + Tensor(2)
     y = Tensor(2) + Tensor(2)
     out = x.contiguous() + y.contiguous()
-    with self.assertRaises(KernelCountException): check_schedule(out, 2, filter_sink=False)
+    check_schedule(out, 2, filter_sink=False)
 
   # multireduce spec
   def test_reduce_same_size(self):
@@ -921,7 +921,6 @@ class TestSchedule(unittest.TestCase):
     out = Tensor.scaled_dot_product_attention(x, y, z, attn_mask=m, is_causal=True)
     check_schedule(out, 6)
 
-  @unittest.expectedFailure
   def test_adam_step_fusion(self):
     with Tensor.train():
       x = Tensor.empty(4, 64, 768)
@@ -931,7 +930,6 @@ class TestSchedule(unittest.TestCase):
       layer(x).relu().sum().backward()
       check_schedule(opt.schedule_step(), 10)
 
-  @unittest.expectedFailure
   def test_adam_conv_fuse(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)
@@ -942,7 +940,6 @@ class TestSchedule(unittest.TestCase):
       c1(img).relu().sum().backward()
       check_schedule(opt.schedule_step(), 10)
 
-  @unittest.expectedFailure
   def test_adam_2convs_fuse(self):
     with Tensor.train():
       img = Tensor.empty(2,3,4,4)

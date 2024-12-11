@@ -413,7 +413,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     from tinygrad.shape.shapetracker import ShapeTracker
     # NOTE: we embed device on CONST with a fake BUFFER uop
     if op is Ops.CONST:
-      return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, 1, dtype), arg if isinstance(arg, UOp) else UOp.const(dtype, unwrap(arg))),
+      fake = UOp(Ops.BUFFER, dtype.ptr(), (), (-1, (device, 1, dtype)))
+      return UOp(Ops.VIEW, dtype, (fake, arg if isinstance(arg, UOp) else UOp.const(dtype, unwrap(arg))),
                  ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
     # otherwise it's a contiguous st
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), UOp(op, dtype, src, arg)), st)
