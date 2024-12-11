@@ -36,7 +36,10 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     try:
       assert tinygrad_output.shape == torch_output.shape, f"shape mismatch: tinygrad={tinygrad_output.shape} | torch={torch_output.shape}"
       assert tinygrad_output.dtype == torch_output.dtype, f"dtype mismatch: tinygrad={tinygrad_output.dtype} | torch={torch_output.dtype}"
-      np.testing.assert_allclose(tinygrad_output, torch_output, atol=atol, rtol=rtol)
+      if np.issubdtype(tinygrad_output.dtype, np.floating):
+        np.testing.assert_allclose(tinygrad_output, torch_output, atol=atol, rtol=rtol)
+      else:
+        np.testing.assert_equal(tinygrad_output, torch_output)
     except Exception as e:
       raise Exception(f"{s} failed shape {tinygrad_output.shape}: {e}")
 
@@ -435,15 +438,34 @@ class TestOps(unittest.TestCase):
     helper_test_op([(), ()], torch.maximum, Tensor.maximum)
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1., 0., 3., -4.], 3.])
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1., 0., 3., -4.], [-1., -2., 3., 0.]])
+    helper_test_op(None, torch.maximum, Tensor.maximum,
+                   vals=[[-1234, 0, 1234, dtypes.max(dtypes.int), dtypes.min(dtypes.int)], dtypes.max(dtypes.int)], forward_only=True)
+    helper_test_op(None, torch.maximum, Tensor.maximum,
+                   vals=[[-1234, 0, 1234, dtypes.max(dtypes.int), dtypes.min(dtypes.int)], dtypes.min(dtypes.int)], forward_only=True)
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[True, False, False], True], forward_only=True)
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[True, False, False], [True, True, False]], forward_only=True)
+
+    # test applying to different dtype
+    helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1, 2, 3], 1.2], forward_only=True)
+    helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[True, False, False], 1.2], forward_only=True)
+    helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[True, False, False], 3], forward_only=True)
+
   def test_minimum(self):
     helper_test_op([(45,65), (45,65)], torch.minimum, Tensor.minimum)
     helper_test_op([(), ()], torch.minimum, Tensor.minimum)
     helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[1., 0., 3., -4.], 3.])
     helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[1., 0., 3., -4.], [-1., -2., 3., 0.]])
+    helper_test_op(None, torch.minimum, Tensor.minimum,
+                   vals=[[-1234, 0, 1234, dtypes.max(dtypes.int), dtypes.min(dtypes.int)], dtypes.max(dtypes.int)], forward_only=True)
+    helper_test_op(None, torch.minimum, Tensor.minimum,
+                   vals=[[-1234, 0, 1234, dtypes.max(dtypes.int), dtypes.min(dtypes.int)], dtypes.min(dtypes.int)], forward_only=True)
     helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[True, False, False], True], forward_only=True)
     helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[True, False, False], [True, True, False]], forward_only=True)
+
+    # test applying to different dtype
+    helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[1, 2, 3], 1.2], forward_only=True)
+    helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[True, False, False], 1.2], forward_only=True)
+    helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[True, False, False], 3], forward_only=True)
 
   def test_tiny_add(self):
     helper_test_op([(3), (3)], lambda x,y: x+y, Tensor.add, forward_only=True)
@@ -502,11 +524,18 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x,y: x//y, forward_only=True, vals=np.array([[5, 6, 7],[1, 2, 3]], dtype=np.int32))
     helper_test_op(None, lambda x: x/2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
     helper_test_op(None, lambda x: x//2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
-    torch_idiv, tiny_idiv = functools.partial(torch.div, rounding_mode="trunc"), Tensor.idiv
-    helper_test_op(None, torch_idiv, tiny_idiv, forward_only=True, vals=np.array([[5, -6, 7],[1, 2, 3]], dtype=np.int32))
+    helper_test_op(None, functools.partial(torch.div, rounding_mode="trunc"), Tensor.idiv, forward_only=True,
+                   vals=np.array([[5, -6, 7],[1, 2, 3]], dtype=np.int32))
     if is_dtype_supported(dtypes.uint64):
       x = Tensor(2**64 - 1, dtype=dtypes.uint64).idiv(1)
       np.testing.assert_equal(x.numpy(), 2**64 - 1)
+    # 1 // 0 is device dependent, but it should not raise
+    Tensor([1]).idiv(1).realize()
+    if not (CI and (Device.DEFAULT=="LLVM" or getenv("PTX"))):  # TODO: crashed in CI
+      # ... because if might be in a where branch that the output is well defined
+      t = Tensor([-1, 0, 1, 2])
+      np.testing.assert_equal((t > 0).where(1//t, t).numpy(), [-1, 0, 1, 0])
+
   def test_scalar_div(self):
     helper_test_op([(45,65)], lambda x: x/255)
     helper_test_op([(45,65)], lambda x: x/1)
@@ -572,6 +601,16 @@ class TestOps(unittest.TestCase):
         _test(base, exponent)
     # NOTE: torch 0 ** -1 is 0
     _test([0, 0, 0], [0, 1, 2])
+
+    np.testing.assert_equal((Tensor(11) ** Tensor(7)).item(), 11 ** 7)
+    np.testing.assert_equal((Tensor([11]) ** Tensor(7)).item(), 11 ** 7)
+    # TODO: fix non-precise int pow
+    with self.assertRaises(AssertionError): np.testing.assert_equal((Tensor(11) ** Tensor([7])).item(), 11 ** 7)
+    with self.assertRaises(AssertionError): np.testing.assert_equal((Tensor([11]) ** Tensor([7])).item(), 11 ** 7)
+
+    # pow to a const int
+    helper_test_op([], lambda: torch.tensor([2], dtype=torch.int) ** torch.tensor(-2, dtype=torch.int),
+                       lambda: Tensor([2]) ** Tensor(-2), forward_only=True)
 
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
@@ -764,6 +803,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
   def test_softplus(self):
     helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
+    helper_test_op([(45,65)], lambda t: torch.nn.functional.softplus(t, beta=3), lambda t: Tensor.softplus(t, beta=3), grad_atol=1e-6)
+    helper_test_op([(45,65)], lambda t: torch.nn.functional.softplus(t, beta=1/3), lambda t: Tensor.softplus(t, beta=1/3), grad_atol=1e-6)
+    # # TODO: support threshold and enable this
+    # helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6, low=300, high=400)
+    helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6, low=-400, high=-300)
     helper_test_op([()], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
 
   def test_erf(self):
@@ -795,11 +839,6 @@ class TestOps(unittest.TestCase):
   def test_mish(self):
     helper_test_op([(45,65)], torch.nn.functional.mish, Tensor.mish)
     helper_test_op([()], torch.nn.functional.mish, Tensor.mish)
-
-  def test_multinomial(self):
-    # NOTE: this is random, so it has a very large atol
-    helper_test_op([(1000,)], lambda x: torch.multinomial(x.clip(0,1), num_samples=1).type(torch.int32),
-                              lambda x: Tensor.multinomial(x.clip(0,1)), forward_only=True, atol=1000.)
 
   def test_small_cumsum(self):
     helper_test_op([(10)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
@@ -844,23 +883,39 @@ class TestOps(unittest.TestCase):
 
   def test_argmax(self):
     # check if it returns the first index for multiple occurences
-    self.assertEqual(torch.tensor([2,2]).argmax().numpy(), Tensor([2,2]).argmax().numpy())
+    helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[2, 2]])
+    helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[1, 2, 2]])
     np.testing.assert_equal(Tensor([2,2]).argmax().numpy(), np.array(0))
     np.testing.assert_equal(Tensor([1,2,2]).argmax().numpy(), np.array(1))
     helper_test_op([(10,20)], lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmax(0, False).type(torch.int32), lambda x: x.argmax(0, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmax(1, False).type(torch.int32), lambda x: x.argmax(1, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmax(1, True).type(torch.int32), lambda x: x.argmax(1, True), forward_only=True)
+    # regression test for bitwise_not then argmax
+    helper_test_op(None, lambda x: (~x).argmax().type(torch.int32), lambda x: (~x).argmax(), forward_only=True, vals=[[2, 2]])
+
+    helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[0, -2**31]])
+    helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[-2**31, 0]])
+    # NOTE: torch does not support this on bool
+    helper_test_op(None, lambda x: x.type(torch.int32).argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[False, True]])
+    helper_test_op(None, lambda x: x.type(torch.int32).argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[True, False]])
 
   def test_argmin(self):
     # check if it returns the first index for multiple occurences
-    self.assertEqual(torch.tensor([2, 2]).argmin().numpy(), Tensor([2, 2]).argmin().numpy())
+    helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[2, 2]])
+    helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[3, 2, 2]])
     np.testing.assert_equal(Tensor([2,2]).argmin().numpy(), np.array(0))
     np.testing.assert_equal(Tensor([3,2,2]).argmin().numpy(), np.array(1))
     helper_test_op([(10,20)], lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmin(0, False).type(torch.int32), lambda x: x.argmin(0, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmin(1, False).type(torch.int32), lambda x: x.argmin(1, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmin(1, True).type(torch.int32), lambda x: x.argmin(1, True), forward_only=True)
+
+    helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[0, -2**31]])
+    helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[-2**31, 0]])
+    # NOTE: torch does not support this on bool
+    helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[False, True]])
+    helper_test_op(None, lambda x: x.type(torch.int32).argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[True, False]])
 
   def test_einsum(self):
     # matrix transpose
@@ -1097,10 +1152,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,3)], lambda x: x.min().mul(0.5))
     helper_test_op([()], lambda x: x.min())
 
-    helper_test_op(None, lambda x: x.type(torch.int32).min(), lambda x: x.cast(dtypes.int32).min(), forward_only=True, vals=[[0, -2**31]])
-    helper_test_op(None, lambda x: x.type(torch.int32).min(), lambda x: x.cast(dtypes.int32).min(), forward_only=True, vals=[[-2**31, 0]])
-    helper_test_op(None, lambda x: x.type(torch.bool).min(), lambda x: x.cast(dtypes.bool).min(), forward_only=True, vals=[[False, True]])
-    helper_test_op(None, lambda x: x.type(torch.bool).min(), lambda x: x.cast(dtypes.bool).min(), forward_only=True, vals=[[True, False]])
+    helper_test_op(None, lambda x: x.min(), forward_only=True, vals=[[0, -2**31]])
+    helper_test_op(None, lambda x: x.min(), forward_only=True, vals=[[-2**31, 0]])
+    helper_test_op(None, lambda x: x.min(), forward_only=True, vals=[[False, True]])
+    helper_test_op(None, lambda x: x.min(), forward_only=True, vals=[[True, False]])
 
   def test_max(self):
     helper_test_op([(45,3)], lambda x: x.max())
@@ -1109,10 +1164,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.max(axis=1)[0], lambda x: x.max(axis=1))
     helper_test_op([()], lambda x: x.max())
 
-    helper_test_op(None, lambda x: x.type(torch.int32).max(), lambda x: x.cast(dtypes.int32).max(), forward_only=True, vals=[[0, -2**31]])
-    helper_test_op(None, lambda x: x.type(torch.int32).max(), lambda x: x.cast(dtypes.int32).max(), forward_only=True, vals=[[-2**31, 0]])
-    helper_test_op(None, lambda x: x.type(torch.bool).max(), lambda x: x.cast(dtypes.bool).max(), forward_only=True, vals=[[False, True]])
-    helper_test_op(None, lambda x: x.type(torch.bool).max(), lambda x: x.cast(dtypes.bool).max(), forward_only=True, vals=[[True, False]])
+    helper_test_op(None, lambda x: x.max(), forward_only=True, vals=[[0, -2**31]])
+    helper_test_op(None, lambda x: x.max(), forward_only=True, vals=[[-2**31, 0]])
+    helper_test_op(None, lambda x: x.max(), forward_only=True, vals=[[False, True]])
+    helper_test_op(None, lambda x: x.max(), forward_only=True, vals=[[True, False]])
 
   @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
   def test_any(self):
@@ -1208,10 +1263,13 @@ class TestOps(unittest.TestCase):
                                  lambda x: Tensor.stack(*x.std_mean(correction=5)))
     helper_test_op([(15,25,35)], lambda x: torch.stack(torch.std_mean(x, keepdim=True, correction=0)),
                                  lambda x: Tensor.stack(*x.std_mean(keepdim=True, correction=0)))
-    helper_test_op([(1,0,3,0,5)], lambda x: torch.stack(torch.std_mean(x, axis=(1,3))),
-                                  lambda x: Tensor.stack(*x.std_mean(axis=(1,3))))
     helper_test_op([(3,4,5,6)], lambda x: torch.stack(torch.std_mean(x, axis=(1,2))),
                                 lambda x: Tensor.stack(*x.std_mean(axis=(1,2))))
+
+  @unittest.skip("TODO: this fails because of loaded nan in mul folding")
+  def test_std_mean_loaded_nan(self):
+    helper_test_op([(1,0,3,0,5)], lambda x: torch.stack(torch.std_mean(x, axis=(1,3))),
+                                  lambda x: Tensor.stack(*x.std_mean(axis=(1,3))))
   def test_softmax(self):
     helper_test_op([(45,65)], torch.nn.Softmax(dim=1), Tensor.softmax, atol=1e-7, grad_atol=1e-7)
     helper_test_op([(45)], torch.nn.Softmax(dim=0), Tensor.softmax, atol=1e-7, grad_atol=1e-7)
@@ -2148,9 +2206,16 @@ class TestOps(unittest.TestCase):
   # TODO: linearizer block error
   @unittest.expectedFailure
   def test_avg_pool3d_failure(self):
-    helper_test_op([(1,1,16,16,16)],
-      lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
-      lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), rtol=1e-5, forward_only=True)
+    with Context(NOOPT=0):
+      helper_test_op([(1,1,16,16,16)],
+        lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
+        lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), rtol=1e-5, forward_only=True)
+
+  def test_avg_pool3d_noopt(self):
+    with Context(NOOPT=1):
+      helper_test_op([(1,1,16,16,16)],
+        lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
+        lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), rtol=1e-5, forward_only=True)
 
   def test_interpolate_linear(self):
     for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:

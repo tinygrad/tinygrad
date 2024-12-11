@@ -1570,6 +1570,8 @@ class Tensor(SimpleMathTrait):
     """
     return self._reduce(F.Max, axis, keepdim)
 
+  def _inverse(self): return -self if self.is_floating_point() else ~self if dtypes.is_int(self.dtype) else self.logical_not()
+
   def min(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
     Returns the minimum value of the tensor along the specified axis or axes.
@@ -1591,8 +1593,7 @@ class Tensor(SimpleMathTrait):
     print(t.min(axis=1, keepdim=True).numpy())
     ```
     """
-    if dtypes.is_int(self.dtype) or self.dtype == dtypes.bool: return ~((~self).max(axis=axis, keepdim=keepdim))
-    return -((-self).max(axis=axis, keepdim=keepdim))
+    return self._inverse().max(axis=axis, keepdim=keepdim)._inverse()
 
   def any(self, axis:Optional[Union[int, Sequence[int]]]=None, keepdim=False):
     """
@@ -1885,7 +1886,7 @@ class Tensor(SimpleMathTrait):
     print(t.argmin(axis=1).numpy()) # Returns the indices of the minimum values along axis 1.
     ```
     """
-    return (-self).argmax(axis=axis, keepdim=keepdim)
+    return self._inverse().argmax(axis=axis, keepdim=keepdim)
 
   def rearrange(self, formula: str, **sizes) -> Tensor:
     """
@@ -3016,7 +3017,7 @@ class Tensor(SimpleMathTrait):
     return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
 
   def _to_const_val(self, x:Union[Tensor, ConstType]) -> Union[Tensor, ConstType]:
-    return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_unmasked_const() \
+    return x.lazydata.const_arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_unmasked_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
   def add(self, x:Union[Tensor, ConstType], reverse=False) -> Tensor:
@@ -3173,7 +3174,7 @@ class Tensor(SimpleMathTrait):
     ```
     """
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    return self.logical_not() if self.dtype == dtypes.bool else self ^ ((1<<8*self.dtype.itemsize)-1)
+    return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
 
   def lshift(self, x:int):
     """
@@ -3217,8 +3218,9 @@ class Tensor(SimpleMathTrait):
     x = self._to_const_val(x)
     if not isinstance(x, Tensor) and not reverse:
       # simple pow identities
-      if x < 0: return self.reciprocal().pow(-x)
+      if x < 0: return self.reciprocal().pow(-x).cast(self.dtype)
       if x == 0: return 1 + self * 0
+      # rewrite pow 0.5 to sqrt
       if int(x - 0.5) + 0.5 == x: return self.pow(int(x - 0.5)) * self.sqrt()
       if int(x) == x: return self.pow(x // 2).square() * (1 if x % 2 == 0 else self)
 
@@ -3249,7 +3251,9 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-1, 2, 3]).maximum(Tensor([-4, -2, 9])).numpy())
     ```
     """
-    return (self<x).detach().where(x, (self==x).detach().where(((self * 0.5 + x * 0.5).cast(self.dtype)), self))
+    # NOTE: the mid-point is for backward, revisit after new gradient API
+    if self.is_floating_point(): return (self<x).detach().where(x, (self==x).detach().where(((self * 0.5 + x * 0.5).cast(self.dtype)), self))
+    return (self<x).detach().where(x, self)
 
   def minimum(self, x:Union[Tensor, ConstType]) -> Tensor:
     """
@@ -3262,7 +3266,8 @@ class Tensor(SimpleMathTrait):
     print(Tensor([-1, 2, 3]).minimum(Tensor([-4, -2, 9])).numpy())
     ```
     """
-    return -((-self).maximum(-x))
+    t, x = self._broadcasted(x)
+    return t._inverse().maximum(x._inverse())._inverse()
 
   def where(self:Tensor, x:Union[Tensor, ConstType, sint], y:Union[Tensor, ConstType, sint]):
     """
