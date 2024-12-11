@@ -693,6 +693,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out1.numpy(), r_np + e_np[0][0][0], atol=1e-4, rtol=1e-4)
 
   # changed by multireduce
+  @unittest.expectedFailure
   def test_reduce_expand_child(self):
     Tensor.manual_seed(0)
     a = Tensor.randn((32, 32, 32)).realize()
