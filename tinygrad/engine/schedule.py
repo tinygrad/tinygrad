@@ -395,7 +395,7 @@ def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
 # TODO
 def merge_mv(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, mv:UOp):
   #raise Exception(v1)
-  return None
+  pass
 
 merge_bufs = PatternMatcher([
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat())))), merge),
@@ -472,7 +472,7 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   ctx.allbufs[buf_uop] = view
   # TODO: this is base because const folding sometimes leaves VIEW around
   # this is fine but it increases kernel count, fix that!
-  if (op:=uval(view).base).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
+  if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
   for x in op.src:
     if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
   # BUFFER_VIEW overrides the underlying buffer
