@@ -84,10 +84,6 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   if op is not None:
     buf_uop.buffer.ref(1)
     ctx.lazybufs[buf_uop] = [buf]
-    ctx.allbufs[buf_uop] = ret
-    if op.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
-    for x in op.src:
-      if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
   cache[buf] = ret
   return ret
 
@@ -465,6 +461,15 @@ merge_bufs = PatternMatcher([
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat(Ops.BUFFER, name="b1"), UPat.var("src"))))), merge_buffers),
 ])
 
+def append_children(ctx:ScheduleContext, view:UOp, buf_uop:UOp, uop:UOp) -> None:
+  ctx.allbufs[buf_uop] = view
+  for x in uop.src:
+    if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
+  if uop.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
+build_ctx = PatternMatcher([
+  (UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat.var("uop"))), append_children)
+])
+
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if len(outs:=dedup(x.base for x in outs if x.base.realized is None and not (is_scheduled(x.base) and x.base.src[1].op is Ops.CONST))) == 0: return [], {}
@@ -475,6 +480,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   for out in big_graph.src: ctx.realizes[out.buf_uop] = out
   big_graph = graph_rewrite(big_graph, ops_folding+do_realize, ctx.realizes)
   big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
+  graph_rewrite(big_graph, build_ctx, ctx)
   # group realizes into kernels
   store_groups = group_realizes(ctx)
   graph_rewrite(big_graph, break_sched, ctx)
