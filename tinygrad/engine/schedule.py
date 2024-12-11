@@ -358,11 +358,22 @@ def simplify_alu(alu:UOp):
   # this needs to have a VIEW next (it has to, right?)
   return UOp.const(alu.dtype, exec_alu(alu.op, alu.dtype, [s.const_arg for s in alu.src]))
 
+def simplify_binop(binop:UOp, x:UOp, y:UOp):
+  if all_int(x.shape) and x.is_unrealized_unmasked_const(): other, const = y, x
+  elif all_int(y.shape) and y.is_unrealized_unmasked_const():
+    if binop.op is Ops.IDIV and y.const_arg == 1: return x
+    other, const = x, y
+  else: return None
+  if binop.op is Ops.ADD and const.const_arg == 0: return other
+  if binop.op is Ops.MUL and const.const_arg == 1: return other
+  if binop.op is Ops.MUL and const.const_arg == 0: return UOp.const(binop.dtype, 0)
+
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda ctx,b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
-  # alu
+  # elementwise const folding
   (UPat(GroupOp.ALU, name="alu"), simplify_alu),
+  (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, name="binop", src=(UPat.var("x"), UPat.var("y"))), simplify_binop),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda ctx,reduce,x:UOp.const(reduce.dtype, identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),

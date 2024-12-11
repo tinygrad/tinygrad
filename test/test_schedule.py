@@ -495,7 +495,6 @@ class TestSchedule(unittest.TestCase):
     out = x ** Tensor(2)
     check_schedule(out, 1)
 
-  @unittest.expectedFailure
   def test_pow_const_tensor_to_zero(self):
     x = Tensor([1,2,3,4])
     out = x ** Tensor(0)
