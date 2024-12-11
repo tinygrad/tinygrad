@@ -40,7 +40,7 @@ class ScheduleItem:
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  lazybufs: Dict[UOp, List[LazyBuffer]] = field(default_factory=dict)      # this maps BUFFER uops of this schedule to the underlying lazybuffer
+  lazybufs: Dict[UOp, List[LazyBuffer]] = field(default_factory=dict) # this maps BUFFER uops of this schedule to the underlying lazybuffer
   var_vals: Dict[Variable, int] = field(default_factory=dict)        # this maps a BIND's DEFINE_VAR to its value
   assigns: Set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: Dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
@@ -190,7 +190,7 @@ append_load = PatternMatcher([(UPat.load(UPat.var("b"), UPat(), name="x"), lambd
 
 def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemContext]:
   si_ctx = ScheduleItemContext(ctx.lazybufs, ctx.ops_metadata, ctx.assigns, ctx.var_vals, {x.buf_uop:x.src[2] for x in pre.src},
-                               # TODO: what do we do if it's folded to another uop?
+                               # TODO: fix metadata merging, this should be a list
                                metadata={m for x in pre.src if (l:=ctx.lazybufs.get(x.buf_uop)) is not None and (m:=l[0].metadata) is not None})
   # fuse and fold store -> loads
   ops_folding = lazy if len(si_ctx.sinked) == 1 else lazy+multioutput
@@ -309,7 +309,7 @@ def group_realizes(ctx:ScheduleContext) -> List[List[UOp]]:
   # maybe fuse arange with its children
   for rbuf in reduce_of_const:
     group = {tr:None for tr,rop in reduce_for_op.items() if rop is rbuf}
-    if any(l.forced_realize for tr in group for l in ctx.lazybufs[tr]): continue
+    if any(luop.forced_realize for tr in group for luop in ctx.lazybufs[tr]): continue
     kernel_children = {c for tr in group for c in ctx.children[tr] if uval(ctx.allbufs[c]).op not in {Ops.COPY, Ops.BUFFER_VIEW}}
     if len(kernel_children) == 0: continue
     for tr in group: del ctx.realizes[tr]
@@ -378,6 +378,30 @@ ops_folding = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.var("x"),)), lambda ctx,x:x if x.is_unrealized_const() else None),
 ])
 
+# ** buffer merging
+
+def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
+  assert v1.st is not None and v2.st is not None and v1.st == v2.st, f"implicit movementop {v1.st} {v2.st}"
+  # if b2 is realized also realize b1
+  if b2 in ctx.realizes:
+    ctx.realizes[b1] = b1
+    del ctx.realizes[b2]
+  # ops referring to b2 now ref to b1
+  ctx.lazybufs[b1] += ctx.lazybufs[b2]
+  del ctx.lazybufs[b2]
+  # merge
+  return v1
+
+# TODO
+def merge_mv(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, mv:UOp):
+  #raise Exception(v1)
+  return None
+
+merge_bufs = PatternMatcher([
+  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat())))), merge),
+  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat())).view(name="mv"))), merge_mv),
+])
+
 # ** this decides which ops get realized
 
 def realize(ctx:Dict[UOp, UOp], b:UOp, to_store:UOp, **kwargs) -> None:
@@ -429,7 +453,7 @@ def append_realize(ctx:ScheduleContext, b:UOp, to_store:UOp, base:UOp) -> UOp:
   return UOp(Ops.LOAD, base.dtype, (b, unwrap(base.st).to_uop()))
 
 def append_op(ctx:ScheduleContext, b:UOp, to_store:UOp) -> UOp:
-  # TODO: what should metadata be post merge?
+  # TODO: metadata post merge
   if (m:=ctx.lazybufs[b][0].metadata) is not None: ctx.ops_metadata[to_store] = m
   return to_store
 
@@ -442,26 +466,12 @@ break_sched = PatternMatcher([
   (UPatScheduled(), lambda ctx,b,to_store,base: append_realize(ctx, b, to_store, base) if b in ctx.realizes else append_op(ctx, b, to_store)),
 ])
 
-def merge_buffers(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
-  assert v1.st is not None and v2.st is not None and v1.st == v2.st, f"implicit movementop {v1.st} {v2.st}"
-  # if b2 is realized also realize b1
-  if b2 in ctx.realizes:
-    ctx.realizes[b1] = b1
-    del ctx.realizes[b2]
-  # ops referring to b2 now ref to b1
-  ctx.lazybufs[b1] += ctx.lazybufs[b2]
-  del ctx.lazybufs[b2]
-  # merge
-  return v1
-
-merge_bufs = PatternMatcher([
-  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat())))), merge_buffers),
-])
-
 # **** Schedule context builder
 
 def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   ctx.allbufs[buf_uop] = view
+  # TODO: this is base because const folding sometimes leaves VIEW around
+  # this is fine but it increases kernel count, fix that!
   if (op:=uval(view).base).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
   for x in op.src:
     if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
