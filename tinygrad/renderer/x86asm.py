@@ -111,9 +111,11 @@ x86_matcher = PatternMatcher([
    lambda c: c.src[0].bitcast(dtypes.uint32).cast(c.dtype)),
   (UPat(Ops.BITCAST, dtypes.float16, src=(UPat(dtype=(dtypes.uint16, dtypes.int16)),), name="c"),
    lambda c: c.src[0].cast(dtypes.uint32).bitcast(c.dtype)),
-  # can't cast from float16 to ints directly and vice versa
-  (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.float16),), name="c"), lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
-  (UPat(Ops.CAST, dtype=dtypes.float16, src=(UPat(dtype=dtypes.ints),), name="c"), lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
+  # can't cast from float16 to ints/float64 directly and vice versa
+  (UPat(Ops.CAST, dtype=(*dtypes.ints, dtypes.float64), src=(UPat(dtype=dtypes.float16),), name="c"),
+   lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
+  (UPat(Ops.CAST, dtype=dtypes.float16, src=(UPat(dtype=(*dtypes.ints, dtypes.float64)),), name="c"),
+   lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
   # can't cast from float to int8/16 directly and vice versa
   (UPat(Ops.CAST, dtype=(dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16), src=(UPat(dtype=dtypes.floats),), name="c"),
     lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
