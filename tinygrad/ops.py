@@ -101,14 +101,11 @@ class Ops(FastEnum):
   # blocks in linearizer
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto() # noqa: E702
 
-  # TernaryOps
-  WHERE = auto(); MULACC = auto() # noqa: E702
-
   # misc ops
   EXPAND = auto(); CONTRACT = auto() # noqa: E702
   VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
-  DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
+  DEFINE_VAR = auto(); DEFINE_LOCAL = auto();
 
   # reduce
   REDUCE_AXIS = auto()
@@ -132,6 +129,10 @@ class Ops(FastEnum):
   ADD = auto(); MUL = auto(); IDIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPNE = auto(); XOR = auto() # noqa: E702
   SHL = auto(); SHR = auto(); OR = auto(); AND = auto(); THREEFRY = auto(); SUB = auto(); FDIV = auto() # noqa: E702
 
+  # TernaryOps
+  WHERE = auto(); MULACC = auto() # noqa: E702
+
+  DEFINE_ACC = auto() # noqa: E702
   # assignment ops
   ASSIGN = auto()
   BIND = auto()
