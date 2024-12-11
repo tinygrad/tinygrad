@@ -1,4 +1,3 @@
-from __future__ import annotations
 from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional, Any
 import functools, collections
 from tinygrad.tensor import Tensor
