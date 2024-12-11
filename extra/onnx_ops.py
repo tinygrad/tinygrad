@@ -3,7 +3,7 @@ from typing import Union, Tuple, Optional, List, Any, cast
 from tinygrad.tensor import Tensor, _broadcast_shape, ConstType
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten
-from extra.onnx import dtype_parse
+from extra.onnx import dtype_parse, to_python_const
 import numpy as np
 
 # **************** Free Ops ****************
@@ -287,7 +287,16 @@ def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore
 
 def ArrayFeatureExtractor(x: Tensor, indices: Tensor): return x[..., indices]
 
-def Gather(x: Tensor, indices: Tensor, axis=0): return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
+def Gather(x: Tensor, indices: Tensor, axis=0):
+  if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
+    x_sh = list(x.shape)
+    ret_shape = x_sh[:axis] + list(indices.shape) + x_sh[axis+1:]
+    if indices.ndim > 1: indices = indices.flatten()
+    indices = [to_python_const(indices)] if indices.shape == () else [x_sh[axis]+x if x<0 else x for x in to_python_const(indices)]
+    args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x_sh)] for i in indices]
+    return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
+  # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
+  return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
 def Scatter(*args, **kwargs): return ScatterElements(*args, **kwargs) # deprecated
 
 def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Optional[str]=None):
