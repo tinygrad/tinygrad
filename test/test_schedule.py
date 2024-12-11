@@ -425,7 +425,6 @@ class TestSchedule(unittest.TestCase):
     # NOOP, 3 convs, contiguous
     with self.assertRaises(KernelCountException): check_schedule(x, 5)
 
-  @unittest.expectedFailure
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
     b2 = Tensor.empty(16)

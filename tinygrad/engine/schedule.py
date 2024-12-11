@@ -47,6 +47,7 @@ class ScheduleContext:
   allbufs: Dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
   ops_metadata: Dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
   children: DefaultDict[UOp, Dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
+  contiguous: Dict[UOp, UOp] = field(default_factory=dict)           # this maps roots to places they are made contiguous
 
 def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2
 
@@ -361,6 +362,16 @@ def simplify_binop(binop:UOp, x:UOp, y:UOp):
   if binop.op is Ops.MUL and const.const_arg == 1: return other
   if binop.op is Ops.MUL and const.const_arg == 0: return UOp.const(binop.dtype, 0)
 
+def found_contiguous(ctx:ScheduleContext, contig:UOp, base:UOp, b:UOp):
+  if contig.src[0].op is Ops.VIEW and len(contig.src[0].src):
+    old_base = contig.src[0].src[0]
+    if old_base.op is Ops.VIEW and (sti:=unwrap(contig.src[0].st).invert(old_base.shape)) is not None: ctx.contiguous[old_base] = base.view(sti)
+def replace_contiguous(ctx:ScheduleContext, alu:UOp):
+  new_src = list(alu.src)
+  for i,s in enumerate(alu.src):
+    if (replace_src:=ctx.contiguous.get(s, None)) is not None: new_src[i] = replace_src
+  if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
+
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
@@ -381,6 +392,9 @@ ops_folding = PatternMatcher([
   # no COPY to same device, except clone (arg is True)
   (UPatScheduled(Ops.COPY, src=UPat(Ops.VIEW, name="copyin"), name="copy"),
    lambda base,b,copyin,copy: copyin if base.device == copy.device and copy.arg is not True else None),
+  # support for using a contiguous permuted view instead of the parent view if one exists
+  (UPatScheduled(Ops.CONTIGUOUS, name="contig"), found_contiguous),
+  (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
 ])
 
 # ** buffer merging
