@@ -1548,7 +1548,7 @@ class TestIndexing(unittest.TestCase):
   def test_arange_shrink_copy(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).to("CLANG")
     sched = self.check_schedule(a, 1)
-    self.assertIs(sched[2].ast.op, Ops.COPY)
+    self.assertIs(sched[-1].ast.op, Ops.COPY)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
   @unittest.skipIf(Device.DEFAULT == "CLANG", "tests copy from ext device")
