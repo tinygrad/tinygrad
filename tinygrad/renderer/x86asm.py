@@ -105,8 +105,12 @@ x86_matcher = PatternMatcher([
    lambda x: UOp(x.op, dtypes.float32, tuple(s.cast(dtypes.float32) if s.dtype != dtypes.bool else s for s in x.src)).cast(dtypes.float16)),
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
    lambda x: UOp(x.op, x.dtype, tuple(s.cast(dtypes.float32) for s in x.src)) if any(s.dtype is dtypes.float16 for s in x.src) else None),
-  (UPat(Ops.BITCAST, (dtypes.uint16, dtypes.int16), src=(UPat(dtype=dtypes.float16)), name="c"), lambda c: c.src[0].bitcast(dtypes.int32).cast(dtypes.uint16)),
   # TODO: remove extra casts by casting to max(c.dtype, float32)
+  # can't bitcast from uint16/int16 to float16 directly and vice versa
+  (UPat(Ops.BITCAST, (dtypes.uint16, dtypes.int16), src=(UPat(dtype=dtypes.float16),), name="c"),
+   lambda c: c.src[0].bitcast(dtypes.uint32).cast(dtypes.uint16)),
+  (UPat(Ops.BITCAST, dtypes.float16, src=(UPat(dtype=(dtypes.uint16, dtypes.int16)),), name="c"),
+   lambda c: c.src[0].cast(dtypes.uint32).bitcast(dtypes.uint16)),
   # can't cast from float16 to ints directly and vice versa
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.float16),), name="c"), lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
   (UPat(Ops.CAST, dtype=dtypes.float16, src=(UPat(dtype=dtypes.ints),), name="c"), lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
