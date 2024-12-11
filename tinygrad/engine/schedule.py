@@ -72,8 +72,6 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
   elif is_scheduled(buf):
     buf_uop = buf.buf_uop
     op = buf.src[1].replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src[1].src))
-    # BUFFER_VIEW overrides the underlying buffer
-    if op.op is Ops.BUFFER_VIEW: buffers[buf_uop] = (x:=op.src[0]).base.buffer.view(buf.st.size, dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
   # ASSIGN uses the target buffer, otherwise we create a new buffer
   else:
     src = tuple(to_uop(x, ctx, cache) for x in buf.srcs)
@@ -464,8 +462,10 @@ merge_bufs = PatternMatcher([
 
 def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   ctx.allbufs[buf_uop] = view
-  buf_uop.buffer.ref(1)
   if (op:=uval(view).base).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
+  # BUFFER_VIEW overrides the underlying buffer
+  if op.op is Ops.BUFFER_VIEW: buffers[buf_uop] = (x:=op.src[0]).base.buffer.view(view.size, view.dtype, unwrap(x.st).views[0].offset*x.dtype.itemsize)
+  buf_uop.buffer.ref(1)
   for x in op.src:
     if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
