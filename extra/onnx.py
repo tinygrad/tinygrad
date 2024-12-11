@@ -2,7 +2,6 @@ from __future__ import annotations
 from typing import List, Dict, Union, Callable, Any, Sequence
 import importlib, functools
 import numpy as np
-from google.protobuf.json_format import MessageToDict
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv, DEBUG, all_same
 from tinygrad.dtype import DType, ConstType
@@ -86,19 +85,13 @@ def get_run_onnx(onnx_model: ModelProto):
   }
 
   # these values are expected to be python consts
-  # required_input_python_consts: Dict[str, tuple[int, ...]] = {
-  #   "Tile": ("repeats",), "Range": ("start", "limit", "delta"), "Expand": ("shape",), "Reshape": ("shape",), "Squeeze": ("axes",),
-  #   "Unsqueeze": ("axes",), "Trilu": ("k",), "ConstantOfShape": ("input",), "CumSum": ("axis",), "Pad": ("pads","constant_value","axes"),
-  #   "MaxUnpool": ("output_shape",), "Dropout": ("ratio","training_mode"), "CenterCropPad": ("shape",), "OneHot": ("depth",),
-  #   "Compress": ("condition",), "ImageDecoder": ("encoded_stream",), "AffineGrid": ("size",), "Resize": ("roi","scales","sizes"),
-  #   "Upsample": ("condition",), "Split": ("split",), "Slice": ("starts","ends","axes","steps"),
-  #   **{"Reduce"+r: ("axes",) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")}
-  # }
-  required_input_python_consts: Dict[str, tuple[int, ...]] = \
-  {"Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
+  required_input_python_consts: Dict[str, tuple[int, ...]] = {
+    "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
     "CumSum": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
     "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
-    **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")}}
+    **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
+    **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
+  }
 
   # src: https://onnx.ai/onnx/repo-docs/IR.html#input-output-data-types
   # parses and validates inputs based on their shape and dtype specified by model

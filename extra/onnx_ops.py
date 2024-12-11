@@ -202,7 +202,7 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Optiona
   value, axes = constant_value or value or 0, axes or list(range(x.ndim))
   real_pads = [0] * (x.ndim*2)
   for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
-  return x.pad(padding=_onnx_pads_to_pad2d_pads(to_python_const(real_pads)), mode={"edge":"replicate", "wrap":"circular"}.get(mode, mode), value=value)
+  return x.pad(padding=_onnx_pads_to_pad2d_pads(real_pads), mode={"edge":"replicate", "wrap":"circular"}.get(mode, mode), value=value)
 
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
   pixel_axes = tuple(range(2, X.ndim))
@@ -386,7 +386,7 @@ def Compress(inp: Tensor, condition, axis=None):
     inp = inp.flatten()
     axis = 0
   if axis < 0: axis += inp.ndim
-  con = Tensor(np.arange(len(condition))[condition]) # TODO no boolean indexing in Tensor, but simple versions of this is possible
+  con = Tensor(np.arange(len(condition))[condition]) # no boolean indexing in Tensor
   return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
 def EyeLike(x: Tensor, dtype=None, k=0):
@@ -506,7 +506,7 @@ def onnx_training(input_group_size):
     def __wrapper(R, T, *inputs, **kwargs):
       old_training = Tensor.training
       Tensor.training = True
-      T, R = to_python_const(T), R.detach()
+      R = R.detach()
       groups = len(inputs) // input_group_size
       ret = [func(R, T, *inps, **kwargs) for inps in (inputs[i::groups] for i in range(groups))]
       Tensor.training = old_training
