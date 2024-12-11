@@ -1485,7 +1485,6 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(out, 1)
     np.testing.assert_equal(out.numpy(), (np.arange(4)*x.numpy()).T+b.numpy())
 
-  @unittest.expectedFailure
   def test_arange_index(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(5, 2).realize()
@@ -1494,7 +1493,6 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(out, 1)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
-  @unittest.expectedFailure
   def test_arange_index_contiguous(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(5, 2).realize()
@@ -1503,7 +1501,6 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(out, 2)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
 
-  @unittest.expectedFailure
   def test_arange_index_child(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(5, 2).realize()
@@ -1512,7 +1509,6 @@ class TestIndexing(unittest.TestCase):
     self.check_schedule(out, 1)
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
-  @unittest.expectedFailure
   def test_arange_index_contiguous_child(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(5, 2).realize()

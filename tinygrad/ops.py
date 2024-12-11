@@ -334,6 +334,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.dtype == dtype: return self # TODO: move this to the scheduler
     if bitcast: return self.bitcast(dtype, allow_buffer_view)
     if self._device is not None and self._device.startswith("DISK"): raise RuntimeError("CAST isn't supported on DISK")
+    if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self is not self.base:
+      return self.base.cast(dtype, bitcast).view(self.st)
     return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType, allow_buffer_view=True):
     if self.can_view() and allow_buffer_view:
