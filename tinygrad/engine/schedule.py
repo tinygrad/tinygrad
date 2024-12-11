@@ -472,11 +472,10 @@ create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, 
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  if len(outs:=dedup(x.base for x in outs if x.base.realized is None and not (is_scheduled(x.base) and x.base.src[1].op is Ops.CONST))) == 0: return [], {}
   # create the big graph
   ctx = ScheduleContext()
   cache: Dict[LazyBuffer, UOp] = {}
-  big_graph = UOp.sink(*(to_uop(x, ctx, cache) for x in outs))
+  big_graph = UOp.sink(*(to_uop(x, ctx, cache).base for x in outs))
   for out in big_graph.src: ctx.realizes[out.buf_uop] = out
   big_graph = graph_rewrite(big_graph, ops_folding+do_realize, ctx.realizes)
   big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
