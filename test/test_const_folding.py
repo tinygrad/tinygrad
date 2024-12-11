@@ -213,7 +213,6 @@ class TestReduceOpsConstFolding(unittest.TestCase):
         assert t.sum().dtype == t.contiguous().sum().dtype
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
-@unittest.skip("const COPY folding no longer supported")
 class TestMultiConstFolding(unittest.TestCase):
   def test_multi_const_folding_literal(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
@@ -240,6 +239,7 @@ class TestMultiConstFolding(unittest.TestCase):
     _check_ast_count(0, t ** 1)
     _check_ast_count(0, 1 ** t)
 
+  @unittest.skip("const COPY folding no longer supported")
   def test_multi_const_folding_tensor(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
     t = Tensor.arange(16).float().realize().to(ds)
