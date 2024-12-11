@@ -19,7 +19,6 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor.ones(4) + Tensor.ones(4))
     _check_ast_count(0, Tensor.ones(4) / Tensor.ones(4))
 
-  @unittest.skip("elementwise ops folding no longer supported")
   def test_cast(self):
     _check_ast_count(0, Tensor.ones(4).cast(dtypes.int16))
     _check_ast_count(0, Tensor.full(4, fill_value=-1).cast(dtypes.uint16))
