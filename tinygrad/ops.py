@@ -225,7 +225,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   src:Tuple[UOp, ...] = tuple()
   arg:Any = None
   def __del__(self):
-    if self.op is Ops.BUFFER: self.buffer.ref(-1)
+    if self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
     if (k:=(self.op, self.dtype, self.src, self.arg)) in UOpMetaClass.ucache:
       del UOpMetaClass.ucache[k]
   def __reduce__(self):
