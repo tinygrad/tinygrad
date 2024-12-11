@@ -65,8 +65,7 @@ def uop_to_json(x:UOp) -> Dict[int, Tuple[str, str, List[int], str, str]]:
     label = f"{str(u.op).split('.')[1]}{(' '+word_wrap(str(u.arg).replace(':', ''))) if u.arg is not None else ''}\n{str(u.dtype)}"
     for idx,x in enumerate(u.src):
       if x.op is Ops.CONST: label += f"\nCONST{idx} {x.arg:g}"
-    color = uops_colors.get(u.op, "#ffffff")
-    if u.op is Ops.VIEW and len(u.src) == 2: color = "#C94277" # make base pop:)
+    color = "#C94277" if u.op is Ops.VIEW and len(u.src) == 2 else uops_colors.get(u.op, "#ffffff") # make base pop:)
     graph[id(u)] = (label, str(u.dtype), [id(x) for x in u.src if x.op is not Ops.CONST], str(u.arg), color)
   return graph
 def _replace_uop(base:UOp, replaces:Dict[UOp, UOp]) -> UOp:

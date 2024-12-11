@@ -457,9 +457,7 @@ def merge_buffers(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, src:UOp) 
   return v1
 
 
-def rebase(v2:UOp, b:UOp, src:UOp, v1:UOp) -> UOp:
-  raise Exception(b)
-
+def rebase(v2:UOp, b:UOp, src:UOp, v1:UOp) -> UOp: return src
 merge_bufs = PatternMatcher([
   # fold the buffer
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat.var("src"))))), merge_buffers),
