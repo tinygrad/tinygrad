@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.realize import run_schedule
-from tinygrad.ops import Ops
+from tinygrad.ops import Ops, forced_realize
 from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.schedule import create_schedule
 
@@ -74,7 +74,7 @@ class TestLazyBuffer(unittest.TestCase):
     a = Tensor.randn(2, 2).realize()
     b = Tensor.randn(2, 2).realize()
     add = a + b
-    add.lazydata.forced_realize = True
+    forced_realize.add(add.lazydata)
     out = add+2
     sched = create_schedule([out.lazydata])
     self.assertEqual(len(sched), 2)
@@ -83,7 +83,7 @@ class TestLazyBuffer(unittest.TestCase):
 
   def test_forced_realized_metaop(self):
     empty = Tensor.empty(1)
-    empty.lazydata.forced_realize = True
+    forced_realize.add(empty.lazydata)
     sched = create_schedule([empty.lazydata])
     self.assertEqual(len(sched), 1)
     self.assertIs(sched[0].ast.op, Ops.EMPTY)
