@@ -60,6 +60,8 @@ jobs:
       run: METAL=1 python3.11 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3.11 test/test_speed_v_torch.py | tee torch_speed.txt
+    - name: Test speed vs theoretical
+      run: METAL=1 IGNORE_BEAM_CACHE=1 BEAM_DEBUG=1 DEBUG=1 python3.11 -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Test tensor cores
       run: METAL=1 python3.11 test/test_linearizer.py TestLinearizer.test_tensor_cores TestLinearizer.test_tensor_cores_padded
     - name: Run Tensor Core GEMM (float)
