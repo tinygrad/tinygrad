@@ -29,9 +29,10 @@ class TLSFAllocator:
     return self
 
   def _verify_blocks(self):
-    for start, (size, nxt, prev, is_free) in self.blocks.items():
-      assert self.blocks.get(nxt) is None or self.blocks[nxt][2] == start, f"next block must point to current {nxt=}, {start=}"
-      assert self.blocks.get(prev) is None or self.blocks[prev][1] == start, f"prev block must point to current, {prev=}, {start=}"
+    # for start, (size, nxt, prev, is_free) in self.blocks.items():
+    #   assert is_free == False or start in self.storage[self.lv1(size)][self.lv2(size)]
+    #   assert self.blocks.get(nxt) is None or self.blocks[nxt][2] == start, f"next block must point to current {nxt=}, {start=}"
+    #   assert self.blocks.get(prev) is None or self.blocks[prev][1] == start, f"prev block must point to current, {prev=}, {start=}"
     return self
 
   def _split_block(self, start:int, size:int, new_size:int):

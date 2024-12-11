@@ -468,7 +468,9 @@ class VFIOIface:
     return HCQBuffer(vm.va_addr, size, cpu_addr=vm.cpu_addr, meta=(self.dev, [self.dev], vm))
 
   def free(self, mem):
-    if mem.meta[2] is not None: self.adev.mm.vfree(mem.meta[2])
+    if mem.meta[2] is not None:
+      for dev in mem.meta[1][1:]: dev.dev_iface.mm.unmap_range(mem.va_addr, mem.size, free_paddrs=False)
+      self.adev.mm.vfree(mem.meta[2])
 
   def map(self, mem):
     if mem.meta[0] == self.dev or self.dev in mem.meta[1]: return
@@ -584,6 +586,12 @@ class AMDDevice(HCQCompiled):
 
   def on_device_hang(self):
     self.dev_iface.adev.gmc.on_interrupt()
+    raise RuntimeError("Device hang detected")
+
+    # for dev in self.devices:
+    #   print(dev.device_id, dev.sdma_queue.read_ptr[0], dev.sdma_queue.write_ptr[0])
+
+    # raise RuntimeError("Device hang detected")
 
     # report = []
 

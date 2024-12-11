@@ -208,7 +208,7 @@ class AM_IH(AM_IP):
   def __init__(self, adev):
     super().__init__(adev)
 
-    # self.rings = [(self.adev.mm.valloc(262144, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), suf, i) for i,suf in enumerate(["", "_RING1"])]
+    self.rings = [(self.adev.mm.valloc(262144, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), suf, i) for i,suf in enumerate(["", "_RING1"])]
     self.rptr = 0
 
   def interrupt_handler(self):
@@ -230,11 +230,11 @@ class AM_IH(AM_IP):
     # to_mv(self.adev.doorbell_cpu_addr, 0x2000).cast('I')[self.AMDGPU_NAVI10_DOORBELL_IH * 2] = self.rptr
 
   def enable_ring(self, addr_vm, rwptr_vm, suf, ring_id):
-    self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", addr_vm.vaddr >> 8)
+    self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", addr_vm.va_addr >> 8)
 
     self.adev.reg(f"regIH_RB_CNTL{suf}").write(0xC0310120 if ring_id == 0 else 0xC0100320)
 
-    if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", rwptr_vm.vaddr)
+    if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", rwptr_vm.va_addr)
 
     self.adev.reg(f"regIH_RB_WPTR{suf}").write(0)
     self.adev.reg(f"regIH_RB_RPTR{suf}").write(0)
@@ -242,17 +242,17 @@ class AM_IH(AM_IP):
     self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write(((self.AMDGPU_NAVI10_DOORBELL_IH + ring_id) * 2), enable=1)
 
   def init(self):
-    # for ring in self.rings: self.enable_ring(*ring)
+    for ring in self.rings: self.enable_ring(*ring)
 
-    # self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
-    # self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
-    # self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
+    self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
+    self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
+    self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
 
     pci_set_master(self.adev.pcidev)
 
     # toggle interrupts
-    # for addr_vm, rwptr_vm, suf, ring_id in self.rings:
-    #   self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
+    for addr_vm, rwptr_vm, suf, ring_id in self.rings:
+      self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
 
 class AM_SDMA(AM_IP):
   def load_mqd(self, mqd:am.struct_v11_sdma_mqd, pipe:int, queue:int):
@@ -275,13 +275,14 @@ class AM_SDMA(AM_IP):
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_IB_CNTL").update(ib_enable=1)
 
   def init(self):
-    for i in range(2):
+    for i in range(1):
       self.adev.reg(f"regSDMA{i}_F32_CNTL").update(halt=0)
+      self.adev.reg(f"regSDMA{i}_SEM_WAIT_FAIL_TIMER_CNTL").write(0x0)
 
-      self.adev.reg(f"regSDMA{i}_WATCHDOG_CNTL").write(0x1)
-      self.adev.reg(f"regSDMA{i}_UTCL1_CNTL").write(0x2c000689)
+      self.adev.reg(f"regSDMA{i}_WATCHDOG_CNTL").update(queue_hang_count=100) # 10s, 100ms per unit
+      self.adev.reg(f"regSDMA{i}_UTCL1_CNTL").update(resp_mode=3, redo_delay=9)
       self.adev.reg(f"regSDMA{i}_UTCL1_PAGE").write(0x10cec20)
-      self.adev.reg(f"regSDMA{i}_F32_CNTL").write(0x8084000)
+      self.adev.reg(f"regSDMA{i}_F32_CNTL").update(halt=0, th1_reset=0)
     self.adev.regS2A_DOORBELL_ENTRY_2_CTRL.write(0x3051001d)
 
 class AM_PSP(AM_IP):

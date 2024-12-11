@@ -142,7 +142,7 @@ class AMMemoryManager:
 
   def unmap_range(self, vaddr:int, size:int, free_paddrs=True):
     if AM_DEBUG >= 2: print(f"Unmapping {vaddr=:#x} ({size=:#x})")
-    print(f"Unmapping {vaddr=:#x} ({size=:#x})")
+    # print(f"Unmapping {vaddr=:#x} ({size=:#x})")
 
     vaddr = vaddr - AMMemoryManager.va_allocator.base
     for va, off, pte_st_idx, n_ptes, pte_covers, page_table, _ in self.frags_walker(self.root_page_table, vaddr, size, from_entry=True, free_pt=True):
