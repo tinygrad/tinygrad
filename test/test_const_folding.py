@@ -99,12 +99,12 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor.ones(4) ** Tensor([1.0, 2, 3, 4]))
 
 # folds advance indexing into basic indexing
-@unittest.skip("indexing ops folding no longer supported")
 class TestIndexingConstFolding(unittest.TestCase):
   def test_scalar_index(self):
     t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
     _check_ast_count(0, t[:,:,Tensor(1),:])
-    _check_ast_count(0, t[:,:,Tensor(1)+2,:])
+    # NOTE: this is no longer supported because the 1+2 isn't folding early.
+    #_check_ast_count(0, t[:,:,Tensor(1)+2,:])
     _check_ast_count(0, t[:,:,Tensor(1),Tensor(0)])
 
   @unittest.expectedFailure
