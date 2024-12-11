@@ -376,6 +376,11 @@ ops_folding = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), simplify_reduceop),
   # CONST doesn't need COPY
   (UPat(Ops.COPY, src=(UPat.var("x"),)), lambda ctx,x:x if x.is_unrealized_const() else None),
+  # no double COPY
+  (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, name="base")),))), lambda base: base),
+  # no COPY to same device, except clone (arg is True)
+  (UPatScheduled(Ops.COPY, src=UPat(Ops.VIEW, name="copyin"), name="copy"),
+   lambda base,b,copyin,copy: copyin if base.device == copy.device and copy.arg is not True else None),
 ])
 
 # ** buffer merging

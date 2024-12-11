@@ -483,7 +483,6 @@ class TestSchedule(unittest.TestCase):
     c = (a.sum(2).contiguous() + b).contiguous()
     check_schedule(c, 2)
 
-  @unittest.expectedFailure
   def test_double_from(self):
     x = Tensor([1,2,3,4])
     out = x.to('python')
