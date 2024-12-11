@@ -463,7 +463,9 @@ break_sched = PatternMatcher([
 
 def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   ctx.allbufs[buf_uop] = view
-  if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
+  # TODO: this is base because const folding sometimes leaves VIEW around
+  # this is fine but it increases kernel count, fix that!
+  if (op:=uval(view).base).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
   for x in op.src:
     if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
   buf_uop.buffer.ref(1)

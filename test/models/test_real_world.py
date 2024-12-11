@@ -128,7 +128,8 @@ class TestRealWorld(unittest.TestCase):
         loss.backward()
         optimizer.step()
 
-      helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 125)
+      # TODO: this increased after basing children
+      helper_test("train_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 129)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_train_cifar_hyp(self):
