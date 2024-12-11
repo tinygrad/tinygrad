@@ -12,6 +12,7 @@ def _check_ast_count(desired_count:int, t:Tensor):
   asts = [s for s in schedule if s.ast.op is Ops.SINK]
   assert len(asts) == desired_count
 
+@unittest.skip("elementwise ops folding no longer supported")
 class TestUnaryOpsConstFolding(unittest.TestCase):
   def test_all_consts_ops(self):
     _check_ast_count(0, Tensor.ones(4).exp())
