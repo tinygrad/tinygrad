@@ -1003,7 +1003,6 @@ class TestSchedule(unittest.TestCase):
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
       check_schedule(opt.schedule_step(), 18)
 
-  @unittest.expectedFailure
   def test_sgd_4convs_fuse_conv_bw(self):
     with Tensor.train():
       img = Tensor.empty(2,3,64,64)
