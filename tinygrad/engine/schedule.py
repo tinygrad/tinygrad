@@ -193,7 +193,7 @@ append_load = PatternMatcher([(UPat.load(UPat.var("b"), UPat(), name="x"), lambd
 def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemContext]:
   si_ctx = ScheduleItemContext(ctx.lazybufs, ctx.ops_metadata, ctx.assigns, ctx.var_vals, {x.buf_uop:x.src[2] for x in pre.src},
                                # TODO: what do we do if it's folded to another uop?
-                               metadata={l[0].metadata for x in pre.src if (l:=ctx.lazybufs.get(x.buf_uop)) is not None and l[0].metadata is not None})
+                               metadata={m for x in pre.src if (l:=ctx.lazybufs.get(x.buf_uop)) is not None and (m:=l[0].metadata) is not None})
   # fuse and fold store -> loads
   ops_folding = lazy if len(si_ctx.sinked) == 1 else lazy+multioutput
   sink = graph_rewrite(pre, ops_folding if len(si_ctx.assigns) == 0 else ops_folding+append_load, si_ctx)
