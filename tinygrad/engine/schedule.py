@@ -9,7 +9,6 @@ from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG
 from tinygrad.dtype import ConstType, ImageDType, dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape
-from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.device import Buffer
 
 # creation can recurse a lot
@@ -40,7 +39,7 @@ class ScheduleItem:
 
 @dataclass(frozen=True)
 class ScheduleContext:
-  lazybufs: Dict[UOp, List[LazyBuffer]] = field(default_factory=dict) # this maps BUFFER uops of this schedule to the underlying lazybuffer
+  lazybufs: Dict[UOp, List[UOp]] = field(default_factory=dict) # this maps BUFFER uops of this schedule to the underlying lazybuffer
   var_vals: Dict[Variable, int] = field(default_factory=dict)        # this maps a BIND's DEFINE_VAR to its value
   assigns: Set[UOp] = field(default_factory=set)                     # this holds all the BUFFER uops we ASSIGN to in this schedule
   realizes: Dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
@@ -51,7 +50,7 @@ class ScheduleContext:
 
 def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2
 
-def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> UOp:
+def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
   # shapeless op is passthrough
   if buf.st is None: return buf
@@ -141,7 +140,7 @@ view_right = merge_views+PatternMatcher([
 
 @dataclass(frozen=True)
 class ScheduleItemContext:
-  lazybufs: Dict[UOp, List[LazyBuffer]]
+  lazybufs: Dict[UOp, List[UOp]]
   ops_metadata: Dict[UOp, Metadata]
   assigns: Set[UOp]
   var_vals: Dict[Variable, int]
@@ -504,11 +503,11 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
 @track_rewrites(named=True)
-def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
+def create_schedule_with_vars(outs:List[UOp]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
   # create the big graph
   ctx = ScheduleContext()
-  cache: Dict[LazyBuffer, UOp] = {}
+  cache: Dict[UOp, UOp] = {}
   for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
   big_graph = graph_rewrite(big_graph, ops_folding+do_realize, ctx)
   big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
@@ -553,7 +552,7 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   if DEBUG >= 1 and len(schedule) >= 10: print(f"scheduled {len(schedule)} kernels")
   return schedule, ctx.var_vals
 
-def create_schedule(outs:List[LazyBuffer]) -> List[ScheduleItem]:
+def create_schedule(outs:List[UOp]) -> List[ScheduleItem]:
   schedule, var_vals = create_schedule_with_vars(outs)
   assert len(var_vals) == 0
   return schedule
