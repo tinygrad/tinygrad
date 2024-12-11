@@ -80,14 +80,8 @@ def to_uop(buf:LazyBuffer, ctx:ScheduleContext, cache:Dict[LazyBuffer, UOp]) -> 
     buf_uop = src[0].base.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
     op = UOp(buf.op, dtype.base, src, buf.arg)
   ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)
-  # keep track of ops outside the big graph
-  if op is not None:
-    buf_uop.buffer.ref(1)
-    ctx.lazybufs[buf_uop] = buf
-    ctx.allbufs[buf_uop] = ret
-    if op.op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
-    for x in op.src:
-      if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
+  # track the underlying lazydata for this op
+  if op is not None: ctx.lazybufs[buf_uop] = buf
   cache[buf] = ret
   return ret
 
@@ -448,6 +442,16 @@ break_sched = PatternMatcher([
   (UPatScheduled(), lambda ctx,b,to_store,base: append_realize(ctx, b, to_store, base) if b in ctx.realizes else append_op(ctx, b, to_store)),
 ])
 
+# **** Schedule context builder
+
+def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
+  ctx.allbufs[buf_uop] = view
+  if (op:=uval(view)).op is Ops.ASSIGN: ctx.assigns.add(buf_uop)
+  for x in op.src:
+    if is_scheduled(x.base): ctx.children.setdefault(x.base.buf_uop, {})[buf_uop] = None
+  buf_uop.buffer.ref(1)
+create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
+
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
@@ -456,6 +460,8 @@ def create_schedule_with_vars(outs:List[LazyBuffer]) -> Tuple[List[ScheduleItem]
   cache: Dict[LazyBuffer, UOp] = {}
   for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
   big_graph = graph_rewrite(big_graph, ops_folding+do_realize, ctx.realizes)
+  # create the scheduler context
+  graph_rewrite(big_graph, create_ctx, ctx)
   # group realizes into kernels
   store_groups = group_realizes(ctx)
   graph_rewrite(big_graph, break_sched, ctx)
