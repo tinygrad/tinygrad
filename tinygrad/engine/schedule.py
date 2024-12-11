@@ -392,10 +392,8 @@ def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
   # merge
   return v1
 
-# TODO
 def merge_mv(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, mv:UOp):
-  #raise Exception(v1)
-  pass
+  return mv
 
 merge_bufs = PatternMatcher([
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat.var("b1"), UPat())))), merge),
