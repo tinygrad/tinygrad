@@ -90,7 +90,6 @@ class LazyBuffer(MathTrait):
   def contiguous(self, allow_buffer_view=True):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
       ret = self.alu(Ops.BUFFER_VIEW) if allow_buffer_view and self.can_view() else self.alu(Ops.CONTIGUOUS)
-      if (sti := self.st.invert(self.base.shape)) is not None: self.base.contiguous_child = ref(ret), sti
       return ret
     self.base.forced_realize = True
     return self
@@ -148,10 +147,7 @@ class LazyBuffer(MathTrait):
   def alu(self, op:Ops, *in_srcs:LazyBuffer) -> LazyBuffer:
     srcs: List[LazyBuffer] = []
     for s in (self,)+in_srcs:
-      if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child[0]()) is not None:
-        srcs.append(root.view(s.base.contiguous_child[1]))
-      else:
-        srcs.append(s)
+      srcs.append(s)
     if not all_same(dts:=[x.dtype.base for x in (srcs[1:] if op is Ops.WHERE else srcs)]):
       raise AssertionError(f"all dtypes must match {dts} on {op}")
     assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
