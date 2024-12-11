@@ -1947,28 +1947,28 @@ class TestView(unittest.TestCase):
     np.testing.assert_allclose(b.numpy(), np.pad(a.numpy(), ((0, 5), (0, 0)))[5:])
 
 @track_rewrites(named=True)
-def big_graph_rewrite(big_graph:UOp, realizes={}) -> UOp: return graph_rewrite(big_graph, do_realize, ScheduleContext(realizes=realizes))
+def big_graph_rewrite(big_graph:UOp, ctx) -> UOp: return graph_rewrite(big_graph, do_realize, ctx)
 class TestBigGraph(unittest.TestCase):
   def test_sink_childless_const(self):
     x = UOp.const(dtypes.int, 0)
-    big_graph = big_graph_rewrite(x.sink(), realizes:={})
+    big_graph = big_graph_rewrite(x.sink(), ctx:=ScheduleContext())
     self.assertIs(big_graph, UOp(Ops.NOOP))
-    self.assertEqual(len(realizes), 0)
+    self.assertEqual(len(ctx.realizes), 0)
 
   def test_sink_childless_const_alt(self):
     x = UOp.const(dtypes.int, 0)
     y = UOp(Ops.VIEW, dtypes.int, (UOp(Ops.BUFFER, dtypes.int.ptr(), (), 0), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
-    big_graph = big_graph_rewrite(UOp.sink(x, y), realizes:={})
+    big_graph = big_graph_rewrite(UOp.sink(x, y), ctx:=ScheduleContext())
     self.assertIs(big_graph, UOp(Ops.NOOP))
-    self.assertEqual(len(realizes), 0)
+    self.assertEqual(len(ctx.realizes), 0)
 
   def test_sink_childless_const_alt_expanded(self):
     # this is a real STORE of CONST (post expand)
     y = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 1, dtypes.int), UOp.const(dtypes.int, 0)), ShapeTracker.from_shape(()))
     out = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 2, dtypes.int), y.reshape((1,)).expand((2,)).contiguous(),), ShapeTracker.from_shape((2,)))
-    big_graph = big_graph_rewrite(out.sink(), realizes:={})
+    big_graph = big_graph_rewrite(out.sink(), ctx:=ScheduleContext())
     self.assertIs(big_graph, out.sink())
-    self.assertEqual(len(realizes), 1)
+    self.assertEqual(len(ctx.realizes), 1)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
