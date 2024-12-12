@@ -18,13 +18,14 @@ def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple
   for i, v in enumerate(st.views):
     shape_without_mask = tuple(y-x for x,y in v.mask) if v.mask else v.shape
 
-    # compensate for flips and mask when computing offset. apply it.
+    # do any shrinking (becomes pad)
     buffer_size = sum((s-1)*abs(st) for s,st in zip(shape_without_mask, v.strides)) + 1
     real_offset = v.offset + sum(st*(s-1) for s,st in zip(shape_without_mask, v.strides) if st<0)
     if v.mask: real_offset += sum(x*st for (x,_),st in zip(v.mask, v.strides))
     to_apply.extend([(MovementOps.RESHAPE, (-1,)),
                      (MovementOps.SHRINK, ((real_offset, real_offset+buffer_size),))])
 
+    # do any strides
     strides_without_stride_0: List[sint] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
     if strides_without_stride_0:
       shape_without_mask_and_stride_0 = [s for s,st in zip(shape_without_mask, v.strides) if st]
@@ -58,21 +59,13 @@ def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple
     to_apply.append((MovementOps.RESHAPE, tuple(s if st else 1 for s,st in zip(shape_without_mask, v.strides))))
 
     # handle FLIP
-    if any(i < 0 for i in v.strides): to_apply.append((MovementOps.STRIDE, tuple(-1 if st<0 else 1 for st in v.strides)))
-
-    # then, we apply pre expand pads
-    if v.mask is not None:
-      pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-      post_expand_pads = tuple((x,s-y) if st == 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-      if any(x != (0,0) for x in pre_expand_pads):
-        to_apply.append((MovementOps.PAD, pre_expand_pads))
-        shape_without_mask = tuple(x+s[0]+s[1] for x,s in zip(shape_without_mask, pre_expand_pads))
+    if any(i < 0 for i in v.strides): to_apply.append((MovementOps.STRIDE, tuple(-1 if st < 0 else 1 for st in v.strides)))
 
     # then, we do any expands
     if any(s != 1 and st == 0 for s,st in zip(shape_without_mask, v.strides)): to_apply.append((MovementOps.EXPAND, shape_without_mask))
 
-    # lastly, we apply post expand pads
-    if v.mask is not None and any(x != (0,0) for x in post_expand_pads): to_apply.append((MovementOps.PAD, post_expand_pads))
+    # then, we apply PAD (last)
+    if v.mask is not None: to_apply.append((MovementOps.PAD, tuple((x,s-y) for (x,y),s in zip(v.mask, v.shape))))
 
   # get all the in_shape
   out_st = ShapeTracker.from_shape(in_shape)
