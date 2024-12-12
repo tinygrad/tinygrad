@@ -3,14 +3,14 @@ from onnx import helper
 from onnx.backend.test.case.test_case import TestCase
 from onnx.defs import AI_ONNX_PREVIEW_TRAINING_DOMAIN
 
-def create_testcase(op:str, name:str, inputs:dict[str, np.ndarray], outputs:dict[str, np.ndarray], domain='', **opts):
+def create_testcase(op:str, name:str, inputs:dict[str, np.ndarray], outputs:dict[str, np.ndarray], domain='', rtol=1e-3, atol=1e-7, **opts):
   node = helper.make_node(op, list(inputs), outputs, name=f"test_{op}", domain=domain, **opts)
   inputs_info = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in inputs.items()]
   outputs_info = [helper.make_tensor_value_info(name, helper.np_dtype_to_tensor_dtype(arr.dtype), arr.shape) for name, arr in outputs.items()]
   graph = helper.make_graph([node], name, inputs_info, outputs_info)
   model = helper.make_model(graph)
   return TestCase(name=name, model_name=name, model=model, data_sets=[(list(inputs.values()), list(outputs.values()))], kind="node",
-                  rtol=1e-3, atol=1e-7, url=None, model_dir=None)
+                  rtol=rtol, atol=atol, url=None, model_dir=None)
 
 def test_adam_large_t():
   from onnx.backend.test.case.node.adam import apply_adam

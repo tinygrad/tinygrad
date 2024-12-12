@@ -39,10 +39,10 @@ class TinygradBackend(Backend):
     # NOTE: this is onnx CPU
     return device == "CPU"
 
-# extend BackendTest to support in-memory tests
+# monkeypatches BackendTest to support in-memory tests
 class TinygradBackendTestRunner(onnx.backend.test.BackendTest):
   def _add_model_test(self, model_test, kind):
-    # if .model and .pb are in memory
+    # if model.onnx and *.pb (inputs and outputs) are in memory
     if model_test.model is not None and model_test.data_sets is not None:
       model_marker = [model_test.model]
       def run(test_self, device='CPU', **kwargs):
@@ -56,6 +56,7 @@ class TinygradBackendTestRunner(onnx.backend.test.BackendTest):
       self._add_test(kind + "Node", model_test.name, run, model_marker)
     else:
       # parent logic is for file-based tests
+      # file-based tests located here: https://github.com/onnx/onnx/tree/main/onnx/backend/test/data
       super()._add_model_test(model_test, kind)
 
 backend_test = TinygradBackendTestRunner(TinygradBackend, __name__)
@@ -73,10 +74,8 @@ backend_test._add_model_test(adam_test_case, "Tinygrad")
 backend_test._add_model_test(adagrad_test_case, "Tinygrad")
 backend_test._add_model_test(momentum_test_case, "Tinygrad")
 
-# TODO: there isn't an AttributeProto for `epsilon` in the NodeProto for 'test_adam_multiple_cpu'
-# [x.name for x in n.attribute] -> ['alpha', 'beta', 'norm_coefficient']
-# but in their documentation https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-176, it states there being an epsilon of 1e-2
-# test passes with epsilon = 1e-2
+# BUG: onnx didn't include epsilon in their node
+# https://github.com/onnx/onnx/blob/main/onnx/backend/test/case/node/adam.py#L93
 backend_test.exclude('test_adam_multiple_cpu')
 
 # about different dtypes
