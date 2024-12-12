@@ -83,9 +83,9 @@ x86_rewrite = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"), lambda ctx,x: f"{x86op[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{cflag(x)} {ctx[x]}"),
   # requires rax/rdx
   #TODO: prealloc rax to idiv
-  (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda ctx,x: f"{ctx.alu_mov(x, x.src[0])}{ctx.idiv(x, x.src[1])}"),
+  (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{ctx.idiv(x, x.src[1])}"),
   (UPat(GroupOp.Binary, name="x"),
-   lambda ctx,x: f"{ctx.alu_mov(x, x.src[0])}{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
+   lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
   # unary ops
   (UPat(Ops.SQRT, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
   # if
@@ -102,17 +102,12 @@ x86_matcher = PatternMatcher([
    lambda x: UOp(x.op, dtypes.float32, tuple(s.cast(dtypes.float32) if s.dtype != dtypes.bool else s for s in x.src)).cast(dtypes.float16)),
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"),
    lambda x: UOp(x.op, x.dtype, tuple(s.cast(dtypes.float32) for s in x.src)) if any(s.dtype is dtypes.float16 for s in x.src) else None),
-  # TODO: remove extra casts by casting to max(c.dtype, float32)
   # can't bitcast from uint16/int16 to float16 directly and vice versa
-  (UPat(Ops.BITCAST, (dtypes.uint16, dtypes.int16), src=(UPat(dtype=dtypes.float16),), name="c"),
-   lambda c: c.src[0].bitcast(dtypes.uint32).cast(c.dtype)),
-  (UPat(Ops.BITCAST, dtypes.float16, src=(UPat(dtype=(dtypes.uint16, dtypes.int16)),), name="c"),
-   lambda c: c.src[0].cast(dtypes.uint32).bitcast(c.dtype)),
+  (UPat(Ops.BITCAST, (dtypes.uint16, dtypes.int16), (UPat(dtype=dtypes.float16),), name="c"), lambda c: c.src[0].bitcast(dtypes.uint).cast(c.dtype)),
+  (UPat(Ops.BITCAST, dtypes.float16, (UPat(dtype=(dtypes.uint16, dtypes.int16)),), name="c"), lambda c: c.src[0].cast(dtypes.uint).bitcast(c.dtype)),
   # can't cast from float16 to ints/float64 directly and vice versa
-  (UPat(Ops.CAST, dtype=(*dtypes.ints, dtypes.float64), src=(UPat(dtype=dtypes.float16),), name="c"),
-   lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
-  (UPat(Ops.CAST, dtype=dtypes.float16, src=(UPat(dtype=(*dtypes.ints, dtypes.float64)),), name="c"),
-   lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
+  (UPat(Ops.CAST, (*dtypes.ints, dtypes.float64), (UPat(dtype=dtypes.float16),), name="c"), lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
+  (UPat(Ops.CAST, dtypes.float16, (UPat(dtype=(*dtypes.ints, dtypes.float64)),), name="c"), lambda c: c.src[0].cast(dtypes.float32).cast(c.dtype)),
   # can't cast from float to int8/16 directly and vice versa
   (UPat(Ops.CAST, dtype=(dtypes.uint8, dtypes.uint16, dtypes.int8, dtypes.int16), src=(UPat(dtype=dtypes.floats),), name="c"),
     lambda c: c.src[0].cast(dtypes.int32).cast(c.dtype)),
@@ -148,8 +143,6 @@ class X86Renderer(Renderer):
   has_shared = False
   global_max = None
   extra_matcher = x86_matcher
-
-  def alu_mov(self, x:UOp, s:UOp): assert x.dtype == s.dtype; return f"{x86op[x.dtype][Ops.ASSIGN]} {self[x]}, {self[s]}\n" if self[x] != self[s] else ""
 
   def idiv(self, x:UOp, s:UOp) -> str:
     remainder_signex = {1:"cbw", 2: "cwd", 4: "cdq", 8: "cqo"}
@@ -243,7 +236,6 @@ class X86Renderer(Renderer):
           for var in (v for v in r if is_reg(r[v]) and v.op is not Ops.RANGE):
             free_reg(r[var])
             mov_to_stack(var)
-          # TODO?: if we do the cmp at the start of the loop we don't need this
           last_use[u.src[1]] = max(last_use[u], last_use[u.src[1]])
         # render x86 assembly
         if (l:=x86_rewrite.rewrite(u, ctx=self)) is None:
