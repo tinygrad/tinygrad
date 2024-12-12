@@ -1,5 +1,5 @@
 from typing import cast
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, sum_acc_dtype
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops
 from tinygrad.shape.view import View
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -19,17 +19,23 @@ def view_gradient(ctx:UOp, ret:UOp):
   assert len(ret.arg.views) == 1, "no multiview support yet"
   v = ret.arg.views[0]
   assert ctx.shape == v.shape, "grad_output shape must match output shape"
-  # find all stride 0 and add sum (inverse of expand)
-  expand_axis = tuple(i for i,(s,st) in enumerate(zip(v.shape, v.strides)) if s > 1 and st == 0)
-  if len(expand_axis): ctx = ctx.r(Ops.ADD, expand_axis)
 
-  # invert
-  iv = View.create(ctx.shape)
-  if v.mask: iv = iv.shrink(v.mask)
-  if 0 in iv.shape: return (ret.src[0].const_like(0),)
-  iv = iv.stride(tuple(-1 if x < 0 else 1 for x in v.strides)).permute(argsort(tuple(-x if x > 0 else x for x in v.strides)))
-  assert prod(iv.shape) == prod(ret.src[0].shape), f"shape mismatch? {iv.shape} vs {ret.src[0].shape}"
-  return (ctx.view(ShapeTracker((iv,)).reshape(ret.src[0].shape)),)
+  # shrink for mask
+  if v.mask: ctx = ctx.shrink(v.mask)
+
+  # if we shrank it to nothing, it's just 0
+  if 0 in ctx.shape: return (ret.src[0].const_like(0),)
+
+  # find all stride 0 and add sum (inverse of expand)
+  expand_axis = tuple(i for i,(s,st) in enumerate(zip(ctx.shape, v.strides)) if s > 1 and st == 0)
+
+  # TODO: these casts should just be around the EXPAND in the forward, then we don't need this
+  if len(expand_axis): ctx = ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, expand_axis).cast(ctx.dtype)
+
+  ctx = ctx.stride(tuple(-1 if x < 0 else 1 for x in v.strides)).permute(argsort(tuple(-x if x > 0 else x for x in v.strides)))
+
+  assert prod(ctx.shape) == prod(ret.src[0].shape), f"shape mismatch? {ctx.shape} vs {ret.src[0].shape}"
+  return (ctx.reshape(ret.src[0].shape),)
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
