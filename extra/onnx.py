@@ -137,11 +137,15 @@ def get_run_onnx(onnx_model: ModelProto):
       return None
 
     for num,n in enumerate(onnx_model.graph.node):
-      inp = [to_python_const(fetch_tensor(x)) if i in required_input_python_consts.get(n.op_type, ()) else fetch_tensor(x) for i,x in enumerate(n.input)]
+      all_inp = [fetch_tensor(x) for x in n.input]
+      required_consts = required_input_python_consts.get(n.op_type, ())
+      inp = [to_python_const(t) if i in required_consts else t for i,t in enumerate(all_inp)]
       opt = model_attributes[num]
 
-      if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
-      if debug >= 3: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {t}" for i,(x,t) in enumerate(zip(n.input, inp))))
+      if debug >= 1: print(f"{num}: op \"{n.op_type}\" input shapes {[x.shape if isinstance(x, Tensor) else x for x in all_inp]} opt {opt}")
+      if debug >= 3:
+        print("\tinputs:")
+        print("\n".join(f"\t\t{x} - {t}" + (" (to_python_const)" if i in required_consts else "") for i,(x,t) in enumerate(zip(n.input, inp))))
 
       if n.op_type in tensor_methods:
         ret = getattr(Tensor, tensor_methods[n.op_type])(*inp, **opt)
