@@ -143,7 +143,7 @@ class Buffer:
 class Allocator:
   # overriden in LRUAllocator
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
-    assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
+    assert size > 0, f"alloc size must be positve, getting {size}"
     return self._alloc(size, options if options is not None else BufferSpec())
   def free(self, opaque, size:int, options:Optional[BufferSpec]=None): self._free(opaque, options if options is not None else BufferSpec())
 
