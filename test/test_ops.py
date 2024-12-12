@@ -60,7 +60,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     ret = tinygrad_fxn(*tst)
     loss:Tensor = (ret+1).square().mean()
     tst_grads = loss.gradient(*tst)
-    Tensor.realize(*tst_grads)
+    if len(tst_grads): Tensor.realize(*tst_grads)
     tinygrad_fbp = time.monotonic() - st
 
     for i, (t, tt_grad) in enumerate(zip(ts, tst_grads)):
