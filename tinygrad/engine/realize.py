@@ -121,9 +121,6 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
     prg: ProgramSpec = get_kernel(Device[device].renderer, ast).to_program()
-    if getenv("FUZZ_UOPS"):
-      from test.external.fuzz_uops import UOpsFuzzerRunner
-      return UOpsFuzzerRunner(replace(prg, device=device))
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
