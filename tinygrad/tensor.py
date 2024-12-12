@@ -870,7 +870,9 @@ class Tensor(SimpleMathTrait):
   # ***** toposort and backward pass *****
 
   def gradient(self, *targets:Tensor) -> list[Tensor]:
-    return [Tensor(y) for y in gradient(self.lazydata, [x.lazydata for x in targets])]
+    assert isinstance(self.lazydata, UOp), "multi isn't supported yet"
+    target_uops: List[UOp] = [x.lazydata for x in targets if isinstance(x.lazydata, UOp)]
+    return [Tensor(y) for y in gradient(self.lazydata, target_uops)]
 
   def _deepwalk(self):
     def _walk(node, visited):

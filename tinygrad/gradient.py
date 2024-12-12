@@ -1,6 +1,27 @@
 from typing import cast
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops
+from tinygrad.shape.view import View
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.helpers import argsort, prod
 import math
+
+def reduce_gradient(ctx:UOp, ret:UOp):
+  if ret.arg[0] == Ops.ADD: return (ctx.expand(ret.src[0].shape),)
+
+# NOTE: this is very similar to invert
+def view_gradient(ctx:UOp, ret:UOp):
+  assert len(ret.arg.views) == 1, "no multiview support yet"
+  v = ret.arg.views[0]
+  assert ctx.shape == v.shape, "grad_output shape must match output shape"
+  # find all stride 0 and add sum (inverse of expand)
+  out = ctx.r(Ops.ADD, tuple(i for i,(s,st) in enumerate(zip(v.shape, v.strides)) if s > 1 and st == 0))
+
+  # invert
+  iv = View.create(out.shape)
+  if v.mask: iv = iv.shrink(v.mask)
+  iv = iv.stride(tuple(-1 if x < 0 else 1 for x in v.strides)).permute(argsort(tuple(-x if x > 0 else x for x in v.strides)))
+  assert prod(iv.shape) == prod(ret.src[0].shape), "shape mismatch?"
+  return (out.view(ShapeTracker((iv,)).reshape(ret.src[0].shape)),)
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
@@ -14,7 +35,8 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.ADD), lambda ctx: (ctx, ctx)),
   (UPat(Ops.MUL, name="ret"), lambda ctx, ret: (ret.src[1]*ctx, ret.src[0]*ctx)),
   (UPat(Ops.WHERE, name="ret"), lambda ctx, ret: (None, ret.src[0].where(ctx, ctx.const_like(0)), ret.src[0].where(ctx.const_like(0), ctx))),
-  # TODO: reduce/movement ops once we have the new lazy stuff
+  (UPat(Ops.VIEW, name="ret"), view_gradient),
+  (UPat(Ops.REDUCE_AXIS, name="ret"), reduce_gradient),
 ])
 
 # copied from tensor.py, get relevant toposort of gradients
