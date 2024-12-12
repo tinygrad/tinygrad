@@ -1,4 +1,5 @@
 from typing import cast
+from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops
 from tinygrad.shape.view import View
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -7,6 +8,10 @@ import math
 
 def reduce_gradient(ctx:UOp, ret:UOp):
   if ret.arg[0] == Ops.ADD: return (ctx.expand(ret.src[0].shape),)
+  if ret.arg[0] == Ops.MAX:
+    max_is_1s = ret.src[0].ne(ret.expand(ret.src[0].shape)).ne(ret.src[0].const_like(1).cast(dtypes.bool)).cast(ctx.dtype)
+    div = max_is_1s.r(Ops.ADD, ret.arg[1]).expand(ret.src[0].shape)
+    return ((max_is_1s/div) * ctx.expand(ret.src[0].shape),)
 
 # NOTE: this is very similar to invert
 def view_gradient(ctx:UOp, ret:UOp):
@@ -33,6 +38,8 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.SQRT, name="ret"), lambda ctx, ret: (ctx / (ret*2),)),
   (UPat((Ops.CMPLT, Ops.CMPNE)), lambda: (None, None)),
   (UPat(Ops.ADD), lambda ctx: (ctx, ctx)),
+  (UPat(Ops.MAX, name="ret"), lambda ctx, ret: ((ret.src[0]>ret.src[1]).where(ctx, (ret.src[0]!=ret.src[1]).where(ctx.const_like(0), ctx * 0.5)),
+                                                (ret.src[0]<ret.src[1]).where(ctx, (ret.src[0]!=ret.src[1]).where(ctx.const_like(0), ctx * 0.5)))),
   (UPat(Ops.MUL, name="ret"), lambda ctx, ret: (ret.src[1]*ctx, ret.src[0]*ctx)),
   (UPat(Ops.WHERE, name="ret"), lambda ctx, ret: (None, ret.src[0].where(ctx, ctx.const_like(0)), ret.src[0].where(ctx.const_like(0), ctx))),
   (UPat(Ops.VIEW, name="ret"), view_gradient),
