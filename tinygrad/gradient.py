@@ -25,8 +25,9 @@ def view_gradient(ctx:UOp, ret:UOp):
   # invert
   iv = View.create(out.shape)
   if v.mask: iv = iv.shrink(v.mask)
+  if 0 in iv.shape: return (ret.src[0].const_like(0),)
   iv = iv.stride(tuple(-1 if x < 0 else 1 for x in v.strides)).permute(argsort(tuple(-x if x > 0 else x for x in v.strides)))
-  assert prod(iv.shape) == prod(ret.src[0].shape), "shape mismatch?"
+  assert prod(iv.shape) == prod(ret.src[0].shape), f"shape mismatch? {iv.shape} vs {ret.src[0].shape}"
   return (out.view(ShapeTracker((iv,)).reshape(ret.src[0].shape)),)
 
 # ctx is grad_output
@@ -66,6 +67,7 @@ def gradient(root:UOp, targets:list[UOp]) -> list[UOp]:
     if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}")
     assert len(lgrads) == len(t0.src)
     for k,v in zip(t0.src, lgrads):
+      if v is None: continue
       if k in grads: grads[k] = grads[k] + v
       else: grads[k] = v
   return [grads[x] for x in targets]
