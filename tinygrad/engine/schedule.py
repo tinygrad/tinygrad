@@ -174,6 +174,8 @@ to_si = PatternMatcher([
   # don't need contiguous or assign anymore
   (UPat(Ops.CONTIGUOUS, src=(UPat.var("x"),)), lambda ctx,x: x),
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda ctx,x: x),
+  # don't need the reduceop size anymore
+  (UPat(Ops.REDUCE_AXIS, name="r"), lambda r: None if len(r.arg) == 2 else r.replace(arg=r.arg[:2])),
 ])
 
 # ** fusion
@@ -381,8 +383,8 @@ ops_folding = PatternMatcher([
   (UPat(Ops.CAST, src=(UPat.var("x"),), name="cast"),
    lambda x,cast: UOp.const(cast.dtype, x.const_arg) if all_int(x.shape) and x.is_unrealized_unmasked_const() else None),
   # reduce of size 0 is the identity element
-  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
-   lambda reduce,x:UOp.const(reduce.dtype, identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
+  (UPat(Ops.REDUCE_AXIS, name="reduce"),
+   lambda reduce: UOp.const(reduce.dtype, identity_element(reduce.arg[0], reduce.dtype)) if 0 in reduce.arg[2] and reduce.size != 0 else None),
   # reduce of const is collapsed (TODO: make this a generic rule for stride0)
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), simplify_reduceop),
   # CONST doesn't need COPY

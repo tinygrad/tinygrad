@@ -16,7 +16,7 @@ from tinygrad.shape.view import View
 from tinygrad.ops import UOp, Ops, graph_rewrite, track_rewrites, view_supported_devices
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, do_realize
+from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, do_realize, ops_folding
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
 from extra.models.llama import precompute_freqs_cis
 
@@ -1960,6 +1960,12 @@ class TestBigGraph(unittest.TestCase):
     big_graph = big_graph_rewrite(out.sink(), ctx:=ScheduleContext())
     self.assertIs(big_graph, out.sink())
     self.assertEqual(len(ctx.realizes), 1)
+
+  def test_size0_const_reduce(self):
+    sz0 = UOp.const(dtypes.bool, True).view(ShapeTracker.from_shape((1, 0)))
+    reduceop = sz0.r(Ops.MAX, (1,))
+    folded = graph_rewrite(reduceop, ops_folding)
+    self.assertIs(folded, UOp.const(dtypes.bool, False))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

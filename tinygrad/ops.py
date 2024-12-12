@@ -371,7 +371,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def range(dtype:DType, start:sint, end:sint, idx:int): return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(start), sint_to_uop(end)), arg=idx)
   def _reduce_op(self, op:Ops, axis:Tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
-    return self if len(axis) == 0 else UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis))
+    return self if len(axis) == 0 else UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis, self.shape))
   def r(self, op:Ops, axis:Tuple[int, ...]) -> UOp:
     new_shape = unwrap(self.st).reduce(axis)
 
