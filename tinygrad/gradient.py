@@ -4,13 +4,6 @@ from tinygrad.ops import UOp, PatternMatcher, UPat, Ops
 from tinygrad.helpers import prod, argsort
 import math
 
-def reduce_gradient(ctx:UOp, ret:UOp):
-  if ret.arg[0] == Ops.ADD: return (ctx.expand(ret.src[0].shape),)
-  if ret.arg[0] == Ops.MAX:
-    max_is_1s = ret.src[0].ne(ret.expand(ret.src[0].shape)).ne(ret.src[0].const_like(1).cast(dtypes.bool)).cast(ctx.dtype)
-    div = max_is_1s.r(Ops.ADD, ret.arg[1]).expand(ret.src[0].shape)
-    return ((max_is_1s/div) * ctx.expand(ret.src[0].shape),)
-  if ret.arg[0] == Ops.MUL: return ((ctx * ret).expand(ret.src[0].shape) / ret.src[0],)
 
 # NOTE: this is very similar to invert
 from typing import Tuple, List
@@ -34,22 +27,7 @@ def apply_mop(st: ShapeTracker, mop_arg: Tuple[MovementOps, Tuple]) -> ShapeTrac
   if mop == MovementOps.STRIDE: return st.stride(arg)
   raise ValueError("invalid mop")
 
-def get_real_view(shape, strides, offset, mask):
-  real_shape = tuple(y-x for x,y in mask) if mask else shape
-  offset = offset + sum(st * (s-1) for s,st in zip(real_shape, strides) if st<0)
-  real_offset = offset + (sum(x*st for (x,_),st in zip(mask, strides)) if mask else 0)
-  real_real_shape = [s for s,st in zip(real_shape, strides) if st]
-  strides = [abs(st) if isinstance(st,int) else st for st in strides if st]
-  return real_real_shape, strides, real_offset
-
-def get_buffer_size(shape, strides, offset, mask):
-  real_real_shape, strides, real_offset = get_real_view(shape, strides, offset, mask)
-  return real_offset + sum((s-1)*st for s, st in zip(real_real_shape,strides)) + 1
-
-def make_scratch_st(st: ShapeTracker) -> ShapeTracker:
-  return ShapeTracker.from_shape((get_buffer_size(st.views[0].shape, st.views[0].strides, st.views[0].offset, st.views[0].mask),))
-
-def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
+def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple]]:
   to_apply:List[Tuple[MovementOps, Tuple]] = []
   for i, v in enumerate(st.views):
     real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
@@ -92,7 +70,7 @@ def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
     # lastly, we apply post expand pads
     if v.mask is not None and any(x != (0,0) for x in post_expand_pads): to_apply.append((MovementOps.PAD, post_expand_pads))
 
-  scratch_st = make_scratch_st(st)
+  scratch_st = ShapeTracker.from_shape(in_shape)
   ret = []
   seen = {}  # {shapetracker: list of mops to generate that shapetracker}
   for mop_arg in to_apply:
@@ -105,12 +83,11 @@ def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
 
   return ret
 
-
 def view_gradient(ctx:UOp, ret:UOp):
   assert ctx.shape == ret.shape, "grad_output shape must match output shape"
 
   # Convert to MovementOps
-  forward_ops = to_movement_ops(ret.arg)
+  forward_ops = to_movement_ops(ret.arg, ret.src[0].shape)
 
   # get all shapes
   shapes = [ret.src[0].shape] + [x for (_,_,x) in forward_ops]
@@ -140,6 +117,14 @@ def view_gradient(ctx:UOp, ret:UOp):
       ctx = ctx.stride(arg)
 
   return (ctx,)
+
+def reduce_gradient(ctx:UOp, ret:UOp):
+  if ret.arg[0] == Ops.ADD: return (ctx.expand(ret.src[0].shape),)
+  if ret.arg[0] == Ops.MAX:
+    max_is_1s = ret.src[0].ne(ret.expand(ret.src[0].shape)).ne(ret.src[0].const_like(1).cast(dtypes.bool)).cast(ctx.dtype)
+    div = max_is_1s.r(Ops.ADD, ret.arg[1]).expand(ret.src[0].shape)
+    return ((max_is_1s/div) * ctx.expand(ret.src[0].shape),)
+  if ret.arg[0] == Ops.MUL: return ((ctx * ret).expand(ret.src[0].shape) / ret.src[0],)
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
