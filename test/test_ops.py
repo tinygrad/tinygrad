@@ -56,12 +56,24 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     torch_fbp = time.monotonic() - st
 
     st = time.monotonic()
+    # NOTE: we now have to recompute the forward pass since we realized it
+    ret = tinygrad_fxn(*tst)
+    loss:Tensor = (ret+1).square().mean()
+    tst_grads = loss.gradient(*tst)
+    Tensor.realize(*tst_grads)
+    tinygrad_fbp = time.monotonic() - st
+
+    for i, (t, tt_grad) in enumerate(zip(ts, tst_grads)):
+      compare(f"backward pass tensor {i}", tt_grad.numpy(), t.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)
+
+    """
     (ret+1).square().mean().backward()
     for tt in tst: tt.grad.realize()
     tinygrad_fbp = time.monotonic() - st
 
     for i, (t, tt) in enumerate(zip(ts, tst)):
       compare(f"backward pass tensor {i}", tt.grad.numpy(), t.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)
+    """
 
   if not CI:
     print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % \
