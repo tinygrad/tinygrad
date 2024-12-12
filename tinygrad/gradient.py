@@ -52,6 +52,7 @@ pm_gradient = PatternMatcher([
 def _deepwalk(root:UOp, targets:list[UOp]):
   def _walk(node:UOp, visited:set[UOp]):
     visited.add(node)
+    if node.op is Ops.DETACH: return
     if any(x in node.toposort for x in targets if x is not node):
       for i in node.src:
         if i not in visited: yield from _walk(i, visited)
@@ -59,10 +60,9 @@ def _deepwalk(root:UOp, targets:list[UOp]):
   return list(_walk(root, set()))
 
 def gradient(root:UOp, targets:list[UOp]) -> list[UOp]:
-  # TODO: better error
-  if not all(x in root.toposort for x in targets): raise RuntimeError("some gradient targets not found in parents")
   grads = {root: root.const_like(1.0)}
   for t0 in reversed(_deepwalk(root, targets)):
+    if t0 not in grads: continue
     lgrads: tuple[UOp, ...]|None = cast(tuple[UOp, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
     if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}")
     assert len(lgrads) == len(t0.src)
@@ -70,5 +70,8 @@ def gradient(root:UOp, targets:list[UOp]) -> list[UOp]:
       if v is None: continue
       if k in grads: grads[k] = grads[k] + v
       else: grads[k] = v
-  return [grads[x] for x in targets]
+  ret = [grads.get(x, None) for x in targets]
+  for i,x in enumerate(ret):
+    if x is None: raise RuntimeError(f"{targets[i]}\n\nnot found in\n\n{root}")
+  return ret
 

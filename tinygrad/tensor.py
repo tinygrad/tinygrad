@@ -262,7 +262,7 @@ class Tensor(SimpleMathTrait):
     """
     Returns a new tensor with the same data as this tensor, but detached from the autograd graph.
     """
-    return Tensor(self.lazydata, device=self.device, requires_grad=False)
+    return Tensor(self.lazydata.detach(), device=self.device, requires_grad=False)
 
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
