@@ -50,16 +50,20 @@ def compile(onnx_file):
 
   # checks from compile2
   kernel_count = 0
+  read_image_count = 0
   gated_read_image_count = 0
   for ei in run_onnx_jit.captured.jit_cache:
     if isinstance(ei.prg, CompiledRunner):
       kernel_count += 1
+      read_image_count += ei.prg.p.src.count("read_image")
       gated_read_image_count += ei.prg.p.src.count("?read_image")
-  print(f"kernel_count: {kernel_count}  gated_read_image_count: {gated_read_image_count}")
-  assert kernel_count <= getenv("ALLOWED_KERNEL_COUNT", 0) or getenv("ALLOWED_KERNEL_COUNT", 0) == 0, "too many kernels!"
+  print(f"{kernel_count=},  {read_image_count=}, {gated_read_image_count=}")
+  if (allowed_kernel_count:=getenv("ALLOWED_KERNEL_COUNT", -1)) != -1:
+    assert kernel_count <= allowed_kernel_count, f"too many kernels! {kernel_count=}, {allowed_kernel_count=}"
+  if (allowed_read_image:=getenv("ALLOWED_READ_IMAGE", -1)) != -1:
+    assert read_image_count == allowed_read_image, f"different read_image! {read_image_count=}, {allowed_read_image=}"
   if (allowed_gated_read_image:=getenv("ALLOWED_GATED_READ_IMAGE", -1)) != -1:
-    assert gated_read_image_count <= allowed_gated_read_image, \
-      f"too many gated read_image! {gated_read_image_count=}, {allowed_gated_read_image=}"
+    assert gated_read_image_count <= allowed_gated_read_image, f"too many gated read_image! {gated_read_image_count=}, {allowed_gated_read_image=}"
 
   with open(OUTPUT, "wb") as f:
     pickle.dump(run_onnx_jit, f)
