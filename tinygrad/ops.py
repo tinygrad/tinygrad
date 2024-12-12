@@ -345,13 +345,8 @@ class UOp(MathTrait):
       s0,s1,s2 = [cast(UOp, self.src[i] if i < len(self.src) else None) for i in range(3)]
       if self.arg is BinaryOps.ADD: return s0.vmin+s1.vmin, s0.vmax+s1.vmax
       if self.arg is BinaryOps.MUL:
-        # both are non-positive
-        if (s0.vmax <= 0 and s1.vmax <= 0): return s0.vmax*s1.vmax, s0.vmin*s1.vmin
-        # at lease one is non-negative
-        if (s0.vmin >= 0 or s1.vmin >= 0):
-          Lmin, Lmax = (s0.vmin, s0.vmax) if s1.vmin >= 0 else (s0.vmax, s0.vmin)
-          Rmin, Rmax = (s1.vmin, s1.vmax) if s0.vmin >= 0 else (s1.vmax, s1.vmin)
-          return Lmin*Rmin, Lmax*Rmax
+        v1, v2, v3, v4 = s0.min * s1.min, s0.min * s1.max, s0.max * s1.min, s0.max * s1.max
+        return min(v1, v2, v3, v4), max(v1, v2, v3, v4)
       if self.arg is BinaryOps.MOD and s1.vmin > 0: return 0, s1.vmax-1
       if self.arg is BinaryOps.IDIV and s1.op is UOps.CONST:
         if s1.arg > 0: return s0.vmin//s1.arg, s0.vmax//s1.arg
