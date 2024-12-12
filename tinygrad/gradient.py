@@ -18,24 +18,18 @@ def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple
   for i, v in enumerate(st.views):
     shape_without_mask = tuple(y-x for x,y in v.mask) if v.mask else v.shape
 
-    offset = v.offset + sum(st*(s-1) for s,st in zip(shape_without_mask, v.strides) if st<0)
-    real_offset = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
-    shape_without_mask_and_stride_0 = [s for s,st in zip(shape_without_mask, v.strides) if st]
-
-    # deal with strides?
-    strides: List[sint] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
-    buffer_size = sum((s-1)*st for s,st in zip(shape_without_mask_and_stride_0, strides)) + 1
-    if i: buffer_size = prod(st.views[i-1].shape) - real_offset
-
-    def sort_by_strides(shape, strides):
-      return sorted(zip(shape, strides), key=lambda k: (k[1],-k[0]), reverse=True), \
-             sorted(range(len(strides)), key=lambda k: (strides[k],-shape_without_mask_and_stride_0[k]), reverse=True)
-    ordered_shape_strides, order = sort_by_strides(shape_without_mask_and_stride_0, strides)
-
+    # compensate for flips and mask when computing offset. apply it.
+    buffer_size = sum((s-1)*abs(st) for s,st in zip(shape_without_mask, v.strides)) + 1
+    real_offset = v.offset + sum(st*(s-1) for s,st in zip(shape_without_mask, v.strides) if st<0)
+    if v.mask: real_offset += sum(x*st for (x,_),st in zip(v.mask, v.strides))
     to_apply.extend([(MovementOps.RESHAPE, (-1,)),
                      (MovementOps.SHRINK, ((real_offset, real_offset+buffer_size),))])
-    if strides:
-      if (ordered_shape_strides[0][0]*ordered_shape_strides[0][1])-buffer_size>0:
+
+    strides_without_stride_0: List[sint] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
+    if strides_without_stride_0:
+      shape_without_mask_and_stride_0 = [s for s,st in zip(shape_without_mask, v.strides) if st]
+      ordered_shape_strides = sorted(zip(shape_without_mask_and_stride_0, strides_without_stride_0), key=lambda k: (k[1],-k[0]), reverse=True)
+      if (ordered_shape_strides[0][0]*ordered_shape_strides[0][1])-buffer_size > 0:
         to_apply.append((MovementOps.PAD, ((0, (ordered_shape_strides[0][0] * ordered_shape_strides[0][1]) - buffer_size),)))
 
       for i, shape_stride in enumerate(ordered_shape_strides):
@@ -53,7 +47,12 @@ def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple
 
       to_apply.extend([(MovementOps.SHRINK, (*[(0, s[0]) for s in ordered_shape_strides], (0,1))),
                        (MovementOps.RESHAPE, tuple(s[0] for s in ordered_shape_strides))])
-      if order != list(range(len(order))): to_apply.append((MovementOps.PERMUTE, tuple(order.index(i) for i in range(len(strides)))))
+
+      # handle PERMUTE
+      order = sorted(range(len(strides_without_stride_0)),
+                    key=lambda k: (strides_without_stride_0[k], -shape_without_mask_and_stride_0[k]), reverse=True)
+      if order != list(range(len(order))):
+        to_apply.append((MovementOps.PERMUTE, tuple(order.index(i) for i in range(len(order)))))
 
     # Reshape to final shape considering strides that are 0 become dimension of size 1
     to_apply.append((MovementOps.RESHAPE, tuple(s if st else 1 for s,st in zip(shape_without_mask, v.strides))))
