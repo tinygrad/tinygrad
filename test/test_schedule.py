@@ -18,11 +18,10 @@ from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, ge
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, do_realize
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
-from tinygrad.engine.lazy import LazyBuffer
 from extra.models.llama import precompute_freqs_cis
 
 class KernelCountException(Exception): pass
-def check_schedule(t:Union[Tensor, List[Tensor], LazyBuffer], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
+def check_schedule(t:Union[Tensor, List[Tensor], UOp], allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_sink=True):
   if isinstance(t, Tensor): outs = t.lazydata.lbs
   elif isinstance(t, List): outs = flatten([r.lazydata.lbs for r in t])
   else: outs = [t]
@@ -1296,14 +1295,14 @@ class TestSchedule(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT not in view_supported_devices, "subbuffer not supported")
   def test_bitcast_subbufer(self):
-    x = cast(LazyBuffer, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
+    x = cast(UOp, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
     a = x.alu(Ops.EXP2).cast(dtypes.int32, True, allow_buffer_view=True)
     b = x.cast(dtypes.int32, True, allow_buffer_view=True)
     b = a.alu(Ops.ADD, b)
     check_schedule(b, 2) # this should fuse when it makes sense
 
   def test_bitcast_disable_subbufer(self):
-    x = cast(LazyBuffer, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
+    x = cast(UOp, Tensor.empty(1, dtype=dtypes.float32).realize().lazydata)
     a = x.alu(Ops.EXP2).cast(dtypes.int32, True, allow_buffer_view=False)
     b = x.cast(dtypes.int32, True, allow_buffer_view=False)
     b = a.alu(Ops.ADD, b)

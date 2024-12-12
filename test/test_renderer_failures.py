@@ -11,7 +11,6 @@ from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.ops import UOp, Ops
 from tinygrad.renderer import ProgramSpec
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.engine.lazy import LazyBuffer
 
 def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
   for x in inputs: x.realize()
@@ -21,7 +20,7 @@ def _test_uop_result(inputs:List[Tensor], stores:List[UOp], local_size=None):
   uops = dedup(flatten(_recursive_add(st) for st in stores))
   outbufs = [Buffer(Device.DEFAULT, sz:=(1 if local_size is None else prod(local_size)), (dtype:=u.src[1].dtype), \
       initial_value=np.zeros(sz, dtype=_to_np_dtype(dtype)).data) for u in uops if u.op is Ops.STORE]
-  inbufs = [cast(LazyBuffer,x.lazydata).base.buffer for x in inputs]
+  inbufs = [cast(UOp,x.lazydata).base.buffer for x in inputs]
   src = Device[Device.DEFAULT].renderer.render("test", uops)
   ei = CompiledRunner(ProgramSpec("test", src, Device.DEFAULT, uops=uops, local_size=local_size))
   ei.exec(outbufs+inbufs)

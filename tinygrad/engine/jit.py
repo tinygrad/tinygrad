@@ -1,7 +1,6 @@
 from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
@@ -179,7 +178,7 @@ def _prepare_jit_inputs(args, kwargs):
   input_tensors: List[Tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
   names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
   if tensors: Tensor.realize(*tensors)
-  lbs: List[LazyBuffer] = flatten([t.lazydata.lbs for t in tensors])
+  lbs: List[UOp] = flatten([t.lazydata.lbs for t in tensors])
   input_buffers: List[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
   assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
   st_varval_dtype_device = [(*unwrap(lb.st).unbind(), lb.dtype, lb.device) for lb in lbs]
