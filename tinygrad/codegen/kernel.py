@@ -19,7 +19,7 @@ from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
 
 class OptOps(Enum):
-  TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
+  TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
   GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
@@ -96,8 +96,6 @@ class Kernel:
     self.tensor_core: Optional[TensorCore] = None
     self.tensor_core_opts: Optional[TensorCoreOptions] = None
     self.use_tensor_cores: int = 0
-    # the local aliased buffers for A and B
-    self.bufs_for_tensor_core: Dict[UOp, Tuple[int, int]] = {}
     self.dont_use_locals: bool = False
 
     # group simplifies
@@ -117,8 +115,7 @@ class Kernel:
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduces, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduces, self.upcasted, self.local_dims, self.dont_use_locals
-    ret.tensor_core, ret.tensor_core_opts, ret.bufs_for_tensor_core, ret.use_tensor_cores = \
-      self.tensor_core, self.tensor_core_opts, self.bufs_for_tensor_core, self.use_tensor_cores
+    ret.tensor_core, ret.tensor_core_opts, ret.use_tensor_cores = self.tensor_core, self.tensor_core_opts, self.use_tensor_cores
 
     return ret
 
@@ -157,10 +154,6 @@ class Kernel:
   def shape_len(self) -> int: return len(self.sts[0].shape)
 
   @property
-  def upcast_in_mid_reduce_axes(self) -> List[int]:
-    return [j for j in range(self.first_reduce, self.first_reduce+self.group_for_reduces) if self.full_shape[j] == self.sts[0].shape[j]]
-
-  @property
   def global_dims(self) -> int: return self.first_reduce-self.local_dims
 
   # there's eight chunks of the shape
@@ -168,7 +161,6 @@ class Kernel:
   # cyan   -- local dims (warp ones first)
   #  *** self.first_reduce
   # green  -- reduce-local dims
-  # white  -- reduce-late upcasted dim (self.upcast_in_mid_reduce_axes)
   # red    -- reduce loops
   #  *** self.upcasted
   # purple -- reduce upcasted
@@ -178,8 +170,8 @@ class Kernel:
     colors = ["blue"] * self.global_dims if not self.dont_use_locals else ["BLUE"] * self.global_dims
     # after global are local_dims; warp ones used in tensor cores must be closest to first_reduce (cyan)
     colors += ["cyan"] * self.local_dims
-    # between first_reduce and first_reduce + group_for_reduces, they are either upcast mid reduce (white), or late upcasted (green)
-    colors += ["white" if i in self.upcast_in_mid_reduce_axes else "green" for i in range(self.first_reduce, self.first_reduce + self.group_for_reduces)]  # noqa: E501
+    # between first_reduce and first_reduce + group_for_reduces, they are late upcasted (green)
+    colors += ["green"] * self.group_for_reduces
     # between first_reduce + group_for_reduces and upcasted, they are reduce (red)
     colors += ["red"] * (self.first_upcast - (self.first_reduce + self.group_for_reduces))
     # upcasted dimensions are reduce (magenta) or normal (yellow)
@@ -296,7 +288,6 @@ class Kernel:
     s0, s1, s2 = axis_choices[-(axis+1)][0][0], axis_choices[-(axis+1)][1][0], axis_choices[-(axis+1)][2]  # s0 is n, s1 is m, s2 is k
     axis_pads = tuple((x, tc.dims[i]) for i, x in enumerate([s0, s1, s2]) if resolve(self.full_shape[x]%tc.dims[i] != 0))
     if axis_pads and (opt_level < 2): return None
-    self.bufs_for_tensor_core[reduceop] = (buf0, buf1)
     if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
     return TensorCoreOptions(axes=(s0, s1, s2), axes_exist=(True, True), axis_pads=axis_pads)
 
@@ -362,7 +353,7 @@ class Kernel:
       return False
 
   def apply_opt(self, opt:Opt, append_opt:bool=True):
-    if self.dont_use_locals: check(opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals")
+    if self.dont_use_locals: check(opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP}, "not using locals")
 
     if opt.op is OptOps.TC:
       check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: things like PADTO might be fine
@@ -418,14 +409,6 @@ class Kernel:
       check(amt <= 16, "don't upcast more than 16")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
-    elif opt.op is OptOps.UPCASTMID:                  # white
-      check(self.bufs[0].src[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces != 0 and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1, "invalid upcast mid reduce")  # noqa: E501
-      axes = self.sts[0].unit_stride_axes()
-      check(len(axes) == 1, f"wrong number of stride 1 axis : {axes}")
-      check(axes[0] == axis, "wrong axis")
-      check(amt == 4, "don't upcast mid anything but 4")
-      self.shift_to(axis, amt, insert_before=self.first_reduce + self.group_for_reduces)
-      self.group_for_reduces += 1
     elif opt.op is OptOps.NOLOCALS:
       check(self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals")
       check(self.local_dims == 0 and self.group_for_reduces == 0, "can't have no locals with locals")
@@ -458,8 +441,7 @@ class Kernel:
     if isinstance(self.membufs[0].dtype, ImageDType):
       unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
       assert unit_stride_axes_mul_4, f"needs a unit stride axis in {self.bufs[0]}"
-      if all(x < self.first_upcast for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
-        self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
+      if all(x < self.first_upcast for x in unit_stride_axes_mul_4): self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
     return self
 
   def hand_coded_optimizations(self) -> Kernel:
@@ -494,19 +476,12 @@ class Kernel:
               break
             except KernelOptError: pass
 
-      # are we upcasting in mid reduce? (only for images)
-      if self.bufs[0].src[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduces and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1:  # noqa: E501
-        axes = self.sts[0].unit_stride_axes()
-        assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
-        if self.sts[0].shape[axes[0]]%4 == 0:
-          self.apply_opt(Opt(OptOps.UPCASTMID, axes[0], 4))
-
     # upcast float4 images
     for buf_index,buf in enumerate(self.bufs):
       unit_stride_axes_mul_4 = [i for i in self.sts[buf_index].unit_stride_axes(ignore_valid=True) if self.sts[buf_index].shape[i]%4 == 0]
       if buf.src[0].dtype.__class__ is ImageDType:
         #assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[buf_index]}"
-        if len(unit_stride_axes_mul_4) and all(x < self.first_upcast for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:  # noqa: E501
+        if len(unit_stride_axes_mul_4) and all(x < self.first_upcast for x in unit_stride_axes_mul_4):
           if unit_stride_axes_mul_4[0] < self.first_reduce:
             self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
           else:

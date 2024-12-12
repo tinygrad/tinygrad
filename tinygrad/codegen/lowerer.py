@@ -1,5 +1,4 @@
 # the job of the lowerer is to do indexing
-from __future__ import annotations
 import functools, itertools, operator
 from dataclasses import dataclass
 from typing import List, Tuple, cast, Optional

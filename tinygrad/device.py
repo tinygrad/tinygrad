@@ -6,6 +6,7 @@ import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, cont
 from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
+from tinygrad.ops import UOp, buffers
 
 # **************** Device ****************
 
@@ -55,8 +56,8 @@ class BufferSpec:
   external_ptr: Optional[int] = None
 
 class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None,
-               initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,
+               lb_refcount=0, uop_ref:Optional[UOp]=None, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
     if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
     self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
@@ -73,6 +74,7 @@ class Buffer:
       assert device == base.device, "base must have the same device"
       self._base = base
     if preallocate: self.allocate()
+    if uop_ref is not None: buffers[uop_ref] = self
   @property
   def base(self) -> Buffer: return self._base if self._base is not None else self
   @property
@@ -95,13 +97,15 @@ class Buffer:
     return self
   def __reduce__(self):
     buf = None
+    if len(uop_refs:=[u for u,v in buffers.items() if self is v]) > 1: raise RuntimeError(f"double ref to buffer? {len(uop_refs)}")
+    uop_ref = None if len(uop_refs) == 0 else uop_refs[0]
     if self._base is not None:
-      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
-    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
+      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, uop_ref, self.base, self.offset, self.is_allocated())
+    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount, uop_ref)
     if self.is_allocated():
       buf = bytearray(self.nbytes)
       self.copyout(memoryview(buf))
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
+    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount, uop_ref)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
