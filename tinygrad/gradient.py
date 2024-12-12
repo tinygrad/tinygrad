@@ -14,11 +14,14 @@ class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PA
 
 def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple]]:
   to_apply:List[Tuple[MovementOps, Tuple]] = []
+
   for i, v in enumerate(st.views):
     real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
     offset = v.offset + sum(st*(s-1) for s,st in zip(real_shape, v.strides) if st<0)
     real_offset = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
     real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
+
+    # deal with strides?
     strides: List[sint] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
     buffer_size = sum((s-1)*st for s,st in zip(real_real_shape,strides)) + 1
     if i: buffer_size = prod(st.views[i-1].shape) - real_offset
@@ -42,7 +45,10 @@ def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple
       to_apply.extend([(MovementOps.SHRINK, (*[(0, s[0]) for s in ordered_shape_strides], (0,1))), (MovementOps.RESHAPE, tuple(s[0] for s in ordered_shape_strides))])
       if order != list(range(len(order))): to_apply.append((MovementOps.PERMUTE, tuple(order.index(i) for i in range(len(strides)))))
     to_apply.append((MovementOps.RESHAPE, tuple(s if st else 1 for s,st in zip(real_shape, v.strides))))
-    if any(i<0 for i in v.strides): to_apply.append((MovementOps.STRIDE, tuple(-1 if st<0 else 1 for st in v.strides)))
+
+    # handle FLIP
+    if any(i < 0 for i in v.strides): to_apply.append((MovementOps.STRIDE, tuple(-1 if st<0 else 1 for st in v.strides)))
+
     # then, we apply pre expand pads
     if v.mask is not None:
       pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
@@ -58,9 +64,11 @@ def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple
   st = ShapeTracker.from_shape(in_shape)
   ret = []
   for (mop, arg) in to_apply:
-    if mop == MovementOps.RESHAPE: st = st.reshape((prod(st.views[-1].shape),) if arg == (-1,) else arg)
+    if mop == MovementOps.RESHAPE:
+      if arg == (-1,): arg = (prod(st.views[-1].shape),)
+      st = st.reshape(arg)
     if mop == MovementOps.PERMUTE: st = st.permute(arg)
-    if mop == MovementOps.EXPAND: st = st.reshape((1,*st.shape)) if len(arg) != len(st.shape) else st.expand(arg)
+    if mop == MovementOps.EXPAND: st = st.expand(arg)
     if mop == MovementOps.PAD: st = st.pad(arg)
     if mop == MovementOps.SHRINK: st = st.shrink(arg)
     if mop == MovementOps.STRIDE: st = st.stride(arg)
@@ -70,31 +78,19 @@ def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple
 def view_gradient(ctx:UOp, ret:UOp):
   assert ctx.shape == ret.shape, "grad_output shape must match output shape"
 
-  # Convert to MovementOps
   forward_ops = to_movement_ops(ret.arg, ret.src[0].shape)
-
-  # get all shapes
   shapes = [ret.src[0].shape] + [x for (_,_,x) in forward_ops]
 
-  # Now apply backward transformations in reverse order
-  # shapes[i] is the shape after applying forward_ops[:i]
-  # shapes[-1] == ret.shape, shapes[0] == ret.src[0].shape
-  for (mop, arg, _), out_shape, in_shape in reversed(list(zip(forward_ops, shapes[1:], shapes[:-1]))):
-    #print(mop, arg, out_shape, in_shape, ctx.shape)
-    # ctx has shape out_shape at this point
-    assert ctx.shape == out_shape, f"shape mismatch {ctx.shape} != {out_shape}"
-
+  for (mop, arg, _), in_shape in reversed(list(zip(forward_ops, shapes[:-1]))):
     if mop == MovementOps.EXPAND:
-      expanded_axes = tuple(i for i, (si, so) in enumerate(zip(in_shape, out_shape)) if si != so)
-      if expanded_axes: ctx = ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, expanded_axes).cast(ctx.dtype)
-      ctx = ctx.reshape(in_shape)
+      if (expanded_axes:=tuple(i for i, (si, so) in enumerate(zip(in_shape, arg)) if si != so)):
+        ctx = ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, expanded_axes).cast(ctx.dtype)
     elif mop == MovementOps.RESHAPE: ctx = ctx.reshape(in_shape)
     elif mop == MovementOps.PERMUTE: ctx = ctx.permute(argsort(arg))
     elif mop == MovementOps.PAD: ctx = ctx.shrink(tuple([(p[0], s+p[0]) for s,p in zip(in_shape, arg)]))
     elif mop == MovementOps.SHRINK: ctx = ctx.pad(tuple([(p[0], s-p[1]) for s,p in zip(in_shape, arg)]))
-    elif mop == MovementOps.STRIDE:
-      assert all(x in {-1,1} for x in arg), "stride is only flip"
-      ctx = ctx.stride(arg)
+    elif mop == MovementOps.STRIDE: ctx = ctx.stride(arg)
+    assert ctx.shape == in_shape, f"shape mismatch {ctx.shape} != {in_shape}"
 
   return (ctx,)
 
