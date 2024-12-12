@@ -12,24 +12,15 @@ from tinygrad.engine.schedule import ScheduleItem
 
 logkerns, logkerns_level = open(getenv("LOGKERNS", ""), "a") if getenv("LOGKERNS", "") else None, getenv("LOGKERNS_LEVEL", 1)
 def get_kernel(renderer:Renderer, ast:UOp) -> Kernel:
-  if DEBUG >= 5:
-    print(ast)
+  if DEBUG >= 5: print(ast)
   k = Kernel(ast, opts=renderer).required_optimizations()
   if not NOOPT:
-    if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
+    if not k.apply_tensor_cores(getenv("TC", 1)): k.hand_coded_optimizations()
     if BEAM >= 1:
-      from tinygrad.engine.search import beam_search, time_linearizer, bufs_from_lin
-      kb, k_opt = Kernel(ast, opts=renderer).required_optimizations(), k
+      from tinygrad.engine.search import beam_search, bufs_from_lin
+      kb = Kernel(ast, opts=renderer).required_optimizations()
       rawbufs = bufs_from_lin(kb, allocate=False)
       k = beam_search(kb, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
-      if getenv("BEAM_COMPARE", 1):
-        # TODO: move the HC/TC/BEAM compare to beam_search so it can be optionally cached which choice is better
-        lins: List[Tuple[str, Kernel]] = [(f"beam{BEAM.value}", k), (("tc" if used_tensor_cores else "hc"), k_opt)]
-        if used_tensor_cores: lins.append(("hc", Kernel(ast, opts=renderer).hand_coded_optimizations()))
-        timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
-        if DEBUG >= 3: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
-        k = timed[0][1]
-        if logkerns is not None and logkerns_level > 1: logkerns.writelines([f"{(lin.ast, lin.applied_opts)}\n" for (_,lin,_) in timed[1:]])
   if logkerns is not None: logkerns.writelines([f"{(k.ast, k.applied_opts)}\n"])
   if DEBUG >= 5: print((k.ast, k.applied_opts)) # print here to show final applied_opts for all kernels instead of just in beam_search
   return k
@@ -122,9 +113,6 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
     prg: ProgramSpec = get_kernel(Device[device].renderer, ast).to_program()
-    if getenv("FUZZ_UOPS"):
-      from test.external.fuzz_uops import UOpsFuzzerRunner
-      return UOpsFuzzerRunner(replace(prg, device=device))
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
