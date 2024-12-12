@@ -12,6 +12,7 @@ def reduce_gradient(ctx:UOp, ret:UOp):
     max_is_1s = ret.src[0].ne(ret.expand(ret.src[0].shape)).ne(ret.src[0].const_like(1).cast(dtypes.bool)).cast(ctx.dtype)
     div = max_is_1s.r(Ops.ADD, ret.arg[1]).expand(ret.src[0].shape)
     return ((max_is_1s/div) * ctx.expand(ret.src[0].shape),)
+  if ret.arg[0] == Ops.MUL: return ((ctx * ret).expand(ret.src[0].shape) / ret.src[0],)
 
 # NOTE: this is very similar to invert
 def view_gradient(ctx:UOp, ret:UOp):
