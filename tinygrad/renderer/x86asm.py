@@ -17,7 +17,6 @@ x86_float16_ops = {Ops.STORE: "pextrw", Ops.LOAD: "pinsrw", Ops.ASSIGN: "pextrw"
 # NOTE: are doubles vectorized? 2 doubles is "ups" not "lps", use a instead of u
 x86_vec2_ops = {**{k:v+"lps" for k,v in x86_mov_ops.items()}}
 x86_vec4_ops = {**{k:v+"ups" for k,v in x86_mov_ops.items()}}
-#TODO: add float16 support?
 x86op = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86_signed_ops for x in dtypes.sints},
           dtypes.float32:x86_float32_ops, dtypes.float64:x86_float64_ops, dtypes.float16:x86_float16_ops,
           dtypes.float32.vec(2):x86_vec2_ops, dtypes.float32.vec(4):x86_vec4_ops}
@@ -37,9 +36,7 @@ def to_hex(x, dt:DType) -> str:
   if dt is dtypes.float16: return hex(struct.unpack('<H', struct.pack('<e', x))[0])
   return hex(x)
 
-def cflag(x:UOp) -> str:
-  if x.op is Ops.CMPNE: return "setne"
-  return "setl" if x.src[0].dtype in dtypes.sints else "setb"
+def cflag(x:UOp) -> str: return "setne" if x.op is Ops.CMPNE else "setl" if x.src[0].dtype in dtypes.sints else "setb"
 
 def float_cast(x:DType, s:DType) -> str:
   if s is dtypes.float16: return "vcvtph2ps"
@@ -86,9 +83,9 @@ x86_rewrite = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.CMPNE), name="x"), lambda ctx,x: f"{x86op[x.src[0].dtype][x.op]} {ctx[x.src[0]]}, {ctx[x.src[1]]}\n{cflag(x)} {ctx[x]}"),
   # requires rax/rdx
   #TODO: prealloc rax to idiv
-  (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{ctx.idiv(x, x.src[1])}"),
+  (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda ctx,x: f"{ctx.alu_mov(x, x.src[0])}{ctx.idiv(x, x.src[1])}"),
   (UPat(GroupOp.Binary, name="x"),
-   lambda ctx,x: f"{x86op[x.dtype][Ops.ASSIGN]} {ctx[x]}, {ctx[x.src[0]]}\n{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
+   lambda ctx,x: f"{ctx.alu_mov(x, x.src[0])}{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}"),
   # unary ops
   (UPat(Ops.SQRT, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
   # if
@@ -152,6 +149,8 @@ class X86Renderer(Renderer):
   global_max = None
   extra_matcher = x86_matcher
 
+  def alu_mov(self, x:UOp, s:UOp): assert x.dtype == s.dtype; return f"{x86op[x.dtype][Ops.ASSIGN]} {self[x]}, {self[s]}\n" if self[x] != self[s] else ""
+
   def idiv(self, x:UOp, s:UOp) -> str:
     remainder_signex = {1:"cbw", 2: "cwd", 4: "cdq", 8: "cqo"}
     l = ""
@@ -187,7 +186,6 @@ class X86Renderer(Renderer):
     stack_size: int = 8
     kernel: List[str] = []
     self.uops = uops
-
     last_use: Dict[UOp, int] = {var: i for i,u in enumerate(uops) for var in (v for v in (u,) + u.src if v.dtype != dtypes.void)}
 
     def is_imm(u:UOp) -> bool: return u.op is Ops.CONST and not dtypes.is_float(u.dtype) and abs(u.arg) <= dtypes.max(dtypes.int32)
@@ -243,7 +241,9 @@ class X86Renderer(Renderer):
           if u.op is Ops.ASSIGN:
             # define acc was already spilled here
             r[u] = mem[u] = mem[u.src[0]]
-          else: r[u] = assign_reg(i, u.dtype)
+          else:
+            if u.op in GroupOp.Binary and u.op not in (Ops.CMPLT, Ops.CMPNE) and last_use[u.src[0]] == i and is_reg(r[u.src[0]]) and list(r.values()).count(r[u.src[0]]) == 1: r[u] = r[u.src[0]]
+            else: r[u] = assign_reg(i, u.dtype)
         if u.op is Ops.RANGE: # all registers get moved to stack before loop TODO: remove range check
           for var in (v for v in r if is_reg(r[v]) and v.op is not Ops.RANGE):
             free_reg(r[var])
