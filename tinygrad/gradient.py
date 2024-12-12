@@ -21,7 +21,7 @@ pm_gradient = PatternMatcher([
 def _deepwalk(root:UOp, targets:list[UOp]):
   def _walk(node:UOp, visited:set[UOp]):
     visited.add(node)
-    if any(x in node.parents for x in targets):
+    if any(x in node.toposort for x in targets if x is not node):
       for i in node.src:
         if i not in visited: yield from _walk(i, visited)
       yield node
@@ -29,7 +29,7 @@ def _deepwalk(root:UOp, targets:list[UOp]):
 
 def gradient(root:UOp, targets:list[UOp]) -> list[UOp]:
   # TODO: better error
-  if not all(x in root.sparents for x in targets): raise RuntimeError("some gradient targets not found in parents")
+  if not all(x in root.toposort for x in targets): raise RuntimeError("some gradient targets not found in parents")
   grads = {root: root.const_like(1.0)}
   for t0 in reversed(_deepwalk(root, targets)):
     lgrads: tuple[UOp, ...]|None = cast(tuple[UOp, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))

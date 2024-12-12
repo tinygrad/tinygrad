@@ -7,6 +7,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.multi import MultiLazyBuffer
+from tinygrad.gradient import gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.engine.realize import run_schedule
@@ -867,6 +868,9 @@ class Tensor(SimpleMathTrait):
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
+
+  def gradient(self, *targets:Tensor) -> list[Tensor]:
+    return [Tensor(y) for y in gradient(self.lazydata, [x.lazydata for x in targets])]
 
   def _deepwalk(self):
     def _walk(node, visited):

@@ -2,6 +2,7 @@ from typing import Callable
 import unittest, math
 import jax
 import jax.numpy as jnp
+from tinygrad import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp
 from tinygrad.gradient import gradient
@@ -56,6 +57,15 @@ class TestGradient(unittest.TestCase):
 
   # TODO: this isn't working
   #def test_where(self): self._test_two_input_function(lambda x,y: (x<y).where(x,y), lambda x,y: jnp.where(x<y, x, y))
+
+class TestTensorGradient(unittest.TestCase):
+  def test_example(self):
+    x = Tensor.eye(3).contiguous()
+    y = Tensor([[2.0,0,-2.0]])
+    z = y.matmul(x).sum()
+    dx, dy = z.gradient(x, y)
+    print(dx.tolist())
+    print(dy.tolist())
 
 if __name__ == '__main__':
   unittest.main()
