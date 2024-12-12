@@ -2564,7 +2564,7 @@ class Tensor(SimpleMathTrait):  # pylint: disable=abstract-method
     Applies the Parametric Rectified Linear Unit (PReLU) function element-wise.
     NOTE: if `weight` is a non-scalar 1-D Tensor, prelu follows unconventional broadcasting rules determined by `channel_dim`
     When `channel_dim` is `1`, the behavior matches that of pytorch's prelu
-    When `channel_dim` is `None`, `channel_dim` is selected as the first dimension of target tensor that has the same shape as weight
+    When `channel_dim` is `None`, `channel_dim` is determined by the first dimension of target tensor that has the same shape as weight
 
     - Described: https://paperswithcode.com/method/prelu
     - Paper: https://arxiv.org/abs/1502.01852v1
