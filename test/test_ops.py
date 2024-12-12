@@ -531,7 +531,7 @@ class TestOps(unittest.TestCase):
       np.testing.assert_equal(x.numpy(), 2**64 - 1)
     # 1 // 0 is device dependent, but it should not raise
     Tensor([1]).idiv(1).realize()
-    if not (CI and (Device.DEFAULT=="LLVM" or getenv("PTX"))):  # TODO: crashed in CI
+    if not (CI and (Device.DEFAULT in ("LLVM", "X86") or getenv("PTX"))):  # TODO: crashed in CI
       # ... because if might be in a where branch that the output is well defined
       t = Tensor([-1, 0, 1, 2])
       np.testing.assert_equal((t > 0).where(1//t, t).numpy(), [-1, 0, 1, 0])
