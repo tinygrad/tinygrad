@@ -20,15 +20,16 @@ def view_gradient(ctx:UOp, ret:UOp):
   v = ret.arg.views[0]
   assert ctx.shape == v.shape, "grad_output shape must match output shape"
   # find all stride 0 and add sum (inverse of expand)
-  out = ctx.r(Ops.ADD, tuple(i for i,(s,st) in enumerate(zip(v.shape, v.strides)) if s > 1 and st == 0))
+  expand_axis = tuple(i for i,(s,st) in enumerate(zip(v.shape, v.strides)) if s > 1 and st == 0)
+  if len(expand_axis): ctx = ctx.r(Ops.ADD, expand_axis)
 
   # invert
-  iv = View.create(out.shape)
+  iv = View.create(ctx.shape)
   if v.mask: iv = iv.shrink(v.mask)
   if 0 in iv.shape: return (ret.src[0].const_like(0),)
   iv = iv.stride(tuple(-1 if x < 0 else 1 for x in v.strides)).permute(argsort(tuple(-x if x > 0 else x for x in v.strides)))
   assert prod(iv.shape) == prod(ret.src[0].shape), f"shape mismatch? {iv.shape} vs {ret.src[0].shape}"
-  return (out.view(ShapeTracker((iv,)).reshape(ret.src[0].shape)),)
+  return (ctx.view(ShapeTracker((iv,)).reshape(ret.src[0].shape)),)
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
