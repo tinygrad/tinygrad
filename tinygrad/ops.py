@@ -102,6 +102,9 @@ class Ops(FastEnum):
   # blocks in linearizer
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto() # noqa: E702
 
+  # movement ops!
+  RESHAPE = auto(); PERMUTE = auto(); MEXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
+
   # misc ops
   EXPAND = auto(); CONTRACT = auto() # noqa: E702
   VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
@@ -151,6 +154,7 @@ class GroupOp:
   ALU = set.union(Unary, Binary, Ternary)
 
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
+  Movement = {Ops.RESHAPE, Ops.MEXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.STRIDE}
 
   # meta ops
   Meta = {Ops.COPY, Ops.EMPTY, Ops.BUFFER_VIEW}
@@ -265,6 +269,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
     if self.op is Ops.VIEW: return self.arg
+    if self.op is Ops.RESHAPE: return unwrap(self.src[0].st).reshape(self.arg)
+    if self.op is Ops.PERMUTE: return unwrap(self.src[0].st).permute(self.arg)
+    if self.op is Ops.MEXPAND: return unwrap(self.src[0].st).expand(self.arg)
+    if self.op is Ops.SHRINK: return unwrap(self.src[0].st).shrink(self.arg)
+    if self.op is Ops.STRIDE: return unwrap(self.src[0].st).stride(self.arg)
+    if self.op is Ops.PAD: return unwrap(self.src[0].st).pad(self.arg)
+
     # buffer ops can have a non contiguous shapetracker
     if self.op in GroupOp.Buffer and len(src_sts:=[unwrap(x.st) for x in self.src if x.op is Ops.VIEW]) != 0: return src_sts[0]
     if len(src_sts:=[x.st for x in self.src if x.st is not None]) == 0: return None
@@ -456,7 +467,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop movement ops ***
 
   @property
-  def base(self) -> UOp: return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
+  def base(self) -> UOp:
+    if self.op in GroupOp.Movement: return self.src[0].base
+    return self.src[0] if self.op is Ops.VIEW and len(self.src) == 1 and self.src[0].op is not Ops.BUFFER else self
   def view(self, new_st:ShapeTracker) -> UOp:
     if self.st is None: return UOp(Ops.VIEW, self.dtype.base if not isinstance(self.dtype, ImageDType) else self.dtype, (self,), new_st)
     ret = UOp(Ops.VIEW, self.dtype, (self.base,), new_st)
@@ -464,12 +477,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.st.size == 0 or (new_st.views[-1].mask is not None and any((x[1]-x[0]) == 0 for x in new_st.views[-1].mask)): return ret.const_like(0)
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return ret
-  def reshape(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).reshape(arg))
-  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self.view(unwrap(self.st).pad(arg))
-  def expand(self, arg:Tuple[sint, ...]): return self.view(unwrap(self.st).expand(arg))
-  def permute(self, arg:Tuple[int, ...]): return self.view(unwrap(self.st).permute(arg))
-  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self.view(unwrap(self.st).shrink(arg))
-  def stride(self, arg:Tuple[int, ...]): return self.view(unwrap(self.st).stride(arg))
+
+  def reshape(self, arg:Tuple[sint, ...]): return UOp(Ops.RESHAPE, self.dtype, (self,), arg)
+  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return UOp(Ops.PAD, self.dtype, (self,), arg)
+  def expand(self, arg:Tuple[sint, ...]): return UOp(Ops.MEXPAND, self.dtype, (self,), arg)
+  def permute(self, arg:Tuple[sint, ...]): return UOp(Ops.PERMUTE, self.dtype, (self,), arg)
+  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return UOp(Ops.SHRINK, self.dtype, (self,), arg)
+  def stride(self, arg:Tuple[sint, ...]): return UOp(Ops.STRIDE, self.dtype, (self,), arg)
 
   # *** uop Buffer stuff ***
 

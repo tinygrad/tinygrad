@@ -1,102 +1,8 @@
 from typing import cast
+import math
 from tinygrad.dtype import dtypes, sum_acc_dtype
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops
-from tinygrad.helpers import prod, argsort
-import math
-
-
-# NOTE: this is very similar to invert
-from typing import Tuple, List
-from enum import Enum, auto
-from tinygrad.ops import sint
-from tinygrad.shape.shapetracker import ShapeTracker
-class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
-
-def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple]]:
-  to_apply:List[Tuple[MovementOps, Tuple]] = []
-
-  for i, v in enumerate(st.views):
-    shape_without_mask = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-
-    # do any shrinking (becomes pad)
-    buffer_size = sum((s-1)*abs(st) for s,st in zip(shape_without_mask, v.strides)) + 1
-    real_offset = v.offset + sum(st*(s-1) for s,st in zip(shape_without_mask, v.strides) if st<0)
-    if v.mask: real_offset += sum(x*st for (x,_),st in zip(v.mask, v.strides))
-    to_apply.extend([(MovementOps.RESHAPE, (-1,)),
-                     (MovementOps.SHRINK, ((real_offset, real_offset+buffer_size),))])
-
-    # do any strides
-    strides_without_stride_0: List[sint] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
-    if strides_without_stride_0:
-      shape_without_mask_and_stride_0 = [s for s,st in zip(shape_without_mask, v.strides) if st]
-      ordered_shape_strides = sorted(zip(shape_without_mask_and_stride_0, strides_without_stride_0), key=lambda k: (k[1],-k[0]), reverse=True)
-      if (ordered_shape_strides[0][0]*ordered_shape_strides[0][1])-buffer_size > 0:
-        to_apply.append((MovementOps.PAD, ((0, (ordered_shape_strides[0][0] * ordered_shape_strides[0][1]) - buffer_size),)))
-
-      for i, shape_stride in enumerate(ordered_shape_strides):
-        if i < len(ordered_shape_strides)-1 and shape_stride[1] < ordered_shape_strides[i+1][0]*ordered_shape_strides[i+1][1]:
-          remaining_buffer = ordered_shape_strides[i-1][1] if i>0 else buffer_size
-          to_apply.append((MovementOps.EXPAND, (shape_stride[0], *(s[0] for s in ordered_shape_strides[:i]), remaining_buffer)))
-          to_apply.append((MovementOps.PERMUTE, (*range(1,i+1), 0, i+1)))
-          to_apply.append((MovementOps.RESHAPE, (*(s[0] for s in ordered_shape_strides[:i]), shape_stride[0]*remaining_buffer)))
-          to_apply.append((MovementOps.PAD, (*((0,0) for _ in range(i)), (0, shape_stride[0]*shape_stride[1]))))
-          to_apply.append((MovementOps.RESHAPE, (*(s[0] for s in ordered_shape_strides[:i+1]), remaining_buffer+shape_stride[1])))
-          ordered_shape_strides[i] = (ordered_shape_strides[i][0], remaining_buffer+shape_stride[1])
-        else:
-          to_apply.append((MovementOps.SHRINK, (*((0, s[0]) for s in ordered_shape_strides[:i]), (0, shape_stride[0]*shape_stride[1]))))
-          to_apply.append((MovementOps.RESHAPE, (*[s[0] for s in ordered_shape_strides[:i+1]], shape_stride[1])))
-
-      to_apply.extend([(MovementOps.SHRINK, (*[(0, s[0]) for s in ordered_shape_strides], (0,1))),
-                       (MovementOps.RESHAPE, tuple(s[0] for s in ordered_shape_strides))])
-
-      # handle PERMUTE
-      order = sorted(range(len(strides_without_stride_0)),
-                    key=lambda k: (strides_without_stride_0[k], -shape_without_mask_and_stride_0[k]), reverse=True)
-      if order != list(range(len(order))):
-        to_apply.append((MovementOps.PERMUTE, tuple(order.index(i) for i in range(len(order)))))
-
-    # Reshape to final shape considering strides that are 0 become dimension of size 1
-    to_apply.append((MovementOps.RESHAPE, tuple(s if st else 1 for s,st in zip(shape_without_mask, v.strides))))
-
-    # handle FLIP
-    if any(i < 0 for i in v.strides): to_apply.append((MovementOps.STRIDE, tuple(-1 if st < 0 else 1 for st in v.strides)))
-
-    # then, we do any expands
-    if any(s != 1 and st == 0 for s,st in zip(shape_without_mask, v.strides)): to_apply.append((MovementOps.EXPAND, shape_without_mask))
-
-    # then, we apply PAD (last)
-    if v.mask is not None: to_apply.append((MovementOps.PAD, tuple((x,s-y) for (x,y),s in zip(v.mask, v.shape))))
-
-  # get all the in_shape
-  out_st = ShapeTracker.from_shape(in_shape)
-  ret = []
-  for (mop, arg) in to_apply:
-    in_shape = out_st.shape
-    if mop == MovementOps.RESHAPE: out_st = out_st.reshape((prod(out_st.views[-1].shape),) if arg == (-1,) else arg)
-    if mop == MovementOps.PERMUTE: out_st = out_st.permute(arg)
-    if mop == MovementOps.EXPAND: out_st = out_st.expand(arg)
-    if mop == MovementOps.PAD: out_st = out_st.pad(arg)
-    if mop == MovementOps.SHRINK: out_st = out_st.shrink(arg)
-    if mop == MovementOps.STRIDE: out_st = out_st.stride(arg)
-    ret.append((mop, arg, in_shape))
-
-  # they should at least be equivalent
-  #assert out_st.simplify() == st.simplify(), f"rebuilt {out_st.simplify()} != {st.simplify()}"
-  return ret
-
-def view_gradient(ctx:UOp, ret:UOp):
-  assert ctx.shape == ret.shape, "grad_output shape must match output shape"
-  for mop, arg, in_shape in reversed(to_movement_ops(ret.arg, ret.src[0].shape)):
-    if mop == MovementOps.EXPAND:
-      if (expanded_axes:=tuple(i for i, (si, so) in enumerate(zip(in_shape, arg)) if si != so)):
-        ctx = ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, expanded_axes).cast(ctx.dtype)
-    elif mop == MovementOps.RESHAPE: ctx = ctx.reshape(in_shape)
-    elif mop == MovementOps.PERMUTE: ctx = ctx.permute(argsort(arg))
-    elif mop == MovementOps.PAD: ctx = ctx.shrink(tuple([(p[0], s+p[0]) for s,p in zip(in_shape, arg)]))
-    elif mop == MovementOps.SHRINK: ctx = ctx.pad(tuple([(p[0], s-p[1]) for s,p in zip(in_shape, arg)]))
-    elif mop == MovementOps.STRIDE: ctx = ctx.stride(arg)
-    assert ctx.shape == in_shape, f"shape mismatch {ctx.shape} != {in_shape}"
-  return (ctx,)
+from tinygrad.helpers import argsort
 
 def reduce_gradient(ctx:UOp, ret:UOp):
   if ret.arg[0] == Ops.ADD: return (ctx.expand(ret.src[0].shape),)
@@ -120,8 +26,15 @@ pm_gradient = PatternMatcher([
                                                 (ret.src[0]<ret.src[1]).where(ctx, (ret.src[0]!=ret.src[1]).where(ctx.const_like(0), ctx * 0.5)))),
   (UPat(Ops.MUL, name="ret"), lambda ctx, ret: (ret.src[1]*ctx, ret.src[0]*ctx)),
   (UPat(Ops.WHERE, name="ret"), lambda ctx, ret: (None, ret.src[0].where(ctx, ctx.const_like(0)), ret.src[0].where(ctx.const_like(0), ctx))),
-  (UPat(Ops.VIEW, name="ret"), view_gradient),
   (UPat(Ops.REDUCE_AXIS, name="ret"), reduce_gradient),
+  (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape),)),
+  (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.arg)),)),
+  (UPat(Ops.PAD, name="ret"), lambda ctx, ret: (ctx.shrink(tuple([(p[0], s+p[0]) for s,p in zip(ret.src[0].shape, ret.arg)])),)),
+  (UPat(Ops.SHRINK, name="ret"), lambda ctx, ret: (ctx.pad(tuple([(p[0], s-p[1]) for s,p in zip(ret.src[0].shape, ret.arg)])),)),
+  (UPat(Ops.STRIDE, name="ret"), lambda ctx, ret: (ctx.stride(ret.arg) if all(x in {-1,1} for x in ret.arg) else None,)),
+  # TODO: this cast can be removed by putting the casts around the EXPAND
+  (UPat(Ops.MEXPAND, name="ret"), lambda ctx, ret:
+    (ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, tuple(i for i,(si,so) in enumerate(zip(ret.src[0].shape, ret.arg)) if si!=so)).cast(ctx.dtype),)),
 ])
 
 # copied from tensor.py, get relevant toposort of gradients
@@ -139,7 +52,7 @@ def gradient(root:UOp, targets:list[UOp]) -> list[UOp]:
   grads = {root: root.const_like(1.0)}
   for t0 in reversed(_deepwalk(root, targets)):
     if t0 not in grads: continue
-    lgrads: tuple[UOp, ...]|None = cast(tuple[UOp, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
+    lgrads: tuple[UOp|None, ...]|None = cast(tuple[UOp, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
     if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}")
     assert len(lgrads) == len(t0.src)
     for k,v in zip(t0.src, lgrads):
