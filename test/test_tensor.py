@@ -424,6 +424,10 @@ class TestTinygrad(unittest.TestCase):
     data = [np.array(1.0), np.array(2.0), np.array(3.0)]
     np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
 
+  def test_tensor_dtype_errors(self):
+    with self.assertRaises(AttributeError): Tensor([3], dtype="typo")
+    with self.assertRaises(TypeError): Tensor([3], dtype=(dtypes.int,))
+
   def test_tensor_bytes(self):
     data = b"abc123"
     t = Tensor(data)

@@ -125,7 +125,6 @@ class Tensor(SimpleMathTrait):
   def __init__(self, data:Union[None, ConstType, bytes, List, Tuple, UOp, MultiLazyBuffer, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
-    assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
     device = tuple(Device.canonicalize(x) for x in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
 
