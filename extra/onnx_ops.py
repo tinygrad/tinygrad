@@ -1,14 +1,10 @@
 import functools, io, math
-from typing import Union, Tuple, Optional, List, Any
+from typing import Union, Tuple, Optional, List, Any, cast
 from tinygrad.tensor import Tensor, _broadcast_shape
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.helpers import prod, flatten
-from extra.onnx import DTYPE_MAP, to_python_const
+from extra.onnx import dtype_parse, to_python_const
 import numpy as np
-
-tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
-                  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-                  "Elu", "Celu", "PRelu", "Xor", "Round", "Erf"}
 
 # **************** Free Ops ****************
 
@@ -21,12 +17,16 @@ def LessOrEqual(x:Tensor,y:Tensor): return x <= y
 def Greater(x:Tensor,y:Tensor): return x > y
 def GreaterOrEqual(x:Tensor,y:Tensor): return x >= y
 def Equal(x:Tensor,y:Tensor): return x == y
+def BitwiseNot(x:Tensor): return ~x
+def BitwiseOr(x:Tensor, y:Tensor): return x | y
+def BitwiseAnd(x:Tensor, y:Tensor): return x & y
+def BitwiseXor(x:Tensor, y:Tensor): return x ^ y
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
 def Mean(*data_0): return Sum(*data_0) / len(data_0)
 # NOTE: does not support saturate
-def Cast(x: Tensor, to: int, saturate=1): return x.cast(DTYPE_MAP[to])
+def Cast(x: Tensor, to: int, saturate=1): return x.cast(dtype_parse(to))
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
 # **************** Simple Ops ****************
@@ -44,7 +44,13 @@ def Constant(value:Optional[Tensor]=None, value_float=None, value_floats=None, v
 
 def HardSigmoid(x: Tensor, alpha=0.2, beta=0.5): return (alpha*x + beta).clip(0, 1)
 def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + (x/math.sqrt(2)).erf())
+<<<<<<< HEAD
 def Selu(X: Tensor, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
+=======
+def PRelu(X:Tensor, slope:Tensor):
+  slope = slope[0] if slope.shape[-1] != X.shape[-1] else slope # HACK OnnxBackendPyTorchConvertedModelTest HAS WEIRD SLOPE WHERE IT'S [0.25, 0.25, 0.25] FOR ANY X.SHAPE
+  return (X > 0).where(X, X * slope)
+>>>>>>> master
 def LeakyRelu(X: Tensor, alpha=0.01): return X.leakyrelu(alpha)
 def ThresholdedRelu(X: Tensor, alpha=1.0): return (X > alpha).where(X, 0)
 def Softmax_1(x: Tensor, axis=1): return x.softmax(axis)
@@ -85,25 +91,17 @@ def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
 def Not(x:Tensor): return x.logical_not()
 
-def Asin(x): return Atan(x / (1 - x * x).sqrt())
-def Acos(x: Tensor):
-  negate = (x < 0)
-  x = x.abs()
-  ret = ((((-0.0187293 * x) + 0.0742610)*x - 0.2121144) * x + 1.5707288) * (1.0 - x).sqrt()
-  ret = ret - 2 * negate * ret
-  return negate * math.pi + ret
-def Atan(y: Tensor):
-  t1 = y.abs()
-  t3 = (1 > t1).where(t1, t1.reciprocal())
-  t4 = t3 * t3
-  t0 = ((((-0.013480470 * t4 + 0.057477314) * t4 - 0.121239071) * t4 + 0.195635925) * t4 - 0.332994597) * t4 + 0.999995630
-  t3 = t0 * t3
-  t3 = (t1 > 1).where(1.570796327 - t3, t3)
-  return y.sign() * t3
-
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
   k = to_python_const(k) if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
   return x.triu(k) if upper else x.tril(k)
+
+def Slice(data: Tensor, starts:Tensor, ends:Tensor, axes:Optional[Tensor]=None, steps:Optional[Tensor]=None):
+  if axes is None: axes = list(range(data.ndim))
+  if steps is None: steps = [1] * data.ndim
+  starts, ends, axes, steps = (to_python_const(x) for x in (starts, ends, axes, steps))
+  slices = [slice(0,x,1) for x in data.shape]
+  for i, axis in enumerate(axes): slices[axis] = slice(starts[i], ends[i], steps[i])
+  return data[tuple(slices)]
 
 def Squeeze(data: Tensor, axes):
   if isinstance(axes, Tensor): axes = to_python_const(axes)
@@ -140,16 +138,11 @@ def Gemm(A: Tensor, B: Tensor, C: Tensor=None, alpha=1.0, beta=1.0, transA=0, tr
 def Einsum(*Inputs: List[Tensor], equation): return Tensor.einsum(equation, Inputs)
 
 def CumSum(X:Tensor, axis:Tensor, exclusive=0, reverse=0):
-  axis = to_python_const(axis)
-  if axis < 0: axis += X.ndim
+  if (axis := to_python_const(axis)) < 0: axis += X.ndim
   if reverse: X = X.flip(axis)
-  if exclusive:
-    pad_arg, shrink_arg = [None] * X.ndim, [None] * X.ndim
-    pad_arg[axis] = (1, 0)
-    shrink_arg[axis] = (0, X.shape[axis])
-    X = X.pad(tuple(pad_arg)).shrink(tuple(shrink_arg))
-  if reverse: return X.cumsum(axis).flip(axis)
-  return X.cumsum(axis)
+  if exclusive: X = X.pad(tuple((1,0) if i == axis else None for i in range(X.ndim)))\
+                      .shrink(tuple((0,X.shape[axis]) if i == axis else None for i in range(X.ndim)))
+  return X.cumsum(axis).flip(axis) if reverse else X.cumsum(axis)
 
 # TODO: this is copied from tinygrad/nn/__init__.py
 # spatial is from opset 7 and has since been removed
@@ -222,34 +215,13 @@ def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations):
     return pad_shape[::2] + pad_shape[1::2] if auto_pad == "SAME_UPPER" else pad_shape[1::2] + pad_shape[::2]
   raise NotImplementedError(f"auto_pad={auto_pad} not implemented")
 
-def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
-  constant_value = value if constant_value is None else float(to_python_const(constant_value))
-  seq_pads = list(pads) if isinstance(pads, tuple) else to_python_const(pads)
-  seq_pads = [math.ceil(i) for i in seq_pads]
-  seq_axes = to_python_const(axes) if axes is not None else None
-  base_shape = x.shape
-  pads = _format_padding(seq_pads, ndims=len(x.shape), axes=seq_axes)
-  if mode == "wrap":
-    repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(pads, base_shape)]
-    new_shape = [s*r for s,r in zip(base_shape, repeat_args)]
-    shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh if dim[1]%sh != 0 else 0)) for dim, sh, nsh in zip(pads, base_shape, new_shape)]
-    return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
-  if mode == "reflect":
-    for i,s in enumerate(x.shape):
-      if pads[i] != (0,0):
-        xL = x.flip(i).shrink(tuple((s-pads[i][0]-1, s_-1) if i_ == i else None for i_,s_ in enumerate(x.shape)))
-        xR = x.flip(i).shrink(tuple((1, pads[i][1]+1) if i_ == i else None for i_ in range(x.ndim)))
-        x = xL.cat(x, xR, dim=i)
-    return x
-  if mode == "edge":
-    for i,s in enumerate(x.shape):
-      if pads[i] != (0,0):
-        xL = x.shrink(tuple((0,1) if i_ == i else None for i_ in range(x.ndim))).expand([pads[i][0] if i_ == i else None for i_ in range(x.ndim)])
-        xR = x.shrink(tuple((s_-1, s_) if i_ == i else None for i_,s_ in enumerate(x.shape))).expand([pads[i][1] if i_ == i else None for i_ in range(x.ndim)])
-        x = xL.cat(x, xR, dim=i)
-    return x
-  if mode == "constant":
-    return _padded(x, seq_pads, axes=seq_axes, constant_value=constant_value)
+# (x1_begin, x2_begin, ..., x1_end, x2_end, ...) -> (..., x2_start, x2_end, x1_start, x1_end)
+def _onnx_pads_to_pad2d_pads(pads): return flatten(reversed(list((pB, pE) for pB, pE in zip(pads, pads[len(pads)//2:]))))
+def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Optional[Tensor]=None, axes: Optional[Tensor]=None, mode="constant", value=0):
+  pads, value, axes = to_python_const(pads), to_python_const(constant_value) or value or 0, to_python_const(axes) or list(range(x.ndim))
+  real_pads = [0] * (x.ndim*2)
+  for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
+  return x.pad(padding=_onnx_pads_to_pad2d_pads(to_python_const(real_pads)), mode={"edge":"replicate", "wrap":"circular"}.get(mode, mode), value=value)
 
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
   pixel_axes = tuple(range(2, X.ndim))
@@ -279,7 +251,7 @@ def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_sh
   if outshape is not None and (outshape := to_python_const(outshape)) != ret.shape:
     diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
     pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
-    ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
+    ret = ret.pad((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
   return ret
 
 def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
@@ -309,15 +281,9 @@ def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSE
   return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding)
 
 def DepthToSpace(X:Tensor, blocksize:int, mode:str="DCR"):
-  b, c, h, w = X.shape
-  if mode == "DCR":
-    return X.reshape(b, blocksize, blocksize, c // (blocksize**2), h, w).permute(0, 3, 4, 1, 5, 2).reshape(b, c // (blocksize**2), h * blocksize, w * blocksize)
-  elif mode == "CRD":
-    return X.reshape(b, c // (blocksize ** 2), blocksize, blocksize, h, w).permute(0, 1, 4, 2, 5, 3).reshape(b, c // (blocksize ** 2), h * blocksize, w * blocksize)
-
+  return X.rearrange("b (c h1 w1) h w -> b c (h h1) (w w1)" if mode=="CRD" else "b (h1 w1 c) h w -> b c (h h1) (w w1)", h1=blocksize, w1=blocksize)
 def SpaceToDepth(X:Tensor, blocksize:int):
-  b, c, h, w = X.shape
-  return X.reshape(b, c, h // blocksize, blocksize, w // blocksize, blocksize).permute(0, 3, 5, 1, 2, 4).reshape(b, c * (blocksize**2), h // blocksize, w // blocksize)
+  return X.rearrange("b c (h h1) (w w1) -> b (h1 w1 c) h w", h1=blocksize, w1=blocksize)
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
 def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
@@ -330,44 +296,17 @@ def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
   return data * mask * (1/(1.0 - ratio)), mask
 
 def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
-  bs, c, iy, ix = x.shape
-  return x / x.mul(x).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
+  pooled_x = (x**2).rearrange('b c h w -> b 1 c (h w)').pad((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1)
+  return x / (pooled_x.reshape(x.shape) * alpha + bias).pow(beta)
 
-def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)):
-  mean = x.mean(axis, keepdim=True)
-  std = x.std(axis, keepdim=True, correction=0)
-  return (x - mean) / (std + 1e-9)
+def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)): return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
 
 def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_index=None, reduction="mean"):
-  N, C, i_shape = x.shape[0], x.shape[1], x.shape
-  t_shape = target.shape
-  if len(x.shape) != 3:
-    x = x.reshape((N, C, -1))
-    target = target.reshape((N, -1))
-  if weight is not None:
-    mask = target.unsqueeze(-1) == Tensor.arange(C).repeat((N, 1, 1))
-    weight = (mask * weight).sum(axis=-1)
-  if ignore_index is not None:
-    cond = target == ignore_index
-    weight = cond.where(0, weight) if weight is not None else cond.where(0, 1)
-  mask = target[:, None, :] == Tensor.arange(C).reshape([1, C] + [1]*(x.ndim -2))
-  loss = -(mask * x).sum(axis=1) * (1 if weight is None else weight)
-  if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
-  if reduction == "sum": return loss.sum()
-  return loss.reshape(t_shape) if len(i_shape) != 3 else loss
+  return x.nll_loss(target, weight, ignore_index, reduction)
 
 def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore_index=None, reduction="mean"):
-  _N, C, *s_dimensions = scores.shape
-  if ignore_index is not None: labels = (labels == ignore_index).where(C+1, labels)
-  mask = labels.unsqueeze(1) == Tensor.arange(C).reshape(1, C, *[1]*len(s_dimensions))
-  y = scores.log_softmax(axis=1)
-  loss = (mask * -y).sum(1)
-  if weights is not None:
-    weights = weights[labels, ...]
-    loss = loss * weights
-  if reduction == "mean": loss = loss.sum() / ((loss != 0).sum() if weights is None else weights.sum())
-  elif reduction == "sum": loss = loss.sum()
-  return loss, y
+  log_probs = scores.log_softmax(1)
+  return log_probs.nll_loss(labels, weights, ignore_index, reduction), log_probs
 
 def ArrayFeatureExtractor(x: Tensor, indices: Tensor): return x[..., indices]
 
@@ -381,114 +320,81 @@ def Gather(x: Tensor, indices: Tensor, axis=0):
     return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
   # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
   return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
+def Scatter(*args, **kwargs): return ScatterElements(*args, **kwargs) # deprecated
 
+def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Optional[str]=None):
+  if reduction in {"min", "max"}: raise NotImplementedError("min and max reduction not supported")
+  indices = (indices < 0).where(x.shape[axis], 0) + indices
+  return x.scatter(axis, indices, updates, reduction)
 def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
   return x.gather(axis, indices)
 
-# TODO clean this up, it's taking the longest in CI
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel',
-           cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch',
-           mode='nearest', nearest_mode='round_prefer_floor'):
-  def _nearest_gather(X: Tensor, x_out, y_out): return X[:,:,y_out,:][:,:,:,x_out]
-  def _nearest_mode(x_resized: Tensor, nearest_mode: str, x_len):
-    if nearest_mode == "round_prefer_floor": ret = (x_resized - 0.5).ceil()
-    elif nearest_mode == "round_prefer_ceil": ret = (x_resized + 0.5).floor()
-    elif nearest_mode == "floor": ret = x_resized.floor()
-    elif nearest_mode == "ceil": ret = x_resized.ceil()
-    return ret.cast(dtypes.int32).clip(0, x_len-1)
-  def _coordinate_transformation(x_out, y_out, output_shape, scales_, roi=None):
-    if coordinate_transformation_mode == "half_pixel":
-      x_out = (x_out + 0.5) / scales_[-1] - 0.5
-      y_out = (y_out + 0.5) / scales_[-2] - 0.5
-    elif coordinate_transformation_mode == "align_corners":
-      x_out = x_out * (X.shape[-1] - 1) / (output_shape[-1] - 1)
-      y_out = y_out * (X.shape[-2] - 1) / (output_shape[-2] - 1)
-    elif coordinate_transformation_mode == "asymmetric":
-      x_out = x_out / scales_[-1]
-      y_out = y_out / scales_[-2]
-    elif coordinate_transformation_mode == "half_pixel_symmetric":
-      x_out = X.shape[-1] / 2 * (1 - int(output_shape[-1]) / output_shape[-1]) + (x_out + 0.5) / scales_[-1] - 0.5
-      y_out = X.shape[-2] / 2 * (1 - int(output_shape[-2]) / output_shape[-2]) + (y_out + 0.5) / scales_[-2] - 0.5
-    elif coordinate_transformation_mode == "pytorch_half_pixel":
-      x_out = (x_out + 0.5) / scales_[-1] - 0.5 if output_shape[-1] > 1 else Tensor([0])
-      y_out = (y_out + 0.5) / scales_[-2] - 0.5 if output_shape[-2] > 1 else Tensor([0])
-    elif coordinate_transformation_mode == "tf_crop_and_resize":
-      x_out = roi[-1][0] * (X.shape[-1] - 1) + x_out * ((roi[-1][1] - roi[-1][0]) * (X.shape[-1] - 1) / (output_shape[-1] - 1)) if output_shape[-1] > 1 else Tensor([0.5 * (roi[-1][0] + roi[-1][1]) * (X.shape[-1] - 1)])
-      y_out = roi[-2][0] * (X.shape[-2] - 1) + y_out * ((roi[-2][1] - roi[-2][0]) * (X.shape[-2] - 1) / (output_shape[-2] - 1)) if output_shape[-2] > 1 else Tensor([0.5 * (roi[-2][0] + roi[-2][1]) * (X.shape[-2] - 1)])
-    return x_out.clip(0, X.shape[-1]-1), y_out.clip(0, X.shape[-2]-1)
-  if roi is not None:
-    roi = to_python_const(roi)
-    roi = [(st,ed) for st, ed in zip(roi[:len(roi)//2], roi[len(roi)//2:])]
-    roi_ = [(1,1)] * 4
-    if axes is not None:
-      for a,r in zip(axes, roi):
-        roi_[a] = r
-      roi = roi_
-  if scales is not None:
-    scales = to_python_const(scales)
-    if axes is not None:
-      scales_ = [1]*X.ndim
-      for a,s in zip(axes, scales):
-        scales_[a] = s
-      scales = scales_
-  elif sizes is not None:
-    sizes = to_python_const(sizes)
-    scales = []
-    if axes is not None:
-      sizes_ = [1]*X.ndim
-      for a,s in zip(axes, sizes):
-        sizes_[a] = s
-        scales.append(s/X.shape[a])
-      sizes = sizes_
-    else: scales = [si/xs for xs, si in zip(X.shape, sizes)]
-    if keep_aspect_ratio_policy == "not_larger":
-      scale = min(scales)
-      sizes = list(X.shape[:-2]) + [math.ceil(sh*scale) for sh in X.shape[-2:]]
-    elif keep_aspect_ratio_policy == "not_smaller":
-      scale = max(scales)
-      sizes = list(X.shape[:-2]) + [math.ceil(sh*scale) for sh in X.shape[-2:]]
-  output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
-  output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
-  scales_ = [os/xs for xs, os in zip(X.shape, output_shape)]
-  x_out = Tensor.arange(output_shape[-1], dtype=dtypes.default_float)
-  y_out = Tensor.arange(output_shape[-2], dtype=dtypes.default_float)
-  if mode == "nearest":
-    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_, roi)
-    x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
-    y_out = _nearest_mode(y_out, nearest_mode, X.shape[-1])
-    return _nearest_gather(X, x_out, y_out)
-  if mode == "linear":
-    x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape_, scales, roi)
-    ret = []
-    for y in to_python_const(y_out):
-      for x in to_python_const(x_out):
-        x_floor, y_floor = int(x), int(y)
-        y_shrink = (y_floor, math.ceil(y)+1)
-        x_shrink = (x_floor, math.ceil(x)+1)
-        corners = to_python_const(X.shrink((None, None, y_shrink, x_shrink)))[0][0]
+          cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch',
+          mode='nearest', nearest_mode='round_prefer_floor'):
+  def _apply_nearest_mode(index: Tensor, input_dim, mode: str):
+    if mode == "round_prefer_floor": index = (index - 0.5).ceil()
+    elif mode == "round_prefer_ceil": index = (index + 0.5).floor()
+    elif mode in ["floor", "ceil"]: index = getattr(index, mode)()
+    else: raise ValueError(f"invalid {nearest_mode=}")
+    return index.cast(dtypes.int32).clip(0, input_dim-1)
+  def _apply_transformation(index: Tensor, input_dim, scale_dim, roi_dim, sizes_frac, mode):
+    # TODO: needs more testing, not confident in this
+    # NOTE: their reference implementation differ from the implementation in their reference docs
+    # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_resize.py
+    # https://github.com/onnx/onnx/blob/main/docs/Operators.md#Resize
+    output_dim = scale_dim * input_dim
+    if mode == "half_pixel": index = (index + 0.5) / scale_dim - 0.5
+    elif mode == "align_corners": index = index * (input_dim - 1) / (output_dim - 1) if output_dim != 1 else Tensor([0])
+    elif mode == "asymmetric": index = index / scale_dim
+    elif mode == "pytorch_half_pixel": index = (index + 0.5) / scale_dim - 0.5 if output_dim != 1 else Tensor([-0.5])
+    elif mode == "half_pixel_symmetric": index = input_dim / 2 * (1 - int(output_dim) / sizes_frac) + (index + 0.5) / scale_dim - 0.5
+    elif mode == "tf_crop_and_resize": index = roi_dim[0] * (input_dim - 1) + index * ((roi_dim[1] - roi_dim[0]) * (input_dim - 1) / (output_dim - 1)) # noqa: E501
+    else: raise ValueError(f"invalid {coordinate_transformation_mode=}")
+    return index.clip(0, input_dim-1)
 
-        wx, wy = math.ceil(x) - x, math.ceil(y) - y
-        if x == x_floor and y == y_floor:
-          weighted = corners[0][0]
-        elif x == x_floor:
-          weighted = corners[0][0] * wy + corners[1][0] * (1-wy)
-        elif y == y_floor:
-          weighted = corners[0][0] * wx + corners[0][1] * (1-wx)
-        else:
-          weighted = (corners[0][0] * wx + corners[0][1] * (1-wx)) * wy + \
-                     (corners[1][0] * (wx) + corners[1][1] * (1-wx)) * (1-wy)
-        ret.append(weighted)
-    return Tensor(ret).reshape(output_shape)
-  if mode == "cubic":
-    raise NotImplementedError("cubic interpolation is not implemented")
+  roi, scales, sizes = (to_python_const(a) for a in (roi, scales, sizes))
+  scales, sizes = (None if scales is None else scales[-2:]), (None if sizes is None else sizes[-2:])
+  # we pre permute the axes and permute back after resize
+  axes, input_shape, = (axes or list(range(X.ndim))), X.shape[2:],
+  perm = [a for a in range(len(X.shape)) if a not in axes] + list(axes)
+  X = X.permute(*perm)
+
+  if sizes is not None:
+    if keep_aspect_ratio_policy in ["not_larger", "not_smaller"]:
+      scale_fxn = min if keep_aspect_ratio_policy == "not_larger" else max
+      scales = scale_fxn([sizes[i] / input_shape[i] for i in range(X.ndim-2) if i+2 in axes])
+      sizes = [int((scales * input_shape[i]) + 0.5) if i+2 in axes else input_shape[i] for i in range(X.ndim-2)]
+    else: scales = [sizes[-2] / X.size(-2), sizes[-1] / X.size(-1)]
+  else: sizes = [int(sc*sh) for sc, sh in zip(scales, input_shape)]
+  scales = [scales] * 2 if not isinstance(scales, list) else scales
+  roi = [[st, ed] for st, ed in zip(roi, roi[len(roi)//2:])] if isinstance(roi, list) else [None] * (X.ndim-2)
+
+  # NOTE: this transformation makes it so that we can't just call Tensor.interpolate
+  # in Tensor.interpolate, we use indexes without any transformation
+  indexes = []
+  for shape, size, scale, region in zip(input_shape, sizes, scales, roi):
+    indexes.append(_apply_transformation(Tensor.arange(size), shape, scale, region, shape * scale, coordinate_transformation_mode))
+
+  if mode == "nearest":
+    indexes = [_apply_nearest_mode(index, shape, nearest_mode) for (index, shape) in zip(indexes, input_shape)]
+    X = X[(..., *Tensor.meshgrid(*indexes))]
+  if mode == "linear":
+    expand = list(X.shape)
+    for i in range(-len(sizes), 0):
+      reshape, index = [1] * X.ndim, indexes[i]
+      reshape[i] = expand[i] = sizes[i]
+      low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor(), index.ceil(), index - index.floor())]
+      X = X.gather(i, low).lerp(X.gather(i, high), perc)
+  if mode == "cubic": raise NotImplementedError("cubic interpolation is not implemented")
+  return X.permute(*[perm.index(i) for i in range(len(perm))]) if perm else X
 
 def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
-  if not axes: axes = list(range(t.ndim))
+  shape = to_python_const(shape)
   shrink_arg = [None] * t.ndim
   pad_arg = [None] * t.ndim
-  shape = to_python_const(shape)
-  for s, x in zip(shape, axes):
+  for s, x in zip(shape, axes or range(t.ndim)):
     tx = t.shape[x]
     if s < tx: shrink_arg[x] = (tx//2 - (s+1)//2, tx//2 + s//2)
     elif s > tx: pad_arg[x] = ((s-tx)//2, (s-tx+1)//2)
@@ -496,93 +402,53 @@ def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
 
 def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
   depth = int(to_python_const(depth))
-  indices, rank = (indices < 0).where(indices+depth, indices), indices.ndim
-  if axis < 0: axis += rank + 1
-  ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
-  cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
-  return cond.where(values[1], values[0])
+  # Scalar or Rank 1 tensor containing exactly one element
+  depth, indices = depth[0] if isinstance(depth, list) else depth, (indices < 0).where(indices+depth, indices),
+  return indices[:, None]._one_hot_along_dim(depth, dim=axis).where(values[1], values[0])
 
 def Compress(inp: Tensor, condition: Tensor, axis=None):
   if axis is None:
     inp = inp.flatten()
     axis = 0
-
   if axis < 0: axis += inp.ndim
-
   con_np = to_python_const(condition)
   con = Tensor(np.arange(condition.shape[0])[con_np]) # no boolean indexing in Tensor
   return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
 def EyeLike(x: Tensor, dtype=None, k=0):
-  if dtype is None: dtype = x.dtype
-  else: dtype = DTYPE_MAP[int(dtype)]
-  dim = min(x.shape)
-  if x.shape[0] == x.shape[1]:
-    return Tensor.eye(dim, dtype=dtype)
-  padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)
-  return Tensor.eye(dim, dtype=dtype).pad(padarg)
+  ret = Tensor.eye(cast(int, min(x.shape)), dtype=dtype_parse(dtype) if dtype else x.dtype)
+  return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.size(0)-k) for d in x.shape))
 
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 
-def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
-  return (x == float("inf")) * bool(detect_positive) + (x == float("-inf")) * bool(detect_negative)
-
 def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1, block_size=0):
-  def numpy_repeat(t: Tensor, axis, repeats, out_shape):
-    t = t.reshape(tuple(-1 if i == axis-1 else 1 if i == axis else sh for i,sh in enumerate(t.shape)))
-    return t.repeat([repeats if i == axis else 1 for i in range(t.ndim)]).reshape(out_shape)
   if axis < 0: axis += x.ndim
-  if block_size:
-    x_zer, x_sc = numpy_repeat(x_zero_point, axis, block_size, x.shape), numpy_repeat(x_scale, axis, block_size, x.shape)
+  if not isinstance(x_zero_point, Tensor): x_zero_point = Tensor(x_zero_point)
+  if block_size: x_zer, x_sc = x_zero_point.repeat_interleave(block_size, axis), x_scale.repeat_interleave(block_size, axis)
   else:
-    x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
-    x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
+    shape = (*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
+    x_sc, x_zer = x_scale.reshape(shape), x_zero_point.reshape(shape)
   return ((x.float() - x_zer) * x_sc).cast(x_scale.dtype)
-
-def IsNaN(x: Tensor): return x != x
 
 # copied from https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
 # without importing PIL we'll have to manually decode a bunch of image formats like PNG, JPEG, WebP, etc
 def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
-  try:
-    import PIL.Image
-  except ImportError as e:
-    raise ImportError("Pillow must be installed to use the reference implementation of the ImageDecoder operator") from e
-  img = PIL.Image.open(io.BytesIO(to_python_const(encoded_stream, tobytes=True)))
-  if pixel_format == "BGR":
-    return Tensor(np.array(img))[:, :, ::-1]
-  if pixel_format == "RGB":
-    return Tensor(np.array(img))
-  if pixel_format == "Grayscale":
-    img = img.convert("L")
-    decoded = Tensor(np.array(img))
-    return decoded.unsqueeze(-1) # (H, W) to (H, W, 1)
+  try: import PIL.Image
+  except ImportError as e: raise ImportError("Pillow must be installed to use the reference implementation of the ImageDecoder operator") from e
+  img = PIL.Image.open(io.BytesIO(to_python_const(encoded_stream)))
+  if pixel_format == "BGR": return Tensor(np.array(img))[:, :, ::-1]
+  if pixel_format == "RGB": return Tensor(np.array(img))
+  if pixel_format == "Grayscale": return Tensor(np.array(img.convert("L"))).unsqueeze(-1) # (H, W) to (H, W, 1)
   raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
 def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
-  _, _, *data_sz = to_python_const(size)
-  size_zeros, original_grid = Tensor.zeros(data_sz), Tensor.ones(data_sz)
-  stackable = [original_grid]
-  for dim, dim_sz in enumerate(data_sz):
-    a = Tensor.arange(-1, 1.0001, 2/(dim_sz-1)) if align_corners == 1 else Tensor.arange(-1+1/dim_sz, 1, 2/dim_sz)
-    if dim == 0: stackable = [a.reshape(dim_sz, *[1]*(len(data_sz)-1)) + size_zeros, *stackable]
-    elif dim == 1: stackable = [a.reshape(1, dim_sz, *[1]*(len(data_sz)-2)) + size_zeros, *stackable]
-    else: stackable = [a.reshape(1, dim_sz) + size_zeros, *stackable]
-  original_grid = Tensor.stack(*stackable, dim=len(data_sz))
-  if original_grid.ndim == 3:
-    N, dim_2d, dim_homo = theta.shape
-    assert dim_2d == 2 and dim_homo == 3
-    H, W, dim_homo = original_grid.shape
-    assert dim_homo == 3
-    original_grid = original_grid.reshape(H*W, dim_homo).transpose()
-    return theta.matmul(original_grid).permute(0,2,1).reshape(N, H, W, dim_2d)
-  assert original_grid.ndim == 4
-  N, dim_3d, dim_homo = theta.shape
-  assert dim_3d == 3 and dim_homo == 4
-  D, H, W, dim_homo = original_grid.shape
-  assert dim_homo == 4
-  original_grid = original_grid.reshape(D*H*W, dim_homo).transpose()
-  return theta.matmul(original_grid).permute(0,2,1).reshape(N, D, H, W, dim_3d)
+  N, _, *spatial_dims = to_python_const(size)
+  def generate_grid(steps):
+    return Tensor.linspace(-1, 1, steps, device=theta.device) if align_corners else Tensor.linspace(-1+1/steps, 1-1/steps, steps, device=theta.device)
+  grids = Tensor.meshgrid(*(generate_grid(d) for d in spatial_dims))
+  base_grid = Tensor.stack(*reversed(grids), Tensor.ones_like(grids[0], device=theta.device), dim=-1)
+  base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
+  return (base_grid @ theta.transpose(1, 2)).reshape(N, *spatial_dims, -1)
 
 # **************** com.microsoft Ops ****************
 
@@ -605,9 +471,8 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   compute_seg_emb = (segment_embedding is not None and segment_ids is not None)
   vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
 
-  def embedding(x:Tensor, vocab_size, weight:Tensor) -> Tensor:  # TODO from nn.Embedding. Could probably upstream this to Tensor
-    vocab_counter = Tensor.arange(vocab_size, dtype=x.dtype, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
-    return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
+  def embedding(x:Tensor, vocab_size, weight:Tensor) -> Tensor:
+    return x.unsqueeze(-1).expand(*x.shape, vocab_size)._one_hot_along_dim(vocab_size) @ weight
 
   # bert embedding layer
   if epsilon is None: epsilon = 1e-12
@@ -657,53 +522,58 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
   return out, present
 
 # **************** ai.onnx.preview.training Ops ****************
+# NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
+# NOTE: onnx training ops actually don't need the state for optim, all the ops work in a functional way, but we still can reuse optim.py code
 
-# TODO not entirely sure these optimizers are correct
+from tinygrad.nn.optim import Adam as TinyAdam
+from tinygrad.nn.optim import SGD
+
+def onnx_training(input_group_size):
+  def _decorator(func):
+    def __wrapper(R, T, *inputs, **kwargs):
+      old_training = Tensor.training
+      Tensor.training = True
+      T, R = to_python_const(T), R.detach()
+      groups = len(inputs) // input_group_size
+      ret = [func(R, T, *inps, **kwargs) for inps in (inputs[i::groups] for i in range(groups))]
+      Tensor.training = old_training
+      return tuple(flatten(zip(*ret)))
+    return __wrapper
+  return _decorator
+
+@onnx_training(3)
 def Adagrad(R, T, *inputs, decay_factor=0.0, epsilon=0.0, norm_coefficient=0.0):
-  groups = len(inputs) // 3
-  grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  r = to_python_const(R / (1 + T * decay_factor))
-  ret = []
-  for X, G, H in grouped_inputs:
-    X.grad = norm_coefficient * X + G
-    X.grad.requires_grad, H.requires_grad = False, False # TODO manually turning off requires_grad, see TODO under (domain == "ai.onnx.preview.training") in onnx.py
-    H.assign(H.detach() + X.grad * X.grad).realize()
-    H_adaptive = H.sqrt() + epsilon
-    X.assign(X.detach() - r * X.grad / H_adaptive)
-    ret.extend([X, H])
-  ret = ret[::2] + ret[1::2]
-  return tuple(ret)
+  X, G, H = (i.detach() for i in inputs)
+  grad = norm_coefficient * X + G
+  H.assign(H + grad.square())
+  up = grad / (H.sqrt() + epsilon)
+  r = R / (1 + T * decay_factor)
+  X.assign(X.detach() - r * up)
+  return [X, H]
 
-def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
-  groups = len(inputs) // 3
-  grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R.requires_grad = to_python_const(T), False
-  beta_adjusted = beta if T > 0 else 1
-  ret = []
-  for X, G, V in grouped_inputs:
-    X.grad = (norm_coefficient * X + G).realize()
-    X.grad.requires_grad, V.requires_grad = False, False
-    V.assign(alpha * V + beta_adjusted * X.grad).realize()
-    if mode == "standard": X.assign(X.detach() - R * V).realize()
-    elif mode == "nesterov": X.assign(X.detach() - R * (X.grad + alpha + V)).realize()
-    ret.extend([X, V])
-  ret = ret[::2] + ret[1::2]
-  return tuple(ret)
-
-# copied from tinygrad/nn/optim.py: LAMB with some edits
+@onnx_training(4)
 def Adam(R, T, *inputs, alpha=0.9, beta=0.999, epsilon=0.0, norm_coefficient=0.0, norm_coefficient_post=0.0):
-  groups = len(inputs) // 4
-  grouped_inputs = [inputs[i::groups] for i in range(groups)]
-  T, R.requires_grad = to_python_const(T), False
-  ret = []
-  for X, G, V, H in grouped_inputs:
-    X.grad = (norm_coefficient * X + G).realize()
-    V.requires_grad, H.requires_grad, X.grad.requires_grad = False, False, False
-    V.assign(alpha * V + (1.0 - alpha) * X.grad).realize()
-    H.assign(beta * H + (1.0 - beta) * (X.grad * X.grad)).realize()
-    up = (V / (1.0 - alpha**T)) / ((H / (1.0 - beta**T)).sqrt() + epsilon) if T > 0 else V / (H.sqrt() + epsilon)
-    X.assign(X.detach() - R * up).realize()
-    X = (1 - norm_coefficient_post) * X
-    ret.extend([X, V, H])
-  ret = ret[::3] + ret[1::3] + ret[2::3]
-  return tuple(ret)
+  X, G, V, H = inputs
+  G, V, H = G.detach(), V.detach(), H.detach()  # TODO we shouldn't need these detaches
+  X.grad = norm_coefficient * X.detach() + G
+  opt = TinyAdam([X], b1=alpha, b2=beta, eps=epsilon)
+  opt.m, opt.v, opt.lr = [V], [H], R
+  # need no-op for m_hat and v_hat if T == 0
+  if T == 0: opt.b1_t, opt.b2_t = opt.b1_t.zeros_like(), opt.b2_t.zeros_like()
+  else:
+    # `T-1` since it's applied again at the start of `_step`
+    opt.b1_t = Tensor([alpha**(T-1)], dtype=dtypes.float32, device=X.device, requires_grad=False)
+    opt.b2_t = Tensor([beta**(T-1)], dtype=dtypes.float32, device=X.device, requires_grad=False)
+  opt.step()
+  X = (1 - norm_coefficient_post) * X
+  return [X, V, H]
+
+@onnx_training(3)
+def Momentum(R, T, *inputs, alpha, beta, mode, norm_coefficient):
+  X, G, V = inputs
+  G, V = G.detach(), V.detach()
+  X.grad = (norm_coefficient * X.detach() + G) * (beta if T > 0 else 1)
+  opt = SGD([X], momentum=alpha, nesterov=(mode=="nesterov"))
+  opt.b, opt.lr = [V], R
+  opt.step()
+  return [X, V]

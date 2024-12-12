@@ -17,17 +17,17 @@ class DiskBuffer:
 
 MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
-  def __init__(self, device:DiskDevice): self.device = device
+  def __init__(self, dev:DiskDevice): self.dev = dev
   def _alloc(self, size:int, options):
-    self.device._might_open(size)
-    return DiskBuffer(self.device, size)
-  def _free(self, opaque, options): self.device._might_close()
-  def as_buffer(self, src:DiskBuffer): return src._buf()
-  def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
-  def copyout(self, dest:memoryview, src:DiskBuffer):
-    if OSX and self.device.fd is not None:
+    self.dev._might_open(size)
+    return DiskBuffer(self.dev, size)
+  def _free(self, opaque, options): self.dev._might_close()
+  def _as_buffer(self, src:DiskBuffer): return src._buf()
+  def _copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
+  def _copyout(self, dest:memoryview, src:DiskBuffer):
+    if OSX and self.dev.fd is not None:
       # OSX doesn't seem great at mmap, this is faster
-      with io.FileIO(self.device.fd, "a+b", closefd=False) as fo:
+      with io.FileIO(self.dev.fd, "a+b", closefd=False) as fo:
         fo.seek(src.offset)
         fo.readinto(dest)
     else:
@@ -45,7 +45,7 @@ class DiskAllocator(Allocator):
         # Prepare sqe
         sqe_index = (tail:=DiskDevice.io_uring.sq.ktail[0]) & DiskDevice.io_uring.sq.kring_mask[0]
         sqe = DiskDevice.io_uring.sq.sqes[sqe_index]
-        sqe.opcode, sqe.fd, sqe.off = io_uring.IORING_OP_READ, self.device.fd, fd_offset + next_read_offset
+        sqe.opcode, sqe.fd, sqe.off = io_uring.IORING_OP_READ, self.dev.fd, fd_offset + next_read_offset
         sqe.addr, sqe.len, sqe.user_data = copy_batch[0], min(seg_len, total_copy_size - next_read_offset), len(reqs)
 
         # Send sqe
@@ -65,7 +65,7 @@ class DiskAllocator(Allocator):
         DiskDevice.io_uring.cq.khead[0] = head + 1 # advance
         processed_reqs_cnt += 1
 
-  def offset(self, buf:DiskBuffer, size:int, offset:int): return DiskBuffer(buf.device, size, offset)
+  def _offset(self, buf:DiskBuffer, size:int, offset:int): return DiskBuffer(buf.device, size, offset)
 
 class DiskDevice(Compiled):
   _tried_io_uring_init = False
@@ -81,7 +81,7 @@ class DiskDevice(Compiled):
     self.count += 1
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
     if self.size is not None: return
-    filename = self.dname[len("disk:"):]
+    filename = self.device[len("disk:"):]
     self.size = size
 
     if sys.platform != "win32" and filename.startswith("shm:"):

@@ -1,14 +1,14 @@
-import sys, time, logging, difflib
+import time, logging, difflib
 from typing import Callable, Optional, Tuple
 import numpy as np
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Tensor, dtypes
 from tinygrad.ops import UOp, Ops, sint
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
 from tinygrad.dtype import ConstType, DType
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import CI, OSX, T, getenv, colored
+from tinygrad.helpers import T, getenv, colored
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler, PythonAllocator
@@ -30,23 +30,6 @@ def assert_jit_cache_len(fxn, expected_len):
     # until we have a better way of typing the prg in ExecItem
     assert type(fxn.jit_cache[0].prg).__name__.endswith('Graph')
     assert len(fxn.jit_cache[0].prg.jit_cache) == expected_len
-
-def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
-  if dtype == dtypes.bfloat16:
-    # NOTE: this requires bf16 buffer support
-    return device in {"AMD"} or (device in {"CUDA", "NV"} and not CI and not getenv("PTX"))
-  if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
-  # for CI GPU and OSX, cl_khr_fp16 isn't supported
-  # for CI LLVM, it segfaults because it can't link to the casting function
-  # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
-  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
-  if dtype == dtypes.half:
-    if device == "GPU": return not CI and not OSX
-    if device in ["CUDA", "NV"]: return not CI
-    if device == "LLVM": return OSX
-    if device == "PYTHON": return sys.version_info >= (3, 12)
-  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
-  return True
 
 def rand_for_dtype(dt:DType, size:int):
   if dtypes.is_unsigned(dt):

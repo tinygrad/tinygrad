@@ -3,7 +3,7 @@ import random
 from tqdm import trange
 from typing import List
 from tinygrad import Device
-from tinygrad.runtime.ops_amd import AMDDevice, HWCopyQueue, HWComputeQueue
+from tinygrad.runtime.ops_amd import AMDDevice, HWQueue
 
 if __name__ == "__main__":
   dev: List[AMDDevice] = [Device[f"KFD:{i}"] for i in range(6)]
@@ -15,9 +15,9 @@ if __name__ == "__main__":
     d1, b1 = random.choice(buffers)
     d2, b2 = random.choice(buffers)
     d1._gpu_map(b2)
-    q = HWComputeQueue()
+    q = HWQueue()
     q.signal(sig:=AMDDevice._alloc_signal(10))
-    qc = HWCopyQueue()
+    qc = HWQueue()
     qc.wait(sig)
     qc.copy(b1.va_addr, b2.va_addr, min(b1.size, b2.size))
     d1.completion_signal.value = 1

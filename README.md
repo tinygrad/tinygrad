@@ -88,6 +88,7 @@ tinygrad already supports numerous accelerators, including:
 - [x] [AMD](tinygrad/runtime/ops_amd.py)
 - [x] [NV](tinygrad/runtime/ops_nv.py)
 - [x] [QCOM](tinygrad/runtime/ops_qcom.py)
+- [x] [WEBGPU](tinygrad/runtime/ops_webgpu.py)
 
 And it is easy to add more! Your accelerator of choice only needs to support a total of ~25 low level ops.
 
@@ -125,8 +126,8 @@ y = Tensor([[2.0,0,-2.0]], requires_grad=True)
 z = y.matmul(x).sum()
 z.backward()
 
-print(x.grad.numpy())  # dz/dx
-print(y.grad.numpy())  # dz/dy
+print(x.grad.tolist())  # dz/dx
+print(y.grad.tolist())  # dz/dy
 ```
 
 The same thing but in PyTorch:
@@ -138,8 +139,8 @@ y = torch.tensor([[2.0,0,-2.0]], requires_grad=True)
 z = y.matmul(x).sum()
 z.backward()
 
-print(x.grad.numpy())  # dz/dx
-print(y.grad.numpy())  # dz/dy
+print(x.grad.tolist())  # dz/dx
+print(y.grad.tolist())  # dz/dy
 ```
 
 ## Contributing

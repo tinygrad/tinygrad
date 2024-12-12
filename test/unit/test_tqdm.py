@@ -231,6 +231,24 @@ class TestProgressBar(unittest.TestCase):
         self.assertEqual(tinytqdm_out.split("\r\033[K")[-1], tqdm_out.split(f"{i-1}\n")[-1])
       self.assertEqual(tinytqdm_out, tinytqdm_out)
 
+  @patch('sys.stderr', new_callable=StringIO)
+  @patch('shutil.get_terminal_size')
+  def test_tqdm_context_manager(self, mock_terminal_size, mock_stderr):
+    for _ in range(10):
+      total, ncols = random.randint(5, 30), random.randint(*NCOLS_RANGE)
+      mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
+      mock_stderr.truncate(0)
+
+      with tinytqdm(desc="Test", total=total) as bar:
+        for _ in range(total):
+          bar.update(1)
+
+      tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
+      iters_per_sec = float(tinytqdm_output.split("it/s")[-2].split(" ")[-1])
+      elapsed = total/iters_per_sec
+      tqdm_output = tqdm.format_meter(n=total, total=total, elapsed=elapsed, ncols=ncols, prefix="Test")
+      self._compare_bars(tinytqdm_output, tqdm_output)
+
   def test_tqdm_perf(self):
     st = time.perf_counter()
     for _ in tqdm(range(100)): pass

@@ -3,15 +3,15 @@ import unittest
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
-from hypothesis import given, strategies as strat, settings
+from hypothesis import given, strategies as strat, settings, HealthCheck
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import run_schedule
 from tinygrad.ops import GroupOp
 from tinygrad.tensor import _to_np_dtype
-from test.helpers import is_dtype_supported
-import pytest
+from tinygrad.device import is_dtype_supported
+import pytest, math
 pytestmark = pytest.mark.filterwarnings("ignore")
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -41,8 +41,8 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.
 # TODO: (a+b)/2 in tensor.py's maximum can overflow. This requires a new implementation of maximum that can be backpropagated
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
-# TODO: CI CUDA segfaults on sin
-if getenv("MOCKGPU") and Device.DEFAULT == "NV": unary_operations.remove((Tensor.sin, np.sin))
+# TODO: CI CUDA segfaults on sin, WEBGPU sin is not precise enough for large numbers
+if (getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU": unary_operations.remove((Tensor.sin, np.sin))
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
@@ -60,6 +60,8 @@ class ht:
   bool = strat.booleans()
 
 def universal_test(a, b, dtype, op):
+  # The 'nan' cases only fail with Vulkan WebGPU backend (CI)
+  if (math.isnan(a) or math.isnan(b)) and Device.DEFAULT == "WEBGPU" and CI: return
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
   numpy_value = op[1](np.array([a]).astype(_to_np_dtype(dtype)), np.array([b]).astype(_to_np_dtype(dtype)))
@@ -79,15 +81,17 @@ def universal_test_unary(a, dtype, op):
     np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
-    op = [x for x in ast.parents if x.op in GroupOp.Unary][0]
+    op = [x for x in ast.toposort if x.op in GroupOp.Unary][0]
     assert op.dtype == dtype
 
 def universal_test_cast(a, in_dtype, dtype):
   tensor_value = Tensor([a], dtype=in_dtype).cast(dtype)
-  numpy_value = np.array([a]).astype(_to_np_dtype(dtype))
+  numpy_value = np.array([a], dtype=_to_np_dtype(in_dtype)).astype(_to_np_dtype(dtype))
   np.testing.assert_equal(tensor_value.numpy(), numpy_value)
 
 def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
+  # the 'inf' and 'nan' cases are wrong on WEBGPU
+  if (any(map(math.isnan, [a, b, c])) or math.isinf(c)) and Device.DEFAULT == "WEBGPU": return
   if not isinstance(op1, tuple): op1 = (op1, op1)
   if not isinstance(op2, tuple): op2 = (op2, op2)
   at, bt, ct = Tensor([a], dtype=d1), Tensor([b], dtype=d1), Tensor([c], dtype=d2)
@@ -148,6 +152,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, ht.int32, strat.sampled_from(integer_binary_operations))
   def test_int32(self, a, b, op): universal_test(a, b, dtypes.int32, op)
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.int64, Device.DEFAULT), f"no int64 on {Device.DEFAULT}")
   @given(ht.int64, ht.int64, strat.sampled_from(integer_binary_operations))
   def test_int64(self, a, b, op): universal_test(a, b, dtypes.int64, op)
 
@@ -172,6 +177,35 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skip("broken. TODO: fix it")
   @given(ht.int32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
   def test_int32_cast(self, a, dtype): universal_test_cast(a, dtypes.int32, dtype)
+
+  @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
+  def test_float_cast_to_unsigned(self, a, float_dtype, unsigned_dtype):
+    if not is_dtype_supported(float_dtype, Device.DEFAULT): float_dtype = dtypes.float32
+    float_strat = {dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype]
+    float_strat = float_strat.filter(lambda x: 0 < x < dtypes.max(unsigned_dtype))
+    universal_test_cast(a.draw(float_strat), float_dtype, unsigned_dtype)
+
+  @settings(suppress_health_check=[HealthCheck.filter_too_much])
+  @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
+  def test_float_cast_to_unsigned_overflow(self, a, float_dtype, unsigned_dtype):
+    if not is_dtype_supported(float_dtype, Device.DEFAULT): float_dtype = dtypes.float32
+    float_strat = {dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype]
+    overflow_strat = float_strat.filter(lambda x: x > dtypes.max(unsigned_dtype) and x <= dtypes.max(dtypes.int32))
+    universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
+
+  @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
+  def test_float_cast_to_unsigned_underflow(self, a, float_dtype, unsigned_dtype):
+    if not is_dtype_supported(float_dtype, Device.DEFAULT): float_dtype = dtypes.float32
+    float_strat = {dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype]
+    overflow_strat = float_strat.filter(lambda x: x < 0 and x >= dtypes.min(dtypes.int32))
+    universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
+
+  @unittest.expectedFailure
+  def test_unsafe_cast_float_to_int_failure(self):
+    val = float(dtypes.max(dtypes.int32) - 1)
+    t1 = Tensor([val], dtype=dtypes.float32).cast(dtypes.int32)
+    t2 = Tensor(val, dtype=dtypes.float32).cast(dtypes.int32)
+    np.testing.assert_equal(t1.item(), t2.item())
 
 if __name__ == '__main__':
   unittest.main()

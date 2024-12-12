@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.engine.realize import lower_schedule
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 
 class TestCompileFailures(unittest.TestCase):
   def compile(self, out:Tensor):
@@ -11,7 +11,6 @@ class TestCompileFailures(unittest.TestCase):
   def test_interpolate_atari(self):
     self.compile(Tensor.empty(210, 160, dtype='uint8').interpolate((64, 64)))
 
-  @unittest.skip("FIXME: broken on METAL")
   def test_add_max_uchar(self):
     self.compile((Tensor.empty(1024, dtype='uint8') + Tensor.empty(1024, dtype='uint8')).max())
 

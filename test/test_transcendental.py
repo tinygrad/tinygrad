@@ -4,7 +4,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import Context, getenv
 from test.test_schedule import check_schedule
 from test.test_dtype_alu import ht, dtypes_float
-from test.helpers import is_dtype_supported
+from tinygrad.device import is_dtype_supported
 import numpy as np
 from hypothesis import given, settings, strategies as strat
 
