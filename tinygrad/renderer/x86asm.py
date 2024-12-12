@@ -221,9 +221,8 @@ class X86Renderer(Renderer):
     for i,u in enumerate(uops):
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
         if i < 6: r[u] = assign_reg(i, u.dtype)
-        else: # value is in stack instead of register, rbp + 8 is return address
-          # TODO: fix this
-          r[u] = mem[u] = f"[rbp + {16 + (i-6)*8}]"
+        # value is in stack instead of register, rbp + 8 is return address, TODO: fix this
+        else: r[u] = mem[u] = f"[rbp + {16 + (i-6)*8}]"
       elif u.op is Ops.CONST:
         r[u] = to_hex(u.arg, u.dtype)
         if not is_imm(u):
@@ -238,12 +237,8 @@ class X86Renderer(Renderer):
           if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD): mov_to_reg(s, assign_reg(i, s.dtype))
           elif is_mem(s) and not (u.op in (Ops.LOAD,Ops.DEFINE_ACC) and s.op is Ops.CONST): mov_to_reg(s, assign_reg(i, s.dtype))
         if u.dtype != dtypes.void: # assign destination
-          if u.op is Ops.ASSIGN:
-            # define acc was already spilled here
-            r[u] = mem[u] = mem[u.src[0]]
-          else:
-            if u.op in GroupOp.Binary and u.op not in (Ops.CMPLT, Ops.CMPNE) and last_use[u.src[0]] == i and is_reg(r[u.src[0]]) and list(r.values()).count(r[u.src[0]]) == 1: r[u] = r[u.src[0]]
-            else: r[u] = assign_reg(i, u.dtype)
+          if u.op is Ops.ASSIGN: r[u] = mem[u] = mem[u.src[0]] # define acc was already spilled here
+          else: r[u] = assign_reg(i, u.dtype)
         if u.op is Ops.RANGE: # all registers get moved to stack before loop TODO: remove range check
           for var in (v for v in r if is_reg(r[v]) and v.op is not Ops.RANGE):
             free_reg(r[var])
