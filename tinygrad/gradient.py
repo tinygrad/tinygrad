@@ -12,21 +12,6 @@ from tinygrad.ops import sint
 from tinygrad.shape.shapetracker import ShapeTracker
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
 
-def apply_mop(st: ShapeTracker, mop_arg: Tuple[MovementOps, Tuple]) -> ShapeTracker:
-  mop, arg = mop_arg
-  if mop == MovementOps.RESHAPE:
-    # shapetracker doesn't allow flattening with -1 but required for MovementOps.RESHAPE
-    if arg == (-1,): return st.reshape((prod(st.views[-1].shape),))
-    return st.reshape(arg)
-  if mop == MovementOps.PERMUTE: return st.permute(arg)
-  if mop == MovementOps.EXPAND:
-    if len(arg) != len(st.shape): st = st.reshape((1,*st.shape))
-    return st.expand(arg)
-  if mop == MovementOps.PAD: return st.pad(arg)
-  if mop == MovementOps.SHRINK: return st.shrink(arg)
-  if mop == MovementOps.STRIDE: return st.stride(arg)
-  raise ValueError("invalid mop")
-
 def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple]]:
   to_apply:List[Tuple[MovementOps, Tuple]] = []
   for i, v in enumerate(st.views):
@@ -70,17 +55,22 @@ def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple
     # lastly, we apply post expand pads
     if v.mask is not None and any(x != (0,0) for x in post_expand_pads): to_apply.append((MovementOps.PAD, post_expand_pads))
 
-  scratch_st = ShapeTracker.from_shape(in_shape)
+  st = ShapeTracker.from_shape(in_shape)
   ret = []
   seen = {}  # {shapetracker: list of mops to generate that shapetracker}
   for mop_arg in to_apply:
-    scratch_st = apply_mop(scratch_st, mop_arg)
-    if scratch_st in seen:
-      ret = seen[scratch_st][:]
+    mop, arg = mop_arg
+    if mop == MovementOps.RESHAPE: st = st.reshape((prod(st.views[-1].shape),) if arg == (-1,) else arg)
+    if mop == MovementOps.PERMUTE: st = st.permute(arg)
+    if mop == MovementOps.EXPAND: st = st.reshape((1,*st.shape)) if len(arg) != len(st.shape) else st.expand(arg)
+    if mop == MovementOps.PAD: st = st.pad(arg)
+    if mop == MovementOps.SHRINK: st = st.shrink(arg)
+    if mop == MovementOps.STRIDE: st = st.stride(arg)
+    if st in seen:
+      ret = seen[st][:]
     else:
-      ret.append(mop_arg+(scratch_st.shape,))
-      seen[scratch_st] = ret[:]
-
+      ret.append(mop_arg+(st.shape,))
+      seen[st] = ret[:]
   return ret
 
 def view_gradient(ctx:UOp, ret:UOp):
