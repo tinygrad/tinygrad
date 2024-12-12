@@ -14,29 +14,30 @@ def reduce_gradient(ctx:UOp, ret:UOp):
 
 # NOTE: this is very similar to invert
 def view_gradient(ctx:UOp, ret:UOp):
-  assert len(ret.arg.views) == 1, "no multiview support yet"
-  v = ret.arg.views[0]
-  assert ctx.shape == v.shape, "grad_output shape must match output shape"
+  assert ctx.shape == ret.shape, "grad_output shape must match output shape"
 
-  # shrink for mask
-  if v.mask: ctx = ctx.shrink(v.mask)
+  for v,s in zip(ret.arg.views[::-1], [x.shape for x in ret.arg.views[::-1][1:]]+[ret.src[0].shape]):
+    # shrink for mask
+    if v.mask: ctx = ctx.shrink(v.mask)
 
-  # if we shrank it to nothing, it's just 0
-  if 0 in ctx.shape: return (ret.src[0].const_like(0),)
+    # if we shrank it to nothing, it's just 0 (immediately)
+    if 0 in ctx.shape: return (ret.src[0].const_like(0),)
 
-  # find all stride 0 and add sum (inverse of expand)
-  # TODO: these casts should just be around the EXPAND in the forward, then we don't need this
-  expand_axis = tuple(i for i,(s,st) in enumerate(zip(ctx.shape, v.strides)) if s > 1 and st == 0)
-  if len(expand_axis): ctx = ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, expand_axis).cast(ctx.dtype)
+    # find all stride 0 and add sum (inverse of expand)
+    # TODO: these casts should just be around the EXPAND in the forward, then we don't need this
+    expand_axis = tuple(i for i,(s,st) in enumerate(zip(ctx.shape, v.strides)) if s > 1 and st == 0)
+    if len(expand_axis): ctx = ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, expand_axis).cast(ctx.dtype)
 
-  # handle flip
-  ctx = ctx.stride(tuple(-1 if x < 0 else 1 for x in v.strides))
+    # handle flip
+    ctx = ctx.stride(tuple(-1 if x < 0 else 1 for x in v.strides))
 
-  # handle permute
-  ctx = ctx.permute(argsort(tuple(-abs(x) for x in v.strides)))
+    # handle permute (this is wrong)
+    ctx = ctx.permute(argsort(tuple(-abs(x) for x in v.strides)))
 
-  assert prod(ctx.shape) == prod(ret.src[0].shape), f"shape mismatch? {ctx.shape} vs {ret.src[0].shape}"
-  return (ctx.reshape(ret.src[0].shape),)
+    # reshape to the input
+    ctx = ctx.reshape(s)
+
+  return (ctx,)
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
