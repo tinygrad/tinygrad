@@ -479,37 +479,12 @@ class VFIOIface:
     self.adev.mm.map_from(mem.va_addr, mem.size, mem.meta[0].dev_iface.adev)
 
   def create_queue(self, queue_type, ring, gart, eop_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, debug_memory_size=0):
-    mqd = self.alloc(0x1000, uncached=True, cpu_access=True)
-
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
-      doorbell_index = 0x100 # 0x100 is the first doorbell index for SDMA
-      mqd_struct = am.struct_v11_sdma_mqd(sdmax_rlcx_rb_base=lo32(ring.va_addr>>8), sdmax_rlcx_rb_base_hi=hi32(ring.va_addr>>8),
-        sdmax_rlcx_rb_cntl=self.adev.regSDMA0_QUEUE0_RB_CNTL.build(rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=1,
-          f32_wptr_poll_enable=1, rb_size=(ring.size//4).bit_length()-1),
-        sdmax_rlcx_rb_rptr_addr_lo=lo32(gart.va_addr), sdmax_rlcx_rb_rptr_addr_hi=hi32(gart.va_addr),
-        sdmax_rlcx_rb_wptr_poll_addr_lo=lo32(gart.va_addr+0x10), sdmax_rlcx_rb_wptr_poll_addr_hi=hi32(gart.va_addr+0x10),
-        sdmax_rlcx_doorbell_offset=self.adev.regSDMA0_QUEUE0_DOORBELL_OFFSET.build(offset=doorbell_index*2))
+      self.adev.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
+                                doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0), pipe=0, queue=0)
     else:
-      doorbell_index = 0x8
-      mqd_struct = am.struct_v11_compute_mqd(header=0xC0310800, cp_mqd_base_addr_lo=lo32(mqd.va_addr), cp_mqd_base_addr_hi=hi32(mqd.va_addr),
-        cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.build(preload_size=0x55, preload_req=1),
-        cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
-        cp_hqd_pq_base_lo=lo32(ring.va_addr>>8), cp_hqd_pq_base_hi=hi32(ring.va_addr>>8),
-        cp_hqd_pq_rptr_report_addr_lo=lo32(gart.va_addr), cp_hqd_pq_rptr_report_addr_hi=hi32(gart.va_addr),
-        cp_hqd_pq_wptr_poll_addr_lo=lo32(gart.va_addr+0x10), cp_hqd_pq_wptr_poll_addr_hi=hi32(gart.va_addr+0x10),
-        cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.build(doorbell_offset=doorbell_index*2, doorbell_en=1),
-        cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.build(rptr_block_size=5, unord_dispatch=1, queue_size=(ring.size//4).bit_length()-2),
-        cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.build(min_ib_avail_size=0x3), cp_hqd_hq_status0=0x20004000,
-        cp_mqd_control=self.adev.regCP_MQD_CONTROL.build(priv_state=1),
-        cp_hqd_eop_base_addr_lo=lo32(eop_buffer.va_addr>>8), cp_hqd_eop_base_addr_hi=hi32(eop_buffer.va_addr>>8),
-        cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.build(eop_size=(eop_buffer.size//4).bit_length()-2))
-
-    # Copy mqd into memory
-    ctypes.memmove(mqd.va_addr, ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct))
-    self.adev.gmc.flush_hdp()
-
-    if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA: self.adev.sdma.load_mqd(mqd_struct, pipe=0, queue=0)
-    else: self.adev.gfx.load_mqd(mqd_struct, pipe=0, queue=0)
+      self.adev.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr, wptr_addr=gart.va_addr+0x10,
+        eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=0)
 
     return AMDQueueDesc(ring=to_mv(ring.va_addr, ring.size).cast("I"), doorbell=to_mv(self.doorbell_cpu_addr + doorbell_index * 8, 8).cast("Q"),
                         read_ptr=to_mv(gart.va_addr, 8).cast("Q"), write_ptr=to_mv(gart.va_addr+0x10, 8).cast("Q"))

@@ -3,7 +3,7 @@ import ctypes, time
 from typing import Literal
 from tinygrad.runtime.autogen import libpciaccess
 from tinygrad.runtime.autogen.am import am, gc_11_0_0, smu_v13_0_0
-from tinygrad.helpers import to_mv, data64
+from tinygrad.helpers import to_mv, data64, lo32, hi32
 
 class AM_IP:
   def __init__(self, adev): self.adev = adev
@@ -141,9 +141,8 @@ class AM_GFX(AM_IP):
       self.adev.regSH_MEM_CONFIG.write(address_mode=am.SH_MEM_ADDRESS_MODE_64, alignment_mode=am.SH_MEM_ALIGNMENT_MODE_UNALIGNED, initial_inst_prefetch=3)
 
       # Configure apertures:
-      # LDS:         0x60000000'00000000 - 0x60000001'00000000 (4GB)
-      # Scratch:     0x60000001'00000000 - 0x60000002'00000000 (4GB)
-      # GPUVM:       0x60010000'00000000 - 0x60020000'00000000 (1TB)
+      # LDS:         0x10000000'00000000 - 0x10000001'00000000 (4GB)
+      # Scratch:     0x20000000'00000000 - 0x20000001'00000000 (4GB)
       self.adev.regSH_MEM_BASES.write(shared_base=0x1, private_base=0x2)
     self._grbm_select()
 
@@ -161,12 +160,31 @@ class AM_GFX(AM_IP):
     # NOTE: Wait for MEC to be ready. The kernel does udelay as well.
     time.sleep(0.5)
 
-  def load_mqd(self, mqd:am.struct_v11_compute_mqd, pipe:int, queue:int):
+  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int):
+    mqd = self.adev.mm.valloc(0x1000, uncached=True, contigous=True)
+
+    mqd_struct = am.struct_v11_compute_mqd(header=0xC0310800, cp_mqd_base_addr_lo=lo32(mqd.va_addr), cp_mqd_base_addr_hi=hi32(mqd.va_addr),
+      cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.build(preload_size=0x55, preload_req=1),
+      cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
+      cp_hqd_pq_base_lo=lo32(ring_addr>>8), cp_hqd_pq_base_hi=hi32(ring_addr>>8),
+      cp_hqd_pq_rptr_report_addr_lo=lo32(rptr_addr), cp_hqd_pq_rptr_report_addr_hi=hi32(rptr_addr),
+      cp_hqd_pq_wptr_poll_addr_lo=lo32(wptr_addr), cp_hqd_pq_wptr_poll_addr_hi=hi32(wptr_addr),
+      cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.build(doorbell_offset=doorbell*2, doorbell_en=1),
+      cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.build(rptr_block_size=5, unord_dispatch=1, queue_size=(ring_size//4).bit_length()-2),
+      cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.build(min_ib_avail_size=0x3), cp_hqd_hq_status0=0x20004000,
+      cp_mqd_control=self.adev.regCP_MQD_CONTROL.build(priv_state=1),
+      cp_hqd_eop_base_addr_lo=lo32(eop_addr>>8), cp_hqd_eop_base_addr_hi=hi32(eop_addr>>8),
+      cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.build(eop_size=(eop_size//4).bit_length()-2))
+
+    # Copy mqd into memory
+    ctypes.memmove(mqd.cpu_addr, ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct))
+    self.adev.gmc.flush_hdp()
+
     self._grbm_select(me=1, pipe=pipe, queue=queue)
 
-    mqd_mv = to_mv(ctypes.addressof(mqd), ctypes.sizeof(mqd)).cast('I')
+    mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
     for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.reg_off, self.adev.regCP_HQD_PQ_WPTR_HI.reg_off + 1)):
-      self.adev.wreg(reg, mqd_mv[0x80 + i])
+      self.adev.wreg(reg, mqd_st_mv[0x80 + i])
     self.adev.regCP_HQD_ACTIVE.write(0x1)
 
     self._grbm_select()
@@ -181,40 +199,26 @@ class AM_GFX(AM_IP):
       if self.adev.regCP_STAT.read() == 0 and bootload_ready: break
 
   def _config_gfx_rs64(self):
-    for pipe in range(2):
-      self._grbm_select(pipe=pipe)
-      self.adev.wreg_pair("regCP_PFP_PRGRM_CNTR_START", "", "_HI", self.adev.fw.ucode_start['PFP'] >> 2)
-    self._grbm_select()
-    self.adev.regCP_ME_CNTL.update(pfp_pipe0_reset=1, pfp_pipe1_reset=1)
-    self.adev.regCP_ME_CNTL.update(pfp_pipe0_reset=0, pfp_pipe1_reset=0)
-    
-    for pipe in range(2):
-      self._grbm_select(pipe=pipe)
-      self.adev.wreg_pair("regCP_ME_PRGRM_CNTR_START", "", "_HI", self.adev.fw.ucode_start['ME'] >> 2)
-    self._grbm_select()
-    self.adev.regCP_ME_CNTL.update(me_pipe0_reset=1, me_pipe1_reset=1)
-    self.adev.regCP_ME_CNTL.update(me_pipe0_reset=0, me_pipe1_reset=0)
+    def _config_helper(eng_name, cntl_reg, eng_reg, pipe_cnt, me=0):
+      for pipe in range(pipe_cnt):
+        self._grbm_select(me=me, pipe=pipe)
+        self.adev.wreg_pair(f"regCP_{eng_reg}_PRGRM_CNTR_START", "", "_HI", self.adev.fw.ucode_start[eng_name] >> 2)
+      self._grbm_select()
+      self.adev.reg(f"regCP_{cntl_reg}_CNTL").update(**{f"{eng_name.lower()}_pipe{pipe}_reset": 1 for pipe in range(pipe_cnt)})
+      self.adev.reg(f"regCP_{cntl_reg}_CNTL").update(**{f"{eng_name.lower()}_pipe{pipe}_reset": 0 for pipe in range(pipe_cnt)})
 
-    for pipe in range(4):
-      self._grbm_select(me=1, pipe=pipe)
-      self.adev.wreg_pair("regCP_MEC_RS64_PRGRM_CNTR_START", "", "_HI", self.adev.fw.ucode_start['MEC'] >> 2)
-    self._grbm_select()
-    self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=1, mec_pipe1_reset=1, mec_pipe2_reset=1, mec_pipe3_reset=1)
-    self.adev.regCP_MEC_RS64_CNTL.update(mec_pipe0_reset=0, mec_pipe1_reset=0, mec_pipe2_reset=0, mec_pipe3_reset=0)
+    _config_helper(eng_name="PFP", cntl_reg="ME", eng_reg="PFP", pipe_cnt=2)
+    _config_helper(eng_name="ME", cntl_reg="ME", eng_reg="ME", pipe_cnt=2)
+    _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=4, me=1)
 
 class AM_IH(AM_IP):
-  AMDGPU_NAVI10_DOORBELL_IH = 0x178
-
-  # def __init__(self, adev):
-  #   super().__init__(adev)
-
   def interrupt_handler(self):
     addr_vm, rwptr_vm, suf, ring_id = self.rings[0]
     ring_view = to_mv(addr_vm.cpu_addr(), 262144).cast('I')
     wptr = to_mv(rwptr_vm.cpu_addr(), 8).cast('Q')[0]
 
-    while self.rptr < wptr:
-      ring_index = (self.rptr >> 2)
+    while (self.rptr % self.ring_vm.size) < (wptr % self.ring_vm.size):
+      ring_index = (self.rptr % self.ring_vm.size) // 4
       iv_entry = am.struct_amdgpu_iv_entry(client_id=ring_view[ring_index + 0] & 0xff, src_id=(ring_view[ring_index + 0] >> 8) & 0xff,
         ring_id=(ring_view[ring_index + 0] >> 16) & 0xff, vmid=(ring_view[ring_index + 0] >> 24) & 0xf, vmid_src=(ring_view[ring_index + 0] >> 31),
         timestamp=ring_view[ring_index + 1] | ((ring_view[ring_index + 2] & 0xffff) << 32), timestamp_src=(ring_view[ring_index + 2] >> 31),
@@ -223,27 +227,28 @@ class AM_IH(AM_IP):
       # print(iv_entry.client_id, iv_entry.timestamp, am.soc21_ih_clientid__enumvalues.get(iv_entry.client_id, "UNK CLIENT"))
       self.rptr += 32
 
-    self.adev.regIH_RB_RPTR.write(self.rptr)
-    # to_mv(self.adev.doorbell_cpu_addr, 0x2000).cast('I')[self.AMDGPU_NAVI10_DOORBELL_IH * 2] = self.rptr
-
-  def enable_ring(self, addr_vm, rwptr_vm, suf, ring_id):
-    self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", addr_vm.va_addr >> 8)
-
-    self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=(addr_vm.size//4).bit_length(),
-      mc_snoop=1, mc_ro=0, mc_vmid=0, **({'wptr_overflow_enable': 1, 'rptr_rearm': 1} if ring_id == 0 else {'rb_full_drain_enable': 1}))
-
-    if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", rwptr_vm.va_addr)
-
-    self.adev.reg(f"regIH_RB_WPTR{suf}").write(0)
-    self.adev.reg(f"regIH_RB_RPTR{suf}").write(0)
-
-    self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write(((self.AMDGPU_NAVI10_DOORBELL_IH + ring_id) * 2), enable=1)
+    self.adev.regIH_RB_CNTL.update(wptr_overflow_clear=1)
+    self.adev.regIH_RB_CNTL.update(wptr_overflow_clear=0)
+    self.adev.regIH_RB_RPTR.write(self.rptr % self.ring_vm.size)
+    to_mv(self.adev.doorbell_cpu_addr, 0x2000).cast('I')[am.AMDGPU_NAVI10_DOORBELL_IH * 2] = self.rptr
 
   def init(self):
+    # TODO: Clean this up
     self.rings = [(self.adev.mm.valloc(256 << 10, uncached=True), self.adev.mm.valloc(0x1000, uncached=True), suf, i) for i,suf in enumerate(["", "_RING1"])]
     self.rptr = 0
 
-    for ring in self.rings: self.enable_ring(*ring)
+    for addr_vm, rwptr_vm, suf, ring_id in self.rings:
+      self.adev.wreg_pair("regIH_RB_BASE", suf, f"_HI{suf}", addr_vm.va_addr >> 8)
+
+      self.adev.reg(f"regIH_RB_CNTL{suf}").write(mc_space=4, wptr_overflow_clear=1, rb_size=(addr_vm.size//4).bit_length(),
+        mc_snoop=1, mc_ro=0, mc_vmid=0, **({'wptr_overflow_enable': 1, 'rptr_rearm': 1} if ring_id == 0 else {'rb_full_drain_enable': 1}))
+
+      if ring_id == 0: self.adev.wreg_pair("regIH_RB_WPTR_ADDR", "_LO", "_HI", rwptr_vm.va_addr)
+
+      self.adev.reg(f"regIH_RB_WPTR{suf}").write(0)
+      self.adev.reg(f"regIH_RB_RPTR{suf}").write(0)
+
+      self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write(((self.AMDGPU_NAVI10_DOORBELL_IH + ring_id) * 2), enable=1)
 
     self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
     self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
@@ -258,34 +263,28 @@ class AM_IH(AM_IP):
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
 
 class AM_SDMA(AM_IP):
-  def load_mqd(self, mqd:am.struct_v11_sdma_mqd, pipe:int, queue:int):
+  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int):
+    # Stop if something is running...
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_CNTL").update(rb_enable=0)
     while not self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_CONTEXT_STATUS").read(idle=1): pass
 
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_DOORBELL_OFFSET").write(mqd.sdmax_rlcx_doorbell_offset)
+    # Setup the ring
+    self.adev.wreg_pair(f"regSDMA{pipe}_QUEUE{queue}_RB_RPTR", "", "_HI", 0)
+    self.adev.wreg_pair(f"regSDMA{pipe}_QUEUE{queue}_RB_WPTR", "", "_HI", 0)
+    self.adev.wreg_pair(f"regSDMA{pipe}_QUEUE{queue}_RB_BASE", "", "_HI", ring_addr >> 8)
+    self.adev.wreg_pair(f"regSDMA{pipe}_QUEUE{queue}_RB_RPTR_ADDR", "_LO", "_HI", rptr_addr)
+    self.adev.wreg_pair(f"regSDMA{pipe}_QUEUE{queue}_RB_WPTR_POLL_ADDR", "_LO", "_HI", wptr_addr)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_DOORBELL_OFFSET").update(offset=doorbell * 2)
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_DOORBELL").update(enable=1)
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_RPTR").write(0)
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_RPTR_HI").write(0)
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_WPTR").write(0)
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_WPTR_HI").write(0)
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_BASE").write(mqd.sdmax_rlcx_rb_base)
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_BASE_HI").write(mqd.sdmax_rlcx_rb_base_hi)
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_RPTR_ADDR_LO").write(mqd.sdmax_rlcx_rb_rptr_addr_lo)
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_RPTR_ADDR_HI").write(mqd.sdmax_rlcx_rb_rptr_addr_hi)
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_WPTR_POLL_ADDR_LO").write(mqd.sdmax_rlcx_rb_wptr_poll_addr_lo)
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_WPTR_POLL_ADDR_HI").write(mqd.sdmax_rlcx_rb_wptr_poll_addr_hi)
-    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_CNTL").write(mqd.sdmax_rlcx_rb_cntl, rb_enable=1)
+    self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_RB_CNTL").write(rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=1,
+      f32_wptr_poll_enable=1, rb_size=(ring_size//4).bit_length()-1, rb_enable=1)
     self.adev.reg(f"regSDMA{pipe}_QUEUE{queue}_IB_CNTL").update(ib_enable=1)
 
   def init(self):
-    for i in range(1):
-      self.adev.reg(f"regSDMA{i}_F32_CNTL").update(halt=0)
-      self.adev.reg(f"regSDMA{i}_SEM_WAIT_FAIL_TIMER_CNTL").write(0x0)
-
-      self.adev.reg(f"regSDMA{i}_WATCHDOG_CNTL").update(queue_hang_count=100) # 10s, 100ms per unit
-      self.adev.reg(f"regSDMA{i}_UTCL1_CNTL").update(resp_mode=3, redo_delay=9)
-      self.adev.reg(f"regSDMA{i}_UTCL1_PAGE").write(0x10cec20)
-      self.adev.reg(f"regSDMA{i}_F32_CNTL").update(halt=0, th1_reset=0)
+    self.adev.regSDMA0_WATCHDOG_CNTL.update(queue_hang_count=100) # 10s, 100ms per unit
+    self.adev.regSDMA0_UTCL1_CNTL.update(resp_mode=3, redo_delay=9)
+    self.adev.regSDMA0_UTCL1_PAGE.write(0x10cec20)
+    self.adev.regSDMA0_F32_CNTL.update(halt=0, th1_reset=0)
     self.adev.regS2A_DOORBELL_ENTRY_2_CTRL.write(0x3051001d)
 
 class AM_PSP(AM_IP):

@@ -270,6 +270,7 @@ generate_am() {
     extra/amdpci/headers/psp_gfx_if.h \
     extra/amdpci/headers/amdgpu_psp.h \
     extra/amdpci/headers/amdgpu_irq.h \
+    extra/amdpci/headers/amdgpu_doorbell.h \
     extra/amdpci/headers/soc15_ih_clientid.h \
     -o $BASE/am/am.py
 

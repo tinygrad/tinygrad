@@ -4,7 +4,6 @@ from typing import Tuple, Dict, Set, Optional, Generator, List
 from tinygrad.helpers import to_mv, mv_address, getenv, round_up
 from tinygrad.runtime.autogen.am import am, mp_11_0, mp_13_0_0, nbio_4_3_0, mmhub_3_0_0, gc_11_0_0, osssys_6_0_0
 from tinygrad.runtime.support.am.mm import TLSFAllocator
-from tinygrad.runtime.support.am.firmware import Firmware
 from tinygrad.runtime.support.am.ip import AM_SOC21, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 from tinygrad.runtime.support.hcq import BumpAllocator
 
@@ -33,6 +32,72 @@ class AMRegister:
     self.adev.wreg(self.reg_off, (value & mask) | values)
 
   def read(self, **kwargs): return self.adev.rreg(self.reg_off) & self._parse_kwargs(**kwargs)[0]
+
+class AMFirmware:
+  def __init__(self):
+    # Load SOS firmware
+    self.sos_fw = {}
+
+    blob, sos_hdr = self.load_fw("/lib/firmware/amdgpu/psp_13_0_0_sos.bin", am.struct_psp_firmware_header_v2_0)
+    fw_bin = sos_hdr.psp_fw_bin
+
+    for fw_i in range(sos_hdr.psp_fw_bin_count):
+      fw_bin_desc = am.struct_psp_fw_bin_desc.from_address(ctypes.addressof(fw_bin) + fw_i * ctypes.sizeof(am.struct_psp_fw_bin_desc))
+      ucode_start_offset = fw_bin_desc.offset_bytes + sos_hdr.header.ucode_array_offset_bytes
+      self.sos_fw[fw_bin_desc.fw_type] = blob[ucode_start_offset:ucode_start_offset+fw_bin_desc.size_bytes]
+    
+    # Load other fw
+    self.ucode_start: Dict[str, int] = {}
+    self.descs: List[Tuple[int, memoryview]] = []
+
+    blob, hdr = self.load_fw("/lib/firmware/amdgpu/smu_13_0_0.bin", am.struct_smc_firmware_header_v1_0)
+    self.smu_psp_desc = self.desc(am.GFX_FW_TYPE_SMU, blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes)
+
+    # SDMA firmware
+    blob, hdr = self.load_fw("/lib/firmware/amdgpu/sdma_6_0_0.bin", am.struct_sdma_firmware_header_v2_0)
+    self.descs += [self.desc(am.GFX_FW_TYPE_SDMA_UCODE_TH0, blob, hdr.header.ucode_array_offset_bytes, hdr.ctx_ucode_size_bytes)]
+    self.descs += [self.desc(am.GFX_FW_TYPE_SDMA_UCODE_TH1, blob, hdr.ctl_ucode_offset, hdr.ctl_ucode_size_bytes)]
+
+    # PFP, ME, MEC firmware
+    for (fw_name, fw_cnt) in [('PFP', 2), ('ME', 2), ('MEC', 4)]:
+      blob, hdr = self.load_fw(f"/lib/firmware/amdgpu/gc_11_0_0_{fw_name.lower()}.bin", am.struct_gfx_firmware_header_v2_0)
+
+      # Code part
+      self.descs += [self.desc(getattr(am, f'GFX_FW_TYPE_RS64_{fw_name}'), blob, hdr.header.ucode_array_offset_bytes, hdr.ucode_size_bytes)]
+
+      # Stack
+      fw_types = [getattr(am, f'GFX_FW_TYPE_RS64_{fw_name}_P{fwnun}_STACK') for fwnun in range(fw_cnt)]
+      self.descs += [self.desc(typ, blob, hdr.data_offset_bytes, hdr.data_size_bytes) for typ in fw_types]
+      self.ucode_start[fw_name] = hdr.ucode_start_addr_lo | (hdr.ucode_start_addr_hi << 32)
+
+    # IMU firmware
+    blob, hdr = self.load_fw("/lib/firmware/amdgpu/gc_11_0_0_imu.bin", am.struct_imu_firmware_header_v1_0)
+    imu_i_off, imu_i_sz, imu_d_sz = hdr.header.ucode_array_offset_bytes, hdr.imu_iram_ucode_size_bytes, hdr.imu_dram_ucode_size_bytes
+    self.descs += [self.desc(am.GFX_FW_TYPE_IMU_I, blob, imu_i_off, imu_i_sz), self.desc(am.GFX_FW_TYPE_IMU_D, blob, imu_i_off + imu_i_sz, imu_d_sz)]
+
+    # RLC firmware
+    blob, hdr0, hdr1, hdr2, hdr3 = self.load_fw("/lib/firmware/amdgpu/gc_11_0_0_rlc.bin", am.struct_rlc_firmware_header_v2_0,
+      am.struct_rlc_firmware_header_v2_1, am.struct_rlc_firmware_header_v2_2, am.struct_rlc_firmware_header_v2_3)
+
+    for mem in ['GPM', 'SRM']:
+      off, sz = getattr(hdr1, f'save_restore_list_{mem.lower()}_offset_bytes'), getattr(hdr1, f'save_restore_list_{mem.lower()}_size_bytes')
+      self.descs += [self.desc(getattr(am, f'GFX_FW_TYPE_RLC_RESTORE_LIST_{mem}_MEM'), blob, off, sz)]
+
+    for mem,fmem in [('IRAM', 'iram'), ('DRAM_BOOT', 'dram')]:
+      off, sz = getattr(hdr2, f'rlc_{fmem}_ucode_offset_bytes'), getattr(hdr2, f'rlc_{fmem}_ucode_size_bytes')
+      self.descs += [self.desc(getattr(am, f'GFX_FW_TYPE_RLC_{mem}'), blob, off, sz)]
+
+    for mem in ['P', 'V']:
+      off, sz = getattr(hdr3, f'rlc{mem.lower()}_ucode_offset_bytes'), getattr(hdr3, f'rlc{mem.lower()}_ucode_size_bytes')
+      self.descs += [self.desc(getattr(am, f'GFX_FW_TYPE_RLC_{mem}'), blob, off, sz)]
+
+    self.descs += [self.desc(am.GFX_FW_TYPE_RLC_G, blob, hdr0.header.ucode_array_offset_bytes, hdr0.header.ucode_size_bytes)]
+
+  def load_fw(self, path:str, *headers):
+    with open(path, "rb") as f: blob = memoryview(bytearray(f.read()))
+    return tuple([blob] + [hdr.from_address(mv_address(blob)) for hdr in headers])
+
+  def desc(self, typ:int, blob:memoryview, offset:int, size:int) -> Tuple[int, memoryview]: return (typ, blob[offset:offset+size])
 
 class AMPhysicalMemoryBlock:
   def __init__(self, adev:AMDev, paddr:int, size:int): self.adev, self.paddr, self.size = adev, paddr, size
@@ -187,7 +252,7 @@ class AMDev:
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size)
-    self.fw = Firmware(self)
+    self.fw = AMFirmware()
 
     # Initialize IP blocks
     self.soc21 = AM_SOC21(self)
