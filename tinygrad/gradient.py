@@ -57,20 +57,14 @@ def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple
 
   st = ShapeTracker.from_shape(in_shape)
   ret = []
-  seen = {}  # {shapetracker: list of mops to generate that shapetracker}
-  for mop_arg in to_apply:
-    mop, arg = mop_arg
+  for (mop, arg) in to_apply:
     if mop == MovementOps.RESHAPE: st = st.reshape((prod(st.views[-1].shape),) if arg == (-1,) else arg)
     if mop == MovementOps.PERMUTE: st = st.permute(arg)
     if mop == MovementOps.EXPAND: st = st.reshape((1,*st.shape)) if len(arg) != len(st.shape) else st.expand(arg)
     if mop == MovementOps.PAD: st = st.pad(arg)
     if mop == MovementOps.SHRINK: st = st.shrink(arg)
     if mop == MovementOps.STRIDE: st = st.stride(arg)
-    if st in seen:
-      ret = seen[st][:]
-    else:
-      ret.append(mop_arg+(st.shape,))
-      seen[st] = ret[:]
+    ret.append((mop, arg, st.shape))
   return ret
 
 def view_gradient(ctx:UOp, ret:UOp):
@@ -91,17 +85,13 @@ def view_gradient(ctx:UOp, ret:UOp):
     assert ctx.shape == out_shape, f"shape mismatch {ctx.shape} != {out_shape}"
 
     if mop == MovementOps.EXPAND:
-      # Backward of expand: sum over expanded axes
       expanded_axes = tuple(i for i, (si, so) in enumerate(zip(in_shape, out_shape)) if si != so)
       if expanded_axes: ctx = ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, expanded_axes).cast(ctx.dtype)
-      # Reshape to in_shape to continue
       ctx = ctx.reshape(in_shape)
-
     elif mop == MovementOps.RESHAPE: ctx = ctx.reshape(in_shape)
     elif mop == MovementOps.PERMUTE: ctx = ctx.permute(argsort(arg))
     elif mop == MovementOps.PAD: ctx = ctx.shrink(tuple([(p[0], s+p[0]) for s,p in zip(in_shape, arg)]))
     elif mop == MovementOps.SHRINK: ctx = ctx.pad(tuple([(p[0], s-p[1]) for s,p in zip(in_shape, arg)]))
-
     elif mop == MovementOps.STRIDE:
       assert all(x in {-1,1} for x in arg), "stride is only flip"
       ctx = ctx.stride(arg)
