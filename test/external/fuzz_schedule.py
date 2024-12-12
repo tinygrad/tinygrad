@@ -4,15 +4,14 @@ from typing import DefaultDict, Dict, List, Set, Tuple, TypeVar, Union
 from tinygrad.device import Buffer
 from tinygrad.engine.realize import capturing, lower_schedule_item
 from tinygrad.helpers import DEBUG, MULTIOUTPUT, colored, getenv
-from tinygrad.engine.lazy import LazyBuffer
 from tinygrad.engine.schedule import LBScheduleItem, _graph_schedule, ScheduleItem
-from tinygrad.ops import Ops
+from tinygrad.ops import Ops, UOp
 from tinygrad.tensor import Tensor, _to_np_dtype
 
 ctx_vars = { MULTIOUTPUT: (0, 1) }
 FUZZ_SCHEDULE_MAX_PATHS = getenv("FUZZ_SCHEDULE_MAX_PATHS", 10)
 
-def fuzz_schedule(outs:List[LazyBuffer]):
+def fuzz_schedule(outs:List[UOp]):
   # find toposorts across all tunable params
   unique_ts: Dict[Tuple[LBScheduleItem, ...], Dict[str, int]] = {}
   for combination in itertools.product(*ctx_vars.values()):
@@ -24,10 +23,10 @@ def fuzz_schedule(outs:List[LazyBuffer]):
   if DEBUG >= 1: print(colored(f"fuzzing {len(toposorts)} schedule permutations", "yellow"))
 
   # setup ground truth
-  ground_truth: Dict[LazyBuffer, memoryview] = {}
-  assign_targets: Dict[LazyBuffer, LazyBuffer] = {}
+  ground_truth: Dict[UOp, memoryview] = {}
+  assign_targets: Dict[UOp, UOp] = {}
   # IMPORTANT: freeze prerealized bufs before ScheduleItem exec
-  prerealized: Dict[LazyBuffer, memoryview] = {}
+  prerealized: Dict[UOp, memoryview] = {}
   seed = Tensor._seed
   ts,_ = toposorts[0]
   for lsi in ts:
@@ -47,7 +46,7 @@ def fuzz_schedule(outs:List[LazyBuffer]):
   # exec and validate each permutation with new Buffers
   for i, (ts, ctx) in enumerate(toposorts[1:]):
     if DEBUG >= 1: print(colored(f"testing permutation {i} {ctx}", "yellow"))
-    rawbufs: Dict[LazyBuffer, Buffer] = {}
+    rawbufs: Dict[UOp, Buffer] = {}
     for lsi in ts:
       for out in lsi.outputs:
         base = rawbufs[lsi.inputs[0]].base if out.op is Ops.BUFFER_VIEW else None
