@@ -3,8 +3,7 @@ import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.realize import run_schedule
-from tinygrad.ops import Ops
-from tinygrad.engine.lazy import LazyBuffer
+from tinygrad.ops import Ops, UOp
 from tinygrad.engine.schedule import create_schedule
 
 class TestLazyBuffer(unittest.TestCase):
@@ -62,11 +61,11 @@ class TestLazyBuffer(unittest.TestCase):
     np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
 
   def test_const_dtype(self):
-    lb: LazyBuffer = Tensor([1], dtype=dtypes.int).lazydata
+    lb: UOp = Tensor([1], dtype=dtypes.int).lazydata
     assert lb.const_like(1).const_arg == 1
     assert type(lb.const_like(1).const_arg) is int
 
-    lb: LazyBuffer = Tensor([1], dtype=dtypes.float).lazydata
+    lb: UOp = Tensor([1], dtype=dtypes.float).lazydata
     assert lb.const_like(1).const_arg == 1.0
     assert type(lb.const_like(1).const_arg) is float
 
