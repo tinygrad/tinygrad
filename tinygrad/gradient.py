@@ -16,17 +16,21 @@ def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple
   to_apply:List[Tuple[MovementOps, Tuple]] = []
 
   for i, v in enumerate(st.views):
-    real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-    offset = v.offset + sum(st*(s-1) for s,st in zip(real_shape, v.strides) if st<0)
+    shape_without_mask = tuple(y-x for x,y in v.mask) if v.mask else v.shape
+
+    offset = v.offset + sum(st*(s-1) for s,st in zip(shape_without_mask, v.strides) if st<0)
     real_offset = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
-    real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
+    shape_without_mask_and_stride_0 = [s for s,st in zip(shape_without_mask, v.strides) if st]
 
     # deal with strides?
     strides: List[sint] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
-    buffer_size = sum((s-1)*st for s,st in zip(real_real_shape,strides)) + 1
+    buffer_size = sum((s-1)*st for s,st in zip(shape_without_mask_and_stride_0, strides)) + 1
     if i: buffer_size = prod(st.views[i-1].shape) - real_offset
-    def sort_by_strides(shape, strides): return sorted(zip(shape, strides), key=lambda k: (k[1],-k[0]), reverse=True), sorted(range(len(strides)), key=lambda k: (strides[k],-real_real_shape[k]), reverse=True)
-    ordered_shape_strides, order = sort_by_strides(real_real_shape, strides)
+
+    def sort_by_strides(shape, strides):
+      return sorted(zip(shape, strides), key=lambda k: (k[1],-k[0]), reverse=True), \
+             sorted(range(len(strides)), key=lambda k: (strides[k],-shape_without_mask_and_stride_0[k]), reverse=True)
+    ordered_shape_strides, order = sort_by_strides(shape_without_mask_and_stride_0, strides)
 
     to_apply.extend([(MovementOps.RESHAPE, (-1,)),
                      (MovementOps.SHRINK, ((real_offset, real_offset+buffer_size),))])
@@ -50,7 +54,9 @@ def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple
       to_apply.extend([(MovementOps.SHRINK, (*[(0, s[0]) for s in ordered_shape_strides], (0,1))),
                        (MovementOps.RESHAPE, tuple(s[0] for s in ordered_shape_strides))])
       if order != list(range(len(order))): to_apply.append((MovementOps.PERMUTE, tuple(order.index(i) for i in range(len(strides)))))
-    to_apply.append((MovementOps.RESHAPE, tuple(s if st else 1 for s,st in zip(real_shape, v.strides))))
+
+    # Reshape to final shape considering strides that are 0 become dimension of size 1
+    to_apply.append((MovementOps.RESHAPE, tuple(s if st else 1 for s,st in zip(shape_without_mask, v.strides))))
 
     # handle FLIP
     if any(i < 0 for i in v.strides): to_apply.append((MovementOps.STRIDE, tuple(-1 if st<0 else 1 for st in v.strides)))
@@ -61,10 +67,10 @@ def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple
       post_expand_pads = tuple((x,s-y) if st == 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
       if any(x != (0,0) for x in pre_expand_pads):
         to_apply.append((MovementOps.PAD, pre_expand_pads))
-        real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand_pads))
+        shape_without_mask = tuple(x+s[0]+s[1] for x,s in zip(shape_without_mask, pre_expand_pads))
 
     # then, we do any expands
-    if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)): to_apply.append((MovementOps.EXPAND, real_shape))
+    if any(s != 1 and st == 0 for s,st in zip(shape_without_mask, v.strides)): to_apply.append((MovementOps.EXPAND, shape_without_mask))
 
     # lastly, we apply post expand pads
     if v.mask is not None and any(x != (0,0) for x in post_expand_pads): to_apply.append((MovementOps.PAD, post_expand_pads))
@@ -81,6 +87,9 @@ def to_movement_ops(st: ShapeTracker, in_shape) -> List[Tuple[MovementOps, Tuple
     if mop == MovementOps.SHRINK: out_st = out_st.shrink(arg)
     if mop == MovementOps.STRIDE: out_st = out_st.stride(arg)
     ret.append((mop, arg, in_shape))
+
+  # they should at least be equivalent
+  #assert out_st.simplify() == st.simplify(), f"rebuilt {out_st.simplify()} != {st.simplify()}"
   return ret
 
 def view_gradient(ctx:UOp, ret:UOp):
