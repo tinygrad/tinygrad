@@ -720,7 +720,9 @@ class UPat(MathTrait):
   @staticmethod
   @functools.lru_cache(None)
   def cvar(name:Optional[str]=None, dtype:Optional[DType]=None, vec=True):
-    return UPat((Ops.CONST, Ops.VCONST) if vec else Ops.CONST, dtype=dtype, name=name)
+    return UPat.any(UPat((Ops.CONST, Ops.VCONST) if vec else Ops.CONST, dtype=dtype, name=name),
+                    UPat(Ops.VIEW, src=(UPat(), UPat(Ops.CONST, dtype=dtype))).view(name=name),
+                    UPat(Ops.VIEW, name=name, src=(UPat(), UPat(Ops.CONST, dtype=dtype))))
   @staticmethod
   def const(dtype:Optional[Union[DType, Tuple[DType, ...]]], b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
 

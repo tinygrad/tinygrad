@@ -327,7 +327,7 @@ def _as_const(u:UOp, val:ConstType) -> UOp:
 
 def simplify_reduceop(reduce:UOp, x:UOp) -> Optional[UOp]:
   # remove reduce on unmasked const
-  if all_int(x.shape) and x.is_unrealized_unmasked_const():
+  if all_int(x.shape) and all(v.mask is None for v in unwrap(x.st).views):
     prshape = prod(unwrap(x.st).shape[i] for i in reduce.arg[1])
     ret = x.const_arg
     match reduce.arg[0]:
@@ -375,9 +375,9 @@ ops_folding = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x:UOp.const(reduce.dtype, identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
   # reduce of const is collapsed (TODO: make this a generic rule for stride0)
-  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), simplify_reduceop),
+  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.cvar("x"),)), simplify_reduceop),
   # CONST doesn't need COPY
-  (UPat(Ops.COPY, src=(UPat.var("x"),)), lambda x:x if x.is_unrealized_const() else None),
+  (UPat(Ops.COPY, src=(UPat.cvar("x"),)), lambda x:x),
   # no double COPY
   (UPat(Ops.COPY, src=(UPat(Ops.VIEW, src=(UPat(), UPat(Ops.COPY, name="base")),))), lambda base: base),
   # no COPY to same device, except clone (arg is True)
