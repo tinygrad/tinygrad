@@ -97,10 +97,13 @@ class Ops(FastEnum):
   SINK = auto(); CONTIGUOUS = auto(); PRELOAD = auto() # noqa: E702
 
   # MetaOps
-  COPY = auto(); EMPTY = auto(); BUFFER_VIEW = auto() # noqa: E702
+  COPY = auto(); EMPTY = auto(); BUFFER_VIEW = auto(); DETACH = auto() # noqa: E702
 
   # blocks in linearizer
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto() # noqa: E702
+
+  # movement ops!
+  RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
 
   # misc ops
   UNROLL = auto(); CONTRACT = auto() # noqa: E702
@@ -151,6 +154,7 @@ class GroupOp:
   ALU = set.union(Unary, Binary, Ternary)
 
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
+  Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.STRIDE}
 
   # meta ops
   Meta = {Ops.COPY, Ops.EMPTY, Ops.BUFFER_VIEW}
