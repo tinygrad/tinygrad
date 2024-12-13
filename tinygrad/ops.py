@@ -272,13 +272,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def st(self) -> Optional[ShapeTracker]:
     if self.op is Ops.VIEW: return self.arg
-    if self.op is Ops.RESHAPE: return unwrap(self.src[0].st).reshape(self.arg)
-    if self.op is Ops.PERMUTE: return unwrap(self.src[0].st).permute(self.arg)
-    if self.op is Ops.EXPAND: return unwrap(self.src[0].st).expand(self.arg)
-    if self.op is Ops.SHRINK: return unwrap(self.src[0].st).shrink(self.arg)
-    if self.op is Ops.STRIDE: return unwrap(self.src[0].st).stride(self.arg)
-    if self.op is Ops.PAD: return unwrap(self.src[0].st).pad(self.arg)
-
+    if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
     # buffer ops can have a non contiguous shapetracker
     if self.op in GroupOp.Buffer and len(src_sts:=[unwrap(x.st) for x in self.src if x.op is Ops.VIEW]) != 0: return src_sts[0]
     if len(src_sts:=[x.st for x in self.src if x.st is not None]) == 0: return None
@@ -351,10 +345,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self._device is not None and self._device.startswith("DISK"): raise RuntimeError("CAST isn't supported on DISK")
     if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self is not self.base:
       # NOTE: we have to apply the movementops here, we can't use VIEW (yet)
+      # TODO: move this to the scheduler
       ret = self.base.cast(dtype, bitcast)
       op_arg = []
       mop = self
-      while mop.op in GroupOp.Movement:
+      while mop is not self.base:
         op_arg.append((mop.op, mop.arg))
         mop = mop.src[0]
       for op,arg in reversed(op_arg): ret = UOp(op, ret.dtype, (ret,), arg)
@@ -489,7 +484,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return ret
 
-  def _mop(self, op, arg):
+  def _mop(self, op:Ops, arg):
     ret = UOp(op, self.dtype, (self,), arg)
     ret.st  # pylint: disable=pointless-statement
     return ret
