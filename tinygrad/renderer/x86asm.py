@@ -12,8 +12,8 @@ x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR
 x86_float32_ops = {Ops.ADD: "addss", Ops.SUB: "subss", Ops.MUL: "mulss", Ops.FDIV: "divss", Ops.CMPLT: "ucomiss", Ops.CMPNE: "ucomiss",
                  Ops.SQRT: "sqrtss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
 x86_float64_ops = {**{k:v[:-1]+'d' for k,v in x86_float32_ops.items()}}
-#x86_float16_ops = {Ops.STORE: "pextrw", Ops.LOAD: "pinsrw", Ops.ASSIGN: "pextrw", Ops.DEFINE_ACC: "pinsrw"}
-x86_float16_ops = {Ops.STORE: "movd", Ops.LOAD: "movd", Ops.ASSIGN: "movss", Ops.DEFINE_ACC: "movss"}
+# NOTE: these are just for reg/stack reg/reg movs, for heap load/stores we load float16 using gen regs 
+x86_float16_ops = {Ops.STORE: "movss", Ops.LOAD: "movss", Ops.ASSIGN: "movss", Ops.DEFINE_ACC: "movss"}
 # NOTE: are doubles vectorized? 2 doubles is "ups" not "lps", use a instead of u
 x86_vec2_ops = {**{k:v+"lps" for k,v in x86_mov_ops.items()}}
 x86_vec4_ops = {**{k:v+"ups" for k,v in x86_mov_ops.items()}}
@@ -147,22 +147,20 @@ class X86Renderer(Renderer):
   extra_matcher = x86_matcher
 
   def idiv(self, x:UOp, s:UOp) -> str:
-    remainder_signex = {1:"cbw", 2: "cwd", 4: "cdq", 8: "cqo"}
-    l = ""
+    remainder_signex = {1: "cbw", 2: "cwd", 4: "cdq", 8: "cqo"}
+    req_regs = ("rax", "rdx")
     # if dividend is rax/rdx we don't push because pop would overwrite result
-    if self.r[x] != "rax" and "rax" in self.r.values(): l += "push rax\n"
-    if self.r[x] != "rdx" and "rdx" in self.r.values(): l += "push rdx\n"
+    l = [f"push {reg}" for reg in req_regs if self.r[x] != reg]
     # divisor can't be rax or rdx
-    if self.r[s] in ("rax", "rdx"): l += f"mov r15, {self.r[s]}\n"
-    divisor = "r15" if self.r[s] in ("rax", "rdx") else self.r[s]
-    l += f"mov {self.regt('rax', x.dtype)}, {self[x]}\n"
-    if dtypes.is_unsigned(x.dtype): l += f"{'xor rdx, rdx' if x.dtype.itemsize > 1 else 'xor ah, ah'}\n"
-    else: l += f"{remainder_signex[x.dtype.itemsize]}\n"
-    l += f"{x86op[x.dtype][x.op]} {self.regt(divisor, s.dtype)}\n"
-    l += f"mov {self[x]}, {self.regt('rax' if x.op is Ops.IDIV else 'rdx', x.dtype)}"
-    if self.r[x] != "rdx" and "rdx" in self.r.values(): l += "\npop rdx"
-    if self.r[x] != "rax" and "rax" in self.r.values(): l += "\npop rax"
-    return l
+    if self.r[s] in req_regs: l.append(f"mov r15, {self.r[s]}")
+    divisor = "r15" if self.r[s] in req_regs else self.r[s]
+    l.append(f"mov {self.regt('rax', x.dtype)}, {self[x]}")
+    #zero/sign extend register with remainder
+    if dtypes.is_unsigned(x.dtype): l.append(f"xor {'rdx, rdx' if x.dtype.itemsize > 1 else 'ah, ah'}")
+    else: l.append(f"{remainder_signex[x.dtype.itemsize]}")
+    l.append(f"{x86op[x.dtype][x.op]} {self.regt(divisor, s.dtype)}")
+    l.append(f"mov {self[x]}, {self.regt('rax' if x.op is Ops.IDIV else 'rdx', x.dtype)}")
+    return "\n".join(l + [f"pop {reg}" for reg in reversed(req_regs) if self.r[x] != reg])
 
   def regt(self, reg:str, dt:DType) -> str:
     if dt.itemsize == 8 or dtypes.is_float(dt) or isinstance(dt, PtrDType): return reg
@@ -230,7 +228,6 @@ class X86Renderer(Renderer):
         for s in u.src: # mov srcs
           # these can't take imm values
           if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD): mov_to_reg(s, assign_reg(i, s.dtype))
-          #elif is_mem(s) and not (u.op in (Ops.LOAD,Ops.DEFINE_ACC) and s.op is Ops.CONST): mov_to_reg(s, assign_reg(i, s.dtype))
           elif is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
         if u.dtype != dtypes.void: # assign destination
           if u.op is Ops.ASSIGN: r[u] = mem[u] = mem[u.src[0]] # define acc was already spilled here
