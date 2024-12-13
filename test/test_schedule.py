@@ -1749,10 +1749,10 @@ class TestSwizzle(unittest.TestCase):
     UOp(Ops.LOAD, dtypes.float, arg=None, src=(
         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()),
         UOp(Ops.VIEW, dtypes.void, arg=(ld_st:=ShapeTracker(views=(View(shape=(2, 1, 3, 16, 62, 62, 3, 3), strides=(0, 0, 9, 27, 0, 0, 3, 1), offset=0, mask=None, contiguous=False),))), src=()),)),)),)) # noqa: E501
-    # there's an EXPAND pushing through the REDUCE_AXIS
+    # there's an UNROLL pushing through the REDUCE_AXIS
     self.assertGreater(prod(swizzle.st.shape), prod(swizzle.src[0].st.shape))
     ret = swizzle_rewrite(swizzle)
-    # EXPAND is rewritten
+    # UNROLL is rewritten
     self.assertEqual(prod(ret.st.shape), prod(ret.src[0].st.shape))
     # and pushed to the LOAD
     new_load_st = unwrap([x for x in ret.toposort if x.op is Ops.VIEW][0].st)
