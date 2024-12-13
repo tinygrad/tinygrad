@@ -596,10 +596,10 @@ class Kernel:
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           def fix_st(st: ShapeTracker, wd_pattern, tcd_pattern):
-            offset = (tcd := self.first_upcast) - (wd := self.global_dims) + len(wd_pattern)
+            offset = (tcd := self.first_upcast) - ((wd := self.global_dims) + len(wd_pattern))
             permaxis = list(range(wd)) \
-              + [x + (wd if x < len(wd_pattern) else tcd + offset) for x in wd_pattern]  + list(range(wd + len(wd_pattern), tcd)) \
-              + [x + (wd if x < len(wd_pattern) else tcd + offset) for x in tcd_pattern] + list(range(tcd + len(tcd_pattern), len(st.shape)))
+              + [wd + x + (offset if x >= len(wd_pattern) else 0) for x in wd_pattern]  + list(range(wd + len(wd_pattern), tcd)) \
+              + [wd + x + (offset if x >= len(wd_pattern) else 0) for x in tcd_pattern] + list(range(tcd + len(tcd_pattern), len(st.shape)))
             return ShapeTracker.from_shape(st.shape).permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
