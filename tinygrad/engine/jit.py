@@ -1,14 +1,12 @@
-from __future__ import annotations
 from typing import TypeVar, Generic, Callable, List, Tuple, Union, Dict, cast, Optional, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.engine.lazy import LazyBuffer
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, dedup, partition, unwrap
 from tinygrad.device import Buffer, Compiled, Device
 from tinygrad.dtype import DType
 from tinygrad.ops import UOp, ssimplify, Variable, sint, sym_infer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferXfer, CompiledRunner, Runner
+from tinygrad.engine.realize import ExecItem, capturing, EmptyOp, ViewOp, BufferCopy, BufferXfer, CompiledRunner, Runner
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from dataclasses import dataclass
@@ -180,10 +178,10 @@ def _prepare_jit_inputs(args, kwargs):
   input_tensors: List[Tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
   names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
   if tensors: Tensor.realize(*tensors)
-  lbs: List[LazyBuffer] = flatten([t.lazydata.lbs for t in tensors])
+  lbs: List[UOp] = flatten([t.lazydata.lbs for t in tensors])
   input_buffers: List[Buffer] = [lb.base.realized for lb in lbs if lb.base.realized is not None]
   assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
-  st_varval_dtype_device = [(*lb.st.unbind(), lb.dtype, lb.device) for lb in lbs]
+  st_varval_dtype_device = [(*unwrap(lb.st).unbind(), lb.dtype, lb.device) for lb in lbs]
   var_vals = merge_dicts([x[1] for x in st_varval_dtype_device] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
   st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varval_dtype_device]
   return input_buffers, var_vals, names, st_vars_dtype_device
@@ -268,6 +266,8 @@ class TinyJit(Generic[ReturnType]):
           if any(b in depends for b in ei.bufs):
             if isinstance(ei.prg, CompiledRunner):
               depends.update(cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs)
+            if isinstance(ei.prg, (BufferCopy, BufferXfer)):
+              depends.add(cast(Buffer, ei.bufs[0]))
         pruned, onetime = partition(jit_cache,
                                     lambda ei: not isinstance(ei.prg, CompiledRunner) or any(ei.bufs[out] in depends for out in ei.prg.p.outs))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")

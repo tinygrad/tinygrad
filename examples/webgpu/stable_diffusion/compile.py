@@ -1,9 +1,10 @@
 import os
-from extra.export_model import compile_net, jit_model
+from extra.export_model import compile_net, jit_model, dtype_to_js_type
+from extra.f16_decompress import u32_to_f16
 from examples.stable_diffusion import StableDiffusion
 from tinygrad.nn.state import get_state_dict, safe_save, safe_load_metadata, torch_load, load_state_dict
 from tinygrad.tensor import Tensor
-from tinygrad import Device
+from tinygrad import Device, dtypes
 from tinygrad.helpers import fetch
 from typing import NamedTuple, Any, List
 import requests
@@ -29,7 +30,7 @@ def convert_f32_to_f16(input_file, output_file):
     rest_float32_values.tofile(f)
 
 def split_safetensor(fn):
-  _, json_len, metadata = safe_load_metadata(fn)
+  _, data_start, metadata = safe_load_metadata(fn)
   text_model_offset = 3772703308
   chunk_size = 536870912
 
@@ -51,12 +52,12 @@ def split_safetensor(fn):
     part_offset = offset - last_offset
 
     if (part_offset >= chunk_size):
-      part_end_offsets.append(8+json_len+offset)
+      part_end_offsets.append(data_start+offset)
       last_offset = offset
 
   text_model_start = int(text_model_offset/2)
   net_bytes = bytes(open(fn, 'rb').read())
-  part_end_offsets.append(text_model_start+8+json_len)
+  part_end_offsets.append(text_model_start+data_start)
   cur_pos = 0
 
   for i, end_pos in enumerate(part_end_offsets):
@@ -65,7 +66,7 @@ def split_safetensor(fn):
       cur_pos = end_pos
 
   with open(os.path.join(os.path.dirname(__file__), f'./net_textmodel.safetensors'), "wb+") as f:
-    f.write(net_bytes[text_model_start+8+json_len:])
+    f.write(net_bytes[text_model_start+data_start:])
 
   return part_end_offsets
 
@@ -95,7 +96,8 @@ if __name__ == "__main__":
   sub_steps = [
     Step(name = "textModel", input = [Tensor.randn(1, 77)], forward = model.cond_stage_model.transformer.text_model),
     Step(name = "diffusor", input = [Tensor.randn(1, 77, 768), Tensor.randn(1, 77, 768), Tensor.randn(1,4,64,64), Tensor.rand(1), Tensor.randn(1), Tensor.randn(1), Tensor.randn(1)], forward = model),
-    Step(name = "decoder", input = [Tensor.randn(1,4,64,64)], forward = model.decode)
+    Step(name = "decoder", input = [Tensor.randn(1,4,64,64)], forward = model.decode),
+    Step(name = "f16tof32", input = [Tensor.randn(2097120, dtype=dtypes.uint32)], forward = u32_to_f16)
   ]
 
   prg = ""
@@ -116,19 +118,23 @@ if __name__ == "__main__":
     weights = {id(x.lazydata.base.realized): name for name, x in state.items()}
     kernel_code = '\n\n'.join([f"const {key} = `{fixup_code(code, key)}`;" for key, code in functions.items()])
     kernel_names = ', '.join([name for (name, _, _, _) in statements])
+    input_names = [name for _,name in special_names.items() if "input" in name]
+    output_names = [name for _,name in special_names.items() if "output" in name]
+    input_buf_types = [dtype_to_js_type(bufs[inp_name][1]) for inp_name in input_names]
+    output_buf_types = [dtype_to_js_type(bufs[out_name][1]) for out_name in output_names]
     kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
-    bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}'], '{weights[_key]}'))") + ";"  for name,(size,dtype,_key) in bufs.items()])
+    exported_bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}'], '{weights[_key]}'))") + ";"  for name,(size,dtype,_key) in bufs.items()])
     gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate(special_names.items()) if "output" not in value])
-    input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new Float32Array(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,(_,value) in enumerate(special_names.items()) if value != "output0"])
+    input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new {input_buf_types[i]}(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,_ in enumerate(input_names)])
     return f"""\n    var {step.name} = function() {{
 
     {kernel_code}
 
     return {{
       "setup": async (device, safetensor) => {{
-        const metadata = getTensorMetadata(safetensor[0]);
+        const metadata = safetensor ? getTensorMetadata(safetensor[0]) : null;
 
-        {bufs}
+        {exported_bufs}
 
         {gpu_write_bufs}
         const gpuReadBuffer = device.createBuffer({{ size: output0.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }});
@@ -147,8 +153,8 @@ if __name__ == "__main__":
             device.queue.submit([gpuCommands]);
 
             await gpuReadBuffer.mapAsync(GPUMapMode.READ);
-            const resultBuffer = new Float32Array(gpuReadBuffer.size/4);
-            resultBuffer.set(new Float32Array(gpuReadBuffer.getMappedRange()));
+            const resultBuffer = new {output_buf_types[0]}(gpuReadBuffer.size/{bufs[output_names[0]][1].itemsize});
+            resultBuffer.set(new {output_buf_types[0]}(gpuReadBuffer.getMappedRange()));
             gpuReadBuffer.unmap();
             return resultBuffer;
         }}

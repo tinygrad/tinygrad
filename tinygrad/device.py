@@ -2,10 +2,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Optional, Dict, Tuple, Any, Iterator
-import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys
+import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys, re
 from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
+from tinygrad.ops import UOp, buffers
 
 # **************** Device ****************
 
@@ -13,7 +14,7 @@ class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def _canonicalize(self, device:str) -> str: return ((d:=device.split(":", 1)[0].upper()) + device[len(d):]).replace(":0", "")
+  def _canonicalize(self, device:str) -> str: return re.sub(r":0$", "", (d:=device.split(":", 1)[0].upper()) + device[len(d):])
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
   def canonicalize(self, device:Optional[str]) -> str: return self._canonicalize(device) if device is not None else Device.DEFAULT
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
@@ -43,6 +44,7 @@ Device = _Device()
 
 # **************** Buffer + Allocators ****************
 
+
 @dataclass(frozen=True, eq=True)
 class BufferSpec:
   # TODO: move device, size, dtype here?
@@ -54,8 +56,8 @@ class BufferSpec:
   external_ptr: Optional[int] = None
 
 class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None,
-               initial_value:Optional[bytes]=None, lb_refcount=0, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferSpec]=None, initial_value:Optional[bytes]=None,
+               lb_refcount=0, uop_ref:Optional[UOp]=None, base:Optional[Buffer]=None, offset:int=0, preallocate=False):
     if isinstance(dtype, ImageDType): options = BufferSpec(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     else: assert isinstance(dtype, DType) and not isinstance(dtype, PtrDType)
     self.device, self.size, self.dtype, self.options, self.offset = device, size, dtype, options, offset
@@ -72,6 +74,7 @@ class Buffer:
       assert device == base.device, "base must have the same device"
       self._base = base
     if preallocate: self.allocate()
+    if uop_ref is not None: buffers[uop_ref] = self
   @property
   def base(self) -> Buffer: return self._base if self._base is not None else self
   @property
@@ -94,13 +97,15 @@ class Buffer:
     return self
   def __reduce__(self):
     buf = None
+    if len(uop_refs:=[u for u,v in buffers.items() if self is v]) > 1: raise RuntimeError(f"double ref to buffer? {len(uop_refs)}")
+    uop_ref = None if len(uop_refs) == 0 else uop_refs[0]
     if self._base is not None:
-      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, self.base, self.offset, self.is_allocated())
-    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount)
+      return self.__class__, (self.device, self.size, self.dtype, None, None, None, 0, uop_ref, self.base, self.offset, self.is_allocated())
+    if self.device == "NPY": return self.__class__, (self.device, self.size, self.dtype, self._buf, self.options, None, self.lb_refcount, uop_ref)
     if self.is_allocated():
       buf = bytearray(self.nbytes)
       self.copyout(memoryview(buf))
-    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount)
+    return self.__class__, (self.device, self.size, self.dtype, None, self.options, buf, self.lb_refcount, uop_ref)
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
@@ -138,7 +143,7 @@ class Buffer:
 class Allocator:
   # overriden in LRUAllocator
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
-    assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
+    assert size > 0, f"alloc size must be positve, getting {size}"
     return self._alloc(size, options if options is not None else BufferSpec())
   def free(self, opaque, size:int, options:Optional[BufferSpec]=None): self._free(opaque, options if options is not None else BufferSpec())
 

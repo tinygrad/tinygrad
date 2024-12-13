@@ -52,7 +52,7 @@ class PtrDType(DType):
   def vec(self, sz:int) -> DType:
     assert self.v == 1, f"can't vectorize ptr {self} with size {sz}"
     if sz == 1: return self  # sz=1 is a scalar
-    return type(self)(*tuple(sz if f.name == 'v' else (self if f.name == '_scalar' else getattr(self, f.name)) for f in fields(self)))
+    return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.local, sz)
   def ptr(self, local=False): raise RuntimeError("can't make a pointer from a pointer")
   @property
   def vcount(self): return self.v

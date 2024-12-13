@@ -17,7 +17,7 @@ def strides_for_shape(shape:Tuple[sint, ...]) -> Tuple[sint, ...]:
   return canonicalize_strides(shape, strides)
 
 @functools.lru_cache(maxsize=None)
-def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]]=None) -> Tuple[Tuple[int, int, int], ...]:
+def merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]]=None) -> Tuple[Tuple[int, int, int], ...]:
   # merge contiguous sub-parts or zero strided dims. ret = Tuple[(merged_size, stride, merged size w/o zero stride), ...]
   if not shape: return ()
   assert len(shape) == len(strides) and (mask is None or len(shape) == len(mask))
@@ -233,7 +233,7 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def minify(self):
-    min_shape = tuple(x[0] for x in _merge_dims(self.shape, self.strides, self.mask))
+    min_shape = tuple(x[0] for x in merge_dims(self.shape, self.strides, self.mask))
     return nv if (nv := self.reshape(min_shape)) else self
 
   def __unsafe_resize(self, arg: Tuple[Tuple[sint, sint], ...], mask=None) -> View:
@@ -268,11 +268,9 @@ class View:
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def expand(self, new_shape: Tuple[sint, ...]) -> View:
     if len(new_shape) != len(self.shape): raise ValueError(f"expand arg {new_shape=} must have same number of dimensions as shape {self.shape=}")
-    if 0 in self.shape:
-      assert all((s == x == 0) or (s > 0 and (x % s) == 0) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
-      return View.create(new_shape)
-    # TODO: this resolve might be wrong
-    assert all((not resolve(s != x, False) or s == 1) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
+    # NOTE: does not check multiple of symbolic shape
+    assert all(resolve(s == ns) or s == 1 for s,ns in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
+    if 0 in self.shape: return View.create(new_shape)
     # NOTE: can the mask ever be (0,0)?
     # TODO: this resolve may not be needed, but it's hard because vars need to be sorted
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if resolve(s != ns, False) else m) \
@@ -300,16 +298,13 @@ class View:
   def reshape(self, new_shape: Tuple[sint, ...]) -> Optional[View]:
     if self.shape == new_shape: return self
 
-    # TODO: this resolve shouldn't be needed
-    assert all(resolve(x >= 0) for x in new_shape), f"shape can't contain negative numbers {new_shape}"
-    if 0 in self.shape:
-      assert 0 in new_shape, f"cannot reshape 0 size to {new_shape}"
-      return View.create(new_shape)
+    assert all(x >= 0 for x in new_shape), f"shape can't contain negative numbers {new_shape}"
     # check for the same size
     if (self_all_int := all_int(self.shape)):
       assert all(isinstance(s, (int, UOp)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
       if resolve(prod(self.shape) != prod(new_shape), False): raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
 
+    if 0 in self.shape: return View.create(new_shape)
     if new_shape == () and self.mask and any(mx==my for (mx,my) in self.mask): return None
 
     # after the asserts, it's okay to check contiguous
@@ -325,7 +320,7 @@ class View:
       return View(new_shape, self.strides, self.offset, self.mask, self.contiguous)
 
     strides, r_new_shape = [], reversed(new_shape)
-    for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
+    for merged_dim, new_stride, real_dim in reversed(merge_dims(self.shape, self.strides, self.mask)):
       acc = 1
       # TODO: third resolve shouldn't be needed
       while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and resolve((new_dim := next(r_new_shape, 0)) > 0):
