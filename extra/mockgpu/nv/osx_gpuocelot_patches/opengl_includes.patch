@@ -1,0 +1,300 @@
+From a05b92f315c1a11ef3b2415ba079513c004dd2d5 Mon Sep 17 00:00:00 2001
+From: Jakob Spahn <jakob@craalse.de>
+Date: Thu, 12 Dec 2024 14:54:23 +0100
+Subject: [PATCH] import osx opengl
+
+---
+ ocelot/include/ocelot/cuda/CudaDriver.h                       | 2 +-
+ ocelot/include/ocelot/cuda/CudaDriverInterface.h              | 2 +-
+ tests/cuda2.2/sdk/cuda_gl_interop.h                           | 2 +-
+ tests/cuda2.2/sdk/cutil_gl_error.h                            | 2 +-
+ tests/cuda2.3/sdk/cutil_gl_error.h                            | 2 +-
+ tests/cuda3.2/sdk/GL/freeglut_std.h                           | 2 +-
+ tests/cuda3.2/sdk/GL/glut.h                                   | 2 +-
+ tests/cuda3.2/sdk/cuda_gl_interop.h                           | 2 +-
+ tests/cuda3.2/sdk/cutil_gl_error.h                            | 2 +-
+ tests/cuda3.2/shared/GL/freeglut_std.h                        | 2 +-
+ tests/cuda3.2/shared/GL/glu.h                                 | 2 +-
+ tests/cuda3.2/shared/GL/glut.h                                | 2 +-
+ tests/cuda4.1sdk/sdk/cutil_gl_error.h                         | 2 +-
+ .../cudarenderer-2.1h/VisualC/libSDL/include/SDL/SDL_opengl.h | 2 +-
+ tests/unstructured/cudarenderer-2.1h/configure                | 2 +-
+ tests/unstructured/cudarenderer-2.1h/configure.ac             | 2 +-
+ tests/unstructured/cudarenderer-2.1h/src/BVH.cpp              | 2 +-
+ tests/unstructured/cudarenderer-2.1h/src/Loader.cpp           | 2 +-
+ tests/unstructured/cudarenderer-2.1h/src/cudarenderer.cu      | 2 +-
+ tests/unstructured/cudarenderer-2.1h/src/main.cpp             | 4 ++--
+ 20 files changed, 21 insertions(+), 21 deletions(-)
+
+diff --git a/ocelot/include/ocelot/cuda/CudaDriver.h b/ocelot/include/ocelot/cuda/CudaDriver.h
+index 1edf5b16..dbe3471a 100644
+--- a/ocelot/include/ocelot/cuda/CudaDriver.h
++++ b/ocelot/include/ocelot/cuda/CudaDriver.h
+@@ -15,7 +15,7 @@
+ #endif
+ 
+ // OpenGL Includes
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ 
+ // Standard Library Includes
+ #include <string>
+diff --git a/ocelot/include/ocelot/cuda/CudaDriverInterface.h b/ocelot/include/ocelot/cuda/CudaDriverInterface.h
+index 52bdf650..a8dc748a 100644
+--- a/ocelot/include/ocelot/cuda/CudaDriverInterface.h
++++ b/ocelot/include/ocelot/cuda/CudaDriverInterface.h
+@@ -19,7 +19,7 @@
+ #undef min
+ #endif
+ 
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ 
+ // Ocelot includes
+ #include <ocelot/cuda/cuda_internal.h>
+diff --git a/tests/cuda2.2/sdk/cuda_gl_interop.h b/tests/cuda2.2/sdk/cuda_gl_interop.h
+index db937e74..5efaefb1 100644
+--- a/tests/cuda2.2/sdk/cuda_gl_interop.h
++++ b/tests/cuda2.2/sdk/cuda_gl_interop.h
+@@ -50,7 +50,7 @@
+ 
+ #else /* __APPLE__ */
+ 
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ 
+ #endif /* __APPLE__ */
+ 
+diff --git a/tests/cuda2.2/sdk/cutil_gl_error.h b/tests/cuda2.2/sdk/cutil_gl_error.h
+index 3f6bbf9a..009a09d0 100644
+--- a/tests/cuda2.2/sdk/cutil_gl_error.h
++++ b/tests/cuda2.2/sdk/cutil_gl_error.h
+@@ -46,7 +46,7 @@
+ #include <OpenGL/gl.h>
+ #include <OpenGL/glu.h>
+ #else
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ #include <GL/glu.h>
+ #endif
+ 
+diff --git a/tests/cuda2.3/sdk/cutil_gl_error.h b/tests/cuda2.3/sdk/cutil_gl_error.h
+index 54a3403b..6fa6f746 100644
+--- a/tests/cuda2.3/sdk/cutil_gl_error.h
++++ b/tests/cuda2.3/sdk/cutil_gl_error.h
+@@ -28,7 +28,7 @@
+ #include <OpenGL/gl.h>
+ #include <OpenGL/glu.h>
+ #else
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ #include <GL/glu.h>
+ #endif
+ 
+diff --git a/tests/cuda3.2/sdk/GL/freeglut_std.h b/tests/cuda3.2/sdk/GL/freeglut_std.h
+index d7bdec08..bb041a6b 100644
+--- a/tests/cuda3.2/sdk/GL/freeglut_std.h
++++ b/tests/cuda3.2/sdk/GL/freeglut_std.h
+@@ -81,7 +81,7 @@
+ /*
+  * Always include OpenGL and GLU headers
+  */
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ #include <GL/glu.h>
+ 
+ /*
+diff --git a/tests/cuda3.2/sdk/GL/glut.h b/tests/cuda3.2/sdk/GL/glut.h
+index 96d63347..256cabc1 100644
+--- a/tests/cuda3.2/sdk/GL/glut.h
++++ b/tests/cuda3.2/sdk/GL/glut.h
+@@ -56,7 +56,7 @@ typedef unsigned short wchar_t;
+ 
+ #endif
+ 
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ #include <GL/glu.h>
+ 
+ /* define APIENTRY and CALLBACK to null string if we aren't on Win32 */
+diff --git a/tests/cuda3.2/sdk/cuda_gl_interop.h b/tests/cuda3.2/sdk/cuda_gl_interop.h
+index cc02a0df..166fc7ea 100644
+--- a/tests/cuda3.2/sdk/cuda_gl_interop.h
++++ b/tests/cuda3.2/sdk/cuda_gl_interop.h
+@@ -45,7 +45,7 @@
+ 
+ #else /* __APPLE__ */
+ 
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ 
+ #endif /* __APPLE__ */
+ 
+diff --git a/tests/cuda3.2/sdk/cutil_gl_error.h b/tests/cuda3.2/sdk/cutil_gl_error.h
+index 4da3d39e..d911f702 100644
+--- a/tests/cuda3.2/sdk/cutil_gl_error.h
++++ b/tests/cuda3.2/sdk/cutil_gl_error.h
+@@ -39,7 +39,7 @@
+ #include <OpenGL/gl.h>
+ #include <OpenGL/glu.h>
+ #else
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ #include <GL/glu.h>
+ #endif
+ 
+diff --git a/tests/cuda3.2/shared/GL/freeglut_std.h b/tests/cuda3.2/shared/GL/freeglut_std.h
+index d7bdec08..bb041a6b 100644
+--- a/tests/cuda3.2/shared/GL/freeglut_std.h
++++ b/tests/cuda3.2/shared/GL/freeglut_std.h
+@@ -81,7 +81,7 @@
+ /*
+  * Always include OpenGL and GLU headers
+  */
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ #include <GL/glu.h>
+ 
+ /*
+diff --git a/tests/cuda3.2/shared/GL/glu.h b/tests/cuda3.2/shared/GL/glu.h
+index 3cd11135..116daa64 100644
+--- a/tests/cuda3.2/shared/GL/glu.h
++++ b/tests/cuda3.2/shared/GL/glu.h
+@@ -35,7 +35,7 @@
+ #include "glu_mangle.h"
+ #endif
+ 
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ 
+ #ifndef GLAPIENTRY
+ #define GLAPIENTRY
+diff --git a/tests/cuda3.2/shared/GL/glut.h b/tests/cuda3.2/shared/GL/glut.h
+index 3b9b287c..173bbef1 100644
+--- a/tests/cuda3.2/shared/GL/glut.h
++++ b/tests/cuda3.2/shared/GL/glut.h
+@@ -60,7 +60,7 @@ typedef unsigned short wchar_t;
+ #include <OpenGL/gl.h>
+ #include <OpenGL/glu.h>
+ #else
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ #include <GL/glu.h>
+ #endif
+ 
+diff --git a/tests/cuda4.1sdk/sdk/cutil_gl_error.h b/tests/cuda4.1sdk/sdk/cutil_gl_error.h
+index 4da3d39e..d911f702 100644
+--- a/tests/cuda4.1sdk/sdk/cutil_gl_error.h
++++ b/tests/cuda4.1sdk/sdk/cutil_gl_error.h
+@@ -39,7 +39,7 @@
+ #include <OpenGL/gl.h>
+ #include <OpenGL/glu.h>
+ #else
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ #include <GL/glu.h>
+ #endif
+ 
+diff --git a/tests/unstructured/cudarenderer-2.1h/VisualC/libSDL/include/SDL/SDL_opengl.h b/tests/unstructured/cudarenderer-2.1h/VisualC/libSDL/include/SDL/SDL_opengl.h
+index c479a3a4..bcc43cf4 100644
+--- a/tests/unstructured/cudarenderer-2.1h/VisualC/libSDL/include/SDL/SDL_opengl.h
++++ b/tests/unstructured/cudarenderer-2.1h/VisualC/libSDL/include/SDL/SDL_opengl.h
+@@ -43,7 +43,7 @@
+ #include <gl.h>		/* Header File For The OpenGL Library */
+ #include <glu.h>	/* Header File For The GLU Library */
+ #else
+-#include <GL/gl.h>	/* Header File For The OpenGL Library */
++#include <OpenGL/gl.h>	/* Header File For The OpenGL Library */
+ #include <GL/glu.h>	/* Header File For The GLU Library */
+ #endif
+ #ifndef NO_SDL_GLEXT
+diff --git a/tests/unstructured/cudarenderer-2.1h/configure b/tests/unstructured/cudarenderer-2.1h/configure
+index c3fd53e6..dcd0e586 100755
+--- a/tests/unstructured/cudarenderer-2.1h/configure
++++ b/tests/unstructured/cudarenderer-2.1h/configure
+@@ -6873,7 +6873,7 @@ cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+ /* end confdefs.h.  */
+ 
+  #include <GL/glew.h>
+- #include <GL/gl.h>
++ #include <OpenGL/gl.h>
+  #include <GL/glut.h>
+ 
+ int
+diff --git a/tests/unstructured/cudarenderer-2.1h/configure.ac b/tests/unstructured/cudarenderer-2.1h/configure.ac
+index 6d1f3d42..47f30c53 100644
+--- a/tests/unstructured/cudarenderer-2.1h/configure.ac
++++ b/tests/unstructured/cudarenderer-2.1h/configure.ac
+@@ -164,7 +164,7 @@ AC_MSG_CHECKING(for OpenGL GLUT and GLEW support)
+ HAVE_OPENGL=no
+ AC_TRY_COMPILE([
+  #include <GL/glew.h>
+- #include <GL/gl.h>
++ #include <OpenGL/gl.h>
+  #include <GL/glut.h>
+ ],[
+ ],[
+diff --git a/tests/unstructured/cudarenderer-2.1h/src/BVH.cpp b/tests/unstructured/cudarenderer-2.1h/src/BVH.cpp
+index a8b6b310..ea55db6f 100644
+--- a/tests/unstructured/cudarenderer-2.1h/src/BVH.cpp
++++ b/tests/unstructured/cudarenderer-2.1h/src/BVH.cpp
+@@ -31,7 +31,7 @@
+ #else
+ #define GL_GLEXT_PROTOTYPES
+ #include <GL/glew.h>
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ #endif
+ #include <GL/glut.h>
+ 
+diff --git a/tests/unstructured/cudarenderer-2.1h/src/Loader.cpp b/tests/unstructured/cudarenderer-2.1h/src/Loader.cpp
+index 11994a7b..cab2ee47 100644
+--- a/tests/unstructured/cudarenderer-2.1h/src/Loader.cpp
++++ b/tests/unstructured/cudarenderer-2.1h/src/Loader.cpp
+@@ -24,7 +24,7 @@
+ #else
+ #define GL_GLEXT_PROTOTYPES
+ #include <GL/glew.h>
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ #endif
+ 
+ #include <cstdio>
+diff --git a/tests/unstructured/cudarenderer-2.1h/src/cudarenderer.cu b/tests/unstructured/cudarenderer-2.1h/src/cudarenderer.cu
+index ca5d100f..03a4340a 100644
+--- a/tests/unstructured/cudarenderer-2.1h/src/cudarenderer.cu
++++ b/tests/unstructured/cudarenderer-2.1h/src/cudarenderer.cu
+@@ -22,7 +22,7 @@
+ #include <GL/glew.h>
+ #else
+ #define GL_GLEXT_PROTOTYPES
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ #endif
+ #include <GL/glut.h>
+ 
+diff --git a/tests/unstructured/cudarenderer-2.1h/src/main.cpp b/tests/unstructured/cudarenderer-2.1h/src/main.cpp
+index e5664b46..c28daedd 100644
+--- a/tests/unstructured/cudarenderer-2.1h/src/main.cpp
++++ b/tests/unstructured/cudarenderer-2.1h/src/main.cpp
+@@ -26,7 +26,7 @@
+ #else
+ #define GL_GLEXT_PROTOTYPES
+ #include <GL/glew.h>
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ #endif
+ #include <GL/glut.h>
+ 
+@@ -35,7 +35,7 @@
+ #include <math.h>
+ 
+ #define GL_GLEXT_PROTOTYPES
+-#include <GL/gl.h>
++#include <OpenGL/gl.h>
+ 
+ #include <SDL.h>
+ 
+-- 
+2.39.5 (Apple Git-154)
+
