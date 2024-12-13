@@ -612,7 +612,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [amd]
+        backend: [amd, ptx]
 
     name: Tests on MacOS (${{ matrix.backend }})
     runs-on: macos-15
@@ -632,7 +632,7 @@ jobs:
           path: /Users/runner/Library/Python/3.12/lib/python/site-packages
           key: mockgpu-osx-${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'amd' && 'MOCKGPU=1\nAMD=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'amd' && 'MOCKGPU=1\nAMD=1\nFORWARD_ONLY=1' ||  matrix.backend == 'ptx' && 'PTX=1\n\nMOCKGPU=1\nNV=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install comgr
         if: matrix.backend == 'amd'
         run: |
@@ -646,6 +646,37 @@ jobs:
           curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
             jq -r '.assets[] | select(.name == "libremu.dylib").browser_download_url' | \
             sudo xargs curl -L -o /usr/local/lib/libremu.dylib
+      - name: Install gpuocelot dependencies (ptx)
+        if: matrix.backend == 'ptx'
+        run: |
+          brew update
+          brew install cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
+      - name: Cache gpuocelot
+        if: matrix.backend == 'ptx'
+        id: cache-build
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-gpuocelot-osx-build
+        with:
+          path: ${{ github.workspace }}/gpuocelot/ocelot
+          key: macos-15-gpuocelot-4524e34adb7eaccc6f71262f2e21d7052bb17c2f-rebuild-9
+      - name: Clone/compile gpuocelot
+        if: matrix.backend == 'ptx' && steps.cache-build.outputs.cache-hit != 'true'
+        run: |
+          git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
+          cd ${{ github.workspace }}/gpuocelot
+          git checkout 4524e34adb7eaccc6f71262f2e21d7052bb17c2f
+          git apply ${{ github.workspace }}/extra/mockgpu/nv/osx_gpuocelot_patches/*.patch
+          cd ocelot
+          mkdir build
+          cd build
+          cmake .. -Wno-dev -G Ninja -DBUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF
+          ninja
+      - name: Install gpuocelot
+        if: matrix.backend == 'ptx'
+        run: |
+          cd ${{ github.workspace }}/gpuocelot/ocelot/build
+          sudo ninja install -d explain
       - name: Install dependencies
         run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Check Device.DEFAULT and print some source
@@ -653,7 +684,7 @@ jobs:
           PYTHONPATH=${{ github.workspace }} python3 -c "from tinygrad import Device; assert Device.DEFAULT == 'AMD', Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (amd)
-        if: matrix.backend=='amd'
+        if: matrix.backend=='amd' || matrix.backend=='ptx'
         run: python -m pytest -n=auto test/test_hcq.py test/test_tiny.py --durations=20
 
   wintests:
