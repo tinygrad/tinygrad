@@ -51,7 +51,7 @@ class BLAKE3:
       states[i] = self.compress_blocks_jit(next_state.contiguous(), data[i].contiguous(), chain_vals[i].contiguous())
     return self.finalize_states(states, info)
 
-  @TinyJit
+  # @TinyJit
   def tree_step(self, chain_vals: Tensor, final_step: Tensor) -> Tensor:
     stacked = chain_vals.transpose().reshape(-1, 16).transpose().reshape(2, 8, -1)
     stacked_mask = stacked.any(1)
