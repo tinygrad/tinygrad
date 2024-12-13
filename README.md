@@ -1,4 +1,4 @@
-<div align="center">
+<div align="center" >
 
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="/docs/logo_tiny_light.svg">
