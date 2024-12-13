@@ -710,7 +710,7 @@ class UPat(MathTrait):
       self.early_reject = {pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1}
 
   def named(self, name:str): return UPat(self.op, self.dtype, self._in_src, self.arg, name, self.allowed_len == -1, self.custom_early_reject)
-  def with_type(self, dtype:DType): return UPat(self.op, dtype, self._in_src, self.arg, self.name, self.allowed_len == -1, self.custom_early_reject)
+  def with_dtype(self, dtype:DType): return UPat(self.op, dtype, self._in_src, self.arg, self.name, self.allowed_len == -1, self.custom_early_reject)
 
   @staticmethod
   def any(*src): return UPatAny(src=src)
@@ -1191,11 +1191,11 @@ symbolic_simple = PatternMatcher([
   (x.with_dtype(dtypes.bool) & c1, lambda x,c1: x if c1.arg else c1),
   (x.with_dtype(dtypes.bool) | c1, lambda x,c1: c1 if c1.arg else x),
   (UPat(GroupOp.Idempotent, src=(x, x)), lambda x: x),
-  (x.with_type(dtypes.bool).logical_not().logical_not(), lambda x: x),
-  (x.with_type(dtypes.bool).where(UPat.const(dtypes.bool, True), UPat.const(dtypes.bool, False)), lambda x: x),
+  (x.with_dtype(dtypes.bool).logical_not().logical_not(), lambda x: x),
+  (x.with_dtype(dtypes.bool).where(UPat.const(dtypes.bool, True), UPat.const(dtypes.bool, False)), lambda x: x),
   # ** zero folding **
   (x < x, lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x < x -> False
-  (x.with_type(dtypes.ints) != x.with_type(dtypes.ints), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x != x -> False (only ints)
+  (x.with_dtype(dtypes.ints) != x.with_dtype(dtypes.ints), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x != x -> False (only ints)
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
@@ -1203,9 +1203,9 @@ symbolic_simple = PatternMatcher([
   # ** constant folding **
   (UPat(GroupOp.ALU, name="a", src=UPat((Ops.VCONST, Ops.CONST))), lambda a: a.const_like(exec_alu(a.op, a.dtype, [x.arg for x in a.src], False))),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
-  (x.with_type(dtypes.bool) * y.with_type(dtypes.bool), lambda x,y: x&y),
-  (x.with_type(dtypes.bool) + y.with_type(dtypes.bool), lambda x,y: x|y),
-  (x.with_type(dtypes.bool).maximum(y.with_type(dtypes.bool)), lambda x,y: x|y),
+  (x.with_dtype(dtypes.bool) * y.with_dtype(dtypes.bool), lambda x,y: x&y),
+  (x.with_dtype(dtypes.bool) + y.with_dtype(dtypes.bool), lambda x,y: x|y),
+  (x.with_dtype(dtypes.bool).maximum(y.with_dtype(dtypes.bool)), lambda x,y: x|y),
   # *** cast ***
   (UPat(Ops.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   (UPat(Ops.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
@@ -1246,11 +1246,11 @@ symbolic = symbolic_simple+PatternMatcher([
   ((x // c1_v) // c2_v, lambda x,c1,c2: x//(c1*c2)),
   # ** lt **
   # c0*x<c1 for positive int c0,c1
-  (c1*x.with_type(dtypes.ints)<c2, lambda x,c1,c2: x<math.ceil(c2.arg/c1.arg) if c1.arg > 0 and c2.arg > 0 else None),
+  (c1*x.with_dtype(dtypes.ints)<c2, lambda x,c1,c2: x<math.ceil(c2.arg/c1.arg) if c1.arg > 0 and c2.arg > 0 else None),
   # c0*x<c1 for negative int c0 and non-positive c1
-  (c1*x.with_type(dtypes.ints)<c2, lambda x,c1,c2: (-x)<(-(math.floor(-c2.arg/-c1.arg))) if c1.arg < 0 and c1.arg != -1 and c2.arg <= 0 else None),
+  (c1*x.with_dtype(dtypes.ints)<c2, lambda x,c1,c2: (-x)<(-(math.floor(-c2.arg/-c1.arg))) if c1.arg < 0 and c1.arg != -1 and c2.arg <= 0 else None),
   # x//c0<c1 for positive int c0
-  ((x.with_type(dtype=dtypes.ints)//c1)<c2, lambda x,c1,c2: x<(c2.arg*c1.arg) if c1.arg > 0 else None),
+  ((x.with_dtype(dtype=dtypes.ints)//c1)<c2, lambda x,c1,c2: x<(c2.arg*c1.arg) if c1.arg > 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
   (UPat(Ops.ADD, src=(x, c1_v)) + y, lambda x,c1,y: (x+y)+c1),
   (UPat(Ops.MUL, src=(x, c1_v)) * y, lambda x,c1,y: (x*y)*c1),
@@ -1258,14 +1258,14 @@ symbolic = symbolic_simple+PatternMatcher([
   # unrolled arange div folding
   ((UPat() + UPat(Ops.IDIV)).named("divs"), fold_unrolled_divs),
   # generic lt folding
-  (x.with_type(dtypes.sints)<c1, lambda x,c: lt_folding(x, c1.arg) if 0 < c1.arg else None),
+  (x.with_dtype(dtypes.sints)<c1, lambda x,c: lt_folding(x, c1.arg) if 0 < c1.arg else None),
   # canonicalize a simplex with positive coefficients > 0
   # not x < 1 -> X > 0
-  ((x.with_type(dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
+  ((x.with_dtype(dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # ** div **
   # div folding
   ((x//c1_v + c2_v)//c3_v, lambda x,c,a,d: (x+c1_v*c2_v)//(c1_v*c3_v)),  # (x//c1+c2)//c3 -> (x+a*c)//(c*d)
-  (x.with_type(dtypes.sints) // c1, lambda x,c1: div_and_mod_folding(x,c1.arg,Ops.IDIV) if 0 < c1.arg else None),
+  (x.with_dtype(dtypes.sints) // c1, lambda x,c1: div_and_mod_folding(x,c1.arg,Ops.IDIV) if 0 < c1.arg else None),
   # ** mod **
   # mod folding
   (x % c1, lambda x,c1: div_and_mod_folding(x,c1.arg,Ops.MOD) if 0 < c1.arg else None),
@@ -1276,7 +1276,7 @@ symbolic_flat = symbolic+PatternMatcher([
   # ** combine terms (opinionated) **
   (-1 * (x + y), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
-  ((x.with_type(dtypes.ints) + y) * c1_v, lambda x,y,c1: x*c1+y*c1),
+  ((x.with_dtype(dtypes.ints) + y) * c1_v, lambda x,y,c1: x*c1+y*c1),
 ])
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
