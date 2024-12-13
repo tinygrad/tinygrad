@@ -60,23 +60,16 @@ class TinygradBackendTestRunner(onnx.backend.test.BackendTest):
       super()._add_model_test(model_test, kind)
 
 backend_test = TinygradBackendTestRunner(TinygradBackend, __name__)
-# def run(test:TestCase, device='CPU', **kwargs):
-#   model = test.model
-#   if hasattr(backend_test.backend, "is_compatible") and not backend_test.backend.is_compatible(model):
-#     raise unittest.SkipTest("Not compatible with backend")
-#   prepared = backend_test.backend.prepare(model, device, **kwargs)
-#   for inputs, ref_outputs in test.data_sets:
-#     outputs = prepared.run(inputs)
-#     backend_test.assert_similar_outputs(ref_outputs, outputs, test.rtol, test.atol)
 
-from test.external.external_test_onnx_superset import adam_test_case, adagrad_test_case, momentum_test_case
-backend_test._add_model_test(adam_test_case, "Tinygrad")
-backend_test._add_model_test(adagrad_test_case, "Tinygrad")
-backend_test._add_model_test(momentum_test_case, "Tinygrad")
+from test.external.external_test_onnx_superset import test_adam_multiple, test_adam_large_t, test_adagrad_large_t, test_momentum_large_t
+backend_test._add_model_test(test_adam_large_t(), "Tinygrad")
+backend_test._add_model_test(test_adagrad_large_t(), "Tinygrad")
+backend_test._add_model_test(test_momentum_large_t(), "Tinygrad")
 
 # BUG: onnx didn't include epsilon in their node
 # https://github.com/onnx/onnx/blob/main/onnx/backend/test/case/node/adam.py#L93
 backend_test.exclude('test_adam_multiple_cpu')
+backend_test._add_model_test(test_adam_multiple(), "Tinygrad")
 
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):
