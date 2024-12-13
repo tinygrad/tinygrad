@@ -15,7 +15,7 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
     upcast_size = self.dims[dim] // prod(sz for d,sz in self.threads if d==dim)
     return [(dim, 2) for _ in range(int(math.log2(upcast_size)))] if upcast_size > 0 else []
   upcast_axes: Tuple[List[Tuple[int,int]], List[Tuple[int,int]], List[Tuple[int,int]]] # list of (TC dim,amt) that upcast A, B and C
-  threads: Tuple[Tuple[int,int], ...] = ((0, 2), (0, 2), (0, 2), (1, 2), (1, 2)) # list of (TC dim,amt) that construct the warp thread structure
+  threads: Tuple[Tuple[int,int], ...] = ((0, 2), (0, 2), (1, 2), (1, 2), (1, 2)) # list of (TC dim,amt) that construct the warp thread structure
   st1_pattern: Optional[Tuple[Tuple[Tuple[int,int], ...], Tuple[Tuple[int,int], ...]]] = None # pattern to fix shapetracker for A
   st2_pattern: Optional[Tuple[Tuple[Tuple[int,int], ...], Tuple[Tuple[int,int], ...]]] = None # pattern to fix shapetracker for B
   st3_pattern: Optional[Tuple[Tuple[Tuple[int,int], ...], Tuple[Tuple[int,int], ...]]] = None # pattern to fix shapetracker for C/D
