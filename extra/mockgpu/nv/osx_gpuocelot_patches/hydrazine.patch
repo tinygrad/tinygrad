@@ -1,0 +1,32 @@
+Submodule ocelot/ThirdParty/hydrazine 342a9d78..3b72ca2f:
+diff --git a/ocelot/ThirdParty/hydrazine/test/TestMath.cpp b/ocelot/ThirdParty/hydrazine/test/TestMath.cpp
+index 837ebce..c2e4fa7 100644
+--- a/ocelot/ThirdParty/hydrazine/test/TestMath.cpp
++++ b/ocelot/ThirdParty/hydrazine/test/TestMath.cpp
+@@ -200,7 +200,7 @@ namespace test
+ 		for( unsigned int i = 0; i < correctnessIterations; i++ )
+ 		{
+ 		
+-			unsigned int value = abs( random() );
++			unsigned int value = abs( static_cast<int>(random()) );
+ 		
+ 			powerOfTwoValue = 1;
+ 		
+@@ -267,7 +267,7 @@ namespace test
+ 		
+ 		for( unsigned int i = 0; i < correctnessIterations; i++ )
+ 		{
+-			int value = abs( random() );
++			int value = abs( static_cast<int>(random()) );
+ 		
+ 			powerOfTwoIntValue = 1;
+ 		
+@@ -402,7 +402,7 @@ namespace test
+ 		// do for int
+ 		for( unsigned int i = 0; i < correctnessIterations; i++ )
+ 		{
+-			int value = abs( random() );
++			int value = abs( static_cast<int>(random()) );
+ 			int experimental = hydrazine::powerOfTwo( value );
+ 			int reference = naivePowerOfTwo( value );
+ 			
