@@ -58,12 +58,12 @@ if __name__ == "__main__":
   ]
 
   for model in model_parts:
-    prg, inp_sizes, out_sizes, state = export_model(model, Device.DEFAULT.lower(), *model.input)
+    prg, inp_sizes, out_sizes, state = export_model(model, Device.DEFAULT.lower(), *model.input, model_name=model.name)
     dirname = Path(__file__).parent
     weight_loc =  (dirname / f"net_{model.name}.safetensors").as_posix()
     safe_save(state, weight_loc)
     if model.name == "diffusor":
-      convert_f32_to_f16(weight_loc, (dirname / f"net_diffuso_f16.safetensors").as_posix())
+      convert_f32_to_f16(weight_loc, (dirname / f"net_diffusor_f16.safetensors").as_posix())
 
     with open(dirname / f"net_{model.name}.js", "w") as text_file:
-        text_file.write(prg)
+      text_file.write(prg)

@@ -35,8 +35,9 @@ extra/datasets/COCO/
 extra/datasets/audio*
 extra/weights
 venv
-examples/**/net.*[js,json]
+examples/**/**/net*.*[js,json]
 examples/**/*.safetensors
+examples/webgpu/stable_diffusion/*.*[js,mjs]
 node_modules
 package.json
 package-lock.json
