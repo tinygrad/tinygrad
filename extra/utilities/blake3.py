@@ -68,16 +68,16 @@ class BLAKE3:
     chain_vals = chain_vals.pad((None, (0, chain_vals.shape[1])))
     return chain_vals.realize()
 
-  def tree_hash(self, chain_vals: Tensor, n_tree_steps: Variable) -> Tensor:
+  def tree_hash(self, chain_vals: Tensor, n_tree_steps: int) -> Tensor:
     print(f"----- tree_hash -----")
-    for _ in range(n_tree_steps.val):
+    for _ in range(n_tree_steps):
       final_step = chain_vals[0, :3].prod().cast(dtypes.bool).neg()
       chain_vals = self.tree_step(chain_vals.contiguous(), final_step)
       print(f"step {_}")
     print(f"----- tree_hash done -----")
     return chain_vals.realize()
 
-  def tensor_to_blake_input(self, tensor: Tensor, padded_input_size: int) -> Tuple[Tensor, Tensor, Variable]:
+  def tensor_to_blake_input(self, tensor: Tensor, padded_input_size: int) -> Tuple[Tensor, Tensor, int]:
     assert padded_input_size % 1024 == 0 and padded_input_size & (padded_input_size - 1) == 0, "padded_input_size must be a power of two divisible by 1024"
     blake_input = tensor.flatten().pad((0, (padded_input_size // tensor.element_size()) - tensor.shape[0]))
     blake_input = blake_input.bitcast(dtypes.uint32).reshape(-1, 16, 16).permute(1, 2, 0).contiguous()
@@ -87,8 +87,7 @@ class BLAKE3:
     info = Tensor.full((16, 1, blake_input.shape[-1]), fill_value=self.DEFAULT_LEN, dtype=dtypes.uint32).contiguous()
     info[n_end_blocks - 1, :, n_chunks - 1] = 0 if tensor.nbytes() == 0 else (tensor.nbytes() % 64) or 64
     info[n_end_blocks:, :, n_chunks - 1:] = info[:, :, n_chunks:] = self.PAD
-    n_steps = Variable(min_val=0, max_val=log2(padded_input_size), name="n_steps").bind(ceil(log2(max(n_chunks, 1))))
-    return blake_input, info, n_steps
+    return blake_input, info, ceil(log2(max(n_chunks, 1)))
 
   def hash(self, tensor: Tensor, padded_input_size: int = 1024**2 * 512) -> str:
     print(f"----- init hash -----")
@@ -96,5 +95,5 @@ class BLAKE3:
     # print(f"init hash output: {data[:, :, :3].numpy()}")
     print(f"----- init hash done -----")
     chain_vals = self.init_chain_vals(data, info)
-    chain_vals = self.tree_hash(chain_vals, n_tree_steps) if n_tree_steps.val > 0 else chain_vals
+    chain_vals = self.tree_hash(chain_vals, n_tree_steps) if n_tree_steps > 0 else chain_vals
     return chain_vals[:, 0].flatten().bitcast(dtypes.uint8).data().tobytes().hex()
