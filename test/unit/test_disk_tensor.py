@@ -82,7 +82,7 @@ class TestRawDiskBuffer(unittest.TestCase):
 
     pathlib.Path(tmp).unlink()
 
-@unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu doesn't support uint8 datatype")
+@unittest.skipUnless(is_dtype_supported(dtypes.uint8), "need uint8")
 class TestSafetensors(unittest.TestCase):
   def test_real_safetensors(self):
     import torch
