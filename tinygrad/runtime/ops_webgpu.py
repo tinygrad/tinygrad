@@ -7,8 +7,7 @@ import struct
 
 def create_uniform(wgpu_device, val) -> wgpu.GPUBuffer:
   buf = wgpu_device.create_buffer(size=4, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
-  if isinstance(val, int): wgpu_device.queue.write_buffer(buf, 0, val.to_bytes(4, "little"))
-  else: wgpu_device.queue.write_buffer(buf, 0, struct.pack('<f', val))
+  wgpu_device.queue.write_buffer(buf, 0, val.to_bytes(4, "little") if isinstance(val, int) else struct.pack('<f', val))
   return buf
 
 class WebGPUProgram:
@@ -58,8 +57,8 @@ class WebGpuAllocator(Allocator):
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
-    adapter = wgpu.gpu.request_adapter(power_preference="high-performance")
+    adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
     timestamp_supported = wgpu.FeatureName.timestamp_query in adapter.features
-    wgpu_device = adapter.request_device(required_features=[wgpu.FeatureName.timestamp_query] if timestamp_supported else [])
+    wgpu_device = adapter.request_device_sync(required_features=[wgpu.FeatureName.timestamp_query] if timestamp_supported else [])
     super().__init__(device, WebGpuAllocator(wgpu_device), WGSLRenderer(), Compiler(),
                      functools.partial(WebGPUProgram, (wgpu_device, timestamp_supported)))

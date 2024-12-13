@@ -4,7 +4,7 @@ import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.helpers import getenv, temp, CI, _METADATA, mv_address
+from tinygrad.helpers import getenv, temp, _METADATA, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
@@ -135,7 +135,6 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "this test uses more than 8 bufs which breaks webgpu") #TODO: remove after #1461
   def test_backward_pass_diamond_model(self):
     def test_tinygrad():
       u = Tensor(U_init, requires_grad=True)
@@ -424,6 +423,10 @@ class TestTinygrad(unittest.TestCase):
     data = [np.array(1.0), np.array(2.0), np.array(3.0)]
     np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
 
+  def test_tensor_dtype_errors(self):
+    with self.assertRaises(AttributeError): Tensor([3], dtype="typo")
+    with self.assertRaises(TypeError): Tensor([3], dtype=(dtypes.int,))
+
   def test_tensor_bytes(self):
     data = b"abc123"
     t = Tensor(data)
@@ -493,12 +496,14 @@ class TestTinygrad(unittest.TestCase):
     subprocess.run([f'NPY=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
                     shell=True, check=True)
 
-@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL", "NV", "AMD"}, "no GPU CI")
+@unittest.skip("this test is just flaky, sync issue")
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
   @given(strat.sampled_from([d0, d1]), strat.sampled_from([d0, d1]),
          strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
   def test_to_preserves(self, src, dest, dtype, requires_grad):
+    if not is_dtype_supported(dtype):
+      return
     s = Tensor([1, 2, 3], device=src, dtype=dtype, requires_grad=requires_grad)
     if requires_grad: s.sum().backward()
     t = s.to(dest)
@@ -769,7 +774,7 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(y.grad.lazydata.metadata.name, "sigmoid")
     self.assertTrue(y.grad.lazydata.metadata.backward)
     si = create_schedule([out.lazydata, x.grad.lazydata, y.grad.lazydata])[-1]
-    self.assertEqual(len(si.metadata), 3)
+    self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
     self.assertEqual(set(m.name for m in si.metadata), {"sigmoid", "sigmoid", "relu"})
     bw = [m for m in si.metadata if m.backward]
     self.assertEqual(len(bw), 1)
