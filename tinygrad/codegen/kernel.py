@@ -307,8 +307,7 @@ class Kernel:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
         for dim, amt in tc.get_reduce_axes(): self.apply_opt(Opt(OptOps.UNROLL,tc_opts.axes[2]-self.first_reduce,amt), append_opt=False)
-        for i in (0,1):
-          for dim, amt in tc.get_early_upcast_axes(i): self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[dim],amt), append_opt=False)
+        for dim, amt in tc.get_early_upcast_axes(0) + tc.get_early_upcast_axes(1): self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[dim],amt), append_opt=False) # noqa: E501
         for dim, amt in tc.threads: self.apply_opt(Opt(OptOps.LOCAL,tc_opts.axes[dim],amt), append_opt=False)
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
