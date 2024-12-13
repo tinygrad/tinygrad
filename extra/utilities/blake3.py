@@ -52,10 +52,9 @@ class BLAKE3:
     return self.finalize_states(states, info)
 
   @TinyJit
-  def tree_step(self, chain_vals: Tensor) -> Tensor:
+  def tree_step(self, chain_vals: Tensor, final_step: Tensor) -> Tensor:
     stacked = chain_vals.transpose().reshape(-1, 16).transpose().reshape(2, 8, -1)
     stacked_mask = stacked.any(1)
-    final_step = chain_vals[0, :3].prod().cast(dtypes.bool).neg()
     pair_mask, remainder_mask = (stacked_mask[0] * stacked_mask[1]), (stacked_mask[0] ^ stacked_mask[1])
     paired, remainder = (stacked * pair_mask).reshape(16, -1), (stacked * remainder_mask).reshape(16, -1)[:8]
     flags = Tensor.full((1, paired.shape[-1]), 4, dtype=dtypes.uint32)
@@ -72,7 +71,8 @@ class BLAKE3:
   def tree_hash(self, chain_vals: Tensor, n_tree_steps: Variable) -> Tensor:
     print(f"----- tree_hash -----")
     for _ in range(n_tree_steps.val):
-      chain_vals = self.tree_step(chain_vals.contiguous())
+      final_step = chain_vals[0, :3].prod().cast(dtypes.bool).neg()
+      chain_vals = self.tree_step(chain_vals.contiguous(), final_step)
       print(f"step {_}")
     print(f"----- tree_hash done -----")
     return chain_vals.realize()
