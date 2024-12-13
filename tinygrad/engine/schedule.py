@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import identity_element, buffers, exec_alu
+from tinygrad.ops import identity_element, buffers, symbolic
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, ContextVar
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -338,21 +338,6 @@ def simplify_reduceop(reduce:UOp, x:UOp) -> Optional[UOp]:
     return UOp.const(reduce.dtype, ret)
   return None
 
-def simplify_alu(alu:UOp):
-  if not all(x.is_unrealized_unmasked_const() for x in alu.src): return None
-  # this needs to have a VIEW next (it has to, right?)
-  return UOp.const(alu.dtype, exec_alu(alu.op, alu.dtype, [s.const_arg for s in alu.src]))
-
-def simplify_binop(binop:UOp, x:UOp, y:UOp):
-  if all_int(x.shape) and x.is_unrealized_unmasked_const(): other, const = y, x
-  elif all_int(y.shape) and y.is_unrealized_unmasked_const():
-    if binop.op is Ops.IDIV and y.const_arg == 1: return x
-    other, const = x, y
-  else: return None
-  if binop.op is Ops.ADD and const.const_arg == 0: return other
-  if binop.op is Ops.MUL and const.const_arg == 1: return other
-  if binop.op is Ops.MUL and const.const_arg == 0: return UOp.const(binop.dtype, 0)
-
 def found_contiguous(ctx:ScheduleContext, contig:UOp, base:UOp, b:UOp):
   if contig.src[0].op is Ops.VIEW and len(contig.src[0].src):
     old_base = contig.src[0].src[0]
@@ -363,14 +348,9 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
     if (replace_src:=ctx.contiguous.get(s, None)) is not None: new_src[i] = replace_src
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
-ops_folding = PatternMatcher([
+ops_folding = symbolic+PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
-  # elementwise const folding
-  (UPat(GroupOp.ALU, name="alu"), simplify_alu),
-  (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, name="binop", src=(UPat.var("x"), UPat.var("y"))), simplify_binop),
-  (UPat(Ops.CAST, src=(UPat.var("x"),), name="cast"),
-   lambda x,cast: UOp.const(cast.dtype, x.const_arg) if all_int(x.shape) and x.is_unrealized_unmasked_const() else None),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x:UOp.const(reduce.dtype, identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
@@ -397,6 +377,7 @@ def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
     ctx.realizes[b1] = b1
     del ctx.realizes[b2]
   # ops referring to b2 now ref to b1
+  if b1 not in ctx.tensor_uops: ctx.tensor_uops[b1] = []
   ctx.tensor_uops[b1] += ctx.tensor_uops[b2]
   del ctx.tensor_uops[b2]
   # merge
