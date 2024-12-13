@@ -385,7 +385,6 @@
             f32safeTensor.set(f16safeTensor.subarray(8, 8 + metadataLength), 8);
 
             let start = Date.now();
-            let cursor = 0;
 
             for (let i = 0; i < numChunks; i++) {
                 progress(i, numChunks);
@@ -420,7 +419,7 @@
             }
 
             const device = await getDevice();
-            f16decomp =  await f16tof32().setup(device, safetensorParts),
+            f16decomp =  await f16tof32().load(device, ''),
             safetensorParts = await getAndDecompressF16Safetensors(device, progress);
 
             modelDlTitle.innerHTML = "Compiling model"
