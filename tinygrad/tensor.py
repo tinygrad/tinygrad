@@ -125,7 +125,6 @@ class Tensor(SimpleMathTrait):
   def __init__(self, data:Union[None, ConstType, bytes, List, Tuple, UOp, MultiLazyBuffer, 'np.ndarray', pathlib.Path],  # type: ignore [name-defined] # noqa: F821
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DTypeLike]=None, requires_grad:Optional[bool]=None):
     if dtype is not None: dtype = to_dtype(dtype)
-    assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
     device = tuple(Device.canonicalize(x) for x in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
 
@@ -493,6 +492,10 @@ class Tensor(SimpleMathTrait):
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
     _device = device = Device.canonicalize(device)
 
+    # if shape has 0, return zero tensor
+    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
+    num = ceildiv(numel * dtype.itemsize, 4)
+
     # when using MOCKGPU and NV generate rand on CLANG
     if getenv("MOCKGPU") and device.startswith("NV"): device = "CLANG"
 
@@ -502,15 +505,8 @@ class Tensor(SimpleMathTrait):
         [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed],
         device=device, dtype=dtypes.uint32, requires_grad=False)
       Tensor._device_rng_counters[device] = Tensor([0], device=device, dtype=dtypes.uint32, requires_grad=False)
-      had_counter = False
-    else: had_counter = True
-
-    # if shape has 0, return zero tensor
-    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=_device, dtype=dtype, **kwargs)
-    num = ceildiv(numel * dtype.itemsize, 4)
-
     # increment rng counter for devices
-    if had_counter: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num).contiguous()
+    else: Tensor._device_rng_counters[device].assign(Tensor._device_rng_counters[device] + num).contiguous()
 
     # threefry random bits
     counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._device_rng_counters[device])

@@ -135,7 +135,6 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "this test uses more than 8 bufs which breaks webgpu") #TODO: remove after #1461
   def test_backward_pass_diamond_model(self):
     def test_tinygrad():
       u = Tensor(U_init, requires_grad=True)
@@ -423,6 +422,10 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
     data = [np.array(1.0), np.array(2.0), np.array(3.0)]
     np.testing.assert_equal(Tensor(data).numpy(), np.array(data))
+
+  def test_tensor_dtype_errors(self):
+    with self.assertRaises(AttributeError): Tensor([3], dtype="typo")
+    with self.assertRaises(TypeError): Tensor([3], dtype=(dtypes.int,))
 
   def test_tensor_bytes(self):
     data = b"abc123"
