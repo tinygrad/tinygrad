@@ -347,7 +347,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if bitcast: return self.bitcast(dtype, allow_buffer_view)
     if self._device is not None and self._device.startswith("DISK"): raise RuntimeError("CAST isn't supported on DISK")
     if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self is not self.base:
-      return self.base.cast(dtype, bitcast).view(self.st)
+      # NOTE: we have to apply the movementops here, we can't use VIEW (yet)
+      ret = self.base.cast(dtype, bitcast)
+      op_arg = []
+      mop = self
+      while mop.op in GroupOp.Movement:
+        op_arg.append((mop.op, mop.arg))
+        mop = mop.src[0]
+      for op,arg in reversed(op_arg): ret = UOp(op, ret.dtype, (ret,), arg)
+      return ret
     return UOp(Ops.CAST, dtype, (self,))
   def bitcast(self, dtype:DType, allow_buffer_view=True):
     if self.can_view() and allow_buffer_view:
@@ -478,12 +486,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return ret
 
-  def reshape(self, arg:Tuple[sint, ...]): return UOp(Ops.RESHAPE, self.dtype, (self,), arg)
-  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return UOp(Ops.PAD, self.dtype, (self,), arg)
-  def expand(self, arg:Tuple[sint, ...]): return UOp(Ops.MEXPAND, self.dtype, (self,), arg)
-  def permute(self, arg:Tuple[sint, ...]): return UOp(Ops.PERMUTE, self.dtype, (self,), arg)
-  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return UOp(Ops.SHRINK, self.dtype, (self,), arg)
-  def stride(self, arg:Tuple[sint, ...]): return UOp(Ops.STRIDE, self.dtype, (self,), arg)
+  def _mop(self, op, arg):
+    ret = UOp(op, self.dtype, (self,), arg)
+    ret.st
+    return ret
+
+  def reshape(self, arg:Tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
+  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg)
+  def expand(self, arg:Tuple[sint, ...]): return self._mop(Ops.MEXPAND, arg)
+  def permute(self, arg:Tuple[sint, ...]): return self._mop(Ops.PERMUTE, arg)
+  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg)
+  def stride(self, arg:Tuple[sint, ...]): return self._mop(Ops.STRIDE, arg)
 
   # *** uop Buffer stuff ***
 
