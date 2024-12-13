@@ -5,13 +5,13 @@ from tinygrad.helpers import ceildiv
 
 class BLAKE3:
   """BLAKE3 hashing algorithm. Paper: https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf."""
-  IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
+  
   PAD, DEFAULT_LEN, PERMUTATIONS = 66, 65, Tensor([2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8], dtype=dtypes.uint32)
 
   def __init__(self): self.compress_blocks_jit = TinyJit(self.compress_blocks)
 
   def compress_blocks(self, states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
-    def rotr(x: Tensor, n: int) -> Tensor: return ((x << (32 - n)) | (x >> n))
+    def rotr(x: Tensor, n: int) -> Tensor: return (x << (32 - n)) | (x >> n)
     for i in range(7):
       for j, (a,b,c,d) in enumerate([(0,4,8,12), (1,5,9,13), (2,6,10,14), (3,7,11,15), (0,5,10,15), (1,6,11,12), (2,7,8,13), (3,4,9,14)]):
         mx, my = data[j * 2], data[j * 2 + 1]
@@ -25,7 +25,8 @@ class BLAKE3:
 
   @TinyJit
   def init_states(self, data: Tensor, info: Tensor) -> Tuple[Tensor, Tensor]:
-    chain_vals = self.IV.reshape(1, 8, 1).expand(16, 8, info.shape[-1]).contiguous()
+    IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
+    chain_vals = IV.reshape(1, 8, 1).expand(16, 8, info.shape[-1]).contiguous()
     counts = Tensor.arange(0, data.shape[-1], dtype=dtypes.uint32).reshape(-1, 1).expand(-1, 16).reshape(-1, 16, 1).permute(1, 2, 0)
     counts = counts.cat(Tensor.zeros(chain_vals.shape[0], 1, chain_vals.shape[-1], dtype=dtypes.uint32), dim=1)
     lengths = (info == self.DEFAULT_LEN).where(64, info)
@@ -50,15 +51,17 @@ class BLAKE3:
       states[i] = self.compress_blocks_jit(next_state.contiguous(), data[i].contiguous(), chain_vals[i].contiguous())
     return self.finalize_states(states, info)
 
-  #@TinyJit
+  @TinyJit
   def tree_step(self, chain_vals: Tensor) -> Tensor:
     stacked = chain_vals.transpose().reshape(-1, 16).transpose().reshape(2, 8, -1)
     stacked_mask = stacked.any(1)
     final_step = (stacked_mask.sum() <= 2)
     pair_mask, remainder_mask = (stacked_mask[0] * stacked_mask[1]), (stacked_mask[0] ^ stacked_mask[1])
     paired, remainder = (stacked * pair_mask).reshape(16, -1), (stacked * remainder_mask).reshape(16, -1)[:8]
-    flags = final_step.where(12, Tensor.full((1, paired.shape[-1]), 4, dtype=dtypes.uint32))
-    iv = self.IV.reshape(8, 1).expand(8, paired.shape[-1])
+    flags = Tensor.full((1, paired.shape[-1]), 4, dtype=dtypes.uint32)
+    flags = final_step.where(12, flags)
+    IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
+    iv = IV.reshape(8, 1).expand(8, paired.shape[-1])
     counts = Tensor.zeros((2, paired.shape[-1]), dtype=dtypes.uint32)
     lengths = Tensor.full((1, paired.shape[-1]), 64, dtype=dtypes.uint32)
     states = iv.cat(iv[:4], counts, lengths, flags, dim=0)
@@ -67,8 +70,11 @@ class BLAKE3:
     return chain_vals.realize()
 
   def tree_hash(self, chain_vals: Tensor, n_tree_steps: Variable) -> Tensor:
+    print(f"----- tree_hash -----")
     for _ in range(n_tree_steps.val):
       chain_vals = self.tree_step(chain_vals.contiguous())
+      print(f"step {_}: {chain_vals[:, :3].numpy()}")
+    print(f"----- tree_hash done -----")
     return chain_vals.realize()
 
   def tensor_to_blake_input(self, tensor: Tensor, padded_input_size: int) -> Tuple[Tensor, Tensor, Variable]:
@@ -85,7 +91,10 @@ class BLAKE3:
     return blake_input, info, n_steps
 
   def hash(self, tensor: Tensor, padded_input_size: int = 1024**2 * 512) -> str:
+    print(f"----- init hash -----")
     data, info, n_tree_steps = self.tensor_to_blake_input(tensor, padded_input_size)
+    print(f"init hash output: {data[:, :, :3].numpy()}")
+    print(f"----- init hash done -----")
     chain_vals = self.init_chain_vals(data, info)
     chain_vals = self.tree_hash(chain_vals, n_tree_steps)
     return chain_vals[:, 0].flatten().bitcast(dtypes.uint8).data().tobytes().hex()
