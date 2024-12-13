@@ -628,7 +628,7 @@ jobs:
       - name: Set env
         run: printf "${{ matrix.backend == 'ptx' && 'PTX=1\n\nMOCKGPU=1\nNV=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install packages
-        if: matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv'
+        if: matrix.backend == 'ptx'
         run: |
           brew update
           brew install cmake ninja llvm@15 zlib glew flex bison boost zstd ncurses
@@ -654,7 +654,7 @@ jobs:
           cmake .. -Wno-dev -G Ninja -DBUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF
           ninja
       - name: Install gpuocelot
-        if: matrix.backend == 'ptx' || matrix.backend == 'triton' || matrix.backend == 'nv'
+        if: matrix.backend == 'ptx'
         run: |
           cd ${{ github.workspace }}/gpuocelot/ocelot/build
           sudo ninja install -d explain
