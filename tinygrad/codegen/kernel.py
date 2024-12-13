@@ -596,9 +596,10 @@ class Kernel:
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           def fix_st(st: ShapeTracker, wd_pattern, tcd_pattern):
-            wd, tcd = self.global_dims, self.first_upcast
-            permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in wd_pattern]  + list(range(wd + len(wd_pattern), tcd)) + \
-                                         [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd + len(tcd_pattern), len(st.shape)))
+            offset = (tcd := self.first_upcast) - (wd := self.global_dims) + len(wd_pattern)
+            permaxis = list(range(wd)) \
+              + [x + (wd if x < len(wd_pattern) else tcd + offset) for x in wd_pattern]  + list(range(wd + len(wd_pattern), tcd)) \
+              + [x + (wd if x < len(wd_pattern) else tcd + offset) for x in tcd_pattern] + list(range(tcd + len(tcd_pattern), len(st.shape)))
             return ShapeTracker.from_shape(st.shape).permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
@@ -608,7 +609,7 @@ class Kernel:
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
               st = store_st = ShapeTracker.from_shape(local_shape)
-              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in.ptr(local=True), (), (f"temp{i + 1}", st.real_size()))
+              local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in. ptr(local=True), (), (f"temp{i + 1}", st.real_size()))
               if tc_pattern: store_st = fix_st(store_st, *tc_pattern)
               local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
               srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
