@@ -12,8 +12,8 @@ x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR
 x86_float32_ops = {Ops.ADD: "addss", Ops.SUB: "subss", Ops.MUL: "mulss", Ops.FDIV: "divss", Ops.CMPLT: "ucomiss", Ops.CMPNE: "ucomiss",
                  Ops.SQRT: "sqrtss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
 x86_float64_ops = {**{k:v[:-1]+'d' for k,v in x86_float32_ops.items()}}
-x86_float16_ops = {Ops.STORE: "pextrw", Ops.LOAD: "pinsrw", Ops.ASSIGN: "pextrw", Ops.DEFINE_ACC: "pinsrw"}
-#x86_float16_ops = {Ops.STORE: "movd", Ops.LOAD: "movd"}
+#x86_float16_ops = {Ops.STORE: "pextrw", Ops.LOAD: "pinsrw", Ops.ASSIGN: "pextrw", Ops.DEFINE_ACC: "pinsrw"}
+x86_float16_ops = {Ops.STORE: "movd", Ops.LOAD: "movd", Ops.ASSIGN: "movd", Ops.DEFINE_ACC: "movd"}
 # NOTE: are doubles vectorized? 2 doubles is "ups" not "lps", use a instead of u
 x86_vec2_ops = {**{k:v+"lps" for k,v in x86_mov_ops.items()}}
 x86_vec4_ops = {**{k:v+"ups" for k,v in x86_mov_ops.items()}}
@@ -21,8 +21,8 @@ x86op = {**{x:x86_unsigned_ops for x in (dtypes.bool,)+dtypes.uints}, **{x:x86_s
           dtypes.float32:x86_float32_ops, dtypes.float64:x86_float64_ops, dtypes.float16:x86_float16_ops,
           dtypes.float32.vec(2):x86_vec2_ops, dtypes.float32.vec(4):x86_vec4_ops}
 
-gep_imm = {0: "0x00", 1: "0x40", 2:"0x80", 3:"0xC0"}
-vec_imm = {0: "0x00", 1: "0x10", 2:"0x20", 3:"0x30"}
+gep_imm = {0: "0x00", 1: "0x40", 2: "0x80", 3: "0xC0"}
+vec_imm = {0: "0x00", 1: "0x10", 2: "0x20", 3: "0x30"}
 
 x86_reg_map = {"rdi": {4: "edi", 2: "di", 1: "dil"}, "rsi": {4: "esi", 2: "si", 1: "sil"}, "rdx": {4: "edx", 2: "dx", 1: "dl"},
                "rcx": {4: "ecx", 2: "cx", 1: "cl"},  "rax": {4: "eax", 2: "ax", 1: "al"},  "rbx": {4: "ebx", 2: "bx", 1: "bl"},
@@ -50,13 +50,13 @@ x86_rewrite = PatternMatcher([
   # loads/stores/movs
   (UPat(Ops.INDEX, name="x"), lambda ctx,x: f"lea {ctx[x]}, [{ctx[x.src[0]]} + {ctx.r[x.src[1]]}*{x.src[0].dtype.itemsize}]"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"), lambda ctx,x,idx,alt,mask:
-   f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}{', 0' if x.dtype is dtypes.float16 else ''}\ntest {ctx[mask]}, 1\n"
-   f"jz .L{ctx.uops.index(x)}\n{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]{', 0' if x.dtype is dtypes.float16 else ''}\n.L{ctx.uops.index(x)}:"),
-  (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]{', 0' if x.dtype is dtypes.float16 else ''}"),
+   f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[alt]}\ntest {ctx[mask]}, 1\n"
+   f"jz .L{ctx.uops.index(x)}\n{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]\n.L{ctx.uops.index(x)}:"),
+  (UPat(Ops.LOAD, src=(UPat.var("idx"),), name="x"), lambda ctx,x,idx: f"{x86op[x.dtype][x.op]} {ctx[x]}, [{ctx[idx]}]"),
   (UPat(Ops.STORE, name="x"), lambda ctx,x:
-   f"{x86op[x.src[1].dtype][x.op]}{size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ''} [{ctx[x.src[0]]}], {ctx[x.src[1]]}{', 0' if x.src[1].dtype is dtypes.float16 else ''}"),
-  (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}{', 0' if x.dtype is dtypes.float16 else ''}"),
-  (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}{', 0' if x.dtype is dtypes.float16 else ''}" if ctx[x] != ctx[x.src[1]] else None),
+   f"{x86op[x.src[1].dtype][x.op]}{size_prefix[x.src[1].dtype.itemsize] if x.src[1].op is Ops.CONST else ''} [{ctx[x.src[0]]}], {ctx[x.src[1]]}"),
+  (UPat(Ops.DEFINE_ACC, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[0]]}"),
+  (UPat(Ops.ASSIGN, name="x"), lambda ctx,x: f"{x86op[x.dtype][x.op]} {ctx[x]}, {ctx[x.src[1]]}" if ctx[x] != ctx[x.src[1]] else None),
   # devectorize/vectorize
   (UPat(Ops.GEP, name="x"), lambda ctx,x: f"insertps {ctx[x]}, {ctx[x.src[0]]}, {gep_imm[x.arg[0]]}"),
   (UPat(Ops.VECTORIZE, name="x"), lambda ctx,x: "\n".join(f"insertps {ctx[x]}, {ctx[s]}, {vec_imm[i]}" for i,s in enumerate(x.src))),
@@ -95,8 +95,10 @@ x86_rewrite = PatternMatcher([
 
 x86_matcher = PatternMatcher([
   # we use general registers to load/store the 2 bytes of float16
-  #(UPat(Ops.LOAD, dtype=dtypes.float16, name="x"), lambda x: UOp(Ops.LOAD, dtypes.int16, x.src).cast(dtypes.uint32).bitcast(dtypes.float16)),
-  #(UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.float16)), name="x"), lambda x: x.src[0].store(x.src[1].bitcast(dtypes.int32).cast(dtypes.int16))),
+  (UPat(Ops.LOAD, dtype=dtypes.float16, src=(UPat.var('idx'), UPat.var('alt'), UPat.var('mask')), name="x"),
+   lambda x,idx,alt,mask: idx.load(alt.bitcast(dtypes.int16), mask, dtype=dtypes.int16).bitcast(x.dtype)),
+  (UPat(Ops.LOAD, dtype=dtypes.float16, name="x"), lambda x: UOp(Ops.LOAD, dtypes.int16, x.src).bitcast(x.dtype)),
+  (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.float16)), name="x"), lambda x: x.src[0].store(x.src[1].bitcast(dtypes.int16))),
   # float16 alus perform instruction in float32
   (UPat(GroupOp.ALU, dtype=dtypes.float16, name="x"),
    lambda x: UOp(x.op, dtypes.float32, tuple(s.cast(dtypes.float32) if s.dtype != dtypes.bool else s for s in x.src)).cast(dtypes.float16)),
@@ -188,7 +190,7 @@ class X86Renderer(Renderer):
 
     def mov_to_reg(u:UOp, reg:str):
       dt = dtypes.int64 if isinstance(u.dtype, PtrDType) or reg == "r15" else u.dtype
-      kernel.append(f"{x86op[dt][Ops.LOAD]} {reg}, {r[u]}{', 0' if dt is dtypes.float16 else ''}")
+      kernel.append(f"{x86op[dt][Ops.LOAD]} {reg}, {r[u]}")
       r[u] = reg
 
     def mov_to_stack(u:UOp):
@@ -197,7 +199,7 @@ class X86Renderer(Renderer):
         mem[u] = f"[rbp - {stack_size}]"
         stack_size += 8
       dt = dtypes.int64 if isinstance(u.dtype, PtrDType) or r[u] == "r15" else u.dtype
-      kernel.append(f"{x86op[dt][Ops.STORE]} {mem[u]}, {r[u]}{', 0' if dt is dtypes.float16 else ''}")
+      kernel.append(f"{x86op[dt][Ops.STORE]} {mem[u]}, {r[u]}")
       r[u] = mem[u]
 
     def assign_reg(i:int, dt:DType) -> str:
@@ -228,7 +230,8 @@ class X86Renderer(Renderer):
         for s in u.src: # mov srcs
           # these can't take imm values
           if is_imm(s) and not is_reg(r[s]) and u.op in (Ops.WHERE, Ops.IDIV, Ops.MOD): mov_to_reg(s, assign_reg(i, s.dtype))
-          elif is_mem(s) and not (u.op in (Ops.LOAD,Ops.DEFINE_ACC) and s.op is Ops.CONST): mov_to_reg(s, assign_reg(i, s.dtype))
+          #elif is_mem(s) and not (u.op in (Ops.LOAD,Ops.DEFINE_ACC) and s.op is Ops.CONST): mov_to_reg(s, assign_reg(i, s.dtype))
+          elif is_mem(s): mov_to_reg(s, assign_reg(i, s.dtype))
         if u.dtype != dtypes.void: # assign destination
           if u.op is Ops.ASSIGN: r[u] = mem[u] = mem[u.src[0]] # define acc was already spilled here
           else: r[u] = assign_reg(i, u.dtype)
