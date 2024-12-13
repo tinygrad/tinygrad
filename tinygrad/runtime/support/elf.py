@@ -1,4 +1,3 @@
-from __future__ import annotations
 from typing import Tuple, List, Any
 from dataclasses import dataclass
 import tinygrad.runtime.autogen.libc as libc

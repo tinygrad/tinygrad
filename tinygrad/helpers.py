@@ -100,8 +100,9 @@ DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0),
 WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 PROFILE, PROFILEPATH = ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
 USE_TC, TC_OPT, AMX, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0), ContextVar("TRANSCENDENTAL", 1)
-FUSE_ARANGE, FUSE_CONV_BW, LAZYCACHE = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0), ContextVar("LAZYCACHE", 1)
+FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
+PICKLE_BUFFERS = ContextVar("PICKLE_BUFFERS", 1)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -156,11 +157,11 @@ class Profiling(contextlib.ContextDecorator):
 
 # *** universal database cache ***
 
-_cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache"))
-CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
+cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
+CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 16
+VERSION = 17
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -191,7 +192,7 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
   return None
 
 _db_tables = set()
-def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
+def diskcache_put(table:str, key:Union[Dict, str, int], val:Any, prepickled=False):
   if CACHELEVEL == 0: return val
   if isinstance(key, (str,int)): key = {"key": key}
   conn = db_connection()
@@ -201,7 +202,7 @@ def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
     ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
     cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
     _db_tables.add(table)
-  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))  # noqa: E501
+  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (val if prepickled else pickle.dumps(val), ))  # noqa: E501
   conn.commit()
   cur.close()
   return val
@@ -224,7 +225,7 @@ def _ensure_downloads_dir() -> pathlib.Path:
       subprocess.run(["sudo", "chown", "tiny:root", downloads_dir], check=True)
       subprocess.run(["sudo", "chmod", "775", downloads_dir], check=True)
     return downloads_dir
-  return pathlib.Path(_cache_dir) / "tinygrad" / "downloads"
+  return pathlib.Path(cache_dir) / "downloads"
 
 def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional[str]=None, gunzip:bool=False,
           allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
