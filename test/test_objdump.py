@@ -10,7 +10,7 @@ class TestCpuObjDump(unittest.TestCase):
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
       ClangCompiler().disassemble(lib)
-    assert "eax,eax" in out.getvalue(), "objdump disassembly should be in intel syntax"
+    assert "%" not in out.getvalue(), "x86 objdump disassembly should be in intel syntax"
 
 if __name__ == '__main__':
   unittest.main()
