@@ -1178,16 +1178,16 @@ def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, 
 
 symbolic_simple = PatternMatcher([
   # ** self folding **
-  (x + 0, lambda x: x),    # x+0 -> x
-  (x * 1, lambda x: x),    # x*1 -> x
-  (x // x, lambda x: x.const_like(1)), # x//x -> 1
-  (x // 1, lambda x: x),   # x//1 -> x
-  (x // -1, lambda x: -x), # x//-1 -> -x
-  (x / x, lambda x: x.const_like(1)), # x/x -> 1
-  ((x * y) / y, lambda x,y: x), # (x*y)/y -> x
-  ((UPat.var() % y).named("base") % y, lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
-  (x%c1_v+(x//c1_v)*c1_v, lambda x,c1: x),  # (x%c1)+(x//c1)*c1 = x
-  ((x//c1_v)*c2_v+x%c1_v*c2_v, lambda x,c1,c2,c3: x*c2 if c1.arg*c2.arg==c3.arg else None), # (x%c1)*c2+(x//c1)*c3 = x*c2 if c1*c2==c3
+  (x + 0, lambda x: x),
+  (x * 1, lambda x: x),
+  (x // x, lambda x: x.const_like(1)),
+  (x // 1, lambda x: x),
+  (x // -1, lambda x: -x),
+  (x / x, lambda x: x.const_like(1)),
+  ((x * y) / y, lambda x,y: x),
+  ((UPat() % y).named("base") % y, lambda base,y: base),  # (rewritten with base for speed)
+  (x%c1_v + (x//c1_v)*c1_v, lambda x,c1: x),
+  ((x//c1_v)*c2_v + x%c1_v*c2_v, lambda x,c1,c2,c3: x*c2 if c1.arg*c2.arg==c3.arg else None),
   (x.with_dtype(dtypes.bool) & c1, lambda x,c1: x if c1.arg else c1),
   (x.with_dtype(dtypes.bool) | c1, lambda x,c1: c1 if c1.arg else x),
   (UPat(GroupOp.Idempotent, src=(x, x)), lambda x: x),
@@ -1215,15 +1215,15 @@ symbolic = symbolic_simple+PatternMatcher([
   # ** COMMUTATIVE flipping **
   (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
   # group like
-  ((x + y) + x * c1_v, lambda x,y,c1: (x+x*c1)+y),
+  ((x + y) + x*c1_v, lambda x,y,c1: (x+x*c1)+y),
   # ** boolean algebra **
-  (x | (x & UPat.var()), lambda x: x), # x|(x&y) -> x
+  (x | (x & UPat()), lambda x: x),
   # ** combine terms **
-  (x * c1_v + x * c2_v, lambda x,c1,c2: x*(c1+c2)), # (x*c1)+(x*c2) -> x*(c1+c2)
-  (x + x * c1_v, lambda x,c1: x*(c1+1)), # (x+x*c)-> x*(c+1)
-  (x + x, lambda x: x*2), # (x+x)-> x*2
-  ((x / y) / z, lambda x,y,z: x/(y*z)), # (x/y)/z -> x/(y*z)
-  (-1 * (x + c1_v), lambda x,c1: (-x)+(-c1)),  # -(x+c) -> -x + -c
+  ((x*c1_v) + (x*c2_v), lambda x,c1,c2: x*(c1+c2)),
+  (x + (x*c1_v), lambda x,c1: x*(c1+1)),
+  (x + x, lambda x: x*2),
+  ((x/y) / z, lambda x,y,z: x/(y*z)),
+  (-1*(x + c1_v), lambda x,c1: (-x)+(-c1)),
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat().where(x, x), lambda x: x),
   (c1.where(x, y), lambda c1,x,y: x if c1.arg else y),
@@ -1242,8 +1242,8 @@ symbolic = symbolic_simple+PatternMatcher([
   ((x * c1_v) * c2_v, lambda x,c1,c2: x*(c1*c2)),
   ((x & c1_v) & c2_v, lambda x,c1,c2: x&(c1&c2)),
   ((x | c1_v) | c2_v, lambda x,c1,c2: x|(c1|c2)),
-  ((c1_v + x) < c2_v, lambda x,c1,c2: x<(c2-c1)),  # c1 + x < c2 -> x < c2 - c1
-  ((x // c1_v) // c2_v, lambda x,c1,c2: x//(c1*c2)), # (x//c1)//c2 -> x//(c1*c2)
+  ((x + c1_v) < c2_v, lambda x,c1,c2: x<(c2-c1)),
+  ((x // c1_v) // c2_v, lambda x,c1,c2: x//(c1*c2)),
   # ** lt **
   # c0*x<c1 for positive int c0,c1
   (c1*x.with_type(dtypes.ints)<c2, lambda x,c1,c2: x<math.ceil(c2.arg/c1.arg) if c1.arg > 0 and c2.arg > 0 else None),
