@@ -50,8 +50,8 @@ def _to_np_dtype(dtype:DType) -> Optional[type]:
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.metaop(Ops.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
   # fake realize
-  ret.buffer.allocate(x)
   del ret.srcs
+  ret.buffer.allocate(x)
   return ret
 
 def get_shape(x) -> Tuple[int, ...]:
