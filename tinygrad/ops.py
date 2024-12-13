@@ -313,10 +313,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def const_arg(self) -> ConstType:
     match self.base.op:
-      case Ops.CONST: ret = self.base.arg
+      case Ops.CONST | Ops.VCONST: ret = self.base.arg
       case Ops.VIEW: ret = self.base.src[1].const_arg
       case op: raise AssertionError(f"const_arg called on {op}")
-    assert isinstance(ret, get_args(ConstType)), f"const_arg trying to return {ret}"
+    assert isinstance(ret, (*get_args(ConstType), tuple)), f"const_arg trying to return {ret}"
     return ret
   @property
   def axis_arg(self) -> Tuple[int, ...]:
@@ -719,10 +719,10 @@ class UPat(MathTrait):
   def var(name:Optional[str]=None, dtype:Optional[Union[DType, Tuple[DType, ...]]]=None): return UPat(dtype=dtype, name=name)
   @staticmethod
   @functools.lru_cache(None)
-  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None, vec=True):
-    return UPat.any(UPat((Ops.CONST, Ops.VCONST) if vec else Ops.CONST, dtype=dtype, name=name),
-                    UPat(Ops.VIEW, src=(UPat(), UPat(Ops.CONST, dtype=dtype))).view(name=name),
-                    UPat(Ops.VIEW, name=name, src=(UPat(), UPat(Ops.CONST, dtype=dtype))))
+  def cvar(name:Optional[str]=None, dtype:Optional[DType]=None, vec=True, arg:Optional[ConstType]=None):
+    return UPat.any(UPat((Ops.CONST, Ops.VCONST) if vec else Ops.CONST, dtype=dtype, name=name, arg=arg),
+                    UPat(Ops.VIEW, src=(UPat(), UPat(Ops.CONST, dtype=dtype, arg=arg))).view(name=name),
+                    UPat(Ops.VIEW, name=name, src=(UPat(), UPat(Ops.CONST, dtype=dtype, arg=arg))))
   @staticmethod
   def const(dtype:Optional[Union[DType, Tuple[DType, ...]]], b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
@@ -736,7 +736,7 @@ class UPat(MathTrait):
   def store(self, *src:UPat, **kwargs): return UPat(Ops.STORE, dtypes.void, (self,)+src, **kwargs)
   def assign(self, x:UPat): return UPat(Ops.ASSIGN, self.dtype, (self,x))
 
-  def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
+  def const_like(self, b:ConstLike): return UPat.cvar(dtype=self.dtype, arg=b)
   def alu(self, op:Ops, *src:UPat):
     asrc = (self,)+src
     return UPat(op, dtypes.bool if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].dtype, list(asrc) if op in GroupOp.Commutative else asrc)
@@ -1201,15 +1201,16 @@ symbolic_simple = PatternMatcher([
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
-  (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
+  (UPat.cvar("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.const_arg, float) and (math.isnan(x.const_arg) or math.isinf(x.const_arg)) else 0)),
+  (UPat.var("x") * 0, lambda x: x.const_like(0)),
   # ** constant folding **
-  (UPat(GroupOp.ALU, name="a", src=UPat((Ops.VCONST, Ops.CONST))), lambda a: a.const_like(exec_alu(a.op, a.dtype, [x.arg for x in a.src], False))),
+  (UPat(GroupOp.ALU, name="a", src=UPat.cvar()), lambda a: a.const_like(exec_alu(a.op, a.dtype, [x.const_arg for x in a.src], False))),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
   (UPat.var('x', dtype=dtypes.bool).maximum(UPat.var('y', dtype=dtypes.bool)), lambda x,y: x|y),
   # *** cast ***
-  (UPat(Ops.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
+  (UPat(Ops.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.const_arg)),
   (UPat(Ops.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
 ])
 
@@ -1228,7 +1229,7 @@ symbolic = symbolic_simple+PatternMatcher([
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
-  (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.const_arg else c1),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
@@ -1249,13 +1250,13 @@ symbolic = symbolic_simple+PatternMatcher([
   # ** lt **
   # c0*x<c1 for positive int c0,c1
   ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints))<UPat.cvar("c1", vec=False),
-   lambda x,c0,c1: x<math.ceil(c1.arg/c0.arg) if c0.arg > 0 and c1.arg > 0 else None),
+   lambda x,c0,c1: x<math.ceil(c1.const_arg/c0.const_arg) if c0.const_arg > 0 and c1.const_arg > 0 else None),
   # c0*x<c1 for negative int c0 and non-positive c1
   ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints))<UPat.cvar("c1", vec=False),
-   lambda x,c0,c1: (-x)<(-(math.floor(-c1.arg/-c0.arg))) if c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
+   lambda x,c0,c1: (-x)<(-(math.floor(-c1.const_arg/-c0.const_arg))) if c0.const_arg < 0 and c0.const_arg != -1 and c1.const_arg <= 0 else None),
   # x//c0<c1 for positive int c0
   ((UPat.var("x", dtype=dtypes.ints)//UPat.cvar("c0", vec=False))<UPat.cvar("c1", vec=False),
-   lambda x,c0,c1: x<(c1.arg*c0.arg) if c0.arg > 0 else None),
+   lambda x,c0,c1: x<(c1.const_arg*c0.const_arg) if c0.const_arg > 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
   (UPat(Ops.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
   (UPat(Ops.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
@@ -1263,17 +1264,17 @@ symbolic = symbolic_simple+PatternMatcher([
   # unrolled arange div folding
   (UPat(Ops.ADD, name="divs", src=[UPat(), UPat(Ops.IDIV)]), fold_unrolled_divs),
   # generic lt folding
-  (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
+  (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.const_arg) if 0 < c.const_arg else None),
   # canonicalize a simplex with positive coefficients > 0
   # not x < 1 -> X > 0
   ((UPat.var("x", dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # ** div **
   # div folding
   ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)),  # (x//c+a)//d -> (x+a*c)//(c*d)
-  (UPat.var("x", dtypes.sints) // UPat.cvar("c", vec=False), lambda x,c: div_and_mod_folding(x,c.arg,Ops.IDIV) if 0 < c.arg else None),
+  (UPat.var("x", dtypes.sints) // UPat.cvar("c", vec=False), lambda x,c: div_and_mod_folding(x,c.const_arg,Ops.IDIV) if 0 < c.const_arg else None),
   # ** mod **
   # mod folding
-  (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: div_and_mod_folding(x,c.arg,Ops.MOD) if 0 < c.arg else None),
+  (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: div_and_mod_folding(x,c.const_arg,Ops.MOD) if 0 < c.const_arg else None),
 ])
 
 
