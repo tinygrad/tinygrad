@@ -324,8 +324,9 @@ class View:
       acc = 1
       # TODO: third resolve shouldn't be needed
       while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and resolve((new_dim := next(r_new_shape, 0)) > 0):
-        strides.append(new_stride)
-        if resolve(new_dim != 1): new_stride *= (new_dim if resolve((acc := acc * new_dim) < real_dim) else 0)
+        strides.append(new_stride * acc)
+        acc *= new_dim
+        if not resolve(acc < real_dim): new_stride = 0  # why?
       if resolve(acc != merged_dim): return None
 
     if (new_mask:=_reshape_mask(self.mask, self.shape, new_shape)) is not None:
