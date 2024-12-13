@@ -1,6 +1,7 @@
 import unittest
 from typing import Any, Tuple
 from onnx.backend.base import Backend, BackendRep
+from onnx.backend.test.case.test_case import TestCase
 import onnx
 import onnx.backend.test
 import numpy as np
@@ -39,37 +40,33 @@ class TinygradBackend(Backend):
     # NOTE: this is onnx CPU
     return device == "CPU"
 
-# monkeypatches BackendTest to support in-memory tests
+# add support for in-memory tests
 class TinygradBackendTestRunner(onnx.backend.test.BackendTest):
-  def _add_model_test(self, model_test, kind):
-    # if model.onnx and *.pb (inputs and outputs) are in memory
-    if model_test.model is not None and model_test.data_sets is not None:
-      model_marker = [model_test.model]
-      def run(test_self, device='CPU', **kwargs):
-        model = model_test.model
-        if hasattr(self.backend, "is_compatible") and not self.backend.is_compatible(model):
-          raise unittest.SkipTest("Not compatible with backend")
-        prepared = self.backend.prepare(model, device, **kwargs)
-        for inputs, ref_outputs in model_test.data_sets:
-          outputs = prepared.run(inputs)
-          self.assert_similar_outputs(ref_outputs, outputs, model_test.rtol, model_test.atol)
-      self._add_test(kind + "Node", model_test.name, run, model_marker)
-    else:
-      # parent logic is for file-based tests
-      # file-based tests located here: https://github.com/onnx/onnx/tree/main/onnx/backend/test/data
-      super()._add_model_test(model_test, kind)
+  def include_in_memory_test(self, test:TestCase, kind:str):
+    assert test.model is not None and test.data_sets is not None, "must have in memory data"
+    model_marker = [test.model]
+    def run(test_self, device='CPU', **kwargs):
+      model = test.model
+      if hasattr(self.backend, "is_compatible") and not self.backend.is_compatible(model):
+        raise unittest.SkipTest("Not compatible with backend")
+      prepared = self.backend.prepare(model, device, **kwargs)
+      for inputs, ref_outputs in test.data_sets:
+        outputs = prepared.run(inputs)
+        self.assert_similar_outputs(ref_outputs, outputs, test.rtol, test.atol)
+    self._add_test(kind + "Node", test.name, run, model_marker)
 
 backend_test = TinygradBackendTestRunner(TinygradBackend, __name__)
 
-from test.external.external_test_onnx_superset import test_adam_multiple, test_adam_large_t, test_adagrad_large_t, test_momentum_large_t
-backend_test._add_model_test(test_adam_large_t(), "Tinygrad")
-backend_test._add_model_test(test_adagrad_large_t(), "Tinygrad")
-backend_test._add_model_test(test_momentum_large_t(), "Tinygrad")
+from test.external.external_test_onnx_superset import TEST_CASES, test_adam_multiple
+
+# add local tests
+for test in TEST_CASES:
+  backend_test.include_in_memory_test(test, "Tinygrad")
 
 # BUG: onnx didn't include epsilon in their node
 # https://github.com/onnx/onnx/blob/main/onnx/backend/test/case/node/adam.py#L93
 backend_test.exclude('test_adam_multiple_cpu')
-backend_test._add_model_test(test_adam_multiple(), "Tinygrad")
+backend_test.include_in_memory_test(test_adam_multiple(), "Tinygrad")
 
 # about different dtypes
 if not is_dtype_supported(dtypes.float64):

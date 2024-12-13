@@ -482,7 +482,9 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   out = embedding_sum.layernorm(eps=epsilon) * gamma + beta
   return out, None, embedding_sum
 
-def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional[Tensor]=None, past:Optional[Tensor]=None, relative_position_bias:Optional[Tensor]=None, past_sequence_length:Optional[Tensor]=None, do_rotary=None, mask_filter_value=None, num_heads=None, past_present_share_buffer=None, qkv_hidden_sizes=None, scale=None, unidirectional=None):
+def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional[Tensor]=None, past:Optional[Tensor]=None,
+              relative_position_bias:Optional[Tensor]=None, past_sequence_length:Optional[Tensor]=None, do_rotary=None, mask_filter_value=None,
+              num_heads=None, past_present_share_buffer=None, qkv_hidden_sizes=None, scale=None, unidirectional=None):
   # https://github.com/microsoft/onnxruntime/blob/main/docs/ContribOperators.md#com.microsoft.Attention
   assert num_heads is not None  # required
   assert (qkv_hidden_sizes is None and past is not None) or (qkv_hidden_sizes is not None)
@@ -515,7 +517,7 @@ def Attention(x:Tensor, weights, bias:Optional[Tensor]=None, mask_index:Optional
 
   bsz, _, seq_len, _ = xq.shape
   out = attn(xq, xk, xv, mask_index).transpose(1, 2).reshape(bsz, seq_len, -1)
-  return out, present
+  return out, present if past is not None else out
 
 # **************** ai.onnx.preview.training Ops ****************
 # NOTE: onnx test coverage only covers `T==0` cases, so for all `T>0` this isn't tested
