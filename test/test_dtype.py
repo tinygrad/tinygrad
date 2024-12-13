@@ -646,8 +646,7 @@ class TestAutoCastType(unittest.TestCase):
   def test_broadcast_scalar(self, dt):
     assert (Tensor.ones(4, 4, dtype=dt) + 2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
     assert (Tensor.ones(4, 4, dtype=dt) + 2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
-    if Device.DEFAULT != "WEBGPU" and dt != dtypes.bool:
-      assert (Tensor.ones(4, 4, dtype=dt) + True).dtype == dt
+    assert (Tensor.ones(4, 4, dtype=dt) + True).dtype == dt
 
   def test_sum(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).sum().dtype == dtypes.int32
