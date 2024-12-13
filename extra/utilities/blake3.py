@@ -56,6 +56,7 @@ class BLAKE3:
     stacked = chain_vals.transpose().reshape(-1, 16).transpose().reshape(2, 8, -1)
     stacked_mask = stacked.any(1)
     final_step = chain_vals[0, :3].prod() == 0
+    print(f"final_step: {not not final_step.numpy()}")
     pair_mask, remainder_mask = (stacked_mask[0] * stacked_mask[1]), (stacked_mask[0] ^ stacked_mask[1])
     paired, remainder = (stacked * pair_mask).reshape(16, -1), (stacked * remainder_mask).reshape(16, -1)[:8]
     flags = Tensor.full((1, paired.shape[-1]), 4, dtype=dtypes.uint32)
@@ -73,7 +74,7 @@ class BLAKE3:
     print(f"----- tree_hash -----")
     for _ in range(n_tree_steps.val):
       chain_vals = self.tree_step(chain_vals.contiguous())
-      # print(f"step {_}: {chain_vals[:, :3].numpy()}")
+      print(f"step {_}")
     print(f"----- tree_hash done -----")
     return chain_vals.realize()
 
