@@ -212,9 +212,10 @@ class X86Renderer(Renderer):
 
     for i,u in enumerate(uops):
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
-        if i < 6: r[u] = assign_reg(i, u.dtype)
-        # value is in stack instead of register, rbp + 8 is return address, TODO: fix this
-        else: r[u] = mem[u] = f"[rbp + {16 + (i-6)*8}]"
+        type_regs = float_regs if dtypes.is_float(u.dtype) and not isinstance(u.dtype, PtrDType) else gen_regs
+        # value is in stack instead of register, rbp + 8 is return address
+        if type_regs[0] in ("rax", "xmm8"): r[u] = mem[u] = f"[rbp + {16 + (i-6)*8}]"
+        else: r[u] = assign_reg(i, u.dtype)
       elif u.op is Ops.CONST:
         r[u] = to_hex(u.arg, u.dtype)
         if not is_imm(u):
