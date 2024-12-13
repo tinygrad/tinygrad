@@ -912,7 +912,7 @@ c1, c2, c3 = UPat.cvar("c1", vec=False), UPat.cvar("c2", vec=False), UPat.cvar("
 spec = PatternMatcher([
   (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
-  (UPat(Ops.DEFINE_ACC, src=(y,), name="x", allow_any_len=True), lambda x,c: all(s.op is Ops.RANGE for s in x.src[1:]) and y.dtype == x.dtype),
+  (UPat(Ops.DEFINE_ACC, src=(y,), name="x", allow_any_len=True), lambda x,y: all(s.op is Ops.RANGE for s in x.src[1:]) and y.dtype == x.dtype),
   (UPat(Ops.DEFINE_VAR, src=(), name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
   (UPat(Ops.RANGE, src=(x, y), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype and isinstance(rng.arg, int)),
@@ -1187,7 +1187,7 @@ symbolic_simple = PatternMatcher([
   ((x * y) / y, lambda x,y: x),
   ((UPat() % y).named("base") % y, lambda base,y: base),  # (rewritten with base for speed)
   (x%c1_v + (x//c1_v)*c1_v, lambda x,c1: x),
-  ((x//c1_v)*c2_v + x%c1_v*c2_v, lambda x,c1,c2,c3: x*c2 if c1.arg*c2.arg==c3.arg else None),
+  ((x//c1_v)*c3_v + x%c1_v*c2_v, lambda x,c1,c2,c3: x*c2 if c1.arg*c2.arg==c3.arg else None),
   (x.with_dtype(dtypes.bool) & c1, lambda x,c1: x if c1.arg else c1),
   (x.with_dtype(dtypes.bool) | c1, lambda x,c1: c1 if c1.arg else x),
   (UPat(GroupOp.Idempotent, src=(x, x)), lambda x: x),
@@ -1258,13 +1258,13 @@ symbolic = symbolic_simple+PatternMatcher([
   # unrolled arange div folding
   ((UPat() + UPat(Ops.IDIV)).named("divs"), fold_unrolled_divs),
   # generic lt folding
-  (x.with_dtype(dtypes.sints)<c1, lambda x,c: lt_folding(x, c1.arg) if 0 < c1.arg else None),
+  (x.with_dtype(dtypes.sints)<c1, lambda x,c1: lt_folding(x, c1.arg) if 0 < c1.arg else None),
   # canonicalize a simplex with positive coefficients > 0
   # not x < 1 -> X > 0
   ((x.with_dtype(dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # ** div **
   # div folding
-  ((x//c1_v + c2_v)//c3_v, lambda x,c,a,d: (x+c1_v*c2_v)//(c1_v*c3_v)),  # (x//c1+c2)//c3 -> (x+a*c)//(c*d)
+  ((x//c1_v + c2_v)//c3_v, lambda x,c1,c2,c3: (x+c1*c2)//(c1*c3)),
   (x.with_dtype(dtypes.sints) // c1, lambda x,c1: div_and_mod_folding(x,c1.arg,Ops.IDIV) if 0 < c1.arg else None),
   # ** mod **
   # mod folding
