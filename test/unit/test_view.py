@@ -36,7 +36,7 @@ class TestView(unittest.TestCase):
     v2 = View.create(shape=(1,1,1,4), strides=(0,0,0,1), offset=0, mask=((0,1),(0,1),(0,1),(0,4)))
     self.assertEqual(v1.contiguous, v2.contiguous)
     v = View.create(shape=(2,3,4), mask=((0,2),(0,3),(0,4)))
-    self.assertTrue(v1.contiguous)
+    self.assertTrue(v.contiguous)
 
   def test_merge_view_pairs(self):
     v1 = View(shape=(2, 4), strides=(2, 1), offset=-2, mask=((0, 2), (2, 4)), contiguous=False)
