@@ -11,17 +11,18 @@ class BLAKE3:
   def __init__(self): self.compress_blocks_jit = TinyJit(self.compress_blocks)
 
   def compress_blocks(self, states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
+    new_states = states.clone()
     def rotr(x: Tensor, n: int) -> Tensor: return ((x << (32 - n)) | (x >> n))
     for i in range(7):
       for j, (a,b,c,d) in enumerate([(0,4,8,12), (1,5,9,13), (2,6,10,14), (3,7,11,15), (0,5,10,15), (1,6,11,12), (2,7,8,13), (3,4,9,14)]):
         mx, my = data[j * 2], data[j * 2 + 1]
         for m in (mx, my):
-          states[a] = (states[a] + states[b] + m)
-          states[d] = rotr(states[d] ^ states[a], 16 if m is mx else 8)
-          states[c] = states[c] + states[d]
-          states[b] = rotr(states[b] ^ states[c], 12 if m is mx else 7)
+          new_states[a] = (new_states[a] + new_states[b] + m)
+          new_states[d] = rotr(new_states[d] ^ new_states[a], 16 if m is mx else 8)
+          new_states[c] = new_states[c] + new_states[d]
+          new_states[b] = rotr(new_states[b] ^ new_states[c], 12 if m is mx else 7)
       if i < 6: data = data[self.PERMUTATIONS]
-    return (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:])
+    return (new_states[:8] ^ new_states[8:]).cat(chain_vals[:8] ^ new_states[8:])
 
   @TinyJit
   def init_states(self, data: Tensor, info: Tensor) -> Tuple[Tensor, Tensor]:
