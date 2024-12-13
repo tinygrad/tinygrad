@@ -34,7 +34,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.SHRINK, name="ret"), lambda ctx, ret: (ctx.pad(tuple([(p[0], s-p[1]) for s,p in zip(ret.src[0].shape, ret.arg)])),)),
   (UPat(Ops.STRIDE, name="ret"), lambda ctx, ret: (ctx.stride(ret.arg) if all(x in {-1,1} for x in ret.arg) else None,)),
   # TODO: this cast can be removed by putting the casts around the EXPAND
-  (UPat(Ops.MEXPAND, name="ret"), lambda ctx, ret:
+  (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret:
     (ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, tuple(i for i,(si,so) in enumerate(zip(ret.src[0].shape, ret.arg)) if si!=so)).cast(ctx.dtype),)),
 ])
 
