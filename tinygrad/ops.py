@@ -348,7 +348,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       ret = self.base.cast(dtype, bitcast)
       op_arg = []
       mop = self
-      while mop.op in GroupOp.Movement:
+      while mop is not self.base:
         op_arg.append((mop.op, mop.arg))
         mop = mop.src[0]
       for op,arg in reversed(op_arg): ret = UOp(op, ret.dtype, (ret,), arg)
