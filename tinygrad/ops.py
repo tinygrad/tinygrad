@@ -710,6 +710,7 @@ class UPat(MathTrait):
       self.early_reject = {pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1}
 
   def named(self, name:str): return UPat(self.op, self.dtype, self._in_src, self.arg, name, self.allowed_len == -1, self.custom_early_reject)
+  def with_type(self, dtype:DType): return UPat(self.op, dtype, self._in_src, self.arg, self.name, self.allowed_len == -1, self.custom_early_reject)
 
   @staticmethod
   def any(*src): return UPatAny(src=src)
@@ -903,17 +904,18 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp
   return RewriteContext(pm, ctx).bottom_up_rewrite(sink) if bottom_up else RewriteContext(pm, ctx).rewrite(sink)
 
 # ***** uop type spec *****
+x,y,z,c1_v,c2_v,c3_v = UPat.var("x"), UPat.var("y"), UPat.var("z"), UPat.cvar("c1"), UPat.cvar("c2"), UPat.cvar("c3")
+c1, c2, c3 = UPat.cvar("c1", vec=False), UPat.cvar("c2", vec=False), UPat.cvar("c3", vec=False)
 
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
 spec = PatternMatcher([
   (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
-  (UPat(Ops.DEFINE_ACC, src=(UPat.var("c"),), name="x", allow_any_len=True),
-   lambda x,c: all(y.op is Ops.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
+  (UPat(Ops.DEFINE_ACC, src=(y,), name="x", allow_any_len=True), lambda x,c: all(s.op is Ops.RANGE for s in x.src[1:]) and y.dtype == x.dtype),
   (UPat(Ops.DEFINE_VAR, src=(), name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
-  (UPat(Ops.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype and isinstance(rng.arg, int)),
+  (UPat(Ops.RANGE, src=(x, y), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype and isinstance(rng.arg, int)),
   (UPat(Ops.SPECIAL, src=()), lambda: True),
 
   # TODO: confirm the args of both of these are shapetrackers
@@ -946,10 +948,10 @@ spec = PatternMatcher([
   (UPat(Ops.STORE, dtype=dtypes.void, src=(UPat((Ops.INDEX, Ops.CAST)), UPat(), UPat(Ops.IF))), lambda: True),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
-  (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat(name="x"), UPat(name="y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
-  (UPat((Ops.CMPLT, Ops.CMPNE), dtype=dtypes.bool, src=(UPat(name="x"), UPat(name="y"))), lambda x,y: x.dtype == y.dtype),
+  (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), x, y)), lambda w,x,y: w.dtype == x.dtype == y.dtype),
+  (UPat((Ops.CMPLT, Ops.CMPNE), dtype=dtypes.bool, src=(x, y)), lambda x,y: x.dtype == y.dtype),
   # and SHL/SHR, the shift distance can be an int
-  (UPat((Ops.SHL, Ops.SHR), src=(UPat(name="x"), UPat(name="y")), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),
+  (UPat((Ops.SHL, Ops.SHR), src=(x, y), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),
   (UPat(Ops.IDIV, name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(GroupOp.ALU, name="x"), lambda x: all(x.dtype == y.dtype for y in x.src)),
 
@@ -1176,36 +1178,34 @@ def sint_to_uop(x:sint, dtype:DType=dtypes.int) -> UOp: return UOp.const(dtype, 
 
 symbolic_simple = PatternMatcher([
   # ** self folding **
-  (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
-  (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
-  (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
-  (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
-  (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
-  (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
-  ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
-  ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
-  (UPat.var("x")%UPat.cvar("c")+(UPat.var("x")//UPat.cvar("c"))*UPat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
-  ((UPat.var("x")//UPat.cvar("c1"))*UPat.cvar("c3")+UPat.var("x")%UPat.cvar("c1")*UPat.cvar("c2"),
-    lambda x,c1,c2,c3: x*c2 if c1.arg*c2.arg==c3.arg else None), # (x%c1)*c2+(x//c1)*c3 = x*c2 if c1*c2==c3
-  (UPat.var("x", dtype=dtypes.bool) & UPat.cvar("c", vec=False), lambda x,c: x if c.arg else c),
-  (UPat.var("x", dtype=dtypes.bool) | UPat.cvar("c", vec=False), lambda x,c: c if c.arg else x),
-  (UPat(GroupOp.Idempotent, src=(UPat.var("x"), UPat.var("x"))), lambda x: x),
-  (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
-  (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, True), UPat.const(dtypes.bool, False)), lambda x: x),
+  (x + 0, lambda x: x),    # x+0 -> x
+  (x * 1, lambda x: x),    # x*1 -> x
+  (x // x, lambda x: x.const_like(1)), # x//x -> 1
+  (x // 1, lambda x: x),   # x//1 -> x
+  (x // -1, lambda x: -x), # x//-1 -> -x
+  (x / x, lambda x: x.const_like(1)), # x/x -> 1
+  ((x * y) / y, lambda x,y: x), # (x*y)/y -> x
+  ((UPat.var() % y).named("base") % y, lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
+  (x%c1_v+(x//c1_v)*c1_v, lambda x,c1: x),  # (x%c1)+(x//c1)*c1 = x
+  ((x//c1_v)*c2_v+x%c1_v*c2_v, lambda x,c1,c2,c3: x*c2 if c1.arg*c2.arg==c3.arg else None), # (x%c1)*c2+(x//c1)*c3 = x*c2 if c1*c2==c3
+  (x.with_dtype(dtypes.bool) & c1, lambda x,c1: x if c1.arg else c1),
+  (x.with_dtype(dtypes.bool) | c1, lambda x,c1: c1 if c1.arg else x),
+  (UPat(GroupOp.Idempotent, src=(x, x)), lambda x: x),
+  (x.with_type(dtypes.bool).logical_not().logical_not(), lambda x: x),
+  (x.with_type(dtypes.bool).where(UPat.const(dtypes.bool, True), UPat.const(dtypes.bool, False)), lambda x: x),
   # ** zero folding **
-  (UPat.var("x") < UPat.var("x"), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x < x -> False
-  (UPat.var("x", dtype=dtypes.ints) != UPat.var("x", dtype=dtypes.ints),
-   lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x != x -> False (only ints)
+  (x < x, lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x < x -> False
+  (x.with_type(dtypes.ints) != x.with_type(dtypes.ints), lambda x: UOp.const(dtypes.bool.vec(x.dtype.count), False)), # x != x -> False (only ints)
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
   # NOTE: this can be wrong for loaded NaN
-  (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
+  (x * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # ** constant folding **
   (UPat(GroupOp.ALU, name="a", src=UPat((Ops.VCONST, Ops.CONST))), lambda a: a.const_like(exec_alu(a.op, a.dtype, [x.arg for x in a.src], False))),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
-  (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
-  (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
-  (UPat.var('x', dtype=dtypes.bool).maximum(UPat.var('y', dtype=dtypes.bool)), lambda x,y: x|y),
+  (x.with_type(dtypes.bool) * y.with_type(dtypes.bool), lambda x,y: x&y),
+  (x.with_type(dtypes.bool) + y.with_type(dtypes.bool), lambda x,y: x|y),
+  (x.with_type(dtypes.bool).maximum(y.with_type(dtypes.bool)), lambda x,y: x|y),
   # *** cast ***
   (UPat(Ops.CAST, name="root", src=UPat.cvar("c")), lambda root, c: root.const_like(c.arg)),
   (UPat(Ops.CAST, name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
@@ -1215,71 +1215,68 @@ symbolic = symbolic_simple+PatternMatcher([
   # ** COMMUTATIVE flipping **
   (UPat(GroupOp.Commutative, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
   # group like
-  ((UPat.var("x") + UPat.var("y")) + UPat.var("x") * UPat.cvar("c"), lambda x,y,c: (x+x*c)+y),
+  ((x + y) + x * c1_v, lambda x,y,c1: (x+x*c1)+y),
   # ** boolean algebra **
-  (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
+  (x | (x & UPat.var()), lambda x: x), # x|(x&y) -> x
   # ** combine terms **
-  (UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1"), lambda x,c0,c1: x*(c0+c1)), # (x*c0)+(x*c1) -> x*(c0+c1)
-  (UPat.var("x") + UPat.var("x") * UPat.cvar("c"), lambda x,c: x*(c+1)), # (x+x*c)-> x*(c+1)
-  (UPat.var("x") + UPat.var("x"), lambda x: x*2), # (x+x)-> x*2
-  ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3)), # (x/x2)/x3 -> x/(x2*x3)
-  (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
+  (x * c1_v + x * c2_v, lambda x,c1,c2: x*(c1+c2)), # (x*c1)+(x*c2) -> x*(c1+c2)
+  (x + x * c1_v, lambda x,c1: x*(c1+1)), # (x+x*c)-> x*(c+1)
+  (x + x, lambda x: x*2), # (x+x)-> x*2
+  ((x / y) / z, lambda x,y,z: x/(y*z)), # (x/y)/z -> x/(y*z)
+  (-1 * (x + c1_v), lambda x,c1: (-x)+(-c1)),  # -(x+c) -> -x + -c
   # a conditional with the same results either way is a noop, also fold const conditionals
-  (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
-  (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UPat().where(x, x), lambda x: x),
+  (c1.where(x, y), lambda c1,x,y: x if c1.arg else y),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
-  (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
-   lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
+  (UPat(GroupOp.Binary, name="alu", src=(x.where(c1, y), x.where(c2, z))), lambda alu,x,c1,c2,y,z: x.where(c1.alu(alu.op, c2), y.alu(alu.op, z))),
+  (UPat(GroupOp.Binary, name="alu", src=(x.where(y, c1), x.where(z, c2))), lambda alu,x,c1,c2,y,z: x.where(y.alu(alu.op, z), c1.alu(alu.op, c2))),
   # ALU min==max -> CONST (slow!)
   (UPat(GroupOp.ALU, name="x"), lambda x: x.const_like(x.vmin) if x.vmin == x.vmax else None),
   # max folding
-  (UPat.maximum(UPat.var("x"), UPat.var("y")), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
+  (UPat.maximum(x, y), lambda x,y: x if x.vmin >= y.vmax else y if x.vmax <= y.vmin else None),
   # TODO: why does this rule break beautiful_mnist?
-  #((UPat.var("x")+UPat.var("z")).maximum(UPat.var("y")+UPat.var("z")), lambda x,y,z: x.maximum(y) + z),
-  ((UPat.var("x")*UPat.cvar("c1")).maximum(UPat.var("x")*UPat.cvar("c2")), max_var_const),
+  #((x+UPat.var("z")).maximum(y+UPat.var("z")), lambda x,y,z: x.maximum(y) + z),
+  ((x*c1_v).maximum(x*c2_v), max_var_const),
   # ** two stage ALU folding **
-  ((UPat.var("x") + UPat.cvar("c1")) + UPat.cvar("c2"), lambda x,c1,c2: x+(c1+c2)),
-  ((UPat.var("x") * UPat.cvar("c1")) * UPat.cvar("c2"), lambda x,c1,c2: x*(c1*c2)),
-  ((UPat.var("x") & UPat.cvar("c1")) & UPat.cvar("c2"), lambda x,c1,c2: x&(c1&c2)),
-  ((UPat.var("x") | UPat.cvar("c1")) | UPat.cvar("c2"), lambda x,c1,c2: x|(c1|c2)),
-  ((UPat.cvar("c0") + UPat.var("x")) < UPat.cvar("c1"), lambda x,c0,c1: x<(c1-c0)),  # c0 + x < c1 -> x < c1 - c0
-  ((UPat.var("x") // UPat.cvar("c1")) // UPat.cvar("c2"), lambda x,c1,c2: x//(c1*c2)), # (x//c1)//c2 -> x//(c1*c2)
+  ((x + c1_v) + c2_v, lambda x,c1,c2: x+(c1+c2)),
+  ((x * c1_v) * c2_v, lambda x,c1,c2: x*(c1*c2)),
+  ((x & c1_v) & c2_v, lambda x,c1,c2: x&(c1&c2)),
+  ((x | c1_v) | c2_v, lambda x,c1,c2: x|(c1|c2)),
+  ((c1_v + x) < c2_v, lambda x,c1,c2: x<(c2-c1)),  # c1 + x < c2 -> x < c2 - c1
+  ((x // c1_v) // c2_v, lambda x,c1,c2: x//(c1*c2)), # (x//c1)//c2 -> x//(c1*c2)
   # ** lt **
   # c0*x<c1 for positive int c0,c1
-  ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints))<UPat.cvar("c1", vec=False),
-   lambda x,c0,c1: x<math.ceil(c1.arg/c0.arg) if c0.arg > 0 and c1.arg > 0 else None),
+  (c1*x.with_type(dtypes.ints)<c2, lambda x,c1,c2: x<math.ceil(c2.arg/c1.arg) if c1.arg > 0 and c2.arg > 0 else None),
   # c0*x<c1 for negative int c0 and non-positive c1
-  ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.ints))<UPat.cvar("c1", vec=False),
-   lambda x,c0,c1: (-x)<(-(math.floor(-c1.arg/-c0.arg))) if c0.arg < 0 and c0.arg != -1 and c1.arg <= 0 else None),
+  (c1*x.with_type(dtypes.ints)<c2, lambda x,c1,c2: (-x)<(-(math.floor(-c2.arg/-c1.arg))) if c1.arg < 0 and c1.arg != -1 and c2.arg <= 0 else None),
   # x//c0<c1 for positive int c0
-  ((UPat.var("x", dtype=dtypes.ints)//UPat.cvar("c0", vec=False))<UPat.cvar("c1", vec=False),
-   lambda x,c0,c1: x<(c1.arg*c0.arg) if c0.arg > 0 else None),
+  ((x.with_type(dtype=dtypes.ints)//c1)<c2, lambda x,c1,c2: x<(c2.arg*c1.arg) if c1.arg > 0 else None),
   # ** move add/mul consts to end (NOTE: this is still happening before constant folding) **
-  (UPat(Ops.ADD, src=(UPat.var("x"), UPat.cvar("c1"))) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
-  (UPat(Ops.MUL, src=(UPat.var("x"), UPat.cvar("c1"))) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
+  (UPat(Ops.ADD, src=(x, c1_v)) + y, lambda x,c1,y: (x+y)+c1),
+  (UPat(Ops.MUL, src=(x, c1_v)) * y, lambda x,c1,y: (x*y)*c1),
   # *** rules from symbolic ***
   # unrolled arange div folding
-  (UPat(Ops.ADD, name="divs", src=[UPat(), UPat(Ops.IDIV)]), fold_unrolled_divs),
+  ((UPat() + UPat(Ops.IDIV)).named("divs"), fold_unrolled_divs),
   # generic lt folding
-  (UPat.var("x", dtypes.sints)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
+  (x.with_type(dtypes.sints)<c1, lambda x,c: lt_folding(x, c1.arg) if 0 < c1.arg else None),
   # canonicalize a simplex with positive coefficients > 0
   # not x < 1 -> X > 0
-  ((UPat.var("x", dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
+  ((x.with_type(dtypes.ints)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # ** div **
   # div folding
-  ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)),  # (x//c+a)//d -> (x+a*c)//(c*d)
-  (UPat.var("x", dtypes.sints) // UPat.cvar("c", vec=False), lambda x,c: div_and_mod_folding(x,c.arg,Ops.IDIV) if 0 < c.arg else None),
+  ((x//c1_v + c2_v)//c3_v, lambda x,c,a,d: (x+c1_v*c2_v)//(c1_v*c3_v)),  # (x//c1+c2)//c3 -> (x+a*c)//(c*d)
+  (x.with_type(dtypes.sints) // c1, lambda x,c1: div_and_mod_folding(x,c1.arg,Ops.IDIV) if 0 < c1.arg else None),
   # ** mod **
   # mod folding
-  (UPat.var("x") % UPat.cvar("c", vec=False), lambda x,c: div_and_mod_folding(x,c.arg,Ops.MOD) if 0 < c.arg else None),
+  (x % c1, lambda x,c1: div_and_mod_folding(x,c1.arg,Ops.MOD) if 0 < c1.arg else None),
 ])
 
 
 symbolic_flat = symbolic+PatternMatcher([
   # ** combine terms (opinionated) **
-  (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
+  (-1 * (x + y), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
-  ((UPat.var("x", dtypes.ints) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
+  ((x.with_type(dtypes.ints) + y) * c1_v, lambda x,y,c1: x*c1+y*c1),
 ])
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
