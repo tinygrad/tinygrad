@@ -187,9 +187,10 @@ if __name__ == "__main__":
 
   prof_json = []
   if profile is not None:
-    for ev in tqdm(profile):
+    for ev in profile:
       if isinstance(ev, HCQProfileDeviceEvent): prof_json += dev_ev_to_perfetto_json(ev)
-      elif isinstance(ev, HCQProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)
+    for ev in tqdm(profile):
+      if isinstance(ev, HCQProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)
       elif isinstance(ev, HCQProfileGraphEvent): prof_json += graph_ev_to_perfetto_json(ev, reccnt:=len(prof_json))
     print(f"*** loaded {len(prof_json)} profile events")
   perfetto_profile = json.dumps({"traceEvents": prof_json}).encode() if len(prof_json) > 0 else None

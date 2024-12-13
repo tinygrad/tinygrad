@@ -295,44 +295,6 @@ class HCQProgram(Generic[DeviceType]):
     if wait: self.dev.synchronize()
     return (float(sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
 
-# class ProfileLogger:
-#   writers: int = 0
-#   mjson: List[Dict] = []
-#   actors: Dict[Union[str, Tuple[str, str]], int] = {}
-
-#   def __init__(self): self.events, self.deps, ProfileLogger.writers = [], [], ProfileLogger.writers + 1
-
-#   def add_event(self, ev_name, ev_start, ev_end, actor, subactor=None, args=None): self.events += [(ev_name, ev_start, ev_end, actor, subactor, args)]
-
-#   def _ensure_actor(self, actor_name, subactor_name):
-#     if actor_name not in self.actors:
-#       self.actors[actor_name] = (pid:=len(self.actors))
-#       self.mjson.append({"name": "process_name", "ph": "M", "pid": pid, "args": {"name": actor_name}})
-
-#     if (subactor_key:=(actor_name,subactor_name)) not in self.actors:
-#       self.actors[subactor_key] = (tid:=len(self.actors))
-#       self.mjson.append({"name": "thread_name", "ph": "M", "pid": self.actors[actor_name], "tid":tid, "args": {"name": subactor_name}})
-
-#     return self.actors[actor_name], self.actors.get(subactor_key, -1)
-
-#   def __del__(self):
-#     # perfetto json docs: https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
-#     for name, st, et, actor_name, subactor_name, args in self.events:
-#       pid, tid = self._ensure_actor(actor_name,subactor_name)
-#       args = {k: (v if v.__class__ is str else v(et-st)) for k, v in args.items()} if args is not None else None
-#       self.mjson.append({"name": name, "ph": "X", "pid": pid, "tid": tid, "ts": st, "dur": et-st, "args": args})
-
-#     for en,st,dep_actor_name,dep_subactor_name,actor_name,subactor_name in self.deps:
-#       dep_pid, dep_tid = self._ensure_actor(dep_actor_name,dep_subactor_name)
-#       pid, tid = self._ensure_actor(actor_name,subactor_name)
-#       self.mjson.append({"ph": "s", "pid": dep_pid, "tid": dep_tid, "id": len(self.mjson), "ts": en, "bp": "e"})
-#       self.mjson.append({"ph": "f", "pid": pid, "tid": tid, "id": len(self.mjson)-1, "ts": st, "bp": "e"})
-
-#     ProfileLogger.writers -= 1
-#     if ProfileLogger.writers == 0 and len(self.mjson) > 0:
-#       with open(PROFILEPATH.value, "w") as f: f.write(json.dumps({"traceEvents": self.mjson}))
-#       print(f"Saved profile to {PROFILEPATH.value}. Use https://ui.perfetto.dev/ to open it.")
-
 class HCQProfileEvent: pass
 class HCQProfileDeviceEvent(HCQProfileEvent):
   def __init__(self, device:str, comp_tdiff:decimal.Decimal, copy_tdiff:decimal.Decimal):
@@ -362,9 +324,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
     self._shadow_timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
 
+    self.prof_events:List[HCQProfileEvent] = []
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
-    # self.raw_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, str, bool, Optional[Dict]]] = []
-    # self.dep_prof_records:List[Tuple[decimal.Decimal, decimal.Decimal, HCQCompiled, bool, decimal.Decimal, decimal.Decimal, HCQCompiled, bool]] = []
 
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, renderer, compiler, runtime, HCQGraph)
@@ -372,9 +333,6 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.kernargs_page:HCQBuffer = self.allocator.alloc(16 << 20, BufferSpec(cpu_access=True))
     self.kernargs_alloctor:BumpAllocator = BumpAllocator(self.kernargs_page.size, start=cast(int, self.kernargs_page.va_addr), wrap=True)
     self.devices.append(self)
-
-    self.prof_events:List[HCQProfileEvent] = []
-    if PROFILE: self._ensure_shared_time_base()
 
   def synchronize(self):
     try: self.timeline_signal.wait(self.timeline_value - 1)
@@ -387,7 +345,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
       self.prof_events += [HCQProfileRangeEvent(self.device, name, st.timestamp, en.timestamp, is_cp) for st,en,name,is_cp in self.sig_prof_records]
       self.sig_prof_records.clear()
 
-  def _ensure_shared_time_base(self):
+  def _sync_gpu_to_cpu(self):
     def _sync(d:HCQCompiled, q_t:Type[HWQueue]):
       q_t().timestamp(d.timeline_signal).signal(d.timeline_signal, d.timeline_value).submit(d)
       d.timeline_value += 1
@@ -400,61 +358,6 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.gpu2cpu_compute_time_diff = statistics.median([_sync(self, self.hw_compute_queue_t) for _ in range(40)])
     self.gpu2cpu_copy_time_diff = None if self.hw_copy_queue_t is None else statistics.median([_sync(self, self.hw_copy_queue_t) for _ in range(40)])
     self.prof_events.append(HCQProfileDeviceEvent(self.device, self.gpu2cpu_compute_time_diff, self.gpu2cpu_copy_time_diff))
-
-    # randomly sample the timing from GPU to CPU
-    # choices: List = [(d, d.hw_compute_queue_t, []) for d in self.devices]
-    # choices += [(d, d.hw_copy_queue_t, []) for d in self.devices if d.hw_copy_queue_t is not None]
-    # for _ in range(100*len(self.devices)):
-    #   d,q,l = random.choice(choices)
-    #   l.append(_sync_cpu_queue(d,q))
-
-    # for d,q,l in choices:
-    #   if q == d.hw_compute_queue_t: d.gpu2cpu_compute_time_diff = statistics.median(l)
-    #   if q == d.hw_copy_queue_t: d.gpu2cpu_copy_time_diff = statistics.median(l)
-
-    # def _sync_gpu_to_gpu_queue(d1:HCQCompiled, d2:HCQCompiled, q1_t:Type[HWQueue], q2_t:Type[HWQueue]):
-    #   q1_t().signal(d1.timeline_signal, d1.timeline_value).wait(d2.timeline_signal, d2.timeline_value) \
-    #         .timestamp(d1.timeline_signal).signal(d1.timeline_signal, d1.timeline_value+1).submit(d1)
-    #   q2_t().signal(d2.timeline_signal, d2.timeline_value).wait(d1.timeline_signal, d1.timeline_value) \
-    #         .timestamp(d2.timeline_signal).signal(d2.timeline_signal, d2.timeline_value+1).submit(d2)
-    #   d1.timeline_value += 2
-    #   d2.timeline_value += 2
-    #   d1.timeline_signal.wait(d1.timeline_value - 1)
-    #   d2.timeline_signal.wait(d2.timeline_value - 1)
-    #   return d2.timeline_signal.timestamp - d1.timeline_signal.timestamp
-
-    # # then test it by timing the GPU to GPU times
-    # jitter_matrix = [[float('nan')]*len(self.devices) for _ in range(len(self.devices))]
-    # for i1, d1 in enumerate(self.devices):
-    #   for i2, d2 in enumerate(self.devices):
-    #     if d1 == d2: continue
-    #     d1_to_d2 = statistics.median(_sync_gpu_to_gpu_queue(d1, d2, d1.hw_compute_queue_t, d2.hw_compute_queue_t) - \
-    #                                  _sync_gpu_to_gpu_queue(d2, d1, d2.hw_compute_queue_t, d1.hw_compute_queue_t) for _ in range(20)) / 2
-    #     jitter_matrix[i1][i2] = d1_to_d2 - (d1.gpu2cpu_compute_time_diff - d2.gpu2cpu_compute_time_diff)
-    # print("pairwise clock jitter matrix (us):\n" + '\n'.join([''.join([f'{float(item):8.3f}' for item in row]) for row in jitter_matrix]))
-
-  # def _gpu2cpu_time(self, gpu_time:decimal.Decimal, is_copy:bool) -> float:
-  #   """
-  #   Translates local gpu time (timestamp) into global cpu time.
-  #   """
-  #   return float(gpu_time + (self.gpu2cpu_copy_time_diff if is_copy else self.gpu2cpu_compute_time_diff))
-
-  # def _prof_finalize(self):
-  #   qname = ["COMPUTE", "DMA"]
-
-  #   # Sync to be sure all events on the device are recorded.
-  #   self.synchronize()
-
-  #   for st, en, name, is_cp, args in self.raw_prof_records:
-  #     self.profile_logger.events += [(name, self._gpu2cpu_time(st, is_cp), self._gpu2cpu_time(en, is_cp), self.device, qname[is_cp], args)]
-  #   for a_st, a_en, a_dev, a_is_copy, b_st, b_en, b_dev, b_is_copy in self.dep_prof_records:
-  #     # Perfetto connects nodes based on timing data, ensuring every choice is valid by averaging times to a midpoint.
-  #     a_tm, b_tm = a_dev._gpu2cpu_time((a_st+a_en)/decimal.Decimal(2), a_is_copy), b_dev._gpu2cpu_time((b_st+b_en)/decimal.Decimal(2), b_is_copy)
-  #     self.profile_logger.deps += [(a_tm, b_tm, a_dev.device, qname[a_is_copy], b_dev.device, qname[b_is_copy])]
-  #   self.raw_prof_records, self.dep_prof_records = [], []
-
-  #   # Remove the logger, this flushes all data written by the device.
-  #   del self.profile_logger
 
   def _wrap_timeline_signal(self):
     self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
@@ -551,5 +454,26 @@ if PROFILE:
   @atexit.register
   def hcq_finlize_profile():
     for dev in HCQCompiled.devices: dev.synchronize()
-    with open(fn:=temp("profile.pkl"), "wb") as f: pickle.dump([ev for dev in HCQCompiled.devices for ev in dev.prof_events], f)
+    for dev in HCQCompiled.devices: dev._sync_gpu_to_cpu()
+
+    def _sync_d2d(d1:HCQCompiled, d2:HCQCompiled):
+      d1.hw_compute_queue_t().signal(d1.timeline_signal, d1.timeline_value).wait(d2.timeline_signal, d2.timeline_value) \
+                             .timestamp(d1.timeline_signal).signal(d1.timeline_signal, d1.timeline_value+1).submit(d1)
+      d2.hw_compute_queue_t().signal(d2.timeline_signal, d2.timeline_value).wait(d1.timeline_signal, d1.timeline_value) \
+                             .timestamp(d2.timeline_signal).signal(d2.timeline_signal, d2.timeline_value+1).submit(d2)
+      d1.timeline_value += 2
+      d2.timeline_value += 2
+      d1.timeline_signal.wait(d1.timeline_value - 1)
+      d2.timeline_signal.wait(d2.timeline_value - 1)
+      return d2.timeline_signal.timestamp - d1.timeline_signal.timestamp
+
+    # then test it by timing the GPU to GPU times
+    jitter_matrix = [[float('nan')] * len(HCQCompiled.devices) for _ in range(len(HCQCompiled.devices))]
+    pairs = [(p1, p2) for p1 in enumerate(HCQCompiled.devices) for p2 in enumerate(HCQCompiled.devices) if p1 != p2]
+    for (i1, d1), (i2, d2) in pairs:
+      cpu_diff = d1.gpu2cpu_compute_time_diff - d2.gpu2cpu_compute_time_diff
+      jitter_matrix[i1][i2] = statistics.median(_sync_d2d(d1, d2) - _sync_d2d(d2, d1) for _ in range(20)) / 2 - cpu_diff
+    print("pairwise clock jitter matrix (us):\n" + '\n'.join([''.join([f'{float(item):8.3f}' for item in row]) for row in jitter_matrix]))
+
+    with open(temp("profile.pkl"), "wb") as f: pickle.dump([ev for dev in HCQCompiled.devices for ev in dev.prof_events], f)
     os.execv(sys.executable, [sys.executable] + [pathlib.Path(__file__).parent.parent.parent/"viz"/"serve.py", "", temp("profile.pkl")])
