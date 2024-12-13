@@ -59,6 +59,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     # NOTE: we now have to recompute the forward pass since we realized it
     ret = tinygrad_fxn(*tst)
     loss:Tensor = (ret+1).square().mean()
+    # test_ops uses new style gradient
     tst_grads = loss.gradient(*tst)
     if len(tst_grads): Tensor.realize(*tst_grads)
     tinygrad_fbp = time.monotonic() - st

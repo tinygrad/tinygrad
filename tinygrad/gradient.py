@@ -1,5 +1,5 @@
 from typing import cast
-import math
+import math, functools
 from tinygrad.dtype import dtypes, sum_acc_dtype
 from tinygrad.ops import UOp, PatternMatcher, UPat, Ops
 from tinygrad.helpers import argsort
@@ -40,10 +40,12 @@ pm_gradient = PatternMatcher([
 
 # copied from tensor.py, get relevant toposort of gradients
 def _deepwalk(root:UOp, targets:list[UOp]):
+  @functools.lru_cache(None)
+  def is_in_target_path(x:UOp) -> bool: return any(u in targets or is_in_target_path(u) for u in x.src)
   def _walk(node:UOp, visited:set[UOp]):
     visited.add(node)
     if node.op is Ops.DETACH: return
-    if any(x in node.toposort for x in targets if x is not node):
+    if is_in_target_path(node):
       for i in node.src:
         if i not in visited: yield from _walk(i, visited)
       yield node
