@@ -183,7 +183,7 @@ class ResNetFPN:
 
   def __call__(self, x):
     out = self.body.bn1(self.body.conv1(x)).relu()
-    out = out.pad2d([1,1,1,1]).max_pool2d((3,3), 2)
+    out = out.pad([1,1,1,1]).max_pool2d((3,3), 2)
     out = out.sequential(self.body.layer1)
     p3 = out.sequential(self.body.layer2)
     p4 = p3.sequential(self.body.layer3)

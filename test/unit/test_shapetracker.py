@@ -125,7 +125,6 @@ class TestRealStrides(unittest.TestCase):
     ))
     self.assertEqual(st.real_strides(), (None, 4, 1))
 
-  @unittest.expectedFailure  # FIXME
   def test_2(self):
     # test/test_ops.py::TestOps::test_simple_padding_conv1d
     st = ShapeTracker((
@@ -153,7 +152,6 @@ class TestRealStrides(unittest.TestCase):
     ))
     self.assertEqual(st.real_strides(), (896, 0, None, 56, None))
 
-  @unittest.expectedFailure  # FIXME
   def test_5(self):
     # test/test_ops.py::TestOps::test_conv2d
     st = ShapeTracker((
@@ -794,6 +792,12 @@ class TestShapeTrackerSize(unittest.TestCase):
   def test_simple_size(self):
     st = ShapeTracker.from_shape((100, 100))
     self.assertEqual(st.real_size(), 100*100)
+
+  def test_0_in_shape_size(self):
+    st = ShapeTracker.from_shape((0, 100))
+    self.assertEqual(st.real_size(), 0)
+    st = ShapeTracker.from_shape((100, 0))
+    self.assertEqual(st.real_size(), 0)
 
   def test_expand_size(self):
     st = ShapeTracker.from_shape((100, 100))

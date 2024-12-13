@@ -2,9 +2,7 @@ from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip
 import urllib.request, subprocess, shutil, math, contextvars, types, copyreg, inspect, importlib
 from dataclasses import dataclass
-from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
-if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
-  from typing_extensions import TypeGuard
+from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -36,29 +34,25 @@ def make_tuple(x:Union[int, Sequence[int]], cnt:int) -> Tuple[int, ...]: return 
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fully_flatten(l):
   if hasattr(l, "__len__") and hasattr(l, "__getitem__") and not isinstance(l, str):
+    if hasattr(l, "shape") and l.shape == (): return [l[()]]
     flattened = []
-    if hasattr(l, "shape") and l.shape == (): flattened.append(l[()])
-    else:
-      for i in range(len(l)): flattened.extend(fully_flatten(l[i]))
+    for li in l: flattened.extend(fully_flatten(li))
     return flattened
   return [l]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
-def ceildiv(num, amt):
-  ret = -(num//-amt)
-  return ret if not isinstance(ret, float) else int(ret)
+def ceildiv(num, amt): return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
-def data64(data: int) -> Tuple[int, int]: return (data >> 32, data & 0xFFFFFFFF)
-def data64_le(data: int) -> Tuple[int, int]: return (data & 0xFFFFFFFF, data >> 32)
+def data64(data:Any) -> Tuple[Any, Any]: return (data >> 32, data & 0xFFFFFFFF) # Any is sint
+def data64_le(data:Any) -> Tuple[Any, Any]: return (data & 0xFFFFFFFF, data >> 32) # Any is sint
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   kvs = set([(k,v) for d in ds for k,v in d.items()])
   assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for d in ds for k,v in d.items()}
 def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> Tuple[List[T], List[T]]:
-  a:List[T] = []
-  b:List[T] = []
-  for s in itr: (a if fxn(s) else b).append(s)
-  return a,b
+  ret:Tuple[List[T], List[T]] = ([], [])
+  for s in itr: (ret[0] if fxn(s) else ret[1]).append(s)
+  return ret
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
@@ -68,7 +62,7 @@ def get_child(obj, key):
     elif isinstance(obj, dict): obj = obj[k]
     else: obj = getattr(obj, k)
   return obj
-def word_wrap(x, wrap=80): return x if len(x) <= wrap else (x[0:wrap] + "\n" + word_wrap(x[wrap:], wrap))
+def word_wrap(x, wrap=80): return x if len(x) <= wrap or '\n' in x[0:wrap] else (x[0:wrap] + "\n" + word_wrap(x[wrap:], wrap))
 
 # for length N coefficients `p`, returns p[0] * x**(N-1) + p[1] * x**(N-2) + ... + p[-2] * x + p[-1]
 def polyN(x:T, p:List[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
@@ -106,8 +100,9 @@ DEBUG, IMAGE, BEAM, NOOPT, JIT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0),
 WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 PROFILE, PROFILEPATH = ContextVar("PROFILE", 0), ContextVar("PROFILEPATH", temp("tinygrad_profile.json"))
 USE_TC, TC_OPT, AMX, TRANSCENDENTAL = ContextVar("TC", 1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0), ContextVar("TRANSCENDENTAL", 1)
-FUSE_ARANGE, FUSE_CONV_BW, LAZYCACHE = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0), ContextVar("LAZYCACHE", 1)
+FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
+PICKLE_BUFFERS = ContextVar("PICKLE_BUFFERS", 1)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -162,11 +157,11 @@ class Profiling(contextlib.ContextDecorator):
 
 # *** universal database cache ***
 
-_cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache"))
-CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
+cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
+CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 16
+VERSION = 17
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -197,7 +192,7 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
   return None
 
 _db_tables = set()
-def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
+def diskcache_put(table:str, key:Union[Dict, str, int], val:Any, prepickled=False):
   if CACHELEVEL == 0: return val
   if isinstance(key, (str,int)): key = {"key": key}
   conn = db_connection()
@@ -207,7 +202,7 @@ def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
     ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
     cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
     _db_tables.add(table)
-  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))  # noqa: E501
+  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (val if prepickled else pickle.dumps(val), ))  # noqa: E501
   conn.commit()
   cur.close()
   return val
@@ -230,28 +225,26 @@ def _ensure_downloads_dir() -> pathlib.Path:
       subprocess.run(["sudo", "chown", "tiny:root", downloads_dir], check=True)
       subprocess.run(["sudo", "chmod", "775", downloads_dir], check=True)
     return downloads_dir
-  return pathlib.Path(_cache_dir) / "tinygrad" / "downloads"
+  return pathlib.Path(cache_dir) / "downloads"
 
 def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional[str]=None, gunzip:bool=False,
           allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
-  else:
-    fp = _ensure_downloads_dir() / (subdir or "") / \
-      ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + (".gunzip" if gunzip else ""))
+  else: fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + (".gunzip" if gunzip else ""))
   if not fp.is_file() or not allow_caching:
+    (_dir := fp.parent).mkdir(parents=True, exist_ok=True)
     with urllib.request.urlopen(url, timeout=10) as r:
-      assert r.status == 200
+      assert r.status == 200, r.status
       length = int(r.headers.get('content-length', 0)) if not gunzip else None
-      progress_bar = tqdm(total=length, unit='B', unit_scale=True, desc=f"{url}", disable=CI)
-      (path := fp.parent).mkdir(parents=True, exist_ok=True)
       readfile = gzip.GzipFile(fileobj=r) if gunzip else r
-      with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
+      progress_bar = tqdm(total=length, unit='B', unit_scale=True, desc=f"{url}", disable=CI)
+      with tempfile.NamedTemporaryFile(dir=_dir, delete=False) as f:
         while chunk := readfile.read(16384): progress_bar.update(f.write(chunk))
         f.close()
-        progress_bar.update(close=True)
-        if length and (file_size:=os.stat(f.name).st_size) < length: raise RuntimeError(f"fetch size incomplete, {file_size} < {length}")
         pathlib.Path(f.name).rename(fp)
+      progress_bar.update(close=True)
+      if length and (file_size:=os.stat(fp).st_size) < length: raise RuntimeError(f"fetch size incomplete, {file_size} < {length}")
   return fp
 
 # *** Exec helpers
@@ -271,9 +264,10 @@ def cpu_objdump(lib, objdump_tool='objdump'):
 # TODO: make this work with read only memoryviews (if possible)
 def from_mv(mv:memoryview, to_type=ctypes.c_char):
   return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type * len(mv))).contents
-def to_mv(ptr, sz) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
+def to_mv(ptr:int, sz:int) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
 def mv_address(mv:memoryview): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
-def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])  # noqa: E501
+def to_char_p_p(options: List[bytes], to_type=ctypes.c_char):
+  return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
 @functools.lru_cache(maxsize=None)
 def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
   class CStruct(ctypes.Structure):
@@ -295,6 +289,8 @@ class tqdm:
       yield item
       self.update(1)
     self.update(close=True)
+  def __enter__(self): return self
+  def __exit__(self, *_): self.update(close=True)
   def set_description(self, desc:str): self.desc = f"{desc}: " if desc else ""
   def update(self, n:int=0, close:bool=False):
     self.n, self.i = self.n+n, self.i+1
@@ -320,10 +316,7 @@ class trange(tqdm):
 
 def _reconstruct_code(*args): return types.CodeType(*args)
 def _serialize_code(code:types.CodeType):
-  # NOTE: this works in Python 3.8 and up
-  if sys.version_info >= (3, 10): args = inspect.signature(types.CodeType).parameters
-  else: args = ['argcount', 'posonlyargcount', 'kwonlyargcount', 'nlocals', 'stacksize', 'flags', 'codestring',
-                'constants', 'names', 'varnames', 'filename', 'name', 'firstlineno', 'lnotab', 'freevars', 'cellvars']
+  args = inspect.signature(types.CodeType).parameters  # NOTE: this works in Python 3.10 and up
   return _reconstruct_code, tuple(code.__getattribute__('co_'+x.replace('codestring', 'code').replace('constants', 'consts')) for x in args)
 copyreg.pickle(types.CodeType, _serialize_code)
 
