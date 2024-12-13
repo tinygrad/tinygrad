@@ -363,9 +363,15 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
     if (replace_src:=ctx.contiguous.get(s, None)) is not None: new_src[i] = replace_src
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
+def cast_before_view(b:UOp, cast:UOp, base:UOp, bsrc:UOp, vsrc:UOp):
+  if getenv("CAST_BEFORE_VIEW", 1) and cast.dtype.itemsize <= vsrc.dtype.itemsize:
+    return UOp(Ops.VIEW, cast.dtype, (b, cast.replace(src=(bsrc,))), ShapeTracker.from_shape(bsrc.shape)).view(unwrap(vsrc.st))
+
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+  # CAST_BEFORE_VIEW=1
+  (UPatScheduled({Ops.CAST, Ops.BITCAST}, name="cast", src=(UPat(Ops.VIEW, name="bsrc").view(name="vsrc"),)), cast_before_view),
   # elementwise const folding
   (UPat(GroupOp.ALU, name="alu"), simplify_alu),
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, name="binop", src=(UPat.var("x"), UPat.var("y"))), simplify_binop),
