@@ -14,7 +14,6 @@ from tinygrad.device import is_dtype_supported
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
 class TestNN(unittest.TestCase):
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "no int64 on WebGPU")
   def test_sparse_cat_cross_entropy(self):
     # create in tinygrad
     input_tensor = Tensor.randn(6, 5) # not square to test that mean scaling uses the correct dimension
