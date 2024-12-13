@@ -139,7 +139,7 @@ class TestOpenImagesDataset(ExternalTestDatasets):
     tinygrad_dataloader, ref_dataloader = self._create_tinygrad_dataloader("train", anchors.numpy()), self._create_ref_dataloader("train")
     transform = GeneralizedRCNNTransform(img_size, img_mean, img_std)
 
-    for ((tinygrad_img, tinygrad_boxes, tinygrad_labels, _), (ref_img, ref_tgt)) in zip(tinygrad_dataloader, ref_dataloader):
+    for ((tinygrad_img, tinygrad_boxes, tinygrad_labels, _, _), (ref_img, ref_tgt)) in zip(tinygrad_dataloader, ref_dataloader):
       ref_tgt = [ref_tgt]
 
       ref_img, ref_tgt = transform(ref_img.unsqueeze(0), ref_tgt)

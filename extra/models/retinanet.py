@@ -155,7 +155,6 @@ class ClassificationHead:
     y = ((y + 1) * (fg_idxs := matches >= 0) - 1).one_hot(num_classes=x.shape[-1])
     valid_idxs = (matches != -2).reshape(matches.shape[0], -1, 1)
     loss = (sigmoid_focal_loss(x, y) * valid_idxs).sum(-1).sum(-1)
-
     return loss / fg_idxs.sum(-1)
 
 class RegressionHead:
