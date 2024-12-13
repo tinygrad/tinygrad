@@ -32,7 +32,7 @@ class BLAKE3:
     flags = Tensor.zeros((16, 1, info.shape[-1]), dtype=dtypes.uint32).contiguous()
     flags[-1, 0] = (flags[-1, 0] + 2) # chunk end flag
     flags = (flags + 2 * ((flags != 2) * (info < self.DEFAULT_LEN))) # chunk end flag for partial final chunk
-    flags[0].cast(dtypes.uint32) = flags[0] + Tensor(1, dtype=dtypes.uint32) # chunk start flag
+    flags[0] = flags[0].cast(dtypes.uint32) + Tensor(1, dtype=dtypes.uint32) # chunk start flag
     flags = (flags + (8 * (((info < self.PAD).sum() <= 16) * (info < self.DEFAULT_LEN)))).cast(dtypes.uint32) # root flag
     states = (chain_vals.cat(chain_vals[:, :4], counts, lengths, flags, dim=1) * (info < self.PAD).cast(dtypes.uint32))
     return states.realize(), chain_vals.realize()
