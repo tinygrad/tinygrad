@@ -7,7 +7,7 @@ class BLAKE3:
   """BLAKE3 hashing algorithm. Paper: https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf."""
   IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
   PAD, DEFAULT_LEN, PERMUTATIONS = 66, 65, Tensor([2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8], dtype=dtypes.uint32)
-  
+
   def __init__(self): self.compress_blocks_jit = TinyJit(self.compress_blocks)
 
   def compress_blocks(self, states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
@@ -23,7 +23,7 @@ class BLAKE3:
       if i < 6: data = data[self.PERMUTATIONS]
     return (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:])
 
-  @TinyJit 
+  @TinyJit
   def init_states(self, data: Tensor, info: Tensor) -> Tuple[Tensor, Tensor]:
     chain_vals = self.IV.reshape(1, 8, 1).expand(16, 8, info.shape[-1]).contiguous()
     counts = Tensor.arange(0, data.shape[-1], dtype=dtypes.uint32).reshape(-1, 1).expand(-1, 16).reshape(-1, 16, 1).permute(1, 2, 0)
