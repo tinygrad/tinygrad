@@ -12,7 +12,7 @@ x86_signed_ops = {**x86_unsigned_ops, Ops.IDIV: "idiv", Ops.MOD: "idiv", Ops.SHR
 x86_float32_ops = {Ops.ADD: "addss", Ops.SUB: "subss", Ops.MUL: "mulss", Ops.FDIV: "divss", Ops.CMPLT: "ucomiss", Ops.CMPNE: "ucomiss",
                  Ops.SQRT: "sqrtss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
 x86_float64_ops = {**{k:v[:-1]+'d' for k,v in x86_float32_ops.items()}}
-# NOTE: these are just for reg/stack reg/reg movs, for heap load/stores we load float16 using gen regs
+# NOTE: these are just for reg/stack reg/reg movs, for float16 heap load/stores we use gen regs
 x86_float16_ops = {Ops.STORE: "movss", Ops.LOAD: "movss", Ops.ASSIGN: "movss", Ops.DEFINE_ACC: "movss"}
 x86_vec2_ops = {**{k:v+"lps" for k,v in x86_mov_ops.items()}}
 x86_vec4_ops = {**{k:v+"aps" for k,v in x86_mov_ops.items()}}
@@ -175,6 +175,7 @@ class X86Renderer(Renderer):
     self.r = r
     mem: Dict[UOp, str] = {}
     stack_size: int = 8
+    arg_stack_offset: int = 16
     kernel: List[str] = []
     self.uops = uops
     last_use: Dict[UOp, int] = {var: i for i,u in enumerate(uops) for var in (v for v in (u,) + u.src if v.dtype != dtypes.void)}
@@ -214,7 +215,8 @@ class X86Renderer(Renderer):
         r[u] = assign_reg(i, u.dtype)
         if r[u] in ("rax", "xmm8"): # value is in stack instead of register, rbp + 8 is return address
           free_reg(r[u])
-          r[u] = mem[u] = f"[rbp + {16 + (i-6)*8}]"
+          r[u] = mem[u] = f"[rbp + {arg_stack_offset}]"
+          arg_stack_offset += 8
       elif u.op is Ops.CONST:
         r[u] = to_hex(u.arg, u.dtype)
         if not is_imm(u):
