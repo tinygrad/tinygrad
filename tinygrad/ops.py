@@ -94,7 +94,7 @@ class MathTrait(SimpleMathTrait):
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
   # uops that aren't rendered
-  SINK = auto(); CONTIGUOUS = auto(); PRELOAD = auto() # noqa: E702
+  SINK = auto(); CONTIGUOUS = auto(); PRELOAD = auto(); DEVICE = auto() # noqa: E702
 
   # MetaOps
   COPY = auto(); EMPTY = auto(); BUFFER_VIEW = auto() # noqa: E702
@@ -413,14 +413,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.VALID, dtypes.bool, (ShapeTracker.from_shape(()).reshape((1,)*len(shape)).expand(shape).to_uop(),)).where(UOp.const(dtype, val), 0)
   @staticmethod
   def metaop(op:Ops, shape:Tuple[sint, ...], dtype:DType, device:str, arg=None, src:Tuple[UOp, ...]=()) -> UOp:
-    from tinygrad.shape.shapetracker import ShapeTracker
-    # NOTE: we embed device on CONST with a fake BUFFER uop
+    dev = UOp(Ops.DEVICE, arg=device)
     if op is Ops.CONST:
-      fake = UOp(Ops.BUFFER, dtype.ptr(), (), (-1, (device, 1, dtype)))
-      return UOp(Ops.VIEW, dtype, (fake, arg if isinstance(arg, UOp) else UOp.const(dtype, unwrap(arg))),
-                 ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
+      # NOTE: if it's BIND it stays BIND
+      const = arg if isinstance(arg, UOp) else UOp.const(dtype, unwrap(arg))
+      # NOTE: const is shapeless
+      return const.replace(src=(dev, *const.src)).reshape((1,)*len(shape)).expand(shape)
     # otherwise it's a contiguous st
-    return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), UOp(op, dtype, src, arg)), st)
+    from tinygrad.shape.shapetracker import ShapeTracker
+    return UOp(op, dtype, (dev, *src), arg).view(ShapeTracker.from_shape(shape))
   def copy_to_device(self, device:str, force=False, clone:bool=False) -> UOp:
     # no COPY
     if self.device == device and not clone: return self
