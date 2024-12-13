@@ -13,7 +13,7 @@ x86_float32_ops = {Ops.ADD: "addss", Ops.SUB: "subss", Ops.MUL: "mulss", Ops.FDI
                  Ops.SQRT: "sqrtss", **{k:v+"ss" for k,v in x86_mov_ops.items()}}
 x86_float64_ops = {**{k:v[:-1]+'d' for k,v in x86_float32_ops.items()}}
 #x86_float16_ops = {Ops.STORE: "pextrw", Ops.LOAD: "pinsrw", Ops.ASSIGN: "pextrw", Ops.DEFINE_ACC: "pinsrw"}
-x86_float16_ops = {Ops.STORE: "movd", Ops.LOAD: "movd", Ops.ASSIGN: "movd", Ops.DEFINE_ACC: "movd"}
+x86_float16_ops = {Ops.STORE: "movd", Ops.LOAD: "movd", Ops.ASSIGN: "movss", Ops.DEFINE_ACC: "movss"}
 # NOTE: are doubles vectorized? 2 doubles is "ups" not "lps", use a instead of u
 x86_vec2_ops = {**{k:v+"lps" for k,v in x86_mov_ops.items()}}
 x86_vec4_ops = {**{k:v+"ups" for k,v in x86_mov_ops.items()}}
