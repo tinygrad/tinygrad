@@ -182,7 +182,7 @@ class X86Renderer(Renderer):
     def is_imm(u:UOp) -> bool: return u.op is Ops.CONST and not dtypes.is_float(u.dtype) and abs(u.arg) <= dtypes.max(dtypes.int32)
     def is_mem(u:UOp) -> bool: return u in r and u in mem and r[u] == mem[u]
     def is_reg(loc:str) -> bool: return loc in self.all_regs
-    def free_reg(reg:str): float_regs.append(reg) if reg.startswith("xmm") else gen_regs.append(reg)
+    def free_reg(reg:str): float_regs.insert(0, reg) if reg.startswith("xmm") else gen_regs.insert(0, reg)
 
     def mov_to_reg(u:UOp, reg:str):
       dt = dtypes.int64 if isinstance(u.dtype, PtrDType) or reg == "r15" else u.dtype
@@ -211,10 +211,10 @@ class X86Renderer(Renderer):
 
     for i,u in enumerate(uops):
       if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
-        type_regs = float_regs if dtypes.is_float(u.dtype) and not isinstance(u.dtype, PtrDType) else gen_regs
-        # value is in stack instead of register, rbp + 8 is return address
-        if type_regs[0] in ("rax", "xmm8"): r[u] = mem[u] = f"[rbp + {16 + (i-6)*8}]"
-        else: r[u] = assign_reg(i, u.dtype)
+        r[u] = assign_reg(i, u.dtype)
+        if r[u] in ("rax", "xmm8"): # value is in stack instead of register, rbp + 8 is return address
+          free_reg(r[u])
+          r[u] = mem[u] = f"[rbp + {16 + (i-6)*8}]"
       elif u.op is Ops.CONST:
         r[u] = to_hex(u.arg, u.dtype)
         if not is_imm(u):
