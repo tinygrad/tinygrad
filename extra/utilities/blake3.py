@@ -72,6 +72,7 @@ class BLAKE3:
     print(f"----- tree_hash -----")
     for _ in range(n_tree_steps):
       final_step = chain_vals[0, :3].prod().cast(dtypes.bool).neg()
+      print(f"tree_step {_} final_step: {final_step.tolist()}")
       chain_vals = self.tree_step(chain_vals.contiguous(), final_step)
       print(f"step {_}")
     print(f"----- tree_hash done -----")
