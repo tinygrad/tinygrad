@@ -329,6 +329,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
     return ret
   def sink(self, *srcs:UOp): return UOp(Ops.SINK, dtypes.void, (self,)+srcs)
+  def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
   def index(self, idx:UOp, valid:Optional[UOp]=None): return UOp(Ops.INDEX, self.dtype, (self,idx,valid) if valid is not None else (self,idx))
   def const_like(self, b:ConstLike):
     if self._device is not None: return UOp.metaop(Ops.CONST, self.shape, self.dtype, self.device, b)
