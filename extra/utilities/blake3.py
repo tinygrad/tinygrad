@@ -11,18 +11,17 @@ class BLAKE3:
   def __init__(self): self.compress_blocks_jit = TinyJit(self.compress_blocks)
 
   def compress_blocks(self, states: Tensor, data: Tensor, chain_vals: Tensor) -> Tensor:
-    new_states = states.clone()
     def rotr(x: Tensor, n: int) -> Tensor: return ((x << (32 - n)) | (x >> n))
     for i in range(7):
       for j, (a,b,c,d) in enumerate([(0,4,8,12), (1,5,9,13), (2,6,10,14), (3,7,11,15), (0,5,10,15), (1,6,11,12), (2,7,8,13), (3,4,9,14)]):
         mx, my = data[j * 2], data[j * 2 + 1]
         for m in (mx, my):
-          new_states[a] = (new_states[a] + new_states[b] + m)
-          new_states[d] = rotr(new_states[d] ^ new_states[a], 16 if m is mx else 8)
-          new_states[c] = new_states[c] + new_states[d]
-          new_states[b] = rotr(new_states[b] ^ new_states[c], 12 if m is mx else 7)
+          states[a] = (states[a] + states[b] + m)
+          states[d] = rotr(states[d] ^ states[a], 16 if m is mx else 8)
+          states[c] = states[c] + states[d]
+          states[b] = rotr(states[b] ^ states[c], 12 if m is mx else 7)
       if i < 6: data = data[self.PERMUTATIONS]
-    return (new_states[:8] ^ new_states[8:]).cat(chain_vals[:8] ^ new_states[8:])
+    return (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:])
 
   @TinyJit
   def init_states(self, data: Tensor, info: Tensor) -> Tuple[Tensor, Tensor]:
@@ -33,8 +32,8 @@ class BLAKE3:
     flags = Tensor.zeros((16, 1, info.shape[-1]), dtype=dtypes.uint32).contiguous()
     flags[-1, 0] = (flags[-1, 0] + 2) # chunk end flag
     flags = (flags + 2 * ((flags != 2) * (info < self.DEFAULT_LEN))) # chunk end flag for partial final chunk
-    # flags[0, :] = flags[0, :] + 1 # chunk start flag
-    flags = (flags + (8 * (((info < self.PAD).sum() <= 16) * (info < self.DEFAULT_LEN)))).cast(dtypes.uint32) # root flag
+    flags[0, :] = flags[0, :] + 1 # chunk start flag
+    flags = (flags + (8 * (((info < self.PAD).sum() <= 16) * (info < self.DEFAULT_LEN)))) # root flag
     states = (chain_vals.cat(chain_vals[:, :4], counts, lengths, flags, dim=1) * (info < self.PAD).cast(dtypes.uint32))
     return states.realize(), chain_vals.realize()
 
@@ -51,7 +50,7 @@ class BLAKE3:
       states[i] = self.compress_blocks_jit(next_state.contiguous(), data[i].contiguous(), chain_vals[i].contiguous())
     return self.finalize_states(states, info)
 
-  @TinyJit
+  #@TinyJit
   def tree_step(self, chain_vals: Tensor) -> Tensor:
     stacked = chain_vals.transpose().reshape(-1, 16).transpose().reshape(2, 8, -1)
     stacked_mask = stacked.any(1)
