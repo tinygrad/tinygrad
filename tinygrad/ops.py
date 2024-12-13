@@ -103,7 +103,7 @@ class Ops(FastEnum):
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto() # noqa: E702
 
   # movement ops!
-  RESHAPE = auto(); PERMUTE = auto(); MEXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
+  RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
 
   # misc ops
   UNROLL = auto(); CONTRACT = auto() # noqa: E702
@@ -154,7 +154,7 @@ class GroupOp:
   ALU = set.union(Unary, Binary, Ternary)
 
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
-  Movement = {Ops.RESHAPE, Ops.MEXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.STRIDE}
+  Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.STRIDE}
 
   # meta ops
   Meta = {Ops.COPY, Ops.EMPTY, Ops.BUFFER_VIEW}
@@ -274,7 +274,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.VIEW: return self.arg
     if self.op is Ops.RESHAPE: return unwrap(self.src[0].st).reshape(self.arg)
     if self.op is Ops.PERMUTE: return unwrap(self.src[0].st).permute(self.arg)
-    if self.op is Ops.MEXPAND: return unwrap(self.src[0].st).expand(self.arg)
+    if self.op is Ops.EXPAND: return unwrap(self.src[0].st).expand(self.arg)
     if self.op is Ops.SHRINK: return unwrap(self.src[0].st).shrink(self.arg)
     if self.op is Ops.STRIDE: return unwrap(self.src[0].st).stride(self.arg)
     if self.op is Ops.PAD: return unwrap(self.src[0].st).pad(self.arg)
@@ -496,7 +496,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def reshape(self, arg:Tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
   def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg)
-  def expand(self, arg:Tuple[sint, ...]): return self._mop(Ops.MEXPAND, arg)
+  def expand(self, arg:Tuple[sint, ...]): return self._mop(Ops.EXPAND, arg)
   def permute(self, arg:Tuple[sint, ...]): return self._mop(Ops.PERMUTE, arg)
   def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg)
   def stride(self, arg:Tuple[sint, ...]): return self._mop(Ops.STRIDE, arg)
