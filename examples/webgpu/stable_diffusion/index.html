@@ -363,7 +363,7 @@
             return res.arrayBuffer();
         };
   
-        const getAndDecompressF16Safetensors = async (device, progress, f16safeTensor) => {
+        const decompressf16Safetensor = async (device, progress, f16safeTensor) => {
             let totalLoaded = 0;
             let totalSize = 0;
             let partSize = {};
@@ -419,18 +419,15 @@
             }
 
             const device = await getDevice();
-            f16decomp =  await f16tof32().load(device, ''),
-            safetensorParts = await getAndDecompressF16Safetensors(device, progress);
 
             modelDlTitle.innerHTML = "Compiling model"
 
-            let models = ["textModel", "diffusor", "decoder"];
+            let netText = await textModel.load(device, "./net_textModel.safetensors");
+            let netDiffusor = await diffusor.load(device, "./net_diffusor_f16.safetensors");
+            let netDecoder = await decoder.load(device, "./net_decoder.safetensors");
+            let funcF16Decomp = await f16tof32.load(device);
 
-            nets = await timer(() => Promise.all([
-                textModel.load(device, safetensorParts),
-                diffusor().setup(device, safetensorParts),
-                decoder().setup(device, safetensorParts)
-            ]).then((loadedModels) => loadedModels.reduce((acc, model, index) => { acc[models[index]] = model; return acc; }, {})), "(compilation)")
+            decompressf16Safetensor(device, progress, diffusor.getWeights());
 
             progress(1, 1);
 

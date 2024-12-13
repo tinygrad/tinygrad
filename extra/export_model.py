@@ -94,6 +94,7 @@ def export_model_webgpu(functions, statements, bufs, weight_names, input_names, 
   output_return = '[{}]'.format(",".join([f'resultBuffer{i}' for i in range(len(output_names))]))
   return f"""
 const {exported_name} = (() => {{
+let weights = null;
 const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {{
   return safetensorBuffer.subarray(...tensorMetadata.data_offsets);
 }};
@@ -146,7 +147,8 @@ const addComputePass = (device, commandEncoder, pipeline, layout, infinityUnifor
 {kernel_code}
 
 const setupNet = async (device, safetensor) => {{
-    const metadata = getTensorMetadata(safetensor);
+    weights = safetensor;
+    const metadata = safetensor ? getTensorMetadata(safetensor) : null;
     const infinityBuf = createInfinityUniformBuf(device);
 
     {layouts}
@@ -184,8 +186,12 @@ const setupNet = async (device, safetensor) => {{
         return {output_return};
     }}
 }}
-const load = async (device, weight_path) => {{ return await fetch(weight_path).then(x => x.arrayBuffer()).then(x => setupNet(device, new Uint8Array(x))); }}
-return {{ load }};
+const load = async (device, weight_path) =>
+{{
+  const buffer = weight_path ? await fetch(weight_path).then(x => x.arrayBuffer()) : null;
+  return setupNet(device, buffer ? new Uint8Array(buffer) : null);
+}}
+return {{ load, getWeights: () => weights }};
 }})();
 export default {exported_name};
 """
