@@ -379,8 +379,8 @@ def load_retinanet_data(base_dir:Path, val:bool, queue_in:Queue, queue_out:Queue
       img, tgt, _ = resize(img, tgt=tgt)
       match_quality_matrix = box_iou(tgt["boxes"], anchors)
       match_idxs = find_matches(match_quality_matrix, allow_low_quality_matches=True)
-      match_idxs = np.clip(match_idxs, 0, None)
-      boxes, labels = tgt["boxes"][match_idxs], tgt["labels"][match_idxs]
+      clipped_match_idxs = np.clip(match_idxs, 0, None)
+      boxes, labels = tgt["boxes"][clipped_match_idxs], tgt["labels"][clipped_match_idxs]
 
       Y_boxes[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = boxes.tobytes()
       Y_labels[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = labels.tobytes()

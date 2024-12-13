@@ -152,12 +152,11 @@ class ClassificationHead:
       return out
   
   def _compute_loss(self, x:Tensor, y:Tensor, matches:Tensor) -> Tensor:
-    y = ((y + 1) * matches - 1).one_hot(num_classes=x.shape[-1])
-
-    # find indices for which anchors should be ignored
+    y = ((y + 1) * (fg_idxs := matches >= 0) - 1).one_hot(num_classes=x.shape[-1])
     valid_idxs = (matches != -2).reshape(matches.shape[0], -1, 1)
+    loss = (sigmoid_focal_loss(x, y) * valid_idxs).sum(-1).sum(-1)
 
-    loss = sigmoid_focal_loss(x, y, reduction="sum")
+    return loss / fg_idxs.sum(-1)
 
 class RegressionHead:
   def __init__(self, in_channels, num_anchors):
