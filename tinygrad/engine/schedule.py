@@ -493,14 +493,17 @@ def append_uop(ctx:ScheduleContext, view:UOp, buf_uop:UOp) -> None:
   buf_uop.buffer.ref(1)
 create_ctx = PatternMatcher([(UPat(Ops.VIEW, name="view", src=(UPat(Ops.BUFFER, name="buf_uop"), UPat())), append_uop)])
 
+remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.base.view(unwrap(x.st))),])
+
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[UOp]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
   # create the big graph
   ctx = ScheduleContext()
   cache: Dict[UOp, UOp] = {}
+  # to_uop is removing (many) of the movement ops
   for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
-  big_graph = graph_rewrite(big_graph, ops_folding+do_realize, ctx)
+  big_graph = graph_rewrite(big_graph, remove_movement_ops+ops_folding+do_realize, ctx)
   big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
   # create the scheduler context
   graph_rewrite(big_graph, create_ctx, ctx)
