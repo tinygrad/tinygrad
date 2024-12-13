@@ -57,6 +57,8 @@ class TestMergeDims(unittest.TestCase):
     self.assertEqual(merge_dims((2, 3), (0, 1), ((1, 2), (0, 2))), ((6, 1, 3),))
     # shift mask on stride 0
     self.assertEqual(merge_dims((2, 3), (0, 1), ((0, 1), (0, 2))), ((6, 1, 3),))
+    # permute 0 / 1
+    self.assertEqual(merge_dims((3, 2), (1, 0), ((0, 2), (1, 2))), ((3, 1, 3), (2, 0, 0)))
 
 if __name__ == '__main__':
   unittest.main()
