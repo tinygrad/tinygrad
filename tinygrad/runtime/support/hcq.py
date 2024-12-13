@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Tuple, cast, Type, Union, TypeVar, Generic, Any
-import contextlib, decimal, statistics, random, json, atexit, time, ctypes, array, pickle, os, sys, pathlib
+import contextlib, decimal, statistics, random, json, atexit, time, ctypes, array, pickle, os, sys, pathlib, dataclasses
 from tinygrad.helpers import PROFILEPATH, PROFILE, from_mv, getenv, to_mv, round_up, temp
 from tinygrad.renderer import Renderer
 from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator
@@ -13,6 +13,20 @@ DeviceType = TypeVar('DeviceType', bound='HCQCompiled')
 ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
+
+class ProfileEvent: pass
+
+@dataclasses.dataclass(frozen=True)
+class ProfileDeviceEvent(ProfileEvent): device:str; comp_tdiff:decimal.Decimal; copy_tdiff:decimal.Decimal # noqa: E702
+
+@dataclasses.dataclass(frozen=True)
+class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:int; en:int; is_copy:bool # noqa: E702
+
+@dataclasses.dataclass(frozen=True)
+class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:bool # noqa: E702
+
+@dataclasses.dataclass(frozen=True)
+class ProfileGraphEvent(ProfileEvent): ents:List[ProfileGraphEntry]; deps:List[List[int]]; sigs:List[int] # noqa: E702
 
 class BumpAllocator:
   def __init__(self, size:int, start:int=0, wrap:bool=True): self.size, self.ptr, self.start_off, self.wrap = size, 0, start, wrap
@@ -295,18 +309,6 @@ class HCQProgram(Generic[DeviceType]):
     if wait: self.dev.synchronize()
     return (float(sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
 
-class HCQProfileEvent: pass
-class HCQProfileDeviceEvent(HCQProfileEvent):
-  def __init__(self, device:str, comp_tdiff:decimal.Decimal, copy_tdiff:decimal.Decimal):
-    self.device, self.comp_tdiff, self.copy_tdiff = device, comp_tdiff, copy_tdiff
-class HCQProfileRangeEvent(HCQProfileEvent):
-  def __init__(self, device:str, name:str, st:int, en:int, is_copy:bool):
-    self.device, self.name, self.st, self.en, self.is_copy = device, name, st, en, is_copy
-class HCQProfileGraphEntry:
-  def __init__(self, device:str, name:str, st_id:int, en_id:int, is_copy:bool):
-    self.device, self.name, self.st_id, self.en_id, self.is_copy = device, name, st_id, en_id, is_copy
-class HCQProfileGraphEvent(HCQProfileEvent):
-  def __init__(self, ents:List[HCQProfileGraphEntry], deps:List[List[int]], sigs:List[int]): self.ents, self.deps, self.sigs = ents, deps, sigs
 
 class HCQCompiled(Compiled, Generic[SignalType]):
   """
@@ -342,7 +344,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE:
-      self.prof_events += [HCQProfileRangeEvent(self.device, name, st.timestamp, en.timestamp, is_cp) for st,en,name,is_cp in self.sig_prof_records]
+      self.prof_events += [ProfileRangeEvent(self.device, name, st.timestamp, en.timestamp, is_cp) for st,en,name,is_cp in self.sig_prof_records]
       self.sig_prof_records.clear()
 
   def _sync_gpu_to_cpu(self):
@@ -357,7 +359,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     # TODO: make sure this is still fine...
     self.gpu2cpu_compute_time_diff = statistics.median([_sync(self, self.hw_compute_queue_t) for _ in range(40)])
     self.gpu2cpu_copy_time_diff = None if self.hw_copy_queue_t is None else statistics.median([_sync(self, self.hw_copy_queue_t) for _ in range(40)])
-    self.prof_events.append(HCQProfileDeviceEvent(self.device, self.gpu2cpu_compute_time_diff, self.gpu2cpu_copy_time_diff))
+    self.prof_events.append(ProfileDeviceEvent(self.device, self.gpu2cpu_compute_time_diff, self.gpu2cpu_copy_time_diff))
 
   def _wrap_timeline_signal(self):
     self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1

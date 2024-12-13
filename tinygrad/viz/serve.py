@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Tuple, Optional
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedRewriteContext, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.runtime.support.hcq import HCQProfileDeviceEvent, HCQProfileRangeEvent, HCQProfileGraphEvent
+from tinygrad.runtime.support.hcq import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0",
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_ACC: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
@@ -102,12 +102,12 @@ def get_details(k:Any, ctx:TrackedRewriteContext, metadata:GraphRewriteMetadata)
 devices = {}
 def prep_ts(device:str, ts:int, is_copy): return int(ts + devices[device][is_copy])
 def dev_to_pid(device:str, is_copy=False): return {"pid": int(device.split(":")[1]) if ":" in device else 0, "tid": int(is_copy)}
-def dev_ev_to_perfetto_json(ev:HCQProfileDeviceEvent):
+def dev_ev_to_perfetto_json(ev:ProfileDeviceEvent):
   devices[ev.device] = (ev.comp_tdiff, ev.copy_tdiff)
   return [{"name": "process_name", "ph": "M", "pid": dev_to_pid(ev.device)['pid'], "args": {"name": ev.device}}]
-def range_ev_to_perfetto_json(ev:HCQProfileRangeEvent):
+def range_ev_to_perfetto_json(ev:ProfileRangeEvent):
   return [{"name": ev.name, "ph": "X", "ts": prep_ts(ev.device, ev.st, ev.is_copy), "dur": int(ev.en-ev.st), **dev_to_pid(ev.device, ev.is_copy)}]
-def graph_ev_to_perfetto_json(ev:HCQProfileGraphEvent, reccnt):
+def graph_ev_to_perfetto_json(ev:ProfileGraphEvent, reccnt):
   ret = []
   for i,e in enumerate(ev.ents):
     st, en = ev.sigs[e.st_id], ev.sigs[e.en_id]
@@ -188,10 +188,10 @@ if __name__ == "__main__":
   prof_json = []
   if profile is not None:
     for ev in profile:
-      if isinstance(ev, HCQProfileDeviceEvent): prof_json += dev_ev_to_perfetto_json(ev)
+      if isinstance(ev, ProfileDeviceEvent): prof_json += dev_ev_to_perfetto_json(ev)
     for ev in tqdm(profile):
-      if isinstance(ev, HCQProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)
-      elif isinstance(ev, HCQProfileGraphEvent): prof_json += graph_ev_to_perfetto_json(ev, reccnt:=len(prof_json))
+      if isinstance(ev, ProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)
+      elif isinstance(ev, ProfileGraphEvent): prof_json += graph_ev_to_perfetto_json(ev, reccnt:=len(prof_json))
     print(f"*** loaded {len(prof_json)} profile events")
   perfetto_profile = json.dumps({"traceEvents": prof_json}).encode() if len(prof_json) > 0 else None
 

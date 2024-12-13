@@ -2,7 +2,7 @@ import collections, time
 from typing import List, Any, Dict, cast, Optional, Tuple, Set
 from tinygrad.helpers import round_up, PROFILE, memsize_to_str
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator
-from tinygrad.runtime.support.hcq import HCQProfileGraphEntry, HCQProfileGraphEvent
+from tinygrad.runtime.support.hcq import ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp, Variable
@@ -56,7 +56,7 @@ class HCQGraph(MultiGraphRunner):
     # TODO: This logic might allocate a few extra signals...
     self.prof_signals: List[HCQSignal] = [self.devices[0].signal_t() for i in range(len(jit_cache) * 2)] if PROFILE else []
     self.prog_graph_deps: List[List[int]] = []
-    self.prof_graph_entries: List[HCQProfileGraphEntry] = []
+    self.prof_graph_entries: List[ProfileGraphEntry] = []
     # self.prof_records: List[Tuple[Tuple[int, bool], Tuple[int, bool], HCQCompiled, str, bool, List[int], Optional[Dict]]] = []
 
     last_j: Dict[HWQueue, Optional[int]] = collections.defaultdict(lambda: None)
@@ -113,7 +113,7 @@ class HCQGraph(MultiGraphRunner):
         # Description based on the command.
         prof_ji_desc = ji.prg._prg.name if is_exec_prg else f"{ji.bufs[1].device} -> {ji.bufs[0].device}" # type: ignore
 
-        self.prof_graph_entries.append(HCQProfileGraphEntry(enqueue_dev.device, prof_ji_desc, sig_st, j * 2 + 1, is_copy=not is_exec_prg))
+        self.prof_graph_entries.append(ProfileGraphEntry(enqueue_dev.device, prof_ji_desc, sig_st, j * 2 + 1, is_copy=not is_exec_prg))
         self.prog_graph_deps.append([d - 1 for _, d in rdeps])
 
       last_j[enqueue_queue] = j
@@ -196,7 +196,7 @@ class HCQGraph(MultiGraphRunner):
 
   def collect_timestamps(self):
     # Any device is fine...
-    self.devices[0].prof_events += [HCQProfileGraphEvent(self.prof_graph_entries, self.prog_graph_deps, [s.timestamp for s in self.prof_signals])]
+    self.devices[0].prof_events += [ProfileGraphEvent(self.prof_graph_entries, self.prog_graph_deps, [s.timestamp for s in self.prof_signals])]
     # timestamps = [s.timestamp for s in self.prof_signals]
 
     # for (st,_), (en,_), dev, desc, is_cp, deps, args in self.prof_records:
