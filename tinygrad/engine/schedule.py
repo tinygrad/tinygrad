@@ -45,10 +45,8 @@ class ScheduleContext:
   realizes: Dict[UOp, UOp] = field(default_factory=dict)             # this holds all the BUFFER uops we mutate in this schedule
   allbufs: Dict[UOp, UOp] = field(default_factory=dict)              # this maps BUFFER uops the actual op
   ops_metadata: Dict[UOp, Metadata] = field(default_factory=dict)    # this maps fused ops to Metadata
-  children: DefaultDict[UOp, Dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
   contiguous: Dict[UOp, UOp] = field(default_factory=dict)           # this maps roots to places they are made contiguous
-
-def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2
+  children: DefaultDict[UOp, Dict[UOp, None]] = field(default_factory=lambda: defaultdict(dict))
 
 def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
   if (r:=cache.get(buf)) is not None: return r
@@ -175,25 +173,18 @@ to_si = PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
 ])
 
-# ** fusion
-
-lazy = PatternMatcher([
-  # gather the metadata for this kernel
-  (UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.metadata.add(m) if (m:=ctx.ops_metadata.get(x)) is not None else None),
-])
-
-multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.sinked.get(b)),])
-
-append_load = PatternMatcher([(UPat.load(UPat.var("b"), UPat(), name="x"), lambda ctx,b,x: ctx.assign_adj.setdefault(b, []).append(x)
+add_metadata = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: None if (m:=ctx.ops_metadata.get(x)) is None else ctx.metadata.add(m)),])
+add_assign_adjacents = PatternMatcher([(UPat.load(UPat.var("b"), UPat(), name="x"), lambda ctx,b,x: ctx.assign_adj.setdefault(b, []).append(x)
                                if b in ctx.assigns else None)])
 
+# late folding for multi output kernels
+multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.sinked.get(b)),])
+
 def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemContext]:
-  si_ctx = ScheduleItemContext(ctx.tensor_uops, ctx.ops_metadata, ctx.assigns, ctx.var_vals, {x.buf_uop:x.src[2] for x in pre.src},
-                               # TODO: fix metadata merging, this should be a list
-                               metadata={m for x in pre.src if (l:=ctx.tensor_uops.get(x.buf_uop)) is not None and (m:=l[0].metadata) is not None})
-  # fuse and fold store -> loads
-  ops_folding = lazy if len(si_ctx.sinked) == 1 else lazy+multioutput
-  sink = graph_rewrite(pre, ops_folding if len(si_ctx.assigns) == 0 else ops_folding+append_load, si_ctx)
+  # create the ast context
+  si_ctx = ScheduleItemContext(ctx.tensor_uops, ctx.ops_metadata, ctx.assigns, ctx.var_vals, {x.buf_uop:x.src[2] for x in pre.src})
+  create_ctx = add_metadata if len(si_ctx.assigns) == 0 else add_metadata+add_assign_adjacents
+  sink = graph_rewrite(pre, create_ctx if len(si_ctx.sinked) == 1 else multioutput+create_ctx, si_ctx)
   # do movement ops
   sink = graph_rewrite(graph_rewrite(sink, view_left), view_right)
   # convert to AST
@@ -220,6 +211,7 @@ if getenv("RUN_PROCESS_REPLAY"):
 
 # **** Schedule grouping
 
+def is_scheduled(u:UOp) -> bool: return u.op is Ops.VIEW and len(u.src) == 2
 def uval(u:UOp) -> UOp:
   assert is_scheduled(u), f"must be a scheduled op {u}"
   return r.src[0] if (r:=u.src[1]).op is Ops.CONTIGUOUS and not (r.src[0].base.op is Ops.VIEW and len(r.src[0].base.src) == 2) else r
@@ -422,7 +414,6 @@ merge_bufs = PatternMatcher([
   # collapse view
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat())).view(name="mv"))), lambda mv:mv),
   (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).view(name="mv"))), lambda mv:mv),
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.BUFFER).view(name="mv"))), lambda mv:mv),
 ])
 
 # ** this decides which ops get realized
