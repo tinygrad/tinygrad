@@ -97,13 +97,16 @@ class Ops(FastEnum):
   SINK = auto(); CONTIGUOUS = auto(); PRELOAD = auto() # noqa: E702
 
   # MetaOps
-  COPY = auto(); EMPTY = auto(); BUFFER_VIEW = auto() # noqa: E702
+  COPY = auto(); EMPTY = auto(); BUFFER_VIEW = auto(); DETACH = auto() # noqa: E702
 
   # blocks in linearizer
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKFORK = auto(); BLOCKEND = auto() # noqa: E702
 
+  # movement ops!
+  RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto() # noqa: E702
+
   # misc ops
-  EXPAND = auto(); CONTRACT = auto() # noqa: E702
+  UNROLL = auto(); CONTRACT = auto() # noqa: E702
   VIEW = auto(); DEFINE_GLOBAL = auto(); BUFFER = auto() # noqa: E702
   DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # noqa: E702
   VALID = auto(); SPECIAL = auto(); NOOP = auto() # noqa: E702
@@ -151,6 +154,7 @@ class GroupOp:
   ALU = set.union(Unary, Binary, Ternary)
 
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
+  Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.STRIDE}
 
   # meta ops
   Meta = {Ops.COPY, Ops.EMPTY, Ops.BUFFER_VIEW}
@@ -582,7 +586,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op is Ops.RANGE: return self.src[0].vmin, (self.src[1]-1).vmax
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
-    if self.op in {Ops.EXPAND, Ops.VECTORIZE}: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
+    if self.op in {Ops.UNROLL, Ops.VECTORIZE}: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     # TODO: UOps.SPECIAL is UOps.DEFINE_VAR
     if self.op is Ops.SPECIAL: return 0, self.arg[1]-1 if isinstance(self.arg[1], int) else self.arg[1].vmax
     if self.op is Ops.CONST: return self.arg, self.arg
@@ -607,7 +611,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 @dataclass(frozen=True)
 class KernelInfo:
   local_dims: int = 0           # number of local dimensions  (this is remapping RANGE to SPECIAL)
-  upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to EXPAND)
+  upcasted: int = 0             # count that are upcasted     (this is remapping RANGE to UNROLL)
   dont_use_locals: bool = False # don't use local indexing
 
 # ***** ops in python *****
@@ -959,7 +963,7 @@ spec = PatternMatcher([
   # all WMMA has 3 args, <x, w, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat())), lambda: True),
   (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
-  (UPat(Ops.EXPAND, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
+  (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
 
   # if has a <gate, barrier?>
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(),)), lambda: True),
