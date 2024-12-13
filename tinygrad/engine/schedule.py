@@ -87,9 +87,8 @@ def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
 
 # ** movement ops
 
-def apply_swizzle(u:UOp, arg:ShapeTracker) -> UOp:
-  assert u is u.base, f"must be base to swizzle {u}"
-  with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u.view(arg), view_left)
+def apply_swizzle(u:UOp) -> UOp:
+  with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
 
 def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
   input_st = ShapeTracker.from_shape(unwrap(src.st).shape)
@@ -101,7 +100,7 @@ def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
   # update input_st and axis
   new_input_st = tmp + ShapeTracker(tuple(nv))
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
-  return apply_swizzle(src, new_input_st).r(r.arg[0], new_axis).view(ShapeTracker.from_shape(st.shape))
+  return apply_swizzle(src.view(new_input_st)).r(r.arg[0], new_axis).view(ShapeTracker.from_shape(st.shape))
 
 def push_swizzle_down_through_reduce(r:UOp, v:UOp, src:UOp) -> UOp:
   if not (swizzle_st:=unwrap(v.st)).contiguous or v.size != src.size: raise AssertionError(f"can't push {v} down through {src}")
@@ -112,7 +111,7 @@ def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
   if not (swizzles := [x for x in root.src if x.base is not x]): return None
   assert all_same([(x.shape, prod(x.src[0].shape)) for x in swizzles]), f"swizzles must have the same size {swizzles}"
   new_input_st = ShapeTracker.from_shape(swizzles[0].src[0].shape)
-  ret = root.replace(src=tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x, new_input_st) for x in root.src))
+  ret = root.replace(src=tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
   # update the ASSIGN offset to match the new shape
   if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+new_input_st,)
   return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(swizzles[0].shape))
@@ -126,7 +125,7 @@ def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
 view_right = merge_views+PatternMatcher([
   # ASSIGN with offset swizzles STORE
   (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.ASSIGN, name="a"))),
-   lambda a,b,st: None if a.arg is None else apply_swizzle(UOp.store(b, st, a.replace(arg=None)), a.arg)),
+   lambda a,b,st: None if a.arg is None else apply_swizzle(UOp.store(b, st, a.replace(arg=None)).view(a.arg))),
   # non contiguous VIEW on a reduce creates a new VIEW
   (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").view(name="v"), lambda v,r,src: None if v.st.contiguous else swizzle_r(r, src, v.st)),
   # push a VIEW down to STORE, through a reduce (ONLY reshapes)
