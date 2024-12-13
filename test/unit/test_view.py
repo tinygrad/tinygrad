@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import unittest
 from tinygrad.shape.view import View, merge_dims
+# from tinygrad.shape.shapetracker import ShapeTracker
 
 class TestView(unittest.TestCase):
   def test_canonicalize_empty_mask(self):
@@ -59,6 +60,15 @@ class TestMergeDims(unittest.TestCase):
     self.assertEqual(merge_dims((2, 3), (0, 1), ((0, 1), (0, 2))), ((6, 1, 3),))
     # permute 0 / 1
     self.assertEqual(merge_dims((3, 2), (1, 0), ((0, 2), (1, 2))), ((3, 1, 3), (2, 0, 0)))
+
+  def test_different_1_pad(self):
+    # st = ShapeTracker.from_shape((2, 2, 1)).pad(((0, 0), (0, 0), (0, 1)))
+    # print(f"{st.views[-1]}")
+    self.assertEqual(merge_dims((2, 2, 2), (2, 1, 0), ((0, 2), (0, 2), (0, 1))), ((4, 1, 4), (2, 0, 0)))
+
+    # st = ShapeTracker.from_shape((2, 1, 1)).pad(((0, 0), (0, 1), (0, 1)))
+    # print(f"{st.views[-1]}")
+    self.assertEqual(merge_dims((2, 2, 2), (1, 0, 0), ((0, 2), (0, 2), (0, 1))), ((2, 1, 2), (4, 0, 0)))
 
 if __name__ == '__main__':
   unittest.main()
