@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Optional, Dict, Tuple, Any, Iterator
-import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys
+import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys, re
 from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
@@ -14,7 +14,7 @@ class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def _canonicalize(self, device:str) -> str: return ((d:=device.split(":", 1)[0].upper()) + device[len(d):]).replace(":0", "")
+  def _canonicalize(self, device:str) -> str: return re.sub(r":0$", "", (d:=device.split(":", 1)[0].upper()) + device[len(d):])
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
   def canonicalize(self, device:Optional[str]) -> str: return self._canonicalize(device) if device is not None else Device.DEFAULT
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
@@ -143,7 +143,7 @@ class Buffer:
 class Allocator:
   # overriden in LRUAllocator
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
-    assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
+    assert size > 0, f"alloc size must be positve, getting {size}"
     return self._alloc(size, options if options is not None else BufferSpec())
   def free(self, opaque, size:int, options:Optional[BufferSpec]=None): self._free(opaque, options if options is not None else BufferSpec())
 

@@ -17,7 +17,7 @@ def strides_for_shape(shape:Tuple[sint, ...]) -> Tuple[sint, ...]:
   return canonicalize_strides(shape, strides)
 
 @functools.lru_cache(maxsize=None)
-def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]]=None) -> Tuple[Tuple[int, int, int], ...]:
+def merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]]=None) -> Tuple[Tuple[int, int, int], ...]:
   # merge contiguous sub-parts or zero strided dims. ret = Tuple[(merged_size, stride, merged size w/o zero stride), ...]
   if not shape: return ()
   assert len(shape) == len(strides) and (mask is None or len(shape) == len(mask))
@@ -233,7 +233,7 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def minify(self):
-    min_shape = tuple(x[0] for x in _merge_dims(self.shape, self.strides, self.mask))
+    min_shape = tuple(x[0] for x in merge_dims(self.shape, self.strides, self.mask))
     return nv if (nv := self.reshape(min_shape)) else self
 
   def __unsafe_resize(self, arg: Tuple[Tuple[sint, sint], ...], mask=None) -> View:
@@ -320,7 +320,7 @@ class View:
       return View(new_shape, self.strides, self.offset, self.mask, self.contiguous)
 
     strides, r_new_shape = [], reversed(new_shape)
-    for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
+    for merged_dim, new_stride, real_dim in reversed(merge_dims(self.shape, self.strides, self.mask)):
       acc = 1
       # TODO: third resolve shouldn't be needed
       while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and resolve((new_dim := next(r_new_shape, 0)) > 0):
