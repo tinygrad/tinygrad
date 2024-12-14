@@ -712,6 +712,21 @@ class TestIFUOps(unittest.TestCase):
     for st in sink.src:
       self.assertEqual(len(st.src), 2)
 
+class TestIndexingOverflow(unittest.TestCase):
+  def load_shape_assert(self, shape, dtype):
+    st = ShapeTracker.from_shape(shape).to_uop() 
+    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st, UOp.const(dtypes.int8, 1))
+    indexed = rewrite_shapetracker_with_index(store, Device[Device.DEFAULT].renderer)
+    assert indexed.src[0].src[1].dtype is dtype
+
+  def test_int32(self):
+    self.load_shape_assert((2 ** 12, 2 ** 12, 2 ** 7), dtypes.int)
+  def test_overflow(self):
+    self.load_shape_assert((2 ** 12, 2 ** 12, 2 ** 7 + 1), dtypes.long) # int32 max index is 2 * 31 - 1 
+  def test_symbolic_int32(self):
+    self.load_shape_assert((UOp.variable("dim1", 10, 2 ** 12), UOp.variable("dim2", 10, 2 ** 12), 2 ** 7), dtypes.int)
+  def test_symbolic_overflow(self):
+    self.load_shape_assert((UOp.variable("dim1", 10, 2 ** 12), UOp.variable("dim2", 10, 2 ** 12), 2 ** 7 + 1), dtypes.long)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

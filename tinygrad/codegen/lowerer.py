@@ -27,10 +27,10 @@ def _limit_dims(dims:Tuple[sint, ...], max_sizes:Tuple[int, ...]):
     else: raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
   return dims
 
-def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int, ...]], reverse=False) -> List[UOp]:
+def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int, ...]], reverse=False, dtype:Optional[dtypes]=dtypes.int)->List[UOp]:
   if reverse: dims = dims[::-1]
   limited = _limit_dims(dims, max_sizes) if max_sizes is not None else dims
-  ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
+  ret = raw_idxs = [UOp(Ops.SPECIAL, dtype, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
   if limited != dims:
     ret = []
     if (contraction:=get_contraction(dims, limited)) is None: raise AssertionError(f"get_contraction should not be None {dims=} {limited=}")
@@ -51,6 +51,8 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   ki = ast.arg if isinstance(ast.arg, KernelInfo) else KernelInfo()
   # NOTE: assumes the shape is <global dims> <local dims> <group_for_reduces> <reduces> <upcasts/unrolls>
   full_shape = ast.full_shape
+  # if the total number of elements exceeds int32 range, upcast to int64 to avoid overflow (subtract 1 because index starts at zero)
+  idx_dtype = dtypes.int if prod([s.vmax if isinstance(s, UOp) else s for s in full_shape]) - 1 <= dtypes.max(dtypes.int32) else dtypes.int64
   first_upcasted = len(full_shape)-ki.upcasted
   # if there's no reduce, this is first_upcasted. assumes reduces are at the end
   first_reduce = min([first_upcasted]+flatten(x.axis_arg for x in ast.toposort if x.op is Ops.REDUCE_AXIS))
@@ -62,28 +64,28 @@ def get_index(ast:UOp, opts:Renderer) -> IndexContext:
   if opts.has_local:
     if ki.dont_use_locals:
       assert ki.local_dims == 0, "can't use locals if there's no local dims"
-      idxs = get_grouped_dims("idx", full_shape[:global_dims], opts.global_max, reverse=True)
+      idxs = get_grouped_dims("idx", full_shape[:global_dims], opts.global_max, reverse=True, dtype=idx_dtype)
     else:
       # define indexes for GPU-like execution
-      idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True) + \
-             get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max)
+      idxs = get_grouped_dims("gidx", full_shape[:global_dims], opts.global_max, reverse=True, dtype=idx_dtype) + \
+             get_grouped_dims("lidx", full_shape[global_dims:first_reduce+group_for_reduces], opts.local_max, dtype=idx_dtype)
   else:
     # all loops are RANGES
-    idxs = [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(g)), i) for i,g in enumerate(full_shape[:first_reduce])]
+    idxs = [UOp(Ops.RANGE, idx_dtype, (sint_to_uop(0, idx_dtype), sint_to_uop(g, idx_dtype)), i) for i,g in enumerate(full_shape[:first_reduce])]
 
   # reduce loops
-  idxs += [UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(g)), i)
+  idxs += [UOp(Ops.RANGE, idx_dtype, (sint_to_uop(0, idx_dtype), sint_to_uop(g, idx_dtype)), i)
     for i,g in enumerate(full_shape[first_reduce+group_for_reduces:first_upcasted], start=first_reduce+group_for_reduces)]
 
   # upcast loops
   for i,g in enumerate(full_shape[first_upcasted:], start=first_upcasted):
     assert isinstance(g, int), "needs to be int to upcast/unroll"
-    idxs.append(UOp(Ops.UNROLL, dtypes.int, (UOp.const(dtypes.int.vec(g), tuple(range(g))),), ((i,g),)))
+    idxs.append(UOp(Ops.UNROLL, idx_dtype, (UOp.const(dtypes.int.vec(g), tuple(range(g))),), ((i,g),)))
 
   # late indexes (group for reduce)
   ridxs = idxs[:]
   for a in range(first_reduce, first_reduce+group_for_reduces):
-    ridxs[a] = UOp(Ops.RANGE, dtypes.int, (sint_to_uop(0), sint_to_uop(full_shape[a])), 1000+a)
+    ridxs[a] = UOp(Ops.RANGE, idx_dtype, (sint_to_uop(0), sint_to_uop(full_shape[a])), 1000+a)
 
   return IndexContext(idxs, ridxs)
 
