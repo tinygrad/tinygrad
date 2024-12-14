@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.ops import UOp
+from tinygrad.ops import UOp, Ops
 from tinygrad.gradient import compute_gradient
 
 class TestGradient(unittest.TestCase):
@@ -92,6 +92,16 @@ class TestTensorGradient(unittest.TestCase):
     dz = Tensor([1.0, 1.0, 1.0])
     dx = z.gradient(x, gradient=dz)[0]
     self.assertListEqual(dx.tolist(), [2.0, 4.0, 6.0])
+
+class TestRealizeMeansRealize(unittest.TestCase):
+  def test_randn_realizes(self):
+    x = Tensor.randn(2, 3, 64, 64, requires_grad=True).realize()
+    self.assertEqual(x.lazydata.op, Ops.VIEW)
+
+  @unittest.expectedFailure
+  def test_uniform_realizes(self):
+    x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
+    self.assertEqual(x.lazydata.op, Ops.VIEW)
 
 if __name__ == '__main__':
   unittest.main()
