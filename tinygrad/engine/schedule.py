@@ -363,9 +363,20 @@ def replace_contiguous(ctx:ScheduleContext, alu:UOp):
     if (replace_src:=ctx.contiguous.get(s, None)) is not None: new_src[i] = replace_src
   if tuple(new_src) != alu.src: return alu.replace(src=tuple(new_src))
 
+def cast_before_view(ctx:ScheduleContext, b:UOp, cast:UOp, x:UOp, view:UOp, base:UOp):
+  if not getenv("CAST_BEFORE_VIEW", 1) or cast.dtype.itemsize > x.dtype.itemsize: return None
+  # check if we need to rewrite the BUFFER too
+  if (new_x:=x.cast(cast.dtype)).size != (output_buf:=b).size:
+    output_buf = b.replace(arg=b.arg[:2]+(x.size,))
+    ctx.tensor_uops[output_buf] = ctx.tensor_uops[b]
+    del ctx.tensor_uops[b]
+  return UOp(Ops.VIEW, new_x.dtype, (output_buf, new_x), ShapeTracker.from_shape(new_x.shape)).view(unwrap(view.st))
+
 ops_folding = PatternMatcher([
   # op with size 0 is zero
   (UPatScheduled(), lambda b,to_store,base: _as_const(base, 0) if base.size == 0 else None),
+  # early merge_view
+  (UPatScheduled().view(name="v1").view(name="v2"), lambda b,to_store,base,v1,v2: base.view(v1.st+v2.st)),
   # DETACH is a NOOP here
   (UPat(Ops.DETACH, name="detach"), lambda detach: detach.src[0]),
   # elementwise const folding
@@ -388,6 +399,8 @@ ops_folding = PatternMatcher([
   # support for using a contiguous permuted view instead of the parent view if one exists
   (UPatScheduled(Ops.CONTIGUOUS, name="contig"), found_contiguous),
   (UPat(GroupOp.ALU, name="alu"), replace_contiguous),
+  # CAST_BEFORE_VIEW=1
+  (UPatScheduled(Ops.CAST, name="cast", src=(UPat(Ops.VIEW, name="x").view(name="view"))), cast_before_view),
 ])
 
 # ** buffer merging
