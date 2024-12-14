@@ -16,7 +16,7 @@ from tinygrad.shape.view import View
 from tinygrad.ops import UOp, Ops, graph_rewrite, track_rewrites, view_supported_devices
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
-from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, do_realize
+from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, do_realize, remove_movement_ops
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
 from extra.models.llama import precompute_freqs_cis
 
@@ -1749,10 +1749,10 @@ class TestSwizzle(unittest.TestCase):
     UOp(Ops.LOAD, dtypes.float, arg=None, src=(
         UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()),
         UOp(Ops.VIEW, dtypes.void, arg=(ld_st:=ShapeTracker(views=(View(shape=(2, 1, 3, 16, 62, 62, 3, 3), strides=(0, 0, 9, 27, 0, 0, 3, 1), offset=0, mask=None, contiguous=False),))), src=()),)),)),)) # noqa: E501
-    # there's an EXPAND pushing through the REDUCE_AXIS
+    # there's an UNROLL pushing through the REDUCE_AXIS
     self.assertGreater(prod(swizzle.st.shape), prod(swizzle.src[0].st.shape))
     ret = swizzle_rewrite(swizzle)
-    # EXPAND is rewritten
+    # UNROLL is rewritten
     self.assertEqual(prod(ret.st.shape), prod(ret.src[0].st.shape))
     # and pushed to the LOAD
     new_load_st = unwrap([x for x in ret.toposort if x.op is Ops.VIEW][0].st)
@@ -1874,6 +1874,7 @@ class TestSwizzle(unittest.TestCase):
     base = ShapeTracker.from_shape((32, 32))
     a = UOp(Ops.LOAD, dtypes.char, (UOp.new_buffer(Device.DEFAULT, base.size, dtypes.char), base.to_uop()))
     swizzle = a.reshape((64, 16))
+    swizzle = graph_rewrite(swizzle, remove_movement_ops)
     self.assertEqual(swizzle_cnt(swizzle), 1)
     ret = swizzle_rewrite(swizzle)
     self.assertEqual(ret.st_arg, base.reshape((64, 16))) # late rewrite
@@ -1889,6 +1890,7 @@ class TestSwizzle(unittest.TestCase):
     add = r.reshape((16, 32, 1)) + UOp.const_with_shape(r.dtype, 0, (16, 32, 1))
     self.assertEqual(add.st, ShapeTracker.from_shape((16, 32, 1)))
     to_store = add.permute((1, 0, 2)).contiguous()
+    to_store = graph_rewrite(to_store, remove_movement_ops)
     self.assertEqual(to_store.st, ShapeTracker.from_shape((32, 16, 1)))
     self.assertEqual(to_store.src[0].st, add.st.permute((1, 0, 2)))
     self.assertIs(to_store.src[0].op, Ops.VIEW)
@@ -1924,6 +1926,8 @@ class TestView(unittest.TestCase):
     a = UOp(Ops.VIEW, dtypes.float, (UOp.new_buffer(Device.DEFAULT, 121, dtypes.float), UOp(Ops.EMPTY, dtypes.float)), st)
     b = a.pad(pad_arg:=((0, 0), (0, 0), (18, 0)))
     self.assertEqual(b.st, st.pad(pad_arg))
+    # TODO: why does this help?
+    b = graph_rewrite(b, remove_movement_ops)
     self.assertIs(b.base.src[1], UOp.const(dtypes.float, 0))
 
   def test_partial_mask(self):

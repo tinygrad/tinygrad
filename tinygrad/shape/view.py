@@ -18,19 +18,22 @@ def strides_for_shape(shape:Tuple[sint, ...]) -> Tuple[sint, ...]:
 
 @functools.lru_cache(maxsize=None)
 def merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]]=None) -> Tuple[Tuple[int, int, int], ...]:
-  # merge contiguous sub-parts or zero strided dims. ret = Tuple[(merged_size, stride, merged size w/o zero stride), ...]
+  # merge contiguous sub-parts or zero strided dims
+  # any stride 0, masked from dim=1, or contiguous part is merged into next dim.
+  # stride != 0 to stride == 0 starts a new merging block
+  # ret = Tuple[(merged_size, stride, merged size w/o zero stride), ...]
   if not shape: return ()
   assert len(shape) == len(strides) and (mask is None or len(shape) == len(mask))
   ret = [(shape[0], strides[0], shape[0] if strides[0] != 0 else 0)]
   # merge this dim to next dim if size is 1
   merging = (mask[0][1] - mask[0][0] == 1) if mask is not None else shape[0] == 1
   for i, (s, st) in enumerate(zip(shape[1:], strides[1:]), start=1):
-    last_s, last_st, last_pre_expand_s = ret[-1]
     # always merge 1
     if s == 1: continue
+    last_s, last_st, last_pre_expand_s = ret[-1]
     # merge last dim with this dim if merging or strides matched
-    if merging or last_st == s * st: ret[-1] = (last_s * s, st, (s if merging else last_pre_expand_s * s) if st != 0 else 0)
-    else: ret.append((s, st, s if st != 0 else 0))
+    if merging or last_st == s * st: ret[-1] = (last_s * s, st, (s if merging else last_pre_expand_s * s))
+    else: ret.append((s, st, s))
     # merge this dim to next dim if size is 1
     merging = (mask[i][1] - mask[i][0] == 1) if mask is not None else s == 1
   return tuple(ret)
@@ -319,17 +322,20 @@ class View:
       # all dimensions matched, return the new view directly
       return View(new_shape, self.strides, self.offset, self.mask, self.contiguous)
 
-    strides, r_new_shape = [], reversed(new_shape)
-    for merged_dim, new_stride, real_dim in reversed(merge_dims(self.shape, self.strides, self.mask)):
+    r_strides, r_new_shape = [], reversed(new_shape)
+    for merged_size, new_stride, real_size in reversed(merge_dims(self.shape, self.strides, self.mask)):
+      if new_stride == 0: real_size = 0
+      # TODO: write with get_contraction
       acc = 1
       # TODO: third resolve shouldn't be needed
-      while resolve(acc <= merged_dim) and resolve(acc != merged_dim) and resolve((new_dim := next(r_new_shape, 0)) > 0):
-        strides.append(new_stride)
-        if resolve(new_dim != 1): new_stride *= (new_dim if resolve((acc := acc * new_dim) < real_dim) else 0)
-      if resolve(acc != merged_dim): return None
+      while resolve(acc <= merged_size) and resolve(acc != merged_size) and resolve((new_dim := next(r_new_shape, 0)) > 0):
+        r_strides.append(new_stride * acc)
+        acc = acc * new_dim
+        if not resolve(acc < real_size): new_stride = 0
+      if resolve(acc != merged_size): return None
 
     if (new_mask:=_reshape_mask(self.mask, self.shape, new_shape)) is not None:
-      new_strides = (0,) * (len(new_shape) - len(strides)) + tuple(strides[::-1])
+      new_strides = (0,) * (len(new_shape) - len(r_strides)) + tuple(r_strides[::-1])
       extra_offset = (sum(m[0] * s for m,s in zip(self.mask, self.strides)) if self.mask else 0) - \
                      (sum(m[0] * s for m,s in zip(new_mask, new_strides)))
       return View.create(new_shape, new_strides, self.offset + extra_offset, new_mask)
