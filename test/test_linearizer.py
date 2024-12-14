@@ -63,6 +63,7 @@ def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, d
     assert tcs == 0, "tensor core opt is incorrectly included"
 
 class TestLinearizer(unittest.TestCase):
+    
   def test_arg_dedup(self):
     a, b = Tensor.randn(4), Tensor.randn(4)
     np_a, np_b = a.numpy(), b.numpy()
@@ -1405,6 +1406,15 @@ class TestLinearizer(unittest.TestCase):
     k = helper_linearizer_ast(ast, [Tensor.randn(8*32).realize()], opts=[opt])[-1]
     out = [u for u in k.uops if u.op is Ops.STORE][0]
     assert out.src[-1].op is Ops.VECTORIZE and out.src[-1].dtype.count != 1
+
+  @unittest.expectedFailure
+  def test_int64_indexing(self):
+    st = ShapeTracker.from_shape((2**32,)).to_uop()
+    load = UOp.load(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()), st, dtype=dtypes.float)
+    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()), st, load)
+    sink = store.sink()
+    k = Kernel(sink)
+    k.to_program()
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
