@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.engine.schedule import create_schedule
 from tinygrad.helpers import GlobalCounters
-from tinygrad.ops import PatternMatcher, UPat, UOp
+from tinygrad.ops import Ops, PatternMatcher, UPat, UOp, graph_rewrite
 
 class TestPickle(unittest.TestCase):
   def test_pickle_code_object(self):
@@ -13,12 +13,15 @@ class TestPickle(unittest.TestCase):
     self.assertEqual(fxn(2), 4)
 
   def test_pickle_pattern_matcher(self):
-    pm = PatternMatcher([(UPat.cvar('x'), lambda x: x*2)])
-    sink = UOp.const(dtypes.int, 2)
-    tt = pm.rewrite(sink)
+    pm = PatternMatcher([
+      (UPat.cvar('x', dtypes.ints), lambda x: UOp.const(dtypes.float, 2*x.arg)),
+      *((UPat.var("a").alu(op, UPat.var("b")), lambda a,b: a.alu(inv_op, b)) for op, inv_op in [ (Ops.ADD, Ops.SUB), (Ops.MUL, Ops.IDIV) ]),
+    ])
+    sink = UOp.const(dtypes.int, 2) * UOp.const(dtypes.int, 4) + UOp.const(dtypes.int, 8)
+    tt = graph_rewrite(sink, pm)
     pm_str = pickle.dumps(pm)
     pm2 = pickle.loads(pm_str)
-    self.assertEqual(pm2.rewrite(sink).key, tt.key)
+    self.assertEqual(graph_rewrite(sink, pm2).key, tt.key)
 
   def test_pickle_main_pattern_matcher(self):
     from tinygrad.codegen.uopgraph import sym

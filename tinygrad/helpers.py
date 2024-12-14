@@ -320,5 +320,9 @@ def _serialize_code(code:types.CodeType):
   return _reconstruct_code, tuple(code.__getattribute__('co_'+x.replace('codestring', 'code').replace('constants', 'consts')) for x in args)
 copyreg.pickle(types.CodeType, _serialize_code)
 
+def _reconstruct_cell(val): return next(iter((lambda: val).__closure__ or tuple()))
+def _serialize_cell(cell:types.CellType): return (_reconstruct_cell, (cell.cell_contents,))
+copyreg.pickle(types.CellType, _serialize_cell)
+
 def _serialize_module(module:types.ModuleType): return importlib.import_module, (module.__name__,)
 copyreg.pickle(types.ModuleType, _serialize_module)
