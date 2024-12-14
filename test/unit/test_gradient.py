@@ -1,11 +1,13 @@
 from typing import Callable
 import unittest, math
+import numpy as np
 import jax
 import jax.numpy as jnp
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp
 from tinygrad.gradient import gradient
+from tinygrad.nn.optim import SGD, Adam
 
 class TestGradient(unittest.TestCase):
   def _cmp_nan_okay(self, x, y):
@@ -60,15 +62,29 @@ class TestGradient(unittest.TestCase):
 
 class TestTensorGradient(unittest.TestCase):
   def test_example(self):
-    # NOTE: this contiguous shouldn't be needed. gradient should go to base
-    x = Tensor.eye(3).contiguous()
+    x = Tensor.eye(3)
     y = Tensor([[2.0,0,-2.0]])
     z = y.matmul(x).sum()
     dx, dy = z.gradient(x, y)
-    print(dx.tolist())
-    print(dy.tolist())
     self.assertListEqual(dx.tolist(), [[2.0, 2.0, 2.0], [0.0, 0.0, 0.0], [-2.0, -2.0, -2.0]])
     self.assertListEqual(dy.tolist(), [[1.0, 1.0, 1.0]])
+
+  def test_raises(self):
+    x = Tensor([1.0, 2.0, 3.0])
+    w = Tensor.randn((3,))
+    with self.assertRaises(RuntimeError): x.sum().gradient(w)
+
+  def test_optim(self):
+    with Tensor.train():
+      w = Tensor([1.0, 2.0, 3.0])
+      SGD([w], lr=0.1).step(w.sum())
+      np.testing.assert_almost_equal(w.tolist(), [0.9, 1.9, 2.9])
+
+  def test_optim_rng(self):
+    with Tensor.train():
+      x = Tensor([1.0, 2.0, 3.0])
+      w = Tensor.randn((3,))
+      Adam([w], lr=0.1).step((x*w).sum())
 
 if __name__ == '__main__':
   unittest.main()
