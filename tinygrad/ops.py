@@ -1332,8 +1332,9 @@ ConstLike = Union[ConstType, Variable, Tuple[ConstType, ...]]
 # *** uop swizzling ***
 
 merge_views = PatternMatcher([
-  # TODO: delete childless views
+  # VIEW on the edges gets replaced
   (UPat(Ops.VIEW, name="v1", src=()).view(name="v2"), lambda v1,v2: v1.replace(arg=v1.st+v2.st)),
+  # merge double view on op
   (UPat.var("x").view(name="v1").view(name="v2"), lambda x,v1,v2: x.view(v1.st+v2.st)),
 ])
 
