@@ -1344,7 +1344,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.cosh(), grad_atol=1e-6, low=300, high=303, forward_only=True)
   def test_tanh(self):
     helper_test_op([(45,65)], lambda x: x.tanh(), grad_atol=1e-6)
-  @unittest.skip("TODO: fix sigmoid stability")
   def test_tanh_extreme(self):
     helper_test_op([(45,65)], lambda x: x.tanh(), grad_atol=1e-6, low=-300, high=-297)
     helper_test_op([(45,65)], lambda x: x.tanh(), grad_atol=1e-6, low=300, high=303)
