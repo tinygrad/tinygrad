@@ -31,8 +31,4 @@
 ::: tinygrad.Tensor.shard_
 ::: tinygrad.Tensor.contiguous
 ::: tinygrad.Tensor.contiguous_backward
-
-## Gradient
-
-::: tinygrad.Tensor.gradient
 ::: tinygrad.Tensor.backward
