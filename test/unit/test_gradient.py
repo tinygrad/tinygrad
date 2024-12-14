@@ -60,15 +60,17 @@ class TestGradient(unittest.TestCase):
 
 class TestTensorGradient(unittest.TestCase):
   def test_example(self):
-    # NOTE: this contiguous shouldn't be needed. gradient should go to base
-    x = Tensor.eye(3).contiguous()
+    x = Tensor.eye(3)
     y = Tensor([[2.0,0,-2.0]])
     z = y.matmul(x).sum()
     dx, dy = z.gradient(x, y)
-    print(dx.tolist())
-    print(dy.tolist())
     self.assertListEqual(dx.tolist(), [[2.0, 2.0, 2.0], [0.0, 0.0, 0.0], [-2.0, -2.0, -2.0]])
     self.assertListEqual(dy.tolist(), [[1.0, 1.0, 1.0]])
+
+  def test_raises(self):
+    x = Tensor([1.0, 2.0, 3.0])
+    w = Tensor.randn((3,))
+    with self.assertRaises(RuntimeError): x.sum().gradient(w)
 
 if __name__ == '__main__':
   unittest.main()
