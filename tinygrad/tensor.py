@@ -883,7 +883,7 @@ class Tensor(SimpleMathTrait):
     target_uops: List[UOp] = [x.lazydata for x in targets if isinstance(x.lazydata, UOp)]
     assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
     gradient_uop = self.lazydata.const_like(1) if gradient is None else cast(UOp, gradient.lazydata)
-    return [Tensor(y) for y in compute_gradient(self.lazydata, target_uops, gradient_uop)]
+    return [Tensor(y, device=y.device) for y in compute_gradient(self.lazydata, target_uops, gradient_uop)]
 
   def _deepwalk(self):
     def _walk(node, visited):
@@ -914,6 +914,7 @@ class Tensor(SimpleMathTrait):
       for t in t0._ctx.parents:
         if t.requires_grad: tensors_need_grad.append(t)
       if not retain_graph: del t0._ctx
+    tensors_need_grad = dedup(tensors_need_grad)
 
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"

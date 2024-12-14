@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.ops import UOp
-from tinygrad.gradient import gradient
+from tinygrad.gradient import compute_gradient
 
 class TestGradient(unittest.TestCase):
   def _cmp_nan_okay(self, x, y):
@@ -14,7 +14,7 @@ class TestGradient(unittest.TestCase):
 
   def _test_one_input_function(self, f:Callable, jf:Callable|None=None):
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
-    gx = gradient(f(x), [x])[0]
+    gx = compute_gradient(f(x), [x], UOp.const(dtypes.float, 1.0))[0]
     gf = jax.grad(f if jf is None else jf)
 
     for val in [-5., -2.0, 0.0, 2.0, 5.]:
@@ -24,7 +24,7 @@ class TestGradient(unittest.TestCase):
   def _test_two_input_function(self, f:Callable, jf:Callable|None=None):
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
     y = UOp.variable('y', -math.inf, math.inf, dtype=dtypes.float)
-    gx, gy = gradient(f(x, y), [x, y])
+    gx, gy = compute_gradient(f(x, y), [x, y], UOp.const(dtypes.float, 1.0))
     gf = jax.grad(f if jf is None else jf, argnums=(0, 1))
 
     for valx in [-5., -2.0, 0.0, 2.0, 5.]:
