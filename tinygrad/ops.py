@@ -432,7 +432,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # NOTE: we embed device on CONST with a fake BUFFER uop
     if op is Ops.CONST:
       fake = UOp(Ops.BUFFER, dtype.ptr(), (), (-1, device, 1))
-      return UOp(Ops.VIEW, dtype, (fake, arg if isinstance(arg, UOp) else UOp.const(dtype, unwrap(arg))),
+      return UOp(Ops.VIEW, dtype.base, (fake, arg if isinstance(arg, UOp) else UOp.const(dtype.base, unwrap(arg))),
                  ShapeTracker.from_shape(())).reshape((1,)*len(shape)).expand(shape)
     # otherwise it's a contiguous st
     return UOp(Ops.VIEW, dtype, (UOp.new_buffer(device, (st:=ShapeTracker.from_shape(shape)).size, dtype), UOp(op, dtype, src, arg)), st)
@@ -930,7 +930,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False) -> UOp
 # this is the matcher for the final rendered UOps
 # matcher functions returns True or False (or None to not match)
 spec = PatternMatcher([
-  (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
+  (UPat({Ops.DEFINE_GLOBAL, Ops.BUFFER}, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and not x.dtype.local),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.local),
   (UPat(Ops.DEFINE_ACC, src=(UPat.var("c"),), name="x", allow_any_len=True),
    lambda x,c: all(y.op is Ops.RANGE for y in x.src[1:]) and c.dtype == x.dtype),
@@ -939,12 +939,19 @@ spec = PatternMatcher([
   (UPat(Ops.RANGE, src=(UPat(name="x"), UPat(name="y")), name="rng"), lambda rng,x,y: rng.dtype == x.dtype == y.dtype and isinstance(rng.arg, int)),
   (UPat(Ops.SPECIAL, src=()), lambda: True),
 
-  # TODO: confirm the args of both of these are shapetrackers
-  (UPat(Ops.VIEW, dtypes.void, src=()), lambda: True),
-  (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"), lambda x,src: src.op is not Ops.STORE and x.dtype == src.dtype),
+  # VIEW spec
+  (UPat(Ops.VIEW, name="v", src=(), dtype=dtypes.void), lambda v: v.st is not None),
+  (UPat(Ops.VIEW, name="v", src=(UPat(Ops.BUFFER, name="b"),)), lambda b,v: v.st is not None and v.dtype.base == b.dtype.base),
+  (UPat(Ops.VIEW, name="v", src=(UPat.var("x"),)), lambda x,v: v.st is not None and v.dtype == x.dtype),
+  (UPat(Ops.VIEW, name="v", src=(UPat(Ops.BUFFER), UPat.var("x"),)), lambda x,v: (x.st is None or v.shape == x.shape) and v.dtype == x.dtype),
 
   (UPat(Ops.VALID, dtypes.bool, (UPat(Ops.VIEW),)), lambda: True),
   (UPat(Ops.CONST, name="x"), lambda x: x.dtype == x.dtype.scalar() and (type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)))),
+  (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST))), lambda:True),
+
+  # meta ops
+  (UPat({Ops.COPY, Ops.BUFFER_VIEW}, src=(UPat(),)), lambda: True),
+  (UPat(Ops.EMPTY, src=()), lambda: True),
 
   # early LOAD has a <buf, shapetracker, store?>
   (UPat(Ops.LOAD, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL)), UPat(Ops.VIEW))), lambda: True),
@@ -974,9 +981,9 @@ spec = PatternMatcher([
   # and SHL/SHR, the shift distance can be an int
   (UPat((Ops.SHL, Ops.SHR), src=(UPat(name="x"), UPat(name="y")), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),
   (UPat(Ops.IDIV, name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
-  (UPat(GroupOp.ALU, name="x"), lambda x: all(x.dtype == y.dtype for y in x.src)),
+  (UPat({*GroupOp.ALU, Ops.CONTIGUOUS}, name="x"), lambda x: all(x.dtype == y.dtype for y in x.src)),
 
-  (UPat(Ops.ASSIGN, src=(UPat((Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL)), UPat())), lambda: True),
+  (UPat(Ops.ASSIGN, src=(UPat((Ops.BUFFER, Ops.DEFINE_ACC, Ops.DEFINE_GLOBAL)), UPat())), lambda: True),
   (UPat(Ops.ENDRANGE, dtype=dtypes.void, src=(UPat(Ops.RANGE),)), lambda: True),
 
   # all WMMA has 3 args, <x, w, acc>

@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import FrozenSet, Set, Tuple, List, Dict, Optional, DefaultDict
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, can_pad, graph_rewrite, resolve, track_rewrites, view_left, merge_views
-from tinygrad.ops import identity_element, buffers, exec_alu
+from tinygrad.ops import identity_element, buffers, exec_alu, type_verify
 from tinygrad.helpers import Context, Metadata, all_int, all_same, colored, diskcache_put, merge_dicts, prod, dedup, getenv, unwrap
 from tinygrad.helpers import FUSE_CONV_BW, FUSE_ARANGE, DEBUG, ContextVar
 from tinygrad.dtype import ConstType, ImageDType, dtypes
@@ -507,6 +507,7 @@ def create_schedule_with_vars(outs:List[UOp]) -> Tuple[List[ScheduleItem], Dict[
   for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
   big_graph = graph_rewrite(big_graph, remove_movement_ops+ops_folding+do_realize, ctx)
   big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
+  type_verify(list(big_graph.toposort))
   # create the scheduler context
   graph_rewrite(big_graph, create_ctx, ctx)
   # group realizes into kernels
