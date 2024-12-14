@@ -316,7 +316,7 @@ class View:
       for si, so in zip(self.shape, new_shape):
         if not isinstance(so, (int, float)):
           so = cast(int, sym_infer(so, dict([v.unbind() for v in so.vars()])))
-          if isinstance(so, float): raise ValueError(f"{new_shape=} contains Variable {so} that infers to float")
+          if isinstance(so, float): raise ValueError(f"cannot shape to new shape {new_shape=}, contains Variable that infers to float {so}")
         if si != so: raise ValueError(f"cannot symbolic reshape non-contiguous {self} -> {new_shape}")
       # all dimensions matched, return the new view directly
       return View(new_shape, self.strides, self.offset, self.mask, self.contiguous)
