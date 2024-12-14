@@ -467,6 +467,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # CAUTION: MUTABILITY!
   def become(self, u:UOp):
+    print("become", self, "\n\n")
     del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg)]
     self.op, self.dtype, self.src, self.arg = u.op, u.dtype, u.src, u.arg
 
@@ -486,7 +487,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def _mop(self, op:Ops, arg):
     ret = UOp(op, self.dtype, (self,), arg)
-    ret.st  # pylint: disable=pointless-statement
+    if self.st == ret.st: return self
     return ret
 
   def reshape(self, arg:Tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)

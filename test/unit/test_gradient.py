@@ -101,6 +101,7 @@ class TestRealizeMeansRealize(unittest.TestCase):
   @unittest.expectedFailure
   def test_uniform_realizes(self):
     x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
+    print(x.lazydata)
     self.assertEqual(x.lazydata.op, Ops.VIEW)
 
 if __name__ == '__main__':
