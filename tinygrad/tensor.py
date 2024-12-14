@@ -882,8 +882,12 @@ class Tensor(SimpleMathTrait):
     assert isinstance(self.lazydata, UOp), "multi isn't supported yet"
     target_uops: List[UOp] = [x.lazydata for x in targets if isinstance(x.lazydata, UOp)]
     assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
-    gradient_uop = self.lazydata.const_like(1) if gradient is None else cast(UOp, gradient.lazydata)
-    return [Tensor(y, device=y.device) for y in compute_gradient(self.lazydata, target_uops, gradient_uop)]
+    grads = compute_gradient(self.lazydata, self.lazydata.const_like(1) if gradient is None else cast(UOp, gradient.lazydata), target_uops)
+    ret = []
+    for x in target_uops:
+      if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}")
+      ret.append(Tensor(y, device=x.device))
+    return ret
 
   def _deepwalk(self):
     def _walk(node, visited):

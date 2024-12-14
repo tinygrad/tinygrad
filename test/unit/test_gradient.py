@@ -14,7 +14,7 @@ class TestGradient(unittest.TestCase):
 
   def _test_one_input_function(self, f:Callable, jf:Callable|None=None):
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
-    gx = compute_gradient(f(x), [x], UOp.const(dtypes.float, 1.0))[0]
+    gx = compute_gradient(f(x), UOp.const(dtypes.float, 1.0), [x])[x]
     gf = jax.grad(f if jf is None else jf)
 
     for val in [-5., -2.0, 0.0, 2.0, 5.]:
@@ -24,7 +24,8 @@ class TestGradient(unittest.TestCase):
   def _test_two_input_function(self, f:Callable, jf:Callable|None=None):
     x = UOp.variable('x', -math.inf, math.inf, dtype=dtypes.float)
     y = UOp.variable('y', -math.inf, math.inf, dtype=dtypes.float)
-    gx, gy = compute_gradient(f(x, y), [x, y], UOp.const(dtypes.float, 1.0))
+    grads = compute_gradient(f(x, y), UOp.const(dtypes.float, 1.0), [x, y])
+    gx, gy = grads[x], grads[y]
     gf = jax.grad(f if jf is None else jf, argnums=(0, 1))
 
     for valx in [-5., -2.0, 0.0, 2.0, 5.]:
@@ -54,9 +55,7 @@ class TestGradient(unittest.TestCase):
   def test_chain_binop(self): self._test_two_input_function(lambda x,y: (x*y)+x*y)
   def test_big_add_sin(self): self._test_two_input_function(lambda x,y: x.sin()+3.0/y, lambda x,y: jnp.sin(x)+3.0/y)
   def test_big_chain(self): self._test_two_input_function(lambda x,y: (1.0/x*y)+x*y)
-
-  # TODO: this isn't working
-  #def test_where(self): self._test_two_input_function(lambda x,y: (x<y).where(x,y), lambda x,y: jnp.where(x<y, x, y))
+  def test_where(self): self._test_two_input_function(lambda x,y: (x<y).where(x,y), lambda x,y: jnp.where(x<y, x, y))
 
 class TestTensorGradient(unittest.TestCase):
   def test_example(self):
@@ -71,6 +70,12 @@ class TestTensorGradient(unittest.TestCase):
     x = Tensor([1.0, 2.0, 3.0])
     w = Tensor.randn((3,))
     with self.assertRaises(RuntimeError): x.sum().gradient(w)
+
+  def test_with_custom_gradient(self):
+    x = Tensor([1.0, 2.0, 3.0])
+    z = (x * x).sum()
+    dx = z.gradient(x, gradient=Tensor([3.0]))[0]
+    self.assertListEqual(dx.tolist(), [6.0, 12.0, 18.0])
 
 if __name__ == '__main__':
   unittest.main()

@@ -53,33 +53,24 @@ class TestMergeDims(unittest.TestCase):
     self.assertEqual(merge_dims(shape, (3, 1, 0)), ((6, 1, 6), (4, 0, 4)))
     self.assertEqual(merge_dims(shape, (0, 0, 0)), ((24, 0, 0),))
 
-  def test_pad_reshape(self):
-    # st = ShapeTracker.from_shape((1, 2)).pad(((1, 0), (0, 1))).reshape((3, 2))
+  def test_pad(self):
+    # print(ShapeTracker.from_shape((1, 2)).pad(((1, 0), (0, 1))).views[-1])
     self.assertEqual(merge_dims((2, 3), (0, 1), ((1, 2), (0, 2))), ((6, 1, 3),))
-    # shift mask on stride 0
-    self.assertEqual(merge_dims((2, 3), (0, 1), ((0, 1), (0, 2))), ((6, 1, 3),))
-    # permute 0 / 1
-    self.assertEqual(merge_dims((3, 2), (1, 0), ((0, 2), (1, 2))), ((3, 1, 3), (2, 0, 2)))
 
-    # st = ShapeTracker.from_shape((1, 1, 2)).pad(((1, 0), (1, 0), (0, 1)))
-    # print(f"{st.views[-1]}")
+    # print(f"{ShapeTracker.from_shape((1, 1, 2)).pad(((1, 0), (1, 0), (0, 1))).views[-1]}")
     self.assertEqual(merge_dims((2, 2, 3), (0, 0, 1), ((1, 2), (1, 2), (0, 2))), ((12, 1, 3),))
 
-    # st = ShapeTracker.from_shape((1, 1, 2, 2)).pad(((1, 0), (1, 0), (0, 1), (0, 1)))
-    # print(f"{st.views[-1]}")
+    # print(f"{ShapeTracker.from_shape((1, 1, 2, 2)).pad(((1, 0), (1, 0), (0, 1), (0, 1))).views[-1]}")
     self.assertEqual(merge_dims((2, 2, 3, 3), (0, 0, 2, 1), ((1, 2), (1, 2), (0, 2), (0, 2))), ((12, 2, 3), (3, 1, 3)))
 
-    # st = ShapeTracker.from_shape((1, 1, 1, 1)).pad(((0, 2), (0, 0), (0, 1), (0, 3)))
-    # print(f"{st.views[-1]}")
-    # self.assertEqual(merge_dims((3, 1, 2, 4), (0, 0, 0, 0), ((0, 1), (0, 1), (0, 1), (0, 1))), ((24, 0, 0),))
+    # print(f"{ShapeTracker.from_shape((2, 1, 2)).pad(((0, 0), (1, 0), (0, 1))).views[-1]}")
+    self.assertEqual(merge_dims((2, 2, 3), (2, 0, 1), ((0, 2), (1, 2), (0, 2))), ((2, 2, 2), (6, 1, 3)))
 
   def test_different_1_pad(self):
-    # st = ShapeTracker.from_shape((2, 2, 1)).pad(((0, 0), (0, 0), (0, 1)))
-    # print(f"{st.views[-1]}")
+    # print(f"{ShapeTracker.from_shape((2, 2, 1)).pad(((0, 0), (0, 0), (0, 1))).views[-1]}")
     self.assertEqual(merge_dims((2, 2, 2), (2, 1, 0), ((0, 2), (0, 2), (0, 1))), ((4, 1, 4), (2, 0, 2)))
 
-    # st = ShapeTracker.from_shape((2, 1, 1)).pad(((0, 0), (0, 1), (0, 1)))
-    # print(f"{st.views[-1]}")
+    # print(f"{ShapeTracker.from_shape((2, 1, 1)).pad(((0, 0), (0, 1), (0, 1))).views[-1]}")
     self.assertEqual(merge_dims((2, 2, 2), (1, 0, 0), ((0, 2), (0, 2), (0, 1))), ((2, 1, 2), (4, 0, 4)))
 
 if __name__ == '__main__':

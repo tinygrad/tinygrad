@@ -18,7 +18,10 @@ def strides_for_shape(shape:Tuple[sint, ...]) -> Tuple[sint, ...]:
 
 @functools.lru_cache(maxsize=None)
 def merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]]=None) -> Tuple[Tuple[int, int, int], ...]:
-  # merge contiguous sub-parts or zero strided dims. ret = Tuple[(merged_size, stride, merged size w/o zero stride), ...]
+  # merge contiguous sub-parts or zero strided dims
+  # any stride 0, masked from dim=1, or contiguous part is merged into next dim.
+  # stride != 0 to stride == 0 starts a new merging block
+  # ret = Tuple[(merged_size, stride, merged size w/o zero stride), ...]
   if not shape: return ()
   assert len(shape) == len(strides) and (mask is None or len(shape) == len(mask))
   ret = [(shape[0], strides[0], shape[0] if strides[0] != 0 else 0)]
