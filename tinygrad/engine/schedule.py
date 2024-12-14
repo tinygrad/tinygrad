@@ -392,8 +392,8 @@ ops_folding = PatternMatcher([
 
 # ** buffer merging
 
-def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
-  assert v1.st is not None and v2.st is not None and v1.st == v2.st, f"implicit movementop {v1.st} {v2.st}"
+def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, mv:Optional[UOp]=None) -> UOp:
+  if mv is None: assert v1.st is not None and v2.st is not None and v1.st == v2.st, f"implicit movementop {v1.st} {v2.st}"
   # if b2 is realized also realize b1
   if b2 in ctx.realizes:
     ctx.realizes[b1] = b1
@@ -402,20 +402,22 @@ def merge(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp) -> UOp:
   ctx.tensor_uops[b1] += ctx.tensor_uops[b2]
   del ctx.tensor_uops[b2]
   # merge
-  return v1
+  return v1 if mv is None else v1.view(unwrap(mv.st))
 
-def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp):
+def merge_realized(ctx:ScheduleContext, v1:UOp, b1:UOp, v2:UOp, b2:UOp, mv:Optional[UOp]=None):
   # early become
   for luop in ctx.tensor_uops.get(b1, [])+ctx.tensor_uops.get(b2, []): luop.become(b1.view(unwrap(luop.st)))
-  return v1
+  return v1 if mv is None else v1.view(unwrap(mv.st))
 
 merge_bufs = PatternMatcher([
-  # merge base
+  # in scheduled ops, update tensor uops to point to the merged buffer
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat(Ops.BUFFER, name="b1"), UPat())))), merge),
+  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat(Ops.BUFFER, name="b1"),
+                                                                                              UPat())).view(name="mv"))), merge),
+  # in realized ops, early become all tensor uops referring to either of them
   (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat(Ops.BUFFER, name="b1"),)))), merge_realized),
-  # collapse view
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat())).view(name="mv"))), lambda mv:mv),
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).view(name="mv"))), lambda mv:mv),
+  (UPat(Ops.VIEW, name="v2", src=(UPat(Ops.BUFFER, name="b2"), UPat(Ops.VIEW, name="v1", src=(UPat(Ops.BUFFER, name="b1"),
+                                                                                              )).view(name="mv"))), merge_realized),
 ])
 
 # ** this decides which ops get realized
