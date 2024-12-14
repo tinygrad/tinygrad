@@ -29,8 +29,8 @@ def merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tup
     if s == 1: continue
     last_s, last_st, last_pre_expand_s = ret[-1]
     # merge last dim with this dim if merging or strides matched
-    if merging or last_st == s * st: ret[-1] = (last_s * s, st, (s if merging else last_pre_expand_s * s) if st != 0 else 0)
-    else: ret.append((s, st, s if st != 0 else 0))
+    if merging or last_st == s * st: ret[-1] = (last_s * s, st, (s if merging else last_pre_expand_s * s))
+    else: ret.append((s, st, s))
     # merge this dim to next dim if size is 1
     merging = (mask[i][1] - mask[i][0] == 1) if mask is not None else s == 1
   return tuple(ret)
@@ -321,13 +321,13 @@ class View:
 
     r_strides, r_new_shape = [], reversed(new_shape)
     for merged_size, new_stride, real_size in reversed(merge_dims(self.shape, self.strides, self.mask)):
+      if new_stride == 0: real_size = 0
       # TODO: write with get_contraction
       acc = 1
       # TODO: third resolve shouldn't be needed
       while resolve(acc <= merged_size) and resolve(acc != merged_size) and resolve((new_dim := next(r_new_shape, 0)) > 0):
         r_strides.append(new_stride * acc)
         acc = acc * new_dim
-        # merge dim merges if (1) previous_stride = stride * dim, (2) dim = 1, stride = 0, either padded or not
         if not resolve(acc < real_size): new_stride = 0
       if resolve(acc != merged_size): return None
 
