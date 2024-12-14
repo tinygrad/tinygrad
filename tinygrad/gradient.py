@@ -36,9 +36,6 @@ pm_gradient = PatternMatcher([
   # TODO: this cast can be removed by putting the casts around the EXPAND
   (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret:
     (ctx.cast(sum_acc_dtype(ctx.dtype)).r(Ops.ADD, tuple(i for i,(si,so) in enumerate(zip(ret.src[0].shape, ret.arg)) if si!=so)).cast(ctx.dtype),)),
-
-  # there's no gradient for...is this ASSIGN?
-  (UPat(Ops.VIEW, src=(UPat(Ops.BUFFER), UPat(Ops.BUFFER_VIEW))), lambda: (None, None)),
 ])
 
 # copied from tensor.py, get relevant toposort of gradients
@@ -59,8 +56,8 @@ def gradient(root:UOp, targets:list[UOp]) -> list[UOp]:
   for t0 in reversed(_deepwalk(root, targets)):
     if t0 not in grads: continue
     lgrads: tuple[UOp|None, ...]|None = cast(tuple[UOp, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
-    if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}\n\nin {str(t0)[0:1000]}...")
-    assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
+    if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}")
+    assert len(lgrads) == len(t0.src)
     for k,v in zip(t0.src, lgrads):
       if v is None: continue
       if k in grads: grads[k] = grads[k] + v

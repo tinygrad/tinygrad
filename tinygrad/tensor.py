@@ -866,19 +866,6 @@ class Tensor(SimpleMathTrait):
   # ***** toposort and backward pass *****
 
   def gradient(self, *targets:Tensor) -> list[Tensor]:
-    """
-    Compute the gradient of the targets with respect to self.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    x = Tensor.eye(3)
-    y = Tensor([[2.0,0,-2.0]])
-    z = y.matmul(x).sum()
-    dx, dy = z.gradient(x, y)
-
-    print(dx.tolist())  # dz/dx
-    print(dy.tolist())  # dz/dy
-    ```
-    """
     assert isinstance(self.lazydata, UOp), "multi isn't supported yet"
     target_uops: List[UOp] = [x.lazydata for x in targets if isinstance(x.lazydata, UOp)]
     return [Tensor(y) for y in gradient(self.lazydata, target_uops)]

@@ -26,9 +26,11 @@ if __name__ == "__main__":
   @TinyJit
   @Tensor.train()
   def train_step() -> Tensor:
+    opt.zero_grad()
     samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0])
     # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
-    opt.step(loss:=model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]))
+    loss = model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
+    opt.step()
     return loss
 
   @TinyJit
