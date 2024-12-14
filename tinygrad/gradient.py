@@ -54,8 +54,8 @@ def _deepwalk(root:UOp, targets:list[UOp]):
       yield node
   return list(_walk(root, set()))
 
-def gradient(root:UOp, targets:list[UOp]) -> list[UOp]:
-  grads = {root: root.const_like(1.0)}
+def compute_gradient(root:UOp, targets:list[UOp], gradient:UOp) -> list[UOp]:
+  grads = {root: gradient}
   for t0 in reversed(_deepwalk(root, targets)):
     if t0 not in grads: continue
     lgrads: tuple[UOp|None, ...]|None = cast(tuple[UOp, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
@@ -68,5 +68,5 @@ def gradient(root:UOp, targets:list[UOp]) -> list[UOp]:
   ret = [grads.get(x, None) for x in targets]
   for i,x in enumerate(ret):
     if x is None: raise RuntimeError(f"{targets[i]}\n\nnot found in\n\n{root}")
-  return ret
+  return cast(list[UOp], ret)
 

@@ -7,7 +7,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.multi import MultiLazyBuffer
-from tinygrad.gradient import gradient
+from tinygrad.gradient import compute_gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.engine.realize import run_schedule
@@ -865,7 +865,7 @@ class Tensor(SimpleMathTrait):
 
   # ***** toposort and backward pass *****
 
-  def gradient(self, *targets:Tensor) -> list[Tensor]:
+  def gradient(self, *targets:Tensor, gradient:Optional[Tensor]=None) -> list[Tensor]:
     """
     Compute the gradient of the targets with respect to self.
 
@@ -881,7 +881,9 @@ class Tensor(SimpleMathTrait):
     """
     assert isinstance(self.lazydata, UOp), "multi isn't supported yet"
     target_uops: List[UOp] = [x.lazydata for x in targets if isinstance(x.lazydata, UOp)]
-    return [Tensor(y) for y in gradient(self.lazydata, target_uops)]
+    assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
+    gradient_uop = self.lazydata.const_like(1) if gradient is None else cast(UOp, gradient.lazydata)
+    return [Tensor(y) for y in compute_gradient(self.lazydata, target_uops, gradient_uop)]
 
   def _deepwalk(self):
     def _walk(node, visited):
@@ -905,27 +907,17 @@ class Tensor(SimpleMathTrait):
     print(t.grad.numpy())
     ```
     """
-    toposorted = self._deepwalk()
-    if gradient is None:
-      assert self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
-      # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
-      # this is "implicit gradient creation"
-      gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
-
-    assert self.shape == gradient.shape, f"grad shape must match tensor shape, {gradient.shape!r} != {self.shape!r}"
-    self.grad = gradient
-    for t0 in reversed(toposorted):
-      if t0.grad is None: raise RuntimeError(f"tensor {t0} has no grad")
+    tensors_need_grad = [self]
+    for t0 in reversed(self._deepwalk()):
       token = _METADATA.set(dataclasses.replace(md, backward=True) if (md := t0._ctx.metadata) is not None else None)
-      grads = t0._ctx.backward(t0.grad.lazydata)
       _METADATA.reset(token)
-      grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
-        for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
-      for t, g in zip(t0._ctx.parents, grads):
-        if g is not None and t.requires_grad:
-          assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
-          t.grad = g if t.grad is None else (t.grad + g)
+      for t in t0._ctx.parents:
+        if t.requires_grad: tensors_need_grad.append(t)
       if not retain_graph: del t0._ctx
+
+    for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
+      assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
+      t.grad = g if t.grad is None else (t.grad + g)
     return self
 
   # ***** movement low level ops *****
