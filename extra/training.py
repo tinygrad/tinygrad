@@ -11,10 +11,7 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=lambda out,y: ou
     # network
     out = model.forward(x) if hasattr(model, 'forward') else model(x)
     loss = lossfn(out, y)
-    optim.zero_grad()
-    loss.backward()
-    if noloss: del loss
-    optim.step()
+    optim.step(loss)
     if noloss: return (None, None)
     cat = out.argmax(axis=-1)
     accuracy = (cat == y).mean()

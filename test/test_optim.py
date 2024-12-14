@@ -31,14 +31,17 @@ class TinyNet:
     out = out.mul(self.m).add(self.m).sum()
     return out
 
-def step(tensor, optim, steps=1, teeny=False, **kwargs):
+def step(tensor, optim, steps=1, teeny=False, torch_style = False, **kwargs):
   net = TeenyNet(tensor) if teeny else TinyNet(tensor)
   optim = optim([net.x, net.W], **kwargs)
   for _ in range(steps):
     out = net.forward()
-    optim.zero_grad()
-    out.backward()
-    optim.step()
+    if torch_style:
+      optim.zero_grad()
+      out.backward()
+      optim.step()
+    else:
+      optim.step(out)
   return net.x.detach().numpy(), net.W.detach().numpy()
 
 @unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
@@ -51,7 +54,7 @@ class TestOptim(unittest.TestCase):
 
   def _test_optim(self, tinygrad_optim, torch_optim, steps, opts, atol, rtol):
     for x,y in zip(step(Tensor, tinygrad_optim, steps, **opts),
-                   step(torch.tensor, torch_optim, steps, **opts)):
+                   step(torch.tensor, torch_optim, steps, torch_style=True, **opts)):
       np.testing.assert_allclose(x, y, atol=atol, rtol=rtol)
 
   def _test_sgd(self, steps, opts, atol, rtol): self._test_optim(SGD, torch.optim.SGD, steps, opts, atol, rtol)
