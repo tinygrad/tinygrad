@@ -810,6 +810,10 @@ class TestOps(unittest.TestCase):
   def test_sigmoid_extreme(self):
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=300, high=400)
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=-400, high=-300)
+    x = Tensor([300.0])
+    self.assertAlmostEqual(x.sigmoid()[0].gradient(x)[0].item(), 0.0)
+    x = Tensor([-300.0])
+    self.assertAlmostEqual(x.sigmoid()[0].gradient(x)[0].item(), 0.0)
   def test_hardsigmoid(self):
     helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
     helper_test_op([()], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
