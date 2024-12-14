@@ -56,18 +56,15 @@ def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
     return ret
+  # realized is passthrough
+  if buf.is_realized: return buf
   # make things that can't be images not images
-  dtype = buf.buf_uop.dtype.base if buf.is_realized else buf.dtype
+  dtype = buf.dtype
   if isinstance(dtype, ImageDType) and (prod(buf.shape) != prod(dtype.shape) or not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
-    assert buf.realized is None, "can't fixup allocated buffer"
     if DEBUG >= 2: print(f"forcing image {dtype} with shape {buf.shape} to {dtype.base}")
     dtype = buf.dtype.base
-  # base is a VIEW of (BUFFER, (optional) op)
-  if buf.is_realized:
-    buf_uop = buf.buf_uop
-    op = None
   # metaops already have a BUFFER uop
-  elif is_scheduled(buf):
+  if is_scheduled(buf):
     buf_uop = buf.buf_uop
     op = buf.src[1].replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src[1].src))
   # ASSIGN uses the target buffer, otherwise we create a new buffer
