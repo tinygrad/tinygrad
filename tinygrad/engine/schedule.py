@@ -72,7 +72,7 @@ def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
     op = buf.src[1].replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src[1].src))
   # ASSIGN uses the target buffer, otherwise we create a new buffer
   else:
-    src = tuple(to_uop(x, ctx, cache) for x in buf.srcs)
+    src = tuple(to_uop(x, ctx, cache) for x in buf.src)
     buf_uop = src[0].base.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
     op = UOp(buf.op, dtype.base, src, buf.arg)
   ret = UOp(Ops.VIEW, dtype.base, (buf_uop,) if op is None else (buf_uop, op.alu(Ops.CONTIGUOUS) if buf.forced_realize else op), buf.st)

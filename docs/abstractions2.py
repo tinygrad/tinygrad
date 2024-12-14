@@ -78,14 +78,15 @@ print("******** third, the LazyBuffer ***********")
 
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule
+from tinygrad.helpers import unwrap
 
 # allocate some values + load in values
 a = UOp.metaop(Ops.EMPTY, (1,), dtypes.int32, DEVICE)
 b = UOp.metaop(Ops.EMPTY, (1,), dtypes.int32, DEVICE)
 a.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
 b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
-del a.srcs
-del b.srcs
+a = a.buf_uop.view(unwrap(a.st))
+b = b.buf_uop.view(unwrap(b.st))
 
 # describe the computation
 out = a.alu(Ops.ADD, b)
