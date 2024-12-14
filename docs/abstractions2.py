@@ -85,8 +85,8 @@ a = UOp.metaop(Ops.EMPTY, (1,), dtypes.int32, DEVICE)
 b = UOp.metaop(Ops.EMPTY, (1,), dtypes.int32, DEVICE)
 a.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 2))))
 b.buffer.allocate().copyin(memoryview(bytearray(struct.pack("I", 3))))
-a = a.buf_uop.view(unwrap(a.st))
-b = b.buf_uop.view(unwrap(b.st))
+a = a.buf_uop_view()
+b = b.buf_uop_view()
 
 # describe the computation
 out = a.alu(Ops.ADD, b)
