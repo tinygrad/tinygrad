@@ -262,6 +262,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       local_cache[u] = nodes
       return nodes
     ret = _toposort(self)
+    # NOTE: if you comment this it'll keep the cache?
     del local_cache
     return ret
 
