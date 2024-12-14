@@ -63,7 +63,6 @@ def helper_tc_ensure_uops_and_opts_count(n: int, m:int, k:int, dtype_in:DType, d
     assert tcs == 0, "tensor core opt is incorrectly included"
 
 class TestLinearizer(unittest.TestCase):
-    
   def test_arg_dedup(self):
     a, b = Tensor.randn(4), Tensor.randn(4)
     np_a, np_b = a.numpy(), b.numpy()
