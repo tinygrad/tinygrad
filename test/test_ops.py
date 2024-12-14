@@ -814,6 +814,13 @@ class TestOps(unittest.TestCase):
     self.assertAlmostEqual(x.sigmoid()[0].gradient(x)[0].item(), 0.0)
     x = Tensor([-300.0])
     self.assertAlmostEqual(x.sigmoid()[0].gradient(x)[0].item(), 0.0)
+  @unittest.skip("fix sigmoid stability")
+  def test_sigmoid_alt_extreme(self):
+    def sigmoid(x:Tensor): return x.exp() / (1 + x.exp())
+    x = Tensor([300.0])
+    self.assertAlmostEqual(sigmoid(x)[0].gradient(x)[0].item(), 0.0)
+    x = Tensor([-300.0])
+    self.assertAlmostEqual(sigmoid(x)[0].gradient(x)[0].item(), 0.0)
   def test_hardsigmoid(self):
     helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
     helper_test_op([()], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
@@ -1576,13 +1583,13 @@ class TestOps(unittest.TestCase):
   def test_pad_reshape(self):
     helper_test_op([(1, 2)],
                    lambda x: torch.nn.functional.pad(x, (0, 1, 1, 0)).reshape((3, 2)),
-                   lambda x: x.pad((0, 1, 1, 0)).reshape((3, 2)), forward_only=True)
+                   lambda x: x.pad((0, 1, 1, 0)).reshape((3, 2)))
     helper_test_op([(1, 2)],
                    lambda x: torch.nn.functional.pad(x, (0, 2, 1, 1)).reshape((4, 3)),
-                   lambda x: x.pad((0, 2, 1, 1)).reshape((4, 3)), forward_only=True)
+                   lambda x: x.pad((0, 2, 1, 1)).reshape((4, 3)))
     helper_test_op([(1, 1, 1, 2)],
                    lambda x: torch.nn.functional.pad(x, (0, 4, 2, 2, 1, 2, 0, 2)).reshape((4, 3, 6, 5)),
-                   lambda x: x.pad(((0, 2), (1, 2), (2, 2), (0, 4))).reshape((4, 3, 6, 5)), forward_only=True)
+                   lambda x: x.pad(((0, 2), (1, 2), (2, 2), (0, 4))).reshape((4, 3, 6, 5)))
 
   def test_pad_slice(self):
     for value in 0., 3.456:
