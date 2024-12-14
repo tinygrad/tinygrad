@@ -164,30 +164,28 @@ to_si = PatternMatcher([
   (UPat(Ops.ASSIGN, src=(UPat(), UPat.var("x"),)), lambda x: x),
 ])
 
-add_metadata = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: None if (m:=ctx.ops_metadata.get(x)) is None else ctx.metadata.add(m)),])
+def add_op(ctx:ScheduleItemContext, u:UOp):
+  # add metadata
+  if (m:=ctx.ops_metadata.get(u)) is not None: ctx.metadata.add(m)
+  # fix image
+  if u.op is Ops.BUFFER or not isinstance(u.dtype, ImageDType): return None
+  return u.replace(dtype=u.dtype.base)
+init_ops = PatternMatcher([(UPat(tuple(Ops), name="u"), add_op)])
 add_assign_adjacents = PatternMatcher([(UPat.load(UPat.var("b"), UPat(), name="x"), lambda ctx,b,x: ctx.assign_adj.setdefault(b, []).append(x)
                                if b in ctx.assigns else None)])
 
 # late folding for multi output kernels
 multioutput = PatternMatcher([(UPat.load(UPat.var("b"), UPat()), lambda ctx,b: ctx.sinked.get(b)),])
 
-# ** image rewrite
-
-def fix_image(ctx:ScheduleItemContext, u:UOp):
-  if u.op is Ops.DEFINE_GLOBAL: return None
-  return u.replace(dtype=u.dtype.base)
-image_pm = PatternMatcher([(UPat(set(Ops), name="u"), lambda ctx,u: fix_image(ctx, u) if isinstance(u.dtype, ImageDType) else None)])
-
 def full_ast_rewrite(pre:UOp, ctx:ScheduleContext) -> Tuple[UOp, ScheduleItemContext]:
   # create the ast context
   si_ctx = ScheduleItemContext(ctx.tensor_uops, ctx.ops_metadata, ctx.assigns, ctx.var_vals, {x.buf_uop:x.src[2] for x in pre.src})
-  create_ctx = add_metadata if len(si_ctx.assigns) == 0 else add_metadata+add_assign_adjacents
+  create_ctx = init_ops if len(si_ctx.assigns) == 0 else init_ops+add_assign_adjacents
   sink = graph_rewrite(pre, create_ctx if len(si_ctx.sinked) == 1 else multioutput+create_ctx, si_ctx)
   # do movement ops
   sink = graph_rewrite(graph_rewrite(sink, view_left), view_right)
   # convert to AST
   sink = graph_rewrite(graph_rewrite(sink, to_si+check_preload if len(si_ctx.assigns) != 0 else to_si, si_ctx), append_bufs, si_ctx)
-  if any(isinstance(x.dtype, ImageDType) for x in si_ctx.bufs) and sink.op is Ops.SINK: sink = graph_rewrite(sink, image_pm)
   # assert buffer count limit
   if (limit:=BUF_LIMIT.get(device:=si_ctx.bufs[0].device)) is not None and len(si_ctx.bufs) >= limit:
     if DEBUG >= 3: print(sink)
