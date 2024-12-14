@@ -6,9 +6,9 @@ from tinygrad.shape.view import View, merge_dims
 class TestView(unittest.TestCase):
   def test_canonicalize_empty_mask(self):
     v = View.create(shape=(2,2,2), strides=(4,2,1), mask=((0,2),(0,2),(0,2)))
-    assert v.mask is None
+    self.assertIsNone(v.mask)
     v = View.create(shape=(4,3,2), strides=(1,4,10), mask=((0,4),(0,3),(0,2)))
-    assert v.mask is None
+    self.assertIsNone(v.mask)
 
   def test_minify_zero_strided_dims(self):
     target = View.create(shape=(2,2), strides=(30,2), offset=7, mask=None)
