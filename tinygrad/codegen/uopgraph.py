@@ -156,6 +156,10 @@ def threefry2x32(x: UOp, key: UOp):
 
   return xr[1].cast(dtypes.uint64) * 2**32 | xr[0].cast(dtypes.uint64)
 
+# ***** other math rewrite ****
+
+def sigmoid_like(x:UOp, y:UOp): return (t:=(1/(x+1))) * (1-t) * y
+
 # ***** main rewriter *****
 
 def loop_collapse(compval, multconst, rng:UOp, acc:UOp, idx2=None,idx3=None,extra=None,vec=None,ne=None,
@@ -308,6 +312,8 @@ sym = symbolic_flat+PatternMatcher([
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, tuple(flatten(x.src if x.op in {Ops.SINK, Ops.UNROLL} else (x,) for x in root.src)), root.arg)
       if any(x.op in {Ops.SINK, Ops.UNROLL} for x in root.src) else None),
+  # stable sigmoid
+  (UPat.var("x")*(((UPat.var("x")+1)*(UPat.var("x")+1)).reciprocal()*UPat.var("y")), sigmoid_like),
 ])
 
 # *** uop expander ***

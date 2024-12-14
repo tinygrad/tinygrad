@@ -807,14 +807,12 @@ class TestOps(unittest.TestCase):
   def test_sigmoid(self):
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid)
     helper_test_op([()], torch.sigmoid, Tensor.sigmoid)
-  @unittest.skip("TODO: fix sigmoid stability")
   def test_sigmoid_extreme(self):
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=300, high=400)
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=-400, high=-300)
   def test_hardsigmoid(self):
     helper_test_op([(45,65)], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
     helper_test_op([()], torch.nn.functional.hardsigmoid, Tensor.hardsigmoid)
-  @unittest.skip("TODO: fix sigmoid stability")
   def test_hardsigmoid_extreme(self):
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=300, high=400)
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=-400, high=-300)
@@ -835,14 +833,12 @@ class TestOps(unittest.TestCase):
 
   def test_gelu(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu)
-  @unittest.skip("TODO: fix sigmoid stability")
   def test_gelu_extreme(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, low=300, high=400)
     helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, low=-400, high=-300)
   def test_quick_gelu(self):
     helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu)
     helper_test_op([()], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu)
-  @unittest.skip("TODO: fix sigmoid stability")
   def test_quick_gelu_extreme(self):
     helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu, low=300, high=400)
     helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu, low=-400, high=-300)
