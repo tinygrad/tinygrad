@@ -720,9 +720,9 @@ class TestIndexingOverflow(unittest.TestCase):
     assert indexed.src[0].src[1].dtype is dtype
 
   def test_int32(self):
-    self.load_shape_assert((2 ** 12, 2 ** 12, 2 ** 7), dtypes.int)
+    self.load_shape_assert((2 ** 12, 2 ** 12, 2 ** 7), dtypes.int) # This creates 2 ** 31 number of elements, max that can fit in int32 index
   def test_overflow(self):
-    self.load_shape_assert((2 ** 12, 2 ** 12, 2 ** 7 + 1), dtypes.long) # int32 max index is 2 * 31 - 1 
+    self.load_shape_assert((2 ** 12, 2 ** 12, 2 ** 7 + 1), dtypes.long)
   def test_symbolic_int32(self):
     self.load_shape_assert((UOp.variable("dim1", 10, 2 ** 12), UOp.variable("dim2", 10, 2 ** 12), 2 ** 7), dtypes.int)
   def test_symbolic_overflow(self):
