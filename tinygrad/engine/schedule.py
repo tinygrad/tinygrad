@@ -435,8 +435,9 @@ def fold_img_cast(ctx:ScheduleContext, xb:UOp, view:UOp, b:UOp, to_cast:UOp, **k
   del ctx.realizes[b]
   return to_cast.view(unwrap(view.st))
 
-def init_big_graph(sink:UOp) -> Optional[UOp]:
+def init_big_graph(ctx:ScheduleContext, sink:UOp):
   new_src = tuple(x.base for x in sink.src if is_scheduled(x.base) and x.base.src[1].op is not Ops.CONST)
+  for x in new_src: ctx.realizes[x.buf_uop] = x
   return None if new_src == sink.src else UOp(Ops.NOOP) if len(new_src) == 0 else UOp.sink(*new_src)
 
 do_realize = PatternMatcher([
@@ -495,13 +496,11 @@ remove_movement_ops = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda 
 
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[UOp]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
-  if len(outs:=dedup(x.base for x in outs if x.base.realized is None and x.base.op is not Ops.CONST)) == 0: return [], {}
   # create the big graph
   ctx = ScheduleContext()
   cache: Dict[UOp, UOp] = {}
   # to_uop is removing (many) of the movement ops
-  for u in (big_graph:=UOp.sink(*(to_uop(x, ctx, cache) for x in outs))).src: ctx.realizes[u.buf_uop] = u
-  big_graph = graph_rewrite(big_graph, remove_movement_ops+ops_folding+do_realize, ctx)
+  big_graph = graph_rewrite(UOp.sink(*(to_uop(x, ctx, cache) for x in outs)), remove_movement_ops+ops_folding+do_realize, ctx)
   big_graph = graph_rewrite(big_graph, merge_bufs, ctx)
   # create the scheduler context
   graph_rewrite(big_graph, create_ctx, ctx)
