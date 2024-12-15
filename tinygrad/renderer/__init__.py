@@ -1,7 +1,7 @@
 from typing import Optional, List, Tuple, Dict, Callable, Any
 import functools, math
 from dataclasses import dataclass, field
-from tinygrad.helpers import to_function_name, dedup, prod
+from tinygrad.helpers import to_function_name, dedup
 from tinygrad.ops import Ops, UOp, flops_mem, sym_infer, sint, Variable
 from tinygrad.dtype import DType
 
@@ -10,16 +10,21 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   dims: Tuple[int,int,int] # N, M, K
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
-  def get_reduce_axes(self): return [(i, 2) for i in range(int(math.log2(self.dims[2])))] # list of (dim,amt) that constructs the reduce dim
-  def get_early_upcast_axes(self, dim):
-    upcast_size = self.dims[dim] // prod(sz for d,sz in self.threads if d==dim)
-    return [(dim, 2) for _ in range(int(math.log2(upcast_size)))] if upcast_size > 0 else []
-  upcast_axes: Tuple[List[Tuple[int,int]], List[Tuple[int,int]], List[Tuple[int,int]]] # list of (TC dim,amt) that upcast A, B and C
+  contract_axes: Tuple[List[Tuple[int,int]], List[Tuple[int,int]], List[Tuple[int,int]]] # list of (TC dim,amt) that upcast A, B and C
+  threads_count: int = 32
   threads: Tuple[Tuple[int,int], ...] = ((0, 2), (0, 2), (1, 2), (1, 2), (1, 2)) # list of (TC dim,amt) that construct the warp thread structure
-  st1_pattern: Optional[Tuple[Tuple[int, ...], Tuple[int, ...]]] = None # pattern to fix shapetracker for A
+  swizzle: Tuple[Optional[Tuple[Tuple[int, ...], Tuple[int, ...]]], ...] = (None, None, None) # swizzle patterns to fix shapetrackers
+  st1_pattern: Optional[Tuple[Tuple[int, ...], Tuple[int, ...]]] = None # swizzle patterns to fix shapetrackers for A
   st2_pattern: Optional[Tuple[Tuple[int, ...], Tuple[int, ...]]] = None # pattern to fix shapetracker for B
   st3_pattern: Optional[Tuple[Tuple[int, ...], Tuple[int, ...]]] = None # pattern to fix shapetracker for C/D
   def __str__(self): return "_".join(["WMMA"] + list(map(str, self.dims)) + [self.dtype_in.name, self.dtype_out.name])
+  def get_reduce_axes(self, offset = 0): return [(i + offset, 2) for i in range(int(math.log2(self.dims[2])))]
+  def get_upcast_axes(self):
+    tcd_axes = [(0, 2) for i in range(int(math.log2(self.dims[0])))] + [(1, 2) for i in range(int(math.log2(self.dims[1])))]
+    return tcd_axes[int(math.log2(self.threads_count)):]
+  def get_local_axes(self):
+    tcd_axes = [(0, 2) for i in range(int(math.log2(self.dims[0])))] + [(1, 2) for i in range(int(math.log2(self.dims[1])))]
+    return tcd_axes[:int(math.log2(self.threads_count))]
 
 @dataclass
 class ProgramSpec:

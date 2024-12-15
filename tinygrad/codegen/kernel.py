@@ -5,8 +5,7 @@ from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict, Callable, Sequence
 from enum import Enum, auto
 
-from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, type_verify, resolve, Variable, sint, \
-  graph_rewrite, track_rewrites, view_left
+from tinygrad.ops import GroupOp, KernelInfo, UOp, Ops, can_pad, print_uops, type_verify, resolve, Variable, sint, graph_rewrite, track_rewrites
 from tinygrad.device import Device
 from tinygrad.renderer import Renderer, TensorCore, ProgramSpec
 from tinygrad.dtype import ImageDType
@@ -14,7 +13,7 @@ from tinygrad.helpers import all_same, colored, ansilen, dedup, getenv, prod, ro
 from tinygrad.helpers import DEBUG, TC_OPT, USE_TC, AMX
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import strides_for_shape
-from tinygrad.engine.schedule import view_right_elementwise
+from tinygrad.engine.schedule import apply_swizzle, view_right_elementwise
 from tinygrad.codegen.linearize import linearize_uop
 from tinygrad.codegen.uopgraph import full_graph_rewrite
 from tinygrad.codegen.lowerer import rewrite_shapetracker_with_index, get_contraction
@@ -307,8 +306,8 @@ class Kernel:
           for axis, dim in tc_opts.axis_pads: self.apply_opt(Opt(OptOps.PADTO, axis, dim), append_opt=False) # PADTO might fail
         except KernelOptError: continue
         for dim, amt in tc.get_reduce_axes(): self.apply_opt(Opt(OptOps.UNROLL,tc_opts.axes[2]-self.first_reduce,amt), append_opt=False)
-        for dim, amt in tc.get_early_upcast_axes(0) + tc.get_early_upcast_axes(1): self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[dim],amt), append_opt=False) # noqa: E501
-        for dim, amt in tc.threads: self.apply_opt(Opt(OptOps.LOCAL,tc_opts.axes[dim],amt), append_opt=False)
+        for dim, amt in tc.get_upcast_axes(): self.apply_opt(Opt(OptOps.UPCAST,tc_opts.axes[dim],amt), append_opt=False)
+        for dim, amt in tc.get_local_axes(): self.apply_opt(Opt(OptOps.LOCAL,tc_opts.axes[dim],amt), append_opt=False)
         self.tensor_core = tc
         self.use_tensor_cores = use_tensor_cores  # TC=2 will do the shape ops without the WMMA
         return True
@@ -603,7 +602,7 @@ class Kernel:
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
-            if tc_pattern: srcs[i] = srcs[i].view(fix_st(srcs[i].st_arg if srcs[i].op is Ops.LOAD else srcs[i].src[0].st_arg, *tc_pattern))
+            if tc_pattern: srcs[i] = apply_swizzle(srcs[i].view(fix_st(srcs[i].st_arg if srcs[i].op is Ops.LOAD else srcs[i].src[0].st_arg, *tc_pattern)))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
@@ -613,16 +612,20 @@ class Kernel:
               local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
               srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
 
-          tc_reduce_axes = tuple(self.first_upcast + ax for ax, _ in tc.get_reduce_axes())
+          tc_reduce_axes = tuple(ax for ax, _ in tc.get_reduce_axes(self.first_upcast))
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
-            upcast_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.upcast_axes)
-            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _, sz in tc.threads), upcast_axes, tc_reduce_axes)
-            wmma_sz = [prod(x[1] for x in l) for l in upcast_axes]
+            # tcd, tcd_dims = self.first_upcast, len(tc.get_reduce_axes() + tc.get_upcast_axes(0) + tc.get_upcast_axes(1))
+            # def get_contract_axes(strides): [(i, 2) for i,dim in enumerate(strides[tcd: tcd + tcd_dims], tcd) if dim != 0]
+
+            contract_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.contract_axes)
+
+            wmma_sz = [prod(x[1] for x in l) for l in contract_axes]
+            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _,sz in tc.threads), contract_axes, tc_reduce_axes)
             wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(
-              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=upcast_axes[0]),
-              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=upcast_axes[1]),
+              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=contract_axes[0]),
+              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=contract_axes[1]),
               UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), arg=wmma_arg)
-            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=upcast_axes[2])
+            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=contract_axes[2])
 
           else: # for TC=3 MUL/SUM instead of WMMA
             tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
@@ -646,7 +649,7 @@ class Kernel:
 
       return ret
 
-    return graph_rewrite(graph_rewrite(fixup_ast(self.ast), view_left), view_right_elementwise)
+    return graph_rewrite(fixup_ast(self.ast), view_right_elementwise)
 
   # **** this is the lowerer ****
 
