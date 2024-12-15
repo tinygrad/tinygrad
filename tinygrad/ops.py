@@ -453,8 +453,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return (self.st is not None and self._device is not None and self.st.consecutive and not self.is_unrealized_const() and
             not isinstance(self.dtype, ImageDType) and self.device.split(":")[0] in view_supported_devices)
   @property
-  def srcs(self): return self.src
-  @property
   def lbs(self): return [self]
   @property
   def metadata(self): return all_metadata.get(self, None)

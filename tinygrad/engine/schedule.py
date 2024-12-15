@@ -69,7 +69,7 @@ def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
   # ASSIGN uses the target buffer, otherwise we create a new buffer
   else:
     buf_uop = buf.buf_uop if buf.op is Ops.ASSIGN else UOp.new_buffer(buf.device, buf.size, dtype)
-    op = buf.replace(dtype=dtype.base, src=tuple(to_uop(x, ctx, cache) for x in buf.srcs))
+    op = buf.replace(dtype=dtype.base, src=tuple(to_uop(x, ctx, cache) for x in buf.src))
   # track the underlying tensor uop for this op
   ctx.tensor_uops[buf_uop] = [buf]
   # (early) bufferize
