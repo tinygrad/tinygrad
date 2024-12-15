@@ -1991,5 +1991,18 @@ class TestBigGraph(unittest.TestCase):
     merged = merge_rewrite(folded, ScheduleContext({c:[unrealized_op],b:[folded]}))
     self.assertIs(merged, unrealized_op)
 
+  # failure in TestOps.test_stack_slice
+  def test_unrealized_expanded_merge(self):
+    a = test_buf(1)
+    b = test_buf(5)
+    c = test_buf(1)
+    unrealized_op = UOp(Ops.VIEW, a.dtype.base, (c, a.view(st:=ShapeTracker.from_shape((1, 1)))+2), st)
+    folded = UOp(Ops.VIEW, a.dtype, (b, unrealized_op.expand((1, 5))), ShapeTracker.from_shape((1, 5)))
+    folded = graph_rewrite(folded, remove_movement_ops)
+    merged = merge_rewrite(folded, ScheduleContext({c:[unrealized_op],b:[folded]}))
+    self.assertEqual(merged.size, 5)
+    # this needs to match
+    self.assertEqual(merged.base.buf_uop.size, 5)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
