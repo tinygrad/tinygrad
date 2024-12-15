@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # compare kernels created by HEAD against master
+from collections import defaultdict
 import os, multiprocessing, logging, pickle, sqlite3, difflib, functools, warnings
 from typing import Callable, List, Set, Tuple, Union, cast
 from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
@@ -30,7 +31,8 @@ class ProcessReplayWarning(Warning): pass
 # *** recreators
 
 def recreate_sched(ast:UOp, assigns:Set[UOp]) -> UOp:
-  return schedule_uop(ast, ScheduleContext(assigns=assigns)).ast
+  # NOTE: process replay isn't meant to actually schedule anything
+  return schedule_uop(ast, ScheduleContext(assigns=assigns, tensor_uops=defaultdict(list))).ast
 def recreate_kernel(ast:UOp, opts:Renderer, applied_opts:List[Opt], name:str, _) -> str:
   k = Kernel(ast, opts=opts)
   for opt in applied_opts: k.apply_opt(opt)
