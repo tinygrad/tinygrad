@@ -252,18 +252,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def toposort(self) -> Dict[UOp, None]:
-    local_cache = {}
+    @functools.lru_cache(None)
     def _toposort(u:UOp):
-      if (cret:=local_cache.get(u)) is not None: return cret
       nodes: Dict[UOp, None] = {}
       # NOTE: this is a lot faster than the comprehension in parents
       for parent in u.src: nodes.update(_toposort(parent))
       nodes[u] = None
-      local_cache[u] = nodes
       return nodes
     ret = _toposort(self)
-    # NOTE: if you comment this it'll keep the cache?
-    del local_cache
+    del _toposort
     return ret
 
   @functools.cached_property
