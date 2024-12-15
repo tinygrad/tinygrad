@@ -79,7 +79,7 @@ def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
 def apply_swizzle(u:UOp) -> UOp:
   with Context(TRACK_MATCH_STATS=0): return graph_rewrite(u, view_left)
 
-def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
+def reduceop_reswizzle(r:UOp, src:UOp, st:ShapeTracker):
   input_st = ShapeTracker.from_shape(unwrap(src.st).shape)
   tmp = input_st.permute(tuple(i for i in range(len(input_st.shape)) if i not in r.axis_arg)+r.axis_arg)
   prshape = prod(rshape:=tmp.shape[-len(r.axis_arg):])
@@ -91,19 +91,20 @@ def swizzle_r(r:UOp, src:UOp, st:ShapeTracker) -> UOp:
   new_axis = tuple(range(len(st.shape), len(st.shape) + len(r.axis_arg)))
   return apply_swizzle(src.view(new_input_st)).r(r.arg[0], new_axis).view(ShapeTracker.from_shape(st.shape))
 
-def push_swizzle_down_through_reduce(r:UOp, v:UOp, src:UOp) -> UOp:
+def reduceop_swizzle_right(r:UOp, v:UOp, src:UOp):
   if not (swizzle_st:=unwrap(v.st)).contiguous or v.size != src.size: raise AssertionError(f"can't push {v} down through {src}")
   output_shape = swizzle_st.reduce(r.axis_arg)
   return src.r(r.arg[0], tuple(i for i,(s,u) in enumerate(zip(src.shape, output_shape)) if s != u)).view(ShapeTracker.from_shape(output_shape))
 
-def push_swizzle_down_through_elementwise(root:UOp) -> Optional[UOp]:
-  if not (swizzles := [x for x in root.src if x.base is not x]): return None
-  assert all_same([(x.shape, prod(x.src[0].shape)) for x in swizzles]), f"swizzles must have the same size {swizzles}"
-  new_input_st = ShapeTracker.from_shape(swizzles[0].src[0].shape)
-  ret = root.replace(src=tuple(x if not x.has_st else x.src[0] if x in swizzles else apply_swizzle(x.view(new_input_st)) for x in root.src))
+def elementwise_swizzle_right(root:UOp):
+  if len(swizzles:=[x for x in root.src if x.base is not x]) == 0: return None
+  assert all_same([x.src[0].size for x in swizzles]), f"swizzle src size mismatch {swizzles}"
+  # use the first swizzle as the ref
+  input_st = ShapeTracker.from_shape((view:=swizzles[0]).base.shape)
+  ret = root.replace(src=tuple(x.src[0] if x in swizzles else x if x.has_st else apply_swizzle(x.view(input_st)) for x in root.src))
   # update the ASSIGN offset to match the new shape
-  if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+new_input_st,)
-  return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(swizzles[0].shape))
+  if ret.op is Ops.ASSIGN and ret.arg is not None: ret = ret.replace(arg=ret.arg+input_st,)
+  return ret if ret.op is Ops.STORE else ret.view(ShapeTracker.from_shape(view.shape))
 
 def merge_double_reduce(root:UOp, first_reduce:UOp) -> UOp:
   assert root.arg[0] == first_reduce.arg[0], "can't merge reduceops with different alu"
@@ -116,11 +117,11 @@ view_right = merge_views+PatternMatcher([
   (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("st"), UPat(Ops.ASSIGN, name="a"))),
    lambda a,b,st: None if a.arg is None else apply_swizzle(UOp.store(b, st, a.replace(arg=None)).view(a.arg))),
   # non contiguous VIEW on a reduce creates a new VIEW
-  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").view(name="v"), lambda v,r,src: None if v.st.contiguous else swizzle_r(r, src, v.st)),
+  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src"),), name="r").view(name="v"), lambda v,r,src: None if v.st.contiguous else reduceop_reswizzle(r, src, v.st)),
   # push a VIEW down to STORE, through a reduce (ONLY reshapes)
-  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src").view(name="v"),), name="r"), push_swizzle_down_through_reduce),
+  (UPat(Ops.REDUCE_AXIS, src=(UPat.var("src").view(name="v"),), name="r"), reduceop_swizzle_right),
   # push VIEW(s) down to STORE, through an elementwise op (ONLY reshapes)
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), push_swizzle_down_through_elementwise),
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.CONTIGUOUS, Ops.STORE), name="root"), elementwise_swizzle_right),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.REDUCE_AXIS, name="first_reduce"),), name="root"), merge_double_reduce),
 ])
 
