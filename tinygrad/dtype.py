@@ -61,9 +61,6 @@ class PtrDType(DType):
 @dataclass(frozen=True, eq=False)
 class ImageDType(PtrDType):
   shape: Tuple[int, ...] = ()   # shape of the Image
-  def ptr(self, local=False) -> PtrDType:
-    assert not local, "images can't be local"
-    return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
 
 class dtypes:
