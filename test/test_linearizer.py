@@ -1406,12 +1406,6 @@ class TestLinearizer(unittest.TestCase):
     out = [u for u in k.uops if u.op is Ops.STORE][0]
     assert out.src[-1].op is Ops.VECTORIZE and out.src[-1].dtype.count != 1
 
-  @unittest.expectedFailure
-  def test_int64_indexing(self):
-    st = ShapeTracker.from_shape((128, 4096, 4096)).to_indexed_uops()
-
-  
-
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod

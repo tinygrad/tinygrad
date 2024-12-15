@@ -657,7 +657,6 @@ class TestLoadStoreFolder(unittest.TestCase):
     sink = UOp(Ops.SINK, dtypes.void, tuple(load))
     sink = float4_rewrite(sink)
     assert len([x for x in sink.toposort if x.op is Ops.STORE]) == 3
-  
 
 class TestIFUOps(unittest.TestCase):
   def test_create_ifs(self):
