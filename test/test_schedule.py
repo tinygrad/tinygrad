@@ -17,6 +17,7 @@ from tinygrad.ops import UOp, Ops, graph_rewrite, track_rewrites, view_supported
 from tinygrad.helpers import CI, DEBUG, FUSE_ARANGE, GlobalCounters, flatten, getenv, SPLIT_REDUCEOP, unwrap, prod, Context
 from tinygrad.codegen.kernel import Kernel, verify_ast
 from tinygrad.engine.schedule import BUF_LIMIT, ScheduleContext, ScheduleItem, create_schedule, view_right, view_left, do_realize, remove_movement_ops
+from tinygrad.engine.schedule import merge_bufs
 from tinygrad.engine.realize import CompiledRunner, get_runner, run_schedule
 from extra.models.llama import precompute_freqs_cis
 
@@ -1943,6 +1944,15 @@ class TestView(unittest.TestCase):
 
 @track_rewrites(named=True)
 def big_graph_rewrite(big_graph:UOp, ctx) -> UOp: return graph_rewrite(big_graph, do_realize, ctx)
+
+def test_buf(sz:int):
+  ret = UOp.new_buffer(Device.DEFAULT, sz, dtypes.int)
+  ret.buffer # insert a new Buffer for this
+  return ret
+
+@track_rewrites(named=True)
+def merge_rewrite(unmerged:UOp, ctx) -> UOp: return graph_rewrite(unmerged, merge_bufs, ctx)
+
 class TestBigGraph(unittest.TestCase):
   def test_sink_childless_const(self):
     x = UOp.const(dtypes.int, 0)
@@ -1964,6 +1974,22 @@ class TestBigGraph(unittest.TestCase):
     big_graph = big_graph_rewrite(out.sink(), ctx:=ScheduleContext())
     self.assertIs(big_graph, out.sink())
     self.assertEqual(len(ctx.realizes), 1)
+
+  def test_tiny_merge(self):
+    a = test_buf(16)
+    b = test_buf(16)
+    folded = UOp(Ops.VIEW, a.dtype.base, (b, a.view(ShapeTracker.from_shape((4, 4)))), ShapeTracker.from_shape((4, 4)))
+    merged = merge_rewrite(folded, ScheduleContext({a:[], b:[]}))
+    self.assertIs(merged, a.view(ShapeTracker.from_shape((4, 4))))
+
+  def test_unrealized_base_merge(self):
+    a = test_buf(16)
+    b = test_buf(16)
+    c = test_buf(16)
+    unrealized_op = UOp(Ops.VIEW, a.dtype.base, (c, a.view(st:=ShapeTracker.from_shape((4, 4)))+2), st)
+    folded = UOp(Ops.VIEW, a.dtype, (b, unrealized_op), ShapeTracker.from_shape((4, 4)))
+    merged = merge_rewrite(folded, ScheduleContext({c:[unrealized_op],b:[folded]}))
+    self.assertIs(merged, unrealized_op)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
