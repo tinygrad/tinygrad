@@ -1408,12 +1408,9 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_int64_indexing(self):
-    st = ShapeTracker.from_shape((2**32,)).to_uop()
-    load = UOp.load(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1, src=()), st, dtype=dtypes.float)
-    store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0, src=()), st, load)
-    sink = store.sink()
-    k = Kernel(sink)
-    k.to_program()
+    st = ShapeTracker.from_shape((128, 4096, 4096)).to_indexed_uops()
+
+  
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):

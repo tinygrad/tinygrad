@@ -30,7 +30,8 @@ def _limit_dims(dims:Tuple[sint, ...], max_sizes:Tuple[int, ...]):
 def get_grouped_dims(prefix, dims:Tuple[sint, ...], max_sizes:Optional[Tuple[int, ...]], reverse=False) -> List[UOp]:
   if reverse: dims = dims[::-1]
   limited = _limit_dims(dims, max_sizes) if max_sizes is not None else dims
-  ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
+  overflow = prod(dims) - 1 > dtypes.max(dtypes.int32)
+  ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.int64 if overflow else dtypes.int, (), (f"{prefix}{i}", s)) for i,s in enumerate(limited)]
   if limited != dims:
     ret = []
     if (contraction:=get_contraction(dims, limited)) is None: raise AssertionError(f"get_contraction should not be None {dims=} {limited=}")
