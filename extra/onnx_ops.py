@@ -322,12 +322,16 @@ def GatherND(x:Tensor, indices:Tensor, batch_dims:int=0):
   indices = tuple(Tensor.arange(sh, device=x.device) for sh in x.shape[:batch_dims]) + tuple(i.squeeze(-1) for i in indices.split(1, -1))
   return x[indices]
 def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Optional[str]=None):
-  if reduction in {"min", "max"}: raise NotImplementedError("min and max reduction not supported")
-  indices = indices.reshape(indices.shape + (1,) * (updates.ndim - indices.ndim)).expand(updates.shape)
-  return x.scatter(0, indices, updates, reduce={"mul":"multiply"}.get(reduction, reduction))
+  x = x.contiguous()
+  for i, u in zip(indices.split(1, 0), updates.split(1, 0)):
+    i = tuple(i_.squeeze(-1) for i_ in i.squeeze(0).split(1, -1))
+    u = u.squeeze(0)
+    if reduction is None: x[i] = u
+    if reduction == "add": x[i] += u
+    if reduction == "mul": x[i] *= u
+  return x
 
 def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Optional[str]=None):
-  if reduction in {"min", "max"}: raise NotImplementedError("min and max reduction not supported")
   indices = (indices < 0).where(x.shape[axis], 0) + indices
   return x.scatter(axis, indices, updates, reduction)
 def GatherElements(x: Tensor, indices: Tensor, axis):
