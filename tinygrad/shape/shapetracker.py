@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import functools
-from typing import Tuple, List, Optional, Dict, Set
+from typing import Tuple, List, Optional, Dict, Set, Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.view import View, strides_for_shape
 from tinygrad.dtype import dtypes
@@ -115,3 +115,8 @@ class ShapeTracker:
   def reshape(self, new_shape: Tuple[sint, ...]) -> ShapeTracker:
     if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
     return ShapeTracker(self.views + (View.create(new_shape), ))
+
+  def mop(self, op, arg): return mops[op](self, arg)
+
+mops: Dict[Ops, Callable] = {Ops.RESHAPE: ShapeTracker.reshape, Ops.PERMUTE: ShapeTracker.permute, Ops.EXPAND: ShapeTracker.expand,
+                             Ops.SHRINK: ShapeTracker.shrink, Ops.STRIDE: ShapeTracker.stride, Ops.PAD: ShapeTracker.pad}
