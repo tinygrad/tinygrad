@@ -482,7 +482,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def _mop(self, op:Ops, arg):
     ret = UOp(op, self.dtype, (self,), arg)
-    ret.st  # pylint: disable=pointless-statement
+    if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
   def reshape(self, arg:Tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
