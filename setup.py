@@ -39,6 +39,7 @@ setup(name='tinygrad',
         'testing': [
             "numpy",
             "torch",
+            "jax",
             "pillow",
             "pytest",
             "pytest-xdist",

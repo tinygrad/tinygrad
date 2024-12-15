@@ -4,7 +4,7 @@ import torch
 from typing import Any, List
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, DEBUG, CI
-from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16
+from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype, truncate_fp16, to_dtype
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
 from hypothesis import given, settings, strategies as strat
@@ -853,6 +853,19 @@ class TestDtypeUsage(unittest.TestCase):
       if is_dtype_supported(d):
         t = Tensor([[1, 2], [3, 4]], dtype=d)
         (t*t).max().item()
+
+class TestToDtype(unittest.TestCase):
+  def test_dtype_to_dtype(self):
+    dtype = dtypes.int32
+    res = to_dtype(dtype)
+    self.assertIsInstance(res, DType)
+    self.assertEqual(res, dtypes.int32)
+
+  def test_str_to_dtype(self):
+    dtype = "int32"
+    res = to_dtype(dtype)
+    self.assertIsInstance(res, DType)
+    self.assertEqual(res, dtypes.int32)
 
 if __name__ == '__main__':
   unittest.main()
