@@ -5,7 +5,7 @@ from tinygrad.helpers import ceildiv
 
 class BLAKE3:
   """BLAKE3 hashing algorithm. Paper: https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf."""
-  
+
   PAD, DEFAULT_LEN, PERMUTATIONS = 66, 65, Tensor([2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8], dtype=dtypes.uint32)
 
   def __init__(self): self.compress_blocks_jit = TinyJit(self.compress_blocks)
@@ -24,18 +24,13 @@ class BLAKE3:
     return (states[:8] ^ states[8:]).cat(chain_vals[:8] ^ states[8:])
 
   @TinyJit
-  def init_states(self, data: Tensor, info: Tensor) -> Tuple[Tensor, Tensor]:
+  def init_states(self, data: Tensor, info: Tensor, flags: Tensor) -> Tuple[Tensor, Tensor]:
     IV = Tensor([0x6A09E667, 0xBB67AE85, 0x3C6EF372, 0xA54FF53A, 0x510E527F, 0x9B05688C, 0x1F83D9AB, 0x5BE0CD19], dtype=dtypes.uint32)
     chain_vals = IV.reshape(1, 8, 1).expand(16, 8, info.shape[-1]).contiguous()
     counts = Tensor.arange(0, data.shape[-1], dtype=dtypes.uint32).reshape(-1, 1).expand(-1, 16).reshape(-1, 16, 1).permute(1, 2, 0)
     counts = counts.cat(Tensor.zeros(chain_vals.shape[0], 1, chain_vals.shape[-1], dtype=dtypes.uint32), dim=1)
     lengths = (info == self.DEFAULT_LEN).where(64, info)
-    flags = Tensor.zeros((16, 1, info.shape[-1]), dtype=dtypes.uint32).contiguous()
-    flags[-1, 0] = (flags[-1, 0] + 2) # chunk end flag
-    flags = (flags + 2 * ((flags != 2) * (info < self.DEFAULT_LEN))) # chunk end flag for partial final chunk
-    flags[0, :] = flags[0, :] + 1 # chunk start flag
-    flags = (flags + (8 * (((info < self.PAD).sum() <= 16) * (info < self.DEFAULT_LEN)))).cast(dtypes.uint32) # root flag
-    states = (chain_vals.cat(chain_vals[:, :4], counts, lengths, flags, dim=1) * (info < self.PAD).cast(dtypes.uint32))
+    states = chain_vals.cat(chain_vals[:, :4], counts, lengths, flags, dim=1) * (info < self.PAD)
     return states.realize(), chain_vals.realize()
 
   @TinyJit
@@ -45,13 +40,18 @@ class BLAKE3:
     return (states[-1, :] | end_block)[:8].realize()
 
   def init_chain_vals(self, data: Tensor, info: Tensor) -> Tuple[Tensor, Tensor]:
-    states, chain_vals = self.init_states(data, info)
+    flags = Tensor.zeros((16, 1, info.shape[-1]), dtype=dtypes.uint32).contiguous()
+    flags[-1, 0] = (flags[-1, 0] + 2) # chunk end flag
+    flags = (flags + 2 * ((flags != 2) * (info < self.DEFAULT_LEN))) # chunk end flag for partial final chunk
+    flags[0, :] = flags[0, :] + 1 # chunk start flag
+    flags = (flags + (8 * (((info < self.PAD).sum() <= 16) * (info < self.DEFAULT_LEN)))).cast(dtypes.uint32) # root flag
+    states, chain_vals = self.init_states(data, info, flags)
     for i in range(16):
       next_state = states[i] if i == 0 else states[i-1, :8].cat(states[i, 8:])
       states[i] = self.compress_blocks_jit(next_state.contiguous(), data[i].contiguous(), chain_vals[i].contiguous())
     return self.finalize_states(states, info)
 
-  # @TinyJit
+  @TinyJit
   def tree_step(self, chain_vals: Tensor, final_step: Tensor) -> Tensor:
     stacked = chain_vals.transpose().reshape(-1, 16).transpose().reshape(2, 8, -1)
     stacked_mask = stacked.any(1)
