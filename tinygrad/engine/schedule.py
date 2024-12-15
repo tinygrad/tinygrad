@@ -57,10 +57,16 @@ def to_uop(buf:UOp, ctx:ScheduleContext, cache:Dict[UOp, UOp]) -> UOp:
   if buf is not buf.base:
     cache[buf] = ret = to_uop(buf.base, ctx, cache).view(buf.st)
     return ret
-  # meta ops and assign already have a target buffer, otherwise we create a new one
-  buf_uop = buf.buf_uop if buf.op in {Ops.ASSIGN, Ops.VIEW} else UOp.new_buffer(buf.device, buf.size, buf.dtype)
+  # bufferize
+  if buf.op in {Ops.ASSIGN, Ops.VIEW}: buf_uop = buf.buf_uop
+  # make things that can't be images not images
+  elif isinstance(buf.dtype, ImageDType) and (prod(buf.shape)!=prod(buf.dtype.shape) or all(buf.shape[x]%4 != 0 for x in buf.st.unit_stride_axes())):
+    if DEBUG >= 2: print(f"forcing image {buf.dtype} with shape {buf.shape} to {buf.dtype.base}")
+    buf_uop = UOp.new_buffer(buf.device, buf.size, buf.dtype.base)
+  else: buf_uop = UOp.new_buffer(buf.device, buf.size, buf.dtype)
+  # this is a passthrough of tensor_uop
   if buf.op is Ops.VIEW: op = buf.src[1].replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src[1].src))
-  else: op = buf.replace(dtype=buf.dtype, src=tuple(to_uop(x, ctx, cache) for x in buf.src))
+  else: op = buf.replace(src=tuple(to_uop(x, ctx, cache) for x in buf.src))
   # track the underlying tensor uop for this op
   ctx.tensor_uops[buf_uop] = [buf]
   # (early) bufferize
