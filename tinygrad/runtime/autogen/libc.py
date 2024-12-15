@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 # -*- coding: utf-8 -*-
 #
-# TARGET arch is: []
+# TARGET arch is: ['-D_GNU_SOURCE']
 # WORD_SIZE is: 8
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
@@ -172,6 +172,13 @@ try:
     mmap.argtypes = [ctypes.POINTER(None), size_t, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, __off_t]
 except AttributeError:
     pass
+__off64_t = ctypes.c_int64
+try:
+    mmap64 = _libraries['libc'].mmap64
+    mmap64.restype = ctypes.POINTER(None)
+    mmap64.argtypes = [ctypes.POINTER(None), size_t, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, __off64_t]
+except AttributeError:
+    pass
 try:
     munmap = _libraries['libc'].munmap
     munmap.restype = ctypes.c_int32
@@ -230,6 +237,18 @@ try:
     mincore = _libraries['libc'].mincore
     mincore.restype = ctypes.c_int32
     mincore.argtypes = [ctypes.POINTER(None), size_t, ctypes.POINTER(ctypes.c_ubyte)]
+except AttributeError:
+    pass
+try:
+    mremap = _libraries['libc'].mremap
+    mremap.restype = ctypes.POINTER(None)
+    mremap.argtypes = [ctypes.POINTER(None), size_t, size_t, ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    remap_file_pages = _libraries['libc'].remap_file_pages
+    remap_file_pages.restype = ctypes.c_int32
+    remap_file_pages.argtypes = [ctypes.POINTER(None), size_t, ctypes.c_int32, size_t, ctypes.c_int32]
 except AttributeError:
     pass
 try:
@@ -3729,6 +3748,7 @@ __ssize_t_defined = True # macro
 __need_NULL = True # macro
 __gid_t_defined = True # macro
 __uid_t_defined = True # macro
+__off64_t_defined = True # macro
 __useconds_t_defined = True # macro
 __pid_t_defined = True # macro
 __intptr_t_defined = True # macro
@@ -3740,6 +3760,8 @@ F_OK = 0 # macro
 SEEK_SET = 0 # macro
 SEEK_CUR = 1 # macro
 SEEK_END = 2 # macro
+SEEK_DATA = 3 # macro
+SEEK_HOLE = 4 # macro
 L_SET = 0 # macro
 L_INCR = 1 # macro
 L_XTND = 2 # macro
@@ -3747,9 +3769,12 @@ F_ULOCK = 0 # macro
 F_LOCK = 1 # macro
 F_TLOCK = 2 # macro
 F_TEST = 3 # macro
+# def TEMP_FAILURE_RETRY(expression):  # macro
+#    return (({__result;__result=(expression);(__result==-1 and errno==EINTR);__result;}))
 ssize_t = ctypes.c_int64
 gid_t = ctypes.c_uint32
 uid_t = ctypes.c_uint32
+off64_t = ctypes.c_int64
 useconds_t = ctypes.c_uint32
 pid_t = ctypes.c_int32
 intptr_t = ctypes.c_int64
@@ -3758,6 +3783,24 @@ try:
     access = _libraries['libc'].access
     access.restype = ctypes.c_int32
     access.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    euidaccess = _libraries['libc'].euidaccess
+    euidaccess.restype = ctypes.c_int32
+    euidaccess.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    eaccess = _libraries['libc'].eaccess
+    eaccess.restype = ctypes.c_int32
+    eaccess.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    execveat = _libraries['libc'].execveat
+    execveat.restype = ctypes.c_int32
+    execveat.argtypes = [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char) * 0, ctypes.POINTER(ctypes.c_char) * 0, ctypes.c_int32]
 except AttributeError:
     pass
 try:
@@ -3770,6 +3813,12 @@ try:
     lseek = _libraries['libc'].lseek
     lseek.restype = __off_t
     lseek.argtypes = [ctypes.c_int32, __off_t, ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    lseek64 = _libraries['libc'].lseek64
+    lseek64.restype = __off64_t
+    lseek64.argtypes = [ctypes.c_int32, __off64_t, ctypes.c_int32]
 except AttributeError:
     pass
 try:
@@ -3809,9 +3858,27 @@ try:
 except AttributeError:
     pass
 try:
+    pread64 = _libraries['libc'].pread64
+    pread64.restype = ssize_t
+    pread64.argtypes = [ctypes.c_int32, ctypes.POINTER(None), size_t, __off64_t]
+except AttributeError:
+    pass
+try:
+    pwrite64 = _libraries['libc'].pwrite64
+    pwrite64.restype = ssize_t
+    pwrite64.argtypes = [ctypes.c_int32, ctypes.POINTER(None), size_t, __off64_t]
+except AttributeError:
+    pass
+try:
     pipe = _libraries['libc'].pipe
     pipe.restype = ctypes.c_int32
     pipe.argtypes = [ctypes.c_int32 * 2]
+except AttributeError:
+    pass
+try:
+    pipe2 = _libraries['libc'].pipe2
+    pipe2.restype = ctypes.c_int32
+    pipe2.argtypes = [ctypes.c_int32 * 2, ctypes.c_int32]
 except AttributeError:
     pass
 try:
@@ -3890,6 +3957,12 @@ try:
 except AttributeError:
     pass
 try:
+    get_current_dir_name = _libraries['libc'].get_current_dir_name
+    get_current_dir_name.restype = ctypes.POINTER(ctypes.c_char)
+    get_current_dir_name.argtypes = []
+except AttributeError:
+    pass
+try:
     getwd = _libraries['libc'].getwd
     getwd.restype = ctypes.POINTER(ctypes.c_char)
     getwd.argtypes = [ctypes.POINTER(ctypes.c_char)]
@@ -3907,7 +3980,14 @@ try:
     dup2.argtypes = [ctypes.c_int32, ctypes.c_int32]
 except AttributeError:
     pass
+try:
+    dup3 = _libraries['libc'].dup3
+    dup3.restype = ctypes.c_int32
+    dup3.argtypes = [ctypes.c_int32, ctypes.c_int32, ctypes.c_int32]
+except AttributeError:
+    pass
 __environ = ctypes.POINTER(ctypes.POINTER(ctypes.c_char))() # Variable ctypes.POINTER(ctypes.POINTER(ctypes.c_char))
+environ = ctypes.POINTER(ctypes.POINTER(ctypes.c_char))() # Variable ctypes.POINTER(ctypes.POINTER(ctypes.c_char))
 try:
     execve = _libraries['libc'].execve
     execve.restype = ctypes.c_int32
@@ -3948,6 +4028,12 @@ try:
     execlp = _libraries['libc'].execlp
     execlp.restype = ctypes.c_int32
     execlp.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    execvpe = _libraries['libc'].execvpe
+    execvpe.restype = ctypes.c_int32
+    execvpe.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char) * 0, ctypes.POINTER(ctypes.c_char) * 0]
 except AttributeError:
     pass
 try:
@@ -4072,6 +4158,12 @@ try:
 except AttributeError:
     pass
 try:
+    group_member = _libraries['libc'].group_member
+    group_member.restype = ctypes.c_int32
+    group_member.argtypes = [__gid_t]
+except AttributeError:
+    pass
+try:
     setuid = _libraries['libc'].setuid
     setuid.restype = ctypes.c_int32
     setuid.argtypes = [__uid_t]
@@ -4108,6 +4200,30 @@ try:
 except AttributeError:
     pass
 try:
+    getresuid = _libraries['libc'].getresuid
+    getresuid.restype = ctypes.c_int32
+    getresuid.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
+    getresgid = _libraries['libc'].getresgid
+    getresgid.restype = ctypes.c_int32
+    getresgid.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
+    setresuid = _libraries['libc'].setresuid
+    setresuid.restype = ctypes.c_int32
+    setresuid.argtypes = [__uid_t, __uid_t, __uid_t]
+except AttributeError:
+    pass
+try:
+    setresgid = _libraries['libc'].setresgid
+    setresgid.restype = ctypes.c_int32
+    setresgid.argtypes = [__gid_t, __gid_t, __gid_t]
+except AttributeError:
+    pass
+try:
     fork = _libraries['libc'].fork
     fork.restype = __pid_t
     fork.argtypes = []
@@ -4117,6 +4233,12 @@ try:
     vfork = _libraries['libc'].vfork
     vfork.restype = ctypes.c_int32
     vfork.argtypes = []
+except AttributeError:
+    pass
+try:
+    _Fork = _libraries['libc']._Fork
+    _Fork.restype = __pid_t
+    _Fork.argtypes = []
 except AttributeError:
     pass
 try:
@@ -4324,6 +4446,12 @@ try:
 except AttributeError:
     pass
 try:
+    syncfs = _libraries['libc'].syncfs
+    syncfs.restype = ctypes.c_int32
+    syncfs.argtypes = [ctypes.c_int32]
+except AttributeError:
+    pass
+try:
     gethostid = _libraries['libc'].gethostid
     gethostid.restype = ctypes.c_int64
     gethostid.argtypes = []
@@ -4354,9 +4482,21 @@ try:
 except AttributeError:
     pass
 try:
+    truncate64 = _libraries['libc'].truncate64
+    truncate64.restype = ctypes.c_int32
+    truncate64.argtypes = [ctypes.POINTER(ctypes.c_char), __off64_t]
+except AttributeError:
+    pass
+try:
     ftruncate = _libraries['libc'].ftruncate
     ftruncate.restype = ctypes.c_int32
     ftruncate.argtypes = [ctypes.c_int32, __off_t]
+except AttributeError:
+    pass
+try:
+    ftruncate64 = _libraries['libc'].ftruncate64
+    ftruncate64.restype = ctypes.c_int32
+    ftruncate64.argtypes = [ctypes.c_int32, __off64_t]
 except AttributeError:
     pass
 try:
@@ -4384,6 +4524,18 @@ try:
 except AttributeError:
     pass
 try:
+    lockf64 = _libraries['libc'].lockf64
+    lockf64.restype = ctypes.c_int32
+    lockf64.argtypes = [ctypes.c_int32, ctypes.c_int32, __off64_t]
+except AttributeError:
+    pass
+try:
+    copy_file_range = _libraries['libc'].copy_file_range
+    copy_file_range.restype = ssize_t
+    copy_file_range.argtypes = [ctypes.c_int32, ctypes.POINTER(ctypes.c_int64), ctypes.c_int32, ctypes.POINTER(ctypes.c_int64), size_t, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
     fdatasync = _libraries['libc'].fdatasync
     fdatasync.restype = ctypes.c_int32
     fdatasync.argtypes = [ctypes.c_int32]
@@ -4396,9 +4548,182 @@ try:
 except AttributeError:
     pass
 try:
+    swab = _libraries['libc'].swab
+    swab.restype = None
+    swab.argtypes = [ctypes.POINTER(None), ctypes.POINTER(None), ssize_t]
+except AttributeError:
+    pass
+try:
     getentropy = _libraries['libc'].getentropy
     getentropy.restype = ctypes.c_int32
     getentropy.argtypes = [ctypes.POINTER(None), size_t]
+except AttributeError:
+    pass
+try:
+    close_range = _libraries['libc'].close_range
+    close_range.restype = ctypes.c_int32
+    close_range.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int32]
+except AttributeError:
+    pass
+_DLFCN_H = 1 # macro
+# RTLD_NEXT = ((void*)-1) # macro
+# RTLD_DEFAULT = ((void*)0) # macro
+LM_ID_BASE = 0 # macro
+LM_ID_NEWLM = -1 # macro
+Lmid_t = ctypes.c_int64
+try:
+    dlopen = _libraries['libc'].dlopen
+    dlopen.restype = ctypes.POINTER(None)
+    dlopen.argtypes = [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    dlclose = _libraries['libc'].dlclose
+    dlclose.restype = ctypes.c_int32
+    dlclose.argtypes = [ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    dlsym = _libraries['libc'].dlsym
+    dlsym.restype = ctypes.POINTER(None)
+    dlsym.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    dlmopen = _libraries['libc'].dlmopen
+    dlmopen.restype = ctypes.POINTER(None)
+    dlmopen.argtypes = [Lmid_t, ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    dlvsym = _libraries['libc'].dlvsym
+    dlvsym.restype = ctypes.POINTER(None)
+    dlvsym.argtypes = [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    dlerror = _libraries['libc'].dlerror
+    dlerror.restype = ctypes.POINTER(ctypes.c_char)
+    dlerror.argtypes = []
+except AttributeError:
+    pass
+class struct_c__SA_Dl_info(Structure):
+    pass
+
+struct_c__SA_Dl_info._pack_ = 1 # source:False
+struct_c__SA_Dl_info._fields_ = [
+    ('dli_fname', ctypes.POINTER(ctypes.c_char)),
+    ('dli_fbase', ctypes.POINTER(None)),
+    ('dli_sname', ctypes.POINTER(ctypes.c_char)),
+    ('dli_saddr', ctypes.POINTER(None)),
+]
+
+Dl_info = struct_c__SA_Dl_info
+try:
+    dladdr = _libraries['libc'].dladdr
+    dladdr.restype = ctypes.c_int32
+    dladdr.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_c__SA_Dl_info)]
+except AttributeError:
+    pass
+try:
+    dladdr1 = _libraries['libc'].dladdr1
+    dladdr1.restype = ctypes.c_int32
+    dladdr1.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_c__SA_Dl_info), ctypes.POINTER(ctypes.POINTER(None)), ctypes.c_int32]
+except AttributeError:
+    pass
+
+# values for enumeration 'c__Ea_RTLD_DL_SYMENT'
+c__Ea_RTLD_DL_SYMENT__enumvalues = {
+    1: 'RTLD_DL_SYMENT',
+    2: 'RTLD_DL_LINKMAP',
+}
+RTLD_DL_SYMENT = 1
+RTLD_DL_LINKMAP = 2
+c__Ea_RTLD_DL_SYMENT = ctypes.c_uint32 # enum
+try:
+    dlinfo = _libraries['libc'].dlinfo
+    dlinfo.restype = ctypes.c_int32
+    dlinfo.argtypes = [ctypes.POINTER(None), ctypes.c_int32, ctypes.POINTER(None)]
+except AttributeError:
+    pass
+
+# values for enumeration 'c__Ea_RTLD_DI_LMID'
+c__Ea_RTLD_DI_LMID__enumvalues = {
+    1: 'RTLD_DI_LMID',
+    2: 'RTLD_DI_LINKMAP',
+    3: 'RTLD_DI_CONFIGADDR',
+    4: 'RTLD_DI_SERINFO',
+    5: 'RTLD_DI_SERINFOSIZE',
+    6: 'RTLD_DI_ORIGIN',
+    7: 'RTLD_DI_PROFILENAME',
+    8: 'RTLD_DI_PROFILEOUT',
+    9: 'RTLD_DI_TLS_MODID',
+    10: 'RTLD_DI_TLS_DATA',
+    10: 'RTLD_DI_MAX',
+}
+RTLD_DI_LMID = 1
+RTLD_DI_LINKMAP = 2
+RTLD_DI_CONFIGADDR = 3
+RTLD_DI_SERINFO = 4
+RTLD_DI_SERINFOSIZE = 5
+RTLD_DI_ORIGIN = 6
+RTLD_DI_PROFILENAME = 7
+RTLD_DI_PROFILEOUT = 8
+RTLD_DI_TLS_MODID = 9
+RTLD_DI_TLS_DATA = 10
+RTLD_DI_MAX = 10
+c__Ea_RTLD_DI_LMID = ctypes.c_uint32 # enum
+class struct_c__SA_Dl_serpath(Structure):
+    pass
+
+struct_c__SA_Dl_serpath._pack_ = 1 # source:False
+struct_c__SA_Dl_serpath._fields_ = [
+    ('dls_name', ctypes.POINTER(ctypes.c_char)),
+    ('dls_flags', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+Dl_serpath = struct_c__SA_Dl_serpath
+class struct_c__SA_Dl_serinfo(Structure):
+    pass
+
+class union_c__SA_Dl_serinfo_0(Union):
+    _pack_ = 1 # source:False
+    _fields_ = [
+    ('dls_serpath', struct_c__SA_Dl_serpath * 0),
+    ('__dls_serpath_pad', struct_c__SA_Dl_serpath * 1),
+     ]
+
+struct_c__SA_Dl_serinfo._pack_ = 1 # source:False
+struct_c__SA_Dl_serinfo._anonymous_ = ('_0',)
+struct_c__SA_Dl_serinfo._fields_ = [
+    ('dls_size', ctypes.c_uint64),
+    ('dls_cnt', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('_0', union_c__SA_Dl_serinfo_0),
+]
+
+Dl_serinfo = struct_c__SA_Dl_serinfo
+class struct_dl_find_object(Structure):
+    pass
+
+class struct_link_map(Structure):
+    pass
+
+struct_dl_find_object._pack_ = 1 # source:False
+struct_dl_find_object._fields_ = [
+    ('dlfo_flags', ctypes.c_uint64),
+    ('dlfo_map_start', ctypes.POINTER(None)),
+    ('dlfo_map_end', ctypes.POINTER(None)),
+    ('dlfo_link_map', ctypes.POINTER(struct_link_map)),
+    ('dlfo_eh_frame', ctypes.POINTER(None)),
+    ('__dflo_reserved', ctypes.c_uint64 * 7),
+]
+
+try:
+    _dl_find_object = _libraries['libc']._dl_find_object
+    _dl_find_object.restype = ctypes.c_int32
+    _dl_find_object.argtypes = [ctypes.POINTER(None), ctypes.POINTER(struct_dl_find_object)]
 except AttributeError:
     pass
 __all__ = \
@@ -4468,30 +4793,31 @@ __all__ = \
     'DT_SYMTAB_SHNDX', 'DT_TEXTREL', 'DT_TLSDESC_GOT',
     'DT_TLSDESC_PLT', 'DT_VALNUM', 'DT_VALRNGHI', 'DT_VALRNGLO',
     'DT_VERDEF', 'DT_VERDEFNUM', 'DT_VERNEED', 'DT_VERNEEDNUM',
-    'DT_VERSIONTAGNUM', 'DT_VERSYM', 'EFA_PARISC_1_0',
-    'EFA_PARISC_1_1', 'EFA_PARISC_2_0', 'EF_ALPHA_32BIT',
-    'EF_ALPHA_CANRELAX', 'EF_ARM_ABI_FLOAT_HARD',
-    'EF_ARM_ABI_FLOAT_SOFT', 'EF_ARM_ALIGN8', 'EF_ARM_APCS_26',
-    'EF_ARM_APCS_FLOAT', 'EF_ARM_BE8', 'EF_ARM_DYNSYMSUSESEGIDX',
-    'EF_ARM_EABIMASK', 'EF_ARM_EABI_UNKNOWN', 'EF_ARM_EABI_VER1',
-    'EF_ARM_EABI_VER2', 'EF_ARM_EABI_VER3', 'EF_ARM_EABI_VER4',
-    'EF_ARM_EABI_VER5', 'EF_ARM_HASENTRY', 'EF_ARM_INTERWORK',
-    'EF_ARM_LE8', 'EF_ARM_MAPSYMSFIRST', 'EF_ARM_MAVERICK_FLOAT',
-    'EF_ARM_NEW_ABI', 'EF_ARM_OLD_ABI', 'EF_ARM_PIC',
-    'EF_ARM_RELEXEC', 'EF_ARM_SOFT_FLOAT', 'EF_ARM_SYMSARESORTED',
-    'EF_ARM_VFP_FLOAT', 'EF_CPU32', 'EF_CSKY_ABIMASK',
-    'EF_CSKY_ABIV1', 'EF_CSKY_ABIV2', 'EF_CSKY_OTHER',
-    'EF_CSKY_PROCESSOR', 'EF_IA_64_ABI64', 'EF_IA_64_ARCH',
-    'EF_IA_64_MASKOS', 'EF_MIPS_64BIT_WHIRL', 'EF_MIPS_ABI2',
-    'EF_MIPS_ABI_ON32', 'EF_MIPS_ARCH', 'EF_MIPS_ARCH_1',
-    'EF_MIPS_ARCH_2', 'EF_MIPS_ARCH_3', 'EF_MIPS_ARCH_32',
-    'EF_MIPS_ARCH_32R2', 'EF_MIPS_ARCH_4', 'EF_MIPS_ARCH_5',
-    'EF_MIPS_ARCH_64', 'EF_MIPS_ARCH_64R2', 'EF_MIPS_CPIC',
-    'EF_MIPS_FP64', 'EF_MIPS_NAN2008', 'EF_MIPS_NOREORDER',
-    'EF_MIPS_PIC', 'EF_MIPS_XGOT', 'EF_PARISC_ARCH', 'EF_PARISC_EXT',
-    'EF_PARISC_LAZYSWAP', 'EF_PARISC_LSB', 'EF_PARISC_NO_KABP',
-    'EF_PARISC_TRAPNIL', 'EF_PARISC_WIDE', 'EF_PPC64_ABI',
-    'EF_PPC_EMB', 'EF_PPC_RELOCATABLE', 'EF_PPC_RELOCATABLE_LIB',
+    'DT_VERSIONTAGNUM', 'DT_VERSYM', 'Dl_info', 'Dl_serinfo',
+    'Dl_serpath', 'EFA_PARISC_1_0', 'EFA_PARISC_1_1',
+    'EFA_PARISC_2_0', 'EF_ALPHA_32BIT', 'EF_ALPHA_CANRELAX',
+    'EF_ARM_ABI_FLOAT_HARD', 'EF_ARM_ABI_FLOAT_SOFT', 'EF_ARM_ALIGN8',
+    'EF_ARM_APCS_26', 'EF_ARM_APCS_FLOAT', 'EF_ARM_BE8',
+    'EF_ARM_DYNSYMSUSESEGIDX', 'EF_ARM_EABIMASK',
+    'EF_ARM_EABI_UNKNOWN', 'EF_ARM_EABI_VER1', 'EF_ARM_EABI_VER2',
+    'EF_ARM_EABI_VER3', 'EF_ARM_EABI_VER4', 'EF_ARM_EABI_VER5',
+    'EF_ARM_HASENTRY', 'EF_ARM_INTERWORK', 'EF_ARM_LE8',
+    'EF_ARM_MAPSYMSFIRST', 'EF_ARM_MAVERICK_FLOAT', 'EF_ARM_NEW_ABI',
+    'EF_ARM_OLD_ABI', 'EF_ARM_PIC', 'EF_ARM_RELEXEC',
+    'EF_ARM_SOFT_FLOAT', 'EF_ARM_SYMSARESORTED', 'EF_ARM_VFP_FLOAT',
+    'EF_CPU32', 'EF_CSKY_ABIMASK', 'EF_CSKY_ABIV1', 'EF_CSKY_ABIV2',
+    'EF_CSKY_OTHER', 'EF_CSKY_PROCESSOR', 'EF_IA_64_ABI64',
+    'EF_IA_64_ARCH', 'EF_IA_64_MASKOS', 'EF_MIPS_64BIT_WHIRL',
+    'EF_MIPS_ABI2', 'EF_MIPS_ABI_ON32', 'EF_MIPS_ARCH',
+    'EF_MIPS_ARCH_1', 'EF_MIPS_ARCH_2', 'EF_MIPS_ARCH_3',
+    'EF_MIPS_ARCH_32', 'EF_MIPS_ARCH_32R2', 'EF_MIPS_ARCH_4',
+    'EF_MIPS_ARCH_5', 'EF_MIPS_ARCH_64', 'EF_MIPS_ARCH_64R2',
+    'EF_MIPS_CPIC', 'EF_MIPS_FP64', 'EF_MIPS_NAN2008',
+    'EF_MIPS_NOREORDER', 'EF_MIPS_PIC', 'EF_MIPS_XGOT',
+    'EF_PARISC_ARCH', 'EF_PARISC_EXT', 'EF_PARISC_LAZYSWAP',
+    'EF_PARISC_LSB', 'EF_PARISC_NO_KABP', 'EF_PARISC_TRAPNIL',
+    'EF_PARISC_WIDE', 'EF_PPC64_ABI', 'EF_PPC_EMB',
+    'EF_PPC_RELOCATABLE', 'EF_PPC_RELOCATABLE_LIB',
     'EF_RISCV_FLOAT_ABI', 'EF_RISCV_FLOAT_ABI_DOUBLE',
     'EF_RISCV_FLOAT_ABI_QUAD', 'EF_RISCV_FLOAT_ABI_SINGLE',
     'EF_RISCV_FLOAT_ABI_SOFT', 'EF_RISCV_RVC', 'EF_S390_HIGH_GPRS',
@@ -4595,19 +4921,20 @@ __all__ = \
     'LITUSE_ALPHA_BASE', 'LITUSE_ALPHA_BYTOFF', 'LITUSE_ALPHA_JSR',
     'LITUSE_ALPHA_TLS_GD', 'LITUSE_ALPHA_TLS_LDM', 'LL_DELAY_LOAD',
     'LL_DELTA', 'LL_EXACT_MATCH', 'LL_EXPORTS', 'LL_IGNORE_INT_VER',
-    'LL_NONE', 'LL_REQUIRE_MINOR', 'L_INCR', 'L_SET', 'L_XTND',
-    'MIPS_AFL_ASE_DSP', 'MIPS_AFL_ASE_DSPR2', 'MIPS_AFL_ASE_EVA',
-    'MIPS_AFL_ASE_MASK', 'MIPS_AFL_ASE_MCU', 'MIPS_AFL_ASE_MDMX',
-    'MIPS_AFL_ASE_MICROMIPS', 'MIPS_AFL_ASE_MIPS16',
-    'MIPS_AFL_ASE_MIPS3D', 'MIPS_AFL_ASE_MSA', 'MIPS_AFL_ASE_MT',
-    'MIPS_AFL_ASE_SMARTMIPS', 'MIPS_AFL_ASE_VIRT', 'MIPS_AFL_ASE_XPA',
-    'MIPS_AFL_EXT_10000', 'MIPS_AFL_EXT_3900', 'MIPS_AFL_EXT_4010',
-    'MIPS_AFL_EXT_4100', 'MIPS_AFL_EXT_4111', 'MIPS_AFL_EXT_4120',
-    'MIPS_AFL_EXT_4650', 'MIPS_AFL_EXT_5400', 'MIPS_AFL_EXT_5500',
-    'MIPS_AFL_EXT_5900', 'MIPS_AFL_EXT_LOONGSON_2E',
-    'MIPS_AFL_EXT_LOONGSON_2F', 'MIPS_AFL_EXT_LOONGSON_3A',
-    'MIPS_AFL_EXT_OCTEON', 'MIPS_AFL_EXT_OCTEON2',
-    'MIPS_AFL_EXT_OCTEONP', 'MIPS_AFL_EXT_SB1', 'MIPS_AFL_EXT_XLR',
+    'LL_NONE', 'LL_REQUIRE_MINOR', 'LM_ID_BASE', 'LM_ID_NEWLM',
+    'L_INCR', 'L_SET', 'L_XTND', 'Lmid_t', 'MIPS_AFL_ASE_DSP',
+    'MIPS_AFL_ASE_DSPR2', 'MIPS_AFL_ASE_EVA', 'MIPS_AFL_ASE_MASK',
+    'MIPS_AFL_ASE_MCU', 'MIPS_AFL_ASE_MDMX', 'MIPS_AFL_ASE_MICROMIPS',
+    'MIPS_AFL_ASE_MIPS16', 'MIPS_AFL_ASE_MIPS3D', 'MIPS_AFL_ASE_MSA',
+    'MIPS_AFL_ASE_MT', 'MIPS_AFL_ASE_SMARTMIPS', 'MIPS_AFL_ASE_VIRT',
+    'MIPS_AFL_ASE_XPA', 'MIPS_AFL_EXT_10000', 'MIPS_AFL_EXT_3900',
+    'MIPS_AFL_EXT_4010', 'MIPS_AFL_EXT_4100', 'MIPS_AFL_EXT_4111',
+    'MIPS_AFL_EXT_4120', 'MIPS_AFL_EXT_4650', 'MIPS_AFL_EXT_5400',
+    'MIPS_AFL_EXT_5500', 'MIPS_AFL_EXT_5900',
+    'MIPS_AFL_EXT_LOONGSON_2E', 'MIPS_AFL_EXT_LOONGSON_2F',
+    'MIPS_AFL_EXT_LOONGSON_3A', 'MIPS_AFL_EXT_OCTEON',
+    'MIPS_AFL_EXT_OCTEON2', 'MIPS_AFL_EXT_OCTEONP',
+    'MIPS_AFL_EXT_SB1', 'MIPS_AFL_EXT_XLR',
     'MIPS_AFL_FLAGS1_ODDSPREG', 'MIPS_AFL_REG_128', 'MIPS_AFL_REG_32',
     'MIPS_AFL_REG_64', 'MIPS_AFL_REG_NONE',
     'NOTE_GNU_PROPERTY_SECTION_NAME', 'NT_386_IOPERM', 'NT_386_TLS',
@@ -4665,23 +4992,27 @@ __all__ = \
     'RHF_NOTPOT', 'RHF_NO_LIBRARY_REPLACEMENT', 'RHF_NO_MOVE',
     'RHF_NO_UNRES_UNDEF', 'RHF_PIXIE', 'RHF_QUICKSTART',
     'RHF_REQUICKSTART', 'RHF_REQUICKSTARTED', 'RHF_RLD_ORDER_SAFE',
-    'RHF_SGI_ONLY', 'R_386_16', 'R_386_32', 'R_386_32PLT', 'R_386_8',
-    'R_386_COPY', 'R_386_GLOB_DAT', 'R_386_GOT32', 'R_386_GOT32X',
-    'R_386_GOTOFF', 'R_386_GOTPC', 'R_386_IRELATIVE',
-    'R_386_JMP_SLOT', 'R_386_NONE', 'R_386_NUM', 'R_386_PC16',
-    'R_386_PC32', 'R_386_PC8', 'R_386_PLT32', 'R_386_RELATIVE',
-    'R_386_SIZE32', 'R_386_TLS_DESC', 'R_386_TLS_DESC_CALL',
-    'R_386_TLS_DTPMOD32', 'R_386_TLS_DTPOFF32', 'R_386_TLS_GD',
-    'R_386_TLS_GD_32', 'R_386_TLS_GD_CALL', 'R_386_TLS_GD_POP',
-    'R_386_TLS_GD_PUSH', 'R_386_TLS_GOTDESC', 'R_386_TLS_GOTIE',
-    'R_386_TLS_IE', 'R_386_TLS_IE_32', 'R_386_TLS_LDM',
-    'R_386_TLS_LDM_32', 'R_386_TLS_LDM_CALL', 'R_386_TLS_LDM_POP',
-    'R_386_TLS_LDM_PUSH', 'R_386_TLS_LDO_32', 'R_386_TLS_LE',
-    'R_386_TLS_LE_32', 'R_386_TLS_TPOFF', 'R_386_TLS_TPOFF32',
-    'R_390_12', 'R_390_16', 'R_390_20', 'R_390_32', 'R_390_64',
-    'R_390_8', 'R_390_COPY', 'R_390_GLOB_DAT', 'R_390_GOT12',
-    'R_390_GOT16', 'R_390_GOT20', 'R_390_GOT32', 'R_390_GOT64',
-    'R_390_GOTENT', 'R_390_GOTOFF16', 'R_390_GOTOFF32',
+    'RHF_SGI_ONLY', 'RTLD_DI_CONFIGADDR', 'RTLD_DI_LINKMAP',
+    'RTLD_DI_LMID', 'RTLD_DI_MAX', 'RTLD_DI_ORIGIN',
+    'RTLD_DI_PROFILENAME', 'RTLD_DI_PROFILEOUT', 'RTLD_DI_SERINFO',
+    'RTLD_DI_SERINFOSIZE', 'RTLD_DI_TLS_DATA', 'RTLD_DI_TLS_MODID',
+    'RTLD_DL_LINKMAP', 'RTLD_DL_SYMENT', 'R_386_16', 'R_386_32',
+    'R_386_32PLT', 'R_386_8', 'R_386_COPY', 'R_386_GLOB_DAT',
+    'R_386_GOT32', 'R_386_GOT32X', 'R_386_GOTOFF', 'R_386_GOTPC',
+    'R_386_IRELATIVE', 'R_386_JMP_SLOT', 'R_386_NONE', 'R_386_NUM',
+    'R_386_PC16', 'R_386_PC32', 'R_386_PC8', 'R_386_PLT32',
+    'R_386_RELATIVE', 'R_386_SIZE32', 'R_386_TLS_DESC',
+    'R_386_TLS_DESC_CALL', 'R_386_TLS_DTPMOD32', 'R_386_TLS_DTPOFF32',
+    'R_386_TLS_GD', 'R_386_TLS_GD_32', 'R_386_TLS_GD_CALL',
+    'R_386_TLS_GD_POP', 'R_386_TLS_GD_PUSH', 'R_386_TLS_GOTDESC',
+    'R_386_TLS_GOTIE', 'R_386_TLS_IE', 'R_386_TLS_IE_32',
+    'R_386_TLS_LDM', 'R_386_TLS_LDM_32', 'R_386_TLS_LDM_CALL',
+    'R_386_TLS_LDM_POP', 'R_386_TLS_LDM_PUSH', 'R_386_TLS_LDO_32',
+    'R_386_TLS_LE', 'R_386_TLS_LE_32', 'R_386_TLS_TPOFF',
+    'R_386_TLS_TPOFF32', 'R_390_12', 'R_390_16', 'R_390_20',
+    'R_390_32', 'R_390_64', 'R_390_8', 'R_390_COPY', 'R_390_GLOB_DAT',
+    'R_390_GOT12', 'R_390_GOT16', 'R_390_GOT20', 'R_390_GOT32',
+    'R_390_GOT64', 'R_390_GOTENT', 'R_390_GOTOFF16', 'R_390_GOTOFF32',
     'R_390_GOTOFF64', 'R_390_GOTPC', 'R_390_GOTPCDBL',
     'R_390_GOTPLT12', 'R_390_GOTPLT16', 'R_390_GOTPLT20',
     'R_390_GOTPLT32', 'R_390_GOTPLT64', 'R_390_GOTPLTENT',
@@ -5334,31 +5665,32 @@ __all__ = \
     'R_X86_64_RELATIVE64', 'R_X86_64_REX_GOTPCRELX',
     'R_X86_64_SIZE32', 'R_X86_64_SIZE64', 'R_X86_64_TLSDESC',
     'R_X86_64_TLSDESC_CALL', 'R_X86_64_TLSGD', 'R_X86_64_TLSLD',
-    'R_X86_64_TPOFF32', 'R_X86_64_TPOFF64', 'SEEK_CUR', 'SEEK_END',
-    'SEEK_SET', 'SELFMAG', 'SHF_ALLOC', 'SHF_ALPHA_GPREL',
-    'SHF_ARM_COMDEF', 'SHF_ARM_ENTRYSECT', 'SHF_COMPRESSED',
-    'SHF_EXCLUDE', 'SHF_EXECINSTR', 'SHF_GNU_RETAIN', 'SHF_GROUP',
-    'SHF_IA_64_NORECOV', 'SHF_IA_64_SHORT', 'SHF_INFO_LINK',
-    'SHF_LINK_ORDER', 'SHF_MASKOS', 'SHF_MASKPROC', 'SHF_MERGE',
-    'SHF_MIPS_ADDR', 'SHF_MIPS_GPREL', 'SHF_MIPS_LOCAL',
-    'SHF_MIPS_MERGE', 'SHF_MIPS_NAMES', 'SHF_MIPS_NODUPE',
-    'SHF_MIPS_NOSTRIP', 'SHF_MIPS_STRINGS', 'SHF_ORDERED',
-    'SHF_OS_NONCONFORMING', 'SHF_PARISC_HUGE', 'SHF_PARISC_SBP',
-    'SHF_PARISC_SHORT', 'SHF_STRINGS', 'SHF_TLS', 'SHF_WRITE',
-    'SHN_ABS', 'SHN_AFTER', 'SHN_BEFORE', 'SHN_COMMON', 'SHN_HIOS',
-    'SHN_HIPROC', 'SHN_HIRESERVE', 'SHN_LOOS', 'SHN_LOPROC',
-    'SHN_LORESERVE', 'SHN_MIPS_ACOMMON', 'SHN_MIPS_DATA',
-    'SHN_MIPS_SCOMMON', 'SHN_MIPS_SUNDEFINED', 'SHN_MIPS_TEXT',
-    'SHN_PARISC_ANSI_COMMON', 'SHN_PARISC_HUGE_COMMON', 'SHN_UNDEF',
-    'SHN_XINDEX', 'SHT_ALPHA_DEBUG', 'SHT_ALPHA_REGINFO',
-    'SHT_ARM_ATTRIBUTES', 'SHT_ARM_EXIDX', 'SHT_ARM_PREEMPTMAP',
-    'SHT_CHECKSUM', 'SHT_CSKY_ATTRIBUTES', 'SHT_DYNAMIC',
-    'SHT_DYNSYM', 'SHT_FINI_ARRAY', 'SHT_GNU_ATTRIBUTES',
-    'SHT_GNU_HASH', 'SHT_GNU_LIBLIST', 'SHT_GNU_verdef',
-    'SHT_GNU_verneed', 'SHT_GNU_versym', 'SHT_GROUP', 'SHT_HASH',
-    'SHT_HIOS', 'SHT_HIPROC', 'SHT_HISUNW', 'SHT_HIUSER',
-    'SHT_IA_64_EXT', 'SHT_IA_64_UNWIND', 'SHT_INIT_ARRAY', 'SHT_LOOS',
-    'SHT_LOPROC', 'SHT_LOSUNW', 'SHT_LOUSER', 'SHT_MIPS_AUXSYM',
+    'R_X86_64_TPOFF32', 'R_X86_64_TPOFF64', 'SEEK_CUR', 'SEEK_DATA',
+    'SEEK_END', 'SEEK_HOLE', 'SEEK_SET', 'SELFMAG', 'SHF_ALLOC',
+    'SHF_ALPHA_GPREL', 'SHF_ARM_COMDEF', 'SHF_ARM_ENTRYSECT',
+    'SHF_COMPRESSED', 'SHF_EXCLUDE', 'SHF_EXECINSTR',
+    'SHF_GNU_RETAIN', 'SHF_GROUP', 'SHF_IA_64_NORECOV',
+    'SHF_IA_64_SHORT', 'SHF_INFO_LINK', 'SHF_LINK_ORDER',
+    'SHF_MASKOS', 'SHF_MASKPROC', 'SHF_MERGE', 'SHF_MIPS_ADDR',
+    'SHF_MIPS_GPREL', 'SHF_MIPS_LOCAL', 'SHF_MIPS_MERGE',
+    'SHF_MIPS_NAMES', 'SHF_MIPS_NODUPE', 'SHF_MIPS_NOSTRIP',
+    'SHF_MIPS_STRINGS', 'SHF_ORDERED', 'SHF_OS_NONCONFORMING',
+    'SHF_PARISC_HUGE', 'SHF_PARISC_SBP', 'SHF_PARISC_SHORT',
+    'SHF_STRINGS', 'SHF_TLS', 'SHF_WRITE', 'SHN_ABS', 'SHN_AFTER',
+    'SHN_BEFORE', 'SHN_COMMON', 'SHN_HIOS', 'SHN_HIPROC',
+    'SHN_HIRESERVE', 'SHN_LOOS', 'SHN_LOPROC', 'SHN_LORESERVE',
+    'SHN_MIPS_ACOMMON', 'SHN_MIPS_DATA', 'SHN_MIPS_SCOMMON',
+    'SHN_MIPS_SUNDEFINED', 'SHN_MIPS_TEXT', 'SHN_PARISC_ANSI_COMMON',
+    'SHN_PARISC_HUGE_COMMON', 'SHN_UNDEF', 'SHN_XINDEX',
+    'SHT_ALPHA_DEBUG', 'SHT_ALPHA_REGINFO', 'SHT_ARM_ATTRIBUTES',
+    'SHT_ARM_EXIDX', 'SHT_ARM_PREEMPTMAP', 'SHT_CHECKSUM',
+    'SHT_CSKY_ATTRIBUTES', 'SHT_DYNAMIC', 'SHT_DYNSYM',
+    'SHT_FINI_ARRAY', 'SHT_GNU_ATTRIBUTES', 'SHT_GNU_HASH',
+    'SHT_GNU_LIBLIST', 'SHT_GNU_verdef', 'SHT_GNU_verneed',
+    'SHT_GNU_versym', 'SHT_GROUP', 'SHT_HASH', 'SHT_HIOS',
+    'SHT_HIPROC', 'SHT_HISUNW', 'SHT_HIUSER', 'SHT_IA_64_EXT',
+    'SHT_IA_64_UNWIND', 'SHT_INIT_ARRAY', 'SHT_LOOS', 'SHT_LOPROC',
+    'SHT_LOSUNW', 'SHT_LOUSER', 'SHT_MIPS_AUXSYM',
     'SHT_MIPS_CONFLICT', 'SHT_MIPS_CONTENT', 'SHT_MIPS_DEBUG',
     'SHT_MIPS_DELTACLASS', 'SHT_MIPS_DELTADECL', 'SHT_MIPS_DELTAINST',
     'SHT_MIPS_DELTASYM', 'SHT_MIPS_DENSE', 'SHT_MIPS_DWARF',
@@ -5402,37 +5734,47 @@ __all__ = \
     'Val_GNU_MIPS_ABI_FP_DOUBLE', 'Val_GNU_MIPS_ABI_FP_MAX',
     'Val_GNU_MIPS_ABI_FP_OLD_64', 'Val_GNU_MIPS_ABI_FP_SINGLE',
     'Val_GNU_MIPS_ABI_FP_SOFT', 'Val_GNU_MIPS_ABI_FP_XX', 'W_OK',
-    'X_OK', '_ELF_H', '_POSIX2_C_BIND', '_POSIX2_C_DEV',
-    '_POSIX2_C_VERSION', '_POSIX2_LOCALEDEF', '_POSIX2_SW_DEV',
-    '_POSIX2_VERSION', '_POSIX_VERSION', '_SYSCALL_H', '_SYS_MMAN_H',
-    '_UNISTD_H', '_XOPEN_ENH_I18N', '_XOPEN_LEGACY', '_XOPEN_UNIX',
-    '_XOPEN_VERSION', '_XOPEN_XCU_VERSION', '_XOPEN_XPG2',
-    '_XOPEN_XPG3', '_XOPEN_XPG4', '__POSIX2_THIS_VERSION',
-    '__environ', '__getpgid', '__gid_t', '__gid_t_defined',
-    '__intptr_t_defined', '__mode_t_defined', '__need_NULL',
-    '__need_size_t', '__off_t', '__off_t_defined', '__pid_t',
-    '__pid_t_defined', '__socklen_t_defined', '__ssize_t_defined',
-    '__uid_t', '__uid_t_defined', '__useconds_t',
-    '__useconds_t_defined', '_exit', 'access', 'acct', 'alarm', 'brk',
+    'X_OK', '_DLFCN_H', '_ELF_H', '_Fork', '_POSIX2_C_BIND',
+    '_POSIX2_C_DEV', '_POSIX2_C_VERSION', '_POSIX2_LOCALEDEF',
+    '_POSIX2_SW_DEV', '_POSIX2_VERSION', '_POSIX_VERSION',
+    '_SYSCALL_H', '_SYS_MMAN_H', '_UNISTD_H', '_XOPEN_ENH_I18N',
+    '_XOPEN_LEGACY', '_XOPEN_UNIX', '_XOPEN_VERSION',
+    '_XOPEN_XCU_VERSION', '_XOPEN_XPG2', '_XOPEN_XPG3', '_XOPEN_XPG4',
+    '__POSIX2_THIS_VERSION', '__environ', '__getpgid', '__gid_t',
+    '__gid_t_defined', '__intptr_t_defined', '__mode_t_defined',
+    '__need_NULL', '__need_size_t', '__off64_t', '__off64_t_defined',
+    '__off_t', '__off_t_defined', '__pid_t', '__pid_t_defined',
+    '__socklen_t_defined', '__ssize_t_defined', '__uid_t',
+    '__uid_t_defined', '__useconds_t', '__useconds_t_defined',
+    '_dl_find_object', '_exit', 'access', 'acct', 'alarm', 'brk',
+    'c__Ea_RTLD_DI_LMID', 'c__Ea_RTLD_DL_SYMENT',
     'c__Ea_Val_GNU_MIPS_ABI_FP_ANY', 'chdir', 'chown', 'chroot',
-    'close', 'closefrom', 'confstr', 'crypt', 'daemon', 'dup', 'dup2',
-    'endusershell', 'execl', 'execle', 'execlp', 'execv', 'execve',
-    'execvp', 'faccessat', 'fchdir', 'fchown', 'fchownat',
+    'close', 'close_range', 'closefrom', 'confstr', 'copy_file_range',
+    'crypt', 'daemon', 'dladdr', 'dladdr1', 'dlclose', 'dlerror',
+    'dlinfo', 'dlmopen', 'dlopen', 'dlsym', 'dlvsym', 'dup', 'dup2',
+    'dup3', 'eaccess', 'endusershell', 'environ', 'euidaccess',
+    'execl', 'execle', 'execlp', 'execv', 'execve', 'execveat',
+    'execvp', 'execvpe', 'faccessat', 'fchdir', 'fchown', 'fchownat',
     'fdatasync', 'fexecve', 'fork', 'fpathconf', 'fsync', 'ftruncate',
-    'getcwd', 'getdomainname', 'getdtablesize', 'getegid',
-    'getentropy', 'geteuid', 'getgid', 'getgroups', 'gethostid',
-    'gethostname', 'getlogin', 'getlogin_r', 'getpagesize', 'getpass',
-    'getpgid', 'getpgrp', 'getpid', 'getppid', 'getsid', 'getuid',
-    'getusershell', 'getwd', 'gid_t', 'intptr_t', 'isatty', 'lchown',
-    'link', 'linkat', 'lockf', 'lseek', 'madvise', 'mincore', 'mlock',
-    'mlockall', 'mmap', 'mode_t', 'mprotect', 'msync', 'munlock',
-    'munlockall', 'munmap', 'nice', 'off_t', 'pathconf', 'pause',
-    'pid_t', 'pipe', 'posix_madvise', 'pread', 'profil', 'pwrite',
-    'read', 'readlink', 'readlinkat', 'revoke', 'rmdir', 'sbrk',
+    'ftruncate64', 'get_current_dir_name', 'getcwd', 'getdomainname',
+    'getdtablesize', 'getegid', 'getentropy', 'geteuid', 'getgid',
+    'getgroups', 'gethostid', 'gethostname', 'getlogin', 'getlogin_r',
+    'getpagesize', 'getpass', 'getpgid', 'getpgrp', 'getpid',
+    'getppid', 'getresgid', 'getresuid', 'getsid', 'getuid',
+    'getusershell', 'getwd', 'gid_t', 'group_member', 'intptr_t',
+    'isatty', 'lchown', 'link', 'linkat', 'lockf', 'lockf64', 'lseek',
+    'lseek64', 'madvise', 'mincore', 'mlock', 'mlockall', 'mmap',
+    'mmap64', 'mode_t', 'mprotect', 'mremap', 'msync', 'munlock',
+    'munlockall', 'munmap', 'nice', 'off64_t', 'off_t', 'pathconf',
+    'pause', 'pid_t', 'pipe', 'pipe2', 'posix_madvise', 'pread',
+    'pread64', 'profil', 'pwrite', 'pwrite64', 'read', 'readlink',
+    'readlinkat', 'remap_file_pages', 'revoke', 'rmdir', 'sbrk',
     'setdomainname', 'setegid', 'seteuid', 'setgid', 'sethostid',
     'sethostname', 'setlogin', 'setpgid', 'setpgrp', 'setregid',
-    'setreuid', 'setsid', 'setuid', 'setusershell', 'shm_open',
-    'shm_unlink', 'size_t', 'sleep', 'socklen_t', 'ssize_t',
+    'setresgid', 'setresuid', 'setreuid', 'setsid', 'setuid',
+    'setusershell', 'shm_open', 'shm_unlink', 'size_t', 'sleep',
+    'socklen_t', 'ssize_t', 'struct_c__SA_Dl_info',
+    'struct_c__SA_Dl_serinfo', 'struct_c__SA_Dl_serpath',
     'struct_c__SA_Elf32_Chdr', 'struct_c__SA_Elf32_Dyn',
     'struct_c__SA_Elf32_Ehdr', 'struct_c__SA_Elf32_Lib',
     'struct_c__SA_Elf32_Move', 'struct_c__SA_Elf32_Nhdr',
@@ -5453,9 +5795,11 @@ __all__ = \
     'struct_c__SA_Elf64_auxv_t', 'struct_c__SA_Elf_MIPS_ABIFlags_v0',
     'struct_c__SA_Elf_Options', 'struct_c__SA_Elf_Options_Hw',
     'struct_c__UA_Elf32_gptab_gt_entry',
-    'struct_c__UA_Elf32_gptab_gt_header', 'symlink', 'symlinkat',
-    'sync', 'syscall', 'sysconf', 'tcgetpgrp', 'tcsetpgrp',
-    'truncate', 'ttyname', 'ttyname_r', 'ttyslot', 'ualarm', 'uid_t',
+    'struct_c__UA_Elf32_gptab_gt_header', 'struct_dl_find_object',
+    'struct_link_map', 'swab', 'symlink', 'symlinkat', 'sync',
+    'syncfs', 'syscall', 'sysconf', 'tcgetpgrp', 'tcsetpgrp',
+    'truncate', 'truncate64', 'ttyname', 'ttyname_r', 'ttyslot',
+    'ualarm', 'uid_t', 'union_c__SA_Dl_serinfo_0',
     'union_c__SA_Elf32_Dyn_d_un', 'union_c__SA_Elf32_auxv_t_a_un',
     'union_c__SA_Elf64_Dyn_d_un', 'union_c__SA_Elf64_auxv_t_a_un',
     'union_c__UA_Elf32_gptab', 'unlink', 'unlinkat', 'useconds_t',
