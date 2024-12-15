@@ -324,7 +324,6 @@ class View:
 
     r_strides, r_new_shape = [], reversed(new_shape)
     for merged_size, new_stride, real_size in reversed(merge_dims(self.shape, self.strides, self.mask)):
-      if new_stride == 0: real_size = 0
       # TODO: write with get_contraction
       acc = 1
       # TODO: third resolve shouldn't be needed
