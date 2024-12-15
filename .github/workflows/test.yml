@@ -16,7 +16,7 @@ on:
 jobs:
   autogen:
     name: Autogen+Docs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
     - name: Checkout Code
@@ -346,7 +346,7 @@ jobs:
 
   testwebgpu:
     name: WebGPU Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
     - name: Checkout Code
