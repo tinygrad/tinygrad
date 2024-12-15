@@ -453,10 +453,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return (self.st is not None and self._device is not None and self.st.consecutive and not self.is_unrealized_const() and
             not isinstance(self.dtype, ImageDType) and self.device.split(":")[0] in view_supported_devices)
   @property
-  def srcs(self): return self.src
-  @srcs.deleter
-  def srcs(self): self.become(self.buf_uop.view(unwrap(self.st)))
-  @property
   def lbs(self): return [self]
   @property
   def metadata(self): return all_metadata.get(self, None)
@@ -511,6 +507,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return self
     assert self.base.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW}, f"buf_uop called on {self.op}"
     return self.src[0].buf_uop
+  def buf_uop_view(self) -> UOp: return self.buf_uop.view(unwrap(self.st))
   @property
   def buffer(self) -> Buffer:
     if self.base.realized is not None: return self.base.realized
