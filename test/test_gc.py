@@ -66,7 +66,6 @@ class TestGC(unittest.TestCase):
     del y
     self.assertEqual(bufs_allocated()-init, 0)
 
-  @unittest.expectedFailure
   def test_toposort_blocks_gc(self):
     init = bufs_allocated()
     x = Tensor.ones(4,4).contiguous().realize()+1

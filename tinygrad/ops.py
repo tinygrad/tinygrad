@@ -252,14 +252,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def toposort(self) -> Dict[UOp, None]:
-    @functools.lru_cache(None)
-    def _toposort(u:UOp):
+    def _toposort(u:UOp, cache:Dict[UOp, Dict[UOp, None]]):
+      if (cret:=cache.get(u)) is not None: return cret
       nodes: Dict[UOp, None] = {}
       # NOTE: this is a lot faster than the comprehension in parents
-      for parent in u.src: nodes.update(_toposort(parent))
+      for parent in u.src: nodes.update(_toposort(parent, cache))
       nodes[u] = None
+      cache[u] = nodes
       return nodes
-    return _toposort(self)
+    return _toposort(self, cache={})
 
   @functools.cached_property
   def tuplize(self:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
