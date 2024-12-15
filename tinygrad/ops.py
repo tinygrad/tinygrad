@@ -253,14 +253,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def toposort(self) -> Dict[UOp, None]:
-    @functools.lru_cache(None)
-    def _toposort(u:UOp):
+    def _toposort(u:UOp, cache:Dict[UOp, Dict[UOp, None]]):
+      if (cret:=cache.get(u)) is not None: return cret
       nodes: Dict[UOp, None] = {}
       # NOTE: this is a lot faster than the comprehension in parents
-      for parent in u.src: nodes.update(_toposort(parent))
+      for parent in u.src: nodes.update(_toposort(parent, cache))
       nodes[u] = None
+      cache[u] = nodes
       return nodes
-    return _toposort(self)
+    return _toposort(self, cache={})
 
   @functools.cached_property
   def tuplize(self:UOp) -> Tuple[int, Any, Optional[DType], Tuple]:
@@ -454,10 +455,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return (self.st is not None and self._device is not None and self.st.consecutive and not self.is_unrealized_const() and
             not isinstance(self.dtype, ImageDType) and self.device.split(":")[0] in view_supported_devices)
   @property
-  def srcs(self): return self.src
-  @srcs.deleter
-  def srcs(self): self.become(self.buf_uop.view(unwrap(self.st)))
-  @property
   def lbs(self): return [self]
   @property
   def metadata(self): return all_metadata.get(self, None)
@@ -487,7 +484,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def _mop(self, op:Ops, arg):
     ret = UOp(op, self.dtype, (self,), arg)
-    ret.st  # pylint: disable=pointless-statement
+    if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
     return ret
 
   def reshape(self, arg:Tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
@@ -510,8 +507,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
-    assert self.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW} and self.src[0].op is Ops.BUFFER, f"buf_uop called on {self.op}"
-    return self.src[0]
+    assert self.base.op in {*GroupOp.Buffer, Ops.ASSIGN, Ops.VIEW}, f"buf_uop called on {self.op}"
+    return self.src[0].buf_uop
+  def buf_uop_view(self) -> UOp: return self.buf_uop.view(unwrap(self.st))
   @property
   def buffer(self) -> Buffer:
     if self.base.realized is not None: return self.base.realized
