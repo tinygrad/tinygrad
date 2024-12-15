@@ -7,6 +7,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
 from tinygrad.helpers import IMAGE, DEBUG, WINO, _METADATA, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap
 from tinygrad.multi import MultiLazyBuffer
+from tinygrad.gradient import compute_gradient
 from tinygrad.ops import smax, smin, resolve, UOp, Ops, sint, Variable, SimpleMathTrait, identity_element
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.engine.realize import run_schedule
@@ -51,8 +52,7 @@ def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
   ret = UOp.metaop(Ops.EMPTY, x.shape, _from_np_dtype(x.dtype), "NPY")
   # fake realize
   ret.buffer.allocate(x)
-  del ret.srcs
-  return ret
+  return ret.buf_uop_view()
 
 def get_shape(x) -> Tuple[int, ...]:
   # NOTE: str is special because __getitem__ on a str is still a str
@@ -69,8 +69,7 @@ def _frompy(x:Union[List, Tuple, bytes], dtype:DType) -> UOp:
     data = struct.pack(f"@{ret.size}{dtype.fmt}", *[truncate_function(xi) for xi in fully_flatten(x)])
   # fake realize
   ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
-  del ret.srcs
-  return ret
+  return ret.buf_uop_view()
 
 def _get_winograd_matcols(mat, dims:int, shp:Tuple[sint, ...], device:Union[str, Tuple[str, ...]], dtype:DType) -> List[List[Tensor]]:
   return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device, dtype=dtype) for m in mat], dim=dim)
@@ -429,7 +428,7 @@ class Tensor(SimpleMathTrait):
 
     r = Tensor._metaop(Ops.EMPTY, shape, **kwargs)
     r.lazydata.buffer.allocate(external_ptr=ptr)
-    del r.lazydata.srcs # fake realize
+    r.lazydata.buf_uop_view()
     return r
 
   @staticmethod
@@ -863,6 +862,30 @@ class Tensor(SimpleMathTrait):
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
+
+  def gradient(self, *targets:Tensor, gradient:Optional[Tensor]=None) -> list[Tensor]:
+    """
+    Compute the gradient of the targets with respect to self.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    x = Tensor.eye(3)
+    y = Tensor([[2.0,0,-2.0]])
+    z = y.matmul(x).sum()
+    dx, dy = z.gradient(x, y)
+
+    print(dx.tolist())  # dz/dx
+    print(dy.tolist())  # dz/dy
+    ```
+    """
+    assert isinstance(self.lazydata, UOp), "multi isn't supported yet"
+    target_uops: List[UOp] = [x.lazydata for x in targets if isinstance(x.lazydata, UOp)]
+    assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
+    grads = compute_gradient(self.lazydata, self.lazydata.const_like(1) if gradient is None else cast(UOp, gradient.lazydata), target_uops)
+    ret = []
+    for x in target_uops:
+      if (y:=grads.get(x)) is None: raise RuntimeError(f"{x}\n\nnot found in\n\n{self.lazydata}")
+      ret.append(Tensor(y, device=x.device))
+    return ret
 
   def _deepwalk(self):
     def _walk(node, visited):
