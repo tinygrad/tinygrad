@@ -363,7 +363,7 @@ ops_folding = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), simplify_alu),
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, name="binop", src=(UPat.var("x"), UPat.var("y"))), simplify_binop),
   (UPat(Ops.CAST, src=(UPat.var("x"),), name="cast"),
-   lambda x,cast: UOp.const(cast.dtype, x.const_arg) if all_int(x.shape) and x.is_unrealized_unmasked_const() else None),
+   lambda x,cast: x if x.dtype==cast.dtype else UOp.const(cast.dtype,x.const_arg) if all_int(x.shape) and x.is_unrealized_unmasked_const() else None),
   # reduce of size 0 is the identity element
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x:UOp.const(reduce.dtype, identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
