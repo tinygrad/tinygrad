@@ -39,7 +39,6 @@ def cflag(x:UOp) -> str: return "setne" if x.op is Ops.CMPNE else "setl" if x.sr
 
 def float_cast(x:DType, s:DType) -> str:
   if s is dtypes.float16: return "vcvtph2ps"
-  if x is dtypes.float16: return "vcvtps2ph"
   cfrom = "si" if not dtypes.is_float(s) else "sd" if s.itemsize == 8 else "ss"
   cto = "si" if not dtypes.is_float(x) else "sd" if x.itemsize == 8 else "ss"
   if cto == "si": cfrom = "t" + cfrom
@@ -66,7 +65,7 @@ x86_rewrite = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=(dtypes.bool,) + dtypes.uints),), name="x"), lambda ctx,x: f"movzx {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.CAST, dtype=dtypes.ints, src=(UPat(dtype=dtypes.sints),), name="x"),
    lambda ctx,x: f"movs{'x' if x.src[0].dtype.itemsize < 4 else 'xd'} {ctx[x]}, {ctx[x.src[0]]}"),
-  (UPat(Ops.CAST, dtype=dtypes.float16, name="x"), lambda ctx,x: f"{float_cast(x.dtype, x.src[0].dtype)} {ctx[x]}, {ctx[x.src[0]]}, 0x4"),
+  (UPat(Ops.CAST, dtype=dtypes.float16, name="x"), lambda ctx,x: f"vcvtps2ph {ctx[x]}, {ctx[x.src[0]]}, 0x4"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"{float_cast(x.dtype, x.src[0].dtype)} {ctx[x]}, {ctx[x.src[0]]}"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"mov{'q' if x.dtype.itemsize == 8 else 'd'} {ctx[x]}, {ctx[x.src[0]]}"),
   # ternary ops (no cmov for floats)
