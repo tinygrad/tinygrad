@@ -177,7 +177,7 @@ class ClangRenderer(CStyleLanguage):
     CStyleLanguage.extra_matcher
 
   if AMX: tensor_cores = [TensorCore(dims=(sz,sz,1), threads=1, upcast_size=(sz,sz,sz*sz), dtype_in=dt, dtype_out=dt,
-                                     swizzle=(None, ((0,),(5,6,7,8,1,2,3,4)), None)) for dt, sz in [(dt, 64 // dt.itemsize) for dt in [dtypes.float]]]
+                                     swizzle=(None, ((0,),(5,6,7,8,1,2,3,4)), None)) for dt,sz in [(dt, 64 // dt.itemsize) for dt in [dtypes.float]]]
 
   def render_vector_prefix(self, dt:DType) -> str:
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({(sz:=dt.itemsize)}),vector_size({sz})));"
@@ -247,8 +247,8 @@ class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
   tensor_cores = [TensorCore(dims=(8,8,8), threads=32, upcast_size=(2,2,2), dtype_in=dti, dtype_out=dto,
-    swizzle=(((6,8,3,7,4),(0,1,2,5)),((1,5,6,2,7),(3,4,8,0)),((1,8,3,2,4),(5,6,7,0)))) for dti, dto in [(dtypes.float,dtypes.float),
-    (dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float), (dtypes.bfloat16,dtypes.bfloat16)]]
+    swizzle=(((6,8,3,7,4),(0,1,2,5)), ((1,5,6,2,7),(3,4,8,0)), ((1,8,3,2,4),(5,6,7,0)))) for dti,dto in [(dtypes.float,dtypes.float),
+    (dtypes.half,dtypes.float), (dtypes.half,dtypes.half), (dtypes.bfloat16,dtypes.float), (dtypes.bfloat16,dtypes.bfloat16)]]
   def __init__(self): self.tensor_cores = MetalRenderer.tensor_cores if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
   # language options
   kernel_prefix = "kernel "
@@ -296,7 +296,7 @@ class CUDARenderer(CStyleLanguage):
   # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
   tensor_cores = [TensorCore(dims=(8,16,16), threads=32, upcast_size=(8,4,4), dtype_in=dti, dtype_out=dto,
     swizzle=(((6,7,9,10,3),(0,1,2,5,4,8)), ((6,7,0,1,2),(3,4,9,10,5,8)), ((1,2,9,10,3),(5,6,7,8,0,4))))
-    for dti, dto in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
+    for dti,dto in ([(dtypes.half,dtypes.float), (dtypes.bfloat16,dtypes.float)])]
   def __init__(self, arch:str): self.tensor_cores, self.arch = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else [], arch
   def __reduce__(self): return self.__class__, (self.arch,)
 
@@ -359,7 +359,7 @@ class AMDRenderer(CStyleLanguage):
   # https://gpuopen.com/learn/wmma_on_rdna3/
   tensor_cores = [TensorCore(dims=(16,16,16), threads=32, upcast_size=(16,16,8), dtype_in=dti, dtype_out=dto,
     swizzle=(((9,10,11,4,3),(0,1,2,5,6,7,8)), ((0,1,2,3,4),(9,10,11,5,6,7,8)), ((0,1,2,3,9),(5,6,7,8,10,11,4))))
-    for dti, dto in [(dtypes.half, dtypes.float), (dtypes.half, dtypes.half)]]
+    for dti,dto in [(dtypes.half,dtypes.float), (dtypes.half,dtypes.half)]]
 
   # language options
   ockl = [(f"__ockl_get_{name}", "unsigned int", "size_t", "const") for name in ["local_id", "group_id", "local_size"]]
