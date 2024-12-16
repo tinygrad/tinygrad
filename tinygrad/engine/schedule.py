@@ -1,7 +1,7 @@
 import functools
 from dataclasses import dataclass
 from typing import Tuple, List, Dict
-from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, graph_rewrite, track_rewrites, merge_views
+from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, graph_rewrite, track_rewrites, merge_views, view_left
 from tinygrad.helpers import Metadata, unwrap, unwrap_or
 from tinygrad.device import Buffer
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -43,7 +43,7 @@ realize = PatternMatcher([
 def add_buf(ctx:List[UOp], b:UOp):
   ctx.append(b)
   return UOp(Ops.DEFINE_GLOBAL, b.dtype, (), len(ctx)-1)
-to_ast = PatternMatcher([
+to_ast = view_left+PatternMatcher([
   # ** buffer op rules
   # const is just const
   (UPat(Ops.VIEW, name="st", src=(UPat(), UPat.cvar("x"))), lambda st,x: UOp.const_with_shape(x.dtype, x.arg, st.shape)),
