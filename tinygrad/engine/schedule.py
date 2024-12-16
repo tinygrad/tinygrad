@@ -40,6 +40,8 @@ realize = PatternMatcher([
   (UPat(Ops.COPY, name="cp", src=(UPat.var("x"),)), lambda ctx,cp,x: None if (bx:=unwrap_or(_bufferize(ctx, x), x)) is x else cp.replace(src=(bx,))),
   (UPat(Ops.VIEW, name="x", src=(UPat(Ops.BUFFER), UPat(GroupOp.Meta))), _bufferize),
   (UPat(Ops.CONTIGUOUS, name="x"), _bufferize),
+  # very simple rule
+  (UPat(Ops.REDUCE_AXIS, name="x"), _bufferize),
 ])
 
 def add_buf(ctx:List[UOp], b:UOp):
