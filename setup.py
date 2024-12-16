@@ -39,6 +39,7 @@ setup(name='tinygrad',
         'testing': [
             "numpy",
             "torch",
+            "jax",
             "pillow",
             "pytest",
             "pytest-xdist",
@@ -59,7 +60,7 @@ setup(name='tinygrad',
             "bottle",
             "ggml-python"
         ],
-        'webgpu': ["wgpu==v0.18.1"],
+        'webgpu': ["wgpu"],
         'docs': [
             "mkdocs",
             "mkdocs-material",
