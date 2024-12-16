@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Tuple, Optional
 from tinygrad.helpers import colored, getenv, to_function_name, tqdm, unwrap, word_wrap
 from tinygrad.ops import TrackedRewriteContext, UOp, Ops, lines, GroupOp
 from tinygrad.codegen.kernel import Kernel
-from tinygrad.runtime.support.hcq import ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
+from tinygrad.runtime.support.hcq import ProfileEvent, ProfileDeviceEvent, ProfileRangeEvent, ProfileGraphEvent
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.PRELOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0",
                Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_ACC: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
@@ -117,6 +117,14 @@ def graph_ev_to_perfetto_json(ev:ProfileGraphEvent, reccnt):
       ret += [{"ph": "s", **dev_to_pid(d.device, d.is_copy), "id": reccnt+len(ret), "ts": prep_ts(d.device, ev.sigs[d.en_id], d.is_copy), "bp": "e"}]
       ret += [{"ph": "f", **dev_to_pid(e.device, e.is_copy), "id": reccnt+len(ret)-1, "ts": prep_ts(e.device, st, e.is_copy), "bp": "e"}]
   return ret
+def to_perfetto(profile:List[ProfileEvent]):
+  prof_json = []
+  for ev in profile:
+    if isinstance(ev, ProfileDeviceEvent): prof_json += dev_ev_to_perfetto_json(ev)
+  for ev in tqdm(profile):
+    if isinstance(ev, ProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)
+    elif isinstance(ev, ProfileGraphEvent): prof_json += graph_ev_to_perfetto_json(ev, reccnt:=len(prof_json))
+  return json.dumps({"traceEvents": prof_json}).encode() if len(prof_json) > 0 else None
 
 # ** HTTP server
 
@@ -185,15 +193,7 @@ if __name__ == "__main__":
       print(f"fuzzed {len(ret)} rewrite details")
     print("*** loaded kernels")
 
-  prof_json = []
-  if profile is not None:
-    for ev in profile:
-      if isinstance(ev, ProfileDeviceEvent): prof_json += dev_ev_to_perfetto_json(ev)
-    for ev in tqdm(profile):
-      if isinstance(ev, ProfileRangeEvent): prof_json += range_ev_to_perfetto_json(ev)
-      elif isinstance(ev, ProfileGraphEvent): prof_json += graph_ev_to_perfetto_json(ev, reccnt:=len(prof_json))
-    print(f"*** loaded {len(prof_json)} profile events")
-  perfetto_profile = json.dumps({"traceEvents": prof_json}).encode() if len(prof_json) > 0 else None
+  perfetto_profile = to_perfetto(profile) if profile is not None else None
 
   server = HTTPServer(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
