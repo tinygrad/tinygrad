@@ -712,21 +712,47 @@ class TestIFUOps(unittest.TestCase):
     for st in sink.src:
       self.assertEqual(len(st.src), 2)
 
+
 class TestIndexingOverflow(unittest.TestCase):
-  def load_shape_assert(self, shape, dtype):
+  renderer = Device[Device.DEFAULT].renderer
+  def render_src(self, indexed_ast: UOp):
+    uops = linearize_uop(full_graph_rewrite(indexed_ast.sink(), self.renderer))
+    src = self.renderer.render("test", uops)
+    
+  def e(self, shape, dtype):
     st = ShapeTracker.from_shape(shape).to_uop() 
     store = UOp.store(UOp(Ops.DEFINE_GLOBAL, dtypes.int8.ptr(), arg=0, src=()), st, UOp.const(dtypes.int8, 1))
     indexed = rewrite_shapetracker_with_index(store, Device[Device.DEFAULT].renderer)
+    self.render_src(indexed)
     assert indexed.src[0].src[1].dtype is dtype
+  def r(self, shape, dtype):
+    st1 = ShapeTracker.from_shape(shape).to_uop()
+    load = UOp(Ops.LOAD, dtypes.float, src=(UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=1), st1))
+    reduced = UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (0,)), src=(load,))
+    indexed = rewrite_shapetracker_with_index(reduced, Device[Device.DEFAULT].renderer)
+    self.render_src(indexed)
+    def find_index_op(ast: UOp): 
+      if ast.op is Ops.INDEX: return ast
+      for u in ast.src:
+        if (found:= find_index_op(u)) is not None: return found
+    index_op = find_index_op(indexed)
+    assert index_op.src[1].dtype == dtype 
+  
+  def assert_dtype(self, shape, dtype):
+    self.e(shape, dtype)
+    self.r(shape, dtype)
 
-  def test_int32(self):
-    self.load_shape_assert((2 ** 12, 2 ** 12, 2 ** 7), dtypes.int) # This creates 2 ** 31 number of elements, max that can fit in int32 index
-  def test_overflow(self):
-    self.load_shape_assert((2 ** 12, 2 ** 12, 2 ** 7 + 1), dtypes.long)
+  def test_int32(self): self.assert_dtype((2 ** 12, 2 ** 12, 2 ** 7), dtypes.int)
+  def test_overflow(self): self.assert_dtype((2 ** 12, 2 ** 12, 2 ** 7 + 1), dtypes.long)
+
   def test_symbolic_int32(self):
-    self.load_shape_assert((UOp.variable("dim1", 10, 2 ** 12), UOp.variable("dim2", 10, 2 ** 12), 2 ** 7), dtypes.int)
+    # subtract 1 because Var is inclusive
+    self.assert_dtype((UOp.variable("dim1", 10, 2 ** 12 - 1), UOp.variable("dim2", 10, 2 ** 12 - 1), 2 ** 7), dtypes.int) 
   def test_symbolic_overflow(self):
-    self.load_shape_assert((UOp.variable("dim1", 10, 2 ** 12), UOp.variable("dim2", 10, 2 ** 12), 2 ** 7 + 1), dtypes.long)
+    self.assert_dtype((UOp.variable("dim1", 10, 2 ** 12), UOp.variable("dim2", 10, 2 ** 12), 2 ** 7 + 1), dtypes.long)
+    
+
+
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
