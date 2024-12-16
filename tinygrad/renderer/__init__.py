@@ -8,12 +8,12 @@ from tinygrad.dtype import DType
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
   dims: Tuple[int,int,int] # N, M, K
+  threads: int # number of threads that construct the warp
+  upcast_size: Tuple[int, int, int]
   dtype_in: DType # dtype for A and B
   dtype_out: DType # dtype for C and D
-  contract_axes: Tuple[List[Tuple[int,int]], List[Tuple[int,int]], List[Tuple[int,int]]] # list of (TC dim,amt) that upcast A, B and C
-  threads_count: int = 32
-  threads: Tuple[Tuple[int,int], ...] = ((0, 2), (0, 2), (1, 2), (1, 2), (1, 2)) # list of (TC dim,amt) that construct the warp thread structure
   swizzle: Tuple[Optional[Tuple[Tuple[int, ...], Tuple[int, ...]]], ...] = (None, None, None) # swizzle patterns to fix shapetrackers
+  contract_axes: Optional[Tuple[List[Tuple[int,int]], List[Tuple[int,int]], List[Tuple[int,int]]]] = None # list of (TC dim,amt) that upcast A, B and C
   st1_pattern: Optional[Tuple[Tuple[int, ...], Tuple[int, ...]]] = None # swizzle patterns to fix shapetrackers for A
   st2_pattern: Optional[Tuple[Tuple[int, ...], Tuple[int, ...]]] = None # pattern to fix shapetracker for B
   st3_pattern: Optional[Tuple[Tuple[int, ...], Tuple[int, ...]]] = None # pattern to fix shapetracker for C/D
@@ -21,10 +21,10 @@ class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x 
   def get_reduce_axes(self, offset = 0): return [(i + offset, 2) for i in range(int(math.log2(self.dims[2])))]
   def get_upcast_axes(self):
     tcd_axes = [(0, 2) for i in range(int(math.log2(self.dims[0])))] + [(1, 2) for i in range(int(math.log2(self.dims[1])))]
-    return tcd_axes[int(math.log2(self.threads_count)):]
+    return tcd_axes[int(math.log2(self.threads)):]
   def get_local_axes(self):
     tcd_axes = [(0, 2) for i in range(int(math.log2(self.dims[0])))] + [(1, 2) for i in range(int(math.log2(self.dims[1])))]
-    return tcd_axes[:int(math.log2(self.threads_count))]
+    return tcd_axes[:int(math.log2(self.threads))]
 
 @dataclass
 class ProgramSpec:

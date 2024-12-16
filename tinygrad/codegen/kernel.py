@@ -1,5 +1,5 @@
 from __future__ import annotations
-import itertools, functools
+import itertools, functools, math
 from dataclasses import dataclass
 from collections import defaultdict
 from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict, Callable, Sequence
@@ -402,7 +402,7 @@ class Kernel:
       self.upcast()
     elif opt.op is OptOps.UPCAST:                     # yellow
       check(axis < self.first_reduce, "upcast is for non-reduce")
-      check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.threads)), "can't upcast TC locals")
+      check(not (self.tensor_core and self.global_dims <= axis < self.global_dims+len(self.tensor_core.get_local_axes())), "can't upcast TC locals")
       check(amt <= 16, "don't upcast more than 16")
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
@@ -593,45 +593,43 @@ class Kernel:
         grouped_axes = reduced_axes(self.first_reduce, self.first_reduce + self.group_for_reduces)
 
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
+          wd, tcd, tcd_reduce, tcd_upcast = self.global_dims, self.first_upcast, len(tc.get_reduce_axes()), len(tc.get_upcast_axes())
           def fix_st(st: ShapeTracker, wd_pattern, tcd_pattern):
-            offset = (tcd := self.first_upcast) - ((wd := self.global_dims) + len(wd_pattern))
+            offset = (tcd - (wd + len(wd_pattern)))
             permaxis = list(range(wd)) \
               + [wd + x + (offset if x >= len(wd_pattern) else 0) for x in wd_pattern]  + list(range(wd + len(wd_pattern), tcd)) \
               + [wd + x + (offset if x >= len(wd_pattern) else 0) for x in tcd_pattern] + list(range(tcd + len(tcd_pattern), len(st.shape)))
             return ShapeTracker.from_shape(st.shape).permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
-          for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
-            if tc_pattern: srcs[i] = apply_swizzle(srcs[i].view(fix_st(srcs[i].st_arg if srcs[i].op is Ops.LOAD else srcs[i].src[0].st_arg, *tc_pattern)))
+          for i, (src, swizzle) in enumerate(zip(srcs, tc.swizzle)):
+            if swizzle: srcs[i] = apply_swizzle(src.view(fix_st(src.st_arg if src.op is Ops.LOAD else src.src[0].st_arg, *swizzle)))
 
             if self.use_tensor_cores == 3:  # for TC=3, emulate the warp addressing with locals
               local_shape = tuple(1 if i >= self.first_reduce and i < self.first_upcast else s for i, s in enumerate(self.full_shape))
               st = store_st = ShapeTracker.from_shape(local_shape)
               local_buffer = UOp(Ops.DEFINE_LOCAL, tc.dtype_in. ptr(local=True), (), (f"temp{i + 1}", st.real_size()))
-              if tc_pattern: store_st = fix_st(store_st, *tc_pattern)
-              local_store = UOp.store(local_buffer, store_st.to_uop(), srcs[i])
+              if swizzle: store_st = fix_st(store_st, *swizzle)
+              local_store = UOp.store(local_buffer, store_st.to_uop(), src)
               srcs[i] = UOp(Ops.LOAD, tc.dtype_in, (local_buffer, st.to_uop(), local_store))
 
           tc_reduce_axes = tuple(ax for ax, _ in tc.get_reduce_axes(self.first_upcast))
           if self.use_tensor_cores == 1: # real WMMA, use CONTRACT/UNROLL to get the vectorization right
-            # tcd, tcd_dims = self.first_upcast, len(tc.get_reduce_axes() + tc.get_upcast_axes(0) + tc.get_upcast_axes(1))
-            # def get_contract_axes(strides): [(i, 2) for i,dim in enumerate(strides[tcd: tcd + tcd_dims], tcd) if dim != 0]
+            def get_upcast_axes(buf): return tuple((tcd+tcd_reduce+tcd_upcast - (i+1), 2) for i in range(int(math.log2(tc.upcast_size[buf]))))
 
-            contract_axes = tuple(tuple((self.first_upcast + ax, sz) for ax, sz in up) for up in tc.contract_axes)
-
-            wmma_sz = [prod(x[1] for x in l) for l in contract_axes]
-            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, prod(sz for _,sz in tc.threads), contract_axes, tc_reduce_axes)
-            wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(wmma_sz[2]), src=(
-              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(wmma_sz[0]), src=(srcs[0],), arg=contract_axes[0]),
-              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(wmma_sz[1]), src=(srcs[1],), arg=contract_axes[1]),
-              UOp.const(tc.dtype_out.vec(wmma_sz[2]), 0.0)), arg=wmma_arg)
-            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=contract_axes[2])
+            tc_upcast_axes= (get_upcast_axes(0), get_upcast_axes(1), get_upcast_axes(2))
+            wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.opts.device, tc.threads, tc_upcast_axes, tc_reduce_axes)
+            wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.upcast_size[2]), src=(
+              UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.upcast_size[0]), src=(srcs[0],), arg=tc_upcast_axes[0]),
+              UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.upcast_size[1]), src=(srcs[1],), arg=tc_upcast_axes[1]),
+              UOp.const(tc.dtype_out.vec(tc.upcast_size[2]), 0.0)), arg=wmma_arg)
+            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2])
 
           else: # for TC=3 MUL/SUM instead of WMMA
             tc_uop = UOp(Ops.REDUCE_AXIS, tc.dtype_out, ((srcs[0] * srcs[1]).cast(tc.dtype_out),), (Ops.ADD, tc_reduce_axes))
 
           ret = ret.replace(src=(tc_uop,), arg=(Ops.ADD, new_axes)) if (new_axes := tuple(i for i in axes if i not in tc_reduce_axes)) else tc_uop
-          return ret.view(fix_st(unwrap(ret.st), *tc.st3_pattern)) if self.use_tensor_cores == 1 and tc.st3_pattern else ret
+          return ret.view(fix_st(unwrap(ret.st), *tc.swizzle[2])) if self.use_tensor_cores == 1 and tc.swizzle[2] else ret
 
         ret = ret.replace(arg = (op.arg[0], axes))
         if self.group_for_reduces and grouped_axes:
