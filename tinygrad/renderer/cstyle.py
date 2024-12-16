@@ -295,7 +295,7 @@ class CUDARenderer(CStyleLanguage):
   shared_max = 49152
   # https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-fragment-mma-16816-float
   tensor_cores = [TensorCore(dims=(8,16,16), threads=32, upcast_size=(8,4,4), dtype_in=dti, dtype_out=dto,
-    swizzle=(((6,7,10,2,3),(0,1,9,8,4,5)), ((6,7,9,0,1),(4,2,10,3,8,5)), ((0,1,10,2,3),(5,6,7,8,4,9))))
+    swizzle=(((6,7,9,10,3),(0,1,2,5,4,8)), ((6,7,0,1,2),(3,4,9,10,5,8)), ((1,2,9,10,3),(5,6,7,8,0,4))))
     for dti, dto in ([(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)])]
   def __init__(self, arch:str): self.tensor_cores, self.arch = CUDARenderer.tensor_cores if int(arch[3:]) >= 80 else [], arch
   def __reduce__(self): return self.__class__, (self.arch,)
