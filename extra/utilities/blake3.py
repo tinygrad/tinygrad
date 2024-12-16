@@ -1,6 +1,6 @@
 from math import ceil, log2
 from typing import Tuple
-from tinygrad import Tensor, TinyJit, Variable, dtypes
+from tinygrad import Tensor, TinyJit, dtypes
 from tinygrad.helpers import ceildiv
 
 class BLAKE3:
@@ -30,7 +30,7 @@ class BLAKE3:
     counts = Tensor.arange(0, data.shape[-1], dtype=dtypes.uint32).reshape(-1, 1).expand(-1, 16).reshape(-1, 16, 1).permute(1, 2, 0)
     counts = counts.cat(Tensor.zeros(chain_vals.shape[0], 1, chain_vals.shape[-1], dtype=dtypes.uint32), dim=1)
     lengths = (info == self.DEFAULT_LEN).where(64, info)
-    states = chain_vals.cat(chain_vals[:, :4], counts, lengths, flags, dim=1) * (info < self.PAD)
+    states = chain_vals.cat(chain_vals[:, :4], counts, lengths, flags, dim=1)# * (info < self.PAD)
     return states.realize(), chain_vals.realize()
 
   @TinyJit
@@ -38,13 +38,13 @@ class BLAKE3:
     states = states * (info < self.PAD)
     end_block = (states * (info < self.DEFAULT_LEN)).sum(0)
     return (states[-1, :] | end_block)[:8].realize()
-
+  
   def init_chain_vals(self, data: Tensor, info: Tensor) -> Tuple[Tensor, Tensor]:
     flags = Tensor.zeros((16, 1, info.shape[-1]), dtype=dtypes.uint32).contiguous()
     flags[-1, 0] = (flags[-1, 0] + 2) # chunk end flag
-    flags = (flags + 2 * ((flags != 2) * (info < self.DEFAULT_LEN))) # chunk end flag for partial final chunk
+    flags = ((flags != 2) * (info < self.DEFAULT_LEN)).where(flags + 2, flags) # chunk end flag for partial final chunk
     flags[0, :] = flags[0, :] + 1 # chunk start flag
-    flags = (flags + (8 * (((info < self.PAD).sum() <= 16) * (info < self.DEFAULT_LEN)))).cast(dtypes.uint32) # root flag
+    flags = (((info < self.PAD).sum() <= 16) * (info < self.DEFAULT_LEN)).where(flags + 8, flags) # root flag
     states, chain_vals = self.init_states(data, info, flags)
     for i in range(16):
       next_state = states[i] if i == 0 else states[i-1, :8].cat(states[i, 8:])
