@@ -112,7 +112,7 @@ class TestViz(unittest.TestCase):
 
 class TextVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
-    prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=False), 
+    prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=False),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
 
     j = json.loads(to_perfetto(prof))
@@ -129,9 +129,9 @@ class TextVizProfiler(unittest.TestCase):
     self.assertEqual(j['traceEvents'][1]['ph'], 'X')
     self.assertEqual(j['traceEvents'][1]['pid'], 0)
     self.assertEqual(j['traceEvents'][1]['tid'], 0)
-    
+
   def test_perfetto_copy_node(self):
-    prof = [ProfileRangeEvent(device='NV', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True), 
+    prof = [ProfileRangeEvent(device='NV', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
 
     j = json.loads(to_perfetto(prof))
