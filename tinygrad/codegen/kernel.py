@@ -317,7 +317,7 @@ class Kernel:
     return False
 
   def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None, axis:int=0, tc_opt:Optional[int]=None) -> bool:
-    """ Attempts to apply a tensor core optimization to the kernel.  If one exists and applies properly, return true, otherwise return false.
+    """ Attempts to apply a tensor core optimization to the kernel. If one exists and applies properly, return true, otherwise return false.
     Tensor cores are optimized instructions that matrix multiply-accumulate across a wave of threads: D(M, N) = A(M, K) * B(K, N) + C(M, N).
 
     Keyword arguments:
@@ -598,17 +598,12 @@ class Kernel:
         if (tc := self.tensor_core) and (self.use_tensor_cores == 1 or self.use_tensor_cores == 3):
           def fix_st(st: ShapeTracker, wd_pattern, tcd_pattern):
             st = ShapeTracker.from_shape(st.shape) # st needs to be contiguous
-            wd, warp_dims = self.global_dims,  tuple(sz for _, sz in tc.threads)
-            tcd, tcd_dims = self.first_upcast, tuple(sz for _, sz in tc.reduce_axes + tc.early_upcast_axes)
+            wd, tcd, permaxis = self.global_dims, self.first_upcast, list(range(len(st.shape)))
 
-            assert st.shape[wd:wd+len(warp_dims)] == warp_dims, f"warp dims wrong: {st.shape[wd:wd+len(warp_dims)]=} != {warp_dims=}"
-            assert st.shape[tcd:tcd+len(tcd_dims)] == tcd_dims, f"tcd dims wrong: {st.shape[tcd:tcd+len(tcd_dims)]=} != {tcd_dims=}"
-            assert tc.expanded_shape is not None
+            permaxis[wd:wd + len(wd_pattern)] = [y + (wd if x == 0 else tcd) for x, y in wd_pattern]
+            permaxis[tcd:tcd + len(tcd_pattern)] = [y + (wd if x == 0 else tcd) for x, y in tcd_pattern]
 
-            new_shape = st.shape[:tcd] + tc.expanded_shape + st.shape[tcd+len(tcd_dims):]  # expand the tcd
-            permaxis = list(range(wd)) + [y + (wd if x == 0 else tcd) for x,y in wd_pattern]  + list(range(wd+len(warp_dims),tcd)) + \
-                                         [y + (wd if x == 0 else tcd) for x,y in tcd_pattern] + list(range(tcd+len(tc.expanded_shape),len(new_shape)))
-            return st.reshape(new_shape).permute(tuple(permaxis)).reshape(st.shape).simplify()
+            return st.permute(tuple(permaxis))
 
           srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
           for i, tc_pattern in enumerate([tc.st1_pattern, tc.st2_pattern]):
