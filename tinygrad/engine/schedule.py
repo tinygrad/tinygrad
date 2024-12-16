@@ -1,6 +1,7 @@
 import functools
 from dataclasses import dataclass
 from typing import Tuple, List, Dict
+from tinygrad.dtype import dtypes
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, graph_rewrite, track_rewrites, merge_views, view_left
 from tinygrad.helpers import Metadata, unwrap, unwrap_or
 from tinygrad.device import Buffer
@@ -46,7 +47,7 @@ def add_buf(ctx:List[UOp], b:UOp):
 to_ast = view_left+PatternMatcher([
   # ** buffer op rules
   # const is just const
-  (UPat(Ops.VIEW, name="st", src=(UPat(), UPat.cvar("x"))), lambda st,x: UOp.const_with_shape(x.dtype, x.arg, st.shape)),
+  (UPat(Ops.VIEW, name="st", src=(UPat(), UPat.cvar("x"))), lambda st,x: UOp(Ops.VALID, dtypes.bool, (st.st.to_uop(),)).where(x, 0)),
   # buffer view is load
   (UPat(Ops.VIEW, name="st", src=(UPat(Ops.DEFINE_GLOBAL, name="ptr"),)), lambda st,ptr: UOp.load(ptr, st.st.to_uop(), dtype=ptr.dtype.base)),
   # buffer+op view is store
