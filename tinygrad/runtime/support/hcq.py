@@ -3,7 +3,7 @@ from typing import List, Optional, Dict, Tuple, cast, Type, Union, TypeVar, Gene
 import contextlib, decimal, statistics, random, json, atexit, time, ctypes, array, pickle, os, sys, pathlib, dataclasses
 from tinygrad.helpers import PROFILE, from_mv, getenv, to_mv, round_up, temp
 from tinygrad.renderer import Renderer
-from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator
+from tinygrad.device import BufferSpec, Compiler, Compiled, LRUAllocator, ProfileRangeEvent, ProfileDeviceEvent
 from tinygrad.ops import sym_infer, sint, Variable
 
 # **************** for HCQ Compatible Devices ****************
@@ -13,20 +13,6 @@ DeviceType = TypeVar('DeviceType', bound='HCQCompiled')
 ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
-
-class ProfileEvent: pass
-
-@dataclasses.dataclass(frozen=True)
-class ProfileDeviceEvent(ProfileEvent): device:str; comp_tdiff:decimal.Decimal; copy_tdiff:decimal.Decimal # noqa: E702
-
-@dataclasses.dataclass(frozen=True)
-class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:int; en:int; is_copy:bool # noqa: E702
-
-@dataclasses.dataclass(frozen=True)
-class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:bool # noqa: E702
-
-@dataclasses.dataclass(frozen=True)
-class ProfileGraphEvent(ProfileEvent): ents:List[ProfileGraphEntry]; deps:List[List[int]]; sigs:List[int] # noqa: E702
 
 class BumpAllocator:
   def __init__(self, size:int, start:int=0, wrap:bool=True): self.size, self.ptr, self.start_off, self.wrap = size, 0, start, wrap
@@ -326,7 +312,6 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
     self._shadow_timeline_signal:SignalType = self.signal_t(value=0, timeline_for_device=self)
 
-    self.prof_events:List[ProfileEvent] = []
     self.sig_prof_records:List[Tuple[HCQSignal, HCQSignal, str, bool]] = []
 
     from tinygrad.runtime.graph.hcq import HCQGraph
@@ -344,10 +329,10 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
     if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
     if PROFILE:
-      self.prof_events += [ProfileRangeEvent(self.device, name, st.timestamp, en.timestamp, is_cp) for st,en,name,is_cp in self.sig_prof_records]
+      self.profile_events += [ProfileRangeEvent(self.device, name, st.timestamp, en.timestamp, is_cp) for st,en,name,is_cp in self.sig_prof_records]
       self.sig_prof_records.clear()
 
-  def _sync_gpu_to_cpu(self):
+  def _at_profile_finalize(self):
     def _sync(d:HCQCompiled, q_t:Type[HWQueue]):
       q_t().timestamp(d.timeline_signal).signal(d.timeline_signal, d.timeline_value).submit(d)
       d.timeline_value += 1
@@ -356,10 +341,9 @@ class HCQCompiled(Compiled, Generic[SignalType]):
       et = time.perf_counter_ns()
       return (decimal.Decimal(et+st) / 2000) - d.timeline_signal.timestamp
 
-    # TODO: make sure this is still fine...
     self.gpu2cpu_compute_time_diff = statistics.median([_sync(self, self.hw_compute_queue_t) for _ in range(40)])
     self.gpu2cpu_copy_time_diff = None if self.hw_copy_queue_t is None else statistics.median([_sync(self, self.hw_copy_queue_t) for _ in range(40)])
-    self.prof_events.append(ProfileDeviceEvent(self.device, self.gpu2cpu_compute_time_diff, self.gpu2cpu_copy_time_diff))
+    self.profile_events.append(ProfileDeviceEvent(self.device, self.gpu2cpu_compute_time_diff, self.gpu2cpu_copy_time_diff))
 
   def _wrap_timeline_signal(self):
     self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
@@ -378,7 +362,6 @@ class HCQAllocatorBase(LRUAllocator, Generic[DeviceType]):
   """
 
   def __init__(self, dev:DeviceType, batch_size:int=(2 << 20), batch_cnt:int=32):
-    self.dev:DeviceType = dev
     self.b = [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next = [0] * len(self.b), 0
     super().__init__()
@@ -452,30 +435,30 @@ class HCQAllocator(HCQAllocatorBase, Generic[DeviceType]):
 
 # Profile VIZ
 
-if PROFILE:
-  @atexit.register
-  def hcq_finlize_profile():
-    for dev in HCQCompiled.devices: dev.synchronize()
-    for dev in HCQCompiled.devices: dev._sync_gpu_to_cpu()
+# if PROFILE:
+#   @atexit.register
+#   def hcq_finlize_profile():
+#     for dev in HCQCompiled.devices: dev.synchronize()
+#     for dev in HCQCompiled.devices: dev._sync_gpu_to_cpu()
 
-    def _sync_d2d(d1:HCQCompiled, d2:HCQCompiled):
-      d1.hw_compute_queue_t().signal(d1.timeline_signal, d1.timeline_value).wait(d2.timeline_signal, d2.timeline_value) \
-                             .timestamp(d1.timeline_signal).signal(d1.timeline_signal, d1.timeline_value+1).submit(d1)
-      d2.hw_compute_queue_t().signal(d2.timeline_signal, d2.timeline_value).wait(d1.timeline_signal, d1.timeline_value) \
-                             .timestamp(d2.timeline_signal).signal(d2.timeline_signal, d2.timeline_value+1).submit(d2)
-      d1.timeline_value += 2
-      d2.timeline_value += 2
-      d1.timeline_signal.wait(d1.timeline_value - 1)
-      d2.timeline_signal.wait(d2.timeline_value - 1)
-      return d2.timeline_signal.timestamp - d1.timeline_signal.timestamp
+#     def _sync_d2d(d1:HCQCompiled, d2:HCQCompiled):
+#       d1.hw_compute_queue_t().signal(d1.timeline_signal, d1.timeline_value).wait(d2.timeline_signal, d2.timeline_value) \
+#                              .timestamp(d1.timeline_signal).signal(d1.timeline_signal, d1.timeline_value+1).submit(d1)
+#       d2.hw_compute_queue_t().signal(d2.timeline_signal, d2.timeline_value).wait(d1.timeline_signal, d1.timeline_value) \
+#                              .timestamp(d2.timeline_signal).signal(d2.timeline_signal, d2.timeline_value+1).submit(d2)
+#       d1.timeline_value += 2
+#       d2.timeline_value += 2
+#       d1.timeline_signal.wait(d1.timeline_value - 1)
+#       d2.timeline_signal.wait(d2.timeline_value - 1)
+#       return d2.timeline_signal.timestamp - d1.timeline_signal.timestamp
 
-    # then test it by timing the GPU to GPU times
-    jitter_matrix = [[float('nan')] * len(HCQCompiled.devices) for _ in range(len(HCQCompiled.devices))]
-    pairs = [(p1, p2) for p1 in enumerate(HCQCompiled.devices) for p2 in enumerate(HCQCompiled.devices) if p1 != p2]
-    for (i1, d1), (i2, d2) in pairs:
-      cpu_diff = d1.gpu2cpu_compute_time_diff - d2.gpu2cpu_compute_time_diff
-      jitter_matrix[i1][i2] = statistics.median(_sync_d2d(d1, d2) - _sync_d2d(d2, d1) for _ in range(20)) / 2 - cpu_diff
-    print("pairwise clock jitter matrix (us):\n" + '\n'.join([''.join([f'{float(item):8.3f}' for item in row]) for row in jitter_matrix]))
+#     # then test it by timing the GPU to GPU times
+#     jitter_matrix = [[float('nan')] * len(HCQCompiled.devices) for _ in range(len(HCQCompiled.devices))]
+#     pairs = [(p1, p2) for p1 in enumerate(HCQCompiled.devices) for p2 in enumerate(HCQCompiled.devices) if p1 != p2]
+#     for (i1, d1), (i2, d2) in pairs:
+#       cpu_diff = d1.gpu2cpu_compute_time_diff - d2.gpu2cpu_compute_time_diff
+#       jitter_matrix[i1][i2] = statistics.median(_sync_d2d(d1, d2) - _sync_d2d(d2, d1) for _ in range(20)) / 2 - cpu_diff
+#     print("pairwise clock jitter matrix (us):\n" + '\n'.join([''.join([f'{float(item):8.3f}' for item in row]) for row in jitter_matrix]))
 
-    with open(temp("profile.pkl"), "wb") as f: pickle.dump([ev for dev in HCQCompiled.devices for ev in dev.prof_events], f)
-    os.execv(sys.executable, [sys.executable] + [pathlib.Path(__file__).parent.parent.parent/"viz"/"serve.py", "", temp("profile.pkl")])
+#     with open(temp("profile.pkl"), "wb") as f: pickle.dump([ev for dev in HCQCompiled.devices for ev in dev.prof_events], f)
+#     os.execv(sys.executable, [sys.executable] + [pathlib.Path(__file__).parent.parent.parent/"viz"/"serve.py", "", temp("profile.pkl")])

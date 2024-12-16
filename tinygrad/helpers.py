@@ -249,11 +249,6 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional
 
 # *** Exec helpers
 
-def cpu_time_execution(cb, enable):
-  if enable: st = time.perf_counter()
-  cb()
-  if enable: return time.perf_counter()-st
-
 def cpu_objdump(lib, objdump_tool='objdump'):
   with tempfile.NamedTemporaryFile(delete=True) as f:
     pathlib.Path(f.name).write_bytes(lib)

@@ -1,7 +1,7 @@
 from typing import Optional, List
 import ctypes, subprocess, pathlib, tempfile
-from tinygrad.device import Compiled, Compiler, MallocAllocator
-from tinygrad.helpers import cpu_time_execution, cpu_objdump
+from tinygrad.device import Compiled, Compiler, MallocAllocator, ProfileDeviceEvent, ProfileRangeEvent
+from tinygrad.helpers import cpu_objdump
 from tinygrad.renderer.cstyle import ClangRenderer
 
 class ClangCompiler(Compiler):
@@ -20,14 +20,18 @@ class ClangCompiler(Compiler):
   def disassemble(self, lib:bytes): return cpu_objdump(lib, self.objdump_tool)
 
 class ClangProgram:
-  def __init__(self, name:str, lib:bytes):
+  def __init__(self, device:ClangDevice, name:str, lib:bytes):
     self.name, self.lib = name, lib
     # write to disk so we can load it
     with tempfile.NamedTemporaryFile(delete=True) as cached_file_path:
       pathlib.Path(cached_file_path.name).write_bytes(lib)
       self.fxn = ctypes.CDLL(str(cached_file_path.name))[name]
 
-  def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
+  def __call__(self, *bufs, vals=(), wait=False): 
+    with cpu_profile(self.device, self.name, is_copy=False) as cpu_time_execution: self.fxn(*bufs, *vals)
+    return cpu_time_execution.en - cpu_time_execution.st
 
 class ClangDevice(Compiled):
-  def __init__(self, device:str): super().__init__(device, MallocAllocator, ClangRenderer(), ClangCompiler(), ClangProgram)
+  def __init__(self, device:str):
+    super().__init__(device, MallocAllocator, ClangRenderer(), ClangCompiler(), ClangProgram)
+    self.profile_events = [ProfileDeviceEvent(device)]

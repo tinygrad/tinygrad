@@ -1,9 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Optional, Dict, Tuple, Any, Iterator
-import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys, re
-from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv
+from typing import Optional, Dict, Tuple, Any, Iterator, TypeVar
+import multiprocessing, importlib, inspect, functools, pathlib, os, ctypes, contextlib, sys, re, atexit, pickle
+from tinygrad.helpers import CI, OSX, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, from_mv, PROFILE, temp
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes
 from tinygrad.renderer import Renderer
 from tinygrad.ops import UOp, buffers
@@ -13,6 +13,7 @@ from tinygrad.ops import UOp, buffers
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
+    self._opened_devices = set()
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def _canonicalize(self, device:str) -> str: return re.sub(r":0$", "", (d:=device.split(":", 1)[0].upper()) + device[len(d):])
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
@@ -26,6 +27,7 @@ class _Device:
     ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{__name__.split(".")[0]}.runtime.ops_{x.lower()}')) \
            if (cname.lower() == x.lower() + "device")][0](ix)
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
+    self._opened_devices.add(ix)
     return ret
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
@@ -41,6 +43,42 @@ class _Device:
       return device
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
 Device = _Device()
+
+# **************** for Profile ****************
+
+class ProfileEvent: pass
+
+@dataclass(frozen=True)
+class ProfileDeviceEvent(ProfileEvent): device:str; comp_tdiff:decimal.Decimal; copy_tdiff:decimal.Decimal # noqa: E702
+
+@dataclass(frozen=True)
+class ProfileRangeEvent(ProfileEvent): device:str; name:str; st:int; en:int; is_copy:bool # noqa: E702
+
+@dataclass(frozen=True)
+class ProfileGraphEntry: device:str; name:str; st_id:int; en_id:int; is_copy:bool # noqa: E702
+
+@dataclass(frozen=True)
+class ProfileGraphEvent(ProfileEvent): ents:List[ProfileGraphEntry]; deps:List[List[int]]; sigs:List[int] # noqa: E702
+
+@dataclass
+class ProfileResult: st:Optional[int]=None; en:Optional[int]=None; # noqa: E702
+
+@contextlib.contextmanager
+def cpu_profile(dev:Compiled, name, is_copy:bool, return_time:bool=True) -> ProfileResult:
+  res = ProfileResult(st=time.perf_counter())
+  try: yield res
+  res.en = time.perf_counter()
+  if PROFILE: dev.profile_events += ProfileRangeEvent(dev.device, name, res.st, res.en, is_copy=is_copy)
+
+if PROFILE:
+  @atexit.register
+  def finlize_profile():
+    devs = [Device[d] for d in Device._opened_devices]
+    for dev in devs: dev.synchronize()
+    for dev in devs: dev._at_profile_finalize()
+
+    with open(temp("profile.pkl"), "wb") as f: pickle.dump([ev for dev in devs for ev in dev.profile_events], f)
+    os.execv(sys.executable, [sys.executable] + [pathlib.Path(__file__).parent / "viz" / "serve.py", "", temp("profile.pkl")])
 
 # **************** Buffer + Allocators ****************
 
@@ -141,6 +179,8 @@ class Buffer:
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
+  def __init__(self, dev): self.dev = dev
+
   # overriden in LRUAllocator
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
     assert size > 0, f"alloc size must be positve, getting {size}"
@@ -161,7 +201,9 @@ class LRUAllocator(Allocator):
   The LRU Allocator is responsible for caching buffers.
   It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
   """
-  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferSpec]], Any] = defaultdict(list)
+  def __init__(self, dev): 
+    self.cache: Dict[Tuple[int, Optional[BufferSpec]], Any] = defaultdict(list)
+    super().__init__(dev)
   def alloc(self, size:int, options:Optional[BufferSpec]=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
@@ -180,8 +222,10 @@ class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, options:BufferSpec):
     return (ctypes.c_uint8 * size).from_address(options.external_ptr) if options.external_ptr else (ctypes.c_uint8 * size)()
   def _as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
-  def _copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
-  def _copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
+  def _copyin(self, dest, src:memoryview):
+    with cpu_profile(self.dev, "COPYIN"): ctypes.memmove(dest, from_mv(src), len(src))
+  def _copyout(self, dest:memoryview, src):
+    with cpu_profile(self.dev, "COPYOUT"): ctypes.memmove(from_mv(dest), src, len(dest))
   def _offset(self, buf, size:int, offset:int): return from_mv(self._as_buffer(buf)[offset:offset+size])
 
 MallocAllocator = _MallocAllocator()
@@ -205,7 +249,16 @@ class Compiled:
   def __init__(self, device:str, allocator:Allocator, renderer:Optional[Renderer], compiler:Optional[Compiler], runtime, graph=None):
     self.device, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
     self.renderer = renderer or Renderer()
+    self.profile_events:List[ProfileEvent] = []
   def synchronize(self):
+    """
+    Synchronize all pending operations on the device.
+
+    This method ensures that all previously queued operations on the device have been completed before proceeding.
+    """
+    # override this in your device implementation
+  def _at_profile_finalize(self):
+    # TODO: think of this
     """
     Synchronize all pending operations on the device.
 

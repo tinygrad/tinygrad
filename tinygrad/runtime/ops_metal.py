@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, pathlib, struct, ctypes, tempfile, functools
 from typing import List, Any, Union, Tuple, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
@@ -51,8 +51,9 @@ def wait_check(cbuf: Any):
   msg(cbuf, "waitUntilCompleted")
   error_check(msg(cbuf, "error", restype=objc_instance))
 
-def elapsed_time(cbuf: objc_id):
-  return cast(float, msg(cbuf, "GPUEndTime", restype=ctypes.c_double)) - cast(float, msg(cbuf, "GPUStartTime", restype=ctypes.c_double))
+def cmdbuf_label(cbuf: objc_id) -> str: return bytes(msg(cbuf, "label", restype=objc_instance)).decode()
+def cmdbuf_start_time(cbuf: objc_id) -> float: cast(float, msg(cbuf, "GPUStartTime", restype=ctypes.c_double))
+def cmdbuf_end_time(cbuf: objc_id) -> float: cast(float, msg(cbuf, "GPUEndTime", restype=ctypes.c_double))
 
 def error_check(error: objc_instance, error_constructor: type[Exception] = RuntimeError):
   if error.value is None: return None
@@ -137,6 +138,7 @@ class MetalProgram:
     msg(encoder, "dispatchThreadgroups:threadsPerThreadgroup:", to_struct(*global_size), to_struct(*local_size))
     msg(encoder, "endEncoding")
     msg(command_buffer, "commit")
+    msg(command_buffer, "label", to_ns_str(self.name))
     if wait:
       wait_check(command_buffer)
       return elapsed_time(command_buffer)
@@ -146,9 +148,6 @@ class MetalBuffer:
   def __init__(self, buf:Any, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
 
 class MetalAllocator(LRUAllocator):
-  def __init__(self, dev:MetalDevice):
-    self.dev:MetalDevice = dev
-    super().__init__()
   def _alloc(self, size:int, options) -> MetalBuffer:
     # Buffer is explicitly released in _free() rather than garbage collected via reference count
     ret = msg(self.dev.sysdevice, "newBufferWithLength:options:", ctypes.c_ulong(size), MTLResourceOptions.MTLResourceStorageModeShared,
@@ -175,8 +174,10 @@ class MetalAllocator(LRUAllocator):
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
     return to_mv(cast(int, msg(src.buf, "contents", restype=objc_id).value), src.size + src.offset)[src.offset:]
-  def _copyin(self, dest:MetalBuffer, src:memoryview): self._as_buffer(dest)[:] = src
-  def _copyout(self, dest:memoryview, src:MetalBuffer): dest[:] = self._as_buffer(src)
+  def _copyin(self, dest:MetalBuffer, src:memoryview): 
+    with cpu_profile(self.device, "CPU -> METAL"): self._as_buffer(dest)[:] = src
+  def _copyout(self, dest:memoryview, src:MetalBuffer):
+    with cpu_profile(self.device, "METAL -> CPU"): dest[:] = self._as_buffer(src)
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
 
 class MetalDevice(Compiled):
@@ -192,7 +193,10 @@ class MetalDevice(Compiled):
     from tinygrad.runtime.graph.metal import MetalGraph
     super().__init__(device, MetalAllocator(self), MetalRenderer(), MetalCompiler() if getenv("METAL_DIRECT", 1) else Compiler(),
                      functools.partial(MetalProgram, self), MetalGraph)
+
   def synchronize(self):
-    for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
+    for cbuf in self.mtl_buffers_in_flight:
+      wait_check(cbuf)
+      if PROFILE: self.profile_events.append(ProfileRangeEvent(self, cmdbuf_label(cbuf), cmdbuf_start_time(cbuf), cmdbuf_end_time(cbuf)))
     self.mv_in_metal.clear()
     self.mtl_buffers_in_flight.clear()
