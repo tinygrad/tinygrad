@@ -1,7 +1,7 @@
 import functools
 from dataclasses import dataclass
 from typing import Tuple, List, Dict
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.ops import GroupOp, UOp, Ops, PatternMatcher, UPat, Variable, graph_rewrite, track_rewrites, merge_views, view_left
 from tinygrad.helpers import Metadata, unwrap, unwrap_or
 from tinygrad.device import Buffer
@@ -40,6 +40,10 @@ def unbind_st(ctx:Dict[Variable, int], view:UOp):
 add_var_vals = PatternMatcher([
   (UPat(Ops.BIND, name="bind"), unbind),
   (UPat(Ops.VIEW, name="view"), unbind_st),
+])
+
+no_image = PatternMatcher([
+  (UPat(tuple(Ops), name="u"), lambda u: None if u.op is Ops.BUFFER or not isinstance(u.dtype, ImageDType) else u.replace(dtype=u.dtype.base))
 ])
 
 def _bufferize(ctx:Dict[UOp, UOp], x:UOp):
@@ -94,7 +98,7 @@ def schedule_uop(out:UOp, dest:UOp) -> ScheduleItem:
 @track_rewrites(named=True)
 def create_schedule_with_vars(outs:List[UOp]) -> Tuple[List[ScheduleItem], Dict[Variable, int]]:
   var_vals: Dict[Variable, int] = {}
-  sink = graph_rewrite(UOp.sink(*outs), remove_movement_ops+merge_views+add_var_vals, var_vals)
+  sink = graph_rewrite(UOp.sink(*outs), remove_movement_ops+merge_views+add_var_vals+no_image, var_vals)
   realizes: Dict[UOp, UOp] = {}
   graph_rewrite(sink, realize, realizes)
   schedule = [schedule_uop(u, b) for b,u in realizes.items()]
